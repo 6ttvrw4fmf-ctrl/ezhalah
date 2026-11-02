@@ -421,6 +421,15 @@ def main() -> int:
                     pruned += n
         elif args.type == "all":
             print(f"  ⚠ enumeration incomplete ({len(posts)} of x-wp-total {total}) — no prune")
+        if args.type == "all":
+            # EVERY AD WE SHOW GETS A DIRECT CHECK (owner 2026-10-26). The crawl reads only the
+            # properties LIST, and a nightly full re-read lets no row reach grace, so the oracle was
+            # never asked about one listing (0 verified, ever). Ask it about the rows this crawl SAW:
+            # a live answer (200, this post id, publish, no «تم …» status) is stamped; nothing else
+            # writes anything — this cannot hide a listing, and it runs whether or not the prune did.
+            stamp_vg = _verify_gone_with(tax)
+            for tbl, rows in (("aalbarrak_residential_listings", res), ("aalbarrak_commercial_listings", com)):
+                db.stamp_seen_alive(tbl, {r["ad_number"] for r in rows}, stamp_vg, source=SOURCE)
         notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         healthy = db.end_run(run_id, ok=True, rows_seen=len(posts), rows_upserted=len(res) + len(com),
                              notes=f"pruned={pruned}; complete={complete}; {notes}"[:300],

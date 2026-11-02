@@ -27,6 +27,8 @@
 // The seeded token is not a valid credential, so server sync legitimately no-ops; every assertion
 // here is about client state, never about server truth.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, webkit, firefox, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
@@ -872,6 +874,13 @@ const TRANSPORT_PAGE_ERROR_SHAPES = [
   /Failed to fetch/i,                                           // Blink
   /NetworkError when attempting to fetch resource/i,            // Gecko
   /\bERR_[A-Z_]+\b/,                                            // net:: codes, wherever they surface
+  // A third-party frame's own cross-origin SecurityError. Measured 2026-10-23 (sweep 39932772747, webkit desktop AND
+  // mobile, 2/2 on auth-overlay-clears-controls and both-edges-docked-clears-controls): «Blocked a frame with origin
+  // "https://challenges.cloudflare.com" from accessing a frame with origin "https://ezhalah-app.vercel.app"» — the
+  // Cloudflare challenge frame touching its parent, which WebKit reports as an uncaught page error. No Ezhalah code
+  // ran; same class as the One Tap XHR above (a third-party page the engine refused). Only THAT origin is excused:
+  // a bare «SecurityError: The operation is insecure.» from our own code stays a product defect.
+  /Blocked a frame with origin "https:\s*\/*challenges\.cloudflare\.com"/i,
 ];
 
 /** Is this page error a NETWORK failure rather than an application exception? */

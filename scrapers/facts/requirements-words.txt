@@ -1,0 +1,8 @@
+# facts-words.yml only (word checker + free CPU embeddings). CPU-only torch wheel: no CUDA download.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+sentence-transformers==3.4.1
+transformers==4.48.3
+numpy==2.2.3
+supabase==2.10.0
+python-dotenv==1.0.1

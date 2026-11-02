@@ -274,7 +274,14 @@ def probe(s, url: str, retries: int = 3, home_status: int = 0) -> int:
             # opens them (2026-10-17, gathern-api-probe 39029117183: 8 of 8 «home» units opened
             # named on /ar/view/, phone and laptop): 919 served units read no verdict every hour.
             # Their own /ar/ page may only ever say ALIVE here; anything else stays no verdict.
-            return 200 if _opens_at_ar_view(s, url) else home_status
+            # And when that /ar/ page answers its own 404 «الصفحة غير موجودة» (2026-10-24, backlog
+            # 800): that IS the unit's own page reading, and the sweep never took it — 6 served units
+            # whose /ar/view/ is 404 from CI and the cloud alike read «transient» every hour for 2
+            # days, so their 3rd strike never came. The canary keeps HOME_LANDED (a control skipped,
+            # never counted), and the run's controls + three readings still decide every hide.
+            if home_status == HOME_LANDED:
+                return 200 if _opens_at_ar_view(s, url) else home_status
+            return _ar_view_status(s, url) or home_status
         return r.status_code
     return 0
 
@@ -283,21 +290,111 @@ _VIEW = re.compile(r"^(https://gathern\.co)/view/(\d+)/unit/(\d+)/?$")
 _NOT_FOUND = ("الصفحة غير موجودة", "page not found")
 
 
-def _opens_at_ar_view(s, url: str) -> bool:
-    """True only when the unit's /ar/view/ address answers 200 ON that address, with a body that
-    names the unit and is not gathern's not-found page. Never a death: False is no verdict."""
+def _ar_view_status(s, url: str) -> int:
+    """The unit's /ar/view/ answer, read ON that address: 200 = it opens and names the unit, 404/410 =
+    gathern's own not-found page for it, 0 = no verdict (a landing elsewhere, a block, an error)."""
     m = _VIEW.match(url or "")
     if not m:
-        return False
+        return 0
     alt = f"{m.group(1)}/ar/view/{m.group(2)}/unit/{m.group(3)}"
     _throttle()
     try:
         r = s.get(alt, timeout=25, allow_redirects=True)
     except Exception:  # noqa: BLE001 — no answer is no verdict
-        return False
+        return 0
     body = getattr(r, "text", "") or ""
-    return (r.status_code == 200 and not _landed_on_home(alt, str(getattr(r, "url", "") or ""))
+    if _landed_on_home(alt, str(getattr(r, "url", "") or "")):
+        return 0
+    if r.status_code == 200 and m.group(3) in body and not any(n in body for n in _NOT_FOUND):
+        return 200
+    if r.status_code in (404, 410) and any(n in body for n in _NOT_FOUND):
+        return r.status_code
+    return 0
+
+
+def _opens_at_ar_view(s, url: str) -> bool:
+    """True only when the unit's /ar/view/ address answers 200 ON that address, with a body that
+    names the unit and is not gathern's not-found page. Never a death: False is no verdict."""
+    return _ar_view_status(s, url) == 200
+
+
+def fallback_read(status: int, fb, url: str) -> int:
+    """A direct read that gave no verdict, re-read through `fb` (the proxy) when one is given; only a
+    200 from it is taken (the run's controls were read on the direct egress, so a proxy-side 404 is
+    unguarded and stays no verdict). Anything the direct read decided is returned untouched."""
+    if fb is None or status not in (0, HOME_LANDED):
+        return status
+    return 200 if probe(fb, url) == 200 else status
+
+
+# A second browser fingerprint for the units gathern sends home under the first one (2026-10-30).
+# Measured that morning: ~90 served units read «transient» on every hourly sweep for 2-3 days (their
+# last alive stamp 10-27/10-28) because, to curl_cffi's chrome124 fingerprint, BOTH /view/ and /ar/view/
+# answer 307 -> /ar?error=500. The same URLs, the same minute, open named for safari17_0, for a plain
+# client, and for a real Chromium (3 of 4 on the first visit). So the unit is up; our fingerprint is
+# what gathern errors on. This read may only say ALIVE (the unit's own page, named, not the not-found
+# page); anything else stays no verdict, and it never second-guesses a verdict the first read reached.
+ALT_FINGERPRINT = "safari17_0"
+
+
+def _alt_session():
+    from curl_cffi import requests as cc
+    s = cc.Session(impersonate=ALT_FINGERPRINT)
+    s.headers.update({"Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+    return s
+
+
+def _opens_named(s, url: str, fetch: Optional[str] = None) -> bool:
+    """True only when `fetch` (default: `url`, the stored /view/ address) answers 200 ON the unit's own
+    page (any locale prefix), naming the unit, and is not gathern's not-found page."""
+    from urllib.parse import urlsplit
+    m = _VIEW.match(url or "")
+    if not m:
+        return False
+    _throttle()
+    try:
+        r = s.get(fetch or url, timeout=25, allow_redirects=True)
+    except Exception:  # noqa: BLE001 — no answer is no verdict
+        return False
+    final = urlsplit(str(getattr(r, "url", "") or "")).path.rstrip("/").lower()
+    own = f"/view/{m.group(2)}/unit/{m.group(3)}"
+    body = getattr(r, "text", "") or ""
+    return (r.status_code == 200 and final in (own, "/ar" + own, "/en" + own)
             and m.group(3) in body and not any(n in body for n in _NOT_FOUND))
+
+
+def fingerprint_read(status: int, alt, url: str) -> int:
+    """A read that gave no verdict, re-read under the second fingerprint `alt`: only a named 200 is
+    taken. Anything the first read decided (200, 404, 410, any real status) is returned untouched."""
+    if alt is None or status not in (0, HOME_LANDED):
+        return status
+    if _opens_named(alt, url):
+        return 200
+    # Measured 10-30 after the first sweep on this read: 16 units still sent BOTH fingerprints home on
+    # /view/, while the same unit's /ar/view/ opened named for safari17_0 (4 of 4 sampled).
+    m = _VIEW.match(url or "")
+    if m and _opens_named(alt, url, f"{m.group(1)}/ar/view/{m.group(2)}/unit/{m.group(3)}"):
+        return 200
+    return status
+
+
+def fresh_read(status: int, url: str, session_factory=None) -> int:
+    """A read that is STILL no verdict after every other reader, re-read once under a brand-new
+    session (2026-11-02, ♻️, backlog 1147/1148). Returns 200, 404 or 410 from that read; anything
+    else leaves `status` untouched. A verdict the run already reached is never second-guessed.
+
+    Why: the hourly sweep reads ~1,500 units on ONE long-lived session, and gathern sends that
+    session home (307 -> /ar?error=500) for a growing set of units, on /view/ AND /ar/view/, under
+    both fingerprints and through the proxy. Those units read «transient» every hour and were never
+    read again: 178 served units past 26 h on 11-02 (57 the day before). lifecycle-spot-check
+    41434405092 read 43 of them from a FRESH session with the same gl.probe and controls 5/5 live:
+    33 answered their own 404, 8 opened live, 2 still landed home. The run's controls at both ends
+    and the three-readings-6-h-apart rule still decide every hide; this only lets the unit be read."""
+    if status not in (0, HOME_LANDED):
+        return status
+    new = (session_factory or (lambda: proxied_session(False)))()
+    got = probe(new, url)
+    return got if got in (200, 404, 410) else status
 
 
 def proxied_session(use_proxy: bool):
@@ -658,6 +755,36 @@ def _collect_killed(client, limit: int) -> list[dict]:
                            .order("deactivated_at", desc=True).order("id", desc=False)), limit)
 
 
+# ── Alive stamps survive a statement timeout (2026-10-27) ──────────────────────────────────────
+# The 09:37 UTC sweep of 2026-10-27 read for 24 minutes, then ONE 200-row alive update hit
+# PostgREST's statement_timeout (57014) and the exception killed the run: every reading it had
+# not yet written was lost, its scrape_runs row never closed, and its apply lock (2 h TTL) made the
+# 10:37 sweep skip — ~2,959 units the 08:44 crawl had just added went unread for 3 hours. An alive
+# stamp is idempotent, so a timed-out chunk is split in half and retried down to one row (the
+# cleanup engine's _delete_chunk shape). A single row that still fails is left exactly as it was
+# — UNKNOWN, re-read next hour — and the sweep carries on. Never fatal, never a write of anything
+# other than the stamp it was already going to write.
+ALIVE_WRITE_CHUNK = 50
+
+
+def _stamp_alive_chunk(client, ids: list, patch: dict) -> int:
+    """Write `patch` to `ids`; returns how many rows committed. Splits on 57014, never raises it."""
+    if not ids:
+        return 0
+    try:
+        client.table(TABLE).update(patch).in_("id", ids).execute()
+        return len(ids)
+    except Exception as exc:  # noqa: BLE001 — postgrest APIError
+        if "57014" not in str(exc):
+            raise
+        if len(ids) == 1:
+            print(f"⚠ alive stamp timed out for id {ids[0]} — left unstamped (UNKNOWN), "
+                  f"re-read next sweep", flush=True)
+            return 0
+        mid = len(ids) // 2
+        return _stamp_alive_chunk(client, ids[:mid], patch) + _stamp_alive_chunk(client, ids[mid:], patch)
+
+
 # ── Cross-session write lock (2026-07-27) ────────────────────────────────────────────────────────
 # Reuses the repo's existing deploy-lock RPCs (supabase/migrations/20260716_deploy_lock.sql) under a
 # DISTINCT lock_name so a liveness --apply never blocks (or is blocked by) a frontend deploy.
@@ -846,6 +973,12 @@ def main() -> int:
                          "manufacturing false deaths. EXPLICIT opt-in: the secret is metered and "
                          "shared, so it is never inherited silently, and the run reports under "
                          f"'{RUN_NAME_PROXY}' so mon_detect_proxy_contention() counts it.")
+    ap.add_argument("--proxy-fallback", action="store_true",
+                    help="Re-read ONLY the units the direct read left without a verdict through the "
+                         "residential proxy (WASALT_PROXY_URL), and take only a 200 from it. Explicit "
+                         "opt-in like --proxy (2026-10-24: 15 served units read «transient» for 1-3 "
+                         "days because the datacenter egress lands on gathern's home page; the proxy "
+                         "read 11 of them alive and the rest 404). About 20 pages an hour.")
     ap.add_argument("--canaries", type=int, default=MIN_CANARIES * 2,
                     help="How many known-alive control listings to probe BEFORE the worklist. If "
                          "they do not come back alive the whole run is quarantined: 0 strikes, 0 "
@@ -921,6 +1054,8 @@ def main() -> int:
         kill_cap = resolve_kill_cap(active_now)
 
     s = proxied_session(args.proxy)
+    fb = proxied_session(True) if (args.proxy_fallback and not args.proxy) else None
+    alt = _alt_session()
 
     # ── CANARY: prove the environment BEFORE deciding any real listing's fate ────────────────────
     # Owner rule 2026-09-03. The trust gate is a lagging signal — it can only condemn a run once the
@@ -947,6 +1082,8 @@ def main() -> int:
             return 1
 
     seen = dead = alive = transient = killed = struck = 0
+    fresh_reads = 0
+    fresh_verdicts: dict[int, int] = {}
     alive_ids: list[int] = []
     kill_pending: list[tuple[int, int]] = []  # (row id, new_missing) — flipped ONLY after the cap gate
     # Strikes are DEFERRED for the same reason kills are, but against a different failure: the cap
@@ -979,11 +1116,10 @@ def main() -> int:
 
     def _flush_alive() -> None:
         if args.apply and alive_ids:
-            for i in range(0, len(alive_ids), 200):
-                client.table(TABLE).update({"last_seen_at": now_iso, "missing_count": 0,
-                                            "last_liveness_probe_at": now_iso,
-                                            **direct_alive_patch(now_iso=now_iso)}) \
-                    .in_("id", alive_ids[i:i + 200]).execute()
+            patch = {"last_seen_at": now_iso, "missing_count": 0,
+                     "last_liveness_probe_at": now_iso, **direct_alive_patch(now_iso=now_iso)}
+            for i in range(0, len(alive_ids), ALIVE_WRITE_CHUNK):
+                _stamp_alive_chunk(client, alive_ids[i:i + ALIVE_WRITE_CHUNK], patch)
         alive_ids.clear()
 
     try:
@@ -992,7 +1128,11 @@ def main() -> int:
             if not url:
                 continue
             seen += 1
-            status = probe(s, url)
+            status = fingerprint_read(fallback_read(probe(s, url), fb, url), alt, url)
+            if status in (0, HOME_LANDED):
+                status = fresh_read(status, url)
+                fresh_reads += 1
+                fresh_verdicts[status] = fresh_verdicts.get(status, 0) + 1
             mc_before = int(row.get("missing_count") or 0)
             action, new_missing = classify(status, row.get("missing_count"), args.grace)
             evidence = {
@@ -1172,7 +1312,8 @@ def main() -> int:
              f"applied_strikes={applied_strikes} alive={alive} transient={transient} "
              f"kill_cap={kill_cap} [{cap_src}] alive_rate={alive_rate:.3f} trusted={trusted} "
              f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed} canary_statuses[{c_hist}] "
-             f"close_canary={p_alive}/{p_probed} close_statuses[{p_hist}] canary_ok={canary_ok}")
+             f"close_canary={p_alive}/{p_probed} close_statuses[{p_hist}] canary_ok={canary_ok} "
+             f"fresh_reread={fresh_reads} fresh_verdicts[{','.join(f'{k}x{v}' for k, v in sorted(fresh_verdicts.items()))}]")
     if trust_quarantine:
         # trust_quarantine_reason() is kept exactly as main wrote it; the only change is WHICH
         # canary result it is handed. It now receives the BRACKETED verdict (open AND close), not

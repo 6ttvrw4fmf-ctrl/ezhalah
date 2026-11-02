@@ -91,8 +91,57 @@ export function ConfettiOverlay() {
     return () => clearTimeout(id);
   }, [burst, reduced, t]);
 
+  // WEB: THE BROWSER ANIMATES THE PARTY (speed, owner 2026-10-27: «it takes time, doesn't feel smooth»). Animated on
+  // web has no native driver, so 152 pieces × 5 interpolations were recomputed in JavaScript every frame for 2.2 s —
+  // right while the tapped listing's pane was rendering. Here each piece is handed to the Web Animations API once
+  // (translate / rotate / scale / opacity run on the compositor): same pieces, same paths, same easing, zero work per
+  // frame. Native keeps the Animated path below. Guard: scripts/verify-listing-tap-is-instant.ts
+  const nodes = useRef<Array<HTMLElement | null>>([]);
+  useEffect(() => {
+    if (!IS_WEB || !live || reduced) return;
+    const reach = Math.min(height, 900);
+    const timing = { duration: BURST_MS, easing: 'cubic-bezier(0.33, 1, 0.68, 1)', fill: 'forwards' as const };
+    const anims: Array<{ cancel: () => void }> = [];
+    pieces.forEach((p, i) => {
+      const el = nodes.current[i];
+      if (!el || typeof el.animate !== 'function') return;
+      const dx = p.ux * p.v * reach * (p.side === 0 ? 1 : 0.95);
+      const peakY = p.uy * p.v * reach;
+      const start = p.delay, mid = start + (1 - start) * 0.42;
+      try {
+        anims.push(el.animate([
+          { offset: 0, translate: '0px 0px' }, { offset: start, translate: '0px 0px' },
+          { offset: mid, translate: `${dx * 0.8}px ${peakY}px` },
+          { offset: 1, translate: `${dx * (1.05 + (i % 3) * 0.06)}px ${peakY * 0.25 + 60}px` },
+        ], timing));
+        anims.push(el.animate([{ offset: 0, opacity: 0 }, { offset: start, opacity: 1 }, { offset: 0.72, opacity: 1 }, { offset: 1, opacity: 0 }], timing));
+        anims.push(el.animate([{ rotate: '0deg' }, { rotate: `${p.rot}deg` }], timing));
+        anims.push(el.animate([1, 0.25, 1, 0.25, 1, 0.4].map((v, k) => ({ offset: k / 5, scale: `${v} 1` })), timing));
+      } catch { /* decoration only */ }
+    });
+    return () => { for (const a of anims) { try { a.cancel(); } catch { /* ignore */ } } };
+  }, [live, burst, reduced, width, height, pieces]);
+
   if (!live || reduced) return null;
   const reach = Math.min(height, 900);
+  if (IS_WEB) {
+    return (
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, s.top]} testID="confetti-overlay">
+        {pieces.map((p, i) => {
+          const anchor = p.side === 0
+            ? { left: width / 2, top: height * 0.45 }
+            : { bottom: -20, left: p.side < 0 ? -10 : undefined, right: p.side > 0 ? -10 : undefined };
+          return (
+            <View
+              key={i}
+              ref={(n) => { nodes.current[i] = n as unknown as HTMLElement | null; }}
+              style={{ position: 'absolute', ...anchor, width: p.w, height: p.h, borderRadius: p.round ? p.w : 2, backgroundColor: p.color, opacity: 0 }}
+            />
+          );
+        })}
+      </View>
+    );
+  }
   return (
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, s.top]} testID="confetti-overlay">
       {pieces.map((p, i) => {

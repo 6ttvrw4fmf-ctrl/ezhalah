@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-140 -170 310 290" width="310" height="290">
+<!-- The falcon on the falconer's hand (owner 2026-10-26). Coordinates are the falconer drawing's own pixels
+     (insight-falconer-original.png, 167x192, drawn at 0,0); the top of his pointing hand is at y=92.
+     Minimal line art in his green (#01361c) and line weight, like him. One 2.8 s flight, never looping:
+     perched → wings rise → crouch → push off → three deep wingbeats that grow lighter → glide → gone.
+     Each wing is jointed (shoulder + wrist): stretched on the downstroke, folded at the wrist on the upstroke,
+     so it bends like a real wing. Every beat is an eased, continuous rotation — no frame swapping. -->
+<style>
+g,path{transform-box:view-box}
+.l{fill:none;stroke:#01361c;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
+.f{stroke-width:3.4}
+.far{opacity:.55}
+
+/* perched falcon: visible, then hands over to the flying one as the wings rise */
+.perch{animation:perch 2.8s linear forwards}
+@keyframes perch{0%,19%{opacity:1}23%,100%{opacity:0}}
+.head{transform-origin:22px 42px;animation:look 2.8s ease-in-out forwards}
+@keyframes look{0%,5%{transform:rotate(0)}10%{transform:rotate(-8deg)}16%,100%{transform:rotate(0)}}
+
+/* the flying falcon's path: a crouch, the push-off, a climb that bobs with each beat, then a long glide away */
+.flight{opacity:0;transform-origin:0 0;animation:path 2.8s forwards}
+@keyframes path{
+0%,19%{opacity:0;transform:translate(0,0) scale(1);animation-timing-function:ease-out}
+23%{opacity:1;transform:translate(0,0) scale(1)}
+26.8%{transform:translate(1px,3px) scale(1);animation-timing-function:cubic-bezier(.2,.7,.4,1)}
+33.9%{transform:translate(-15px,-24px) scale(1);animation-timing-function:ease-in-out}
+40%{transform:translate(-24px,-29px) scale(.97)}
+46.4%{transform:translate(-41px,-51px) scale(.93)}
+52.1%{transform:translate(-52px,-57px) scale(.9)}
+58.2%{transform:translate(-70px,-77px) scale(.85)}
+63.6%{transform:translate(-84px,-87px) scale(.8);animation-timing-function:linear}
+82%{opacity:1}
+100%{opacity:0;transform:translate(-158px,-148px) scale(.5)}}
+
+/* body attitude: nose down in the crouch, up in the climb, settling into the glide */
+.tilt{animation:tilt 2.8s ease-in-out forwards}
+@keyframes tilt{0%,23%{transform:rotate(-4deg)}26.8%{transform:rotate(9deg)}33.9%{transform:rotate(-22deg)}46.4%{transform:rotate(-18deg)}58.2%{transform:rotate(-15deg)}63.6%,100%{transform:rotate(-10deg)}}
+
+/* tail fans out to push off and steer, then closes for the glide */
+.tail{transform-origin:14px 0;animation:tail 2.8s ease-in-out forwards}
+@keyframes tail{0%,23%{transform:scaleY(1)}30%{transform:scaleY(1.45)}46%{transform:scaleY(1.2)}63.6%,100%{transform:scaleY(.9)}}
+
+/* WINGBEATS. Shoulder: 0deg = wing straight up, negative = sweeping forward and down.
+   Three beats, each a little shallower and quicker than the last, then held out to glide. */
+.arm{transform-origin:-5px -8px;animation:arm 2.8s forwards}
+@keyframes arm{
+0%,19%{transform:rotate(30deg)}
+23%{transform:rotate(20deg);animation-timing-function:ease-in-out}
+26.8%{transform:rotate(26deg);animation-timing-function:cubic-bezier(.5,0,.3,1)}
+33.9%{transform:rotate(-116deg);animation-timing-function:cubic-bezier(.45,0,.55,1)}
+40%{transform:rotate(18deg);animation-timing-function:cubic-bezier(.5,0,.3,1)}
+46.4%{transform:rotate(-104deg);animation-timing-function:cubic-bezier(.45,0,.55,1)}
+52.1%{transform:rotate(14deg);animation-timing-function:cubic-bezier(.5,0,.3,1)}
+58.2%{transform:rotate(-92deg);animation-timing-function:ease-in-out}
+63.6%{transform:rotate(-44deg)}
+75%{transform:rotate(-50deg)}
+88%{transform:rotate(-41deg)}
+100%{transform:rotate(-46deg)}}
+/* wrist: stretched (about 0) on the downstroke, folded back on the upstroke — the bend that makes it real */
+.hand{transform-origin:-3.5px -33px;animation:hand 2.8s ease-in-out forwards}
+@keyframes hand{
+0%,19%{transform:rotate(60deg)}
+23%{transform:rotate(30deg)}
+26.8%{transform:rotate(18deg)}
+33.9%{transform:rotate(-8deg)}
+36.5%{transform:rotate(46deg)}
+40%{transform:rotate(16deg)}
+46.4%{transform:rotate(-8deg)}
+49%{transform:rotate(42deg)}
+52.1%{transform:rotate(14deg)}
+58.2%{transform:rotate(-6deg)}
+63.6%,100%{transform:rotate(-4deg)}}
+/* the far wing beats with the near one, a hair later and a little smaller (it is further away) */
+.far .arm,.far .hand{animation-delay:.04s}
+.far{transform-origin:-6px -9px;transform:scale(.92)}
+
+@media (prefers-reduced-motion:reduce){.perch,.head,.flight,.tilt,.tail,.arm,.hand{animation:none}.perch{opacity:0}}
+</style>
+
+<!-- PERCHED on his hand, facing the way he points: hooked beak, cheek stripe, folded wing, long tail, talons -->
+<g class="perch">
+  <g class="head">
+    <path class="l" d="M16 44 C14 37 18 32 24 32 C30 32 33 37 32 42"/>
+    <path class="l f" d="M16 39.5 C13 39.5 11.5 42.5 13 45 L16 44"/>
+    <circle cx="21.5" cy="37.5" r="2" fill="#01361c"/>
+    <path class="l f" d="M21 41 L20 46"/>
+  </g>
+  <path class="l" d="M16 45 C11 55 11 70 17 82 C20 87 22 90 24 92"/>
+  <path class="l" d="M32 42 C38 50 40 62 38 76"/>
+  <path class="l" d="M31 47 C39 56 41 72 38 96"/>
+  <path class="l f" d="M28 54 C34 62 35 72 33 84"/>
+  <path class="l" d="M35 80 L40 106 L34 107 L29 92"/>
+  <path class="l f" d="M21 89 L19 94 M27 90 L28 94"/>
+</g>
+
+<!-- IN FLIGHT: one rig — body, tail and two jointed wings — moving together -->
+<g transform="translate(26 66)">
+  <g class="flight">
+    <g class="tilt">
+      <!-- far wing, behind the body -->
+      <g class="far">
+        <g class="arm">
+          <path class="l f" d="M-11 -8 C-14 -18 -12 -27 -7 -33 M1 -8 C5 -17 5 -26 0 -33"/>
+          <g class="hand"><path class="l f" d="M-7 -33 C-10 -45 -9 -56 -3 -67 M0 -33 C5 -44 4 -56 -3 -67 M-3.5 -38 C-4 -46 -4 -54 -3 -60"/></g>
+        </g>
+      </g>
+      <!-- body: head with hooked beak and eye, back, belly, tucked feet, and the tail -->
+      <path class="l" d="M-17 -11 C-21 -14 -26 -12 -26 -6 M-26 -7 C-30 -7 -31 -4 -29 -2 L-26 -3 M-24 -2 C-16 4 2 5 14 2 M-17 -11 C-8 -12 6 -8 14 -3"/>
+      <circle cx="-21" cy="-7.5" r="1.8" fill="#01361c"/>
+      <path class="l f" d="M-3 4 L3 8"/>
+      <g class="tail"><path class="l" d="M14 -3 L31 -7 C33 -3 33 1 31 6 L14 2"/></g>
+      <!-- near wing, in front of the body -->
+      <g class="near">
+        <g class="arm">
+          <path class="l" d="M-11 -8 C-14 -18 -12 -27 -7 -33 M1 -8 C5 -17 5 -26 0 -33"/>
+          <g class="hand"><path class="l" d="M-7 -33 C-10 -45 -9 -56 -3 -67 M0 -33 C5 -44 4 -56 -3 -67 M-3.5 -38 C-4 -46 -4 -54 -3 -60"/></g>
+        </g>
+      </g>
+    </g>
+  </g>
+</g>
+</svg>

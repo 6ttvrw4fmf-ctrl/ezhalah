@@ -50,7 +50,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { COHORT_QUESTIONS, cohortAllows } from '../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, cohortAllows, SHORT_STAYS_QUESTIONS, SHORT_STAYS_CHAT_ONLY } from '../src/lib/afCohorts.ts';
 import { CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -123,7 +123,16 @@ for (const cleanType of Object.keys(CLEAN_MACRO)) {
       const allowed = cohortAllows(q, id);
       if (!allowed) continue;
       // R2.1.1: whatever is offered MUST be in this exact cohort's certified list.
-      const certified = (COHORT_QUESTIONS[cleanType] as any)?.[LEG_KEY[legName]] ?? [];
+      // Short stays (owner 2026-10-31): the residential RentMonthly leg is ONE pool, certified by
+      // SHORT_STAYS_QUESTIONS + SHORT_STAYS_CHAT_ONLY for every residential type, not per type.
+      // 2026-11-01/02: only the Apartments & Co-living types are that POOL; Villa / Chalet / Rest House / Camp carry their own
+      // RentMonthly lists in COHORT_QUESTIONS, and the chat-only ids stay certified on every residential short-stays leg.
+      const POOL = ['Apartment', 'Floor', 'Studio', 'Room', 'Residential Building'];
+      const certified = legName === 'RentMonthly' && POOL.includes(cleanType)
+        ? [...SHORT_STAYS_QUESTIONS, ...SHORT_STAYS_CHAT_ONLY]
+        : legName === 'RentMonthly' && CLEAN_MACRO[cleanType] === 'Residential'
+          ? [...((COHORT_QUESTIONS[cleanType] as any)?.RentMonthly ?? []), ...SHORT_STAYS_CHAT_ONLY]
+          : (COHORT_QUESTIONS[cleanType] as any)?.[LEG_KEY[legName]] ?? [];
       if (!certified.includes(id)) violations.push(`${cleanType}/${legName} offers '${id}' — not in COHORT_QUESTIONS`);
       // The shared predicate is what BOTH surfaces call, so agreement is structural; assert that the
       // narrowing direction still holds (never wider than the raw cohort gate).
@@ -145,10 +154,12 @@ const roomBuy: any = { category: 'Residential', types: ['Room'], deal: 'Buy', re
 check("Room/Buy no longer offers property_age (COHORT_QUESTIONS.Room has no Buy list)",
   cohortAllows(roomBuy, 'property_age') === false);
 
-const shopBuy: any = { category: 'Commercial', types: ['Shop'], deal: 'Buy', rentPeriod: null };
+// (Shop/Buy was the measured cell; since the owner's 2026-11-01 commercial lists Shop/Buy asks no age, so the same proof
+// runs on Villa/Buy, whose locked list opens with age.)
+const shopBuy: any = { category: 'Residential', types: ['Villa'], deal: 'Buy', rentPeriod: null };
 // Shop/Buy CERTIFIES property_age, and under the surviving architecture the manual card can now
 // offer it too — that is the point of deleting the duplicate map, not a regression.
-check('Shop/Buy: certified age is now reachable from BOTH surfaces, not just the chat',
+check('Villa/Buy: certified age is reachable from BOTH surfaces, not just the chat',
   cohortAllows(shopBuy, 'property_age') === true);
 
 const aptBuy: any = { category: 'Residential', types: ['Apartment'], deal: 'Buy', rentPeriod: null };

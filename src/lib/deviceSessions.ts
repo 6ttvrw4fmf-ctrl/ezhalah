@@ -50,18 +50,20 @@ function countNoun(n: number, one: string, two: string, few: string, many: strin
 }
 
 // isoUtc → a truthful «آخر نشاط …» label, or '' when the timestamp is unusable
-// (render nothing rather than guess a lie into the gap).
-export function lastActiveLabel(isoUtc: string, nowMs: number): string {
+// (render nothing rather than guess a lie into the gap). `en` is the English mirror of the same
+// buckets (owner 2026-10-24: the Arabic line showed inside the English sheet).
+export function lastActiveLabel(isoUtc: string, nowMs: number, en = false): string {
   const t = Date.parse(isoUtc);
   if (!Number.isFinite(t)) return '';
   const mins = Math.floor((nowMs - t) / 60_000);
   if (mins < 0) return '';
-  if (mins < 75) return 'نشط خلال الساعة الأخيرة';
+  const ago = (n: number, unit: string) => `Last active ${n} ${unit}${n === 1 ? '' : 's'} ago`;
+  if (mins < 75) return en ? 'Active in the last hour' : 'نشط خلال الساعة الأخيرة';
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `آخر نشاط قبل ${countNoun(hours, 'ساعة', 'ساعتين', 'ساعات', 'ساعة')}`;
+  if (hours < 24) return en ? ago(hours, 'hour') : `آخر نشاط قبل ${countNoun(hours, 'ساعة', 'ساعتين', 'ساعات', 'ساعة')}`;
   const days = Math.floor(hours / 24);
-  if (days < 30) return `آخر نشاط قبل ${countNoun(days, 'يوم', 'يومين', 'أيام', 'يومًا')}`;
+  if (days < 30) return en ? ago(days, 'day') : `آخر نشاط قبل ${countNoun(days, 'يوم', 'يومين', 'أيام', 'يومًا')}`;
   const months = Math.floor(days / 30);
-  if (months < 12) return `آخر نشاط قبل ${countNoun(months, 'شهر', 'شهرين', 'أشهر', 'شهرًا')}`;
-  return 'آخر نشاط قبل أكثر من سنة';
+  if (months < 12) return en ? ago(months, 'month') : `آخر نشاط قبل ${countNoun(months, 'شهر', 'شهرين', 'أشهر', 'شهرًا')}`;
+  return en ? 'Last active over a year ago' : 'آخر نشاط قبل أكثر من سنة';
 }

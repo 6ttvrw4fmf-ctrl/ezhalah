@@ -65,6 +65,25 @@ from scrapers.common.arabic_location import city_ar_for, find_district_in_text, 
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
+
+# THE PIN IS ON THE AD PAGE, NOT IN THE REST POST (owner 2026-10-30: 50 ads, 0 pins). Houzez prints the listing's
+# own map as <div id="houzez-single-listing-map" data-map='{"latitude":"21.6037976","longitude":"39.2128789",…}'>
+# (html-escaped), the same pair as its JSON-LD geo. One extra GET per row; a page that cannot be read writes nothing.
+_DATA_MAP = re.compile(r'houzez-single-listing-map"[^>]*?data-map=\'\{"latitude":"(-?\d{1,2}\.\d{3,})","longitude":"(-?\d{1,3}\.\d{3,})')
+
+
+def ad_pin(page_html: str) -> dict:
+    m = _DATA_MAP.search(ihtml.unescape(page_html or ""))
+    return (pin_dict(m.group(1), m.group(2)) if m else {}) or {"pin_absent": True}
+
+
+def page_pin(s, url: str) -> dict:
+    try:
+        r = s.get(url, timeout=45)
+    except Exception:  # noqa: BLE001 — not read ≠ no pin
+        return {}
+    return ad_pin(r.text) if r.status_code == 200 and r.text else {}
 
 BASE = "https://shatrirealestate.com"
 SOURCE = "الشاطري للتطوير العقاري"
@@ -416,6 +435,7 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            row["additional_info"].update(page_pin(s, row["listing_url"]))
             (com if cat == "commercial" else res).append(row)
         notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         if skipped:

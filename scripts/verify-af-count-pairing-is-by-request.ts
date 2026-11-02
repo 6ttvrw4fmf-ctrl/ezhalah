@@ -93,17 +93,38 @@ const WALK: CountPair[] = [
 
 // ── 4. the fallback, for a key the body cannot spell ─────────────────────────────────────────────
 {
-  // property_age «جديد» writes p_is_new_construction: true — the key is not literal anywhere.
-  const agePaired: CountPair = {
-    body: { p_cities: ['الرياض'], p_deal: 'بيع', p_types: ['شقة'], p_is_new_construction: true },
+  // A key no body can spell falls back to «the scope moved». (Until 2026-10-23 this case was property_age «جديد»;
+  // that one is now spelled through SPELLED_AS — see the measured walk below — so the mechanism is pinned with a
+  // key that has no spelling at all.)
+  const movedPaired: CountPair = {
+    body: { p_cities: ['الرياض'], p_deal: 'بيع', p_types: ['شقة'], p_some_flag: true },
     resp: [{ cnt_selected: 9322 }],
   };
-  const r = pricedTheTappedOption(agePaired, PRE.body, 'new');
+  const r = pricedTheTappedOption(movedPaired, PRE.body, 'unspellable_key');
   check('a key the body cannot spell falls back to "the scope moved", and says so',
-    r.ok && !r.literal && r.movedKeys.includes('p_is_new_construction'), JSON.stringify(r));
-  const viaMoved = pairCountForSelection([...WALK, agePaired], 9322, 'new', PRE.body);
+    r.ok && !r.literal && r.movedKeys.includes('p_some_flag'), JSON.stringify(r));
+  const viaMoved = pairCountForSelection([...WALK, movedPaired], 9322, 'unspellable_key', PRE.body);
   check('…and the combined rule pairs it through that fallback, and SAYS it used the fallback',
-    viaMoved.paired === agePaired && viaMoved.via === 'moved', JSON.stringify(viaMoved.via));
+    viaMoved.paired === movedPaired && viaMoved.via === 'moved', JSON.stringify(viaMoved.via));
+
+  // The measured 2026-10-23 walk (الرياض / تجاري / إيجار سنوي / محل, af-live-truth run 39940963632): «جديد» is
+  // priced with p_is_new_construction: true → 436 (the card), and the walk's cumulative rungs spell "new" inside
+  // p_age_buckets → 476 / 593 / 674. The right call must pair, LITERALLY; a rung's number must not.
+  const T = { p_cities: ['الرياض'], p_deal: 'إيجار', p_types: ['محل', 'كشك', 'درايف ثرو'] };
+  const AGE_WALK: CountPair[] = [
+    { body: T, resp: [{ cnt_selected: 989 }] },
+    { body: { ...T, p_is_new_construction: true }, resp: [{ cnt_selected: 436 }] },
+    { body: { ...T, p_age_buckets: ['new', '1_2'] }, resp: [{ cnt_selected: 476 }] },
+    { body: { ...T, p_age_buckets: ['new', '1_2', '3_5'] }, resp: [{ cnt_selected: 593 }] },
+    { body: { ...T, p_age_buckets: ['new', '1_2', '3_5', '6_9'] }, resp: [{ cnt_selected: 674 }] },
+  ];
+  const ageNew = pairCountForSelection(AGE_WALK, 436, 'new', T);
+  check('«جديد» pairs with its own p_is_new_construction call, literally (the 10-23 false FAIL)',
+    ageNew.paired === AGE_WALK[1] && ageNew.via === 'literal', JSON.stringify(ageNew.via));
+  mustCatch('a card showing a rung\'s number (476) while the user tapped «جديد»',
+    pairCountForSelection(AGE_WALK, 476, 'new', T).paired === null);
+  mustCatch('a p_is_new_construction body read as spelling some OTHER key',
+    !pricedTheTappedOption(AGE_WALK[1], T, 'upto2').literal);
   const unmoved = pricedTheTappedOption({ body: PRE.body, resp: [{ cnt_selected: 13700 }] }, PRE.body, 'new');
   mustCatch('a body that never moved off the pre-AF scope passing the fallback',
     unmoved.ok === false);

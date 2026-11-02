@@ -76,6 +76,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://www.muktamel.com"
 WORKERS = int(os.environ.get("MUKTAMEL_WORKERS", "8"))
@@ -758,7 +759,12 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
     age = offer.get("age")
     property_age = 0 if age == 0 else (_int(age) if age not in (None,) else None)
 
+    # Owner 2026-10-20: the ad's own pin is offer.location {lat,lng} in the NUXT payload (measured on
+    # real-estates/28626 → 24.841171549022395,46.89082470062314); offer.agency.location is the OFFICE
+    # (24.68,46.70 on the same page) and is never read. 4,077 ads were on the district border for nothing.
+    _loc = offer.get("location") or {}
     info: dict[str, Any] = {
+        **pin_dict(_loc.get("lat") if isinstance(_loc, dict) else None, _loc.get("lng") if isinstance(_loc, dict) else None),
         "rega_ad_license_number": rega_ad_no,
         "agency_name": agency_company_name,
         "agency_official_name": agency.get("officialName") if is_company_agency else None,

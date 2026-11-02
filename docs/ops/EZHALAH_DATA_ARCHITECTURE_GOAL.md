@@ -145,5 +145,5 @@ For any work under this rule:
 4. **sync it through to the search index**;
 5. **verify the real Filter**, against the original source pages.
 
-Related: `docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md` (the tri-state law and the prose-is-not-a-source
-rule, in detail).
+Related: `docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md` (the tri-state law, and Rule B — how the seller's
+quoted sentence is merged with the site's own field at the search index, 2026-10-25 — in detail).

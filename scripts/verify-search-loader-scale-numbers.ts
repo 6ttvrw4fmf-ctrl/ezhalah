@@ -185,10 +185,14 @@ mustCatch('a thrown network error resolves to null (never rejects — the caller
   check('…bounded by the configured ceiling, not by luck', ms < 4_000, `took ${ms}ms`);
 }
 
-console.log('\n── 3. the copy uses the SAME platform count the pills render, never a second count ──');
+console.log('\n── 3. the copy uses the ONE shared site count (owner 2026-10-20: «make it 148»), never a second count ──');
 const loaderSrc = readFileSync(join(root, 'src/components/SearchLoader.tsx'), 'utf8');
-check('PhaseTitle is called with platformCount={platforms.length} (the roster actually on screen)',
-  /<PhaseTitle[^>]*platformCount=\{platforms\.length\}/.test(loaderSrc));
+// Owner 2026-10-20: the WhatsApp card, the share sentence and this line must all say the same number —
+// src/data/siteCount.ts — with the on-screen roster only as the fallback before that count is read.
+check('PhaseTitle is called with platformCount={siteCountNow() ?? platforms.length} (the shared count, roster as fallback)',
+  /<PhaseTitle[^>]*platformCount=\{siteCountNow\(\) \?\? platforms\.length\}/.test(loaderSrc));
+check('the loader starts the shared count read at app load (the fallback is for the first seconds only)',
+  /void loadSiteCount\(\);/.test(loaderSrc) && /import \{ loadSiteCount, siteCountNow \} from '@\/data\/siteCount';/.test(loaderSrc));
 check('the websites line keys off that same platformCount prop, not a separate fetch/count',
   /platformCount > 0 \? t\('Searching \{count\} real-estate platforms…', \{ count: platformCount \}\)/.test(loaderSrc));
 check('PhaseTitle receives THIS search (query), which drives the city/district lines',

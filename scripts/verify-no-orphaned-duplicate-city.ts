@@ -26,6 +26,7 @@
 // zero listings — a common place name, not one place split in two) must never be silently merged.
 // This barrier only refuses to let a CONFIRMED orphan reappear; the mutation proof below is what
 // keeps its own detection logic from either missing a real one or flagging a benign coincidence.
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { createClient } from '@supabase/supabase-js';
 
 let failed = 0;

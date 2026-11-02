@@ -1,5 +1,23 @@
 # 🦅 الصقر — The Falcon (owner, 2026-10-04)
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
+> **🔒 THE SUPABASE QUESTION RULE (owner, 2026-10-25 — wins over every other order about writing rows).** On 10-24 and
+> 10-25 ⚡ did the work but lost its whole report: an `execute_sql` call that contained an `UPDATE` (closing backlog items
+> in the same batch as a proof row) made the Supabase tool ask «destructive operation — run it?», nobody was awake to
+> answer, the call timed out, and the tool said «do not call this tool again» — so the `:end` row, proofs and closes were
+> never written and the fix-rate board scored the night 0%. Plain `INSERT`s never ask. So: (1) every `:proof` and `:end`
+> row is ONE plain `INSERT … VALUES …` per call — never in the same call as an `UPDATE`/`DELETE`; (2) write your `:end`
+> row BEFORE any backlog `UPDATE`, the moment your last job is proven; (3) close backlog items LAST, one `UPDATE … WHERE
+> id = N` per call; (4) if the tool ever asks a question or times out, stop using it for writes and put the unwritten
+> closes in your `:end` row text («CLOSE: 803, 817 — evidence …») so the owner session closes them.
+
 **This file is the whole instruction.** The cloud routine's prompt only says «follow this file»; if anything else disagrees
 with it, this file wins (the law below wins over this file, and you report any conflict). Model: **Fable 5.1**.
 
@@ -63,7 +81,7 @@ apply in full: approval removes the question, never the guard.
    tab; phone: the sheet), every other site in a new tab; back keeps the search.
 
 **Advanced Filter.**
-12. Never opens by itself (only the customer's tap «خلّنا نحدد الطلب أكثر»). Every question is multi-select; several picks =
+12. Never opens by itself (only the customer's tap «🎯 دقّق مع الذكاء الاصطناعي»). Every question is multi-select; several picks =
    the exact union; never auto-pick, never collapse picks.
 13. After a round the screen stays in place: earlier turns dimmed, never removed; one whole summary; read-only chips (no ✕);
    no «مسح الكل»; back on the Filter = a clean form. 😔 «unknown» only where a truthful count exists.
@@ -122,6 +140,11 @@ apply in full: approval removes the question, never the guard.
 10. **Photos and logos:** photos really render (a 200 is not proof); every live website has its logo and its exact name.
 11. **The machines ran:** every scheduled workflow and pg_cron job of the last 7 days, failed or silent; every robot and
    detector that cannot go red; every alert nobody owns.
+12. **Map pins (100% of platforms, owner 2026-10-30):** `select * from pin_coverage_by_platform()` against
+   `data/pin-sources.json` — every active platform has a row (box 10), none is below its floor, none declared as publishing
+   serves 0 %, no floor was lowered since last Friday (`git log -p data/pin-sources.json`). For every `none`, open its proof
+   URL in a rendered browser and look in all four places once a month (trap 27); for every `UNVERIFIED` note, re-open it
+   from a GitHub runner or a residential IP and re-declare. The 2026-10-30 fleet report is the baseline.
 
 **D. Control: the five nightly engineers' week.**
 - Re-test 3 random proof rows per engineer per night of the week (`<engineer>:proof` rows in `ops_daily_engineer_run`). A proof
@@ -275,6 +298,33 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    Dry-run every list change against the search it feeds (count == results), rolled back, before applying.
 21. Before a heavy scan, explain it or bound it: a per-row _redact_pii_sql over 170k descriptions ran past 60 s
    on production (10-16) and had to be cancelled with pg_cancel_backend. Use one regex pass, gated to the daily slot.
+
+22. A security or infrastructure change breaks robots the next day, not the product (10-23): the 10-21 search offset
+   cap (nothing past offset 25,000) made three AF full-walk robots read the unreachable tail as MISSING (total == oracle,
+   EXTRA 0), and the 10-21 front door (`/sb/rest/v1/` on our own site) failed the combined-budget «expected backend»
+   check. MISSING with EXTRA 0 and equal totals is a harness suspect first. Fix: the deep-page-cap helper in PR 8397.
+23. A checker's own «success» hides a quarantine (10-23): fleet-liveness reported success while aldarim was quarantined
+   for 3 days. Read gate 3 per site from `ops_platform_liveness_coverage`, never from the job colour.
+24. A fix in the index alone leaves the card and the client net behind (10-30): the meter-box price rule (10-28) served
+   260,000 in search while `finalize()` printed the platform row's 52,000,000,000, and `priceFilter()` re-reads the PRINTED
+   price, so the card was dropped after the count. Whenever the index serves a corrected value, diff the index against the
+   platform table field by field (`src/data/remote.ts` `finalize()` reads the platform row) and fix both halves.
+25. A robot red for days with «0 mismatches» everywhere is the harness (10-30): the live sweep failed only its coverage
+   floor for 5 days because it tapped «شهري», renamed «إقامات قصيرة» on 10-25. Read the floor lines, not just the layers.
+26. Agent containers cannot reach ezhalah.com, but GitHub runners can (10-30): browser proofs run through
+   `customer-journey.yml` (dispatch `mode` + `listings`) and the quick-search audit through `qa-coverage-run.yml`
+   (budget 3000). A new workflow can be dispatched only after it is on main; until then its PR run is the proof.
+27. «The site has no map pin» is proven only after ALL FOUR places on a RENDERED ad page (10-30, owner: «make sure the
+   engineers are aware and we never ever get this issue again»): the page · its embedded JSON / data attributes / network
+   calls · a site-wide map or list feed · the parent project/compound page. rakez served 3,660 ads with 0 pins for six
+   weeks because nobody looked past the project page while `/ar/projects-map/` called a feed with every pin; the same
+   sweep found 8 more (compoundin, mustqr, alkhaas, awal, hajer, daryusuf, shatri, wslnaa). Trap 1 is the same rule for
+   every field; for pins the raw page can also LIE the other way: a rendered `maps?ll=` link may be Google's JS geocoding
+   the address (remal), and a pair printed on every ad is the office (nofodh, mustqr, eaqartabuk, macsaib) — never a pin.
+   Your Friday audit line C reads `select * from pin_coverage_by_platform() where below_floor` and
+   `data/pin-sources.json`: a platform below its floor, declared as publishing at 0 %, or launched undeclared is a red
+   row with the engineer who owns it, and a lowered floor is a finding, never a fix.
+   `docs/ops/reports/PIN_CAPTURE_FLEET_2026-10-30.md` is the baseline.
 
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,

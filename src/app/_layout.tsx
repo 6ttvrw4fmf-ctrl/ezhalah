@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppProvider } from '@/store';
 import { classifyRejection, initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
+import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
 import { colors } from '@/theme/tokens';
 import { ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
@@ -14,11 +15,16 @@ import { markAppSessionStarted } from '@/lib/appSession';
 import { usePromptInsets } from '@/lib/bottomPromptInset';
 import { useVisualViewportRoot } from '@/lib/visualViewportFrame';
 import { installTapDebug } from '@/lib/tapDebug';
+import { Image as ExpoImage } from 'expo-image';
+import { PLATFORM_META } from '@/data/loaderPlatforms';
+import { scheduleLogoPrefetch } from '@/lib/prefetchLoaderLogos';
 import Head from 'expo-router/head';
-import { OG_IMAGE, SHARE_BLURB_AR, SHARE_CARD_DESC_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
+import { OG_IMAGE, PAGE_TITLE_AR, PAGE_TITLE_EN, SHARE_BLURB_AR, SHARE_CARD_DESC_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
+import NetworkBlockedNotice from '@/components/NetworkBlockedNotice';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
+import NamePrompt from '@/components/NamePrompt';
 import SignInCard from '@/components/SignInCard';
 import GoogleOneTap from '@/components/GoogleOneTap';
 import CookieConsent from '@/components/CookieConsent';
@@ -67,9 +73,12 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
 // the document is RTL in Arabic, a plain `flexDirection: 'row'` would auto-mirror the sidebar to the
 // right; `row-reverse` under RTL cancels that mirroring so the sidebar (the first child) stays on the
 // physical left in both locales. On mobile/native it collapses away into a tap-to-open drawer.
+// The row direction follows the page's ACTUAL `dir`, not the language state (owner 2026-10-21): see
+// src/lib/useDocumentRtl.ts for the live reproduction of the sidebar landing on the right.
 function Shell() {
   const docked = useDocked();
-  const { isRTL } = useI18n();
+  const { isRTL: localeRtl } = useI18n();
+  const docRtl = useDocumentRtl(localeRtl);
   // Space occupied by a docked third-party auth prompt — Google One Tap's legacy sheet, on WHICHEVER
   // edge it lands on. Zero whenever nothing is docked; see src/lib/bottomPromptInset.ts for both
   // measured bugs this prevents. The sheet is `position:fixed; z-index:9999; pointer-events:auto`
@@ -103,6 +112,13 @@ function Shell() {
   // search (appSession gate), and — since that left an empty AI chat — a reload now lands on the
   // Filter home like every other deep route. The decision lives in shouldSendRefreshHome() so
   // scripts/verify-refresh-restores-filter-search.ts can execute it rather than grep for it.
+  // The search loader's ~145 logos are fetched a moment after ANY page opens, so the loader never shows
+  // empty frames on a slow phone (owner 2026-10-25 screenshot). It lives HERE, in the root layout,
+  // because a route's module only runs once that route opens — in SearchLoader it never ran on Home.
+  // Web only: native ships its assets inside the app. scripts/verify-live-loader-logos.ts proves it live.
+  useEffect(() => {
+    if (Platform.OS === 'web') scheduleLogoPrefetch(PLATFORM_META.map((p) => p.logo), (uris) => ExpoImage.prefetch(uris));
+  }, []);
   const homedRef = useRef(false);
   useEffect(() => {
     if (homedRef.current) return;
@@ -119,7 +135,7 @@ function Shell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row', paddingTop: promptInset.top, paddingBottom: promptInset.bottom }}>
+    <View style={{ flex: 1, flexDirection: firstChildLeftRow(docRtl), paddingTop: promptInset.top, paddingBottom: promptInset.bottom }}>
       <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
       {/* /auth is a focused full-screen moment — no docked sidebar there. The /agent light-pin
           special-case (owner 2026-08-29) was reversed 2026-08-30: dark mode is global and sticky,
@@ -137,6 +153,7 @@ function Shell() {
         >
           <Stack.Screen name="index" options={{ animation: 'fade' }} />
           <Stack.Screen name="agent" options={{ animation: 'none' }} />
+          <Stack.Screen name="map" options={{ animation: 'none' }} />
           <Stack.Screen name="interview" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
           {/* The /settings route is GONE (owner 2026-08-28): account controls open as a compact
               panel anchored to the sidebar's profile row — see components/AccountMenu.tsx. */}
@@ -163,8 +180,12 @@ function Shell() {
           is active (owner 2026-08-15), never a route the user navigates to. Since the 2026-08-29
           revision it opens ONLY via explicit sign-in controls (openAuth) — it never auto-raises. */}
       <AuthModal />
+      {/* «وش نناديك؟» — once per account, only when a sign-in arrived with no name (owner 2026-10-23). */}
+      <NamePrompt />
       {/* Cookie consent — bottom-corner card, once per signed-out web visitor (owner 2026-09-06). */}
       <CookieConsent />
+      {/* «Please turn off your VPN» — shown once when the network guard refuses this visitor (owner 2026-10-21). */}
+      <NetworkBlockedNotice />
       {/* First-run cinematic intro — overlays everything; shows once for new logged-out visitors. */}
       <IntroVideo />
     </View>
@@ -188,9 +209,11 @@ function Shell() {
 // og:image must be ABSOLUTE (a crawler has no origin to resolve a relative path against), and it is
 // a crop of the eagle artwork already in the repo — see lib/share.ts.
 function ShareMeta() {
+  // The tab title follows the UI language (Arabic-first on a fresh load, so crawlers and first paint get Arabic).
+  const { locale } = useI18n();
   return (
     <Head>
-      <title>{SHARE_TITLE_AR}</title>
+      <title>{locale === 'en' ? PAGE_TITLE_EN : PAGE_TITLE_AR}</title>
       <meta name="description" content={SHARE_BLURB_AR} />
       <meta property="og:type" content="website" />
       <meta property="og:site_name" content={SHARE_TITLE_AR} />

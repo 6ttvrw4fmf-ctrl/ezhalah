@@ -32,6 +32,7 @@
 //
 // A layer this run could not reach is printed as NOT REACHED and counted separately. It is never
 // folded into the passes (PART 7): a rule this run could not reach is not a rule this run proved.
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
 import { chromium, devices } from 'playwright';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
@@ -690,7 +691,7 @@ const DEFAULT_CELLS = [
   { label: 'الطائف/تجاري/محل',        city: 'الطائف', category: 'تجاري', deal: ['إيجار', 'شراء', 'سنوي'], group: 'التجزئة والمكاتب',     type: 'محل' },
   { label: 'سكاكا/بيع/شقة',           city: 'سكاكا',           deal: [],                                group: 'الشقق والسكن المشترك', type: 'شقة' },
   { label: 'بيشة/بيع+إيجار/شقة',      city: 'بيشة',            deal: ['إيجار'],                          group: 'الشقق والسكن المشترك', type: 'شقة' },
-  { label: 'MOB ينبع/إيجار-شهري/شقة', city: 'ينبع', mobile: true, deal: ['إيجار', 'شراء', 'شهري', 'سنوي'], group: 'الشقق والسكن المشترك', type: 'شقة' },
+  { label: 'MOB ينبع/إيجار-شهري/شقة', city: 'ينبع', mobile: true, deal: ['إيجار', 'شراء', 'إقامات قصيرة', 'سنوي'], group: 'الشقق والسكن المشترك', type: 'شقة' },
   { label: 'MOB عرعر/بيع/شقة',        city: 'عرعر', mobile: true, deal: [],                              group: 'الشقق والسكن المشترك', type: 'شقة' },
   { label: 'MOB القطيف/بيع+إيجار/فيلا', city: 'القطيف', mobile: true, deal: ['إيجار'],                    group: 'الفلل والبيوت',        type: 'فيلا' },
   { label: 'MOB الجبيل/إيجار-سنوي/شقة', city: 'الجبيل', mobile: true, deal: ['إيجار', 'شراء', 'سنوي'],    group: 'الشقق والسكن المشترك', type: 'شقة' },

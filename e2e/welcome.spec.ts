@@ -1,4 +1,8 @@
 import { test, expect } from '@playwright/test';
+// Robot pass + secret handshake (docs/ops/SCRAPE_GUARD.md): our own test browser is never refused once the back door
+// closes. A no-op without EZ_GATE_SECRET (local runs, fork PRs).
+import { grantRobotPass } from '../scripts/lib/robotPassCore.mjs';
+test.beforeEach(async ({ context }) => { await grantRobotPass(context); });
 
 // No paid model calls: this exercises the real composer/turn lifecycle with a
 // deterministic agent reply. Production searches are verified separately.

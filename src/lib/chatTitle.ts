@@ -78,11 +78,12 @@ const AMENITY_AR: Record<string, string> = {
   electricity: 'كهرباء', water_supply: 'ماء', sanitation: 'صرف صحي',
   pool: 'مسبح', gym: 'نادي', garden: 'حديقة', balcony: 'شرفة', laundry_room: 'غرفة غسيل',
   separate_electricity_meter: 'عداد كهرباء مستقل', separate_water_meter: 'عداد مياه مستقل',
+  majlis: 'مجلس',
 };
 const AMENITY_EN: Record<string, string> = {
   elevator: 'Elevator', parking: 'Parking', kitchen: 'Kitchen', air_conditioner: 'A/C',
   maid_room: 'Maid room', driver_room: 'Driver room', private_entrance: 'Private entrance',
-  rnpl: 'Instalments', car_entrance: 'Car entrance', optical_fibers: 'Fiber',
+  rnpl: 'Instalments', car_entrance: 'Car entrance', optical_fibers: 'Fiber', majlis: 'Majlis',
   electricity: 'Electricity', water_supply: 'Water', sanitation: 'Sanitation',
   pool: 'Pool', gym: 'Gym', garden: 'Garden', balcony: 'Balcony', laundry_room: 'Laundry',
   separate_electricity_meter: 'Own electricity meter', separate_water_meter: 'Own water meter',
@@ -155,8 +156,8 @@ export function titleDetails(q: SearchQuery, loc = 'ar'): string[] {
   const push = (s?: string | null) => { if (s && !out.includes(s)) out.push(s); };
 
   if (q.deal === 'Rent' && !q.bothDeals) {
-    if (q.rentPeriod === 'monthly') push(A ? 'شهري' : 'Monthly');
-    else if (q.rentPeriod === 'both') push(A ? 'شهري وسنوي' : 'Monthly or yearly');
+    if (q.rentPeriod === 'monthly') push(A ? 'إقامات قصيرة' : 'Short stays');
+    else if (q.rentPeriod === 'both') push(A ? 'إقامات قصيرة وسنوي' : 'Short stays or yearly');
   }
   if (q.districts && q.districts.length > 1) {
     push(A ? `${q.districts.length} أحياء` : `${q.districts.length} districts`);

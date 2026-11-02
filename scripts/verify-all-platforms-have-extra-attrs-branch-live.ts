@@ -95,13 +95,17 @@ const SEARCHABLE_TABLES = lifted.SEARCHABLE_TABLES as string[];
 check('SEARCHABLE_TABLES lifted and is plausibly the fleet', SEARCHABLE_TABLES.length >= 50,
   `got ${SEARCHABLE_TABLES.length}`);
 
+// listing_extra_attrs_mv is closed to the public key (20261021003001); extra_attrs_tables_present() (20261021035736)
+// answers the one question this check asks — which tables have at least one row — and nothing else. Fails CLOSED.
+const present = await fetch(`${REST}/rpc/extra_attrs_tables_present`, {
+  method: 'POST', headers: { ...H, 'content-type': 'application/json' }, body: JSON.stringify({ p_tables: SEARCHABLE_TABLES }),
+}).catch(() => null);
+if (!present || !present.ok) die(`could not read extra_attrs_tables_present — ${present ? present.status : 'network error'}`);
+const inExtra = new Set<string>(await present!.json().catch(() => die('extra_attrs_tables_present returned no JSON')) as string[]);
 const rows: ExtraAttrsTableRow[] = [];
 for (const table of SEARCHABLE_TABLES) {
-  const [searchable_rows, extra] = await Promise.all([
-    countRows('search_listings_ar', table, true),
-    countRows('listing_extra_attrs_mv', table, false),
-  ]);
-  rows.push({ table, searchable_rows, in_extra_attrs: extra > 0 });
+  const searchable_rows = await countRows('search_listings_ar', table, true);
+  rows.push({ table, searchable_rows, in_extra_attrs: inExtra.has(table) });
 }
 
 // die() above already exits on any unreachable count, so reaching here means every table measured.

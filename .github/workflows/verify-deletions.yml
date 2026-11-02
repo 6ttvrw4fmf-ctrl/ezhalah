@@ -40,10 +40,15 @@ concurrency:
   group: verify-deletions
   cancel-in-progress: false
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   verify:
     name: Verify ${{ matrix.platform }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 180 min (was 60), matching wasalt-cleanup.yml: the wasalt leg now drives a real browser per
     # sampled row (~15-20s each through the Cloudflare path), so a 200-row sample needs ~1h. The
     # other three legs still finish in seconds.

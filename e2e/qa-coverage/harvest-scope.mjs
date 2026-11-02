@@ -48,6 +48,7 @@
 //
 // Usage:  PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium node e2e/qa-coverage/harvest-scope.mjs
 
+import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { withPage, setDeal, setPeriod, pickCity, runSearch, tapByText, sleep } from '../live-sweep/sweep.mjs';
 
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';

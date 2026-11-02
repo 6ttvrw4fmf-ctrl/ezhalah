@@ -20,6 +20,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { PlatformLogo } from './platform-logo';
+import CloudWisp from './CloudWisp';
+import { cloudVariant } from '@/theme/skyScene';
+import { useThemePalette } from '@/lib/appearance';
 import PlatformRosterPager from './PlatformRosterPager';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
@@ -36,7 +39,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
-import { useResolvedTheme } from '@/lib/appearance';
 import { useI18n, tWord } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import {
@@ -46,6 +48,7 @@ import {
   type LoaderPlatform,
 } from '@/data/loaderPlatforms';
 import { hiddenPlatformNames, loadHiddenPlatformNames } from '@/data/loaderActivePlatforms';
+import { loadSiteCount, siteCountNow } from '@/data/siteCount';
 import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
 import { PILL_STAGGER, highlightStepMs, waveDelayMs, PILL_GROUP, WAVE_RISE, WAVE_HOLD, WAVE_FALL } from '@/lib/searchLoaderTiming';
 import { buildSearchLoaderTitles, countWording, readingDurationMs } from '@/lib/searchLoaderTitles';
@@ -57,6 +60,11 @@ const IS_WEB = Platform.OS === 'web';
 // normally resolved before the first search mounts the strip. Not during the web static render
 // (app.json output "static"), which runs this module in Node at build time.
 if (!IS_WEB || typeof window !== 'undefined') void loadHiddenPlatformNames();
+// The ONE site count every user-facing number uses (owner 2026-10-20: «make it 148»): the WhatsApp
+// card, the share sentence, the welcome line and this loader's «نبحث في N منصة» all read
+// src/data/siteCount.ts. The strip still hides dormant logos; the sentence no longer counts them —
+// until the count has been read it falls back to the logos on screen.
+if (!IS_WEB || typeof window !== 'undefined') void loadSiteCount();
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 
 // Rotating searching headlines (owner-approved copy, v4 set — short, alive, smooth cross-fades).
@@ -154,8 +162,8 @@ function PlatformPill({
   // values — colors.* resolves to var(--ez-*) on web, which it cannot parse). Same pattern the
   // pre-existing glow literals below already used; verify-theme-contract.ts fails the build on a
   // colors.* token reaching this call.
-  const darkTheme = useResolvedTheme() === 'dark';
-  const nameBase: [string, string] = darkTheme ? ['#c9cbc9', '#2b6f4c'] : ['#34403a', '#1d4a37'];
+  const pal = useThemePalette();
+  const nameBase: [string, string] = [pal.body, pal.primary];
   useEffect(() => {
     if (reduced) { h.value = 0; return; }
     // The wave reaches pill `index` at waveDelayMs(index, step) — pills share a step in groups of
@@ -187,8 +195,8 @@ function PlatformPill({
       // Soft green glow — SHADOW ONLY, no fill/border, so the highlight reads as ambient light under
       // the logo+name, never a filled box. Same rgba/blur curve ui.tsx's own selection glow uses.
       ...(IS_WEB
-        ? ({ boxShadow: `0px ${4 * g}px ${14 * g}px rgba(20,80,45,${0.16 * g})` } as any)
-        : { shadowColor: '#14502d', shadowOpacity: 0.16 * g, shadowRadius: 14 * g, shadowOffset: { width: 0, height: 4 * g }, elevation: 4 * g }),
+        ? ({ boxShadow: `0px ${4 * g}px ${14 * g}px rgba(73,57,83,${0.16 * g})` } as any)
+        : { shadowColor: pal.primary, shadowOpacity: 0.16 * g, shadowRadius: 14 * g, shadowOffset: { width: 0, height: 4 * g }, elevation: 4 * g }),
     };
   });
   const nameGlow = useAnimatedStyle(() => ({
@@ -197,7 +205,10 @@ function PlatformPill({
   return (
     <Appear delay={index * (reduced ? 25 : PILL_STAGGER)} reduced={reduced}>
       <Animated.View style={[s.pill, pillOverride, rowGlow]}>
-        <PlatformLogo source={item.logo} />
+        <View style={{ position: 'relative' }}>
+          <CloudWisp variant={cloudVariant(name)} width={72} height={22} opacity={0.65} style={{ bottom: -3, left: cloudVariant(name) % 2 ? -12 : 36 }} />
+          <PlatformLogo source={item.logo} />
+        </View>
         <Animated.Text
           style={[s.pillName, nameOverride, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: 'center' }, nameGlow]}
         >
@@ -239,11 +250,13 @@ function PhaseTitle({
   }, [placeKey]);
   const titles = useMemo(() => {
     const arabic = /[؀-ۿ]/;
-    const placeLine = (p: FunnelPlace | undefined, moreKey: string, exactKey: string, slot: 'city' | 'district'): string | null => {
+    // Exact digits only (owner 2026-10-17, countWording): there is no «more than» wording any more, and
+    // the old branch on it was the one TypeScript error in the app (TS2367) once tsc became a PR gate.
+    const placeLine = (p: FunnelPlace | undefined, exactKey: string, slot: 'city' | 'district'): string | null => {
       const w = countWording(p?.count, loc);
       const name = p ? (loc === 'ar' ? p.ar : p.en) : '';
       if (!w || !name || (loc === 'en' && arabic.test(name))) return null; // never Arabic mid-English
-      return t(w.kind === 'more' ? moreKey : exactKey, { count: w.text, [slot]: name });
+      return t(exactKey, { count: w.text, [slot]: name });
     };
     const kingdom = countWording(scaleStats?.listingCount, loc);
     // WHAT THEY ASKED FOR: the type (one picked type, else the category) + buy/rent. No type at all →
@@ -255,8 +268,8 @@ function PhaseTitle({
     return buildSearchLoaderTitles({
       search: platformCount > 0 ? t('Searching {count} real-estate platforms…', { count: platformCount }) : t(SEARCH_TITLES[0]),
       checking: kingdom ? t('Checking {count} listings across the Kingdom…', { count: kingdom.text }) : t(SEARCH_TITLES[1]),
-      city: placeLine(funnel.city, 'Reviewing more than {count} listings in {city}…', 'Reviewing {count} listings in {city}…', 'city'),
-      district: placeLine(funnel.district, 'Going through more than {count} listings in {district}…', 'Going through {count} listings in {district}…', 'district'),
+      city: placeLine(funnel.city, 'Reviewing {count} listings in {city}…', 'city'),
+      district: placeLine(funnel.district, 'Going through {count} listings in {district}…', 'district'),
       matching: what ? t('Matching your request: {what}…', { what }) : t(SEARCH_TITLES[2]),
       preparing: t(SEARCH_TITLES[4]),
     });
@@ -392,7 +405,7 @@ export default function SearchLoader({
       {/* Headline: sparkle + rotating phase text (+ soft dots while thinking) */}
       <View style={[s.titleRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
         <Ionicons name="sparkles" size={15} color={colors.primary} />
-        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} platformCount={platforms.length} scaleStats={scaleStats} query={query} />
+        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} platformCount={siteCountNow() ?? platforms.length} scaleStats={scaleStats} query={query} />
         {phase === 'thinking' ? <Dots reduced={reduced} /> : null}
       </View>
 

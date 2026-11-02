@@ -79,8 +79,9 @@ class _Session:
         return _Resp(self.control_status, url)
 
 
-def _run(monkeypatch, session):
+def _run(monkeypatch, session, second=lambda url: (None, "")):
     sink: list = []
+    monkeypatch.setattr(db, "_second_read", second)
     monkeypatch.setattr(db, "sb", lambda: types.SimpleNamespace(table=lambda n: _Q(sink, n)))
     monkeypatch.setattr(db, "_execute", lambda q, what=None: q.execute())
     monkeypatch.setattr(db, "_own_page_session", lambda: session)
@@ -177,3 +178,32 @@ def test_the_crawlers_that_drop_sold_ads_record_the_reading(monkeypatch):
     assert got[0] is None and db._READ_GONE.get(f"{wajaf.PREFIX}U77") == "مؤجر"
     ashab.map_page({"badges": ["للبيع", "محجوز"], "title": "", "description": "", "spec": {}}, "9", "u")
     assert f"{ashab.PREFIX}9" not in db._READ_GONE, "reserved is not a removal"
+
+
+# ── 2026-10-20 (amlakalahsa): a 403 to the crawl's session is no answer; the shared reader may have one ──
+def _second(dead=404, control=200):
+    return lambda url: ((dead if "/ad/D" in url else control), "<html>page</html>")
+
+
+def test_a_403_then_a_404_through_the_shared_reader_hides_with_its_control(monkeypatch):
+    killed, kills, ev = _run(monkeypatch, _Session(dead_status=403), second=_second())
+    assert killed == 3 and kills == ["D0", "D1", "D2"]
+    assert all("through the shared reader" in e["note"] for e in ev if e["verdict"] == "GONE")
+
+
+def test_a_403_hides_nothing_when_the_shared_reader_404s_its_control_too(monkeypatch):
+    killed, kills, _ = _run(monkeypatch, _Session(dead_status=403), second=_second(control=404))
+    assert killed == 0 and kills == []
+
+
+def test_a_403_hides_nothing_when_the_shared_reader_sees_it_live_or_blocked(monkeypatch):
+    for dead in (200, 403, None):
+        killed, kills, _ = _run(monkeypatch, _Session(dead_status=403), second=_second(dead=dead))
+        assert killed == 0 and kills == [], dead
+
+
+def test_only_a_block_asks_the_shared_reader(monkeypatch):
+    asked = []
+    killed, kills, _ = _run(monkeypatch, _Session(dead_status=503),
+                            second=lambda url: asked.append(url) or (404, "x"))
+    assert killed == 0 and not asked, "a 5xx is the source's health, not a block to route around"

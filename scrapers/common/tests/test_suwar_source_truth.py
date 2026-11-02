@@ -306,12 +306,12 @@ def test_prose_never_overrides_a_structured_column():
     assert row["kitchen"] is True
 
 
-def test_prose_never_says_no():
+def test_prose_says_an_explicit_no():
     row, _ = R.map_listing(_post_with("<p>لا يوجد مطبخ</p>"), _detail())
-    assert "kitchen" not in row, "prose only says yes or nothing (SOURCE_TRUTH §2)"
+    assert row["kitchen"] is False, "«لا يوجد مطبخ» is a stated no on a prose-only column (owner 2026-10-24)"
 
 
 def test_mutation_without_the_prose_reader_the_kitchen_is_lost(monkeypatch):
-    monkeypatch.setattr(R.normalize, "prose_amenities_yes", lambda raw, skip=(): {})
+    monkeypatch.setattr(R.normalize, "prose_amenities", lambda raw, skip=(): {})
     row, _ = R.map_listing(_post_with(_P_719), _detail(text=_P_719))
     assert "kitchen" not in row          # proves test_the_kitchen_the_ad_names_is_stored is what catches it

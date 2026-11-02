@@ -1018,7 +1018,9 @@ def test_an_unresolvable_option_id_leaves_the_column_null_and_never_interpolates
     188-193 are real options no live listing uses — they must stay NULL, never be read off a
     neighbouring id."""
     row = _row(LAND_RENT_223)
-    assert row["street_width_m"] == 60, "187 is the measured 60 m option"
+    # 2026-10-31: the 187→60 pairing was contradicted by the live page (it prints 50), so street
+    # width now comes ONLY from the page's licence table; with no page read it is unknown.
+    assert row["street_width_m"] is None, "an option id alone never yields metres"
     assert row["property_age"] is None, "«-» — LAND_RENT_223 publishes no age"
 
     row = _row(FLAT_107_ANNUAL_FIELD)

@@ -1,4 +1,8 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
+// Robot pass + secret handshake (docs/ops/SCRAPE_GUARD.md): our own test browser is never refused once the back door
+// closes. A no-op without EZ_GATE_SECRET (local runs, fork PRs).
+import { grantRobotPass } from '../scripts/lib/robotPassCore.mjs';
+test.beforeEach(async ({ context }) => { await grantRobotPass(context); });
 
 // PERMANENT SELECTOR BARRIER (2026-08-14, findings P1–P7): one tap on the City/District fields must
 // ALWAYS open something, the district multi-select must genuinely stay open across picks, the

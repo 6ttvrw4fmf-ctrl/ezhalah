@@ -22,7 +22,9 @@ import argparse
 import datetime as dt
 import json
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
@@ -30,7 +32,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import to_catalog  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 
@@ -43,6 +45,8 @@ SLUG = "manzo"
 _TYPE_AR = {"Apartment": "شقة", "Villa": "فيلا", "Floor": "دور", "Land": "ارض", "Office": "مكتب",
             "Shop": "محل", "Building": "عمارة", "Warehouse": "مستودع", "Studio": "استوديو"}
 _DEAL = {"long_term_rent": "Rent", "sale": "Buy", "sell": "Buy"}
+_FEATURE_COLUMNS = {"elevator": "elevator", "maid_room": "maid_room", "central_ac": "air_conditioner",
+                    "covered_parking": "parking", "laundry_room": "laundry_room", "balcony": "balcony_terrace"}
 _NEVER_STORE = {"lister_info", "borders", "commission", "deep_link", "share_image", "share_title",
                 "share_description", "connectivity", "nearby_pois"}
 
@@ -72,6 +76,33 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
     return rows, total
 
 
+# THE CRAWL FITS ITS SLOT (2026-10-30). The catalogue grew to 856 ads and each detail record was read one after another,
+# so the run outgrew its 10-minute job and was cancelled every time: no manzo crawl finished after 10-28 08:44, and the
+# ad text (#9404) and feature boxes never reached a row. Ten workers (the API answers ~2 s a record: four still took 7.5 min),
+# each with its own session on the profile and route
+# the probe chose, read the same records in the same order; a record that fails is None, counted unreadable as before.
+DETAIL_WORKERS = 10
+
+
+def read_details(s: cc.Session, listing: list[dict], fetch=None) -> list[Optional[dict]]:
+    fetch = fetch or get_json
+    local = threading.local()
+
+    def one(p: dict) -> Optional[dict]:
+        sess = getattr(local, "s", None)
+        if sess is None:
+            sess = local.s = (cc.Session(impersonate=s.impersonate, proxies=s.proxies or None)
+                              if isinstance(s, cc.Session) else s)
+        try:
+            d = fetch(sess, f"{API}/details/s/{p['slug']}/")
+            return d.get("data") or d
+        except Exception:  # noqa: BLE001
+            return None
+
+    with ThreadPoolExecutor(DETAIL_WORKERS) as ex:
+        return list(ex.map(one, listing))
+
+
 def source_published_empty(listing: list, declared: int) -> bool:
     """True only when the walk got an ANSWER that is empty by the source's own count. Anything else
     (rows present, or a count the walk did not reach) is not an empty source."""
@@ -91,8 +122,15 @@ def listed_ad_number(d: dict, p: dict) -> str:
     return f"{PREFIX}{d.get('property_id') or d.get('slug') or p.get('slug')}"
 
 
+# A live, listable ad. Manzo renamed «active» to «available» around 2026-10-13: measured 2026-10-27, all 766
+# listed records read «available», 40/40 sampled carry an active REGA ad licence and their pages answer 200.
+# Owner 2026-10-27: take them «if they are live and are part of our rules». Anything else (rented, paused…)
+# is still skipped.
+LIVE_STATUSES = {"active", "available"}
+
+
 def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
-    if d.get("display_status") != "active":
+    if d.get("display_status") not in LIVE_STATUSES:
         return None, f"status_{d.get('display_status')}"
     deal = _DEAL.get(d.get("property_type") or "")
     if not deal:
@@ -114,31 +152,52 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
 
     city_ar = d.get("city")
     city_id, region_id = to_catalog(city_ar) if city_ar else (None, None)
+    # The source publishes the district as district.name_ar (2026-10-27: 701 of 702 rows had none because this
+    # was never read). Matched to our catalogue the same way holoul does; the raw name is kept either way.
+    district_raw = ((d.get("district") or {}).get("name_ar") or "").strip() or None
+    district_ar = find_district_in_text(district_raw, city_id) if (city_id and district_raw) else None
     lng, lat = ((d.get("coordinates") or {}).get("coordinates") or [None, None])[:2]
     apt = d.get("apartment") or {}
     photos = list(dict.fromkeys(d.get("property_images") or ([d["main_image_url"]] if d.get("main_image_url") else [])))
+    # Manzo serves a stock «Contact Lister for Photos» image (/property_media/placeholders/no_photos.jpg) for ads
+    # with no photos; 266 of 716 ads carried only that on 2026-10-27. It is not a photo of the property, so it is
+    # never stored: the card then shows Ezhalah's own «لا توجد صورة» like every other photo-less ad.
+    photos = [u for u in photos if u and "/placeholders/" not in u]
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{d.get('property_id') or d['slug']}",
         "listing_url": SITE + d["slug"],
         "source": SOURCE,
         "active": True,
         "title": redact_pii(title) or None,
+        # The lister's own prose (shown under «المميزات» on the ad page). The detail API has always carried it
+        # as `description` — kept in source_capture, never mapped, so `description` was empty on 708 of 708
+        # (2026-10-30). Verbatim, phones/emails redacted (PDPL); silence stays NULL, never ''.
+        "description": (redact_pii(d.get("description")) or None) if isinstance(d.get("description"), str) else None,
         "property_type": ptype,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",   # deal is validated above
         "city": normalize.map_city(city_ar) if city_ar else None,
         "city_ar": city_ar,
         "city_id": city_id,
         "region_id": region_id,
+        "district_ar": district_ar,
+        "neighborhood": district_raw,
         "area_m2": _f(d.get("area")),
         "bedrooms": apt.get("bedrooms") or None,
         "bathrooms": apt.get("bathrooms") or None,
         "property_age": normalize.age_from_completion_year(d.get("property_age"), this_year=dt.date.today().year),
         "license_number": d.get("ad_licence_number"),
-        "photo_urls": photos or None,
+        "photo_urls": photos,  # [] (never None): the upsert skips None, so an ad that lost its photos kept the old ones (2026-10-27)
         **row_price,
     }
     for flag, col in (("electricity_access", "electricity"), ("water_access", "water_supply"), ("sewage_system", "sanitation")):
         if d.get(flag) is True:
+            row[col] = True
+    # The apartment's feature checklist (apartment.features) was kept in additional_info but never mapped, so all 708
+    # ads answered no Advanced Filter amenity (2026-10-30). Only a TICKED box is the source saying yes. An unticked box
+    # is not a «no»: every key is false on ads whose own description says furnished, with a kitchen, and 656 of 659
+    # apartments leave «elevator» unticked. So it stays NULL (unknown), never false.
+    for key, col in _FEATURE_COLUMNS.items():
+        if (apt.get("features") or {}).get(key) is True:
             row[col] = True
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     row["price_evidence"] = normalize.price_evidence(
@@ -187,11 +246,8 @@ def main() -> int:
     # keeps a row from being read as unseen and lets the own-page oracle find a known-live control.
     listed: set[str] = set()
     try:
-        for p in listing:
-            try:
-                d = get_json(s, f"{API}/details/s/{p['slug']}/")
-                d = d.get("data") or d
-            except Exception:  # noqa: BLE001
+        for p, d in zip(listing, read_details(s, listing)):
+            if d is None:
                 unreadable += 1
                 continue
             listed.add(listed_ad_number(d, p))

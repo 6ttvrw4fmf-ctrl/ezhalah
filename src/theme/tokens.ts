@@ -61,11 +61,14 @@ export const font = {
   },
 } as const;
 
-// Soft green-tinted card shadow: 0 18px 40px -30px rgba(20,40,30,.3)
+// Soft neutral card shadow: 0 18px 40px -30px rgba(20,40,30,.3)
 export const cardShadow = {
-  shadowColor: 'rgba(20,40,30,1)',
+  shadowColor: 'rgba(36,35,43,1)',
   shadowOpacity: 0.18,
   shadowRadius: 20,
   shadowOffset: { width: 0, height: 8 },
   elevation: 4,
 } as const;
+
+/** Neutral-plum selection glow; shared by the two animated control styles. */
+export const selectionShadowRgb = '73,57,83';

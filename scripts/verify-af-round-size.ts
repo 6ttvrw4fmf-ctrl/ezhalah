@@ -57,8 +57,8 @@ const adv = codeOnly(read('src/data/advancedFilters.ts'));
 const rank = codeOnly(read('src/lib/afRanking.ts'));
 
 // ── 1. THE CONSTANT — executed, not grepped ──────────────────────────────────────────────────────
-check('AF_ROUND_MAX_QUESTIONS is exported from src/lib/afRanking.ts and is exactly 4 (owner 2026-08-24: adaptive 2-4, cap 4)',
-  AF_ROUND_MAX_QUESTIONS === 4,
+check('AF_ROUND_MAX_QUESTIONS is exported from src/lib/afRanking.ts and is exactly 7 (owner 2026-08-24: adaptive, capped; owner 2026-11-01: 4 → 7 so a 7-question locked list fits one round)',
+  AF_ROUND_MAX_QUESTIONS === 7,
   `imported value is ${String(AF_ROUND_MAX_QUESTIONS)} — a lower cap shortens every round; a higher one restores the interrogation the rounds replaced`);
 
 // ── 2. IT IS A SECOND KNOB, NOT MIN_USEFUL_QUESTIONS_TO_SHOW ─────────────────────────────────────

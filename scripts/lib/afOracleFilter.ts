@@ -64,11 +64,153 @@ export const AMENITY_TOKEN_COL: Record<string, string> = {
   balcony: 'balcony',
   laundry_room: 'laundry_room',
   optical_fibers: 'optical_fibers',
+  majlis: 'majlis',
   separate_electricity_meter: 'separate_electricity_meter',
   separate_water_meter: 'separate_water_meter',
   furnished: 'furnished',
   rnpl: 'rent_now_pay_later',
   rent_now_pay_later: 'rent_now_pay_later',
+  // The 39 column-backed chips of the Apartments & Co-living cards (owner handoff 2026-10-31, migration
+  // 20261101100930): the clause guards each as `and (not ('tok' = any(p_amenities)) or s.tok)` — token = column.
+  roof: 'roof', two_entrances: 'two_entrances', annex: 'annex', yard: 'yard', garage: 'garage', grill: 'grill',
+  storage: 'storage', water_tank: 'water_tank', warranty: 'warranty', electronic_deed: 'electronic_deed', basement: 'basement',
+  self_checkin: 'self_checkin', wifi: 'wifi', bills_included: 'bills_included', jacuzzi: 'jacuzzi', smart_tv: 'smart_tv',
+  billiards: 'billiards', cleaning_service: 'cleaning_service', soundproof: 'soundproof', cameras: 'cameras', guard: 'guard',
+  smart_entry: 'smart_entry', smart_home: 'smart_home', central_gas: 'central_gas', sauna: 'sauna', kids_play_area: 'kids_play_area',
+  nursery: 'nursery', free_maintenance: 'free_maintenance', intercom: 'intercom', fire_system: 'fire_system', ev_charger: 'ev_charger',
+  central_vacuum: 'central_vacuum', insulation: 'insulation', dining_majlis: 'dining_majlis', own_bathroom: 'own_bathroom',
+  fridge: 'fridge', whole_floor: 'whole_floor', singles: 'singles', families: 'families',
+  // Villas & Houses (migration 20261102055240): seven text facts, column name = token
+  women_majlis: 'women_majlis', outdoor_kitchen: 'outdoor_kitchen', outdoor_diwaniya: 'outdoor_diwaniya',
+  waterfall: 'waterfall', well: 'well', irrigation: 'irrigation', sports_court: 'sports_court',
+  split_payments: 'split_payments',
+  heated_pool: 'heated_pool',
+  kids_pool: 'kids_pool',
+  water_slide: 'water_slide',
+  sea_view: 'sea_view',
+  football_pitch: 'football_pitch',
+  playstation: 'playstation',
+  inflatable_games: 'inflatable_games',
+  sound_system: 'sound_system',
+  fire_pit: 'fire_pit',
+  bait_shaar: 'bait_shaar',
+  mandi_pit: 'mandi_pit',
+  outdoor_seating: 'outdoor_seating',
+  tent: 'tent',
+  dunes_view: 'dunes_view',
+  women_section: 'women_section',
+  two_sections: 'two_sections',
+  events_hall: 'events_hall',
+  privacy_screen: 'privacy_screen',
+  trees: 'trees',
+  for_families: 'for_families',
+  for_youth: 'for_youth',
+  for_events: 'for_events',
+  for_newlyweds: 'for_newlyweds',
+  quad_bikes: 'quad_bikes',
+  horses_stable: 'horses_stable',
+  camels: 'camels',
+  toilets_on_site: 'toilets_on_site',
+  lighting: 'lighting',
+  artesian_well: 'artesian_well',
+  solar_power: 'solar_power',
+  palms: 'palms',
+  fruit_trees: 'fruit_trees',
+  fodder_crops: 'fodder_crops',
+  greenhouses: 'greenhouses',
+  producing_farm: 'producing_farm',
+  animal_pens: 'animal_pens',
+  poultry: 'poultry',
+  farm_house: 'farm_house',
+  farm_rest_house: 'farm_rest_house',
+  workers_housing: 'workers_housing',
+  fence: 'fence',
+  main_road: 'main_road',
+  good_soil: 'good_soil',
+  corner_plot: 'corner_plot',
+  three_streets: 'three_streets',
+  ready_to_build: 'ready_to_build',
+  raised_plot: 'raised_plot',
+  residential_commercial: 'residential_commercial',
+  all_services: 'all_services',
+  asphalt: 'asphalt',
+  street_lights: 'street_lights',
+  approved_plan: 'approved_plan',
+  direct_owner: 'direct_owner',
+  inside_project: 'inside_project',
+  floors_allowed: 'floors_allowed',
+  grant_land: 'grant_land',
+  no_services: 'no_services',
+  mezzanine: 'mezzanine',
+  pantry: 'pantry',
+  glass_front: 'glass_front',
+  frontage: 'frontage',
+  in_mall: 'in_mall',
+  in_tower: 'in_tower',
+  license: 'license',
+  food_allowed: 'food_allowed',
+  takeover: 'takeover',
+  first_tenant: 'first_tenant',
+  internet: 'internet',
+  civil_defense: 'civil_defense',
+  high_ceiling: 'high_ceiling',
+  hangar: 'hangar',
+  insulated_panel: 'insulated_panel',
+  cold_storage: 'cold_storage',
+  concrete_floor: 'concrete_floor',
+  loading_dock: 'loading_dock',
+  big_gate: 'big_gate',
+  truck_access: 'truck_access',
+  crane: 'crane',
+  racks: 'racks',
+  office_inside: 'office_inside',
+  heavy_power: 'heavy_power',
+  industrial_area: 'industrial_area',
+  car_service: 'car_service',
+  meeting_room: 'meeting_room',
+  reception: 'reception',
+  coworking: 'coworking',
+  private_office: 'private_office',
+  central_ac: 'central_ac',
+  shops_inside: 'shops_inside',
+  offices_inside: 'offices_inside',
+  apartments_inside: 'apartments_inside',
+  staff_housing_inside: 'staff_housing_inside',
+  restaurant_cafe: 'restaurant_cafe',
+  car_wash: 'car_wash',
+  market: 'market',
+  earning_income: 'earning_income',
+  stars_mentioned: 'stars_mentioned',
+  rooms_suites: 'rooms_suites',
+  oil_change: 'oil_change',
+  pumps: 'pumps',
+  mosque: 'mosque',
+  building_rules: 'building_rules',
+};
+// The 6 DERIVED tokens of the same migration — one p_amenities slug standing for a predicate over OTHER columns,
+// mirroring the clause arms exactly:
+//   separate_meters → (s.separate_electricity_meter or s.separate_water_meter)   [an OR group: either meter true]
+//   apts4/8/12/20   → s.apartments_count >= n                                    [the Residential Building ladder]
+//   has_shops       → s.shops_count >= 1
+// Each is translated to PostgREST the way the clause reads it: the OR as an `or=(…)` group (so it composes with the
+// other or-groups through `and=(or(…),or(…))`), the numbers as plain `gte` filters.
+export type DerivedAmenity = { cols: string[]; filter: string; orGroup?: boolean };
+export const AMENITY_TOKEN_DERIVED: Record<string, DerivedAmenity> = {
+  separate_meters: { cols: ['separate_electricity_meter', 'separate_water_meter'], filter: 'separate_electricity_meter.is.true,separate_water_meter.is.true', orGroup: true },
+  // the five villa merged chips (20261102055240): EITHER column true, the same OR-group shape
+  garden_yard: { cols: ['garden', 'yard'], filter: 'garden.is.true,yard.is.true', orGroup: true },
+  jacuzzi_sauna: { cols: ['jacuzzi', 'sauna'], filter: 'jacuzzi.is.true,sauna.is.true', orGroup: true },
+  cameras_smart_home: { cols: ['cameras', 'smart_home'], filter: 'cameras.is.true,smart_home.is.true', orGroup: true },
+  water_tank_well: { cols: ['water_tank', 'well'], filter: 'water_tank.is.true,well.is.true', orGroup: true },
+  smart_home_entry: { cols: ['smart_home', 'smart_entry'], filter: 'smart_home.is.true,smart_entry.is.true', orGroup: true },
+  camels_horses: { cols: ['camels', 'horses_stable'], filter: 'camels.is.true,horses_stable.is.true', orGroup: true },
+  palm_fruit_trees: { cols: ['palms', 'fruit_trees'], filter: 'palms.is.true,fruit_trees.is.true', orGroup: true },
+  pool_gym: { cols: ['pool', 'gym'], filter: 'pool.is.true,gym.is.true', orGroup: true },
+  apts4: { cols: ['apartments_count'], filter: 'apartments_count=gte.4' },
+  apts8: { cols: ['apartments_count'], filter: 'apartments_count=gte.8' },
+  apts12: { cols: ['apartments_count'], filter: 'apartments_count=gte.12' },
+  apts20: { cols: ['apartments_count'], filter: 'apartments_count=gte.20' },
+  has_shops: { cols: ['shops_count'], filter: 'shops_count=gte.1' },
 };
 
 export type OracleOpts = {
@@ -117,6 +259,9 @@ export function directionVariantsFrom(observed: Iterable<string>): Record<string
 
 /** The «Raw Land» filter token; matched against the index's unit_subtype_ar TAG, not type_ar. */
 export const RAW_LAND_TAG = 'أرض خام';
+/** Platforms whose stored age 10 includes the source's OPEN bucket («أكثر من 10 سنوات», «10+ years», REGA
+ *  «Ten Year»), each read on its own published field 2026-10-25 (migrations 20261025065509, 20261025072931). */
+export const AGE_OPEN_10_PLATFORMS = ['aqar', 'aqarcity', 'haraj', 'muhaysini', 'reinvest', 'tuba', 'wasalt'] as const;
 
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
@@ -605,10 +750,12 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         // wrongly filter Buy rows by a rent column. The app never sends a period without
         // p_deal='إيجار' (rentPeriodParam returns null otherwise), so this is refused, not modelled.
         if (reqBody.p_deal !== 'إيجار') { unhandled.push(`p_rent_period=${v} with p_deal=${JSON.stringify(reqBody.p_deal ?? null)} (the clause only applies a period to Rent rows)`); break; }
-        // Every period arm also admits price on request (price_annual NULL) — the one line the clause
-        // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»).
+        // The سنوي and كلاهما arms also admit price on request (price_annual NULL) — the line the clause
+        // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»). Under شهري («إقامات قصيرة»)
+        // an unpriced row is admitted ONLY from the two stay-length platforms (owner 2026-10-26, migration
+        // 20261026071543: «shift those to annual rent»).
         if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
-        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)`);
+        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))`);
         // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
         //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
         //                                 or s.rent_period_ar = 'سنوي'
@@ -640,7 +787,12 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_has_license': parts.push(v === true ? 'license_number=not.is.null' : 'license_number=is.null&license_number=not.is.null'); break;
       case 'p_furnished': parts.push(`furnished=is.${v}`); break;
       case 'p_age_min': parts.push(`property_age=gte.${v}`); break;
-      case 'p_age_max': parts.push(`property_age=lte.${v}`); break;
+      // An upper bound never admits an OPEN bucket: on these platforms «more than 10» is stored as its
+      // floor 10, so a 10 there has no upper end (AGE_OPEN_10_PLATFORMS).
+      case 'p_age_max':
+        parts.push(`property_age=lte.${v}`);
+        if (Number(v) >= 10) orGroups.push(`property_age.lt.10,platform.not.in.(${AGE_OPEN_10_PLATFORMS.join(',')})`);
+        break;
       case 'p_street_width_min': parts.push(`street_width_m=gte.${v}`); break;
       case 'p_street_width_max': parts.push(`street_width_m=lte.${v}`); break;
       // DIRECTIONS ARE NOT STORED CANONICALLY (found 2026-09-02, full-surface sweep). The clause
@@ -700,8 +852,10 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_amenities':
         for (const tok of v as string[]) {
           const col = AMENITY_TOKEN_COL[tok];
-          if (!col) { unhandled.push(`p_amenities:${tok}`); continue; }
-          parts.push(`${col}=is.true`);
+          if (col) { parts.push(`${col}=is.true`); continue; }
+          const derived = AMENITY_TOKEN_DERIVED[tok];
+          if (!derived) { unhandled.push(`p_amenities:${tok}`); continue; }
+          if (derived.orGroup) orGroups.push(derived.filter); else parts.push(derived.filter);
         }
         break;
       // genuinely irrelevant to the WHERE clause (paging/sorting/informational), always safe:

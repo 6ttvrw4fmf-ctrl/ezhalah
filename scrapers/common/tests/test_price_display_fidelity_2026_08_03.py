@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scrapers.aqarcity.run import map_listing as aqarcity_map  # noqa: E402
+from scrapers.common import db  # noqa: E402
 from scrapers.aqargate.run import _price_int, _rent_annualize  # noqa: E402
 from scrapers.eaqartabuk.run import _price as eaqar_price  # noqa: E402
 from scrapers.sadin.run import _extract_price  # noqa: E402
@@ -96,7 +97,8 @@ def test_aqarcity_land_rent_uses_the_displayed_annual_not_the_ld_per_meter():
     assert row["transaction_type"] == "Rent"
     assert row["price_annual"] == 50115, row["price_annual"]
     assert row["price_per_meter"] == 20  # the rounded per-metre rate, kept in its own column
-    assert row["price_total"] is None
+    # A rent has no sale total — written as AUTHORITATIVE_NULL so a stale total is cleared (2026-10-24).
+    assert row["price_total"] is db.AUTHORITATIVE_NULL
 
 
 def test_sadin_lam_lam_meter_form_yields_the_displayed_total():

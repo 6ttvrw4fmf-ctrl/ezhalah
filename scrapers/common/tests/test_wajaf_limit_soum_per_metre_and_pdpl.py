@@ -95,7 +95,8 @@ def test_rent_period_comes_from_the_ad_never_a_hard_coded_year():
 
 @pytest.mark.parametrize("kw,why", [
     ({"status": "مباع"}, "status_مباع"),
-    ({"status": "مؤجر جزئي", "deal": "إيجار"}, "status_مؤجر جزئي"),
+    ({"status": "مؤجر جزئي", "deal": "بيع"}, "status_مؤجر جزئي"),
+    ({"status": "مؤجر بالكامل", "deal": "إيجار"}, "status_مؤجر بالكامل"),
     ({"status": "محجوز"}, "status_محجوز"),
     ({"deal": "استثمار"}, "deal_unmapped_استثمار"),
     ({"type_ar": "شاليه / استراحة"}, "type_unmapped_شاليه / استراحة"),
@@ -104,6 +105,16 @@ def test_rent_period_comes_from_the_ad_never_a_hard_coded_year():
 ])
 def test_what_is_not_a_ready_single_listing_is_skipped_with_a_reason(kw, why):
     assert _map(**kw) == (None, why)
+
+
+def test_a_part_let_rent_ad_is_still_offered_and_its_period_is_never_guessed():
+    # backlog 927: wajaf.sa/properties/9333 «مستودع للايجار.. حي الناصرية», مؤجر جزئي, الحد 200000, 1500 م²
+    (row, cat), why = _map(url="https://wajaf.sa/properties/9333", title="مستودع للايجار.. حي الناصرية",
+                           deal="إيجار", status="مؤجر جزئي", type_ar="مستودعات", limit="200000 R", area="1500 م²",
+                           desc="المستودع يتميز في موقعه وقربه للسوق المركزي")
+    assert why == "" and cat == "commercial" and row["ad_number"] == "WJF9333"
+    assert row["transaction_type"] == "Rent" and row["price_annual"] == 200000 and row["rent_period"] is None
+    assert row["area_m2"] == 1500
 
 
 def test_a_unit_page_is_a_listing_even_though_it_lists_its_siblings():

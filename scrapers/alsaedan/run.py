@@ -195,6 +195,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://alsaedan.com"
 SOURCE = "آل سعيدان"
@@ -534,18 +535,25 @@ def add_unit_page_answers(s: cc.Session, rows: list[dict[str, Any]], fetch=None)
     """Read each unit page once (a unit offered both ways is one page) and merge its answers."""
     fetch = fetch or (lambda url: _get(s, url))
     seen: dict[str, dict[str, bool]] = {}
+    pins: dict[str, dict] = {}
     for r in rows:
         url = r.get("listing_url")
         if not url:
             continue
         if url not in seen:
             try:
-                seen[url] = unit_page_answers(fetch(url))
+                page = fetch(url)
+                seen[url] = unit_page_answers(page)
+                # Owner 2026-10-20 night: the unit page's own «افتح الموقع في خرائط جوجل» link
+                # (maps/search/?api=1&query=LAT,LNG) — 10 of 10 sampled border units carried one.
+                pins[url] = pin_from_html(page)
             except Exception:  # noqa: BLE001 — an unread page is unknown, never a denial
                 seen[url] = {}
             if UNIT_PAGE_PACE:
                 time.sleep(UNIT_PAGE_PACE)
         r.update(seen[url])
+        if pins.get(url):
+            r["additional_info"] = {**(r.get("additional_info") or {}), **pins[url]}
     return sum(1 for v in seen.values() if v)
 
 

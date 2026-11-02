@@ -35,9 +35,11 @@ import { COHORT_QUESTIONS } from '../src/lib/afCohorts.ts';
 import { withoutFacet } from '../src/lib/afCarry.ts';
 import { CLEAN_MACRO, groupsOf } from '../src/data/propertyTypes.ts';
 import {
-  AF_EVIDENCE, AMENITY_COL, AMENITY_LABEL, afActive, afEvidence, normDirectionAr,
+  AF_EVIDENCE, AMENITY_COL, AMENITY_LABEL, DERIVED_TOKEN, afActive, afEvidence, normDirectionAr,
   type ActiveAf, type AfCanon, type T,
 } from '../src/lib/afEvidence.ts';
+import { AMENITY_BAG_QUESTION_IDS } from '../src/lib/afCohorts.ts';
+import { CHIP_DEFS } from '../src/lib/afChips.ts';
 import { isRnpl } from '../src/lib/afCertify.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
@@ -53,31 +55,39 @@ const assert = (cond: boolean, msg: string) => {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 // ── the real code, lifted ────────────────────────────────────────────────────────────────────────
-const QUESTION_CONSTS = [
-  'RNPL_QUESTION', 'AGE_QUESTION', 'AMENITIES_QUESTION', 'BATHROOMS_QUESTION', 'FURNISHED_QUESTION',
-  'STREET_WIDTH_QUESTION', 'DIRECTION_QUESTION', 'RATING_QUESTION', 'UNIT_SUBTYPE_QUESTION',
-];
+// The pool's consts and the lift prelude are shared with every other lifter (scripts/lib/afMatrix.ts), so a new
+// question const is added in ONE place — verify-af-matrix-truth.ts fails if that list falls behind the file.
+import { QUESTION_CONSTS, QUESTION_HELPER_SYMBOLS, afLiftImports } from './lib/afMatrix.ts';
 type Opt = { key: string; labelKey: string };
 type Question = {
   id: string;
+  eligibility: (q: SearchQuery) => boolean;
   apply: (q: SearchQuery, keys: string[]) => SearchQuery;
   resolveOptions: (q: SearchQuery) => Promise<{ options: Opt[] }>;
 };
+// EVERY question that writes the one q.amenities bag — the themed cards and the two Residential Building ladders
+// (owner 2026-10-31 / 11-01) — has NO evidence def of its own: its evidence IS the amenities def (a second owner of
+// the `amenities` field would break the partition rule below). Their tokens are judged through that def.
+const BAG_NO_DEF = [...AMENITY_BAG_QUESTION_IDS].filter((id) => id !== 'amenities');
+const evidenceId = (id: string) => (BAG_NO_DEF.includes(id) ? 'amenities' : id);
+// A probe token each bag question accepts (a ladder takes one rung; every card takes a column chip).
+const BAG_PROBE: Record<string, string> = { apartments: 'apts8', shops: 'has_shops' };
 const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   [
-    { header: 'function addAmenities' },
+    { header: 'function addAmenities' }, { header: 'export function bathroomLadder' },
     { header: 'const AGE_LADDER', endsWith: /^\];$/ },
     { header: 'const DIRECTION_DEFS', endsWith: /^\];$/ },
+    ...QUESTION_HELPER_SYMBOLS,
     ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` })),
     { header: 'export const ADVANCED_QUESTIONS', endsWith: /^\];$/ },
   ],
-  ['addAmenities', 'AGE_LADDER', 'DIRECTION_DEFS', ...QUESTION_CONSTS, 'ADVANCED_QUESTIONS'],
+  ['addAmenities', 'AGE_LADDER', 'DIRECTION_DEFS', 'CHIP_LABEL_FLOOR', ...QUESTION_CONSTS, 'ADVANCED_QUESTIONS'],
   // Cohort logic is imported REAL; only the count path is shimmed. The shim hands each def's key AND
   // labelKey through so T2 can assert the evidence speaks with the chip's own voice (owner
   // decision 6) — without ever hand-listing a label here.
   [
-    `import { cohortAllows, scopeCleanTypes, intersectChips } from ${JSON.stringify(pathToFileURL(join(ROOT, 'src/lib/afCohorts.ts')).href)};`,
+    afLiftImports(ROOT),
     'type GuidedCounts = Record<string, number>;',
     'const fetchApartmentGuidedCounts = async (_q: unknown) => ({} as GuidedCounts);',
     'const guidedOptions = (_c: unknown, defs: Array<{ key: string; labelKey: string }>) => ({ options: defs.map((d) => ({ key: d.key, labelKey: d.labelKey })) });',
@@ -85,6 +95,10 @@ const lifted = await liftSymbols(
 );
 const ADVANCED = lifted.ADVANCED_QUESTIONS as Question[];
 const AGE_BUCKETS = lifted.AGE_LADDER as Opt[];   // the one-tap «up to» ladder (owner 2026-10-05)
+// Floor keeps the room's own name for one chip (laundry_room → «Laundry room», owner 2026-11-01): a token with a
+// Floor voice has TWO declared chip voices, and the one evidence label may equal either.
+const CHIP_LABEL_FLOOR = lifted.CHIP_LABEL_FLOOR as Record<string, string>;
+const chipVoices = (tok: string): string[] => [CHIP_DEFS[tok]?.labelKey, CHIP_LABEL_FLOOR[tok]].filter((x): x is string => !!x);
 const { applyScopeAnswer, SCOPE_GROUP_ID, SCOPE_TYPE_ID } = await import('../src/lib/afPlan.ts');
 const ALL = [
   ...ADVANCED,
@@ -122,10 +136,23 @@ const certified = [...new Set(cohorts.flatMap((c) => c.questions))];
 
 console.log('\n── T1. completeness: every certified question has an evidence def ─────────────────');
 assert(cohorts.length > 0 && certified.length >= 9, `the real registry yielded ${certified.length} certified question ids across ${cohorts.length} cohorts`);
-for (const id of certified) assert(id in AF_EVIDENCE, `certified question «${id}» has an evidence def`);
+const evidenced = certified.filter((id) => !BAG_NO_DEF.includes(id));
+for (const id of evidenced) assert(id in AF_EVIDENCE, `certified question «${id}» has an evidence def`);
+for (const id of BAG_NO_DEF) assert(!(id in AF_EVIDENCE), `bag question «${id}» has NO def of its own (its evidence is the amenities def)`);
 for (const id of Object.keys(AF_EVIDENCE)) assert(certified.includes(id), `evidence def «${id}» is a certified question (no phantom def)`);
-assert(same(Object.keys(AF_EVIDENCE), ADVANCED.map((x) => x.id)),
-  `registry order = ADVANCED_QUESTIONS order [${ADVANCED.map((x) => x.id).join(', ')}]`);
+// The themed cards and the Residential Building ladders (owner 2026-10-31 / 11-01) write the ONE `amenities`
+// field — whose evidence is the amenities def. They have no def of their own (a second owner of `amenities`
+// would break the partition rule above), so the order is compared over the evidenced pool.
+const certifiedOrder = [...new Set(ADVANCED.map((x) => x.id))].filter((id) => evidenced.includes(id));
+assert(same(Object.keys(AF_EVIDENCE), certifiedOrder),
+  `registry order = ADVANCED_QUESTIONS order [${certifiedOrder.join(', ')}]`);
+for (const x of ADVANCED.filter((x) => BAG_NO_DEF.includes(x.id))) {
+  const base = emptyQuery();
+  const after = x.apply(base, [BAG_PROBE[x.id] ?? 'elevator']) as unknown as Record<string, unknown>;
+  const changed = Object.keys(after).filter((k) => after[k] !== (base as unknown as Record<string, unknown>)[k]);
+  assert(same(changed, ['amenities']),
+    `bag question «${x.id}» writes ONLY the amenities field (its evidence is the amenities def) — wrote [${changed.join(', ')}]`);
+}
 for (const f of AF_PREDICATE_FIELDS) {
   const owners = Object.entries(AF_EVIDENCE).filter(([, d]) => (d.fields as readonly string[]).includes(f)).map(([id]) => id);
   if (f === 'amenities') assert(same(owners, ['rnpl', 'amenities']), `field «amenities» is shared by exactly rnpl + amenities (the one declared exception)`);
@@ -143,15 +170,22 @@ const HAND: Record<string, { row: AfCanon; text: string; not: AfCanon }> = {
   'bathrooms:2': { row: { bathrooms: 3 }, text: '3 حمامات', not: { bathrooms: 1 } },
   'bathrooms:3': { row: { bathrooms: 4 }, text: '4 حمامات', not: { bathrooms: 2 } },
   'bathrooms:4': { row: { bathrooms: 5 }, text: '5 حمامات', not: { bathrooms: 3 } },
+  // the villa ladders (owner 2026-11-01): 5+ and 6+ exist since migration 20261102055240
+  'bathrooms:5': { row: { bathrooms: 6 }, text: '6 حمامات', not: { bathrooms: 4 } },
+  'bathrooms:6': { row: { bathrooms: 7 }, text: '7 حمامات', not: { bathrooms: 5 } },
   'street_width:15': { row: { street_width_m: 18 }, text: 'عرض الشارع 18 م', not: { street_width_m: 12 } },
   'street_width:20': { row: { street_width_m: 25 }, text: 'عرض الشارع 25 م', not: { street_width_m: 15 } },
   'street_width:25': { row: { street_width_m: 25 }, text: 'عرض الشارع 25 م', not: { street_width_m: 20 } },
   'street_width:30': { row: { street_width_m: 40 }, text: 'عرض الشارع 40 م', not: { street_width_m: 29 } },
+  // the plots / retail ladders (owner 2026-11-01, counts since 20261102101415): the same STRICT >= rule
+  'street_width:10': { row: { street_width_m: 12 }, text: 'عرض الشارع 12 م', not: { street_width_m: 8 } },
+  'street_width:40': { row: { street_width_m: 45 }, text: 'عرض الشارع 45 م', not: { street_width_m: 36 } },
+  'street_width:60': { row: { street_width_m: 60 }, text: 'عرض الشارع 60 م', not: { street_width_m: 50 } },
   'property_age:new': { row: { property_age: 0 }, text: 'جديد', not: { property_age: 3 } },
   'property_age:1_2': { row: { property_age: 2 }, text: 'عمر سنتين', not: { property_age: 5 } },
   'property_age:3_5': { row: { property_age: 4 }, text: 'عمر 4 سنوات', not: { property_age: 6 } },
   'property_age:6_9': { row: { property_age: 7 }, text: 'عمر 7 سنوات', not: { property_age: 10 } },
-  // owner decision 5: canonical 10 is exact for aqar but the «10+» bucket for wasalt → «١٠ سنوات فأكثر»
+  // owner decision 5: a stored 10 is «10 or more» on seven sites (aqar's «exact» premise disproved 2026-10-25) → «١٠ سنوات فأكثر»
   'property_age:10p': { row: { property_age: 10 }, text: '١٠ سنوات فأكثر', not: { property_age: 9 } },
   // The one-tap «up to» ladder (owner 2026-10-05): the chip still prints the LISTING's own age (R12A.2).
   'property_age:upto2': { row: { property_age: 2 }, text: 'عمر سنتين', not: { property_age: 3 } },
@@ -169,11 +203,34 @@ function expected(id: string, opt: Opt): { row: AfCanon; text: string; not: AfCa
   const hand = HAND[`${id}:${opt.key}`];
   if (hand) return hand;
   switch (id) {
-    case 'rnpl': return { row: { rent_now_pay_later: true }, text: t(opt.labelKey), not: { rent_now_pay_later: false } };
+    case 'rnpl': return opt.key === 'split_payments'
+      ? { row: { split_payments: true }, text: t(opt.labelKey), not: { split_payments: false } }
+      : { row: { rent_now_pay_later: true }, text: t(opt.labelKey), not: { rent_now_pay_later: false } };
     case 'amenities': {
       const col = AMENITY_COL[opt.key];
       if (!col) return null;
       return { row: { [col]: true }, text: t(opt.labelKey), not: { [col]: false } };
+    }
+    // a bag question's chip: a column token as above, a derived token on the columns its predicate reads;
+    // the evidence speaks with the amenities def's label (AMENITY_LABEL), the chip's own voice or the Floor voice
+    case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who':
+    case 'features': case 'services': case 'fun': case 'outdoors': case 'smart': case 'papers': case 'apartments': case 'shops':
+    case 'water': case 'games': case 'camp_life': case 'water_land': case 'land_papers': case 'power': case 'crops': case 'animals': case 'buildings': case 'plot': case 'deal_papers': case 'land': case 'location': case 'cspace': case 'cservices': case 'business': case 'office_kind': case 'ready': case 'building': case 'trucks': case 'loc_papers': case 'inside': case 'investment': case 'hotel': case 'station': case 'deal_loc': case 'space_papers': case 'services_business': case 'workshop': case 'loc_business': case 'building_papers': case 'factory': case 'loc_safety': case 'papers_c': {
+      const text = t(AMENITY_LABEL[opt.key] ?? '');
+      const col = AMENITY_COL[opt.key];
+      if (col) return { row: { [col]: true }, text, not: { [col]: false } };
+      switch (opt.key) {
+        case 'separate_meters': return { row: { separate_electricity_meter: true, separate_water_meter: false }, text, not: { separate_electricity_meter: false, separate_water_meter: false } };
+        case 'has_shops': return { row: { shops_count: 1 }, text, not: { shops_count: 0 } };
+        default: {
+          // the villa merged chips (owner 2026-11-01): EITHER fact true ⇒ chip; both known-false ⇒ not
+          const either = DERIVED_TOKEN[opt.key];
+          if (either && either.reads.length === 2 && !/^apts/.test(opt.key))
+            return { row: { [either.reads[0]]: true, [either.reads[1]]: false }, text, not: { [either.reads[0]]: false, [either.reads[1]]: false } };
+          const n = /^apts(\d+)$/.exec(opt.key);
+          return n ? { row: { apartments_count: Number(n[1]) }, text, not: { apartments_count: Number(n[1]) - 1 } } : null;
+        }
+      }
     }
     case 'furnished': return opt.key === 'yes'
       ? { row: { furnished: true }, text: t('Furnished'), not: { furnished: false } }
@@ -198,8 +255,10 @@ let cells = 0;
 const seen = new Set<string>();
 for (const c of cohorts) {
   for (const id of c.questions) {
-    const question = ADVANCED.find((x) => x.id === id);
-    const def = AF_EVIDENCE[id];
+    // two consts carry id 'space' (short-stays / yearly wording): the one eligible on this scope is the question
+    const question = ADVANCED.find((x) => x.id === id && x.eligibility(c.q)) ?? ADVANCED.find((x) => x.id === id);
+    const evId = evidenceId(id);
+    const def = AF_EVIDENCE[evId];
     if (!question || !def) { assert(false, `«${id}» (${c.clean}/${c.slot}) has both a question and a def`); continue; }
     const options: Opt[] = id === 'property_age' ? AGE_BUCKETS : (await question.resolveOptions(c.q)).options;
     assert(options.length > 0, `${c.clean}/${c.slot} «${id}» offers ${options.length} option(s)`);
@@ -211,13 +270,16 @@ for (const c of cohorts) {
       if (id === 'amenities') {
         assert(AMENITY_LABEL[opt.key] === opt.labelKey,
           `amenity «${opt.key}» evidence label = the chip's own labelKey «${opt.labelKey}» (got «${AMENITY_LABEL[opt.key] ?? 'NONE'}»)`);
+      } else if (evId === 'amenities') {
+        assert(AMENITY_LABEL[opt.key] === opt.labelKey || chipVoices(opt.key).includes(AMENITY_LABEL[opt.key] ?? ''),
+          `«${id}» chip «${opt.key}» evidence label = one of its declared chip voices [${chipVoices(opt.key).join(' / ')}] (got «${AMENITY_LABEL[opt.key] ?? 'NONE'}»)`);
       }
       if (!exp) { assert(false, `${cell}: no expectation (option not covered)`); continue; }
       const applied = question.apply(c.q, [opt.key]);
       const active = afActive(applied);
-      const entry = active.find((a) => a.id === id);
+      const entry = active.find((a) => a.id === evId);
       assert(!!entry && same(entry.keys, [opt.key]), `${cell}: apply() → afActive() round-trips the key (${JSON.stringify(entry?.keys ?? null)})`);
-      assert(!afActive(c.q).some((a) => a.id === id), `${cell}: not active on the untouched scope query`);
+      assert(!afActive(c.q).some((a) => a.id === evId), `${cell}: not active on the untouched scope query`);
       if (!entry) continue;
       const one: ActiveAf = [entry];
       // satisfying row → exactly the expected text, with the ROW's value
@@ -288,12 +350,15 @@ console.log('\n── T2b. multi-value semantics + adjectival direction + AND on
   const rnplLine = clause.split('\n').find((l) => /any\(p_amenities\)[\s\S]*s\.rent_now_pay_later/.test(l)) ?? '';
   const sqlRnplTokens = [...rnplLine.matchAll(/''([a-z_]+)''\s*=\s*any\(p_amenities\)/g)].map((m) => m[1]);
   assert(sqlRnplTokens.length >= 2, `clause exposes ≥2 RNPL tokens (got [${sqlRnplTokens.join(', ')}])`);
+  // each RNPL token proves itself from its OWN column (2026-11-02): «split_payments» is the ad's «دفعات» words
+  // (a text fact), the other two are the site's installment box — the card never shows one as proof of the other.
+  const rnplRow = (tok: string) => (tok === 'split_payments' ? { split_payments: true } : { rent_now_pay_later: true });
   for (const tok of sqlRnplTokens) {
     assert(RNPL_TOKENS.includes(tok), `RNPL_TOKENS covers every RNPL token the RPC filters on: «${tok}» (clause) must be in the shared set`);
     assert(isRnpl(tok), `gate covers every RNPL token the RPC filters on: isRnpl(«${tok}») (else a filtered predicate is uncertified)`);
     const act = afActive({ ...emptyQuery(), amenities: [tok] } as any);
     assert(same(act.map((a) => a.id), ['rnpl']), `evidence renders the RPC's RNPL token «${tok}» via the rnpl def (an R12A.1 hole otherwise)`);
-    assert(afEvidence(act, { rent_now_pay_later: true }, t).length === 1, `evidence: RPC token «${tok}» on an RNPL row → the installment chip`);
+    assert(afEvidence(act, rnplRow(tok), t).length === 1, `evidence: RPC token «${tok}» on an RNPL row → the installment chip`);
   }
   for (const tok of RNPL_TOKENS) {
     assert(isRnpl(tok), `gate: isRnpl accepts the registry token «${tok}»`);
@@ -301,7 +366,7 @@ console.log('\n── T2b. multi-value semantics + adjectival direction + AND on
     const act = afActive({ ...emptyQuery(), amenities: [tok] } as any);
     assert(same(act.map((a) => a.id), ['rnpl']), `evidence: «${tok}» activates ONLY the rnpl def (not amenities)`);
     // and renders the installment chip on a real RNPL row — the exact behaviour that was silent
-    assert(afEvidence(act, { rent_now_pay_later: true }, t).length === 1, `evidence: «${tok}» on an RNPL row → the installment chip`);
+    assert(afEvidence(act, rnplRow(tok), t).length === 1, `evidence: «${tok}» on an RNPL row → the installment chip`);
     // still honours UNKNOWN: a NULL row shows nothing even via the alias
     assert(afEvidence(act, { rent_now_pay_later: null }, t).length === 0, `evidence: «${tok}» on a NULL row → nothing (UNKNOWN stays UNKNOWN)`);
   }
@@ -409,7 +474,7 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
   // R12A.1 — VISIBLE WITHOUT EXPANDING. The 2026-09-02 draft rendered the first AF_CHIP_CAP = 4 and
   // hid the rest behind a «+N» expander. R12A.1 requires an ACTIVE selection to be visible "without
   // expanding, scrolling a sub-panel, or opening the source", and rounds accumulate — five or more
-  // committed answers is ordinary (AF_ROUND_MAX_QUESTIONS is 4 per round, and a single amenities
+  // committed answers is ordinary (AF_ROUND_MAX_QUESTIONS is 7 per round, and a single amenities
   // answer emits one chip PER TOKEN), so a cap of four would hide a field the user explicitly asked
   // for. These three assertions are the rule: map over the WHOLE array, no slice, no expander.
   assert(/\{evidence\.map\(\(c, i\) => \(/.test(strip),
@@ -431,27 +496,29 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
 // nothing — the exact silent hole §12A exists to close. Both halves are pinned here.
 {
   console.log('\n── T5. R12A.5: every certified amenity token is drawable ───────────────────────────────');
-  const unlabelled = Object.keys(AMENITY_COL).filter((k) => !AMENITY_LABEL[k]);
+  // the filter's tokens: the column tokens (AMENITY_COL) and the derived ones (DERIVED_TOKEN, migration 20261101100930)
+  const TOKENS = [...Object.keys(AMENITY_COL), ...Object.keys(DERIVED_TOKEN)];
+  const unlabelled = TOKENS.filter((k) => !AMENITY_LABEL[k]);
   assert(unlabelled.length === 0,
     `every certified amenity token has a label (unlabelled: ${unlabelled.join(', ') || 'none'})`);
-  assert(Object.keys(AMENITY_LABEL).length === Object.keys(AMENITY_COL).length,
-    'AMENITY_LABEL has no entry for a token the filter does not accept');
+  assert(Object.keys(AMENITY_LABEL).length === TOKENS.length,
+    `AMENITY_LABEL has no entry for a token the filter does not accept (${Object.keys(AMENITY_LABEL).length} labels, ${TOKENS.length} tokens)`);
   // T2 already compares evidence label vs chip labelKey for every option a COHORT resolves. That is
   // per-cohort, so it can only see the tokens that cohort certifies. This is the whole-registry half:
-  // the amenity chip defs as advancedFilters.ts DECLARES them, so a token defined for some cohort
+  // the amenity chip defs as advancedFilters.ts DECLARES them — inline on the classic card and the two ladders,
+  // and through CHIP_DEFS (src/lib/afChips.ts) for every themed card — so a token defined for some cohort
   // this file never exercises is still held to the same one-voice rule.
   const advSrc = readFileSync(join(ROOT, 'src/data/advancedFilters.ts'), 'utf8');
-  const declared = new Map<string, string>(
-    [...advSrc.matchAll(/\{\s*key:\s*'([a-z_]+)',\s*labelKey:\s*'([^']+)',\s*count:/g)]
-      .map((m) => [m[1], m[2]] as [string, string]),
-  );
-  const amenityDefs = [...declared].filter(([k]) => k in AMENITY_COL);
-  assert(amenityDefs.length === Object.keys(AMENITY_COL).length,
-    `every certified amenity token has a declared chip def (${amenityDefs.length} of ${Object.keys(AMENITY_COL).length})`);
-  const wrongVoice = amenityDefs.filter(([k, labelKey]) => AMENITY_LABEL[k] !== labelKey);
+  const declared = new Map<string, string[]>();
+  for (const m of advSrc.matchAll(/\{\s*key:\s*'([a-z_0-9]+)',\s*labelKey:\s*'([^']+)',(?:\s*emoji:\s*'[^']*',)?\s*count:/g)) declared.set(m[1], [...(declared.get(m[1]) ?? []), m[2]]);
+  for (const [k, d] of Object.entries(CHIP_DEFS)) declared.set(k, [...new Set([...(declared.get(k) ?? []), ...chipVoices(k), d.labelKey])]);
+  const amenityDefs = [...declared].filter(([k]) => TOKENS.includes(k));
+  assert(amenityDefs.length === TOKENS.length,
+    `every certified amenity token has a declared chip def (${amenityDefs.length} of ${TOKENS.length}; missing: ${TOKENS.filter((k) => !declared.has(k)).join(', ') || 'none'})`);
+  const wrongVoice = amenityDefs.filter(([k, voices]) => !voices.includes(AMENITY_LABEL[k]));
   assert(wrongVoice.length === 0,
     `every evidence label equals the AF chip's own labelKey (${amenityDefs.length} defs compared; ` +
-    `mismatched: ${wrongVoice.map(([k, l]) => `${k}: «${AMENITY_LABEL[k]}» vs «${l}»`).join(', ') || 'none'})`);
+    `mismatched: ${wrongVoice.map(([k, l]) => `${k}: «${AMENITY_LABEL[k]}» vs «${l.join(' / ')}»`).join(', ') || 'none'})`);
   // The map is also guarded at module load, so a token added without a label cannot even boot.
   const src = read('src/lib/afEvidence.ts');
   // The runtime fails SAFE rather than crashing (verify-no-public-test-crash-surface.ts forbids a
@@ -473,7 +540,8 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
   console.log('\n── T6. af_canon ⇄ afEvidence: one contract, both directions ─────────────────────────────');
   const mirror = readFileSync(join(ROOT, 'sql/mirrors/af_canon_select.sql'), 'utf8');
   const packed = new Set([...mirror.matchAll(/'([a-z_]+)',\s*s\.[a-z_]+/g)].map((m) => m[1]));
-  assert(packed.size === 28, `the mirror packs 28 canonical columns (found ${packed.size})`);
+  // 29 (+majlis 2026-10-26) + 41 (the 39 apartment-chip booleans + apartments_count + shops_count, migration 20261101100930)
+  assert(packed.size === 180, `the mirror packs 180 canonical columns (found ${packed.size})`);
 
   // (a) every column any def declares it reads must be packed
   const q = emptyQuery() as any;
@@ -528,7 +596,11 @@ console.log('\n── T9. R12A.7 — the card lights up what was asked, IN PLACE
   const gridKey = (tok: string) => (tok === 'balcony' ? 'balcony_terrace' : AMENITY_COL[tok]);
   const lit = ['kitchen', 'parking', 'elevator', 'ac', 'private_entrance', 'maid_room', 'balcony', 'laundry_room', 'optical_fibers'];
   assert(lit.every((tok) => featKeys.has(gridKey(tok))), `every grid feature the AF can ask for maps to a grid cell (missing: ${lit.filter((tok) => !featKeys.has(gridKey(tok))).join(', ') || 'none'})`);
-  assert(/const pickedFeatures = useMemo\(\(\) => \{[\s\S]{0,240}a\.id === 'amenities'[\s\S]{0,200}AMENITY_COL\[k\]/.test(card), 'the picked set is built from the ACTIVE amenities answer through AMENITY_COL');
+  // every amenity-bag answer (the classic card and each themed card / ladder, owner 2026-10-31) may carry the picked keys
+  assert(/const pickedFeatures = useMemo\(\(\) => \{[\s\S]{0,400}AMENITY_BAG_IDS\.has\(a\.id\)[\s\S]{0,200}AMENITY_COL\[k\]/.test(card), 'the picked set is built from the ACTIVE amenity-bag answers through AMENITY_COL');
+  const bagIds = /const AMENITY_BAG_IDS = new Set\(\[([^\]]*)\]\)/.exec(card);
+  assert(!!bagIds && same([...bagIds[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort(), [...AMENITY_BAG_QUESTION_IDS].sort()),
+    'ResultCard\'s AMENITY_BAG_IDS is exactly afCohorts\' AMENITY_BAG_QUESTION_IDS (one list, two homes — pinned equal)');
   assert(/picked \? 'checkmark-circle' : f\.icon/.test(card) && /picked && card\.featCellPicked/.test(card) && /picked && card\.featTextPicked/.test(card),
     'a picked grid cell draws a ✓ and the brand tint');
   assert(/allActive\.filter\(\(f\) => pickedFeatures\.has\(f\.key\)\), \.\.\.allActive\.filter\(\(f\) => !pickedFeatures\.has\(f\.key\)\)/.test(card),

@@ -254,6 +254,15 @@ def markdown(out: dict) -> str:
     return head + "\n".join(lines) + "\n\n**Gone (evidence, table:id):** " + (", ".join(gone_ids) or "none") + "\n"
 
 
+def is_void(row: dict) -> bool:
+    return str(row.get("note") or "").startswith("void")
+
+
+def retry_void(rows: list[dict]) -> list[int]:
+    """Indexes of the rows to read once more at the end of the run: the void ones. Pure."""
+    return [i for i, r in enumerate(rows) if is_void(r)]
+
+
 def site_list(args: list[str] | None) -> list[str]:
     """The workflow's `sites` input says «comma-separated» and arrives as ONE word: «almuteb,razre,senan»
     was read as one website that shows nothing (2026-10-18). Commas and spaces both separate."""
@@ -289,6 +298,24 @@ def main() -> int:
         row["run_url"] = run_url
         rows.append(row)
         print(_line(row), flush=True)
+
+    # A VOID ROW IS READ ONCE MORE, AT THE END (2026-10-24). At 09:05 that night 12 small websites
+    # voided at once (controls 0/5; two answered the same HTTP 403 of 5,768 bytes): a passing wall.
+    # The daily check had read them 100% live two hours before, and a re-run at 11:18 read 60 of 60
+    # live, but until someone re-ran it the fleet read 15 websites unmeasured. The sweep takes about an
+    # hour, so the end of it is a different minute; a row still void after this is a real finding.
+    for i in retry_void(rows):
+        p = rows[i]["platform"]
+        try:
+            row = score_site(client, p, rows[i]["shown"], n=sample_size(rows[i]["shown"], a.big, a.small),
+                             rng=rng, night=night, pace=a.pace)
+        except Exception as e:  # noqa: BLE001
+            row = empty_row(night, p, rows[i]["shown"], note=f"error: {type(e).__name__}: {e}"[:300])
+        if is_void(row):   # the note must still START with «void»: ops_dead_visible_fleet reads it so
+            row["note"] = (row["note"][:260] + " | still void on the end-of-run retry")[:300]
+        row["run_url"] = run_url
+        rows[i] = row
+        print("retry " + _line(row), flush=True)
 
     out = {"night": night, "fleet": fleet(rows), "rating": rating_cap(rows, complete=not site_list(a.sites)), "sites": rows}
     out["written"] = "dry run: nothing written" if a.dry_run else write_rows(client, rows)

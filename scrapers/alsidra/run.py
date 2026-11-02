@@ -761,6 +761,13 @@ def main() -> int:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:
                     pruned += n
+            # EVERY AD WE SHOW GETS A DIRECT CHECK (owner 2026-10-26). The crawl reads only the posts
+            # LIST, and a nightly full re-read lets no row reach grace, so the oracle above was never
+            # asked about one listing (0 verified, ever). Ask it about the rows this crawl SAW: a live
+            # answer (200, this post id, publish, not an auction, not closed) is stamped; nothing else
+            # writes anything — this cannot hide a listing.
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                db.stamp_seen_alive(tbl, {r["ad_number"] for r in rows}, verify_gone, source=SOURCE)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(posts),
                             rows_upserted=len(res) + len(com),
                             check_tables=["alsidra_residential_listings",

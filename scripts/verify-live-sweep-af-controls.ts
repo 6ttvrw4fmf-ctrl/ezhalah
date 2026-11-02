@@ -6,7 +6,7 @@
 // `scripts/verify-af-live-truth.ts` — and missed `e2e/live-sweep/journeys.mjs`, which went on
 // clicking a control that no longer existed and then fell back to a SINGLE «متابعة».
 //
-// Against a four-question round (AF_ROUND_MAX_QUESTIONS = 4, R6.1.1) one متابعة advances to
+// Against a seven-question round (AF_ROUND_MAX_QUESTIONS = 7 since 2026-11-01, R6.1.1) one متابعة advances to
 // question 2 and stops. No round end, no results turn, no candidates request — and the headline
 // still showing the PRE-AF total. The next sweep reported four confident P1-shaped defects:
 //
@@ -111,7 +111,7 @@ check('the AF journey commits its answer with af-confirm',
   /data-testid="af-confirm"/.test(af));
 check('…and then skips the REMAINING questions in a bounded loop until the round ends',
   /for\s*\([^)]*hop[^)]*\)/.test(af) && /data-testid="af-skip"/.test(af),
-  'AF_ROUND_MAX_QUESTIONS is 4 (R6.1.1) — a single advance leaves a 4-question round unfinished, '
+  'AF_ROUND_MAX_QUESTIONS is 7 (R6.1.1) — a single advance leaves a 7-question round unfinished, '
   + 'with no results turn and no candidates request');
 check('…and stops when the card is gone or has no تخطي (intro/mining state)',
   /af-card"\]\)\s*\)?;?[\s\S]{0,120}?if\s*\(!open\)\s*break/.test(af)
@@ -145,7 +145,7 @@ const mutations: Mutation[] = [
   },
   {
     name: 'the pre-fix journey: one advance, no skip-out loop',
-    apply: (s) => s.replace(/for \(let hop = 0; hop < 8; hop\+\+\) \{[\s\S]*?\n    \}/, '/* single advance only */'),
+    apply: (s) => s.replace(/for \(let hop = 0; hop < \d+; hop\+\+\) \{[\s\S]*?\n    \}/, '/* single advance only */'),
     predicate: (a) => /for\s*\([^)]*hop[^)]*\)/.test(a) && /data-testid="af-skip"/.test(a),
   },
   {

@@ -8,12 +8,23 @@ import type { Listing } from '@/data/listings';
 import { derivedTotalEquation } from '@/data/listings';
 import { useI18n, englishCatalogText, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
+import { freeTextEn } from '@/lib/freeTextEn';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
-import { isStayLengthPriced, listingPrice } from '@/lib/listingDisplay';
+import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
+import { monthlyLineText } from '@/lib/listingDisplay';
+
+// THE MONTHLY LINE UNDER EVERY YEARLY PRICE (owner 2026-10-26): «السعر المعلن 3,000 شهرياً» when the site quoted
+// per month (pool yearly at ×12), «≈ 3,000 شهرياً» (÷12) when it quoted per year. The text comes from the shared
+// price contract (listingDisplay.ts), so every surface prints the same words.
+function monthlyLine(listing: Listing, locale: 'ar' | 'en') {
+  const text = monthlyLineText(listing, locale);
+  if (text == null) return null;
+  return <Text style={card.pricePerMeter} numberOfLines={1} testID="card-monthly-line">{text}</Text>;
+}
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 import { typeImg } from '@/theme/propertyIcons';
 import { GoldShineButton, GoldSurface } from './CardReveal';
@@ -26,6 +37,7 @@ const IS_WEB = Platform.OS === 'web';
 
 // Feature key → (icon, EN label key) — the wrapping amenities row on the listing card.
 // The label is run through t() so it localizes to Arabic. Order matters: most useful features first.
+const AMENITY_BAG_IDS = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'outdoors', 'smart', 'papers', 'water', 'games', 'camp_life', 'water_land', 'land_papers', 'power', 'crops', 'animals', 'buildings', 'plot', 'deal_papers', 'land', 'location', 'cspace', 'cservices', 'business', 'office_kind', 'ready', 'building', 'trucks', 'loc_papers', 'inside', 'investment', 'hotel', 'station', 'deal_loc', 'space_papers', 'services_business', 'workshop', 'loc_business', 'building_papers', 'factory', 'loc_safety', 'papers_c', 'apartments', 'shops']);
 export const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: any; label: string }> = [
   { key: 'parking',          icon: 'car-outline',           label: 'Parking' },
   { key: 'maid_room',        icon: 'person-outline',        label: 'Maid Room' },
@@ -38,6 +50,7 @@ export const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; 
   { key: 'private_entrance', icon: 'walk-outline',          label: 'Private Entrance' },
   { key: 'air_conditioner',  icon: 'snow-outline',          label: 'Air Conditioning' },
   { key: 'optical_fibers',   icon: 'wifi-outline',          label: 'Fiber Internet' },
+  { key: 'majlis',           icon: 'people-outline',        label: 'Majlis room' },
   { key: 'water_supply',     icon: 'water-outline',         label: 'Water Supply' },
   { key: 'electricity',      icon: 'flash-outline',         label: 'Electricity' },
   { key: 'sanitation',       icon: 'shield-checkmark-outline', label: 'Sanitation' },
@@ -204,7 +217,9 @@ export function ResultCard({
   // lights up the same way. Display-only: the set comes from the active answers, and a feature is only
   // drawn at all when the listing itself carries it (the AF predicate is strict, so it always does).
   const pickedFeatures = useMemo(() => {
-    const keys = activeAf?.find((a) => a.id === 'amenities')?.keys ?? [];
+    // Every amenity-bag answer — the classic card and each themed card of the Apartments & Co-living group
+    // (owner handoff 2026-10-31) — writes q.amenities, so any of these ids may carry the picked keys.
+    const keys = (activeAf ?? []).filter((a) => AMENITY_BAG_IDS.has(a.id)).flatMap((a) => a.keys);
     return new Set(keys.map((k) => (k === 'balcony' ? 'balcony_terrace' : AMENITY_COL[k] ?? k)));
   }, [activeAf]);
   const bathPicked = !!activeAf?.some((a) => a.id === 'bathrooms');
@@ -237,12 +252,12 @@ export function ResultCard({
     // The white space under the chips holds the SOURCE's own key facts — age, facade, street width, plan number,
     // usage — exactly as published, at most 3 on one fixed row (so every card stays the same size). A fact the
     // source did not give is simply absent; nothing is derived or guessed.
-    const factRows = (listing.additional_info ?? []).filter((r) => r && r.label && r.value);
+    const factRows = (listing.additional_info ?? []).filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
     const FACT_ORDER = [/age|عمر/i, /facade|الواجهة/i, /street|عرض الشارع|الشارع/i, /plan|المخطط/i, /usage|استخدام/i];
     const lpFacts: Array<{ k: string; label: string; value: string }> = [];
     for (const re of FACT_ORDER) {
       const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
-      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), value: arAttrValue(r.label, r.value, locale) });
+      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale), value: arAttrValue(r.label, r.value, locale) });
     }
     if (listedClean && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
     const CHIP_CAP = 3;
@@ -271,7 +286,15 @@ export function ResultCard({
         <View style={card.lpBody}>
           <View style={card.lpPriceRow}>
             <View style={card.lpPriceCol}>
-              <Text style={stay ? card.stayNote : [card.price, card.lpPrice]} numberOfLines={stay ? 2 : 1}>{listingPrice(listing, locale)}</Text>
+              {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+              {stay ? null : <Text style={[card.price, card.lpPrice]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+              {monthlyLine(listing, locale)}
+              {listing.discount ? (
+                <View style={card.discountRow} testID="card-discount">
+                  <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+                  <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
+                </View>
+              ) : null}
             </View>
             {listing.source_url ? (
               <View style={card.lpCta}>
@@ -358,8 +381,8 @@ export function ResultCard({
             <View style={card.lpFacts} testID="card-lp-facts">
               {lpFacts.map((f) => (
                 <Text key={f.k} style={card.lpFact} numberOfLines={1}>
-                  <Text style={card.addlLabel}>{f.label} </Text>
-                  <Text style={card.addlValue}>{f.value}</Text>
+                  <Text style={[card.addlLabel, locale !== 'ar' && card.ltr]}>{f.label} </Text>
+                  <Text style={[card.addlValue, locale !== 'ar' && card.ltr]}>{f.value}</Text>
                 </Text>
               ))}
             </View>
@@ -428,8 +451,18 @@ export function ResultCard({
         <Text style={[card.title, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]}>
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
-        <Text style={isStayLengthPriced(listing.source) ? [card.stayNote, row && card.stayNoteRow] : [card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={isStayLengthPriced(listing.source) ? 2 : 1}>{listingPrice(listing, locale)}</Text>
+        {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+        {monthlyLine(listing, locale)}
         </View>
+        {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
+            under the final price. Rendered only when the source showed one — see listingDiscountFrom(). */}
+        {listing.discount ? (
+          <View style={card.discountRow} testID="card-discount">
+            <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+            <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
+          </View>
+        ) : null}
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
           <Text style={card.locText}>{place(cityAr) || LOCATION_UNRESOLVED_AR}, {t('Saudi Arabia')}</Text>
@@ -668,11 +701,26 @@ const FREE_TEXT_PROSE_LABELS = new Set([
 // app — production rendered a blank white page for any search containing such a listing. The
 // boundary fix in remote.ts is the root-cause fix; String() here means no future caller (or a
 // newly-added shape on another platform) can turn one odd source value into a blank screen again.
+// English UI: an Arabic label the catalog does not know is translated, never printed in Arabic.
+const enText = (s: string, locale: string) => (locale === 'en' ? freeTextEn(s) : s);
+
+// A value that says nothing is a field the source left silent, in both languages: «.», «-», «/» (the card printed
+// «Other obligations on the property: .»), and a street width of 0 («Street width 0 m»). Hidden, never printed.
+export function isBlankAttrValue(label: unknown, value: unknown): boolean {
+  const v = String(value ?? '').trim();
+  if (!v || /^[\s.\-–—_/\\,،:;·*]+$/.test(v)) return true;
+  return /street.*width|عرض الشارع/i.test(String(label ?? '')) && /^0+(?:\.0+)?\s*(?:m|متر|م)?$/i.test(v);
+}
+
 export function arAttrValue(label: string, value: string, locale: string): string {
   const v = String(value ?? '').trim();
   if (!v) return value;
   const ll = String(label ?? '').trim().toLowerCase();
   const lv = v.toLowerCase();
+  // A machine timestamp («2026-07-16T13:09:02+03:00») reads as the card's other dates do: «16/07/2026» (the
+  // calendar day the source wrote — no time-zone shift).
+  const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(v);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
   if (locale === 'en') {
     // Translate finite source enums in either direction without changing the stored fact.
     const known = Object.entries(AR_ENUM[ll] ?? {}).find(([, ar]) => ar === v);
@@ -694,12 +742,18 @@ export function arAttrValue(label: string, value: string, locale: string): strin
       const years = /^(أكثر من )?(\d+) (?:سنوات|سنة)$/.exec(v);
       if (years) return `${years[1] ? 'Over ' : ''}${years[2]} years`;
     }
-    if (ll === 'amenities' || ll === 'property services') {
-      const aliases: Record<string, string> = { موقف: 'Parking', الكهرباء: 'Electricity', المياه: 'Water Supply', الماء: 'Water Supply', 'الصرف الصحي': 'Sanitation' };
-      return v.split(/[،,]/).map(item => aliases[item.trim()] ?? englishCatalogText(item.trim())).join(', ');
+    if (ll === 'amenities' || ll === 'property services' || ll === 'قنوات العقار' || ll === 'خدمات العقار' || ll === 'الإلتزامات على العقار' || ll === 'الضمانات ومدتها') {
+      const aliases: Record<string, string> = { موقف: 'Parking', الكهرباء: 'Electricity', المياه: 'Water Supply', الماء: 'Water Supply', 'الصرف الصحي': 'Sanitation', مياه: 'Water Supply', كهرباء: 'Electricity', 'صرف صحي': 'Sanitation' };
+      return v.split(/[،,]/).map(item => aliases[item.trim()] ?? freeTextEn(englishCatalogText(item.trim()))).join(', ');
     }
-    if (['street', 'address', 'city', 'district', 'deed location'].includes(ll)) return translitPlace(v);
-    return englishCatalogText(v);
+    if (['street', 'address', 'city', 'district'].includes(ll)) return translitPlace(v);
+    // a sentence («حي X بمدينة Y مساحة الوحدة…»), not a name
+    if (ll === 'deed location') return freeTextEn(v);
+    // therc's «32,000 ر.س / yearly»: the Arabic currency mark is the only Arabic in it.
+    if (/ر\.س/.test(v)) return v.replace(/\s*ر\.س\s*/g, ' SAR ').replace(/\s+/g, ' ').trim();
+    // Last word: whatever the catalog does not know is translated, never printed in Arabic on an English card
+    // («2566/أ» → «2566/A»; owner 2026-10-29: «everything must be translated to English»).
+    return freeTextEn(englishCatalogText(v));
   }
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
   if (ll === 'age') {
@@ -742,7 +796,7 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
   const rows = listing.additional_info;
   if (!rows || rows.length === 0) return null;
   // Preserve the existing valid-row filter; all rows are visible without an expander.
-  const all = rows.filter((r) => r && r.label && r.value);
+  const all = rows.filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
   if (all.length === 0) return null;
   const visible = all;
   if (oneLine) {
@@ -750,8 +804,8 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
       <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, locale === 'ar' ? card.oneLineRtl : card.oneLineLtr]}>
         {visible.map((r) => (
           <Text key={r.key}>
-            <Text style={card.addlLabel}>{attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)} </Text>
-            <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
+            <Text style={[card.addlLabel, locale !== 'ar' && card.ltr]}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)} </Text>
+            <Text style={[card.addlValue, locale !== 'ar' && card.ltr]}>{arAttrValue(r.label, r.value, locale)}</Text>
             {'\u2003'}
           </Text>
         ))}
@@ -764,8 +818,8 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
             {/* The source's own Arabic `key` outranks the placeholder — see attrDisplayLabel. */}
-            <Text style={card.addlLabel}>{attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
-            <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
+            <Text style={[card.addlLabel, locale !== 'ar' && card.ltr]}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)}</Text>
+            <Text style={[card.addlValue, locale !== 'ar' && card.ltr]}>{arAttrValue(r.label, r.value, locale)}</Text>
           </View>
         ))}
       </View>
@@ -789,7 +843,7 @@ const EAQARTABUK_LOGO = require('../../assets/images/platform-logos/eaqartabuk-c
 const SATEL_LOGO = require('../../assets/images/platform-logos/satel-sa.png');
 const SADIN_LOGO = require('../../assets/images/sadin.png');
 const TOOR_LOGO = require('../../assets/images/toor.png');
-const MUSTQR_LOGO = require('../../assets/images/platform-logos/mustqr-sa.png');
+const MUSTQR_LOGO = require('../../assets/images/platform-clean/mustqr.png');
 const RAMZALQASIM_LOGO = require('../../assets/images/ramzalqassim.png');
 const FURSAGHYR_LOGO = require('../../assets/images/platform-logos/fursaghyr-com.png');
 const JAZWTN_LOGO = require('../../assets/images/platform-logos/jazwtn-sa.png');
@@ -888,7 +942,7 @@ const DWELLEO_LOGO = require('../../assets/images/platform-logos/dwelleo-sa.png'
 const MUHAYSINI_LOGO = require('../../assets/images/platform-logos/aqaralmuhaysini-com.png');
 const TUBA_LOGO = require('../../assets/images/platform-logos/tuba-com-sa.png');
 const NOFODH_LOGO = require('../../assets/images/platform-logos/nofodh-sa.png');
-const AQALEMHAJER_LOGO = require('../../assets/images/platform-logos/aqalemhajer-com.png');
+const AQALEMHAJER_LOGO = require('../../assets/images/platform-clean/aqalemhajer.png');
 const WAHADAT_LOGO = require('../../assets/images/platform-logos/wahadat-sa.png');
 const ASHAB_LOGO = require('../../assets/images/platform-logos/ashab-sa.png');
 const REINVEST_LOGO = require('../../assets/images/platform-logos/reinvest-sa.png');
@@ -1349,13 +1403,13 @@ function sourceHost(source: string): string {
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'vm-ksa.com';
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'macsaib.sa';
   if (s.includes('maqrat')) return 'maqrat.com';
-  if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'arshglobal.com.sa';
+  if (raw === 'arsh' || s.includes('عرش العقارية') || s.includes('arshglobal')) return 'arshglobal.com.sa';
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'superoffice.sa';
   if (s.includes('شموع العقار') || s.includes('shomou')) return 'shomoalaqar.com.sa';
   if (s.includes('حراج') || s.includes('haraj')) return 'haraj.com.sa';
   if (s.includes('منصة مكتب') || s.includes('maktab')) return 'maktab.sa';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'marketplace.sirdab.co';
-  if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';
+  if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';
   if (s.includes('منافع العقارية') || s.includes('manafe')) return 'manafe.com.sa';
   if (s.includes('وجف العقارية') || s.includes('wajaf')) return 'wajaf.sa';
   if (s.includes('البكيري العقارية') || s.includes('albukaeri')) return 'albukaeri.sa';
@@ -1367,11 +1421,11 @@ function sourceHost(source: string): string {
   if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'www.8floor.sa';
   if (s.includes('حلول') || s.includes('holoul')) return 'holoul.io';
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'sa.opensooq.com';
-  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.sa';
+  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.com';
   if (s.includes('مباشر') || s.includes('mobasher')) return 'mobasher.sa';
   if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'muajarh.com';
   if (s.includes('دلّالي') || s.includes('dallali')) return 'dallali.com';
-  if (s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'property.maqamco.sa';
+  if (raw === 'maqam' || s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'property.maqamco.sa';
   if (s.includes('تطبيق أرض') || s.includes('earthapp')) return 'earthapp.com.sa';
   if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return 'nawafethalwatan.com';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'remax.sa';
@@ -1544,7 +1598,7 @@ const card = StyleSheet.create({
   headline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 8, rowGap: 2 },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   typeLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', flexShrink: 1 },
-  title: { fontSize: 15, fontWeight: '700', color: colors.ink, letterSpacing: -0.3, flexShrink: 1 },
+  title: { fontSize: 15, fontWeight: '700', color: colors.ink, flexShrink: 1 }, // no tracking: titles are Arabic (joining + ligatures)
   // Owner 2026-10-01: omit the bio from compact cards; details remain on the source page.
   desc: { display: 'none' },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
@@ -1567,6 +1621,11 @@ const card = StyleSheet.create({
   price: { fontSize: 20, fontWeight: '800', color: colors.primary, maxWidth: '100%', flexShrink: 0 },
   // Gathern / Aqar Monthly price line is a sentence, not a figure: same colour, sized as a prompt to tap.
   stayNote: { fontSize: 13, fontWeight: '700', color: colors.primary, maxWidth: '100%', flexShrink: 1 },
+  // Discount line under the price: struck-through original + amber «خصم X٪» pill, on the price's edge.
+  discountRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 2 },
+  discountOld: { fontSize: 12.5, color: colors.muted, fontWeight: '500', textDecorationLine: 'line-through' },
+  discountBadge: { backgroundColor: colors.amberBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  discountBadgeTx: { fontSize: 11.5, fontWeight: '700', color: colors.amberInk },
   // Guest-rating chip (Gathern) — star + score, with a muted review-count suffix. Sits just under
   // the price; only rendered when the listing actually carries a rating. (Gathern Tier-1.)
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
@@ -1670,6 +1729,8 @@ const card = StyleSheet.create({
   // aligned with their own Arabic label when the inline groups wrap.
   addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', writingDirection: 'rtl' },
   addlValue: { flexShrink: 1, fontSize: 11, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
+  // English UI: details read left to right («2566/A», «Additional No.»), not mirrored (live 2026-10-29: «A/2566», «.Additional No»).
+  ltr: { writingDirection: 'ltr' },
   addlMoreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
     paddingVertical: 6, marginTop: 4,

@@ -9,10 +9,10 @@
 //   5. English never carries Arabic script (city/district names come from the official English names);
 //   6. the owner's shape: 30 lines, Arabic without diacritics, every line ends with the brand,
 //      and the English keeps "Ezhalah" untranslated;
-//   7. rotation: one line held for 4 hours then a different one, always personal, time lines only at their time.
+//   7. rotation: one line held for 1 hour then a different one, always personal, time lines only at their time.
 import {
-  WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS,
-  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, type WelcomeFacts,
+  WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, PREPARED_MAX_MS, FACTLESS_ANYTIME_IDS,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, GREET_LINES, GREET_HOLD_MS, greetIndex, greetingFor, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, tabLine, TAB_KEY, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -179,7 +179,7 @@ mustCatch('a reducer that never settles on timeout (the title would hold at opac
   !neverSwaps((s, ev) => (ev.type === 'timeout' ? s : headlineReduce(s, ev))));
 const homeSrc = (await import('node:fs')).readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
 check('the Filter home holds the title\'s entrance on welcomeSettled',
-  /useFilterWelcome\(!!user, pickName\(user, locale\)/.test(homeSrc) && /if \(!welcomeSettled\) return;/.test(homeSrc)
+  /useFilterWelcome\(!!user, sentenceName\(user, locale\)/.test(homeSrc) && /if \(!welcomeSettled\) return;/.test(homeSrc)
   && !/RNAnimated\.parallel\(\[rise\(badgeAnim, 80\), rise\(titleAnim, 230\)/.test(homeSrc));
 
 // ── 11. instant: the headline comes from device memory, no network in the way (owner 2026-10-17) ──
@@ -189,7 +189,7 @@ const inst = instantWelcome({ hasSession: true, cache: freshCache, now: nowWed, 
 check('a fresh cached line is shown as-is, instantly, in both languages', !!inst && inst.fromCache && inst.ar === freshCache.ar && inst.en === freshCache.en && inst.id === 25);
 check('no stored session → no personal line (guest keeps the normal headline)', instantWelcome({ hasSession: true && false, cache: freshCache, now: nowWed, name: 'يوسف' }) === null);
 const stale = instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: 'يوسف', rand: () => 0 });
-check('a cache older than the 4-hour hold is NOT reused — an instant factless line stands in (never the previous id)',
+check('a cache older than the 2-hour hold is NOT reused — an instant factless line stands in (never the previous id)',
   !!stale && !stale.fromCache && stale.id !== 25 && !WELCOME_LINES.find((l) => l.id === stale.id)!.needs.length && stale.ar.includes('يوسف') && /إزهله\.$/.test(stale.ar) && /Ezhalah\.$/.test(stale.en));
 const morningCache = { ...freshCache, id: 6 }; // a morning line
 const night = instantWelcome({ hasSession: true, cache: morningCache, now: new Date('2026-10-14T21:00:00'), name: 'يوسف', rand: () => 0 });
@@ -199,10 +199,56 @@ check('no name on the device → no personal line (never a line with a blank nam
 mustCatch('an instant path that reuses a cache past the hold',
   !!instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: 'يوسف' })?.fromCache === false);
 const hookSrc = (await import('node:fs')).readFileSync(new URL('../src/lib/useFilterWelcome.ts', import.meta.url), 'utf8');
-check('the hook decides once per page load from device state and never re-decides (no second setShown after mount)',
-  (hookSrc.match(/setShown\(/g) ?? []).length === 1 && /instantWelcome\(\{ hasSession: session\.present, cache, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
-check('the background refresh writes the cache for the NEXT visit and never touches the screen',
-  /writeCache\(\{ id: line\.id, at, ar, en \}\)/.test(hookSrc) && !/setShown\([^)]*\)\s*;\s*\}\)\.catch/.test(hookSrc));
+// Three setShown calls: the mount decision, and the two sign-in exceptions (owner 2026-10-22) — the welcome
+// itself when the sign-in completes on this screen, and the hand-over from that welcome to a market insight
+// («show the welcome with 🥳, then change it to a market insight», visibly). Nothing else re-decides.
+check('the hook decides once per page load and re-decides ONLY for a sign-in welcome and its hand-over',
+  // (a fourth setShown only lifts the hold on the welcome at the first firework pop — owner 2026-10-28)
+  // (a fifth settles the FIRST visit of a day once today's fact is read — still hidden until then, owner 2026-10-30)
+  (hookSrc.match(/setShown\(/g) ?? []).length === 5
+  && hookSrc.includes('const reveal = () => setShown((s) => (s.hold ? { ...s, hold: false } : s));')
+  && /if \(greet\) welcomeThenInsight\(\);/.test(hookSrc) && /nameEn: session\.nameEn, hold: true \}\);\s*welcomeThenInsight\(\);/.test(hookSrc)
+  && (hookSrc.match(/welcomeThenInsight\(\);/g) ?? []).length === 2
+  && /const g = takeGreeting\(session, now\);\s*if \(!g\) return;/.test(hookSrc)
+  && /instantWelcome\(\{ hasSession: session\.present, cache: isFact\(cache\) \? cache : null, next, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
+check('the background writes for LATER visits (the shown line\'s numbers, the next line) and never touches the screen',
+  /writeCache\(\{ id: choice\.line\.id, at: held\.at, \.\.\.r \}\)/.test(hookSrc) && /writeKey\(NEXT_KEY, \{ id: INSIGHT_ID_BASE \+ pick\.templateId, at: now\.getTime\(\), ar: pick\.ar, en: pick\.en \}\)/.test(hookSrc)
+  && !/setShown\([^)]*\)\s*;\s*\}\)\.catch/.test(hookSrc));
+
+// ── 11b. the line CHANGES for a visitor who comes back after the 2 hours (owner 2026-10-22: «I keep
+// seeing the same one always»). Measured live before the fix: visits 2 h apart showed the same
+// no-numbers line three times, because the prepared line was stamped when PREPARED and had expired
+// before the visit. Executed: a simulated device across five visits 2 h 05 min apart.
+{
+  const t0 = new Date('2026-10-14T13:00:00').getTime(); // Wednesday afternoon: any-time lines only
+  const step = HOLD_MS + 5 * 60_000;
+  let cache: { id: number; at: number; ar: string; en: string } | null = null;
+  let next: typeof cache = null;
+  const seen: number[] = [];
+  const factIds: number[] = [];
+  let r = 0.11;
+  for (let v = 0; v < 5; v++) {
+    const now = new Date(t0 + v * step);
+    const s = instantWelcome({ hasSession: true, cache, next, now, name: 'يوسف', rand: () => (r = (r * 7.3 + 0.17) % 1) })!;
+    seen.push(s.id);
+    if (!s.fromCache || s.promoted) { cache = { id: s.id, at: now.getTime(), ar: s.ar, en: s.en }; if (s.promoted) next = null; }
+    // the background prepares the next line (a fact line, as the hook does) for the next visit
+    const n = chooseWelcomeLine(now, cache!.id, () => (r = (r * 7.3 + 0.17) % 1));
+    if (n) { next = { id: n.id, at: now.getTime(), ar: `AR-${n.id}`, en: `EN-${n.id}` }; factIds.push(n.id); }
+  }
+  check('a visitor coming back every 2 h 05 min sees a DIFFERENT line on every visit',
+    seen.every((id, i) => i === 0 || id !== seen[i - 1]), `seen ${seen.join(',')}`);
+  check('from the second visit on, each visit shows the line prepared for it (with its live numbers), not a no-numbers stand-in',
+    seen.slice(1).every((id, i) => id === factIds[i]), `seen ${seen.join(',')} prepared ${factIds.join(',')}`);
+  const reload = instantWelcome({ hasSession: true, cache, next, now: new Date(t0 + 4 * step + 30 * 60_000), name: 'يوسف' })!;
+  check('a reload INSIDE the hour keeps the same line (never changes on every refresh)', reload.id === seen[4] && !reload.promoted);
+  const old = { id: 20, at: t0 - PREPARED_MAX_MS - 1, ar: 'x', en: 'y' };
+  check('a prepared line older than a day is not shown (its numbers may be stale)',
+    !instantWelcome({ hasSession: true, cache: null, next: old, now: new Date(t0), name: 'يوسف', rand: () => 0 })!.promoted);
+  // mutation: stamp the prepared line's hold from when it was PREPARED (the old code) → expired on arrival
+  const stamped = instantWelcome({ hasSession: true, cache: { id: 20, at: t0, ar: 'AR', en: 'EN' }, next: null, now: new Date(t0 + step), name: 'يوسف', rand: () => 0 })!;
+  mustCatch('a prepared line written over the shown one and stamped when prepared', stamped.fromCache === false);
+}
 
 // ── 7. rotation ─────────────────────────────────────────────────────────────────────────────────
 const at = (iso: string) => new Date(iso);
@@ -215,26 +261,26 @@ const neverRepeats = (pick: typeof chooseWelcomeLine) => {
   return true;
 };
 // HOLD (owner: «not every refresh … every now and then, hours» → 4 h, always personal).
-const holdsFourHours = (decide: typeof welcomeForNow) => {
+const holdsTwoHours = (decide: typeof welcomeForNow) => {
   const t0 = at('2026-10-14T13:00:00').getTime(); // Wednesday 13:00 — only any-time lines fit
   const held = { id: 20, at: t0 };
   const kept1h = decide(new Date(t0 + 1 * 3600_000), held, () => 0.3);
-  const kept3h = decide(new Date(t0 + 3.9 * 3600_000), held, () => 0.7);
-  const after = decide(new Date(t0 + 4 * 3600_000 + 1), held, () => 0.3);
+  const kept3h = decide(new Date(t0 + 1.95 * 3600_000), held, () => 0.7);
+  const after = decide(new Date(t0 + 2 * 3600_000 + 1), held, () => 0.3);
   return kept1h?.line.id === 20 && kept1h.keep && kept3h?.line.id === 20
     && !!after && !after.keep && after.line.id !== 20;
 };
-check('one line is held for 4 hours, then a different line takes over', holdsFourHours(welcomeForNow));
-check('HOLD_MS is 4 hours', HOLD_MS === 4 * 3600_000);
-mustCatch('a picker that changes on every refresh', !holdsFourHours((now, held, rand) => {
+check('one line is held for 2 hours (owner 2026-10-28), then a different line takes over', holdsTwoHours(welcomeForNow));
+check('HOLD_MS is 2 hours (owner 2026-10-28: «a new message every 2 hours»)', HOLD_MS === 2 * 3600_000);
+mustCatch('a picker that changes on every refresh', !holdsTwoHours((now, held, rand) => {
   const line = chooseWelcomeLine(now, held?.id ?? null, rand); return line ? { line, keep: false } : null;
 }));
-mustCatch('a picker that holds a line forever', !holdsFourHours((_now, held) => {
+mustCatch('a picker that holds a line forever', !holdsTwoHours((_now, held) => {
   const line = WELCOME_LINES.find((l) => l.id === held?.id)!; return { line, keep: true };
 }));
-const morningHeld = { id: 1, at: at('2026-10-14T11:00:00').getTime() };
-const afternoon = welcomeForNow(at('2026-10-14T13:00:00'), morningHeld, () => 0.5);
-check('a held MORNING line does not survive into the afternoon, even within 4 hours', !!afternoon && afternoon.line.id !== 1 && !afternoon.keep);
+const morningHeld = { id: 1, at: at('2026-10-14T11:30:00').getTime() };
+const afternoon = welcomeForNow(at('2026-10-14T12:10:00'), morningHeld, () => 0.5);
+check('a held MORNING line does not survive into the afternoon, even within the hour', !!afternoon && afternoon.line.id !== 1 && !afternoon.keep);
 let alwaysALine = true;
 for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) {
   const now = new Date(2026, 9, 11 + d, h, 30);
@@ -268,9 +314,13 @@ mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, 
   check('a Latin name is never put into an Arabic line', fillName(slotted, 'yusuf', 'ar') === null);
   check('English line gets the Latin name', fillName(renderWelcome(line(24), NAME_SLOT, { ...FACTS, city: { ar: 'الرياض', en: 'Riyadh', count: 162_312 } }, 'en'), 'yusuf', 'en')?.includes('yusuf') === true, String(renderWelcome(line(24), NAME_SLOT, FACTS, 'en')));
   check('no name → no line', fillName(slotted, '  ', 'ar') === null);
-  check("the hook takes BOTH spellings from pickName (the menu's own rule)", /pickName\(names, 'ar'\)/.test(hookSrc) && /pickName\(names, 'en'\)/.test(hookSrc));
+  // sentenceName = pickName (the menu's own rule) minus the other script (owner P1 2026-10-24: «يوسف, the market…»).
+  check("the hook takes BOTH spellings from sentenceName (pickName, never the other script)", /sentenceName\(names, 'ar'\)/.test(hookSrc) && /sentenceName\(names, 'en'\)/.test(hookSrc));
   check('the hook remembers lines with the name SLOT and fills the name per language when shown',
-    /name: NAME_SLOT/.test(hookSrc) && /const nm = NAME_SLOT;/.test(hookSrc) && /fillName\(shown\.ar, shown\.nameAr, 'ar'\)/.test(hookSrc));
+    /name: NAME_SLOT/.test(hookSrc) && /const nm = NAME_SLOT;/.test(hookSrc) && /fillName\(fillGreeting\(shown\.ar, shown\.greet \?\? null, 'ar'\), live \|\| shown\.nameAr, 'ar'\)/.test(hookSrc)
+    && /fillName\(fillGreeting\(shown\.en, shown\.greet \?\? null, 'en'\), live \|\| shown\.nameEn, 'en'\)/.test(hookSrc)
+    // a changed name shows at once: the account's current name (the `name` argument) is used and re-read
+    && /const live = \(name \?\? ''\)\.trim\(\);/.test(hookSrc) && /\[shown, locale, signedIn, name, swapKey\]/.test(hookSrc));
   check('old remembered lines (name baked in) are ignored', /filterWelcome:shown:v2'/.test(hookSrc));
   check('MUTATION: the pre-fix render (Latin name straight into the Arabic line) is what fillName refuses',
     /[A-Za-z]/.test(renderWelcome(line(24), 'yusuf', FACTS, 'ar') ?? '') && fillName(slotted, 'yusuf', 'ar') === null);
@@ -295,6 +345,154 @@ check('a held «today» line never crosses midnight Riyadh (yesterday\'s count i
   && !instantWelcome({ hasSession: true, cache: ntCache, now: nextDay, name: 'يوسف', rand: () => 0 })?.fromCache);
 mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a UTC day)',
   Math.floor(lateNight.getTime() / 86_400_000) === Math.floor(nextDay.getTime() / 86_400_000) ? riyadhDay(lateNight.getTime()) !== riyadhDay(nextDay.getTime()) : false);
+// A DAILY FACT (an insight line: «نُشر أمس …», «خلال آخر 7 أيام …») IS TRUE ONLY ON THE SAUDI DAY IT WAS BUILT FOR (owner
+// 2026-10-27: «yesterday, 1 week should be based on real fact … it goes a day … we can go to jail»). Held or prepared at
+// 23:30, it must not be shown at 00:30 — «أمس» would then be two days ago. Executed through the real instantWelcome.
+{
+  const fact = { id: 2001, at: lateNight.getTime() + 20 * 60_000, // 23:50 Riyadh
+    ar: '⟦g⟧ ⟦n⟧، تدري إنه نُشر أمس ما لا يقل عن 900 إعلان جديد؟', en: '⟦g⟧ ⟦n⟧, did you know at least 900 new listings were posted yesterday?' };
+  const sameNight = instantWelcome({ hasSession: true, cache: fact, now: new Date(fact.at + 5 * 60_000), name: 'يوسف', rand: () => 0 });
+  const afterMidnightHeld = instantWelcome({ hasSession: true, cache: fact, now: nextDay, name: 'يوسف', rand: () => 0 });
+  const afterMidnightPrepared = instantWelcome({ hasSession: true, cache: null, next: fact, now: nextDay, name: 'يوسف', rand: () => 0 });
+  check('a fact line is reused the same Saudi day, but never after midnight (held OR prepared)',
+    sameNight?.id === 2001 && afterMidnightHeld?.id !== 2001 && afterMidnightPrepared?.id !== 2001);
+  // the case is real: 40 minutes old, inside both age limits, so only the day rule stops it
+  mustCatch('an age-only rule (40 min old passes the 1 h hold and the 24 h prepare limit)', nextDay.getTime() - fact.at < Math.min(HOLD_MS, PREPARED_MAX_MS));
+  const hookDays = (src: string) => src.includes(' && sameRiyadhDay(pend.at, start)') && src.includes(' && sameRiyadhDay(pending.at, now.getTime())')
+    && /if \(!sameRiyadhDay\(r\.line\.at, t\)\) return;/.test(src);
+  check('…and the hook checks the day wherever it takes a prepared fact, and again when midnight passes while it waits', hookDays(hookSrc));
+  mustCatch('the hook taking a prepared fact by age alone', !hookDays(hookSrc.replace(' && sameRiyadhDay(pend.at, start)', '').replace(' && sameRiyadhDay(pending.at, now.getTime())', '')));
+}
+
+// ── 13. the sign-in welcome (owner 2026-10-22: «whenever the user logs in or signs up, this message
+// appears», five wordings so users see different ones, approved word for word) ──
+{
+  const APPROVED_AR = [
+    'نورت {n} 🥳، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.',
+    'نورت {n} 🥳، مع إزهله صار البحث عن عقارك في السعودية أسهل.',
+    'نورت {n} 🥳، إزهله يدور لك على عقارك في كل السعودية.',
+    'نورت {n} 🥳، عقارك في السعودية صار أقرب مع إزهله.',
+    'نورت {n} 🥳، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.',
+  ];
+  check('the five sign-in lines are the owner\'s approved Arabic, word for word, in order',
+    GREET_LINES.length === 5 && GREET_LINES.every((l, i) => l.ar === APPROVED_AR[i]));
+  check('every sign-in line has its English, with the name and the untranslated brand «Ezhalah»',
+    GREET_LINES.every((l) => l.en.includes('{n}') && l.en.includes('Ezhalah') && !/[؀-ۿ]/.test(l.en)));
+  check('no sign-in line uses the word «حيك» (owner rule 2026-10-17)', GREET_LINES.every((l) => !/(^|\s)حيك(\s|،|$)/.test(l.ar)));
+  // owner 2026-10-28: «نورت then name … yeah with 🥳» (it had been removed 2026-10-27) — every line opens «نورت {n} 🥳،»,
+  // the 🥳 right after the name in both languages
+  const opens = (lines: readonly { ar: string; en: string }[]) => lines.every((l) => l.ar.startsWith('نورت {n} 🥳، ') && l.en.startsWith('Welcome {n} 🥳, '));
+  check('every sign-in line opens «نورت {name} 🥳،» / "Welcome {name} 🥳,"', opens(GREET_LINES));
+  mustCatch('a sign-in line without the 🥳', !opens([{ ar: 'نورت {n}، إزهله', en: 'Welcome {n} 🥳, Ezhalah' }]));
+  // owner 2026-10-28: falconer → fireworks; «نورت» at the FIRST pop; the fact once the fireworks stop
+  const afterParty = (src: string) => /export const WELCOME_TO_INSIGHT_MS = RAIN_AT_MS \+ PARTY_MS;/.test(src)
+    && src.includes("import { PARTY_MS, PARTY_FIRST_POP_EVENT, PARTY_END_EVENT } from '@/lib/nameParty';") && /import \{ RAIN_AT_MS \} from '@\/components\/HeroFalconer';/.test(src)
+    && src.includes('globalThis.addEventListener?.(PARTY_END_EVENT, () => r(), { once: true } as any);');
+  check('the welcome changes to the facts only when the fireworks are over (capped at falconer + party)', afterParty(hookSrc));
+  mustCatch('the facts arriving before the fireworks (a fixed 5 s)', !afterParty(hookSrc.replace('export const WELCOME_TO_INSIGHT_MS = RAIN_AT_MS + PARTY_MS;', 'export const WELCOME_TO_INSIGHT_MS = 5000;')));
+  mustCatch('the facts not waiting for the fireworks to end', !afterParty(hookSrc.replace('globalThis.addEventListener?.(PARTY_END_EVENT, () => r(), { once: true } as any);', '')));
+  const heldToPop = (src: string) => src.includes('globalThis.addEventListener?.(PARTY_FIRST_POP_EVENT, reveal, { once: true } as any);')
+    && src.includes('return { line: shown.hold ? null : text,') && src.includes('greet: greetIdx, hold: !!greet }')
+    && src.includes('setTimeout(reveal, RAIN_AT_MS + 1500);');
+  check('the «نورت» welcome is held until the FIRST firework pops (with a fallback when no fireworks play)', heldToPop(hookSrc));
+  mustCatch('the welcome shown before the fireworks (no hold)', !heldToPop(hookSrc.replace('return { line: shown.hold ? null : text,', 'return { line: text,')));
+  mustCatch('a hold that never lifts without fireworks', !heldToPop(hookSrc.replace('setTimeout(reveal, RAIN_AT_MS + 1500);', '')));
+  check('the normal rotation never picks a sign-in line',
+    !WELCOME_LINES.some((l) => GREET_LINES.some((g) => g.id === l.id)) && !FACTLESS_ANYTIME_IDS.some((id) => id >= 101));
+  const uids = Array.from({ length: 60 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+  const firsts = new Set(uids.map((u) => greetIndex(u, 0)));
+  check('different users get different wordings (60 users cover all five)', firsts.size === 5);
+  check('the same user sees the next wording on the next sign-in', greetIndex(uids[7], 1) === (greetIndex(uids[7], 0) + 1) % 5);
+  mustCatch('a welcome that ignores who the user is (everyone the same line)', new Set(uids.map(() => 0)).size !== firsts.size);
+  const g = greetingFor(uids[3], 0, NAME_SLOT)!;
+  check('the welcome is rendered in BOTH languages at once, so switching language shows the same line translated',
+    !!g && fillName(g.ar, 'يوسف', 'ar')!.includes('يوسف') && fillName(g.en, 'Yusuf', 'en')!.includes('Yusuf')
+    && GREET_LINES.find((l) => l.id === g.id)!.en.replace('{n}', 'Yusuf') === fillName(g.en, 'Yusuf', 'en')!.replace(/[\u2068\u2069]/g, '')); // the name is bidi-isolated (invisible)
+  check('an Arabic welcome never shows a Latin name (the normal headline stays instead)', fillName(g.ar, 'Yusuf', 'ar') === null);
+  const tNow = new Date('2026-10-14T21:00:00');
+  const held = { id: g.id, at: tNow.getTime() - 10 * 60_000, ar: g.ar, en: g.en };
+  check('a reload within 30 minutes keeps the welcome', !!instantWelcome({ hasSession: true, cache: held, now: tNow, name: NAME_SLOT })?.fromCache);
+  check('after 30 minutes the normal rotation resumes',
+    !instantWelcome({ hasSession: true, cache: { ...held, at: tNow.getTime() - GREET_HOLD_MS - 1 }, now: tNow, name: NAME_SLOT, rand: () => 0 })!.fromCache);
+}
+{
+  // the sign-in mark: set by a real sign-in, read once, stale after 10 minutes
+  const store = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, String(v)), removeItem: (k: string) => void store.delete(k) };
+  const { markJustSignedIn, takeJustSignedIn, hasJustSignedIn, JUST_SIGNED_IN_MAX_MS } = await import('../src/lib/loginWelcome.ts');
+  markJustSignedIn();
+  const t = Date.now();
+  check('a sign-in mark is seen', hasJustSignedIn(t) && !!takeJustSignedIn(t));
+  check('the mark is taken once (one sign-in greets once)', !hasJustSignedIn(t) && takeJustSignedIn(t) === null);
+  markJustSignedIn();
+  check('each sign-in on the device counts up (so the wording moves on)', takeJustSignedIn(Date.now())!.count === 1);
+  markJustSignedIn();
+  check('a mark older than 10 minutes is ignored (a cancelled or abandoned sign-in)', takeJustSignedIn(Date.now() + JUST_SIGNED_IN_MAX_MS + 1) === null);
+  const authSrc = (await import('node:fs')).readFileSync(new URL('../src/app/auth.tsx', import.meta.url), 'utf8');
+  const tapSrc = (await import('node:fs')).readFileSync(new URL('../src/components/GoogleOneTap.tsx', import.meta.url), 'utf8');
+  check('both sign-in paths mark the moment: the Google/Apple return route and Google One Tap',
+    /markJustSignedIn\(\);/.test(authSrc) && /log\('signed in via One Tap'\), markJustSignedIn\(\);/.test(tapSrc));
+  delete (globalThis as any).localStorage;
+}
+
+// ── A TAB KEEPS ITS LINE (owner 2026-10-28: «after 2 hours when I enter Ezhalah … I see the swap») ──
+// Safari shows a saved picture of a sleeping tab and then reloads it; the line that tab showed is kept in its
+// sessionStorage and shown again for the rest of that Saudi day. EXECUTED through the real tabLine.
+{
+  const t = new Date('2026-10-28T10:00:00Z').getTime();            // 13:00 Riyadh
+  const saved = JSON.stringify({ id: 2007, at: t, ar: '⟦g⟧ ⟦n⟧، تدري إن 66% من إعلانات رابغ أراضٍ؟', en: '⟦g⟧ ⟦n⟧, did you know 66% of Rabigh\'s listings are land?', greet: 3 });
+  const later = tabLine(saved, t + 5 * 3600_000);                    // 18:00 the same day, past the 2-hour hold
+  const nextDay = tabLine(saved, new Date('2026-10-28T21:30:00Z').getTime()); // 00:30 Riyadh, the next day
+  check('a returning tab gets ITS line back the same Saudi day, even after the 2-hour hold (no swap)', later?.id === 2007 && later.greet === 3);
+  check('…but never on the next Saudi day, never from the future, never from garbage',
+    nextDay === null && tabLine(saved, t - 1000) === null && tabLine('{bad', t) === null && tabLine(null, t) === null && tabLine(JSON.stringify({ id: 1, at: t, ar: '', en: 'x' }), t) === null);
+  // the day rule is real: drop it and yesterday's line comes back after midnight
+  const noDay = (raw: string, now: number) => { const v = JSON.parse(raw); return v.at <= now ? v : null; };
+  mustCatch('a tab line kept across midnight (yesterday\'s «أمس»)', noDay(saved, new Date('2026-10-28T21:30:00Z').getTime()) !== null && nextDay === null);
+  const hookTab = (src: string) => src.includes("const tabSeen = !greet && session.present && (nameAr || nameEn) ? readTab(now.getTime()) : null;")
+    && src.includes('const tab = isFact(tabSeen) ? tabSeen : null;')
+    && /: tab \? \{ id: tab\.id, ar: tab\.ar, en: tab\.en, fromCache: true, promoted: false \}\n\s*: \(nameAr \|\| nameEn\) \? instantWelcome\(/.test(src)
+    && (src.match(/writeTab\(/g) ?? []).length >= 2 && src.includes('globalThis.sessionStorage?.getItem(TAB_KEY)');
+  check('the hook shows the tab\'s line BEFORE choosing a new one, and records every line it shows in the tab', hookTab(hookSrc));
+  mustCatch('a hook that ignores the tab (back to the swap)', !hookTab(hookSrc.replace('readTab(now.getTime())', 'null')));
+  check('the tab memory is sessionStorage (one tab), never localStorage (every tab would freeze)', TAB_KEY.startsWith('ezhalah:') && !/localStorage\?\.getItem\(TAB_KEY\)/.test(hookSrc));
+}
+
+// ── FACTS ALWAYS (owner 2026-10-30: «show facts always» — the first visit of a day showed «even small cities have a
+// place here» and kept the fact for the NEXT visit). Only a FACT is held; with none on the device the hook reads today's
+// now, hidden (never a visible swap), for at most FACT_WAIT_MS, and the plain line shows only when that read fails.
+{
+  const factsAlways = (src: string) =>
+    src.includes('const isFact = (l: { id: number | null } | null | undefined) => !!l && l.id != null && isInsightLineId(l.id);')
+    && src.includes('cache: isFact(cache) ? cache : null,')
+    && /if \(!greet && session\.present && inst && !isFact\(inst\)\) \{[\s\S]{0,400}?fetchPack\(lastLocation, lastDistrict\)/.test(src)
+    && /void Promise\.race\(\[fact, slow\]\)/.test(src) && /setTimeout\(\(\) => r\(null\), FACT_WAIT_MS\)/.test(src)
+    && /setShown\(\{ settled: true, id: line\.id, ar: line\.ar, en: line\.en, nameAr, nameEn, greet: greetNowIdx \}\);\s*\}\);\s*return;/.test(src);
+  check("facts always: only a fact is held, and a device without one reads today's fact before the headline shows", factsAlways(hookSrc));
+  const { FACT_WAIT_MS: wait } = await import('../src/lib/useFilterWelcome.ts').catch(() => ({ FACT_WAIT_MS: Number(/export const FACT_WAIT_MS = (\d+);/.exec(hookSrc)?.[1]) }));
+  check('the hidden wait is bounded (0 < FACT_WAIT_MS ≤ 3 s), never a headline that waits forever', Number(wait) > 0 && Number(wait) <= 3000);
+  mustCatch('a held plain line blocking the fact again', !factsAlways(hookSrc.replace('cache: isFact(cache) ? cache : null,', 'cache,')));
+  mustCatch('the first visit of a day back to the plain line', !factsAlways(hookSrc.replace('if (!greet && session.present && inst && !isFact(inst)) {', 'if (false) {')));
+  mustCatch('a fact read with no time limit', !factsAlways(hookSrc.replace('void Promise.race([fact, slow])', 'void Promise.race([fact])')));
+}
+
+// ── THE EMOJI STAYS VISIBLE THROUGH THE SHINE (owner 2026-10-28: «the emoji after the name doesn't show») ──
+{
+  const home = (await import('node:fs')).readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
+  const party = (await import('node:fs')).readFileSync(new URL('../src/lib/nameParty.ts', import.meta.url), 'utf8');
+  const reSrc = (home.match(/^const EMOJI_RE = (\/.*\/);$/m) ?? [])[1];
+  const re = reSrc ? new Function(`return ${reSrc}`)() as RegExp : null;
+  const emojis = ['👋', '☀️', '🌙', '🕌', '🌴', '🤍', '☕', '🌿', '😊', '🌤️', '🏡', '✨'];
+  const splits = (r: RegExp | null) => !!r && emojis.every((e) => `مساء الخير يوسف ${e}، تدري إن`.split(r).length === 3 && `مساء الخير يوسف ${e}، تدري إن`.split(r)[1] === e)
+    && 'تدري إن 66% من إعلانات رابغ أراضٍ؟'.split(r).length === 1;
+  check('every greeting emoji is cut into its own span (and a sentence without one is left whole)', splits(re));
+  mustCatch('a pattern that misses the moon 🌙', !splits(/([☀-➿]️?)/));
+  const wired = home.includes('{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}')
+    && home.includes("{...({ dataSet: { ezhEmoji: p === PARTY_EMOJI ? 'party' : '' } } as any)}")
+    && party.includes('[data-ezh-shine="on"] [data-ezh-emoji]{-webkit-text-fill-color:initial!important;color:initial!important}');
+  check('the headline renders its emoji in that span, and the shine CSS gives the span its own fill', wired);
+  mustCatch('the shine CSS without the emoji rule (the emoji vanishes on iPhone)', !(party.replace('[data-ezh-shine="on"] [data-ezh-emoji]', '[x]').includes('[data-ezh-shine="on"] [data-ezh-emoji]')));
+}
 
 console.log(`\nExample (ar): ${renderWelcome(WELCOME_LINES[3], 'يوسف', FACTS, 'ar')}`);
 console.log(`Example (en): ${renderWelcome(WELCOME_LINES[23], 'Yusuf', FACTS, 'en')}`);

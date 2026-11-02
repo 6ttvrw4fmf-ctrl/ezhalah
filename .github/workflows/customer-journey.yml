@@ -1,0 +1,85 @@
+name: Customer journey (production, real browser)
+
+# Falcon 2026-10-30. AGENTS.md: a change is live only when a real browser walked the customer's path on
+# production. e2e/engineers/customer-journey.mjs is that tool for every engineer, but it had no CI home: it ran
+# from agent containers, and since ezhalah.com became the address (10-26) those containers cannot reach the site
+# (backlog 924) — so no engineer could prove anything in a browser. Here it runs from GitHub's network with the
+# robot pass. ONE browser at a time (AGENTS.md «OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN»): the concurrency
+# group queues every run behind the last. A PR that changes the tool proves e2e/engineers/pr-proof-listings.json.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'normal or af'
+        required: true
+        default: 'normal'
+      listings:
+        description: 'JSON list of {platform, source_table, listing_id} (max 12); empty = use sample'
+        required: false
+        default: ''
+      sample:
+        description: 'random listings when no list is given (max 8)'
+        required: false
+        default: '5'
+      absent:
+        description: 'comma-separated listing ids a lifecycle run hid; each must be missing from the same search (FAIL if seen)'
+        required: false
+        default: ''
+      phone:
+        description: 'full mobile emulation'
+        type: boolean
+        required: false
+        default: false
+  pull_request:
+    paths:
+      - e2e/engineers/**
+      - .github/workflows/customer-journey.yml
+
+concurrency:
+  group: production-browser-customer-journey
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  journey:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright + browser
+        run: |
+          npm i -D @playwright/test@^1.49 playwright@^1.49
+          npx playwright install --with-deps chromium
+      - name: Walk the customer's path
+        env:
+          MODE: ${{ github.event.inputs.mode || 'normal' }}
+          LISTINGS: ${{ github.event.inputs.listings }}
+          SAMPLE: ${{ github.event.inputs.sample || '5' }}
+          PHONE: ${{ github.event.inputs.phone }}
+          ABSENT: ${{ github.event.inputs.absent }}
+          JOURNEY_OUT_DIR: ${{ runner.temp }}/customer-journey
+        run: |
+          args=(--mode "$MODE")
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            args+=(--listings "$(cat e2e/engineers/pr-proof-listings.json)")
+          elif [ -n "$LISTINGS" ]; then
+            args+=(--listings "$LISTINGS")
+          else
+            args+=(--sample "$SAMPLE")
+          fi
+          if [ "$PHONE" = "true" ]; then args+=(--phone); fi
+          if [ -n "$ABSENT" ]; then args+=(--absent "$ABSENT"); fi
+          node e2e/engineers/customer-journey.mjs "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: customer-journey-screens
+          path: ${{ runner.temp }}/customer-journey
+          if-no-files-found: ignore
+          retention-days: 7

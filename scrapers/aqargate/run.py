@@ -24,6 +24,8 @@ Usage:  python -m scrapers.aqargate.run [--limit-test 1] [--type residential|com
 from __future__ import annotations
 
 import argparse
+import html as ihtml
+import re
 import os
 import sys
 import time
@@ -40,6 +42,7 @@ import copy
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.pii import redact_pii
 
 # PDPL: advertiser/agent identity + contact inside advertisement_response — never stored.
 _PII = {"advertiserId", "advertiserName", "responsibleEmployeeName",
@@ -321,6 +324,15 @@ def _rent_annualize(
     return rent, "annual"
 
 
+def ad_description(content: Any) -> Optional[str]:
+    """The WordPress post body (`content.rendered`) — the seller's own prose — as plain text, verbatim minus
+    markup and contact details (PDPL). None when the post body is empty."""
+    raw = (content or {}).get("rendered") if isinstance(content, dict) else None
+    if not isinstance(raw, str):
+        return None
+    return redact_pii(ihtml.unescape(re.sub(r"<[^>]+>", " ", raw))) or None
+
+
 def map_listing(p: dict, s: Optional[cc.Session] = None) -> tuple[Optional[dict], str]:
     meta = p.get("property_meta") or {}
     ar = meta.get("advertisement_response") or {}
@@ -411,6 +423,9 @@ def map_listing(p: dict, s: Optional[cc.Session] = None) -> tuple[Optional[dict]
         "city": city,
         "neighborhood": loc.get("district") or None,
         "title": (p.get("title") or {}).get("rendered"),
+        # The seller's own prose is the WordPress post body. The REST record has always carried it (kept in
+        # source_capture), but it was never mapped, so `description` was empty on 107 of 107 (2026-10-30).
+        "description": ad_description(p.get("content")),
         "photo_urls": gallery if gallery is not None
                       else ([thumb] if isinstance(thumb, str) and thumb.startswith("http") else []),
         "property_age": _int(ar.get("propertyAge")),

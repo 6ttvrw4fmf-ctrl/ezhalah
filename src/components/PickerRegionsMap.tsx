@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
   step: { fontSize: 13, lineHeight: 18, fontWeight: '600', color: colors.ink, marginBottom: 6 },
   caption: { alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 40 },   // two caption lines, always reserved
   kingdom: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, flexShrink: 0 },
-  kingdomOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  kingdomOn: { backgroundColor: colors.selFill, borderColor: colors.primary },
   kingdomText: { fontSize: 13, lineHeight: 17, fontWeight: '500', color: colors.body },
   kingdomTextOn: { color: colors.onFill },
   captionHint: { fontSize: 13, lineHeight: 18, color: colors.muted },

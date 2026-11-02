@@ -11,7 +11,6 @@ import { Animated, Easing, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
-import { grouped } from '@/data/search';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 
 /** Pacing for n picks: the LAST pick lands by 4.2 s of the 5 s beat, whatever n is. `share` is one pick's
@@ -63,8 +62,10 @@ function AfRoundLoader({ items, pools, exiting, fontFamily }: { items: string[];
   // «نفحص 830 عقار…» — CHECKING, with the real size of the set this pick is checked against (owner 2026-10-11: «the
   // animation should be checking like this», pointing at «نفحص أكثر من 349,793 عقار…»). Where that size was never
   // known the line names the pick instead («نفحص مصعد…») — it never invents a number.
-  const pool = pools?.[at] ?? null;
-  const text = pool != null ? t('Checking {count} properties…', { count: grouped(pool) }) : `${t('Checking')} ${pick}…`;
+  // The beat names the PICK, one after another («نفحص مصعد…» → «نفحص بلكونة…»), never the set size
+  // (owner 2026-11-01: «replace ezhalah is thinking with what the user selected, without the emoji,
+  // one after another»). `pools` still arrives from the round (buildAfBeatSteps) and stays unused here.
+  const text = `${t('Checking')} ${pick}…`;
   return (
     <View testID="af-round-loader" style={[styles.wrap, exiting && styles.exiting, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
       <Ionicons name="sparkles" size={16} color={colors.primary} />

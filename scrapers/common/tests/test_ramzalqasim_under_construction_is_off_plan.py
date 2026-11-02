@@ -32,3 +32,10 @@ def test_under_construction_is_marked_gone_and_inactive():
 def test_the_same_unit_once_available_is_live():
     row, _, gone = map_marker({**RQ174, "avalible": "available"})           # documented edit
     assert gone is False and row["active"] is True
+
+
+def test_in_prograss_offers_nothing_so_it_is_gone():
+    """2026-10-20 (backlog 654): RQ226/RQ262 «in_prograss», price 0, page prints no availability —
+    held, they sat ACTIVE and served at price 0 since 10-02. Owner order: hidden unless offered."""
+    row, _, gone = map_marker({**RQ174, "avalible": "in_prograss", "price": "0.00"})
+    assert gone is True and row["active"] is False

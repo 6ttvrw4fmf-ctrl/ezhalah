@@ -296,7 +296,7 @@ const st = StyleSheet.create({
   body: { marginTop: 10, fontFamily: font.family.regular, fontSize: 12.5, lineHeight: 19, color: colors.muted },
   btnRow: { marginTop: 16, gap: 8, justifyContent: 'flex-end' },
   btn: { paddingVertical: 9, paddingHorizontal: 16, borderRadius: 11, borderWidth: 1 },
-  btnPrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
+  btnPrimary: { backgroundColor: colors.selFill, borderColor: colors.primary },
   btnGhost: { backgroundColor: colors.surface, borderColor: colors.line },
   btnText: { fontFamily: font.family.semibold, fontSize: 13 },
   btnPrimaryText: { color: colors.onFill },

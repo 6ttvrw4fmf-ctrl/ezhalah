@@ -11,9 +11,9 @@ import { PLATFORM_PICKER_PROFILES } from '@/data/platformPickerProfiles';
 import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
 import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 
-/** Steady scroll speed, px per second. 45 since 2026-10-12 (owner: «speed it a tiny bit» — was 36), so one 108px logo slot
- *  passes in 2.4 s instead of 3 s and a full loop of ~150 sites takes ~6 min instead of ~7½. */
-export const STRIP_SPEED = 45;
+/** Gentle 12 px/s glide (owner 2026-10-24): one 108px logo/cloud group passes in nine seconds.
+ *  Wall-clock phase stays shared between Filter and AI, including refresh. */
+export const STRIP_SPEED = 12;
 /** One logo slot, px (96px frame + 2×6 padding). cycleWidth = names × STRIP_SLOT. */
 export const STRIP_SLOT = 108;
 

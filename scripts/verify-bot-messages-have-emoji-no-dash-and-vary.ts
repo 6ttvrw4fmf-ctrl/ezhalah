@@ -48,9 +48,9 @@ check('whatever goes in, the result has no dash and ends with an emoji',
   ['—', '- -', 'a — b — c', '— — —', 'x–y', 'a-b', 'a‑b', 'x − y', '', 'نص عادي بدون شيء', 'A. B. C.'].every((t) => { const r = bm.botMessage(t); return t === '' ? r === '' : done(r); }));
 check('the edge copy of the gate is byte-identical to the app copy', read('src/lib/botMessage.ts') === read('supabase/functions/agent/botMessage.ts'));
 const gate = read('src/lib/botMessage.ts');
-const stripsEmDash = (src: string) => /\[–—\]/.test(src) && /ensureEmoji\(noDashes\(text\)\)/.test(src);
-check('the gate source strips both dashes and always runs ensureEmoji(noDashes(…))', stripsEmDash(gate));
-mustCatch('the gate not stripping the dash', !stripsEmDash(gate.replace('[–—]', '[x]').replace('ensureEmoji(noDashes(text))', 'text')));
+const stripsEmDash = (src: string) => /\[–—\]/.test(src) && /ensureEmoji\(noDashes\((?:noAllah\()?text\)?\)\)/.test(src);
+check('the gate source strips both dashes and always runs ensureEmoji(noDashes(…)) (the word «الله» goes first since 2026-10-24)', stripsEmDash(gate));
+mustCatch('the gate not stripping the dash', !stripsEmDash(gate.replace('[–—]', '[x]').replace('ensureEmoji(noDashes(noAllah(text)))', 'text')));
 
 // ── 2. wiring: the edge's json() and every chat bubble ───────────────────────────────────────────────────
 const edge = read('supabase/functions/agent/index.ts');

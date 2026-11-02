@@ -380,17 +380,25 @@ def _photo_urls(rec: dict) -> list[str]:
 
 def _amenities(rec: dict, description: Optional[str]) -> dict[str, Any]:
     """Prose < the site's named amenity/tag chips < its labelled fields."""
-    out: dict[str, Any] = dict(normalize.amenities_from_text(description))
+    prose = normalize.amenities_from_text(description)
     names = [a.get("name") for a in (rec.get("amenities") or []) + (rec.get("tags") or [])
              if isinstance(a, dict) and a.get("name")]
-    out.update(normalize.amenities_from_text("، ".join(names)))
+    chips = normalize.amenities_from_text("، ".join(names))
+    out: dict[str, Any] = {**prose, **chips}
     for col in ("maid_room", "driver_room"):
         if _pos(rec.get(col)):
             out[col] = True
     if _pos(rec.get("parking_space")):
         out["parking"] = True
-    if rec.get("furnishing_status") in _FURNISHED:
-        out["furnished"] = _FURNISHED[rec["furnishing_status"]]
+    # furnished has THREE source statements: the furnishing_status field, the tag chips («مفروش») and the ad's own
+    # words. They agree on 1,326 active ads and disagree on ~20 (measured 2026-10-25): «غير مفروشة» / «مفروشة: لا»
+    # under status «furnished» (served as YES), «شقة مفروشة» under «unfurnished» — and on 3 ads status + chip
+    # «مفروش» say yes while the text says «مفروشة: لا», where letting the chip outvote the words put the yes back.
+    # Any disagreement is unknown, written authoritatively (the upsert drops a plain None, so a stale yes stays).
+    stated = {v for v in (prose.get("furnished"), chips.get("furnished"),
+                          _FURNISHED.get(rec.get("furnishing_status"))) if v is not None}
+    if stated:
+        out["furnished"] = stated.pop() if len(stated) == 1 else db.AUTHORITATIVE_NULL
     for key in rec.get("utility_availability") or []:
         if key in _UTILITY:
             out[_UTILITY[key]] = True
@@ -515,12 +523,26 @@ def map_listing(rec: dict, *, this_year: Optional[int] = None,
             row["rent_period"], row["price_annual"] = normalize.rent_period_and_annual(
                 price, "سنوي" if period == "annual" else "شهري")
         else:
-            row["price_annual"] = price                          # silent/mixed: figure as printed
-            # rent_period = AUTHORITATIVE_NULL (not absent): the site publishes no period field at
-            # all for rent prices, so "we found no period word" is the source's own settled state,
-            # not a read failure — it must overwrite a stale 'monthly'/'annual' from an earlier
-            # crawl on re-crawl (RENT PERIOD = SOURCE), matching the sub_monthly fix above.
-            row["rent_period"] = db.AUTHORITATIVE_NULL
+            # Silent or mixed: the owner's rule of 2026-09-26 (normalize.rent_period_from_ad, «check the price —
+            # if it looks monthly, put it monthly») — a period word tied to THIS price wins, else a price of at
+            # most MONTHLY_LOOKING_MAX is monthly (no Saudi unit rents for under 10,000 a year). Re-applied to
+            # dwelleo 2026-10-21 (owner: «based on the price u make a judgement»): 854 rents had no period, and
+            # figures like 1,700 / 3,500 for a flat — whose own rental_prediction is 29,600 / 36,400 a year —
+            # were served as YEARLY rents. Above the line the figure stays as printed with a NULL period.
+            text = f"{rec.get('title') or ''}\n{rec.get('description') or ''}"
+            judged = normalize.stated_rent_period(price, text) or (
+                "monthly" if price and price <= normalize.MONTHLY_LOOKING_MAX else None)
+            if judged:
+                period, note = judged, "judged_by_price"
+                row["rent_period"], row["price_annual"] = normalize.rent_period_and_annual(
+                    price, "سنوي" if judged == "annual" else "شهري")
+            else:
+                row["price_annual"] = price                      # figure as printed
+                # rent_period = AUTHORITATIVE_NULL (not absent): the site publishes no period field at
+                # all for rent prices, so "we found no period word" is the source's own settled state,
+                # not a read failure — it must overwrite a stale 'monthly'/'annual' from an earlier
+                # crawl on re-crawl (RENT PERIOD = SOURCE), matching the sub_monthly fix above.
+                row["rent_period"] = db.AUTHORITATIVE_NULL
         kind = {"annual": "annual", "monthly": "monthly"}.get(period, "total")
     else:
         row["price_total"] = price

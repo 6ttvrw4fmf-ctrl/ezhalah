@@ -1,5 +1,33 @@
 # 🆕 NEW LISTINGS ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
+> **🔢 THE SITE COUNT MOVES BY ITSELF (owner, 2026-10-27 — «a new website goes up, the number changes»).** The
+> «نبحث في N منصة» number and the logo strip both come from ONE list, `loader_active_platforms_ar()`: a site
+> counts and shows its logo only while it is active in `platform_registry` AND has at least one
+> `production_ready` ad a user can see (Aqar Monthly folds into Aqar, so 145 sites read «144» on 2026-10-27).
+> So: a NEW site you bring live raises the number and adds its logo the moment its first ad is searchable; a
+> site that goes down (dormant), is retired, or has no visible ads drops out and its logo hides; it comes
+> back on its own. **Never type a site number anywhere** (copy, share text, docs meant for users) and never
+> keep a logo for a site with no visible ads. Give a new platform its logo and its `SOURCE_TOKENS` entry in
+> `src/data/loaderPlatforms.ts` so it is counted under the right name. Rule: `docs/ARCHITECTURE.md` §20.
+
+> **🔒 THE SUPABASE QUESTION RULE (owner, 2026-10-25 — wins over every other order about writing rows).** On 10-24 and
+> 10-25 ⚡ did the work but lost its whole report: an `execute_sql` call that contained an `UPDATE` (closing backlog items
+> in the same batch as a proof row) made the Supabase tool ask «destructive operation — run it?», nobody was awake to
+> answer, the call timed out, and the tool said «do not call this tool again» — so the `:end` row, proofs and closes were
+> never written and the fix-rate board scored the night 0%. Plain `INSERT`s never ask. So: (1) every `:proof` and `:end`
+> row is ONE plain `INSERT … VALUES …` per call — never in the same call as an `UPDATE`/`DELETE`; (2) write your `:end`
+> row BEFORE any backlog `UPDATE`, the moment your last job is proven; (3) close backlog items LAST, one `UPDATE … WHERE
+> id = N` per call; (4) if the tool ever asks a question or times out, stop using it for writes and put the unwritten
+> closes in your `:end` row text («CLOSE: 803, 817 — evidence …») so the owner session closes them.
+
 **This file is your job.** The cloud routine's prompt only says "follow this file". Written
 2026-09-27 at the owner's request. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra high effort.
 
@@ -19,7 +47,7 @@ wrong, don't act on that belief: report it the same way. The old 11-routine setu
 > **🌙 THE NIGHT SHIFT (owner, 2026-10-04 — this block wins over EVERY other time, budget or hour count in this file).**
 > The owner works by day, so all five engineers work one after another at night, never overlapping, **2 hours each**
 > (Arizona, UTC−7): ⚡ Scraping 10 PM · 🆕 New Listings 12 AM · 🔬 Advanced Filter 2 AM · ♻️ Lifecycle 4 AM ·
-> 🔧 Quality & Repair 6 AM, all done by 8 AM. **You: 🆕 12:00 – 2:00 AM Arizona (07:00–09:00 UTC); your computed score lands at 10:35 PM, before you wake.** Wherever this file says 3 or 4 hours, read 2 hours,
+> 🔧 Quality & Repair 6–10 AM, all done by 10 AM. **You: 🆕 12:00 – 2:00 AM Arizona (07:00–09:00 UTC); your computed score lands at 10:35 PM, before you wake.** Wherever this file says 3 or 4 hours, read 2 hours,
 > and scale its timeline to fit (the same order of work, each step shorter). **Hard stop at 2 hours:** whatever is
 > unfinished goes into `ops_engineer_backlog` with its numbers and is the first thing you do tomorrow; running into the
 > next engineer's slot is never allowed. **Full control (owner, 2026-10-04): «they have full control on everything, no
@@ -135,6 +163,11 @@ engineer's, not yours.
 6. **2:50–3:00 the report.** Then stop. Anything unfinished goes into `ops_engineer_backlog` with its evidence.
 
 ## THE NUMBERS RULE (owner, 2026-10-03): every number a customer sees is true NOW
+
+> **Trap (🦅 10-30):** a value the search index CORRECTS must be corrected on the card too. The 10-28 meter-box rule fixed
+> `search_listings_ar` only; the card (`finalize()` in `src/data/remote.ts`) printed dealapp 451328 at 52,000,000,000 SAR, and
+> the client budget net re-reads that printed price, so «N نتيجة» showed N−1 cards (43 rows, PR 9479). When you correct a
+> served value, grep `finalize()` for the same field in the same PR.
 A customer sees numbers everywhere: the results count, the counts beside cities and districts, the count on every
 Advanced Filter option. **They must equal what a fresh query of the live listings returns, and when a listing dies they
 must drop within one hour** (lifecycle hides it, the hourly search-index sync at :22 removes it from `search_listings_ar`,
@@ -278,13 +311,24 @@ catch it the same day, before wrong data piles up across the whole catalog.
    website shows it (verify it at the source, then keep it).
 2. **Silent means unknown.** If the source doesn't say it, store `NULL` and show it blank. Never
    "no", never 0, never a default. Unknown is never counted as "no" in any filter.
-3. **Prose is not a source field.** If the website publishes a field structurally, never read it
-   from the description, not even as a fallback. Prose may only ever say yes or unknown for a field
-   with no structured version anywhere on that website, it has four outcomes (named, negated,
-   merely prepared, the neighbourhood's), and that exception is documented at the mapping.
-4. **Rent period only from the ad's own words, tied to its price.** Never from the platform's name,
-   never defaulted to yearly. A rental that states no period stays out of both rent searches, with no
-   extra label.
+3. **The scraper writes the box; the seller's sentence is merged at the index (Rule B, owner
+   2026-10-25).** A scraper never writes prose into a field the website publishes structurally — the
+   `*_listings` column must stay the site's own answer. The ad's text is read by the nightly word checker
+   into `listing_text_facts` and merged into the search index under Rule B
+   (`docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md`, «The seller's sentence»). For a field with no structured
+   version anywhere on that website the scraper may still read prose, with four outcomes (named,
+   negated, merely prepared, the neighbourhood's), documented at the mapping.
+4. **Rent period from the ad's own words, tied to its price — and when the ad is SILENT, judged from
+   the price (owner 2026-09-28, widened to every site 2026-10-03, built 2026-10-31, migration
+   `20261031205445`).** A stated period is never overruled. A rental that states no period gets its
+   label from `judge_silent_rent_period_ar()` in the index trigger `enforce_rent_period_judgment()`:
+   (`20261031215442`) under 300 = NULL; 300–7,999 on a home or business type = a per-month figure, stored
+   سنوي ×12; 15,000 and above = سنوي; anything else stays NULL (borderline, never a guess); gathern / aqarmonthly are monthly-only, so a silent row there is شهري. The shown
+   price is always the source's figure; `search_listings_ar.rent_period_judged = true` marks the
+   judged rows, and the raw platform tables are never written. Never default to yearly by platform
+   name, never label the borderline, never put a label on the card. The guard is
+   `mon_detect_priced_rent_unreachable()` (half-hourly: repairs, then P1 only for rows the trigger
+   could not label). Before 2026-10-31, 13,436 priced rents were reachable from no rent button.
 5. **Price per m² × size is a shown, searchable total**, calculated in search and display only.
    Never stored over the source's own price.
 6. **Location:**
@@ -386,6 +430,65 @@ district».
      every listing with it tonight.
    - If you are not sure it is the same place, **ask the owner** with the example
      (`ADVANCED_FILTER_SOURCE_TRUTH.md` §6). Never guess a district.
+6. **THE TWIN GUARD (owner 2026-10-24: «I am scared of duplicates, same district twice»).** The catalogue
+   already refuses an exact repeat; it cannot see the same place spelled two ways («الضاحية الأول» and
+   «الضاحية الحي الأول»). So before you add ANY district to `loc_catalog_district`, read the alarm through
+   `select * from unknown_named_districts_checked(3)` (not the plain `unknown_named_districts`) and obey its verdict:
+   - `exists` or `twin`: **never insert it.** It is the same place as `twin_ar`. Teach the matcher (or record it in
+     `ops_district_name_decision` as `variant`) and fix the listings tonight; the district list gets no new row.
+   - `sequel`: same base, different ordinal / letter / number («شرق المطار أ» and «ب»). Allowed, if the normal rule passes.
+   - `new`: admit it only by the normal rule: named by **3 or more** distinct active ads, not a city, street, plan or
+     direction; spelling = the source's own form.
+   Then prove it: the district shows in `district_options_ar(p_city_id := …)` and a real search for it returns the listing.
+   Put one line in your report: **«Districts: added N · twins refused N · waiting for the owner N»**. The Hofuf (الأحساء)
+   «الضاحية الحي …» names wait for the owner's naming decision; never invent a spelling for them.
+7. **THE DATABASE NOW ENFORCES THE GUARDS (owner 2026-10-25, migration `20261025203753`).** `loc_catalog_district`
+   refuses a DELETE or TRUNCATE (districts are never deleted, even with 0 ads), a new or renamed name with a number,
+   «مخطط», «قاعدة», «شارع», «طريق», «قرى» or one letter, and a spelling twin. If your insert is refused, the
+   error tells you why. Never disable or drop the triggers (`verify-district-guards.ts` fails the PR, and the P1 alarm
+   `mon_detect_district_guards_missing` fires). An owner-approved exception sets `ezhalah.district_guard_ok` for that
+   one statement. Write the owner's approval in the PR.
+8. **A HOME WITH NO DISTRICT: THE MAIN RULE (owner 2026-10-25, permanent).**
+   1. The site's own district always wins, and is never overwritten.
+   2. If the site names none, use Apple Maps at the home's pin. It must be the same city and a district already on our
+      list, and the home must sit in the **middle** of it: Apple names the same district at 4 spots 150 m around the pin.
+      Then it is filled.
+   3. A home near an **edge** (the 4 spots disagree) is filled only if Google Maps names the same district.
+   4. If Apple has no answer, the wrong city, or a name not on our list, ask Google Maps. A name on our list → fill.
+      A real district not on our list → it may be added, through the guards above.
+   5. If nobody knows, the home stays city-only. It is still searchable in its city; never guess.
+   6. **No «تقريبي» label** (owner 2026-10-25: «I don't like تقريبي»). The district shows as the district.
+
+   Fills go into `listing_pin_district` (switched off), and a migration switches them on. That migration's version
+   goes in `FLIP_ALLOWED` in `verify-pin-district-fill-contract.ts` in the same PR. They reach search through the
+   recovery arm. The pin guard `trg_pin_district_on_list` refuses any name not on that city's list and stores the
+   list's spelling. Undo is `applied = false` for that `run_id` plus deleting the `basis = 'pin'` rows of
+   `district_recovery`, in one transaction.
+
+   Batch 2 (315 homes) was switched on 2026-10-25 by `20261025214336`. The 123 edge homes and the 430 Apple
+   couldn't answer are in the nightly Google Maps check: scheduled task `google-maps-district-check`, folder
+   `~/Documents/google-maps-key/daily-check/` on the owner's Mac.
+9. **NEVER DUPLICATES, FOR EVERY LISTING (owner 2026-10-25, permanent).** Two things are now automatic, and you must
+   never work around them:
+   - **The list:** besides rule 7, a name is refused when its LETTERS equal a listed name in that city (spaces, punctuation
+     and a final ا/ه ignored; a final hamza and a one-letter sequel tail kept), equal it without «ال», equal it with the
+     town's name stuck on, or are one letter away. If the guard refuses your name, the error tells you which listed name
+     it is a copy of: use THAT name. A real district that is one letter from another («الريحان» / «الريان») needs the
+     owner, who names it: `set ezhalah.district_guard_ok = '<name>'` in the same statement.
+   - **Search:** `loc_display_district_ar()` folds a site's copy spelling onto the list name at every sync (same letters /
+     without «ال» / town stuck on). So a copy can only show as a second district when the real name is NOT on the list.
+     The alarm `district_copies_unlisted` (P2) lists those pairs with ad counts: your job is to add the real district name,
+     ONE spelling, through the guards (rule 6: 3+ ads, Apple confirms); the fold joins the copies at the next sync.
+     Never add the second spelling. `district_near_twins_served` (P2) pairs are the OWNER's, not yours: report them.
+     Hofuf «ضاحية هجر …» names stay with the owner.
+10. **ONE NAME, ONE LIST (owner 2026-10-25, permanent).** A place with districts under it is a CITY; a place without
+    is a DISTRICT of the city next to it. The database refuses: a new city that is already a city within 40 km (or in the
+    region, when its distance is unknown) or a district of such a city; a new district named like its own city or like a
+    nearby city that has districts; and any delete of a city or a district. If a site names a place you cannot find in
+    either list, decide with the rule, then add it to ONE list; if the guard refuses, read the error: it names the row that
+    already holds the name. A real town that shares a district's name needs the owner: `set ezhalah.city_guard_ok =
+    '<name>'` in the same statement. The alarm `place_list_leaks` (P2) lists the old leaks: those are the owner's merges,
+    never yours — never delete, never remap a city yourself.
 
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
@@ -581,6 +684,21 @@ Your history, read from the routine log on 2026-10-03:
 
 ## Lessons from real breakages (use them)
 
+- **2026-10-30 (owner: «make sure the engineers are aware and we never ever get this issue again» — the map pin).**
+  rakez served 3,660 ads with 0 pins for six weeks while its map page's feed named every project's lat/lng; the same
+  sweep found 8 more sites (compoundin, mustqr, alkhaas, awal, hajer, daryusuf, shatri, wslnaa) — all fixed, all in
+  `docs/ops/reports/PIN_CAPTURE_FLEET_2026-10-30.md`. Your rules from it:
+  1. **New ads arriving without a pin is a finding, not a trait of the site**, until someone looked in **all four
+     places** on a rendered ad page: the page · its embedded JSON / data attributes / network calls · a site-wide map or
+     list feed · the parent project/compound page. Never geocode, never read an office/default pair printed on every ad.
+  2. **Read the declaration before you write «the source has no pins»:** `data/pin-sources.json`. A platform declared
+     `ad-page | page-json | feed | project-page | partial` whose new ads arrive at 0 % is a scraper bug for tonight
+     (`select * from pin_coverage_by_platform() where below_floor` names it; the hourly detector
+     `mon_detect_pin_coverage_below_floor()` raises it as P1); a platform with no row at all is an unfinished launch
+     (checklist box 10) — say so in your report, do not invent a verdict.
+  3. **Your proof is the served index, before → after**, on a fixed id set (`search_listings_ar.latitude`), never the
+     raw table alone: the pin reaches the customer only after the :22 sync, and `keep_stored_pin` / the default-pin
+     strip can change what is served.
 - **2026-10-10 (copied by 🔧 QA):** read `date -u` before any time-based decision, never estimate the clock (misread 07:31 as 08:05 and nearly skipped a fix). And a «district in search but not in the picker» found within the hour is the :20 refresh / :22 sync order (≤ ~1 h lag), not a defect: re-query `district_options_ar` before logging it.
 - **🦅 Falcon 10-09 — the frozen snapshot can contradict the source's own district.** `listing_native_location_v1`
   falls back to `listings_arabic_locations` for `district_ar` when the native arm yields NULL; 471 served listings
@@ -923,3 +1041,89 @@ push engineer work on `claude/*` branches, scrapers-only, docs separate, and the
   migration mirror, merged the moment it is green. 10-19: the GitHub runner queue was 28 deep at 08:00 UTC and the re-score
   dispatched after the merge never left the queue → dispatch the branch re-score right after the first green push (by
   minute 30), never after the merge, and write its run id in the report so 🔧 can read it.
+
+## Lesson from 2026-10-20 (copied by 🔧 from your own report — ⚡ wrote the same lesson on 10-18, so it is a fleet rule)
+- **A scraper fix whose site needs the residential proxy cannot be proven while the proxy is down.** Check the site's last
+  crawl (`last_seen_at`) and the proxy state BEFORE choosing it as a night's job (10-20: snam «Ad Dirah», PR #7847, left
+  proof pending — and ⚡ had set snam dormant at 05:34 UTC, so the 14 rows were not even served). A job you cannot prove
+  inside your slot is paired with one you can, or goes to ♻️ / the automatic liveness.
+- 🔧 adds: write the `new_listings_engineer:start` row first — on 10-20 you wrote proofs and an end row but no start row, and
+  `ops_engineer_review` read you as NOT RUN.
+
+## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
+
+1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
+   with a published period is YEARLY: a per-month figure pools under «سنوي» at ×12 (`price_annual` is
+   already monthly×12), the card reads «/سنوياً» and keeps the site's word: «السعر المعلن 3,000 شهرياً».
+   A price-on-request row from any other site shows under «سنوي»/«كلاهما» only. Pool = `rent_pool_ar()`.
+2. **A «yearly» rent under 8,000 SAR on a home/business unit is a per-month price** (Apartment, Villa,
+   Floor, Duplex, Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom,
+   Commercial Building; rooms/land/rest houses/chalets/camps/farms are OUT). The index SERVES it ×12
+   through `rent_price_annual_ar()`; the card does the same (`src/lib/rentPool.ts::cheapYearlyIsMonthly`).
+   The SOURCE TABLES ARE UNTOUCHED — keep storing the site's figure and the site's word (PRICE = SOURCE,
+   PERIOD = SOURCE). Never «fix» a scraper to ×12 a cheap yearly figure: that would double-apply the rule.
+3. **Stay-length cards (Gathern / Aqar Monthly) print NO price line at all**; every yearly card carries a
+   monthly line («السعر المعلن N شهرياً» or «≈ N شهرياً»).
+4. **Off switches:** `ops_feature_flags.short_stays_pool`, `ops_feature_flags.cheap_yearly_is_monthly`
+   (off = the pre-rule behaviour on the next hourly sync). **Guards:** `mon_detect_short_stays_pool_drift()`,
+   `mon_detect_cheap_yearly_rent_served()` (both P1, twice an hour), `verify-short-stays-pool.ts`,
+   `verify-cheap-yearly-is-monthly.ts`, `verify-stay-length-platforms-show-a-note-not-a-price.ts`.
+   An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
+   sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
+   the type list.
+
+## Lessons from 2026-10-25 and 2026-10-27 (copied by 🔧; the first appeared on two nights across engineers)
+
+- **Merge `origin/main` into the branch before the first push and ship the fix as one commit** (🆕 10-25: a BEHIND
+  branch fails «Tests keep their assertions»; ⚡ 10-27: a scrapers-only PR auto-merges on its first green push, so
+  the second commit lands on a merged PR). The branch proof goes out by minute 20 of the slot.
+- **A serving-rule change must be checked against every robot that reads the index, against the SOURCE table**
+  (🆕 10-27: the yearly-pool rule changed what the index says about a rent and the scorer read it as a mismatch).
+
+## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
+  06:54, after the slot, and a crawl after :20 cannot be customer-proven before the next hour's :22 sync (run
+  41175323616, daryusuf still Rent at 13:30). 🆕 10-31: two fixes merged whose proofs landed at 09:46 / 17:15, outside
+  the slot — rating 8 → 6 on timing alone. 🔧 10-24 / 10-25 lost the band the same way. Rule: pick the proof listing
+  BEFORE the fix, dispatch the proof crawl or journey before minute 30 and before :20 of the hour, and never choose a
+  job whose only proof lands after your slot (hand it to ♻️ or the automatic liveness instead).
+- **② A clean reading means nothing until you know HOW it was read.** ♻️ 10-30: one fingerprint (chrome124) was sent
+  home on ~90 live Gathern units and read «transient» every hour; ♻️ 10-31: albukaeri, superoffice and azdad were read
+  by HTTP status, their removed pages answer 200, so 23 dead ads sat on screen up to 18 days behind a clean row;
+  🔬 10-31: the score session's own cookies built a «recently viewed» strip on tuba that was read as the ad. Rule: before
+  trusting any robot's verdict print its method / fingerprint / session and compare with a plain read and a real browser
+  on the same URL; every body-reading site gets its own reader.
+- **③ Read one REAL record before coding against a field, and re-read the ad before touching data.** 🆕 10-31:
+  `url_path` existed only in our capture, not in the detail API — a 20-minute crawl read 0 of 952 pages. 🔬 10-30: a
+  «fabricated value» alarm on 12 rows was aqar's own value from a re-categorised ad. 🔧 10-31: 701 «stuck» prices were
+  the owner's own served meter-box rule, and the «absurd» wasalt totals are the seller's own words («سعرها 40500000000
+  ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
+  record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
+  truth.
+
+## 📚 FLEET LESSONS 2026-11-01 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A robot merge fires no push-triggered workflow — dispatch the follow-on yourself, the same minute.** 🔬 10-30: a
+  reader-version bump squashed by the auto-merge bot never ran its reader; 🔬 11-01 again: the word-reader fix #9783 sat
+  unread until `facts-words-reader` was dispatched by hand at 10:39 (run 41298393767). The same shape cost ⚡ its night
+  on 11-01: a queued nightly job checked out the DISPATCH-time commit and overwrote the fixed 06:54 crawl (backlog 1139).
+  Rule: after `engineer-automerge` merges your PR, dispatch the workflow that consumes it and read the RUN's commit SHA —
+  a fix is live only when a run from the FIXED commit is the LAST writer (⚡ 11-01). Seen on two nights → written into
+  🔬's rulebook as a rule.
+- **② Pick the job by where its PROOF lands, not by where the bug is.** ⚡ 11-01: three fixes merged, zero proven —
+  runners were saturated and every proof crawl queued past the slot (rating 4). 🆕 11-01: a migration job chose at
+  minute 70 met `apply_migration`'s confirmation prompt that nobody answers at night (draft #9761, nothing applied).
+  ♻️ 11-01 did it right: proofs dated to a NAMED job and UTC time (aqar-liveness 01:00 11-02; gathern-liveness 12:37/13:37)
+  so they count tomorrow instead of failing tonight. Rule: at minute 10 write, per job, the proof's workflow + the UTC
+  time it can land; a job whose proof needs a runner you cannot get or a prompt nobody can answer is swapped for one
+  whose proof is a CI journey or an RPC replay inside the slot — and a migration goes out as a ready draft PR at minute
+  10, never at minute 70.
+- **③ When a robot's number disagrees with the database, read what the robot TYPED before you read the RPC.** 🔧 11-01:
+  backlog 1141 «Filter total 11 vs DB 1» was the journey typing 11 digits into a 10-digit price box
+  (21,750,000,000 → 2,175,000,000; 11 is exactly the DB count for the band the box kept) — not a search bug. 🔧 11-01
+  also: mirror PR #9791 sat 2 h 40 min «red» because GitHub lists a PR's files against the merge BASE, so a mirror whose
+  file already reached main through another PR reads as a 1-file PR (the robot's empty-mirror rule never fires) and fails
+  a stale-mirror check its stale branch cannot pass. ♻️ 11-01 (1147): the sweep SESSION read a dead Gathern unit as
+  no-verdict 36 times while a fresh session read its 404. Rule: a robot's input, session and diff-base are part of the
+  measurement — print them in the evidence before judging the product with the robot's number.

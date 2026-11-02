@@ -1,17 +1,23 @@
 // The main link's WhatsApp/iMessage card carries LIVE, TRUE numbers — or none (owner 2026-10-18).
-//   «محرك بحث عقاري بالذكاء الاصطناعي: 149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
+//   «149 موقع · 385,330 إعلان · 346 مدينة» (2026-10-19; the sentence form was cut at the city count)
 //
 // EXECUTED, not grepped: the real builder (inlined in middleware.ts since 2026-10-19) runs against PostgREST-shaped bodies,
 // including the failure shapes supabase-js/PostgREST really produce (error objects, null, empty arrays,
 // zero counts). A failed read must print the number-free fallback, never «0 موقع» or a partial line.
 // The middleware is then executed with a stubbed fetch: people pass through untouched, bots get the card,
 // a failing database still gets a card (the fallback), never a thrown error.
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { liftSymbols } from './lib/liftSymbols.ts';
 import {
-  homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot,
+  homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot, PREVIEW_BOT_UA,
   HOME_CARD_FALLBACK_AR, HOME_CARD_IMAGE_PATH, HOME_CARD_TITLE_AR, HOME_CARD_HEADLINE_AR,
+  HOME_CARD_HEADLINE_EN, HOME_CARD_FALLBACK_EN, cardLangOf,
 } from '../middleware.ts';
 
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : `  — ${detail}`}`); };
 const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
@@ -19,7 +25,29 @@ const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches 
 const SITES = Array.from({ length: 149 }, (_, i) => `site${i}`);
 const SCALE = [{ city_count: 346, listing_count: 385330, district_count: 5547 }];
 const good = homeCardDescription(homeCardFactsFrom(SITES, SCALE));
-check('the owner-approved numbers line, exact digits', good === '149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.', good);
+
+// SITES ARE COUNTED LIKE THE APP (owner 2026-10-19: the app says 148, the RPC lists 149 slugs because
+// `aqarmonthly` is a source but not a platform). EXECUTED: the app's real normalizeSource() is lifted
+// from loaderPlatforms.ts and run over a realistic slug list; the card's count must equal the number of
+// distinct platforms the app would show. If SOURCE_TOKENS ever folds another pair, this goes red.
+{
+  const lp = await liftSymbols(join(root, 'src/data/loaderPlatforms.ts'), [
+    { header: 'const SOURCE_TOKENS: Array<[string, string]> = [', endsWith: /^\];$/ },
+    { header: 'export function normalizeSource(' },
+  ], ['normalizeSource']);
+  const normalizeSource = lp.normalizeSource as (raw: string) => string | null;
+  const REAL_SLUGS = ['aqar', 'aqaralriyadh', 'aqaralsaudia', 'aqaratikom', 'aqarcity', 'aqargate', 'aqarmonthly', 'aqarnajran',
+    'dealapp', 'eaqartabuk', 'goldendeal', 'ksaaqar', 'wasalt', 'gathern', 'haraj', 'abeea', 'sakan', 'remal'];
+  const appCount = new Set(REAL_SLUGS.map((x) => normalizeSource(x) ?? x)).size;
+  const cardCount = homeCardFactsFrom(REAL_SLUGS, SCALE).sites;
+  check(`the card counts sites exactly as the app does over the real slugs (app ${appCount}, card ${cardCount})`, cardCount === appCount);
+  check('aqarmonthly folds into aqar: 150 raw slugs with both → 149 sites', homeCardFactsFrom([...SITES, 'aqar', 'aqarmonthly'].slice(1), SCALE).sites === 149);
+  mustCatch('a card that counts raw slugs (149 where the app shows 148)', REAL_SLUGS.length !== cardCount);
+}
+check('the owner-approved numbers line, exact digits (2026-10-25: no site count — the message says it — and «بالمملكة»)', good === '385\u066C330 إعلان · 346 مدينة بالمملكة', good);
+check('no «,» inside a number: a narrow WhatsApp card broke «421,077» after the comma and showed «421,» (2026-10-29)', !good.includes(','));
+mustCatch('the site count printed twice (message + card, owner 2026-10-25)', good !== '149 موقع · 385,330 إعلان · 346 مدينة');
+mustCatch('the «و…في…، كلها في مكان واحد.» line WhatsApp cut at the city count', good !== '149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.');
 check('the owner-approved title', HOME_CARD_HEADLINE_AR === 'إزهله، محرك بحث عقاري بالذكاء الاصطناعي');
 // IT ALL SHOWS (owner 2026-10-18: «the message doesn't show fully»). WhatsApp's small card shows ~2 lines
 // of title and ~2 lines of description before cutting. Measured against the BIGGEST numbers we could reach.
@@ -69,6 +97,20 @@ mustCatch('the import that blocked every deploy', localImports("import { x } fro
 // Bots vs people.
 for (const ua of ['WhatsApp/2.24.1 A', 'facebookexternalhit/1.1 Facebot Twitterbot/1.0', 'TelegramBot (like TwitterBot)']) check(`preview bot recognised: ${ua.slice(0, 24)}`, isPreviewBot(ua));
 for (const ua of ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1', 'Mozilla/5.0 (compatible; Googlebot/2.1)', '']) check(`not a preview bot: ${ua.slice(0, 24) || '(empty)'}`, !isPreviewBot(ua));
+// IN-APP BROWSERS ARE PEOPLE (owner 2026-10-23: a shared link «didn't open» inside Snapchat). Each carries its
+// app's name; none may be served the preview page instead of the site.
+const IN_APP = {
+  Snapchat: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Snapchat/13.12.0.36 (like Safari/8614.2.9.1.15, panda)',
+  Instagram: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0.0.25.112 (iPhone15,3; iOS 18_0; ar_SA)',
+  Facebook: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [FBAN/FBIOS;FBAV/480.0.0.39.106;FBBV/650000000]',
+  TikTok: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 musical_ly_36.5.0 BytedanceWebview/d8a21c6',
+  X: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Twitter for iPhone/10.70',
+  Viber: 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36 Viber/24.1.0.2',
+  LinkedIn: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [LinkedInApp]/9.31.320',
+};
+for (const [app, ua] of Object.entries(IN_APP)) check(`a person in ${app}'s in-app browser gets the site, not the preview page`, !isPreviewBot(ua));
+check('Snapchat\'s own preview fetcher still gets the card', isPreviewBot('Mozilla/5.0 (compatible; Snap URL Preview Service; bot; snapchat; https://developers.snap.com/robots)'));
+mustCatch('an app name back in the bot list (the Snapchat «didn\'t open»)', new RegExp(`${PREVIEW_BOT_UA.source}|snapchat`, 'i').test(IN_APP.Snapchat));
 
 // Execute the middleware itself with a stubbed fetch.
 process.env.EXPO_PUBLIC_SUPABASE_KEY = 'test-key';
@@ -82,6 +124,22 @@ check('a person is passed straight through (no response, no database read)', (aw
 const botRes = await mw(req('WhatsApp/2.24'));
 const botHtml = botRes ? await botRes.text() : '';
 check('WhatsApp gets the card with live numbers', !!botRes && botHtml.includes(good), botHtml.slice(0, 200));
+// THE ENGLISH CARD (owner 2026-10-29): the English share link ezhalah.com/?lang=en gets the Arabic card translated
+const goodEn = homeCardDescription(homeCardFactsFrom(SITES, SCALE), 'en');
+check('English numbers line: «385,330 listings · 346 cities in Saudi Arabia» (a word joiner keeps «385,330» whole)',
+  goodEn === '385,⁠330 listings · 346 cities in Saudi Arabia', goodEn);
+check('English title', HOME_CARD_HEADLINE_EN === 'Ezhalah, the AI real estate search engine');
+check('English title and line fit the card', fits(HOME_CARD_HEADLINE_EN, homeCardDescription({ sites: 999, listings: 9_999_999, cities: 9_999 }, 'en')) && fits(HOME_CARD_HEADLINE_EN, HOME_CARD_FALLBACK_EN));
+check('English fallback has no digits, and a broken read gives it', !/\d/.test(HOME_CARD_FALLBACK_EN) && homeCardDescription(null, 'en') === HOME_CARD_FALLBACK_EN);
+check('only ?lang=en picks English; the plain link and anything else stay Arabic',
+  cardLangOf('https://ezhalah.com/?lang=en') === 'en' && cardLangOf('https://ezhalah.com/') === 'ar' && cardLangOf('https://ezhalah.com/?lang=fr') === 'ar' && cardLangOf('nonsense') === 'ar');
+const enRes = await mw(new Request('https://ezhalah.com/?lang=en', { headers: { 'user-agent': 'WhatsApp/2.24' } }));
+const enHtml = enRes ? await enRes.text() : '';
+check('WhatsApp on ?lang=en gets the ENGLISH card (title, live line, English page, its own url)',
+  enHtml.includes(`<meta property="og:title" content="${HOME_CARD_HEADLINE_EN}">`) && enHtml.includes(`content="${goodEn}"`)
+  && enHtml.includes('<html lang="en" dir="ltr">') && enHtml.includes('og:url" content="https://ezhalah.com/?lang=en"'), enHtml.slice(0, 300));
+check('…and the plain link still gets the Arabic card', botHtml.includes(`<meta property="og:title" content="${HOME_CARD_HEADLINE_AR}">`) && !botHtml.includes(HOME_CARD_HEADLINE_EN));
+mustCatch('an English link served the Arabic card', !(botHtml.includes(`content="${HOME_CARD_HEADLINE_EN}"`)));
 
 // A failing database: the card still answers, with the fallback (fresh module so nothing is kept).
 const mw2 = (await import('../middleware.ts?fail')).default as (r: Request) => Promise<Response | undefined>;

@@ -22,11 +22,8 @@
 # STRICT_ERA_BASELINE: history grandfathered, the present held to the rule.
 #
 # Format: one lowercase object name per line.
-aqarcity_commercial_listings
-aqarcity_residential_listings
 capture_crawl_stats
 composite_match_city_ids
-listings_arabic_locations
 norm_en_place
 normalize_ar
 reactivate_suspect_inactive
@@ -35,7 +32,4 @@ safe_bigint
 safe_bool
 safe_int
 safe_numeric
-search_listings_ar
 trigger_gh_workflow
-wasalt_commercial_listings
-wasalt_residential_listings

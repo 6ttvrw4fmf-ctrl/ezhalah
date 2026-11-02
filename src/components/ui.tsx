@@ -17,6 +17,7 @@ import Animated, {
 import { useThemePalette } from '@/lib/appearance';
 import { alpha0 } from '@/theme/palette';
 import { colors, radius } from '@/theme/tokens';
+import { selectionShadowRgb } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -156,8 +157,14 @@ function CrossfadeTintIcon({ source, p, off, on, size }: {
   const fill = { position: 'absolute' as const, top: 0, left: 0, width: size.width, height: size.height };
   return (
     <View style={[size, { overflow: 'hidden' }]}>
-      <AnimatedImage source={source} resizeMode="contain" style={[fill, { tintColor: off }, offA]} />
-      <AnimatedImage source={source} resizeMode="contain" style={[fill, { tintColor: on }, onA]} />
+      {/* KEYED BY THE TINT (owner bug 2026-11-01: on an iPhone in dark mode the unselected «تجاري», «الفلل والبيوت»,
+          «الاستراحات والريف», «الأراضي السكنية» icons were dark-on-dark, invisible). react-native-web tints through an
+          SVG filter whose id is fixed per Image; when the palette flips (light first paint → dark) only the filter's
+          flood colour changes under the SAME url(#tint-N), and Safari never repaints the image — so an icon drawn
+          before the theme settled kept the light theme's dark ink. A new key per colour mounts a fresh Image with a
+          fresh filter id, which every engine paints. */}
+      <AnimatedImage key={`off-${off}`} source={source} resizeMode="contain" style={[fill, { tintColor: off }, offA]} />
+      <AnimatedImage key={`on-${on}`} source={source} resizeMode="contain" style={[fill, { tintColor: on }, onA]} />
     </View>
   );
 }
@@ -209,8 +216,8 @@ function SegButton({ label, on, onPress, icon }: { label: string; on: boolean; o
     // web keyboard-focus ring (a11y) + selection glow bloom; native uses shadow* props for the same glow
     ...(Platform.OS === 'web'
       ? { outlineStyle: 'solid', outlineColor: colors.primary, outlineWidth: focus.value * 2.5, outlineOffset: 2,
-          boxShadow: `0px ${glow.value * 5}px ${glow.value * 14}px rgba(20,80,45,${glow.value * 0.28})` }
-      : { shadowColor: '#14502d', shadowOpacity: glow.value * 0.28, shadowRadius: glow.value * 14, shadowOffset: { width: 0, height: glow.value * 5 }, elevation: glow.value * 5 }),
+          boxShadow: `0px ${glow.value * 5}px ${glow.value * 14}px rgba(${selectionShadowRgb},${glow.value * 0.28})` }
+      : { shadowColor: colors.primary, shadowOpacity: glow.value * 0.28, shadowRadius: glow.value * 14, shadowOffset: { width: 0, height: glow.value * 5 }, elevation: glow.value * 5 }),
   }));
   const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [pal.muted, pal.onFill]) }));
   return (
@@ -269,8 +276,8 @@ export function OptionBox({ label, selected, onPress, style, img, compact = fals
     // web keyboard-focus ring (a11y) + selection glow bloom; native uses shadow* props for the same glow
     ...(Platform.OS === 'web'
       ? { outlineStyle: 'solid', outlineColor: colors.primary, outlineWidth: focus.value * 2.5, outlineOffset: 2,
-          boxShadow: `0px ${glow.value * 7}px ${glow.value * 16}px rgba(20,80,45,${glow.value * 0.30})` }
-      : { shadowColor: '#14502d', shadowOpacity: glow.value * 0.30, shadowRadius: glow.value * 16, shadowOffset: { width: 0, height: glow.value * 7 }, elevation: glow.value * 6 }),
+          boxShadow: `0px ${glow.value * 7}px ${glow.value * 16}px rgba(${selectionShadowRgb},${glow.value * 0.30})` }
+      : { shadowColor: colors.primary, shadowOpacity: glow.value * 0.30, shadowRadius: glow.value * 16, shadowOffset: { width: 0, height: glow.value * 7 }, elevation: glow.value * 6 }),
   }));
   const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [pal.ink, pal.onFill]) }));
   return (
@@ -357,7 +364,7 @@ const s = StyleSheet.create({
   // pointer cursor on web for a premium, obviously-tappable feel.
   box: { flex: 1, minHeight: 46, paddingVertical: 12, paddingHorizontal: 8, borderRadius: radius.chip, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
   // Softer, larger, green-tinted elevation for the selected chip (premium depth vs the old hard shadow).
-  boxShadow: { shadowColor: '#14502d', shadowOpacity: 0.24, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 5 },
+  boxShadow: { shadowColor: colors.primary, shadowOpacity: 0.24, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 5 },
   boxText: { fontSize: 12.5, fontWeight: '600', lineHeight: 16, textAlign: 'center' },
   boxTextOn: { fontWeight: '700' }, // selected state reinforced by weight, not colour alone (skill a11y rule)
   // ENGLISH (owner 2026-10-09: ChatGPT-sized, not heavy). Latin at 12.5/600 reads louder than the Arabic and
@@ -374,9 +381,9 @@ const s = StyleSheet.create({
   optIconCompact: { width: 20, height: 20 },
   optIcon: { width: 24, height: 24, marginBottom: 6 },
 
-  cta: { backgroundColor: colors.primary, borderRadius: radius.field, paddingVertical: 15, alignItems: 'center' },
+  cta: { backgroundColor: colors.selFill, borderRadius: radius.field, paddingVertical: 15, alignItems: 'center' },
   ctaText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
 
-  fieldLabel: { fontSize: 11, fontWeight: '700', color: colors.primary, letterSpacing: 0.55, marginBottom: 8, marginHorizontal: 2 },
+  fieldLabel: { fontSize: 11, fontWeight: '700', color: colors.primary, marginBottom: 8, marginHorizontal: 2 }, // Arabic: no tracking
   fieldLabelEn: { fontSize: 13, fontWeight: '500', letterSpacing: 0 },
 });

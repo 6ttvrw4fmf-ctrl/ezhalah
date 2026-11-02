@@ -279,6 +279,24 @@ def _make_verify_gone(url_by_ad: dict[str, str], ribbon_by_uid: dict[str, str]):
     return verify_gone
 
 
+DIRECT_ALIVE_ORACLE = "fkralemar.detail_fetch.product_container_uid+card_ribbon"
+
+
+def stamp_crawl_read(row: dict, card: dict, page_html: str, ribbon_by_uid: dict[str, str]) -> bool:
+    """Mark a row built from its own product page as directly read alive — only when its card ribbon is
+    the MEASURED live word «للبيع» (an unmeasured ribbon is written but never certified) AND the removal
+    oracle's live limb holds on that same page (200 + product-container data-unique-id=<this id>)."""
+    uid = str(card.get("uid") or "")
+    if row.get("active") is not True or card.get("ribbon") != FOR_SALE:
+        return False
+    if row.get("ad_number") != f"{PREFIX}{uid}":
+        return False
+    if _signal_for(uid, ribbon_by_uid)(200, page_html, False) != "live":
+        return False
+    db.mark_direct_alive(row, oracle=DIRECT_ALIVE_ORACLE)
+    return True
+
+
 def enumerate_catalogue(s: cc.Session) -> tuple[dict[str, dict[str, str]], dict[str, str], dict[str, str]]:
     """(cards by uid, category name by uid, category city-text by category name). Store front + every
     category page; a card seen on several pages keeps the first ribbon (identical on all — measured)."""
@@ -335,12 +353,16 @@ def main() -> int:
             if not ok:
                 continue
             time.sleep(_PAUSE)
-            product = parse_product(fetch(s, BASE + card["href"]))
+            page = fetch(s, BASE + card["href"])      # raises on any non-200: nothing is stamped
+            product = parse_product(page)
             cat_name = cat_of.get(card["uid"]) or ((product.get("category") or [None, None])[1])
             row, cat, why = map_listing(card, product, cat_name, city_text.get(cat_name or "", ""))
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
+            # THE CRAWL IS THE ORACLE (owner 2026-10-26: every ad we show gets a direct check). Built
+            # from ITS OWN product page this run; certified only by the removal oracle's own live limb.
+            stamp_crawl_read(row, card, page, ribbon_by_uid)
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)

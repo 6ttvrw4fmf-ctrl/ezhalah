@@ -256,6 +256,26 @@ def verify_gone(ad_number: str, s: Optional[cc.Session] = None) -> tuple[str, st
     return "gone", "page still renders but the site's complete catalogue no longer lists it"
 
 
+CRAWL_LIVE_ORACLE = "alrifai.detail_fetch.page_and_catalogue"
+
+
+def mark_crawl_read_live(row: dict, pid: str, catalogue: set[str], status: Optional[int],
+                         page: str) -> bool:
+    """Stamp a row the crawl itself proved live by verify_gone's own rule (2026-10-27).
+
+    verify_gone's LIVE is «the id's own page renders (a title, not the empty shell) AND the site's
+    complete catalogue lists it». The crawl establishes exactly that for every row it writes: the
+    id came from THIS run's catalogue and its own page answered 200 with a title. A full catalogue
+    re-read every night meant no row ever reached grace, so verify_gone was never asked and none of
+    the 17 active rows had ever been verified. Zero extra requests: this records reads already made.
+    Anything short of that (another status, an empty body, the shell, an id the catalogue does not
+    list) stamps nothing — UNKNOWN is never evidence."""
+    if status != 200 or not page or pid not in catalogue or not parse_detail(page)["title"]:
+        return False
+    db.mark_direct_alive(row, oracle=CRAWL_LIVE_ORACLE)
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -287,6 +307,8 @@ def main() -> int:
                 continue
             fetched += 1
             row, cat, why = map_listing(pid, parse_detail(page))
+            if row:
+                mark_crawl_read_live(row, pid, set(ids), st, page)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue

@@ -26,3 +26,10 @@ def test_structured_site_prose_never_asks():
 
 def test_prose_site_still_asks():
     assert says_yes(PROSE, "kitchen", "alkhaas", {}) is True
+
+
+def test_reinvest_parking_is_its_count_not_its_prose():
+    """🔬 10-24: 6 of 7 reinvest misses asked parking from «موقف» prose; its parking is info_fields.parking_count."""
+    lines = ["شقة للإيجار مع موقف خاص ومطبخ راكب"]
+    assert says_yes(lines, "parking", "reinvest", {}) is False
+    assert says_yes(lines, "kitchen", "reinvest", {}) is True, "kitchen has no structured home there: prose still states it"

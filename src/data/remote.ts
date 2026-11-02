@@ -2,10 +2,12 @@ import { selectSourceTables } from '@/lib/agentSourceSelection';
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
 import { listingPriceString, isDerivedTotal, type Listing } from './listings';
+import { rentPool, cardFetchPeriodOr, cheapYearlyIsMonthly } from '@/lib/rentPool';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
+import { honestTotal } from '@/lib/honestTotal';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { normalizeType, queryForSelection, queryForTypes, storedRawTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
@@ -15,7 +17,9 @@ import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
 import { dedupePhotoUrls, photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
-import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
+import { listingDiscountFrom } from '@/lib/listingDisplay';
+import { servedSaleFigures } from '@/lib/meterBoxPrice';
+import { orderByScope, scopeForDistricts, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
 import { truncateGlyphs } from '@/lib/typedReveal';
 import saLocations from './sa-locations.json';
@@ -856,10 +860,12 @@ export type GuidedCounts = {
   cnt_bath2: number;
   cnt_bath3: number;
   cnt_bath4: number;
+  cnt_bath5: number; cnt_bath6: number; // villa ladders (owner 2026-11-01: Buy 3+…6+, Rent 2+…5+)
   // Cohort expansion 2026-08-15: direction + street-width counts (ResBldg/Apartment-Buy questions).
   cnt_dir_n: number; cnt_dir_s: number; cnt_dir_e: number; cnt_dir_w: number;
   cnt_dir_ne: number; cnt_dir_nw: number; cnt_dir_se: number; cnt_dir_sw: number;
   cnt_stw15: number; cnt_stw20: number; cnt_stw25: number; cnt_stw30: number;
+  cnt_stw10: number; cnt_stw40: number; cnt_stw60: number; // 20261102101415: the plots / retail ladders
   // Villa cohort 2026-08-16: aqar villa-form chips (مدخل سيارة / صرف صحي).
   cnt_car_entrance: number; cnt_sanitation: number;
   // Commercial expansion 2026-08-16: the utility chips the commercial market actually splits on.
@@ -868,6 +874,7 @@ export type GuidedCounts = {
   // chips, so they need counts. Same template row, same committed scope (migration 20260902220000).
   cnt_gym: number; cnt_pool: number; cnt_garden: number; cnt_balcony: number; cnt_laundry_room: number;
   cnt_optical_fibers: number; cnt_separate_electricity_meter: number; cnt_separate_water_meter: number;
+  cnt_majlis: number;
   cnt_selected: number;
   // Monthly (2026-08-18): Gathern rating thresholds + unit-subtype chips. Data-derived cuts on the
   // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
@@ -878,6 +885,42 @@ export type GuidedCounts = {
   // amenity column NULL (the listing stated no amenity at all).
   cnt_rnpl_unknown: number; cnt_amen_unknown: number; cnt_bath_unknown: number;
   cnt_stw_unknown: number; cnt_rating_unknown: number; cnt_sub_unknown: number;
+  // Apartments & Co-living group (owner handoff 2026-10-31, migration 20261101100930): one cnt_<token> per
+  // chip in src/lib/afChips.ts CHIP_DEFS — 39 boolean columns + 6 derived predicates (separate_meters,
+  // apts4/8/12/20 on apartments_count, has_shops on shops_count) — plus the two «لم يذكر» counts.
+  cnt_roof: number; cnt_two_entrances: number; cnt_annex: number; cnt_yard: number; cnt_garage: number;
+  cnt_grill: number; cnt_storage: number; cnt_water_tank: number; cnt_warranty: number; cnt_electronic_deed: number;
+  cnt_basement: number; cnt_self_checkin: number; cnt_wifi: number; cnt_bills_included: number; cnt_jacuzzi: number;
+  cnt_smart_tv: number; cnt_billiards: number; cnt_cleaning_service: number; cnt_soundproof: number; cnt_cameras: number;
+  cnt_guard: number; cnt_smart_entry: number; cnt_smart_home: number; cnt_central_gas: number; cnt_sauna: number;
+  cnt_kids_play_area: number; cnt_nursery: number; cnt_free_maintenance: number; cnt_intercom: number; cnt_fire_system: number;
+  cnt_ev_charger: number; cnt_central_vacuum: number; cnt_insulation: number; cnt_dining_majlis: number; cnt_own_bathroom: number;
+  cnt_fridge: number; cnt_whole_floor: number; cnt_singles: number; cnt_families: number;
+  // Villas & Houses (owner lists 2026-11-01): seven text facts + five merged chips
+  cnt_women_majlis: number; cnt_outdoor_kitchen: number; cnt_outdoor_diwaniya: number; cnt_waterfall: number;
+  cnt_well: number; cnt_irrigation: number; cnt_sports_court: number;
+  cnt_garden_yard: number; cnt_jacuzzi_sauna: number; cnt_cameras_smart_home: number; cnt_water_tank_well: number; cnt_smart_home_entry: number;
+  // countryside, land, commercial (migrations 2026-11-02)
+  cnt_split_payments: number; cnt_heated_pool: number; cnt_kids_pool: number; cnt_water_slide: number; cnt_sea_view: number; cnt_football_pitch: number;
+  cnt_playstation: number; cnt_inflatable_games: number; cnt_sound_system: number; cnt_fire_pit: number; cnt_bait_shaar: number; cnt_mandi_pit: number;
+  cnt_outdoor_seating: number; cnt_tent: number; cnt_dunes_view: number; cnt_women_section: number; cnt_two_sections: number; cnt_events_hall: number;
+  cnt_privacy_screen: number; cnt_trees: number; cnt_for_families: number; cnt_for_youth: number; cnt_for_events: number; cnt_for_newlyweds: number;
+  cnt_quad_bikes: number; cnt_horses_stable: number; cnt_camels: number; cnt_toilets_on_site: number; cnt_lighting: number; cnt_artesian_well: number;
+  cnt_solar_power: number; cnt_palms: number; cnt_fruit_trees: number; cnt_fodder_crops: number; cnt_greenhouses: number; cnt_producing_farm: number;
+  cnt_animal_pens: number; cnt_poultry: number; cnt_farm_house: number; cnt_farm_rest_house: number; cnt_workers_housing: number; cnt_fence: number;
+  cnt_main_road: number; cnt_good_soil: number; cnt_corner_plot: number; cnt_three_streets: number; cnt_ready_to_build: number; cnt_raised_plot: number;
+  cnt_residential_commercial: number; cnt_all_services: number; cnt_asphalt: number; cnt_street_lights: number; cnt_approved_plan: number; cnt_direct_owner: number;
+  cnt_inside_project: number; cnt_floors_allowed: number; cnt_grant_land: number; cnt_no_services: number; cnt_camels_horses: number; cnt_palm_fruit_trees: number;
+  cnt_mezzanine: number; cnt_pantry: number; cnt_glass_front: number; cnt_frontage: number; cnt_in_mall: number;
+  cnt_in_tower: number; cnt_license: number; cnt_food_allowed: number; cnt_takeover: number; cnt_first_tenant: number; cnt_internet: number;
+  cnt_civil_defense: number; cnt_high_ceiling: number; cnt_hangar: number; cnt_insulated_panel: number; cnt_cold_storage: number; cnt_concrete_floor: number;
+  cnt_loading_dock: number; cnt_big_gate: number; cnt_truck_access: number; cnt_crane: number; cnt_racks: number; cnt_office_inside: number;
+  cnt_heavy_power: number; cnt_industrial_area: number; cnt_car_service: number; cnt_meeting_room: number; cnt_reception: number; cnt_coworking: number;
+  cnt_private_office: number; cnt_central_ac: number; cnt_shops_inside: number; cnt_offices_inside: number; cnt_apartments_inside: number; cnt_staff_housing_inside: number;
+  cnt_restaurant_cafe: number; cnt_car_wash: number; cnt_market: number; cnt_earning_income: number; cnt_stars_mentioned: number; cnt_rooms_suites: number;
+  cnt_oil_change: number; cnt_pumps: number; cnt_mosque: number; cnt_building_rules: number; cnt_pool_gym: number;
+  cnt_separate_meters: number; cnt_apts4: number; cnt_apts8: number; cnt_apts12: number; cnt_apts20: number; cnt_has_shops: number;
+  cnt_apts_unknown: number; cnt_shops_unknown: number;
 };
 
 // De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/
@@ -1173,6 +1216,10 @@ const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
 ]);
 function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
   if (!raw) return null;
+  // LEGACY rows carried under "rows" (owner 2026-10-20): the office sites whose additional_info was the bare
+  // rows array (aldarim, abwbna, alobid, bahadhabab, alhoshan) now store {rows, latitude, longitude} so the
+  // index can read the ad's pin from the object. The panel is exactly the rows it always was.
+  if (typeof raw === 'object' && !Array.isArray(raw) && Array.isArray(raw.rows)) raw = raw.rows;
   if (Array.isArray(raw)) {
     // TYPE COERCION (P0 fix 2026-08-18, Search & Matching QA run): the LEGACY array shape is stored
     // by the source scraper verbatim, and Wasalt publishes NUMERIC values for noOfParkings /
@@ -1491,7 +1538,7 @@ export type FetchListingsResult = { listings: Listing[] | null; pageCandidates: 
 // on the strict-contract fields. (filter contract.)
 function keptFiltersReq(q: SearchQuery, table?: string) {
   const tbl = table ?? tableFor(q);
-  let req = supabase!.from(tbl).select(LIST_SELECT).eq('active', true);
+  let req = supabase!.from(tbl).select(listSelectFor(tbl)).eq('active', true);
   if (!q.bothDeals && !q.dealCombined) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
@@ -1511,12 +1558,12 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //    period branch — it has no figure a period could misstate, and the card prints «سعر عند الطلب»
   //    with no period suffix. Mirrors the one line af_eligibility_clause() gained, so the rows the
   //    results RPC returns are never dropped here. A PRICED null-period row is still in neither.
-  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.eq.monthly,price_annual.is.null');
-  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'annual') {
-    req = req.or('rent_period.eq.annual,price_annual.is.null');
-  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'both') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.in.(monthly,annual),price_annual.is.null');
+  //  • «إقامات قصيرة» POOL (owner 2026-10-25): the clause per pool lives in src/lib/rentPool.ts — Short stays =
+  //    Gathern + Aqar Monthly only; a per-month figure on any other site is a YEARLY listing (×12), so the
+  //    yearly branch accepts it. Executed with mutation proofs by scripts/verify-short-stays-pool.ts.
+  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && (q.rentPeriod === 'monthly' || q.rentPeriod === 'annual' || q.rentPeriod === 'both')) {
+    const clause = cardFetchPeriodOr(q.rentPeriod, tbl);
+    if (clause) req = req.or(clause);
   }
   return req;
 }
@@ -1574,7 +1621,8 @@ function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean):
   // all of them → diversify by city like a region. (user: search all matches, balanced.)
   if (lm?.ambiguous && lm.cities && lm.cities.length > 1) return 'region';
   if (cities && cities.length > 1) return 'region';
-  if (q.districts && q.districts.length) return 'district';
+  // 2+ districts spread across the chosen districts (owner 2026-10-31); 1 district stays 'district'.
+  if (q.districts && q.districts.length) return scopeForDistricts(q.districts.length);
   return 'city';
 }
 
@@ -1854,6 +1902,10 @@ export async function fetchListingsForQuery(
     const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
   }
+  // The count follows the cards (🔧 1153, 2026-11-01): a row the raw hydration dropped (hidden at source since the
+  // last :22 sync, or index↔raw drift) is still inside the index's total_count — subtract this page's drops so the
+  // number on screen never exceeds the cards a customer can reach. Never adds, never below zero (src/lib/honestTotal.ts).
+  pageTotal = honestTotal(pageTotal, cleanCands.length, ranked.length);
   const USE_RELATION_TABLE = true;
   // multiType → spread across the picked clean types (cleanType diversity key). True for a genuine
   // multi-select AND for a subgroup box like «مرافق خدمية» that expands to 5 member types, so its results
@@ -1945,7 +1997,7 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     // did, and on the 60 tables with no retention policy there is no hard delete to eventually end it.
     // Proven with the production ANON key, not privileged SQL: ids 585260 / 629782 / 4744698 each
     // returned a full card payload carrying "active": false.
-    const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).eq('active', true).limit(1);
+    const { data, error } = await supabase.from(table).select(listSelectFor(table)).eq('id', id).eq('active', true).limit(1);
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
     if (row) { row.sourceTable = table; LISTING_CACHE.set(row.id, row); return row; }
@@ -1958,7 +2010,7 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
 // across DEEPLINK_TABLES could hand back another table's row that merely shares the id.
 export async function fetchListingCards(table: string, ids: number[]): Promise<Listing[]> {
   if (!supabase || !ids.length || !SEARCHABLE_TABLES.includes(table)) return [];
-  const { data, error } = await bounded(supabase.from(table).select(LIST_SELECT).in('id', ids).eq('active', true).limit(ids.length));
+  const { data, error } = await bounded(supabase.from(table).select(listSelectFor(table)).in('id', ids).eq('active', true).limit(ids.length));
   if (error || !data) return [];
   const rows = finalize(data, table.includes('_commercial') ? 'com' : 'res');
   for (const r of rows) r.sourceTable = table;
@@ -1995,6 +2047,18 @@ const LIST_SELECT = [
   'title', 'description',
 ].join(', ');
 
+// Source-published discount columns (owner 2026-10-19): the struck-through original and the badge %.
+// ONLY the aqar tables carry them. 65 platform tables (wasalt, dealapp, gathern, aqarmonthly, …) have no
+// such column, and PostgREST fails the WHOLE select over an unknown column — the CI smoke measured that
+// as count=null on every search when these two names sat in LIST_SELECT (PR #7689, run 2795). So the
+// select is built per table: the discount columns are asked for only where they exist. A table without
+// them yields no `price_original` on the row, and finalize() builds no discount — the card as before.
+const DISCOUNT_COLUMN_TABLES = new Set(['aqar_residential_listings', 'aqar_commercial_listings']);
+const DISCOUNT_COLUMNS = 'price_original, discount_pct';
+function listSelectFor(table: string): string {
+  return DISCOUNT_COLUMN_TABLES.has(table) ? `${LIST_SELECT}, ${DISCOUNT_COLUMNS}` : LIST_SELECT;
+}
+
 // Map raw DB rows → in-app `Listing` shape. `kind` = which table-kind the rows came from (res/com),
 // needed to normalize the ambiguous "Building" type (residential vs commercial) into the clean type.
 function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
@@ -2011,9 +2075,26 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // listing can never match a budget the card then fails to show. It renders with a '≈' and
     // the card adds an explicit «محتسب من سعر المتر» note; the source per-metre figure is kept
     // untouched in pricePerMeter below. (owner rule 2026-09-03)
-    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total,
-                                        r.price_per_meter, r.area_m2);
-    const priceIsDerived = isDerivedTotal(deal, r.price_total, r.price_annual, r.price_per_meter, r.area_m2);
+    // THE POOL, not the site's word (owner 2026-10-25, src/lib/rentPool.ts): Gathern + Aqar Monthly are
+    // «إقامات قصيرة»; any other site's per-month figure is a YEARLY listing at ×12 (price_annual already is),
+    // so its card prints «/سنوياً» — and `sourceRentPeriod` below keeps the site's own word for the
+    // «السعر المعلن 3,000 شهرياً» line. An unpublished period still pools as null, never 'annual'.
+    // (2026-10-31: a SILENT period is judged from the figure and the clean type — src/lib/rentPool.ts::judgeSilentRentPeriod,
+    //  the same rule the index applied when it put the row in the yearly pool.)
+    const pool = deal === 'Rent' ? rentPool(r.source ?? '', r.rent_period, r.price_annual, norm.clean) : null;
+    // A «yearly» rent under 8,000 SAR on a home/business unit is a per-month price (owner 2026-10-26,
+    // src/lib/rentPool.ts::cheapYearlyIsMonthly; the index serves it ×12 through rent_price_annual_ar()):
+    // served ×12 here too, and the site's word becomes 'monthly' so the card says «السعر المعلن 3,300 شهرياً».
+    const cheapYearly = deal === 'Rent' && cheapYearlyIsMonthly(r.source ?? '', r.rent_period, r.price_annual, norm.clean);
+    const servedAnnual: unknown = cheapYearly ? (r.price_annual as number) * 12 : r.price_annual;
+    const servedSourcePeriod = cheapYearly ? 'monthly' : (r.rent_period ?? null);
+    // A sale total typed into the per-meter box prints the seller's figure, exactly as the index serves it
+    // (src/lib/meterBoxPrice.ts): the card AND the client budget net read this, so they agree with the count.
+    const sale = deal === 'Buy' ? servedSaleFigures(r.price_total, r.price_annual, r.area_m2, r.price_per_meter, { city: r.city, commercial: kind === 'com' })
+                                : { priceTotal: r.price_total, pricePerMeter: r.price_per_meter };
+    const priceStr = listingPriceString(deal, pool, servedAnnual, sale.priceTotal,
+                                        sale.pricePerMeter, r.area_m2);
+    const priceIsDerived = isDerivedTotal(deal, sale.priceTotal, r.price_annual, sale.pricePerMeter, r.area_m2);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
     // (villa-default.png, at one of a couple CDN sizes, sometimes with a corrupted trailing
     // backslash) as a literal photo_urls entry - filter it out so a listing with only this
@@ -2058,7 +2139,9 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // Passed through VERBATIM — no rounding, no unit conversion, no derivation. The decision of
       // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
       // field always means "what the source published", nothing else.
-      pricePerMeter: typeof r.price_per_meter === 'number' ? r.price_per_meter : null,
+      pricePerMeter: typeof sale.pricePerMeter === 'number' ? sale.pricePerMeter : null,
+      // Shown as «~~old~~ خصم X٪» under the (already discounted) price. Null = no line at all.
+      discount: priceIsDerived ? null : listingDiscountFrom(deal, r.source ?? 'Aqar', r.price_total, r.price_original, r.discount_pct),
       priceIsDerived,
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,
@@ -2066,7 +2149,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // and click-through hostname all derive from it. Wasalt rows have source='Wasalt'.
       source: r.source ?? 'Aqar',
       // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
-      rentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
+      rentPeriod: pool,
+      sourceRentPeriod: deal === 'Rent' ? servedSourcePeriod : null,
       // THE NUMBER THE SERVER FILTERED ON, carried rather than reconstructed (2026-09-06, regression
       // hunter). `price` prints a source-MONTHLY rent at Math.round(price_annual / 12), so ×12-ing
       // the printed figure recovers price_annual only when it divides by 12 — it is short by up to
@@ -2075,7 +2159,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // 12,583/mo, reconstructs to 150,996, and vanished from a search with a 151,000 yearly floor
       // the RPC had matched it against. Carrying the real figure removes the rounding step from
       // every price comparison at once. VERBATIM, like pricePerMeter above.
-      priceAnnual: deal === 'Rent' && typeof r.price_annual === 'number' ? r.price_annual : null,
+      priceAnnual: deal === 'Rent' && typeof servedAnnual === 'number' ? servedAnnual : null,
       // UNKNOWN IS NOT «مؤخراً» (P2, 107,254 active listings — 54.3% of inventory). This used to be
       // `?? 'recently'`, manufacturing a positive FRESHNESS CLAIM out of a date the source never
       // published, one layer above any display guard that could have caught it: ResultCard already
@@ -2127,6 +2211,10 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
         sanitation: !!r.sanitation,
         private_entrance: !!r.private_entrance,
         optical_fibers: !!r.optical_fibers,
+        // The card's own majlis chip comes from the site's majlis COUNT (the source tables have no `majlis`
+        // column — LIST_SELECT reads source tables, not search_listings_ar). The AF proof chip for a majlis
+        // search comes from af_canon (afEvidence), which carries the Rule B value incl. the seller's words.
+        majlis: r.reception_rooms_majlis != null ? Number(r.reception_rooms_majlis) > 0 : undefined,
         laundry_room: !!r.laundry_room,
         balcony_terrace: !!r.balcony_terrace,
       },

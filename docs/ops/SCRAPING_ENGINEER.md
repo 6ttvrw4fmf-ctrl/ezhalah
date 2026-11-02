@@ -1,5 +1,33 @@
 # ⚡ SCRAPING ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
+> **🔢 THE SITE COUNT MOVES BY ITSELF (owner, 2026-10-27 — «a new website goes up, the number changes»).** The
+> «نبحث في N منصة» number and the logo strip both come from ONE list, `loader_active_platforms_ar()`: a site
+> counts and shows its logo only while it is active in `platform_registry` AND has at least one
+> `production_ready` ad a user can see (Aqar Monthly folds into Aqar, so 145 sites read «144» on 2026-10-27).
+> So: a NEW site you bring live raises the number and adds its logo the moment its first ad is searchable; a
+> site that goes down (dormant), is retired, or has no visible ads drops out and its logo hides; it comes
+> back on its own. **Never type a site number anywhere** (copy, share text, docs meant for users) and never
+> keep a logo for a site with no visible ads. Give a new platform its logo and its `SOURCE_TOKENS` entry in
+> `src/data/loaderPlatforms.ts` so it is counted under the right name. Rule: `docs/ARCHITECTURE.md` §20.
+
+> **🔒 THE SUPABASE QUESTION RULE (owner, 2026-10-25 — wins over every other order about writing rows).** On 10-24 and
+> 10-25 ⚡ did the work but lost its whole report: an `execute_sql` call that contained an `UPDATE` (closing backlog items
+> in the same batch as a proof row) made the Supabase tool ask «destructive operation — run it?», nobody was awake to
+> answer, the call timed out, and the tool said «do not call this tool again» — so the `:end` row, proofs and closes were
+> never written and the fix-rate board scored the night 0%. Plain `INSERT`s never ask. So: (1) every `:proof` and `:end`
+> row is ONE plain `INSERT … VALUES …` per call — never in the same call as an `UPDATE`/`DELETE`; (2) write your `:end`
+> row BEFORE any backlog `UPDATE`, the moment your last job is proven; (3) close backlog items LAST, one `UPDATE … WHERE
+> id = N` per call; (4) if the tool ever asks a question or times out, stop using it for writes and put the unwritten
+> closes in your `:end` row text («CLOSE: 803, 817 — evidence …») so the owner session closes them.
+
 **This file is the whole instruction.** The cloud routine's prompt only says "follow this file"; if
 anything else disagrees with it, this file wins. Written 2026-09-27 at the owner's request, after the
 owner deleted all 11 earlier routines to start a smaller, clearer team. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra
@@ -13,7 +41,7 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 > **🌙 THE NIGHT SHIFT (owner, 2026-10-04 — this block wins over EVERY other time, budget or hour count in this file).**
 > The owner works by day, so all five engineers work one after another at night, never overlapping, **2 hours each**
 > (Arizona, UTC−7): ⚡ Scraping 10 PM · 🆕 New Listings 12 AM · 🔬 Advanced Filter 2 AM · ♻️ Lifecycle 4 AM ·
-> 🔧 Quality & Repair 6 AM, all done by 8 AM. **You: ⚡ 10:00 PM – 12:00 AM Arizona (05:00–07:00 UTC).** Wherever this file says 3 or 4 hours, read 2 hours,
+> 🔧 Quality & Repair 6–10 AM, all done by 10 AM. **You: ⚡ 10:00 PM – 12:00 AM Arizona (05:00–07:00 UTC).** Wherever this file says 3 or 4 hours, read 2 hours,
 > and scale its timeline to fit (the same order of work, each step shorter). **Hard stop at 2 hours:** whatever is
 > unfinished goes into `ops_engineer_backlog` with its numbers and is the first thing you do tomorrow; running into the
 > next engineer's slot is never allowed. **Full control (owner, 2026-10-04): «they have full control on everything, no
@@ -48,15 +76,51 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
-**Owed → first thing next run (10-20):**
-- **#7661 Haraj deal conflict (656/672/679):** 112 searchable ads whose own words disagree on Buy vs Rent (e.g.
-  «ايجار شقه … 20 الف السنه» served as Buy 1,000,000,000). Merge state first; then ONE `--ids` re-read of the 112 ids
-  (list in backlog 679 / proof row 10-19) when the slot is free → notes must show `skip_deal_conflict` ≈ 112. Removal
-  from search then comes from ♻️'s strikes (`_signal` → gone).
-- **615 Haraj catalogues:** routed to ♻️ (backlog lifecycle, 10-19): `fleet_liveness:haraj` was QUARANTINED on 2 of 3
-  passes («opening controls 3/3 live»), so no strikes landed. Read their missing_count; nothing else to do on our side.
-- **#7662 rows_collapse:** proven (20 → 1 open, dwelleo kept). Only the merge is owed (migration 20261019051932 live).
-- Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442 (source's own price).
+**NEW (11-01): a queued nightly job used to run the code of the moment it was DISPATCHED.** The 04:22 nightly's
+144 jobs wait hours for a runner (11-01: 96 still queued at 05:15; dealapp's 24 shards hold up to 12 runners for
+hours), so a fix merged at 06:07 was undone at 07:16 by the nightly's daryusuf job pinned to ad8e469 (13109421
+back to Rent). #9739 makes the `sync` job check out `main` for a main-ref run (guard
+`verify-small-sources-sync-runs-current-main.ts`). It applies from the FIRST nightly dispatched after 06:17 UTC
+11-01; the 11-01 nightly itself still runs its old commit, so a site fixed today is proven by a targeted run
+dispatched after the merge, never by that nightly. This container cannot open ezhalah.com (proxy refuses it):
+every customer proof is the CI `customer-journey.yml` run.
+
+**NEW (11-02): NEVER NULL A PRICE FROM A CAPTURE'S TEXT — RE-READ THE LIVE PAYLOAD FIRST.** On 11-02 I blanked 32 aqar
+prices because the stored figure appeared only inside «إعلانات مشابهة» in `source_capture`. That capture was taken
+while the ad was CLOSED. A `recover_stubs` run without `--include-price` refreshes the capture but keeps the price,
+so the capture and the price disagreed for an innocent reason. The live re-read (`aqar-stub-recovery.yml`
+`ads=… include_price=true`) showed only 2 of the 32 really were neighbour prices; about 22 were the ads' own and
+were blank for ~1 h. Order: (1) re-enrich the cohort from the live payload, (2) repair only what that read
+contradicts, (3) then the proof. The function fixes (20261102051729: `aqar_parse` head stops at «إعلانات
+مشابهة»; `trg_aqar_parse` never writes over `authoritative_absent`) stand, watched by
+`mon_detect_aqar_price_over_authoritative_absent`.
+
+**NEW (11-02): `scripts/lib/rpcReplay.ts` now reads an inline dollar-quoted needle edit** (`replace(d, $x$…$x$,
+$x$…$x$)`). A needle-edit migration that touches a function a replay barrier pins (aqar_parse) must also refresh
+`sql/mirrors/<fn>.sql` (md5 = production `pg_get_functiondef`) and `ops_sql_mirror_expected` in a companion.
+
+**Owed → first thing next run (11-02):**
+- **1174 souq24 harvest retry** (merged #9899, c97c51b; targeted souq24 run dispatched 06:25 UTC): once merged, the next souq24 crawl's notes must not say «browse harvest
+  incomplete» on a lone transport_Timeout; alert 12223 clears 72 h after 11-01 10:46 (≈ 11-04 10:46 UTC).
+- **1175 alhumaidan freshness** (20261102054212): no alhumaidan row in `scraper_freshness_alerts` after the 06:10
+  and later crons; alert 4194 resolves ~24 h after the last legacy row (≈ 11-03 00:10 UTC).
+- **aqar 22 restored prices:** served after the 11-02 06:22 sync; commercial 296740/14881483 re-read: aqar's payload
+  publishes no price today, so NULL is source truth.
+- Self-clearing, dated: aqar_liveness kills 12320 (#9794 ok 33/33 on 11-02; clears ≈ 11-04 11:38), shomou
+  11912 (≈ 11-02 08:56), manzo 12026 (≈ 11-02 18:43), albukaeri/superoffice/nowaisiry enumeration_incomplete
+  (clean runs since 10-31/11-01).
+- Not a capture bug (leave the alert to adjudication): superoffice 24 rows = 3 branches × the 8-office window
+  robots.txt allows (`Disallow: /api`); the 184 «baseline» is the old site. dealapp enumeration_incomplete:
+  every active row was seen ≤ 5 days ago and 93 % were verified alive ≤ 3 days ago. The shard guard's
+  denominator is the gap, not lost data.
+- Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442.
+
+**CHANGED (10-25): a targeted `small-sources-sync` dispatch (`source=<slug>[,<slug>…]`) now creates ONLY those jobs**
+(a `plan` job filters the SMALL_SOURCES list; an unknown slug fails the plan; guard
+`scripts/verify-small-sources-targeted-dispatch-is-one-job.ts`). Before 10-25 every dispatch was the full 143-job matrix
+(~28 min) and five targeted runs jammed the runner queue for 3+ h. The nightly (blank input) is unchanged. Two
+dispatches of the SAME list still wait for each other (one concurrency lane per list), so still read
+`gh run list --workflow small-sources-sync.yml --status queued,in_progress` first and dispatch from `main` or a probe branch.
 
 **10-19 facts:** `rows_seen` on `fleet_liveness:*` / `cleanup:*` / `verify_deletions:*` / `aqar_liveness*` labels is
 rows PROBED (fresh rows are skipped), never inventory; judge a site's size by its crawl label. The detector sweep
@@ -274,16 +338,49 @@ These cost your first runs a lot of time. Use them instead of working them out a
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
 
+## Lessons from 2026-10-30 (owner: «make sure the engineers are aware and we never ever get this issue again» — the map pin)
+
+rakez served 3,660 ads with 0 pins for six weeks. Its project page draws no map, so nobody looked further — and
+`/ar/projects-map/` had been calling `/ar/wp-json/hs-map/v1/projects` with every project's lat/lng the whole time. The same
+night's sweep (every platform below 90 % pins, 146 rendered pages) found 8 more: compoundin (marker in an inline
+`cinMapMarkers` script), mustqr (the Maps link in the ad text, which `ad_body()` dropped), alkhaas (`maps?q=` link),
+awal (`data-latitude` attributes), hajer (`rem_property_map` JSON), daryusuf (a DMS iframe), shatri (Houzez `data-map`
+on the page, not in the REST post), wslnaa (the API's `mapUrl` short link). Full table:
+`docs/ops/reports/PIN_CAPTURE_FLEET_2026-10-30.md`.
+
+1. **THE FOUR-PLACE RULE. Before you write «the site has no pin» (or no price, no photo, no age — pins first), look in
+   all four places on a RENDERED ad page:** (1) the page itself; (2) its embedded JSON, data attributes and the network
+   calls it makes (DevTools → Network, the browser pane's request list, a headless Chromium's response log); (3) a
+   site-wide map or list feed (the «projects map» page, the search/API endpoint, the sitemap); (4) the PARENT page of a
+   unit-in-project site (the project, the compound, the building, the branch). A rendered `maps?ll=` link is often
+   Google's JS drawing a pair that lives elsewhere in the raw HTML — or nowhere, when it geocoded an address (remal):
+   re-read the raw page with curl to find the shape you must parse. Never geocode; never read a JSON-LD `geo` or a map
+   centre that is the same on every ad (nofodh, mustqr, eaqartabuk, macsaib all print the office).
+2. **A site is not onboarded until `data/pin-sources.json` has its row** (launch checklist box 10;
+   `scripts/verify-pin-capture-declared.ts` fails `npm test` without it): `pin_source` ∈ ad-page · page-json · feed ·
+   project-page · partial · none, the proof URL, the date, a floor. Write `none` only with the URL of the page you proved
+   silent after all four places; write `partial` with the share you saw; a publishing site is never declared at floor 0.
+3. **The served number is watched, hourly:** `mon_detect_pin_coverage_below_floor()` raises P1 when a platform with ≥ 50
+   served ads is below its floor, is declared as publishing and serves 0 (the rakez shape), or is launched undeclared.
+   Read `select * from pin_coverage_by_platform() where below_floor` at the start of every run; a red row is tonight's
+   first fix, and the fix is a scraper change + a targeted re-crawl, never a lowered floor.
+4. **The fix has two halves or it is not a fix:** the scraper (with `pin_absent: true` when the page was read and has no
+   pin, and nothing when the page or hop failed, so `keep_stored_pin` keeps yesterday's pair) AND the backfill
+   (targeted `small-sources-sync` dispatch, then the :22 sync), proven in `search_listings_ar` before → after. Then raise
+   the floor in `data/pin-sources.json` + a `*_pin_source*` migration (two-place edit; the barrier refuses one without
+   the other).
+
 ## Lesson from 2026-10-16 (🦅 Falcon: «the site has no field for it» is where prose starts, not where capture ends)
 - wasalt publishes NO structured elevator, air-conditioning or private-entrance field (62,491 stored payloads:
   not in `attributes`, `additionalAttributes` or `propertyInfo`), so those columns were NULL on every wasalt row
   while 3,222 / 2,817 / 547 of its own descriptions state them, and the Advanced Filter could not find one wasalt
-  ad by elevator. The law (ADVANCED_FILTER_SOURCE_TRUTH §2) allows prose for exactly this case, YES-only:
-  `normalize.prose_amenities_yes(normalize.html_block_lines(desc))`. Now in `scrapers/wasalt/enrich_ar.py`
+  ad by elevator. The law (ADVANCED_FILTER_SOURCE_TRUTH §2) allows prose for exactly this case — yes, an explicit
+  no tied to the word, or nothing (owner 2026-10-24): `normalize.prose_amenities(normalize.html_block_lines(desc))`.
+  Now in `scrapers/wasalt/enrich_ar.py`
   (`PROSE_ONLY`), with a proxy-free backfill from the stored `ar_data` at the start of every enrich run.
 - The same gap is open on 23 more sites whose amenity columns are 0% captured for homes (rakez, arkaan, razre,
   aqargate, vmksa, aouj, souq24, holoul, azure, awal, …). Before calling a site «it doesn't publish amenities»,
-  check its ad text: if the words are there and no structured field exists, wire `prose_amenities_yes`.
+  check its ad text: if the words are there and no structured field exists, wire `prose_amenities`.
 
 ## Lessons from 2026-10-13
 - **«CertificateVerifyError» on every route is the SITE's certificate, not our network.** abralosol.com served an expired
@@ -646,3 +743,104 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   (10-19: proof run 39203822704 cancelled at 05:54). Read `gh run list --workflow haraj-sync.yml` first and dispatch only
   into an empty queue. The same holds for `small-sources-sync.yml`: on 10-19 one run (39218294587) stayed `in_progress`
   from 07:47 for more than 5 hours and every dispatch behind it queued — read the run list before blaming a site.
+
+## Lesson from 2026-10-27
+- **A scrapers-only PR auto-merges the moment its first push is green.** #8953 merged at 05:37 with the first commit
+  only. The second commit (pushed 05:44) needed its own PR (#8961). Push the whole fix in one commit, or expect a
+  follow-up PR, and never assume a later push rides the same PR.
+- **Test the hypothesis on the live feed before shipping the fix:** the «feed marks them rented» theory for yameen
+  was falsified by its own first run. Probe the unseen rows' API record AND own page first.
+
+## Lesson from 2026-10-20 (copied by 🔧 from your own report — the second night in a row about dispatch, so it is a rule)
+- **Never dispatch a proof crawl from the PR branch.** Its failed jobs become checks on the PR head and the auto-merge gate
+  refuses the PR (10-20: one 15-minute cycle lost). Prove from a sibling probe branch, and — 10-19's half of the same rule —
+  only into an empty runner queue (`gh run list --workflow <job>.yml` first; haraj-sync and small-sources-sync are one slot).
+- 🔧 adds: the DataImpulse proxy (407, funds — backlog 744/745) is the owner's money, never one of your three jobs; a site that
+  needs it (wasalt, souq24, eilmalriyada, sadin) is not provable while it is down, so it is not chosen (same lesson 🆕 learned
+  on snam the same night).
+- 🔧 10-23 (third night of the queue lesson, so it is now a rule): COUNT the queued runs before you dispatch anything
+  (`gh run list --workflow small-sources-sync.yml --status queued,in_progress`): the matrix was one slot (~28 min a run; since
+  10-25 a targeted run is only its own jobs, but a same-list dispatch still waits its lane), so a probe queued ahead of a proof costs the proof its slot — dispatch the PROOF first, the probe after (⚡ 10-23 cancelled
+  its own probe to land the tamyaz proof).
+
+## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
+
+1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
+   with a published period is YEARLY: a per-month figure pools under «سنوي» at ×12 (`price_annual` is
+   already monthly×12), the card reads «/سنوياً» and keeps the site's word: «السعر المعلن 3,000 شهرياً».
+   A price-on-request row from any other site shows under «سنوي»/«كلاهما» only. Pool = `rent_pool_ar()`.
+2. **A «yearly» rent under 8,000 SAR on a home/business unit is a per-month price** (Apartment, Villa,
+   Floor, Duplex, Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom,
+   Commercial Building; rooms/land/rest houses/chalets/camps/farms are OUT). The index SERVES it ×12
+   through `rent_price_annual_ar()`; the card does the same (`src/lib/rentPool.ts::cheapYearlyIsMonthly`).
+   The SOURCE TABLES ARE UNTOUCHED — keep storing the site's figure and the site's word (PRICE = SOURCE,
+   PERIOD = SOURCE). Never «fix» a scraper to ×12 a cheap yearly figure: that would double-apply the rule.
+3. **Stay-length cards (Gathern / Aqar Monthly) print NO price line at all**; every yearly card carries a
+   monthly line («السعر المعلن N شهرياً» or «≈ N شهرياً»).
+4. **Off switches:** `ops_feature_flags.short_stays_pool`, `ops_feature_flags.cheap_yearly_is_monthly`
+   (off = the pre-rule behaviour on the next hourly sync). **Guards:** `mon_detect_short_stays_pool_drift()`,
+   `mon_detect_cheap_yearly_rent_served()` (both P1, twice an hour), `verify-short-stays-pool.ts`,
+   `verify-cheap-yearly-is-monthly.ts`, `verify-stay-length-platforms-show-a-note-not-a-price.ts`.
+   An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
+   sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
+   the type list.
+
+## Lessons from 2026-10-27 and 2026-10-30 (copied by 🔧; one appeared on two nights)
+
+- **Ship a scrapers-only fix as ONE commit after `git fetch origin main && git merge origin/main`, and dispatch the
+  branch proof by minute 20** (⚡ 10-27: a scrapers-only PR auto-merges on its first green push, so a second commit
+  lands on a merged PR; #8984 sat CONFLICTING 5 h; 🆕 10-25 said the same about a BEHIND branch failing «Tests keep
+  their assertions»). Measured 10-25 → 10-27 your fix rate fell 100% → 67% → 50% while the proofs waited on PR churn.
+- **The early-warning robot now opens ONE open row per site and calls a site absent after 26 h, not 20** (🔧 10-30,
+  migration `early_warning_one_open_row_per_site_26h`): at 07:45 UTC the nightly small-sources crawl has not reached
+  every site (its matrix ran until 10:56 on 10-30), so 67 of 68 «no run recorded in 20 h» rows were false and 81 rows
+  were day-stamped duplicates — 148 of your 206 open rows. A robot's clock must follow the crawl's real finish time;
+  when a queue grows by dozens of rows a night, read the writer before reading the rows.
+
+## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
+  06:54, after the slot, and a crawl after :20 cannot be customer-proven before the next hour's :22 sync (run
+  41175323616, daryusuf still Rent at 13:30). 🆕 10-31: two fixes merged whose proofs landed at 09:46 / 17:15, outside
+  the slot — rating 8 → 6 on timing alone. 🔧 10-24 / 10-25 lost the band the same way. Rule: pick the proof listing
+  BEFORE the fix, dispatch the proof crawl or journey before minute 30 and before :20 of the hour, and never choose a
+  job whose only proof lands after your slot (hand it to ♻️ or the automatic liveness instead).
+- **② A clean reading means nothing until you know HOW it was read.** ♻️ 10-30: one fingerprint (chrome124) was sent
+  home on ~90 live Gathern units and read «transient» every hour; ♻️ 10-31: albukaeri, superoffice and azdad were read
+  by HTTP status, their removed pages answer 200, so 23 dead ads sat on screen up to 18 days behind a clean row;
+  🔬 10-31: the score session's own cookies built a «recently viewed» strip on tuba that was read as the ad. Rule: before
+  trusting any robot's verdict print its method / fingerprint / session and compare with a plain read and a real browser
+  on the same URL; every body-reading site gets its own reader.
+- **③ Read one REAL record before coding against a field, and re-read the ad before touching data.** 🆕 10-31:
+  `url_path` existed only in our capture, not in the detail API — a 20-minute crawl read 0 of 952 pages. 🔬 10-30: a
+  «fabricated value» alarm on 12 rows was aqar's own value from a re-categorised ad. 🔧 10-31: 701 «stuck» prices were
+  the owner's own served meter-box rule, and the «absurd» wasalt totals are the seller's own words («سعرها 40500000000
+  ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
+  record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
+  truth.
+
+## 📚 FLEET LESSONS 2026-11-01 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A robot merge fires no push-triggered workflow — dispatch the follow-on yourself, the same minute.** 🔬 10-30: a
+  reader-version bump squashed by the auto-merge bot never ran its reader; 🔬 11-01 again: the word-reader fix #9783 sat
+  unread until `facts-words-reader` was dispatched by hand at 10:39 (run 41298393767). The same shape cost ⚡ its night
+  on 11-01: a queued nightly job checked out the DISPATCH-time commit and overwrote the fixed 06:54 crawl (backlog 1139).
+  Rule: after `engineer-automerge` merges your PR, dispatch the workflow that consumes it and read the RUN's commit SHA —
+  a fix is live only when a run from the FIXED commit is the LAST writer (⚡ 11-01). Seen on two nights → written into
+  🔬's rulebook as a rule.
+- **② Pick the job by where its PROOF lands, not by where the bug is.** ⚡ 11-01: three fixes merged, zero proven —
+  runners were saturated and every proof crawl queued past the slot (rating 4). 🆕 11-01: a migration job chose at
+  minute 70 met `apply_migration`'s confirmation prompt that nobody answers at night (draft #9761, nothing applied).
+  ♻️ 11-01 did it right: proofs dated to a NAMED job and UTC time (aqar-liveness 01:00 11-02; gathern-liveness 12:37/13:37)
+  so they count tomorrow instead of failing tonight. Rule: at minute 10 write, per job, the proof's workflow + the UTC
+  time it can land; a job whose proof needs a runner you cannot get or a prompt nobody can answer is swapped for one
+  whose proof is a CI journey or an RPC replay inside the slot — and a migration goes out as a ready draft PR at minute
+  10, never at minute 70.
+- **③ When a robot's number disagrees with the database, read what the robot TYPED before you read the RPC.** 🔧 11-01:
+  backlog 1141 «Filter total 11 vs DB 1» was the journey typing 11 digits into a 10-digit price box
+  (21,750,000,000 → 2,175,000,000; 11 is exactly the DB count for the band the box kept) — not a search bug. 🔧 11-01
+  also: mirror PR #9791 sat 2 h 40 min «red» because GitHub lists a PR's files against the merge BASE, so a mirror whose
+  file already reached main through another PR reads as a 1-file PR (the robot's empty-mirror rule never fires) and fails
+  a stale-mirror check its stale branch cannot pass. ♻️ 11-01 (1147): the sweep SESSION read a dead Gathern unit as
+  no-verdict 36 times while a fresh session read its 404. Rule: a robot's input, session and diff-base are part of the
+  measurement — print them in the evidence before judging the product with the robot's number.

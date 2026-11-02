@@ -53,8 +53,13 @@ const decodeEntities = (s: any) => s;
 const buildAdditionalInfo = () => null;
 const gathernDistrictFallback = () => null;
 const isDerivedTotal = () => false;
+// The card's discount line (2026-10-19) is built in finalize() but is not a date; stubbed like the price.
+const listingDiscountFrom = () => null;
 const isJunkLocationToken = () => false;
 const listingPriceString = () => '';
+// The rent POOL (2026-10-25, src/lib/rentPool.ts) is built in finalize() but is not a date; stubbed like the price.
+const rentPool = () => null;
+const cheapYearlyIsMonthly = () => false;
 `;
 
 const load = async (source: string) => {

@@ -202,7 +202,7 @@ check('AuthModal renders nothing unless explicitly opened', authModal.includes('
 check('AuthModal exports AuthForm and its Sheet renders it', authModal.includes('export function AuthForm(')
   && authModal.includes('<AuthForm onRequestClose={close} onSignedIn={onSignedIn}'));
 check('SignInCard renders the SAME AuthForm compact — full login inside the card',
-  signInCard.includes("import { AuthForm } from '@/components/AuthModal'")
+  /import \{ AuthForm(, AuthSky)? \} from '@\/components\/AuthModal'/.test(signInCard)
   && signInCard.includes('<AuthForm compact onRequestClose={dismissSignInCard} onSignedIn={signIn} />'));
 check('SignInCard hosts NO auth logic of its own (providers live only in the shared form)',
   !signInCard.includes('signInWithProvider') && !signInCard.includes('verifyPhoneOtp') && !signInCard.includes('sendPhoneOtp'));
@@ -237,8 +237,9 @@ check('NO email (or any) text input on the sign-in surfaces — Google and Apple
 check('the agreement sentence links to the legal reader ONLY when real legal text exists (never a link to nothing)',
   authModal.includes('const legalLive = hasLegalDocs();') && /legalLive \? \(/.test(authModal)
   && authModal.includes("onPress={() => openModal('legal')}"));
-check('WIRING themed from birth: the card paints with var(--ez-*) token roles, no hardcoded surface hexes',
-  signInCard.includes('colors.surface') && signInCard.includes('colors.fieldLine')
+// Owner 2026-10-24: the card is painted by the shared AuthSky (sky blue light / dusk sky dark), not a flat surface.
+check('WIRING themed from birth: the card paints with the shared AuthSky + token roles, no hardcoded surface hexes',
+  signInCard.includes('<AuthSky ') && signInCard.includes('colors.fieldLine')
   && !/backgroundColor:\s*'#/.test(signInCard));
 
 // ── 7. DISMISS-ON-SEND — both send sites, and NOTHING persists the flag ──────────────────────────

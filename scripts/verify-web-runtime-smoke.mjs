@@ -86,6 +86,8 @@
 //
 // Env: PW_CHROMIUM overrides the browser binary; PW_PROXY sets an egress proxy (localhost always
 // bypassed). Both optional — CI needs neither.
+import './lib/robotPass.mjs'; // robot pass + secret handshake for our own browser robots (docs/ops/SCRAPE_GUARD.md)
+import { isForeignOnlyError } from './lib/foreignError.mjs';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -108,7 +110,11 @@ import { INTERVIEW_STOP_AT } from '../src/lib/afRanking.ts';
 const DIST = new URL('../dist/', import.meta.url).pathname;
 let failed = 0;
 let skipped = 0;
+// The last step that ran, so an uncaught error says WHERE it happened (2026-10-29: React #419 failed ~6% of runs
+// for weeks and nobody could find it, because the crash line named no page and no step).
+let lastStep = 'start';
 const check = (label, ok, detail = '') => {
+  lastStep = label;
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail && !ok ? `\n        ${detail}` : ''}`);
 };
@@ -221,7 +227,19 @@ const browser = await chromium.launch(launchOpts);
 const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();
 const crashes = [];
-page.on('pageerror', (e) => { const m = String(e); if (!BENIGN.test(m)) crashes.push(m.slice(0, 200)); });
+page.on('pageerror', (e) => {
+  const m = String(e);
+  if (BENIGN.test(m)) return;
+  // Another website's own page crashing (every stack frame on a foreign origin — e.g. sanadak.sa's Next.js React #419
+  // while a listing opened) is not an Ezhalah crash. Logged, never counted; anything with one of our frames still fails.
+  if (isForeignOnlyError(e?.stack, page.url())) {
+    console.log(`NOTE  third-party page error ignored (not Ezhalah code): ${m.slice(0, 120)} — ${String(e?.stack || '').split('\n')[1]?.trim().slice(0, 160) ?? ''}`);
+    return;
+  }
+  // Where and after what: the page URL, the last check that ran, and the first stack frames.
+  const stack = String(e?.stack || '').split('\n').slice(1, 4).map((l) => l.trim()).join(' < ');
+  crashes.push(`${m.slice(0, 200)} — at ${page.url()} after «${lastStep}»${stack ? ` — ${stack.slice(0, 300)}` : ''}`);
+});
 
 const tap = async (txt) => {
   const box = await page.evaluate(CLICK_LEAF, txt);
@@ -886,7 +904,7 @@ try {
     // any click. Only the recorded timeout evidence below permits an UNKNOWN skip.
     const ctaBack = await page.evaluate(() =>
       Array.from(document.querySelectorAll('div,span,button,a,[role="button"]'))
-        .some((e) => (e.innerText || '').trim().includes('خلّنا نحدد الطلب أكثر') && e.getBoundingClientRect().width > 0));
+        .some((e) => (e.innerText || '').trim().includes('🎯 دقّق مع الذكاء الاصطناعي') && e.getBoundingClientRect().width > 0));
     // UNKNOWN IS NOT A DEFECT (owner 2026-08-26, PR #1152). AF now distinguishes "the sources say
     // there is nothing useful to ask" from "the probes never answered". On the SECOND verdict the
     // product deliberately declines to open and offers NOTHING in place of AF — that is the correct,
@@ -1043,7 +1061,7 @@ try {
 
   let jOpened = false;
   for (let i = 0; i < 6 && !jOpened; i++) {
-    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await tap('🎯 دقّق مع الذكاء الاصطناعي').catch(() => {});
     await page.waitForTimeout(1200);
     jOpened = await afPresent();
   }
@@ -1151,14 +1169,19 @@ try {
       // owner rule (see agent.tsx's gate: `!filterOrigin || busy || revealing`) — so a same-instant
       // zero-count would be coincidental timing, not proof of the actually-settled state this
       // assertion is about.
-      let composerEls = -1;
+      // 2026-10-13 (owner: «remove the lock») SUPERSEDES the no-composer rule above: a finished search KEEPS the
+      // chat box, open and unlocked, and the next message simply starts the next search (agent.tsx:
+      // `!filterOrigin || completed` renders the composer; the lock label is gone). This branch was first exercised
+      // on 2026-11-02, when the villa bathrooms ladder (3+ … 6+ on Duplex/Buy) took the fixture under the stop line.
+      let composerBox = 0, lockedEls = 0;
       for (const deadline = Date.now() + 90_000; Date.now() < deadline; ) {
-        composerEls = await page.locator('textarea:visible, [aria-label*="أُغلقت هذه المحادثة"]:visible').count();
-        if (composerEls === 0) break;
+        composerBox = await page.locator('textarea:visible').count();
+        lockedEls = await page.locator('[aria-label*="أُغلقت هذه المحادثة"]:visible').count();
+        if (composerBox >= 1) break;
         await page.waitForTimeout(1_000);
       }
-      check(`[J] ≤ ${INTERVIEW_STOP_AT}, Filter-origin → once the reveal settles, there is NO composer at all (not even a locked one)`,
-        composerEls === 0, `composerEls=${composerEls}`);
+      check(`[J] ≤ ${INTERVIEW_STOP_AT}, Filter-origin → once the reveal settles, the chat box is back, OPEN and never locked (owner 2026-10-13)`,
+        composerBox >= 1 && lockedEls === 0, `composer=${composerBox} locked=${lockedEls}`);
     } else if (Number.isFinite(jFinal)) {
       console.log(`NOTE  [J] landed at ${jFinal} (> ${INTERVIEW_STOP_AT}) — completion assertions not owed; the interview is right to continue`);
     }
@@ -1172,17 +1195,20 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
   await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
+  // 2026-11-02: Factory earned the owner's commercial lists (street width, building, location & safety on both deals), so the
+  // 0-question scope is now the «مرافق خدمية» box (Service Facilities: a filter-only grouping with no cohort — the one type
+  // scripts/verify-af-group-cohort-coverage.ts still holds at the uncertified baseline, beside Staff Housing).
   await tap('تجاري');
-  await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
-  await tap('مصنع'); await page.waitForTimeout(300);
+  await tap('المباني والمرافق'); await page.waitForTimeout(300);
+  await tap('مرافق خدمية'); await page.waitForTimeout(300);
   await tap('إيجار'); await page.waitForTimeout(300); // Buy is on by default; add Rent → combined
   await pickCity('الرياض');
   await tap('بحث');
   const jZeroStart = await waitForCount(45000);
-  check('[J0] 0-question scope (Factory/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
+  check('[J0] 0-question scope (Service Facilities/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
   let jZeroOpened = false;
   for (let i = 0; i < 4 && !jZeroOpened; i++) {
-    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await tap('🎯 دقّق مع الذكاء الاصطناعي').catch(() => {});
     await page.waitForTimeout(1200);
     jZeroOpened = await afPresent();
   }

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { Animated, Easing, View } from 'react-native';
 import { Image } from 'expo-image';
+import CloudWisp from './CloudWisp';
+import { cloudVariant, skyScene } from '@/theme/skyScene';
 import { useResolvedTheme } from '@/lib/appearance';
 import { PLATFORM_PICKER_PROFILES } from '@/data/platformPickerProfiles';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -30,11 +32,12 @@ export default function HomeWebsiteStrip() {
     animation.start();
     return () => animation.stop();
   }, [reduced, motion, cycleWidth]);
-  return <View testID="home-website-strip" style={{ width: '100%', maxWidth: 560, height: 48, alignSelf: 'center', marginTop: 8, marginBottom: 12, overflow: 'hidden' }}>
+  return <View testID="home-website-strip" style={{ width: '100%', maxWidth: 560, height: skyScene.stripHeight, alignSelf: 'center', marginTop: 8, marginBottom: 12, overflow: 'hidden' }}>
     <Animated.View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: cycleWidth * 2, flexDirection: 'row', transform: [{ translateX: motion }] }}>
       {[0, 1].map(copy => names.map(name => {
         const profile = PLATFORM_PICKER_PROFILES[name];
-        return <View key={`${copy}-${name}`} style={{ width: STRIP_SLOT, height: 48, paddingHorizontal: 6 }}>
+        return <View key={`${copy}-${name}`} style={{ width: STRIP_SLOT, height: skyScene.stripHeight, paddingHorizontal: 6, justifyContent: 'center' }}>
+          <CloudWisp variant={cloudVariant(name)} width={112} height={44} opacity={0.8} style={{ left: -4, bottom: 0 }} />
           <View style={{ width: 96, height: 48, backgroundColor: 'transparent', overflow: 'hidden' }}>
             <Image source={profile.logo} tintColor={profile.layout.monochrome ? (theme === 'dark' ? '#F3F5F3' : '#253831') : undefined} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
           </View>

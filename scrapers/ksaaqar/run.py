@@ -52,6 +52,8 @@ from scrapers.common.arabic_location import (  # noqa: E402
     find_district_in_text, known_district_keys, title_hayy_district, to_catalog,
 )
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
+from scrapers.common.pii import redact_pii  # noqa: E402
 
 BASE = "https://ksaaqar.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -181,8 +183,34 @@ def own_price(page_html: str, link: str) -> Optional[int]:
 _PHOTO_RE = re.compile(r'class="img-box"[^>]*>\s*<a[^>]+href="([^"]+)"', re.S)
 
 
+_AD_LAT = re.compile(r'id="ad_lat"\s+value="(-?\d+\.\d+)"')
+_AD_LNG = re.compile(r'id="ad_lon"\s+value="(-?\d+\.\d+)"')
+# The map's «not set» centre: every ad whose owner placed no pin prints it (9 of 10 sampled, across Jeddah,
+# Taif and Makkah ads — owner 2026-10-20 night). It is never an ad's location.
+_DEFAULT_PIN = ("24.633333", "46.716667")
+
+
+def own_pin(page_html: str) -> dict:
+    """The pin the ad page draws (`<input id="ad_lat" value="21.2817249">` + ad_lon). {} for the map's
+    default centre or when absent.
+
+    SWAPPED HALVES ARE THE SITE'S OWN BUG, NOT A MISSING PIN (2026-11-02, the map-pins investigation): some ads
+    print `ad_lat="46.799907" ad_lon="24.818849"` — a Riyadh pin with the halves exchanged. sa_pin() rightly
+    refuses a latitude of 46.8, and the ad fell to its district border; 2 of 30 pin-less ads sampled live
+    were this case. Inside the Kingdom the two ranges never overlap (lat 16–32.5, lng 34–56), so a pair that
+    is valid ONLY when swapped is unambiguous and is read swapped. Both halves still come from the source;
+    nothing is geocoded or guessed."""
+    la, lo = _AD_LAT.search(page_html or ""), _AD_LNG.search(page_html or "")
+    if not (la and lo):
+        return {}
+    if (la.group(1)[:9], lo.group(1)[:9]) == _DEFAULT_PIN:
+        return {}
+    pin = pin_dict(la.group(1), lo.group(1))
+    return pin or pin_dict(lo.group(1), la.group(1))
+
+
 def own_photos(page_html: str) -> Optional[list[str]]:
-    urls = [ihtml.unescape(u) for u in _PHOTO_RE.findall(page_html or "")]
+    urls =[ihtml.unescape(u) for u in _PHOTO_RE.findall(page_html or "")]
     urls = [u for u in dict.fromkeys(urls)
             if u.startswith("http") and re.search(r"\.(?:jpe?g|png|webp)$", u, re.I)]
     return urls or None
@@ -289,12 +317,13 @@ def parse_age(text: str) -> Optional[int]:
 # found it on 3 of 24 pages that plainly state one:
 #     «المساحة: 163.27 متر مربع»   «مساحة الأرض: 525م²»   «المساحة / 620 م»
 #     «مساحة ٢٠٠م²»                «مساحة الأرض الإجمالية: 1,200 م²»
+#     «المساحه الاجمالية ( 2713) متر مربع» — the figure in brackets (12226358, 2026-11-01: stored no area)
 # What makes a match an AREA is a NUMBER followed by a unit — never the word alone, so prose like
 # «نوفر لكم مساحة عمل» (workspace) and «بمساحة مريحة» (roomy) cannot become a measurement.
 _AREA_RE = re.compile(
     r"مساح[ةه](?:\s+(?:الأرض|الارض|العقار|الإجمالية|الاجمالية|الكلية))*"
-    r"\s*[:：/\-]?\s*"
-    r"([\d٠-٩][\d٠-٩,\.]*)\s*(?:م2|م²|متر\s*مربع|متر|م)")
+    r"\s*[:：/\-]?\s*\(?\s*"
+    r"([\d٠-٩][\d٠-٩,\.]*)\s*\)?\s*(?:م2|م²|متر\s*مربع|متر|م)")
 
 
 def parse_area(text: str) -> Optional[int]:
@@ -747,21 +776,31 @@ def _retire_abroad(table: str, abroad: dict[str, str]) -> list[str]:
 # headline paragraph («فيلا مع شقتين. حي المصيف») and name «مطبخ» / «غرفة سائق» in the next ones, so kitchen stayed
 # NULL on ads that state it (CI re-read 39026652684). The «الوصف:» heading is dropped, never read as a fact.
 _DESC_BOX = re.compile(r'id="adt-ad-description-box"[^>]*>', re.S)
-_DESC_P = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
+_DIV_EDGE = re.compile(r"<(/?)div\b", re.I)
+_DESC_H4 = re.compile(r"<h4[^>]*>.*?</h4>", re.S)
 _PROSE_SKIP = ("air_conditioner", "furnished")
 
 
 def _description_text(page_html: str) -> Optional[str]:
+    """The box's own text, however the poster's editor wrapped it. 281 of 1,352 ads stayed NULL after the
+    2026-10-31 crawl because their text is «<p><div>line</div><div>line</div>…</p>» and the old cut at the
+    first «</div>» ended the box before its first paragraph closed (12 Nov 2020 ad «شقق مفروش إيجار شهري»).
+    The box ends where ITS OWN div closes: nested divs are counted, so the sidebar after it is never read."""
     m = _DESC_BOX.search(page_html or "")
     if not m:
         return None
     box = page_html[m.end():m.end() + 20000]
-    first_p = box.find("<p")
-    if first_p < 0:
+    depth, end = 1, len(box)
+    for edge in _DIV_EDGE.finditer(box):
+        depth += -1 if edge.group(1) else 1
+        if depth == 0:
+            end = edge.start()
+            break
+    inner = _DESC_H4.sub("", box[:end])
+    if "<p" not in inner:
         return None
-    end = box.find("</div>", first_p)
-    paras = _DESC_P.findall(box[:end] if end >= 0 else box)
-    return normalize.html_block_lines("</p>".join(paras))
+    text = normalize.html_block_lines(inner)
+    return text or None
 
 
 def stated_rate(page_html: str, price: Optional[int]) -> Optional[int]:
@@ -771,7 +810,7 @@ def stated_rate(page_html: str, price: Optional[int]) -> Optional[int]:
 
 def parse_description_amenities(page_html: str) -> dict[str, bool]:
     text = _description_text(page_html)
-    return normalize.prose_amenities_yes(text, skip=_PROSE_SKIP) if text is not None else {}
+    return normalize.prose_amenities(text, skip=_PROSE_SKIP) if text is not None else {}
 
 
 def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:
@@ -869,6 +908,11 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         # never saw 393 published «yes» and 89 published «no» (🔬 AF engineer, 2026-10-05).
         "air_conditioner": parse_tristate(page_text, "التكييف"),
         **parse_description_amenities(page_html),
+        # The ad's own description, VERBATIM (owner 2026-10-30: «we read everything»). It was parsed for
+        # amenities since 10-08 but never STORED, so all 1,353 active rows had description NULL and the AI
+        # facts reader (title+description >= 30 chars) could not read one ksaaqar ad. Silence stays NULL.
+        # PDPL: the box carries the broker's phone («0551228113») — redacted here, like every description.
+        "description": redact_pii(_description_text(page_html)),
         "title": title or None,
         "photo_urls": own_photos(page_html),
     }
@@ -903,7 +947,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "price_published": figure is not None,
         "price_published_text": f"{figure} ريال" if fractional else None,   # the card's figure, verbatim
     }
-    row["additional_info"] = {k: v for k, v in extra.items() if v is not None}
+    row["additional_info"] = {**own_pin(page_html), **{k: v for k, v in extra.items() if v is not None}}
     return row, category, ""
 
 

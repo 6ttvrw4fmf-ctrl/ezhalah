@@ -76,6 +76,17 @@ def test_schema_id_match_is_exact_not_prefix():
     assert listing_schema_present('real-estate-listing-schema-501525 ', "501525") is True
 
 
+def test_a_leading_zero_url_id_matches_the_schema_without_it():
+    """/ad-details/089639 renders `real-estate-listing-schema-89639` (measured 2026-10-25): the ad
+    must read ALIVE, not UNKNOWN forever — and a different id must still not match."""
+    body = '<script>{"@id":"real-estate-listing-schema-89639"}</script>'
+    req = "https://dealapp.sa/ar/ad-details/089639"
+    assert listing_schema_present(body, "089639") is True
+    assert classify_dealapp(200, body=body, adid="089639", final_url=req, requested_url=req) == ALIVE
+    assert listing_schema_present(body, "189639") is False
+    assert listing_schema_present('real-estate-listing-schema-896391', "089639") is False
+
+
 # ── Real deaths ─────────────────────────────────────────────────────────────────────────────────
 @pytest.mark.parametrize("status", [404, 410])
 def test_hard_gone_is_dead(status):

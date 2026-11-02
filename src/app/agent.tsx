@@ -1,5 +1,5 @@
 import { agentResultRequest, resultQuantityChange } from '@/lib/agentResultRequest';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -14,7 +14,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -34,6 +33,7 @@ import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupporte
 import VoiceWaveform from '@/components/VoiceWaveform';
 import AgentModelSelector from '@/components/AgentModelSelector';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
+import TopBarLanguage from '@/components/TopBarLanguage';
 import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
 import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -97,15 +97,16 @@ import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
-import { encodeSharePayload, shareLink, shareMessage } from '@/lib/shareSearch';
-import { SHARE_LINK, shareNative } from '@/lib/share';
+import { encodeSharePayload, encodeInvitePayload, shareLink, shareMessage, SHARE_INVITE_LINE } from '@/lib/shareSearch';
+import { shareNative, shareLead, liveSiteCount, shareOrigin } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { createSharedChat } from '@/lib/sharedChat';
+import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
 import { useI18n, LocaleScope, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
-import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
+import { listingLocationAr, listingLocationEn, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import { botMessage } from '@/lib/botMessage';
@@ -117,7 +118,7 @@ import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates
 import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
 import { PLATFORM_META, type LoaderPlatform } from '@/data/loaderPlatforms';
 
-// Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
+// Property Age advanced-filter eligibility. Reached from the EXISTING «🎯 دقّق مع الذكاء الاصطناعي» button
 // below a results block — NEVER before first results. Its gate is cohortAllows(q, 'property_age')
 // (src/lib/afCohorts.ts), the same canonical registry every other Advanced Filter question uses — a
 // type/deal/period fires only when COHORT_QUESTIONS has live-verified evidence for it (see
@@ -677,6 +678,7 @@ export default function Agent() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale } = useI18n();
+  const docRtl = useDocumentRtl(locale === 'ar'); // the split row follows the page's real dir (owner 2026-10-21)
   const { seed, filter, chatBubble, chatSub, replay, fresh, hid } = useLocalSearchParams<{
     seed?: string;
     filter?: string;
@@ -706,7 +708,7 @@ export default function Agent() {
     if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
     const code = await createSharedChat(name, loc, q, t);
     if (!code) return null;
-    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const origin = shareOrigin();
     const url = shareLink(origin, code);
     sharedCopyRef.current = { j, url };
     return url;
@@ -715,25 +717,16 @@ export default function Agent() {
   // THAT chat — named after its latest search, or «محادثة من يوسف» when it has none. Guests and an empty
   // screen keep the homepage share. Phone: the phone's own share menu with the link alone (the card holds
   // the title). Desktop: the link is copied and the pill says so.
-  const [chatLinkCopied, setChatLinkCopied] = useState(false);
-  const shareThisChat = async (): Promise<boolean> => {
-    if (!user || !msgs.length) return false;
-    const lastQ = ([...msgs].reverse().find((m: any) => m?.result?.query) as any)?.result?.query ?? null;
-    const url = await chatShareUrl(lastQ);
-    if (!url) return false;
-    try {
-      if (Platform.OS === 'web') {
-        const nav: any = typeof navigator !== 'undefined' ? navigator : null;
-        const touch = typeof nav?.maxTouchPoints === 'number' ? nav.maxTouchPoints > 0 : false;
-        if (touch && nav?.share) { await nav.share({ url }); return true; }
-        await Clipboard.setStringAsync(url);
-        setChatLinkCopied(true);
-        setTimeout(() => setChatLinkCopied(false), 1800);
-        return true;
-      }
-      await Share.share({ message: url, url });
-      return true;
-    } catch { return true; /* cancelled — never fall through to a second share sheet */ }
+  // AN INVITATION TO JOIN (owner 2026-10-23): the Share under a reply with no results to show (a «هلا», a
+  // question, a search that found nothing) sends a personal welcome — card «يوسف يرحّب بك للانضمام إلى إزهله»,
+  // popup with the same words — and, as the message text, the top Share's marketing line («ليش تدوّر في 148
+  // موقع؟ إزهله يدوّر عنك»). A guest has no name to invite with: the plain link with that same line.
+  const inviteFor = (): { shareUrl?: string; shareText?: string } => {
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const text = shareLead(loc, liveSiteCount());
+    const payload = user ? encodeInvitePayload(pickName(user, loc), loc) : null;
+    const origin = shareOrigin();
+    return { shareUrl: payload ? shareLink(origin, payload) : origin, shareText: text };
   };
   const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
     if (!user || !q) return {};
@@ -742,12 +735,14 @@ export default function Agent() {
     const payload = encodeSharePayload(q, name, loc);
     const text = shareMessage(name, q, loc);
     if (!payload || !text) return {};
-    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const origin = shareOrigin();
     // THE WHOLE CHAT (owner 2026-10-17: «sharing it means I share the chat history»): pressing Share saves
     // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
     // link above is only the fallback when that save fails. One copy per unchanged conversation.
     const prepareShare = () => chatShareUrl(q);
-    return { shareUrl: shareLink(origin, payload), prepareShare /* no text: the card shows the title — sending it too repeated it (owner 2026-10-18) */ };
+    // The text beside the link is the invite LINE, not the title (owner 2026-10-22: the card cut «Open it on
+    // Ezhalah, the AI real…» — say it in full as the message; the card keeps «يوسف شاركك: …» as its title).
+    return { shareUrl: shareLink(origin, payload), prepareShare, shareText: SHARE_INVITE_LINE[loc] };
   };
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
@@ -1180,7 +1175,13 @@ export default function Agent() {
   // stale empty list REPLACED the first tab instead of appending the second (caught live in the v2
   // harness). The ref mirror makes every closure read the same current pane, whenever it was made.
   const adPaneRef = useRef<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
-  const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; setAdPane(p); };
+  // THE TAP IS INSTANT (owner 2026-10-27: «when I click on a listing that opens inside ezhalah it takes time, it
+  // doesn't feel smooth»). Measured on ezhalah.com: the tap froze the page for ~380 ms on a fast laptop (1-2 s on a
+  // phone) — opening the pane re-lays-out every card into the tight row in ONE blocking render. The pane update is a
+  // TRANSITION: the tap's own feedback (buzzer, confetti) paints first, and the pane + card re-layout render in small
+  // slices that never block input. The ref stays synchronous, so a second tap still sees the newest pane.
+  // Guard: scripts/verify-listing-tap-is-instant.ts
+  const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; startTransition(() => setAdPane(p)); };
   const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
   // Laptop photo-first cards: 3 across on a wide screen with nothing open beside them, else 2 across.
   const cardsThreeAcross = useAtLeast(CARDS_THREE_ACROSS_BREAKPOINT);
@@ -1196,14 +1197,16 @@ export default function Agent() {
       adHintTimer.current = setTimeout(() => setAdHint(''), 2200);
     }
   };
+  // the viewer tab names the place in the interface language (owner 2026-10-29: «everything must be translated»)
+  const tabTitle = (l: Listing) => (locale === 'en' ? listingLocationEn(l) : listingLocationAr(l));
   const openAd = (l: Listing) => {
     const url = listingOpenUrl(l);
     if (IS_WEB && inAppPreviewHost(url)) {
-      pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '', listing: l });
+      pushAdTab({ source: l.source, id: l.id, title: tabTitle(l), url: url ?? '', listing: l });
       return;
     }
     if (!(IS_WEB && inAppViewerHost(url))) { void openListing(l); return; }
-    pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '' });
+    pushAdTab({ source: l.source, id: l.id, title: tabTitle(l), url: url ?? '' });
   };
   // LAPTOP CARDS ARE ALWAYS THE SMALL ROW (owner 2026-10-03: «for the laptop it should always be
   // small … never make them big»), one step tighter while the pane is on screen beside them. Decided
@@ -1305,7 +1308,7 @@ export default function Agent() {
   const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
   const refineMsgIdRef = useRef<string | null>(null); // the results turn the latest runRefine is building
   // Advanced-question overlay (عمر العقار, apartment-only for now) — a transient card shown ON TOP of
-  // the current results when «خلّنا نحدد الطلب أكثر» is tapped in an apartment scope. Answering hands
+  // the current results when «🎯 دقّق مع الذكاء الاصطناعي» is tapped in an apartment scope. Answering hands
   // off to the SAME runRefine mechanism used by the pre-existing chip flow (echoes a user bubble,
   // re-runs search, renders a new results turn) — never a separate navigation/route.
   const [ageFlow, setAgeFlow] = useState<
@@ -1383,7 +1386,7 @@ export default function Agent() {
   const afCarryRef = useRef<{ msgId: string; originQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } | null>(null);
   // SKIP-EVERYTHING ROUNDS, per results turn (2026-10-06, contract R6.2.2 / R8.1.3). A round that
   // commits nothing returns early from finishGuided — no search, no new turn — so the turn it was
-  // opened from keeps «خلّنا نحدد الطلب أكثر», and that button's carry is built from the turn's
+  // opened from keeps «🎯 دقّق مع الذكاء الاصطناعي», and that button's carry is built from the turn's
   // guided record, which a skip-only round never writes. Without this record the next tap re-asked
   // the SAME questions forever: on Annual Rent → Apartment (rnpl/furnished/age/bathrooms fill the
   // 4-question round) a customer who only wanted AC or an elevator could never reach the amenities.
@@ -1997,7 +2000,7 @@ export default function Agent() {
   // shipped behavior). THE FIRST tap on a turn reveals the next clean 100-boundary only (…→100, not
   // past it) — exactly BROWSE_BATCH's old boundary math, never retired, just no longer the ONLY
   // target. The chat stays open and BOTH offers stand: «عرض المزيد» (if more than 100 remain) and
-  // «خلّنا نحدد الطلب أكثر» (if a useful AF question exists) — resultsActionsRowVisible already
+  // «🎯 دقّق مع الذكاء الاصطناعي» (if a useful AF question exists) — resultsActionsRowVisible already
   // renders whichever apply, unchanged. A SECOND tap on that same turn — i.e. the user explicitly
   // asking again after already seeing the first hundred — drains every remaining page and finishes
   // the search: composer locked, exactly like R11.1's small-set completion, reachable at any total.
@@ -2279,7 +2282,7 @@ export default function Agent() {
   // for "a refine question is already on screen awaiting an answer" — `send()`'s REFINE INTERCEPT and
   // `runRefine()` both already treat it that way (only ONE pending refine is ever a valid state). Nothing
   // previously stopped a second startRefine() call while one was already pending: both call sites route
-  // through this ONE function via «خلّنا نحدد الطلب أكثر» (the fallback when the AF plan has 0 useful
+  // through this ONE function via «🎯 دقّق مع الذكاء الاصطناعي» (the fallback when the AF plan has 0 useful
   // questions — see startAgeFlow) and the outline «نتائج أدق» button, and NEITHER call site disables
   // itself while its own async work is in flight. A rapid double-tap on either (or the AF entry re-showing
   // its CTA the instant `setAgeFlow(null)` fires, one tick before this runs) fired startRefine() twice and
@@ -2326,7 +2329,7 @@ export default function Agent() {
     // (شقة/فيلا/دور/أرض) that were NOT the canonical taxonomy — no group tier, no Studio/Room/
     // Residential Building/Rest House/Duplex, nothing commercial — and wrote only the scalar
     // `q.type`, bypassing the typeGroups/types multi-select the whole app is built on. It was
-    // reachable from the same «خلّنا نحدد الطلب أكثر» button as the interview, so which type
+    // reachable from the same «🎯 دقّق مع الذكاء الاصطناعي» button as the interview, so which type
     // question a user got depended on live counts. Property type is now asked in exactly ONE place,
     // the Advanced Filter's scope prefix, always from HIERARCHY. `applyRefinement`'s 'type' branch
     // is deliberately kept: an in-flight `pendingRefineRef` from before this change, and the
@@ -2405,6 +2408,12 @@ export default function Agent() {
   // turn is in flight (busy) so a half-rendered turn is never what a return restores; content-keyed
   // (lastCapturedRef) so re-renders and restores never rewrite an unchanged transcript.
   const lastCapturedRef = useRef('');
+  // THE SAVED CHAT BEING DOWNLOADED RIGHT NOW (owner 2026-10-23: «when i click on the side … English
+  // shows only my message»). While openSaved() waits for the server copy it paints a stand-in (just the
+  // user's question, a snapshot or a stale local copy). Saving that stand-in wrote a "question only"
+  // transcript over the full chat, and every later open showed only the question. Nothing is saved for
+  // this chat id until its real copy has landed.
+  const hydratingIdRef = useRef<string | null>(null);
   // The debounced capture that has not fired yet. WITHOUT this, the effect cleanup's clearTimeout
   // silently dropped the newest settled state whenever the user left the chat inside the 600ms
   // window (tapping another chat while the new turn's cards were still cascading was enough) — and
@@ -2422,6 +2431,7 @@ export default function Agent() {
   useEffect(() => {
     const id = chatIdRef.current;
     if (!id) return;
+    if (hydratingIdRef.current === id) return; // a stand-in is on screen, never the chat itself
     const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow });
     if (!t) return;
     const j = JSON.stringify(t);
@@ -3003,7 +3013,7 @@ export default function Agent() {
         // every-setCompleted-is-gated ratchet still means something: the defect that check exists for
         // is a "nothing left to ask" VERDICT silently locking the chat (2026-09-12), which this is
         // not — this fires on a round that actually landed results, never on a probe's opinion.
-        // OFF since 2026-10-05 (owner: re-offer «خلّنا نحدد الطلب أكثر» while >25 + a useful question; a tap, never a timer).
+        // OFF since 2026-10-05 (owner: re-offer «🎯 دقّق مع الذكاء الاصطناعي» while >25 + a useful question; a tap, never a timer).
         const afRoundEndsChat = false;
         if (afRoundEndsChat || searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
         // A ROUND NEVER RE-OPENS ITSELF (owner 2026-09-20 — REVERSES the 2026-09-04 "rounds continue
@@ -3034,7 +3044,7 @@ export default function Agent() {
     });
   };
 
-  // Entry point for «خلّنا نحدد الطلب أكثر» (and the auto-open after an eligible Filter search). Build
+  // Entry point for «🎯 دقّق مع الذكاء الاصطناعي» (and the auto-open after an eligible Filter search). Build
   // the PLAN once — the eligible questions whose initial options clear the floor — so the progress bar
   // reflects reality, then present them select-then-confirm. Nothing qualifies → fall through to the
   // pre-existing refine chips so a manual TAP is never a no-op. The AUTO path passes fallbackToRefine=
@@ -3055,7 +3065,7 @@ export default function Agent() {
     // AUTO entry (owner 2026-08-16, supersedes the 2026-08-03 results-first rule): an eligible
     // Filter search with > 25 results opens on the calm INTRO — the count + invitation — never a
     // question. The plan resolves in the background while the intro is on screen, so «يلا نبدأ»
-    // feels instant. A manual «خلّنا نحدد الطلب أكثر» tap skips the intro (the user already opted in).
+    // feels instant. A manual «🎯 دقّق مع الذكاء الاصطناعي» tap skips the intro (the user already opted in).
     setAgeFlow(opts?.auto ? { phase: 'intro', total: opts?.total ?? null } : { phase: 'loading' });
     // SEEDED FROM THE CARRY (owner 2026-08-24), not emptied. The opening rank happens BEFORE the
     // first syncGuidedFromSteps, so starting from an empty set here made round 2 rank — and then ask
@@ -3225,7 +3235,7 @@ export default function Agent() {
 
   // «رجوع» — one question back (owner 2026-08-22). From the FIRST question it leaves the interview
   // entirely: the record is dropped and ageFlow goes null, which is exactly what the pre-AF CTA row
-  // is gated on, so «خلّنا نحدد الطلب أكثر» + «عرض المزيد» come straight back. Nothing was searched
+  // is gated on, so «🎯 دقّق مع الذكاء الاصطناعي» + «عرض المزيد» come straight back. Nothing was searched
   // during the interview, so there is nothing else to undo.
   const onAgeBack = () => {
     if (ageFlow?.phase !== 'asking') return;
@@ -3304,7 +3314,7 @@ export default function Agent() {
             if (i >= 12 && !referenced) return [];
             const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
               : (l.district || l.city || LOCATION_UNRESOLVED_AR);
-            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${listingPrice(l, 'en')}` +
+            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel}${listingPrice(l, 'en') ? ` — ${listingPrice(l, 'en')}` : ''}` +
               `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
           });
           const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
@@ -3642,7 +3652,7 @@ export default function Agent() {
         if (run.cancelled) return;
         // REMOVED (owner 2026-08-19): the auto-open AF intro popup after a filter search is killed.
         // The advanced filter interview must ONLY appear inline below the result cards when the user
-        // manually taps «خلّنا نحدد الطلب أكثر». No popup, no overlay, no auto-open — ever.
+        // manually taps «🎯 دقّق مع الذكاء الاصطناعي». No popup, no overlay, no auto-open — ever.
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {
@@ -3775,6 +3785,7 @@ export default function Agent() {
     // below replaces it when it lands. lastCapturedRef is set to the painted copy, so nothing is
     // written back until the hydrated one has taken its place.
     if (!t && entryId) {
+      hydratingIdRef.current = entryId; // the stand-in painted below must never be saved
       const early = local ? restoreChat(local) : null;
       if (early) {
         setMsgs(early.msgs as unknown as ChatMsg[]);
@@ -3791,6 +3802,7 @@ export default function Agent() {
         setMsgs([{ id: replayMsgIds(entryId, uid).userId, role: 'user', text: bubble }]);
       }
       t = await hydrateTranscript(entryId).catch(() => null);
+      if (hydratingIdRef.current === entryId) hydratingIdRef.current = null;
       // A failed hydrate keeps the pre-existing fallback below (snapshot/replay) on purpose: adopting the
       // stale copy as THE transcript would let the next turn write it over the server's longer one.
     }
@@ -3805,7 +3817,14 @@ export default function Agent() {
     // re-hydrates when it is opened again.
     if (conversationEpochRef.current !== epoch) return;
     const restored = t ? restoreChat(t) : null;
-    if (restored) {
+    const hasSearch = !!(q?.deal || q?.location || q?.category || q?.type || q?.detail || (q as any)?.priceBand || (q as any)?.priceInput);
+    // A SEARCH CHAT SAVED BEFORE ITS ANSWER LANDED (owner 2026-10-23: a saved chat reopened as his
+    // request alone, no listings — «this should never ever happen»). The capture effect stores the
+    // screen as it is, so a chat left mid-search (or whose search failed) ends on the user's own
+    // request. Restoring that verbatim is a dead end; the search re-runs instead (snapshot first),
+    // and the capture effect then saves the answered conversation over the half one.
+    const unansweredSearch = !!restored && hasSearch && restored.msgs[restored.msgs.length - 1]?.role === 'user';
+    if (restored && !unansweredSearch) {
       let restoringDone: Promise<void> = Promise.resolve();
       setMsgs(restored.msgs as unknown as ChatMsg[]);
       {
@@ -3841,7 +3860,6 @@ export default function Agent() {
     // No transcript anywhere. A search chat falls back to the legacy snapshot/replay view; a
     // chat-only entry (empty query — its conversation predates transcripts) has nothing to replay,
     // so it opens as the greeting screen, exactly as it always did.
-    const hasSearch = !!(q?.deal || q?.location || q?.category || q?.type || q?.detail || (q as any)?.priceBand || (q as any)?.priceInput);
     if (!hasSearch) { greetedRef.current = true; sendGreeting(); return; }
     openStatic(q, override, entry?.snapshot);
   };
@@ -4227,15 +4245,13 @@ export default function Agent() {
     // Owner 2026-10-03: «beside me on my right is the tabs» — the ad pane sits on the PHYSICAL right
     // in BOTH languages (his explicit word, even in Arabic RTL; his reference is the Claude desktop
     // app's layout). Under dir=rtl a plain 'row' flows right→left and would put the second child on
-    // the LEFT, so the direction is pinned per-locale instead of left to the document's dir.
-    <View style={{ flex: 1, flexDirection: locale === 'ar' ? 'row-reverse' : 'row', backgroundColor: colors.paper }}>
+    // the LEFT, so the direction cancels the document's ACTUAL dir (src/lib/useDocumentRtl.ts, owner 2026-10-21) —
+    // keyed on the language instead, a moment where the two disagree moved the pane to the left.
+    <View style={{ flex: 1, flexDirection: firstChildLeftRow(docRtl), backgroundColor: colors.paper }}>
     {/* The results column. A row so the in-app ad viewer can sit BESIDE it, full height (split). */}
     <View style={{ flex: 1 }}>
-      {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
-          Home) so the landmarks fill the whole frame — including the center, which used to wash out
-          to plain white during "Ezhalah is searching…". A light opacity + paper scrim keep it faint
-          enough that message text stays readable: the user sees the same sketch, just light. */}
-      <HeroBackground imageOpacity={0.55} scrim={0.2} fadeStart={0.8} fadeEnd={1} />
+      {/* The landing foreground fades when searching; results retain the calm sky. */}
+      <HeroBackground landscape={introLanding && !busy} />
       {/* Header */}
       <View ref={setLtr} style={[s.topBar, { paddingTop: insets.top + 8 }]}>
         {/* Mobile only: a plain hamburger that opens the existing sidebar — same clean style as the
@@ -4277,6 +4293,8 @@ export default function Agent() {
             <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
           </Pressable>
         )}
+        {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
+        <TopBarLanguage />
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
             results, not gated on a completed search. Throughout the entire experience. (user request.) */}
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
@@ -4287,8 +4305,12 @@ export default function Agent() {
         {/* The phone's OWN share menu first, exactly like the Filter screen (owner 2026-10-18: our drawn
             WhatsApp/X/Telegram sheet looked «fake»). Our sheet stays only as the fallback where the
             device has no usable share menu (desktop — see shareNative()). */}
+        {/* THE NORMAL SHARE, never the chat (owner 2026-10-20: «the share button on top shouldn't be
+            sharing properties, it should be the normal share»): this pill shares the Ezhalah link with
+            the home sentence, exactly like index.tsx. Sharing THIS chat is the share icon under each
+            reply (FeedbackRow → shareFor below). */}
         <Pressable
-          onPress={async () => { if (await shareThisChat()) return; if (!(await shareNative())) setShareOpen(true); }}
+          onPress={async () => { if (!(await shareNative())) setShareOpen(true); }}
           style={({ pressed, hovered }: any) => [
             s.shareIcon,
             s.shareIconWide,
@@ -4304,7 +4326,7 @@ export default function Agent() {
         >
           <Animated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
             <Ionicons name="share-social-outline" size={17} color={colors.primary} />
-            <Text style={s.shareText}>{chatLinkCopied ? t('Copied!') : t('Share')}</Text>
+            <Text style={s.shareText}>{t('Share')}</Text>
           </Animated.View>
         </Pressable>
       </View>
@@ -4318,7 +4340,7 @@ export default function Agent() {
       {introLanding ? <View style={s.landingStrip}><HomeWebsiteStrip /></View> : null}
       {shouldRenderModeSwitch(modeGone, replay, openingSaved) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
-          <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
+          <ModeSwitch active="agent" onSwitch={(to) => (to === 'map' ? router.replace('/map') : router.replace('/'))} t={t} />
         </View>
       )}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
@@ -4350,7 +4372,7 @@ export default function Agent() {
             ]}
           >
             {pickerSheet ? <View style={s.platformPickerGrabber} /> : null}
-            <View style={s.platformPickerHeader}>
+            <View style={[s.platformPickerHeader, locale === 'ar' && { flexDirection: 'row-reverse' }]}>
               <View style={s.platformPickerHeading}>
                 <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>
@@ -4509,10 +4531,13 @@ export default function Agent() {
           <View style={s.col}>
             {(() => { const lastId = msgs[msgs.length - 1]?.id; const latestResult = msgs.filter(x => x.role === 'results').slice(-1)[0]; return msgs.map((m) => {
               if (m.role === 'user') {
-                // Owner: English bubbles sit on the left; Arabic bubbles sit on the right.
+                // The user's own bubble sits on the RIGHT in both languages (owner 2026-10-23, Perplexity
+                // reference: «for English it should be like this», then «Arabic leave it how it is»). The
+                // reply and its action rows still follow the reply's language. Text direction inside the
+                // bubble still follows the message.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: 'flex-end' }]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
@@ -4527,7 +4552,11 @@ export default function Agent() {
                 // handled inside SearchLoader (the message column is LTR-pinned).
                 // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
                 if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} pools={m.afRound.pools} exiting={m.exiting} fontFamily={CHAT_FONT} />;
-                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></View>;
+                // The loader speaks the language of the message that started it (owner 2026-10-23: typed «hi» → the
+                // «thinking» line said «إزهله يفكر…» on the right). Same per-turn rule the result card uses below.
+                const asked = msgs.slice(0, msgs.indexOf(m)).reverse().find((x): x is Extract<typeof x, { role: 'user' }> => x.role === 'user');
+                const loaderLocale: Locale = asked?.text ? (msgRTL(asked.text) ? 'ar' : 'en') : locale;
+                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><LocaleScope locale={loaderLocale}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></LocaleScope></View>;
               }
               if (m.role === 'agent') {
                 if (m.greeting) {
@@ -4549,8 +4578,8 @@ export default function Agent() {
                   return <Text key={m.id} testID="chat-stop-note" style={[s.stopNote, { alignSelf: rtl ? 'flex-end' : 'flex-start', writingDirection: rtl ? 'rtl' : 'ltr' }]}>{txt}</Text>;
                 }
                 return (
-                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
-                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
+                  <View key={m.id} testID="agent-reply" style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', width: '100%' }}>
+                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row', width: '100%' }]}>
                       <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
@@ -4566,6 +4595,10 @@ export default function Agent() {
                           </Pressable>
                         ))}
                       </View>
+                    ) : null}
+                    {/* 👍👎 + Share under a plain reply too (owner 2026-10-23): its Share is the invitation to join. */}
+                    {!m.refine && (!m.typing || doneTyping[m.id]) ? (
+                      <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(txt, [], undefined, locale)} {...inviteFor()} />
                     ) : null}
                   </View>
                 );
@@ -4678,7 +4711,8 @@ export default function Agent() {
                             for every answer, scope or not: nothing on this row removes anything. */}
                         {guidedPills.facets.map((f, i) => (
                           <View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>
-                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}</Text>
+                            {/* Dark pill with a check mark (owner 2026-11-01): the answers the user GOT. */}
+                            <Text style={s.guidedPillTx}>{`✓ ${buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}`}</Text>
                           </View>
                         ))}
                       </View>
@@ -4693,7 +4727,7 @@ export default function Agent() {
                     // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
                     // must not vanish merely because listing count = 0; the user is rating the answer, and
                     // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
-                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} />
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} {...inviteFor()} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).
@@ -4845,7 +4879,7 @@ export default function Agent() {
                         // "once user finishes with the advanced filter … let this message immediately
                         // show"). The receipt string is written the instant finishGuided runs, but it
                         // renders in the `else` of this flag — so until today the origin turn kept its
-                        // «عرض المزيد / خلّنا نحدد الطلب أكثر» row for the whole ~10s the new search
+                        // «عرض المزيد / 🎯 دقّق مع الذكاء الاصطناعي» row for the whole ~10s the new search
                         // took, because `chatCompleted` only flips in runRefine's onFetched. The wait
                         // was never a timer to tune; it was this gate resolving late.
                         //
@@ -4911,7 +4945,7 @@ export default function Agent() {
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
                         // button also") — names the SAME button label(s) actually rendered below, in the same
                         // order, so it can never mention an action that isn't on screen to tap.
-                        const spokenActionLabels = [hasMore && replyT('Load more'), canNarrowFurther && replyT('Let’s narrow it down')].filter(Boolean) as string[];
+                        const spokenActionLabels = [hasMore && replyT('Load more'), canNarrowFurther && replyT('🎯 Refine with AI')].filter(Boolean) as string[];
                         const spokenActionsNote = !showActionsRow ? ''
                           : spokenActionLabels.length === 2
                             ? replyT('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
@@ -4928,10 +4962,10 @@ export default function Agent() {
                                   when far fewer matched (owner 2026-08-20). Removed: with the browse cap one «عرض
                                   المزيد» reveals everything up to the cap, so the button needs no count caption. */}
                               {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
-                                  «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
+                                  «🎯 دقّق مع الذكاء الاصطناعي» asks ONE clarifying question then re-searches — but only
                                   when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
-                                  user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
+                                  user taps «🎯 دقّق مع الذكاء الاصطناعي», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.
                                   `ageFlow` covers every AF phase (loading → intro → asking), so
                                   the row is gone from the tap until the flow closes, and returns by itself
@@ -4939,7 +4973,7 @@ export default function Agent() {
                                   absolute overlay, so without this gate the two buttons stayed rendered
                                   (and reachable) underneath it. */}
                               {showActionsRow ? (
-                                <View testID="results-actions" style={[s.mBtnRow, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row', marginTop: 4 }]}>
+                                <View testID="results-actions" style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
                                   {hasMore ? (
                                     // Secondary now (owner 2026-09-20: gold primary is the narrow
                                     // button below). Dots go colors.primary — the fill is white now.
@@ -4978,7 +5012,7 @@ export default function Agent() {
                                         style={s.mBtnPrimary}
                                         disabled={busy}
                                       >
-                                        <Text style={s.mBtnPrimaryTx}>{replyT('Let’s narrow it down')}</Text>
+                                        <Text style={s.mBtnPrimaryTx}>{replyT('🎯 Refine with AI')}</Text>
                                       </GoldShineButton>
                                     </GoldPulse>
                                   ) : null}
@@ -4993,7 +5027,7 @@ export default function Agent() {
                                    the pills use, so skipped answers can never appear here. */
                                 <View style={s.afReceipt} testID="af-round-receipt">
                                   <Text style={[s.afReceiptHead, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                                    {`✓ ${replyT('Continued with the advanced filter')}`}
+                                    {`✓ ${replyT('Continued with 🎯 Refine with AI')}`}
                                   </Text>
                                   {/* The round, in the order it happened — answers and skips in ONE
                                       sentence (see finishGuided). No «اخترت:» label any more: the line now
@@ -5020,7 +5054,7 @@ export default function Agent() {
                                 closing note + available actions above (owner 2026-08-23). Sliced to `shown`
                                 — never past what's actually rendered right now ("no hidden listing should be
                                 spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap). */}
-                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
+                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
                           </>
                         );
                       })()}
@@ -5322,11 +5356,10 @@ export default function Agent() {
                   the microphone and send all in the same line — the model only below»). A zero-width anchor
                   centred on the mic (the row is LTR-pinned, so the same offset holds in both locales); the box's
                   bottom padding makes the room, so the one-line row above it never moves. */}
-              {!modeSearched ? (
+              {/* ALWAYS (owner 2026-10-23, reversing #7229's «only at the start»: «this model disappears … must show»). */}
               <View pointerEvents="box-none" style={s.composerModelAnchor}>
                 <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
               </View>
-              ) : null}
             </View>
             ) : null}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
@@ -5369,7 +5402,7 @@ export default function Agent() {
           self-positions fixed/top regardless of scroll. See src/components/ReadAloudPlayer.tsx. */}
       <ReadAloudPlayer />
       {/* عمر العقار advanced-question overlay (owner 2026-07-13) — a transient card over the CURRENT
-          results, reached only via «خلّنا نحدد الطلب أكثر» in an apartment-only scope. Absolutely
+          results, reached only via «🎯 دقّق مع الذكاء الاصطناعي» in an apartment-only scope. Absolutely
           positioned over the whole screen, same visual language as the interview overlay (dimmed
           backdrop + centered card), but rendered inline here rather than as a separate route, so
           answering can hand off directly to runRefine and update THIS same conversation in place. */}
@@ -5479,10 +5512,10 @@ const s = StyleSheet.create({
   // (not fontFamily) matches the idiom of every other text style in this sheet.
   guidedPillRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
   guidedPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.primary,
     borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
   },
-  guidedPillTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
+  guidedPillTx: { fontSize: 12.5, fontWeight: '600', color: '#fff' },
   // Completed-round receipt (owner 2026-08-24): a quiet record where the buttons used to be — same
   // tinted surface as the pills, no border emphasis, nothing that reads as pressable.
   afReceipt: { gap: 3, marginTop: 4, alignSelf: 'stretch', backgroundColor: colors.tint, borderRadius: radius.chip, paddingHorizontal: 12, paddingVertical: 9 },
@@ -5498,7 +5531,7 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontSize: 22, fontWeight: '800', color: colors.dark },
+  title: { fontSize: 22, fontWeight: '800', color: colors.ink },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
@@ -5548,14 +5581,14 @@ const s = StyleSheet.create({
   aiex: { marginTop: 12, gap: 11 },
   greet: { marginBottom: 6 },
   greetTag: { fontSize: 20, fontWeight: '800', color: colors.primary },
-  greetBody: { fontSize: 14, color: colors.dark, fontWeight: '600', marginTop: 6, lineHeight: 21 },
+  greetBody: { fontSize: 14, color: colors.ink, fontWeight: '600', marginTop: 6, lineHeight: 21 },
   startHead: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 4 },
-  startT: { fontSize: 18, fontWeight: '700', color: colors.dark },
-  startS: { fontSize: 12, color: colors.dark, fontWeight: '600', marginTop: 1 },
+  startT: { fontSize: 18, fontWeight: '700', color: colors.ink },
+  startS: { fontSize: 12, color: colors.ink, fontWeight: '600', marginTop: 1 },
   // On the website the chips are deliberately BIG — tall blocks with large text that fill the screen
   // and pop in one by one; on phone they stay the snug original size. (user request.)
   suggest: { gap: IS_WEB ? 14 : 10, marginTop: IS_WEB ? 18 : 14 },
-  suggestLead: { fontSize: IS_WEB ? 15 : 13.5, fontWeight: '700', color: colors.dark, marginBottom: IS_WEB ? 4 : 1 },
+  suggestLead: { fontSize: IS_WEB ? 15 : 13.5, fontWeight: '700', color: colors.ink, marginBottom: IS_WEB ? 4 : 1 },
   // Centered onboarding header above the example cards — icon, bold heading, lighter description.
   onbWrap: { alignItems: 'center', gap: 7, marginBottom: IS_WEB ? 14 : 10, paddingHorizontal: 12 },
   onbHeading: { fontSize: IS_WEB ? 19 : 16.5, fontWeight: '700', color: colors.ink, textAlign: 'center' },
@@ -5582,7 +5615,7 @@ const s = StyleSheet.create({
   // The two actions under the «more than 25» message (owner 2026-09-20: gold primary + white
   // secondary — see the JSX above for which button wears which now).
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
-  // PRIMARY = «خلّنا نحدد الطلب أكثر». Layout only — GoldShineButton (CardReveal.tsx) paints the
+  // PRIMARY = «🎯 دقّق مع الذكاء الاصطناعي». Layout only — GoldShineButton (CardReveal.tsx) paints the
   // actual gold gradient + shine sweep + hover/press darken; no flat backgroundColor here anymore.
   mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}) },
   mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: colors.goldOnFill, lineHeight: 18 },
@@ -5643,7 +5676,7 @@ const s = StyleSheet.create({
   replyText: { fontFamily: CHAT_FONT, minWidth: 0, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, color: colors.ink },
   introScroll: { flexGrow: 1, justifyContent: 'center' },
   greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
-  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
+  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.ink, textAlign: 'center', writingDirection: 'rtl' as any },
   greetingSubtitle: { fontSize: 16, lineHeight: 26, color: colors.body, textAlign: 'center', writingDirection: 'rtl' as any },
   // Rotating composer examples (owner brief 2026-08-23): the absolute overlay fills the input's own
   // clipped wrapper (inputGrow), so it is structurally unable to move the mic/Send or overflow; the
@@ -5675,7 +5708,8 @@ const s = StyleSheet.create({
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
   // «شاهين 2.2» is gone after the first message (owner 2026-10-17): the 24 px that made room for it go with it.
-  composerNoModel: { paddingBottom: 6 },
+  // Kept as a no-op: «شاهين 2.2» now shows in every state, so the box keeps its room for it (owner 2026-10-23).
+  composerNoModel: {},
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
   // (34 send-button − 22 line) / 2, the single-line centering trick above.

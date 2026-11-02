@@ -1,0 +1,92 @@
+# PR GATE — the checks that look at the CHANGE itself, not at the data (owner, 2026-10-23: step 1 of
+# the self-healing proposal, "close the door").
+#
+# WHY. On 2026-08-15 a TypeScript type error in src/app/agent.tsx shipped and blanked search; on
+# 2026-10-23 two app-screen bugs (an English reply laid out right-to-left, a saved chat reopening
+# with no listings) passed all four required checks. None of those checks compiles the app or
+# renders a screen: `npm test` is a source-grep/logic suite, and web-runtime-smoke.yml was optional
+# and path-filtered. This workflow adds the two cheapest gates that catch that class, and both are
+# meant to be REQUIRED status checks on main (see scripts/live-reaching-required-checks.txt for why
+# a required check must stay hermetic: nothing here touches production).
+#
+#   typecheck       — `tsc --noEmit` over the app (tsconfig.json: src/, api/, e2e/*.ts; scripts/ and
+#                     supabase/functions are excluded there and have their own parsers).
+#   assertion-trap  — a PR that touches tests may not REDUCE the number of assertions. An agent that
+#                     turns a red check green by deleting the failing `check(...)` is the documented
+#                     failure mode of autonomous repair; the `owner-approved` label is the one way
+#                     through, and only a person can add it.
+#
+# Runs on merge_group too: a required check that never reports on the queued merge commit stalls
+# the queue forever (owner 2026-10-22).
+name: PR gate
+
+on:
+  merge_group:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): required of every workflow by verify-gate-handshake.ts so a
+  # robot of ours is never refused by our own front door. Nothing in this workflow reaches production
+  # today; the variable is here so the next job added to it cannot forget it. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+concurrency:
+  group: pr-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    # NOTE: this job name is referenced by the branch-protection required-status-check list.
+    # Renaming it silently drops the gate — change both together.
+    name: Typecheck (tsc --noEmit)
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+  assertion-trap:
+    # NOTE: this job name is referenced by the branch-protection required-status-check list.
+    name: Tests keep their assertions
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    # A push to main has no base to compare against; the PR and the queued merge commit do.
+    if: github.event_name != 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Count assertions on base and head
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'owner-approved') }}
+        run: |
+          set -euo pipefail
+          # One pattern, applied to the same files on both commits: the call sites that make a verify
+          # script or a journey fail. `grep -c` per file, summed; a file absent on one side counts 0.
+          count() {
+            git ls-tree -r --name-only "$1" -- scripts e2e \
+              | grep -E '^(scripts/verify-.*\.(ts|mjs)|e2e/.*\.(mjs|ts))$' \
+              | while read -r f; do
+                  git show "$1:$f" | grep -cE '\b(check|mustCatch|assert|assertEqual|expect|problems\.push|bad\.push|fail)\(' || true
+                done | awk '{s+=$1} END {print s+0}'
+          }
+          base=$(count "$BASE_SHA"); head=$(count "$HEAD_SHA")
+          echo "assertions: base=$base head=$head (approved=$APPROVED)"
+          if [ "$head" -lt "$base" ] && [ "$APPROVED" != "true" ]; then
+            echo "::error::this change REMOVES assertions ($base → $head). A red check is not fixed by deleting it. Add the owner-approved label if a person really did approve the removal."
+            exit 1
+          fi

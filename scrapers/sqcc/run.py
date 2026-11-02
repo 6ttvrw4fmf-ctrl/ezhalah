@@ -128,6 +128,24 @@ def walk_categories(s: cc.Session) -> tuple[dict[str, set[str]], dict[str, str]]
     return members, where
 
 
+# The unit's own room lists sit OUTSIDE the listing block: a duplex prints one «<h2>دور ارضي</h2>» section per floor,
+# each a `shape_data_list` of bare <b> items («مجلس رجال», «مطبخ», «غرفه خادمة»), and a `shape_notice` line
+# («يتكون من  كراج - حوش»). CI source-reread 40299894589 (13707675, 2026-10-26): the ad states a kitchen, a maid's
+# room and a garage there and all three were stored NULL, because only the icon+<p> spec list above was read.
+_FEATURE_LIST = re.compile(r'<ul class="shape_data_list">(.*?)</ul>', re.S)
+_FEATURE_ITEM = re.compile(r"<li>\s*<div>\s*<b>(.*?)</b>", re.S)
+_NOTICE = re.compile(r'<div class="shape_notice[^"]*">(.*?)</div>', re.S)
+
+
+def features(page: str) -> list[str]:
+    """The ad's own per-floor room items and notice lines, in page order; the footer is never read."""
+    foot = page.find("foot_phone")
+    body = page if foot < 0 else page[:foot]
+    items = [clean(b) for ul in _FEATURE_LIST.findall(body) for b in _FEATURE_ITEM.findall(ul)]
+    items += [clean(n) for n in _NOTICE.findall(body)]
+    return [x for x in dict.fromkeys(items) if x]
+
+
 def parse_page(page: str) -> dict[str, Any]:
     box = page[page.find('id="postin"'):page.find('<div id="data">')]   # the listing block only
     pid = re.search(r"\?p=(\d+)['\"]", page)
@@ -145,6 +163,7 @@ def parse_page(page: str) -> dict[str, Any]:
         "price_text": clean(price.group(1)) if price else "",
         "serv": {k: clean(v) for k, v in re.findall(r'<span class="(icons\d+)">(.*?)</span>', serv, re.S) if clean(v)},
         "specs": [clean(p) for p in re.findall(r'<span class="icons\d+"></span>\s*<p>(.*?)</p>', box, re.S) if clean(p)],
+        "features": features(page),
         "lat": geo.group(1) if geo else None,
         "lng": geo.group(2) if geo else None,
         "photos": [u for u in dict.fromkeys(thumb + gallery) if not _NOT_A_PHOTO.search(u)],
@@ -189,6 +208,7 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
     if not d.get("id"):
         return None, "no_stable_id"
     title, specs, pt = d["title"], d["specs"], d["price_text"]
+    feats = d.get("features") or []
     own = " ".join([title, pt, *specs])
     in_cats = sorted(c for c, urls in cats.items() if url in urls)
     deals = {_DEAL_CAT[c] for c in in_cats if c in _DEAL_CAT}
@@ -246,7 +266,7 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
         "source": SOURCE,
         "active": True,
         "title": redact_pii(title) or None,
-        "description": redact_pii("\n".join(specs)[:4000]) or None,
+        "description": redact_pii("\n".join([*specs, *feats])[:4000]) or None,
         "property_type": ptype,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",   # deal is validated above
         "city": normalize.map_city(city_ar) if city_ar else None,
@@ -261,7 +281,7 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
         "property_age": ages.pop() if len(ages) == 1 else None,
         "photo_urls": list(d["photos"]),
         **row_price,
-        **normalize.amenities_from_text("\n".join(specs)),
+        **normalize.amenities_from_text("\n".join([*specs, *feats])),
     }
     stored = row.get("price_per_meter") or (row.get("price_total") if deal == "Buy" else row.get("price_annual"))
     row["price_evidence"] = normalize.price_evidence(
@@ -284,6 +304,67 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
         "schema": "sqcc.realestate.v1", "title": title, "price_text": pt, "serv": d["serv"],
         "specs": [redact_pii(x) for x in specs], "location_text": where, "categories": in_cats})
     return (row, category), ""
+
+
+# ── LIVENESS (measured 2026-10-27) ────────────────────────────────────────────────────────────────
+# Owner 2026-10-26: every ad we show gets a direct dead-ad check. The crawl already opens EVERY ad's
+# own page every night (sitemap → post page), so that read IS the check — zero extra requests.
+# MEASURED 2026-10-27 from a browser UA: a live post answers 200 carrying its own
+# <link rel='shortlink' href='…?p=52'>; a slug the site does not serve answers HTTP 404
+# (<title>… » الصفحة غير موجودة.), and so does ?p=<unknown id>. A post whose OWN title / price / spec
+# list says «تم البيع / مباع / محجوز / مزاد» is the same retirement map_listing already refuses to
+# write. «مؤجر / تم التأجير» depends on the deal (a tenanted SALE is still for sale), so it is no opinion.
+def _own_text(d: dict[str, Any]) -> str:
+    return " ".join([d.get("title") or "", d.get("price_text") or "", *(d.get("specs") or [])])
+
+
+def _make_signal(ad_number: str):
+    def _signal(status, body, path_changed):
+        if status in (404, 410) and not path_changed:
+            return "gone"
+        if status != 200:
+            return None                               # a 200 is judged by its content, not its path:
+        d = parse_page(body)                          # only THIS post prints its own shortlink id
+        if not d.get("id") or f"{PREFIX}{d['id']}" != ad_number:
+            return None                               # not provably THIS post → no opinion
+        own = _own_text(d)
+        if _GONE.search(own):
+            return "gone"                             # the post's own words retire it
+        if _LEASED.search(own) or not d.get("title"):
+            return None
+        return "live"
+    return _signal
+
+
+def _stored_url(ad_number: str) -> Optional[str]:
+    from scrapers.common.http_liveness import stored_listing_url
+    return stored_listing_url(("sqcc_residential_listings", "sqcc_commercial_listings"))(ad_number)
+
+
+def _make_verify_gone(s, control_ad: Optional[str], url_by_ad: dict[str, str]):
+    """verify_gone for prune_unseen: the row's OWN stored URL (Arabic slug — never rebuilt), read
+    under the shared law; every removal gated on a post THIS crawl just read still answering live."""
+    from scrapers.common.http_liveness import LivenessProbe
+
+    def probe(ad_number: str, canary=None):
+        url = url_by_ad.get(ad_number) or _stored_url(ad_number)
+        if not url:
+            return "unknown", f"{ad_number!r}: no stored listing_url to probe"
+        return LivenessProbe(platform=SLUG, signal=_make_signal(ad_number), session=lambda: s,
+                             url_for=lambda _ad: url, canary=canary).verify_gone(ad_number)
+
+    state: dict[str, tuple[bool, str]] = {}
+
+    def canary() -> tuple[bool, str]:
+        if "v" not in state:
+            if not control_ad:
+                state["v"] = (False, "no row from this run to use as a positive control")
+            else:
+                verdict, why = probe(control_ad)
+                state["v"] = (verdict == "live", f"positive control {control_ad}: {why}")
+        return state["v"]
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def main() -> int:
@@ -319,6 +400,9 @@ def main() -> int:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
             row, cat = got
+            # A DIRECT 200 read of this post's OWN page, its id taken from that page's own shortlink,
+            # and map_listing refused every retirement word: recorded as a direct live reading.
+            db.mark_direct_alive(row, oracle="sqcc.detail_fetch.shortlink_id")
             (com if cat == "commercial" else res).append(row)
         if skipped:
             print("  skipped (not guessed): "
@@ -340,9 +424,12 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         complete = unreadable == 0 and len(urls) > 0
+        url_by_ad = {r["ad_number"]: r["listing_url"] for r in res + com}
+        verify_gone = _make_verify_gone(s, next(iter(sorted(url_by_ad)), None), url_by_ad)
         for tbl, rr in (("sqcc_residential_listings", res), ("sqcc_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
+                                    verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:

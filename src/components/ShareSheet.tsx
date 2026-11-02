@@ -13,7 +13,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
-import { SHARE_BLURB_AR, SHARE_BLURB_EN, SHARE_LEAD_AR, SHARE_LEAD_EN, SHARE_LINK, SHARE_MESSAGE_AR, SHARE_MESSAGE_EN } from '@/lib/share';
+import { SHARE_LINK, SHARE_LINK_EN, liveSiteCount, shareLead, shareMessage } from '@/lib/share';
 
 // Real, resolvable share link (the deployed app), not a placeholder.
 // The link, the sentence and the message all come from lib/share.ts. This file used to hold its own
@@ -61,8 +61,9 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
   // `msg` too pre-filled the composer with the link TWICE.
   // ONE source of truth for the wording — lib/share.ts. This file used to hold its own copy of
   // the sentence, and the two drifted apart until they said different things in different places.
-  const lead = locale === 'ar' ? SHARE_LEAD_AR : SHARE_LEAD_EN;
-  const msg = locale === 'ar' ? SHARE_MESSAGE_AR : SHARE_MESSAGE_EN;
+  const count = liveSiteCount();
+  const lead = shareLead(locale, count);
+  const msg = shareMessage(locale, count);
   const copy = async () => {
     // expo-clipboard works on web (navigator.clipboard) and native alike.
     try { await Clipboard.setStringAsync(msg); } catch { /* ignore */ }
@@ -91,7 +92,7 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
 
   const text = encodeURIComponent(msg);          // the sentence AND the link (no url= parameter)
   const textNoLink = encodeURIComponent(lead);   // the sentence alone (the target appends url=)
-  const link = encodeURIComponent(LINK);
+  const link = encodeURIComponent(locale === 'en' ? SHARE_LINK_EN : LINK);
   const subject = encodeURIComponent(t('Ezhalah'));
 
   // Note #3 — full multi-option share sheet, fully localized. WhatsApp / X / Telegram / Email / Copy
@@ -114,11 +115,12 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
           {/* Link-preview look (owner 2026-10-18: «smaller … professional»): a small framed logo, the
               name, a two-line description, and the bare domain in small muted type — not a big link. */}
           <View style={s.logoFrame}>
-            <RNImage source={require('../../public/og-image-v6.png')} style={s.logo} resizeMode="contain" />
+            <RNImage source={require('../../public/og-image-v9.png')} style={s.logo} resizeMode="contain" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.pvT}>{t('Ezhalah')}</Text>
-            <Text style={s.pvS} numberOfLines={2}>{locale === 'ar' ? SHARE_BLURB_AR : SHARE_BLURB_EN}</Text>
+            {/* The sentence that will actually be sent (owner 2026-10-20), never the page's SEO description. */}
+            <Text style={s.pvS} numberOfLines={2}>{lead}</Text>
             <Text style={s.pvL} numberOfLines={1}>{DOMAIN}</Text>
           </View>
         </View>

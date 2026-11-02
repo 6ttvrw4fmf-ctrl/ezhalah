@@ -29,7 +29,8 @@ SOURCE SHAPE (measured live 2026-09-24, nothing below is assumed):
   · ONE POST CARRIES A HOUZEZ MULTI-UNIT (19957: «دور أرضي», price 992000, 3/3, 150 m²) — a second
     advertised unit with its own price inside the same page. Owner rule (compound sites): each
     unit type is one listing → ad_number MTB19957-U0, listing_url = the post's page.
-  · GEOLOCATION is a real Riyadh pin on 10/10 but is not stored (no column); the reverse-geocoded
+  · GEOLOCATION is a real Riyadh pin on 10/10; stored as additional_info latitude/longitude since
+    2026-10-22 (the border robot found it published and unsaved). The reverse-geocoded
     fave_property_map_address («إبراهيم الكوارني, الشرق, محافظة رماح») is a geocoder string, not
     the ad's district, and is never used for location.
   · PHOTOS: fave_property_images holds the gallery attachment ids (36 across the 10); resolved via
@@ -62,6 +63,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
@@ -118,6 +120,11 @@ def _meta(post: dict, key: str) -> Optional[str]:
     if isinstance(v, list):
         v = v[0] if v else None
     return str(v).strip() if v not in (None, "") else None
+
+
+def _location_pin(post: dict) -> dict:
+    parts = (_meta(post, "fave_property_location") or "").split(",")
+    return pin_dict(parts[0], parts[1]) if len(parts) >= 2 else {}
 
 
 def _names(post: dict, tax: dict, key: str) -> list[str]:
@@ -239,6 +246,9 @@ def map_listing(post: dict, tax: dict, photos: list[str]) -> tuple[Optional[dict
         "published_at": post.get("date_gmt"), "modified_at": post.get("modified_gmt"),
         "photo_count": len(photos) or None,
     }.items() if v is not None}
+    # The ad's own pin: Houzez fave_property_location «LAT,LNG,ZOOM» (measured 2026-10-22: 24.9019,46.6226
+    # on «فلل بحي العارض» — inside Al Arid; the border robot flagged it as a pin we never saved).
+    row["additional_info"].update(_location_pin(post))
     return row, category, ""
 
 

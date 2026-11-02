@@ -5,8 +5,8 @@ import ts from 'typescript';
 import { msgRTL } from '../src/lib/textDirection.ts';
 import { buildAfSummaryItems } from '../src/lib/afSummary.ts';
 
-assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['Up to 2 years'] }], 'en'), ['Age Up to 2 years 🏗️']);
-assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['سنتين'] }]), ['عمر سنتين 🏗️']);
+assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['Up to 2 years'] }], 'en'), ['🏗️ Age Up to 2 years']);
+assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['سنتين'] }]), ['🏗️ عمر سنتين']);
 
 const source = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
 // Location names do not change the paragraph language. Leading numbers and emoji are neutral.
@@ -30,7 +30,7 @@ function verify(text: string) {
     ts.forEachChild(node, visit);
   }
   visit(ast);
-  const wrapper = styles.find(s => s.includes('gap: 10') && s.includes("'76%'"))!;
+  const wrapper = styles.find(s => s.includes('gap: 10') && s.includes('alignSelf: rtl'))!;
   const user = styles.find(s => s.includes('s.userBubble'))!;
   const row = styles.find(s => s.includes('s.reply,') && s.includes('alignSelf:'))!;
   const results = styles.find(s => s.includes('gap: 6, alignItems: rtl') && s.includes("width: '100%'"))!;
@@ -46,10 +46,13 @@ function verify(text: string) {
     const arabic = /[\u0600-\u06ff]/.test(message);
     const edge = arabic ? 'flex-end' : 'flex-start';
     const flow = arabic ? 'row-reverse' : 'row';
-    assert.equal(run(user, message)[1].alignSelf, edge);
+    assert.equal(run(user, message)[1].alignSelf, 'flex-end'); // the user's bubble is on the right in BOTH languages (owner 2026-10-23)
     assert.equal(run(wrapper, message).alignSelf, edge);
+    assert.equal(run(wrapper, message).width, '100%', 'assistant replies use the full chat column');
+    assert.equal(run(wrapper, message).maxWidth, undefined, 'assistant prose has no bubble-width cap');
     assert.equal(run(row, message)[1].alignSelf, edge);
     assert.equal(run(row, message)[1].flexDirection, flow);
+    assert.equal(run(row, message)[1].width, '100%', 'text beside the sparkle fills the reply row');
     assert.equal(run(results, message).alignItems, edge);
     assert.equal(run(slogan, message)[1].flexDirection, flow);
   }
@@ -62,7 +65,10 @@ function mustCatch(brokenSource: string) {
   assert.throws(() => verify(brokenSource), assert.AssertionError);
 }
 mustCatch(mutant);
-const userMutant = source.replace("[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]", "[s.userBubble, { alignSelf: 'flex-end' }]");
+const userMutant = source.replace("[s.userBubble, { alignSelf: 'flex-end' }]", "[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]"); // the pre-2026-10-23 rule: English on the left
 assert.notEqual(userMutant, source, 'user bubble mutation target exists');
 mustCatch(userMutant);
-console.log('PASS: Arabic replies/results/sparkles align right, English left; original defect mutation rejected.');
+const narrowReply = source.replace("gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', width: '100%'", "gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%'");
+assert.notEqual(narrowReply, source, 'reply-width mutation target exists');
+mustCatch(narrowReply);
+console.log('PASS: user bubble right in both languages; Arabic replies/results/sparkles align right, English left; assistant prose fills the chat column; mutations rejected.');

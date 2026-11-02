@@ -45,6 +45,12 @@ This section describes the shape; read the file for the table.
     first.
 - Unmatched → **routine #2 (🎖️ Senior Production)**, which holds the triage mandate. A fallback is
   a real owner, not a bin.
+- **Liveness-coverage alarms → #11 ♻️ Lifecycle (owner, 2026-10-27).** `liveness_checking_shortfall`,
+  `liveness_verification_sla`, `liveness_checking_stalled`, `liveness_coverage_*`, `oracle_never_retires`
+  and `oracle_chain_never_observed` measure the owner's rule «every ad we keep is checked; if we add more,
+  we check more». They had no pattern and fell to #2 — a routine retired on 2026-09-27 — so for a month
+  they reached nobody while DealApp (40% unchecked), Haraj (a 1,000-row slice) and 17 small sites
+  (0% checked) went unnoticed. The open ones were re-owned to `routine-11-lifecycle` the same day.
 
 ### Distribution over the 103 kinds present in `alert_event` on 2026-08-28
 

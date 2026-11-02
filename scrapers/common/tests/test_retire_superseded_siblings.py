@@ -303,6 +303,31 @@ def _call_lines(src: str, attr: str) -> list[int]:
                   and n.func.attr == attr)
 
 
+def _prune_call_lines(tree) -> list:
+    """Real prune call sites: `<mod>.prune_unseen(...)` and calls to a module-level prune wrapper
+    (a function named prune_* that itself calls prune_unseen, e.g. goldendeal's prune_complete_crawl,
+    superoffice's prune_table), EXCLUDING the prune_unseen call inside such a wrapper's own body —
+    the wrapper is defined above main(), so its body line is not where main() prunes (2026-10-27)."""
+    wrappers = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, ast.FunctionDef) and fn.name.startswith("prune_") and any(
+                isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr == "prune_unseen"
+                for c in ast.walk(fn)):
+            wrappers[fn.name] = (fn.lineno, getattr(fn, "end_lineno", fn.lineno))
+    inside = lambda ln: any(a <= ln <= b for a, b in wrappers.values())
+    out = []
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        f = n.func
+        name = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else None)
+        if name == "prune_unseen" and not inside(n.lineno):
+            out.append(n.lineno)
+        elif name in wrappers:
+            out.append(n.lineno)
+    return sorted(out)
+
+
 def test_a_wired_scraper_supersedes_before_it_prunes():
     """Order is load-bearing: prune's guards protect the orphan rather than ageing it out."""
     found = _dual_routing_scrapers()
@@ -310,7 +335,7 @@ def test_a_wired_scraper_supersedes_before_it_prunes():
              if _call_lines(src, "retire_superseded_siblings")}
     assert wired, "no scraper calls the supersession step — the helper is decoration"
     for platform, src in sorted(wired.items()):
-        prune = _call_lines(src, "prune_unseen")
+        prune = _prune_call_lines(ast.parse(src))
         if not prune:
             continue  # amaall prunes nothing; there is no ordering to get wrong
         assert _call_lines(src, "retire_superseded_siblings")[0] < prune[0], \

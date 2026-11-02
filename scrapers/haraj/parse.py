@@ -107,11 +107,22 @@ def sections(desc: str) -> tuple[dict[str, str], dict[str, str]]:
             m = re.match(r"\s*([^:\n]{2,60}?)\s*:\s*(.*)$", line)
             if m and m.group(1).strip() not in out:
                 out[m.group(1).strip()] = m.group(2).strip()
-    # the pin's URL sits on the line AFTER its label
-    pin = re.search(r"maps\.google\.com/\?q=(-?[0-9.]+),(-?[0-9.]+)", deed_txt or lic_txt)
+    # the pin's URL sits on the line AFTER its label. Haraj masks long digit runs as a phone number
+    # («46.( رقم الجوال يظهر عند الضغط على زر تواصل )»), so a cut link is skipped for a whole one (2026-10-22).
+    pin = full_pin(deed_txt or lic_txt)
     if pin:
-        deed["_pin"] = f"{pin.group(1)},{pin.group(2)}"
+        deed["_pin"] = f"{pin[0]},{pin[1]}"
     return lic, deed
+
+
+_MAPS_Q = re.compile(r"maps\.google\.com/\?q=(-?\d{1,2}\.\d{4,}),(-?\d{1,3}\.\d{4,})(?![\d.])")
+
+
+def full_pin(text: str) -> Optional[list[str]]:
+    """The first COMPLETE «maps.google.com/?q=LAT,LNG» in text: both halves with ≥ 4 decimals, not cut
+    mid-number (Haraj's phone mask turns «46.597182495004» into «46.( رقم الجوال … )»)."""
+    m = _MAPS_Q.search(text or "")
+    return [m.group(1), m.group(2)] if m else None
 
 
 # ── REGA's English enums (the licence platform prints either language) ──────────────────────────
@@ -146,7 +157,8 @@ def licence_deals(desc: str) -> list[Optional[str]]:
 
 
 def age_of(raw: Optional[str]) -> Optional[int]:
-    """«جديد»/«New» → 0, «ثلاث سنوات», «Seven Year» → 7, «5» → 5; an open bound («أكثر من 10») → None."""
+    """«جديد»/«New» → 0, «ثلاث سنوات», «Seven Year» → 7, «5» / «45سنه» → 5 / 45; REGA's open top bucket
+    «اكثر من عشر سنوات» → 10; any other open bound («أكثر من 20») → None."""
     from scrapers.common.normalize import exact_age
     v = _clean(raw)
     if not v:
@@ -156,6 +168,15 @@ def age_of(raw: Optional[str]) -> Optional[int]:
     m = re.fullmatch(r"(?i)\s*(one|two|three|four|five|six|seven|eight|nine|ten)\s+years?\s*", v)
     if m:
         return _EN_NUM[m.group(1).lower()]
+    # REGA's open top bucket is «10 or more». A haraj 10 is read as «≥ 10, upper end unknown» by the AF clause
+    # (20261025072931 — the English «Ten Year» already meant both), so «10+» finds it and «up to N» never does.
+    # Was None: 983 live licensed ads stated an age and showed none (2026-10-25).
+    if re.fullmatch(r"\s*[اأ]كثر\s+من\s+(?:عشر|10)\s+سنوات?\s*", v):
+        return 10
+    m = re.fullmatch(r"\s*(\d{1,3})\s*(?:سنه|سنة|سنوات|سنين|عام)\s*", v)   # \d and int() read ٤٥ too
+    if m:                           # «45سنه»: the number glued to its unit, which the shared parser cannot read
+        n = int(m.group(1))
+        return n if n <= 100 else None
     return exact_age(v)
 
 
@@ -304,8 +325,8 @@ def parse_post(ld: dict[str, Any], page_html: str = "") -> dict[str, Any]:
     deal_raw = get("غرض الإعلان")
     pin = (deed.get("_pin") or "").split(",") if deed.get("_pin") else None
     if not pin:
-        m = re.search(r"maps\.google\.com/\?q=(-?[0-9.]+),(-?[0-9.]+)", desc)
-        pin = [m.group(1), m.group(2)] if m else None
+        # the ad text carries the link twice; the deed copy can be cut by Haraj's phone mask (18482433, حي الملقا)
+        pin = full_pin(desc)
     lat, lng = sa_pin(*pin) if pin else (None, None)
     loc3 = licence_location_ar(get("وصف موقع العقار"))
     # DISTRICT precedence (owner 2026-10-18): (1) the deed's «الحي:» — else the licence location's own

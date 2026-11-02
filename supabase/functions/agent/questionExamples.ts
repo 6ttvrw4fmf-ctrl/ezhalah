@@ -181,20 +181,20 @@ const withOpener = (en: boolean, seed: string, avoid: string, type?: string | nu
 };
 // ── chit-chat is not a search: thanks, hello and goodbye each have their own phrasings (owner 2026-10-11: not a chatbot that
 // answers «thanks» with the same introduction it gives everyone) ────────────────────────────────────────────────────────────
-export const THANKS_AR: readonly string[] = ['العفو، أي وقت 🤍', 'حياك الله، أنا حاضر لو احتجت شي 🏡', 'الله يعافيك، تحت أمرك 🤍', 'العفو، إذا تبي أدور لك على شي ثاني قلّي 🏡'];
+export const THANKS_AR: readonly string[] = ['العفو، أي وقت 🤍', 'حياك، أنا حاضر لو احتجت شي 🏡', 'تسلم، تحت أمرك 🤍', 'العفو، إذا تبي أدور لك على شي ثاني قلّي 🏡'];
 export const THANKS_EN: readonly string[] = ["You're welcome, I'm here whenever you need me 🤍", 'Happy to help, just tell me what to search next 🏡', 'Anytime, tell me if you want another search 🏡', 'My pleasure 🤍'];
 export const HELLO_AR: readonly string[] = [
-  'ارحب فيك، وش تبي أدور لك؟ مثلاً: {ex}', 'حياك الله، أنا إزهله، وش تدور عليه؟ مثلاً: {ex}', 'ارحب، تحت أمرك. اكتب لي وش تبغى، مثلاً: {ex}', 'ارحب، وش تبغى أدور لك؟ مثلاً: {ex}',
+  'ارحب فيك، وش تبي أدور لك؟ مثلاً: {ex}', 'حياك، أنا إزهله، وش تدور عليه؟ مثلاً: {ex}', 'ارحب، تحت أمرك. اكتب لي وش تبغى، مثلاً: {ex}', 'ارحب، وش تبغى أدور لك؟ مثلاً: {ex}',
 ];
 export const SALAM_AR: readonly string[] = [
-  'وعليكم السلام ورحمة الله، ارحب فيك. وش تدور عليه؟ مثلاً: {ex}', 'وعليكم السلام، حياك الله. وش تبي أدور لك؟ مثلاً: {ex}',
-  'وعليكم السلام ورحمة الله وبركاته، تحت أمرك. اكتب لي وش تبغى، مثلاً: {ex}',
+  'وعليكم السلام، ارحب فيك. وش تدور عليه؟ مثلاً: {ex}', 'وعليكم السلام، حياك. وش تبي أدور لك؟ مثلاً: {ex}',
+  'وعليكم السلام، تحت أمرك. اكتب لي وش تبغى، مثلاً: {ex}',
 ];
 export const HELLO_EN: readonly string[] = [
   'Welcome, what are you looking for? For example: {ex}', 'Hi there, tell me what to search for, for example: {ex}', 'Hello, I am Ezhalah. What can I find for you? For example: {ex}',
   'Good to see you, what are you after? For example: {ex}',
 ];
-export const BYE_AR: readonly string[] = ['مع السلامة، حياك الله في أي وقت 🤍', 'في أمان الله، أنا هنا لو احتجت شي 🤍', 'الله يحفظك، نشوفك على خير 🤍'];
+export const BYE_AR: readonly string[] = ['مع السلامة، حياك في أي وقت 🤍', 'نشوفك قريب، أنا هنا لو احتجت شي 🤍', 'يومك سعيد، نشوفك على خير 🤍'];
 export const BYE_EN: readonly string[] = ['Goodbye, come back anytime 🤍', 'Take care, I am here when you need me 🤍', 'See you soon 🤍'];
 const THANKS_RE = /شكر|يعطيك\s*العافية|مشكور|يسلمو|\bthank|\bthx\b|\bcheers\b/i;
 const BYE_RE = /مع\s*السلامة|في\s*أمان\s*الله|\bbye\b|\bgoodbye\b|\bsee\s*you\b/i;

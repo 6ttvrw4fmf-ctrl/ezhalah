@@ -31,13 +31,18 @@ concurrency:
   group: gathern-sync
   cancel-in-progress: false
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   sync:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 150
     strategy:
       fail-fast: false        # one shard failing never blocks the others
-      max-parallel: 12
+      max-parallel: 6         # two waves of 6 — spreads our load on gathern over time (2026-10-23)
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
@@ -53,7 +58,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SCRAPE_MIN_INTERVAL: "0.3"
+          SCRAPE_MIN_INTERVAL: "1.2"   # 0.3 got Riyadh refused at page 128 (2026-10-23)
+          # Owner 2026-10-27 «do that, let us try getting more»: chalets, rest houses, camps join «إقامات قصيرة».
+          # Dry run 2026-10-27: 20/20 open on gathern.co, 20/20 types match Gathern's own category.
+          GATHERN_SHORT_STAYS: "1"
         run: |
           mkdir -p seen
           exec python -m scrapers.gathern.run --shard ${{ matrix.shard }}/12 \
@@ -75,7 +83,7 @@ jobs:
   # staleness costs nothing; pruning on a partial union would deactivate live listings).
   prune:
     needs: sync
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -106,7 +114,7 @@ jobs:
   alert:
     needs: [sync, prune]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

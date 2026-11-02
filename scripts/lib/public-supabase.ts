@@ -20,6 +20,10 @@
 // barriers assert production behaviour through the exact anon path real clients hit — a privileged
 // key would mask precisely the RLS/permission regressions they exist to catch.
 
+// The secret handshake (docs/ops/SCRAPE_GUARD.md): every script that resolves the public endpoint through this file
+// also sends x-ezhalah-gate to our database when the job provides EZ_GATE_SECRET. Side-effect import.
+import './gateFetch.mjs';
+
 export const PUBLIC_SUPABASE_URL = 'https://aannarbkwcymrotzwdbo.supabase.co';
 
 /** RLS-respecting anon key — shipped in the public client bundle. Not a credential to protect. */

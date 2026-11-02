@@ -35,10 +35,10 @@ def test_rawasidark_states_kitchen_yes():
     assert row["kitchen"] is True
 
 
-def test_rawasidark_silence_and_stated_no_stay_unknown():
+def test_rawasidark_silence_is_unknown_and_a_stated_no_is_no():
     row, _cat = map_object(_raw("عمارة على شارعين\nبدون مصعد"))
     assert "kitchen" not in row               # silence → NULL
-    assert "elevator" not in row              # prose never writes «no»
+    assert row["elevator"] is False           # «بدون مصعد» is a stated no (owner 2026-10-24)
 
 
 def _alkhaas_page(text: str) -> str:
@@ -86,6 +86,20 @@ def test_sirdab_reads_its_ad_text(monkeypatch):
     assert row["parking"] is True and row["air_conditioner"] is True and row["kitchen"] is True
     assert row["electricity"] is True                      # the structured flag still lands
     assert "elevator" not in row                           # silence → NULL
+
+
+def test_sirdab_reads_a_stated_no(monkeypatch):
+    """«مفروشة: لا» is a NO on sirdab too (2026-10-25): a yes-only reader can never take a yes back, so 4 ads stayed
+    furnished = yes once the shared reader stopped calling the labelled «لا» a yes. Silence still stays NULL."""
+    from scrapers.sirdab import run as R
+    from scrapers.sirdab.run import map_ad
+    monkeypatch.setattr(R, "to_catalog", lambda c, region_hint=None: (None, None))
+    monkeypatch.setattr(R, "find_district_in_text", lambda t, cid: None)
+    out, _why = map_ad(_sirdab_ad("مستودع مع مواقف سيارات - مفروشة: لا"))
+    assert out is not None
+    row, _cat = out
+    assert row["furnished"] is False and row["parking"] is True
+    assert "elevator" not in row
 
 
 def test_remal_reads_its_post_text(monkeypatch):

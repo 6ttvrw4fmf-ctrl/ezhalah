@@ -20,9 +20,14 @@ concurrency:
   group: district-suggestion-parity-live-check
   cancel-in-progress: false
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   district-parity:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 10 was the cap until 2026-09-27, when 9 of 12 consecutive runs were KILLED at 618-620s and
     # reported as `cancelled` — which the failure->alert bridge classifies as NO_VERDICT, so this
     # barrier went dark for ~2.5 days with no red anyone read and no alert row. The work grew

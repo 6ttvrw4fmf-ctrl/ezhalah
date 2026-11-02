@@ -236,6 +236,14 @@ def session() -> cc.Session:
     return s
 
 
+def _coord(v: Any) -> Optional[str]:
+    """A coordinate as the source wrote it, without surrounding whitespace; None when empty."""
+    if v is None:
+        return None
+    t = str(v).strip()
+    return t or None
+
+
 def _pos(v: Any) -> Optional[int]:
     """A positive integer, or None. Runs through normalize.to_int so Arabic-Indic digits ٠-٩,
     thousands commas and float strings ("228,344", "134.32") all parse; 0 means "not stated" on
@@ -464,8 +472,10 @@ def map_listing(msg: dict, ad: dict, unit: Optional[dict],
         "area_information": prop.get("area_information"),  # NEIGHBOURHOOD prose — never the description
         "date_construction_building": prop.get("date_construction_building"),
         "age_property": prop.get("age_property"),
-        "lat": prop.get("lat"),
-        "lng": prop.get("long"),                           # listing_rich_attrs reads lat/lng
+        # Trimmed (audit 2026-10-21): H182 published «47.3109269	» — a trailing tab made listing_rich_attrs
+        # read the pair as not-a-number, so a real pin showed as a border.
+        "lat": _coord(prop.get("lat")),
+        "lng": _coord(prop.get("long")),                   # listing_rich_attrs reads lat/lng
         "frontage": msg.get("frontage"),
         "units_floors": msg.get("units_floors"),
         # Kept, never promoted to a price: derived سعر المتر (ppm × area reproduces the published

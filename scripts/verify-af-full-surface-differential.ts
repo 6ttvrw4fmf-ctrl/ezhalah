@@ -62,7 +62,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, intersectChips } from '../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, intersectChips, cardKeys, CARD_IDS } from '../src/lib/afCohorts.ts';
 import { typeArForTypes, CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 import { buildOracleQS, CANONICAL_DIRECTIONS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
@@ -173,8 +173,23 @@ const AMENITY_COL: Record<string, string> = {
 };
 // The eight residential tokens the CHAT may map (certifiedAmenityKeys) that have a clause predicate
 // but NO chip on the card: predicate-only cases — the click set must still be exact.
-const RICH_TOKENS = ['gym', 'pool', 'garden', 'balcony', 'laundry_room', 'optical_fibers', 'separate_electricity_meter', 'separate_water_meter'];
+const RICH_TOKENS = ['gym', 'pool', 'garden', 'balcony', 'laundry_room', 'optical_fibers', 'separate_electricity_meter', 'separate_water_meter', 'majlis'];
 const amenity = (key: string): Opt => ({ key: `amenities:${key}`, col: `cnt_${key}`, countRpc: 'guided', params: { p_amenities: [key] }, pred: { kind: 'true', col: AMENITY_COL[key] } });
+// A themed-card chip (owner 2026-10-31, migration 20261101100930): a column token (token = column, `ac` aside) or the
+// one derived chip a card may carry — separate_meters = either meter true. Counted as cnt_<token>, sent as p_amenities.
+// Every «EITHER column» token: separate_meters and the five villa merged chips (migration 20261102055240).
+const EITHER_COLS: Record<string, [string, string]> = {
+  separate_meters: ['separate_electricity_meter', 'separate_water_meter'], garden_yard: ['garden', 'yard'],
+  jacuzzi_sauna: ['jacuzzi', 'sauna'], cameras_smart_home: ['cameras', 'smart_home'],
+  water_tank_well: ['water_tank', 'well'], smart_home_entry: ['smart_home', 'smart_entry'],
+  camels_horses: ['camels', 'horses_stable'],
+  palm_fruit_trees: ['palms', 'fruit_trees'],
+  pool_gym: ['pool', 'gym'],
+};
+const chipPred = (key: string): Pred => EITHER_COLS[key]
+  ? { kind: 'or', preds: EITHER_COLS[key].map((col) => ({ kind: 'true' as const, col })) }
+  : { kind: 'true', col: AMENITY_COL[key] ?? key };
+const cardChip = (qid: string, key: string): Opt => ({ key: `${qid}:${key}`, col: `cnt_${key}`, countRpc: 'guided', params: { p_amenities: [key] }, pred: chipPred(key) });
 const DIR_COL: Record<string, string> = { 'شمال': 'cnt_dir_n', 'جنوب': 'cnt_dir_s', 'شرق': 'cnt_dir_e', 'غرب': 'cnt_dir_w', 'شمال شرق': 'cnt_dir_ne', 'شمال غرب': 'cnt_dir_nw', 'جنوب شرق': 'cnt_dir_se', 'جنوب غرب': 'cnt_dir_sw' };
 
 /** Which amenity chips the card renders for this scope — AMENITIES_QUESTION.resolveOptions, restated. */
@@ -191,10 +206,68 @@ function amenityChipKeys(types: string[], q: any): string[] {
   return defs;
 }
 
+// every card id afCohorts declares has an arm below (a new CARD_IDS entry without one is caught at start-up)
+const CARD_ARMS = ['comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'outdoors', 'smart', 'papers',
+  'water', 'games', 'camp_life', 'water_land', 'land_papers', 'power', 'crops', 'animals', 'buildings', 'plot', 'deal_papers', 'land', 'location', 'cspace', 'cservices', 'business', 'office_kind', 'ready', 'building', 'trucks', 'loc_papers', 'inside', 'investment', 'hotel', 'station', 'deal_loc', 'space_papers', 'services_business', 'workshop', 'loc_business', 'building_papers', 'factory', 'loc_safety', 'papers_c'];
+if (CARD_IDS.some((id) => !CARD_ARMS.includes(id))) throw new Error(`optionsFor() has no arm for card(s): ${CARD_IDS.filter((id) => !CARD_ARMS.includes(id)).join(', ')}`);
 function optionsFor(qid: string, types: string[], q: any): Opt[] | null {
   switch (qid) {
-    case 'rnpl': return [{ key: 'rnpl', col: 'cnt_rnpl', countRpc: 'guided', params: { p_amenities: ['rnpl'] }, pred: { kind: 'true', col: 'rent_now_pay_later' } }];
+    // two chips since 2026-11-02: the site's installment box, and the ad's own «دفعات» words (a text fact, 20261102100954)
+    case 'rnpl': return [{ key: 'rnpl', col: 'cnt_rnpl', countRpc: 'guided', params: { p_amenities: ['rnpl'] }, pred: { kind: 'true', col: 'rent_now_pay_later' } },
+      { key: 'split_payments', col: 'cnt_split_payments', countRpc: 'guided', params: { p_amenities: ['split_payments'] }, pred: { kind: 'true', col: 'split_payments' } }];
     case 'amenities': return amenityChipKeys(types, q).map(amenity);
+    // the ten themed cards: exactly the chips the real plan offers on this scope (cardKeys reads COHORT_CARDS)
+    case 'comfort': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'space': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'safety': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'perks': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'outdoors': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'smart': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'papers': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'water': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'games': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'camp_life': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'water_land': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'land_papers': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'power': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'crops': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'animals': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'buildings': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'plot': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'deal_papers': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'land': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'location': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'cspace': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'cservices': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'business': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'office_kind': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'ready': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'building': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'trucks': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'loc_papers': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'inside': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'investment': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'hotel': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'station': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'deal_loc': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'space_papers': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'services_business': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'workshop': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'loc_business': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'building_papers': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'factory': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'loc_safety': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'papers_c': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'build': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'extras': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'who': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'features': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'services': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'fun': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    // the Residential Building ladders (owner 2026-10-31): apts4/8/12/20 = apartments_count >= n; has_shops = shops_count >= 1
+    case 'apartments': return ([['apts4', 4], ['apts8', 8], ['apts12', 12], ['apts20', 20]] as const)
+      .map(([tok, n]) => ({ key: `apartments:${tok}`, col: `cnt_${tok}`, countRpc: 'guided', params: { p_amenities: [tok] }, pred: { kind: 'gte', col: 'apartments_count', n } }));
+    case 'shops': return [{ key: 'shops:has_shops', col: 'cnt_has_shops', countRpc: 'guided', params: { p_amenities: ['has_shops'] }, pred: { kind: 'gte', col: 'shops_count', n: 1 } }];
     case 'bathrooms': return [1, 2, 3, 4].map((n) => ({ key: `bathrooms:${n}+`, col: `cnt_bath${n}`, countRpc: 'guided', params: { p_bath_min: n }, pred: { kind: 'gte', col: 'bathrooms', n } }));
     case 'furnished': return [
       { key: 'furnished:yes', col: 'cnt_furnished', countRpc: 'guided', params: { p_furnished: true }, pred: { kind: 'true', col: 'furnished' } },
@@ -284,6 +357,13 @@ async function rpcIds(body: Record<string, unknown>): Promise<{ ids: string[]; t
   }
   return { ids, total };
 }
+// The id set the OR/AND set algebra reasons over. Past the search RPC's offset cap (scripts/lib/searchDeepPageCap.ts) a
+// walk holds only the reachable rows, so A ∩ B over two truncated walks is not A ∩ B (Jeddah Apartment/Buy, 10-23:
+// «intersection expected 11126 got 25500»). Once judgeOption() has PASSED this exact request — RPC total == oracle,
+// every reachable RPC row eligible, MISSING == the tail only — the oracle set is that request's result set, so the
+// algebra uses it. A request that did not pass keeps its own walk and fails loudly as before.
+const algebraIds = (r: { ids: string[]; total: number }, o: { ids: string[] }, v: { ok: boolean }) =>
+  (v.ok && new Set(r.ids).size < r.total ? o.ids : r.ids);
 type OracleOut = { ids: string[]; rows: Row[]; unhandled: string[] };
 async function oracle(body: Record<string, unknown>, cols: string[] = []): Promise<OracleOut> {
   const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, ...(DIRECTION_VARIANTS.map ? { directionVariants: DIRECTION_VARIANTS.map } : {}) });
@@ -312,7 +392,7 @@ async function oracleCount(body: Record<string, unknown>, extraQs = ''): Promise
   );
   return contentRangeTotal(p);
 }
-const strictColsOf = (p: Pred): string[] => (p.kind === 'and' ? [...new Set(p.preds.flatMap(strictColsOf))] : [p.col]);
+const strictColsOf = (p: Pred): string[] => (p.kind === 'and' ? [...new Set(p.preds.flatMap(strictColsOf))] : p.kind === 'or' ? [] : [p.col]);
 
 // ── a tiny semaphore ─────────────────────────────────────────────────────────────────────────────
 let inFlight = 0; const waiters: Array<() => void> = [];
@@ -389,7 +469,7 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
         applied ? rpc('af_eligible_count', countBody(base, opt.params)) : Promise.resolve(null),
       ]);
       if (o.unhandled.length) { skip(label, `oracle declined: ${o.unhandled[0].slice(0, 100)}`); return null; }
-      let v = judgeOption({ label, chip, applied: a == null ? null : Number(a), rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: opt.pred });
+      let v = judgeOption({ label, chip, applied: a == null ? null : Number(a), rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: opt.pred });
 
       // A disagreement is only this product's if it survives a re-read taken on ONE index state —
       // chip included, since the chip handed in above may be many minutes old (see `indexStamp`).
@@ -402,7 +482,7 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
             applied ? rpc('af_eligible_count', countBody(base, opt.params)) : Promise.resolve(null),
           ]);
           if (o2.unhandled.length) return null;
-          return judgeOption({ label, chip: c2, applied: a2 == null ? null : Number(a2), rpcTotal: r2.total, rpcIds: r2.ids, oracleIds: o2.ids, oracleRows: o2.rows, pred: opt.pred });
+          return judgeOption({ label, chip: c2, applied: a2 == null ? null : Number(a2), rpcTotal: r2.total, page: PAGE, rpcIds: r2.ids, oracleIds: o2.ids, oracleRows: o2.rows, pred: opt.pred });
         });
         if (again.state === 'moved') {
           undecide(label, `the searchable index was rebuilt under the read (${again.stamp}) — no verdict, in either direction`);
@@ -437,7 +517,7 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
       } else {
         pass(label, `chip=${chip ?? '—'} = rpc ${r.total} = oracle ${o.ids.length} · ${v.nullLeaks} null-leaks · ${v.rowViolations} violations`);
       }
-      return { ids: r.ids, total: r.total };
+      return { ids: algebraIds(r, o, v), total: r.total };
     } catch (e: any) {
       if (isSchemaCacheUnresolved(e)) { unmeasured(label, e); return null; }
       fail(label, `probe error: ${e.message}`); return null;
@@ -497,11 +577,11 @@ for (const scope of SCOPES) {
       const body = searchBody(base, {});
       const [r, o] = await Promise.all([rpcIds(body), oracle(body)]);
       if (o.unhandled.length) { skip(`${tag} · baseline`, o.unhandled[0]); return null; }
-      const v = judgeOption({ label: 'baseline', chip: total, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids });
+      const v = judgeOption({ label: 'baseline', chip: total, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids });
       M.basePurity++;
       if (!v.ok) { fail(`${tag} · baseline (no AF)`, v.reasons.join(' | ')); M.missing += v.missing.length; M.extra += v.extra.length; }
       else pass(`${tag} · baseline (no AF)`, `${r.total} rows, chip total ${total}`);
-      return { ids: r.ids, total: r.total };
+      return { ids: algebraIds(r, o, v), total: r.total };
     });
     if (!baseline || baseline.total === 0) { if (baseline) info(`${tag}: empty cohort in this scope — options skipped`); continue; }
 
@@ -566,9 +646,9 @@ for (const scope of SCOPES) {
         const params = { p_directions: [ka, kb] };
         const [r, o, footer] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), ['direction_ar']), rpc('apartment_guided_counts_ar', countBody(base, params))]);
         M.orCombos++;
-        const u = judgeUnion(a[1].ids, b[1].ids, r.ids);
         const chip = Number(footer?.[0]?.cnt_selected);
-        const v = judgeOption({ label: 'or', chip, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: { kind: 'in', col: 'direction_ar', vs: [...(DIRECTION_VARIANTS.map?.[ka] ?? [ka]), ...(DIRECTION_VARIANTS.map?.[kb] ?? [kb])] } });
+        const v = judgeOption({ label: 'or', chip, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: { kind: 'in', col: 'direction_ar', vs: [...(DIRECTION_VARIANTS.map?.[ka] ?? [ka]), ...(DIRECTION_VARIANTS.map?.[kb] ?? [kb])] } });
+        const u = judgeUnion(a[1].ids, b[1].ids, algebraIds(r, o, v));
         if (o.unhandled.length) skip(`${tag} · OR ${ka}+${kb}`, o.unhandled[0]);
         else if (!u.ok || !v.ok) fail(`${tag} · OR ${ka}+${kb}`, `union expected ${u.expected} got ${u.got} (missing ${u.missing.length}, extra ${u.extra.length}); ${v.reasons.join(' | ')}`);
         else pass(`${tag} · OR ${ka}+${kb}`, `${a[1].chip} ∪ ${b[1].chip} = ${r.total} (footer ${chip} = oracle ${o.ids.length})`);
@@ -590,8 +670,8 @@ for (const scope of SCOPES) {
         const [r, o] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), strictColsOf(pred))]);
         M.andCombos++; M.secondRoundChips++;
         if (o.unhandled.length) { skip(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, o.unhandled[0]); return; }
-        const it = judgeIntersection(A.ids, B.ids, r.ids);
-        const v = judgeOption({ label: 'and', chip: chipB, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
+        const v = judgeOption({ label: 'and', chip: chipB, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
+        const it = judgeIntersection(A.ids, B.ids, algebraIds(r, o, v));
         M.missing += v.missing.length; M.extra += v.extra.length; M.nullLeaks += v.nullLeaks; M.rowViolations += v.rowViolations;
         if (!it.ok || !v.ok) fail(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, `intersection expected ${it.expected} got ${it.got} (missing ${it.missing.length}, extra ${it.extra.length}); second-round chip ${chipB}; ${v.reasons.join(' | ')}`);
         else pass(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, `${A.chip} ∩ ${B.chip} = ${r.total} (chip-in-round-2 ${chipB} = oracle ${o.ids.length})`);
@@ -605,7 +685,7 @@ for (const scope of SCOPES) {
         const [r, o, a] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), strictColsOf(pred)), rpc('af_eligible_count', countBody(base, params))]);
         M.stacked++;
         if (o.unhandled.length) { skip(`${tag} · STACK ×${firsts.length}`, o.unhandled[0]); return; }
-        const v = judgeOption({ label: 'stack', chip: null, applied: Number(a), rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
+        const v = judgeOption({ label: 'stack', chip: null, applied: Number(a), rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
         M.missing += v.missing.length; M.extra += v.extra.length;
         if (!v.ok) fail(`${tag} · STACK ${firsts.map(([, f]) => f.opt.key).join(' ∧ ')}`, v.reasons.join(' | '));
         else pass(`${tag} · STACK ${firsts.map(([, f]) => f.opt.key).join(' ∧ ')}`, `${r.total} = oracle ${o.ids.length}`);
@@ -649,7 +729,7 @@ if (!SKIP_MULTI) {
         const take = async (chipNow: number | null) => {
           const [r, o] = await Promise.all([rpcIds(searchBody(base, {})), oracle(searchBody(base, {}))]);
           if (o.unhandled.length) return null;
-          return judgeOption({ label: 'mt-base', chip: chipNow, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids });
+          return judgeOption({ label: 'mt-base', chip: chipNow, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids });
         };
         let v = await take(total);
         if (v === null) { skip(label, 'oracle declined'); return; }

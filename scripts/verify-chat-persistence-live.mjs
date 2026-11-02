@@ -11,6 +11,8 @@
 //      curl -s "$SUPABASE_URL/auth/v1/token?grant_type=password" -H "apikey: $ANON_KEY" \
 //        -H 'Content-Type: application/json' -d '{"email":"<e2e user>","password":"<pw>"}'
 //   3. node scripts/verify-chat-persistence-live.mjs
+import './lib/robotPass.mjs'; // robot pass + secret handshake for our own browser robots (docs/ops/SCRAPE_GUARD.md)
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -102,7 +104,7 @@ check('search lands with a real count', await waitFor(async () => (await counts(
 const startCount = (await counts())[0];
 console.log('  start:', startCount);
 
-// AF round via the latest turn's «خلّنا نحدد الطلب أكثر» (testID results-narrow)
+// AF round via the latest turn's «🎯 دقّق مع الذكاء الاصطناعي» (testID results-narrow)
 const narrow = page.locator('[data-testid="results-narrow"]');
 check('narrow CTA renders on the newest turn', await waitFor(async () => (await narrow.count()) > 0 && await narrow.first().isVisible(), 20000));
 await narrow.first().click(); await page.waitForTimeout(2500);

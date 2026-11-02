@@ -71,7 +71,7 @@ export function TrendingRows({
 const s = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 10, paddingHorizontal: 12 },
   flame: { fontSize: 14 },
-  headTitle: { fontSize: 13, fontWeight: '700', color: colors.dark },
+  headTitle: { fontSize: 13, fontWeight: '700', color: colors.ink },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 12 },
   rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.line },
   rank: { fontSize: 13, fontWeight: '700', color: colors.muted, width: 18 },
@@ -80,6 +80,6 @@ const s = StyleSheet.create({
   rowSub: { fontSize: 11.5, color: colors.muted },
   // Selected = the app's existing chip treatment (chipFill/chipLine), not a new visual language.
   rowSelected: { backgroundColor: colors.chipFill },
-  rowLabelSelected: { color: colors.dark, fontWeight: '700' },
+  rowLabelSelected: { color: colors.ink, fontWeight: '700' },
   selMark: { fontSize: 14, fontWeight: '800', color: colors.primary },
 });

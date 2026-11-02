@@ -48,6 +48,54 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-11-02. Two kitchens whose ad says «مطبخ غير راكب» went back to unknown (alert 12326, backlog 1189).
+  '20261102105648_kitchen_not_installed_stays_unknown.sql':
+    'two-row evidence repair (akariyoun 12049465, therc 10283616) to NULL, the value the reader already computes; it is ' +
+    'watched by the standing detector that found it, mon_detect_not_installed_served_as_yes (alert not_installed_served_as_yes), ' +
+    'which re-raises if any stored kitchen yes sits on an ad whose own words say the kitchen is not installed. The applied ' +
+    'file cannot be edited to name it (content parity: this is its byte-exact mirror).',
+  // 2026-10-31. AI facts reader: 13 sites' description text arrived AFTER the AI had read the title alone, so every AI row
+  // written before those crawls is stamped text_hash = 'read-before-text:2026-10-31' and the ad reads as UNREAD again.
+  '20261031080211_ai_facts_reader_rereads_when_the_text_arrives_or_changes.sql':
+    'not a listing-field repair: it re-stamps listing_facts.text_hash so facts_ai_is_read() answers false and the ad is ' +
+    'picked again; nothing a user sees is edited and a re-scrape cannot undo it. The invariant (every new ad with text is ' +
+    'read) is watched by the standing alarm from the day before: ops_ai_facts_unread_new() + mon_detect_text_facts raising ' +
+    'ai_facts_new_ads_unread (20261030061800, P2, fail-closed — scripts/verify-ai-reader-never-skips-silently.ts). The ' +
+    'applied file cannot be edited to name a detector (content parity: this is its byte-exact mirror).',
+  // 2026-10-25. Pin districts batch 2 switched on (owner): `applied = true` on listing_pin_district rows, no listing value edited.
+  '20261025214336_pin_district_batch_2_switch_on.sql':
+    'not a listing-field repair: it flips listing_pin_district.applied, the switch the recovery arm reads; a re-scrape ' +
+    'cannot undo it, and the served result IS watched by two rostered detectors that predate it: ' +
+    'mon_detect_pin_district_unvouched (20261025095716, P2: a served basis=pin district no switched-on row vouches for) ' +
+    'and mon_detect_district_guards_missing (20261025203753, P1: the list/pin guard triggers dropped or disabled). ' +
+    'verify-pin-district-fill-contract.ts pins the flip version in FLIP_ALLOWED; the applied file cannot be edited ' +
+    'to name the detectors (content parity).',
+  // 2026-10-25. haraj REGA «اكثر من عشر سنوات» NULL → 10 (the open 10+ bucket the AF clause already reads as open).
+  '20261025082809_haraj_rega_open_age_is_ten_plus_backfill.sql':
+    'watched by its companion 20261025083341_mon_detect_haraj_stated_age_not_stored.sql, which creates ' +
+    'mon_detect_haraj_stated_age_not_stored() (P2) over every ACTIVE haraj row whose stored REGA licence states an age while ' +
+    'property_age is NULL, splices it into the mon_run_all_detectors() roster (a planted NULL is caught at apply) and enrolls ' +
+    'the repair in ops_repair_guarantee_registry. The parser half (scrapers/haraj/parse.age_of) is executed by ' +
+    'verify-open-age-bucket-never-answers-up-to.ts on every CI run',
+  // 2026-10-27. Owner-approved one-off retirement («do that please fix everything»).
+  '20261027025056_razre_retire_wix_era_rows.sql':
+    'a one-off owner decision on a fixed set of 94 rows from razre.sa before its rebuild (Wix /onepro-1/ URLs that now ' +
+    'redirect); every row is registered in ops_adjudicated_retraction, which auto_recover_false_inactive() and the ' +
+    'deliberate-deactivation barrier already watch, and the new site cannot produce /onepro-1/ rows, so the class cannot recur.',
+  // 2026-10-22. Pins the ads' own sources published, read at save time (owner: «fix all the bugs»).
+  '20261022230940_pins_nine_sites.sql':
+    'the re-save only lets the new per-table BEFORE trigger (tg_pin_from_source_link) read a pin the row already holds, ' +
+    'and a re-scrape runs the same trigger, so it cannot be undone by a crawl. It IS watched: ' +
+    'mon_detect_captured_pin_not_served (rostered), widened 4 minutes later in 20261022231345_captured_pin_any_shape to read ' +
+    'every pin shape this repair reads and to raise from 3 ads per table; that migration\'s apply-time proof asserted no table ' +
+    'holds 3+ pins it does not show. The applied file cannot be edited to name the detector (content parity).',
+  // 2026-10-21. Dwelleo fresh start (owner): 7,953 rows absent from the full catalogue walk switched off.
+  '20261021132404_dwelleo_fresh_start_retire_unseen.sql':
+    'a one-shot retirement, not a field repair a re-scrape can undo: every switched-off row is registered in ' +
+    'ops_adjudicated_retraction in the same migration, which auto_recover_false_inactive() honours, and the migration ' +
+    'asserts at apply that 0 stale rows stay active and 0 switched-off rows are unregistered. A Dwelleo id that comes ' +
+    'back to the live catalogue is re-upserted active by the crawl, which is the correct outcome; dwelleo liveness from ' +
+    'then on is the registry\'s CANDIDATE_PLUS_DIRECT oracle (its own API answers 422 for a gone id)',
   // 2026-10-18. aqar `direction` repaired to the closed facade vocabulary (14 rows).
   '20261018234721_trg_aqar_parse_respects_a_rate_headline.sql':
     'its UPDATEs are an apply-time PROOF inside a rolled-back block (no row is repaired). The outcome it protects, a ' +
@@ -73,6 +121,12 @@ const WAIVED: Record<string, string> = {
     'changes no listing row: the one UPDATE (DA417737) runs inside the proof sub-blocks that always roll back, and the ' +
     'migration fails if a bridge row survives; the bridge edit itself is pinned by verify-dealapp-town-placed-by-own-pin.ts ' +
     'and the scraper half by test_dealapp_own_pin_town_2026_10_18.py',
+  // ⚡ 2026-11-02. aqar closed-ad price repair (32 rows priced from another ad's «إعلانات مشابهة» card → NULL).
+  '20261102051729_aqar_parse_never_reads_similar_ad_price.sql':
+    'watched by its companion 20261102053242_mon_detect_aqar_price_over_authoritative_absent.sql, which creates ' +
+    'mon_detect_aqar_price_over_authoritative_absent() (P1) over the same predicate and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted neighbour price is caught). The function ' +
+    'half is pinned by verify-aqar-parse-ignores-similar-ads.ts',
   // 2026-10-18. ksaaqar `neighborhood` repair (data half of #7511), applied before its detector existed.
   '20261018125140_ksaaqar_neighborhood_holds_only_a_stated_district.sql':
     'watched by its companion 20261018131230_mon_detect_ksaaqar_neighborhood_unstated.sql, which creates ' +
@@ -162,6 +216,14 @@ const WAIVED: Record<string, string> = {
     'AUTHORITATIVE_NULL (scrapers/bossbih/run.py), pinned by test_bossbih_price_basis_and_traps.py',
   // 🔬 AF engineer, 2026-10-08. Each of tonight's three repairs is watched by its own companion or pinned the
   // same way as the 2026-10-07 entries below.
+  // 🦅 Falcon 2026-10-23: same shape — the 3-row repair was applied before its watcher existed.
+  '20261023215159_haraj_three_districts_unglued_from_the_rega_block.sql':
+    'watched by its companion 20261023215519_mon_detect_district_carries_ad_block_text.sql, which creates ' +
+    'mon_detect_district_carries_ad_block_text() (P2) over every SERVED district_ar carrying a REGA block label or a colon, ' +
+    'on every platform, and splices it into the mon_run_all_detectors() roster (a planted glued district is caught at apply)',
+  '20261023222823_haraj_three_district_ar_unglued_from_the_rega_block.sql':
+    'the second half of 20261023215159 (haraj serves its own district_ar column, not neighborhood); watched by the same ' +
+    'companion 20261023215519_mon_detect_district_carries_ad_block_text.sql over every SERVED district_ar',
   // 2026-10-18 (owner P1 «we can get sued»): the repair was applied before its watcher existed, so the applied file cannot
   // name it; the companion creates it and splices it into the roster.
   '20261018123454_wasalt_rate_is_not_the_total.sql':

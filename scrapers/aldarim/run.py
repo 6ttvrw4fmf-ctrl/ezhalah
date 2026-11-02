@@ -36,6 +36,8 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.pii import redact_pii
+from scrapers.common.source_pin import pin_dict
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
 _PII = {"whatsapp_number", "rega_advertiser_number"}
@@ -80,6 +82,49 @@ def _throttle() -> None:
     _last = time.monotonic()
 
 
+# ── The source's own per-listing verdict (owner 2026-10-20) ──────────────────────────────────
+# Measured on aldarim: ten ads the API marked availability_status «unavailable» stayed ACTIVE for 6–15 days
+# — the crawl skips them, and the page probe still answers 200 for them — so they were served with a
+# district border. The Nuzul API is a DIRECT per-listing oracle: /api/public/properties/{id} answers 404
+# for a deleted ad (measured) and availability_status for the rest. Asked only at grace, from
+# prune_unseen; absence alone still never kills (docs/ops/LISTING_LIVENESS.md).
+_AD_PREFIX = "ALD"
+_SOURCE_UNAVAILABLE: set[str] = set()      # ad_numbers the API marked not-available THIS run
+_ORACLE_S = None
+
+
+def _api_verify_gone(ad_number: str) -> tuple[str, str]:
+    global _ORACLE_S
+    if ad_number in _SOURCE_UNAVAILABLE:
+        return "gone", "source API availability_status is not available (this run)"
+    pid = ad_number[len(_AD_PREFIX):] if ad_number.startswith(_AD_PREFIX) else ""
+    if not pid.isdigit():
+        return "unknown", f"{ad_number!r} is not a {_AD_PREFIX}<id> ad number"
+    try:
+        if _ORACLE_S is None:
+            _ORACLE_S = session()
+        r = _ORACLE_S.get(f"{API}/{pid}", timeout=30)
+    except Exception as e:  # noqa: BLE001 — a failed fetch is UNKNOWN, never a death
+        return "unknown", f"api {type(e).__name__}"
+    if r.status_code == 404:
+        return "gone", "source API 404 for this id"
+    if r.status_code != 200:
+        return "unknown", f"api HTTP {r.status_code}"
+    try:
+        d = r.json()
+        d = d.get("data") if isinstance(d, dict) and isinstance(d.get("data"), dict) else d
+        st = (d.get("availability_status") or "").strip().lower()
+    except Exception:  # noqa: BLE001
+        return "unknown", "api body not json"
+    return ("live", "api available") if st in ("available", "") else ("gone", f"source API availability_status={st}")
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    """API verdict first (direct, per listing); the page probe only when the API could not answer."""
+    v = _api_verify_gone(ad_number)
+    return v if v[0] != "unknown" else _probe.verify_gone(ad_number)
+
+
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     s.headers.update(HEADERS)
@@ -117,8 +162,12 @@ def session() -> cc.Session:
 # something that MIMICS death. The canary asks, before every single removal, whether the site is
 # still rendering real listings to us right now, using URLs THIS RUN already fetched successfully.
 # It fails CLOSED: no canary, no removal.
+# 2026-10-20 the site's ld+json changed «"@type":"RealEstate"» to «"@type":"RealEstateListing"» (live page
+# /en/properties/26049 read 2026-10-23). The old exact match missed every live page, so fleet_liveness quarantined
+# aldarim on «opening controls 0/5 live» every day from 10-20 and no listing was verified for 3 days (alert 10445).
+# Both forms are the page stating it renders this listing.
 _LD_REAL_ESTATE = re.compile(
-    r'<script[^>]+application/ld\+json[^>]*>\s*\{[^<]*"@type"\s*:\s*"RealEstate"', re.S)
+    r'<script[^>]+application/ld\+json[^>]*>\s*\{[^<]*"@type"\s*:\s*"RealEstate(?:Listing)?"', re.S)
 _NOT_FOUND_TITLE = re.compile(r"<title[^>]*>\s*Property Not Found\b", re.I)
 
 _canary: dict[str, Any] = {"urls": [], "verdict": None, "reason": "not evaluated"}
@@ -413,11 +462,17 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "city": _city(L.get("city")),
         "neighborhood": (_name(L.get("district")) or "").replace(" Dist.", "").strip() or None,
         "title": L.get("name_en") or L.get("name_ar"),
+        # The ad's own text (🔬 AF 2026-10-27): the Rule B word checker reads only `description`, and this Nuzul
+        # tenant left it NULL, so «ومتاح مصعد» in description_ar never reached the Advanced Filter (0 text facts).
+        "description": redact_pii(L.get("description_ar") or L.get("description_en")) or None,
         "photo_urls": _photos(L),
         "property_age": None if property_type in AGELESS_TYPES
                         else _age_from_year_built(L.get("year_built")),
         "rega_location_verified": bool(L.get("rega_ad_number")),
-        "additional_info": _additional_info(L),
+        # Owner 2026-10-20: the API item's own latitude/longitude (strings). The panel rows keep their
+        # legacy shape under "rows" (src/data/remote.ts buildAdditionalInfo unwraps it); the index reads
+        # the pin from the object (listing_rich_attrs → search_listings_ar.latitude).
+        "additional_info": {"rows": _additional_info(L), **pin_dict(L.get("latitude"), L.get("longitude"))},
         # Feature-grid booleans the card renders with icons — mapped from Aldarim's flags/counts so the
         # card shows real features (Electricity/Water/Sewage/AC/parking…) instead of "No features".
         # Tri-state (2026-08-11): silence is NOT a denial. All four keys are 0/1 flags aldarim really
@@ -486,6 +541,7 @@ def main() -> int:
                 # SKIP sold/rented — Aldarim's API returns them, but they're not available to buy/rent.
                 # (Found in recon: 74 of 231 were sold/rented. We only show what's actually on offer.)
                 if (L.get("availability_status") or "").lower() not in ("available", "", None):
+                    _SOURCE_UNAVAILABLE.add(f"{_AD_PREFIX}{L.get('id')}")   # the source's own verdict, used at grace
                     continue
                 row, cat = map_listing(L)
                 if not row or not row.get("property_type"):
@@ -532,8 +588,14 @@ def main() -> int:
                 print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
             for tbl, seen_ads in (("aldarim_residential_listings", seen_res), ("aldarim_commercial_listings", seen_com)):
+                # Owner 2026-10-20 «once we see it, remove it»: an ad this run's own API marked unavailable,
+                # or whose record answers 404, is removed NOW — only rows _verify_gone reads «gone» are
+                # struck, at grace 1. The registry tier (FLEET_DAILY_DIRECT, grace 3) is unchanged for the
+                # daily revisit; this is the crawl's own direct reading.
+                if _SOURCE_UNAVAILABLE:
+                    db.strike_read_gone(tbl, set(seen_ads), "Aldarim", verify_gone=_verify_gone, grace=1)
                 n = db.prune_unseen(tbl, set(seen_ads), source="Aldarim",
-                                    verify_gone=_probe.verify_gone)
+                                    verify_gone=_verify_gone)
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:

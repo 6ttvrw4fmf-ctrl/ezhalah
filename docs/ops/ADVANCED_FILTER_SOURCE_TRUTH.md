@@ -38,19 +38,86 @@ Every Advanced Filter attribute is **three-valued**, never two:
 `NULL` is a correct, honest answer. A confident `false` that the source never stated is a data
 corruption incident, not a default.
 
-### Prose is not a source field
+### The seller's sentence — Rule B (owner, 2026-10-25: «We trust the sellers sentence»)
 
-Matching Arabic keywords in a description tells you the ad *mentions a word*. It cannot distinguish:
+The ad's own words are the seller speaking, and the Advanced Filter now hears them **beside** the site's
+own field (the "box"), not only where the box is missing. For each of the 20 Advanced Filter amenity
+columns (`public.text_facts_af_columns()`):
 
-- «مصعد» (has a lift) from «لا يوجد مصعد» (has NO lift), and
-- "the source said no" from "the source said nothing".
+| the site's own field (box) | the ad's text | served |
+|---|---|---|
+| NULL / no such field | names it, or explicitly negates it | **the text** |
+| false / unticked | explicitly names it | **true** — the sentence wins |
+| true | silent | true (the box) |
+| true | explicitly negates it | **CONFLICT → `NULL`**, listed for Quality & Repair (`ops_text_facts_conflicts`) |
+| false | silent | false (the box) |
 
-Therefore: **if the platform publishes the field structurally, prose must not be consulted for that
-field at all — not even as a fallback.** A structured `null` outranks any prose hit. Prose may only
-ever produce `true`/`NULL` for a field with no structured counterpart anywhere on the platform, and
-even that is a last resort that must be documented at the mapping site.
+What did not change: **every text value carries its quote** (the ad's exact words; a DB `CHECK` refuses
+one without), prepared-only («مصعد مؤسس», «تأسيس مصعد») and nearby («قريب من …») never produce a value,
+and the 9 word groups the 2026-10-25 report left for the owner stay out of the reader. Facts with no
+filter column yet (majlis, roof, warranty, …) live in `listing_facts` only.
 
-**Case law — aqar `parking` (2026-08-09).** `parking` was derived from the patterns «موقف سيارة» /
+**How it is wired — overlay, never overwrite.** The scrapers still write only the box into the
+`*_listings` tables, and `normalize.prose_amenities(text, skip=<structured columns>)` still never writes
+prose into a structured column: the box must stay the site's own answer, or Rule B could not tell the
+two apart, and every crawl would rewrite it anyway. The reader's answers live in
+`public.listing_text_facts` (one row per ad read, its `src_hash`, a re-read replaces it), and the two
+search-index writers (`sync_search_listings_ar`, `sync_listing_rich_attrs`) serve
+`af_rule_b(box, text)`. An ad whose text changed stops applying on the next hourly pass
+(`text_facts_mark_stale`). Kill switch: `ops_feature_flags.af_text_facts_overlay` (off = box-only on the
+next pass). Migrations 20261025203351 / 20261025205008 / 20261025205450; the run behind it:
+`docs/ops/reports/FACTS_WORDS_VECTOR_TEST_2026-10-25.md`.
+
+**Rule B for numbers (owner, 2026-10-25, handoff decision #1: «yes for street width»).** A number the
+seller wrote fills a **blank** box only; a number the site published is never replaced, and two different
+numbers are listed for Quality & Repair (`ops_text_facts_width_differs`), never served. Today the one
+numeric key is `street_width_m` (`public.text_facts_af_num_columns()`): the overlay stores it as a JSON
+number 4..150 with its quote, `listing_text_facts_af.street_width_m` serves it behind its own kill switch
+`ops_feature_flags.af_text_facts_street_width`, and `sync_search_listings_ar` writes
+`af_rule_b_num(box, text) = coalesce(box, text)`. The reader already refuses a corner plot, «يحدها 2 شارع»,
+two widths or two bearings, so one ad hands over at most one width. Building age is **not** in: the owner
+asked for a 500-ad sample first (the text is often «جديد» / «شبه جديد», not a number). Measured at the
+switch: 73,662 quoted widths, 28,787 blank boxes filled, 3,528 differ from the box (listed). Barrier:
+`scripts/verify-text-facts-rule-b.ts` «Rule B for numbers».
+
+**Majlis — the first filter question born from the stored text facts (owner, 2026-10-26, handoff decision #3).**
+`search_listings_ar.majlis` is the 21st amenity token (`p_amenities` `majlis`, chip «مجلس» / labelKey
+«Majlis room», `cnt_majlis` in the guided counts, `amenity:majlis` in the sweep and the truth table,
+`af_field_registry` row). Its box is the site's own majlis COUNT (`listing_rich_attrs.majlis` =
+`majlis_rooms > 0`, aqar/wasalt `reception_rooms_majlis`, 7,328 ads, never 0 — a positive-only box); the
+text side is the reader's `majlis` fact (91k ads) through the same overlay (`text_facts_af_columns()`
+now 21 keys), behind its own switch `ops_feature_flags.af_text_facts_majlis`. Served = `af_rule_b(box, text)`.
+Migrations 20261026011638 / 20261026012051 / 20261026013134; the clause mirror digest is 62539dd9….
+Related facts the reader SAVES but does not serve (no column yet): roof, warranty, storage, annex, boundaries,
+`corner_plot` (a corner / on two streets — never two_entrances; 2026-10-26).
+
+**Why the August case law below no longer forbids this.** The 2026-08-09 rule («if the platform publishes
+the field structurally, prose must not be consulted at all — a structured `null` outranks any prose hit»)
+was written against a *keyword matcher*: «موقف سيارة» / «مواقف» → `true`, which could not tell «مصعد» from
+«لا يوجد مصعد», nor "the source said no" from "the source said nothing". The reader behind Rule B is a
+four-outcome reader (named / explicitly negated / prepared-only / nearby, the last two stored as nothing)
+that keeps the ad's exact words as proof: 99.8 % agreement with the LLM reader on 10,558 ads, 1.7 %
+false-yes on the last 120 random hand-checked rows. The parking case below stays as history and as the
+reason the box is never overwritten.
+
+**Prose on the scraper side** (the rules below) is unchanged: a scraper may produce three values from
+prose only for a field with NO structured counterpart anywhere on the platform (owner, approved in chat
+2026-10-24):
+
+| The ad's own words | Stored |
+|---|---|
+| name it («مصعد», «مطبخ راكب», «مفروشة») | `true` |
+| an **explicit negation tied to the token** — before it («لا يوجد مصعد», «بدون مصعد», «غير مفروشة», «عدم وجود مصعد», «لا تأتي الشقة مفروشة») or as the answer to the token used as a label («مفروشة: لا», «مواقف السيارات: غير متوفرة») | `false` |
+| silence, prepared only («تأسيس مصعد»), not installed («مطبخ غير راكب», «المكيفات غير راكبة», «مصعد غير مركب» — anywhere in the ad, it outranks a plain mention; coordinator for the owner, 2026-10-25), nearby («قريب من …»), partly, «غير محدد», or two statements that disagree | `NULL` |
+
+These are the four outcomes of `normalize.amenities_from_text` (2026-09-20: yes / no / prepared /
+nearby, with prepared and nearby both stored as `NULL`), and the one reader every prose-only site uses
+is `normalize.prose_amenities(text, skip=<the site's structured columns>)`. A negation that is not tied to
+the token (a «لا» somewhere else in the sentence) is never a `false`. The reader is pinned by
+`scripts/verify-labelled-no-is-not-a-yes.ts`. Prose is still a last resort, documented at the mapping site.
+
+**Case law — aqar `parking` (2026-08-09; history — the keyword matcher it judged was retired by Rule B,
+the lesson that the box must be read from the source payload still stands).** `parking` was derived from the patterns «موقف سيارة» /
 «مواقف» for ~25,159 active rows. A later fix asserted "aqar publishes NO parking field at all" and
 made the column permanently `NULL`. **Both were wrong.** aqar publishes
 `listing.extended_details.special_parking` as a native JSON boolean. A 24-page live sample found

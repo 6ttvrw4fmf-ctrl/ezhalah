@@ -24,9 +24,11 @@
 //     carries more districts than the row's label — comparing against the label alone reports a
 //     false mismatch.
 
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { pickScreenCityCall } from './lib/trendingScreenCall.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
@@ -244,8 +246,17 @@ async function runJourney(j: Journey) {
     }
     check(`${name}: the Trending Cities RPC was captured`, cityCalls.length > 0);
 
-    if (cityCalls.length && visibleCities.length) {
-      const call = cityCalls[cityCalls.length - 1];
+    // THE CALL THE SCREEN SHOWS, not the last one captured (backlog 1144): the home screen also warms
+    // the Rent / Buy + Rent / Buy pools in the background, so the LAST call is often a warm-up for a
+    // scope nobody is looking at. Trending Cities is read before the type is picked, so: the chosen
+    // deal (Buy by default), no types, and any typed price / area.
+    const screenCall = pickScreenCityCall(cityCalls, {
+      deal: deal.length === 1 ? deal[0] : 'بيع', types: null, priceMax, areaMin,
+    });
+    check(`${name}: a Trending Cities call for the scope on screen was captured`, !!screenCall,
+      `${cityCalls.length} calls captured; scopes: ` + cityCalls.map((c) => `${c.body.p_deal ?? 'null'}/${c.body.p_rent_period ?? '-'}/${JSON.stringify(c.body.p_types ?? null)}`).join(' '));
+    if (screenCall && visibleCities.length) {
+      const call = screenCall;
       // Every visible row must be backed by the RPC's own number — a row showing a count the RPC
       // did not return is a stale count from a previous filter state.
       // CANONICAL CITY CLUSTERS (2026-09-05). Since 25c9934 the client presents a cluster as ONE

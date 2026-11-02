@@ -50,6 +50,8 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize, sold_pin
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.pii import redact_pii
+from scrapers.common.source_pin import pin_dict
 
 BASE = "https://hajerhouses.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/properties"
@@ -391,12 +393,15 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         rent_period, price_annual = normalize.rent_period_and_annual(
             None if rate_only else price, " ".join(str(v) for v in f.values()))
 
-    extra = []
+    # An OBJECT, not the legacy bare list (2026-10-30): the served index reads the pin as
+    # additional_info->>'latitude', which a JSON array can never answer. The fact rows the ad page renders
+    # keep their shape under "rows" (src/data/remote.ts reads an object's `rows` exactly like the bare list).
+    extra: dict = {"rows": []}
     for label, key in (("واجهة العقار", "Facade"), ("عمر العقار", "Age"),
                        ("عرض الشارع", "Street width"), ("خدمات الحي", "Property services")):
         v = f.get(label)
         if v:
-            extra.append({"key": label, "label": key, "value": v})
+            extra["rows"].append({"key": label, "label": key, "value": v})
 
     row = {
         "ad_number": f"HJ{ad}",
@@ -420,8 +425,13 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         # Amenities from the ad's own body (WordPress `content`): «مطبخ مغلق», «غرفة خادمة», «غرفة غسيل».
         # hajer's REM block has NO amenity field (its 20 labels are rooms/area/facade/street/age/…), so
         # the law allows prose here, four outcomes, line by line (🔬 AF engineer 2026-10-07: 0/4 hajer
-        # findability, source-reread 37608383084). The body itself is not stored (PDPL: free text).
+        # findability, source-reread 37608383084).
         **normalize.amenities_from_lines(_body_lines(p)),
+        # The ad body itself — the page's own `<div class="description">` (WordPress `content`): «يتكون من
+        # دورين وملحق: الدور الأرضي •صالة+دورة مياه …» (2026-10-30: 123 of 123 active rows stored none, so the
+        # AI facts reader had nothing to read). Stored verbatim through redact_pii (PDPL); an empty body is
+        # NULL, never ''.
+        "description": redact_pii(_body_lines(p)) or None,
         # A per-metre rate is never a total and never an annual rent — see `rate_only` above.
         "price_total": None if (is_rent or rate_only) else price,
         "price_annual": price_annual,
@@ -441,7 +451,19 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "region_id": rid,
         "source_capture": cap,
     }
+    if html_text:
+        row["additional_info"].update(ad_pin(html_text))
     return row, category, gone
+
+
+# The page's own map config: var rem_property_map = {"use_map_from":"google_maps",…,"latitude":"25.4211944",
+# "longitude":"49.5856389",…} — the pair the theme draws (owner 2026-10-30: 124 ads, 0 pins).
+_REM_MAP = re.compile(r'rem_property_map\s*=\s*\{[^{}]*?"latitude":"(-?\d{1,2}\.\d{3,})","longitude":"(-?\d{1,3}\.\d{3,})"')
+
+
+def ad_pin(html_text: str) -> dict:
+    m = _REM_MAP.search(html_text or "")
+    return (pin_dict(m.group(1), m.group(2)) if m else {}) or {"pin_absent": True}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],

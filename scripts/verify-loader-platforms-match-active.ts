@@ -18,6 +18,7 @@
 // verify-*-live.ts barriers. The exclusion is declared in scripts/test-exclusions.txt with a
 // pointer to the workflow that runs it.
 
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { existsSync, readFileSync } from 'node:fs';
 import { postgrestFetch } from './lib/postgrestRetry.ts';
 

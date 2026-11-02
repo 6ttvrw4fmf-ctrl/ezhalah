@@ -86,7 +86,8 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # licensed offers only go live) with its CANDIDATE_PLUS_DIRECT entry below.
 # moj (2026-10-10) is not a listing platform at all: it reads the Ministry of Justice's district sales
 # aggregates into moj_district_sales (scrapers/moj/sales.py) and writes no listing.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj"})
+# "facts" is not a platform: scrapers/facts/ is the facts-extraction test reader (2026-10-24), like "common".
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj", "facts"})
 
 
 class _P(dict):
@@ -1138,13 +1139,39 @@ POLICIES: dict[str, _P] = {
         "An oracle is possible — /ar/search/<id> for a removed post — but it is not written yet, so "
         "this does not claim a direct check."),
     "holoul": _P(
-        _pol("holoul", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set over app.holoul.io/customer/api/v1/units/ (per_page=100, `pages`) "
-        "checked against the API's own `total` (238 when measured — the feed ignores every filter, "
-        "so listed/licensed/Sale is applied here). run.py suppresses prune_unseen unless the walk "
-        "reached that total.",
-        "An oracle is possible — /customer/api/v1/units/<uuid> answers 404 unit__not_found for a "
-        "removed unit — but it is not written yet, so this does not claim a direct check."),
+        _pol("holoul", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's own API record GET app.holoul.io/customer/api/v1/units/<uuid> (no trailing "
+        "slash): 404 JSON {\"error\":[\"unit__not_found\"]} or a 200 for this uuid whose unit or "
+        "project status left «listed» is GONE (canary-gated on a unit this crawl served reading "
+        "live); a 200 for this uuid, both «listed», licensed is LIVE; the HTML route-miss 404, "
+        "401/403/429/5xx, timeouts, another id and an unlicensed record are UNKNOWN. nhc_end_at is "
+        "never read (owner 2026-10-02). Absence-prune only when the walk reached the API's total.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): every unit the crawl serves has its own record read each run (db.stamp_seen_alive), and that record is the removal oracle handed to prune_unseen."),
+    "therc": _P(
+        _pol("therc", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the listing's own /properties/<slug> page: HTTP 404/410 (the platform's «404 - الصفحة غير "
+        "موجودة») is GONE; a 200 printing this ad's own «رقم المرجع» with JSON-LD availability "
+        "InStock (or none) is LIVE; any other 200, a redirect onto a 404, 401/403/429/5xx and a "
+        "timeout are UNKNOWN. Removals are canary-gated on an ad this crawl just read answering live.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): the crawl already opens every ad's own page, so that read is stamped through db.mark_direct_alive (zero extra requests); the same page is the removal oracle handed to prune_unseen."),
+    "alhoshan": _P(
+        _pol("alhoshan", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the record's own API route GET /api/alhoshan/properties/<GUID> (GUID from the stored "
+        "source_capture.id): HTTP 404 carrying the API's JSON body, or a 200 whose record says "
+        "isPublished=false, is GONE; a 200 for this publicId with isPublished=true, "
+        "moderationStatus=approved and no listingExpiresAt is LIVE; an HTML 404, "
+        "400/401/403/429/5xx, another publicId, an unmeasured moderation/expiry state and a timeout "
+        "are UNKNOWN. Removals are canary-gated on an ad this crawl just listed.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): every listed ad's own record is read each run (db.stamp_seen_alive), and that record is the removal oracle handed to prune_unseen."),
+    "alta": _P(
+        _pol("alta", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own REST record GET /wp-json/wp/v2/estate_property/<wp_id> (wp_id from the row's "
+        "additional_info): 404 rest_post_invalid_id, status left publish, or its own property_status "
+        "naming تم البيع / تم التأجير / غير متاح is GONE (canary-gated on a post this crawl read live; "
+        "absence-prune only on a walk equal to x-wp-total); a 200 for this id whose slug maps to this "
+        "ad_number with a readable non-gone status is LIVE; an unnamed status id, 401/403/429/5xx, "
+        "timeouts and HTML are UNKNOWN. The crawl's sold pin on property_status is unchanged.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): every post the list serves has its own REST record read each run (db.stamp_seen_alive), and that record is the removal oracle handed to prune_unseen."),
     "eightfloor": _P(
         _pol("eightfloor", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the Nuzul public API www.8floor.sa/api/public/v2/properties "
@@ -1184,16 +1211,27 @@ POLICIES: dict[str, _P] = {
         "the crawl's OWN seen-set over the site's own list /properties («البيع المباشر», 31). "
         "run.py suppresses prune_unseen unless every detail page was readable.",
         "No oracle is written yet, so this does not claim a direct check."),
+    "azdad": _P(
+        _pol("azdad", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the site's own API asked per ad (run.read_api): no row while this run's catalogue is non-empty, "
+        "or status «مباع», is GONE; «متاح» is live; anything else UNKNOWN. A removed ad's page answers 200 "
+        "«غير موجود», so the page status is never used. Absence only nominates; prune_unseen asks this "
+        "oracle at grace (2026-10-31) and strike_read_gone asks it when the prune is refused, each gone "
+        "answer gated on a seen «متاح» control reading live.",
+        "Tier not yet raised: the registry reseed that moves it to CANDIDATE_PLUS_DIRECT is a held apply."),
     "ryadah": _P(
         _pol("ryadah", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the WP REST property posts (Arabic only). "
         "run.py suppresses prune_unseen unless every detail page was readable.",
         "No oracle is written yet, so this does not claim a direct check."),
     "sqcc": _P(
-        _pol("sqcc", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set over the realestate sitemap (33). "
-        "run.py suppresses prune_unseen unless every detail page was readable.",
-        "No oracle is written yet, so this does not claim a direct check."),
+        _pol("sqcc", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own /realestate/<slug>/ page: HTTP 404/410 («الصفحة غير موجودة») is GONE, and so "
+        "is a 200 for this post whose own title/price/spec list says تم البيع / مباع / محجوز / مزاد; a "
+        "200 carrying this post's own shortlink ?p=<id> with none of those words (and no "
+        "deal-dependent «مؤجر») is LIVE; another post's page, 401/403/429/5xx and a timeout are "
+        "UNKNOWN. Removals are canary-gated on a post this crawl just read answering live.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): the crawl already opens every post's own page, so that read is stamped through db.mark_direct_alive (zero extra requests); the same page is the removal oracle handed to prune_unseen."),
     "daraa": _P(
         _pol("daraa", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over /projects?page=N (33 projects). "
@@ -1206,9 +1244,13 @@ POLICIES: dict[str, _P] = {
         "No oracle is written yet, so this does not claim a direct check."),
     "superoffice": _P(
         _pol("superoffice", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set over the sitemap's 184 Arabic office pages; a booked office drops out of it. "
-        "run.py suppresses prune_unseen unless every page was readable.",
-        "No oracle is written yet, so this does not claim a direct check."),
+        "the office's OWN page /branch/<b>/unit/<code>: JSON-LD offer availability OutOfStock or HTTP 404/410 is "
+        "GONE, InStock is LIVE; an old-site /ar/office-details/<slug> URL answering 301/308 to a category page "
+        "(or 404/410) is GONE; anything else UNKNOWN. Handed to every prune_unseen call and to strike_read_gone; "
+        "a gone counts only after an office this crawl saw reads live (2026-10-29, site rebuilt 2026-10-28).",
+        "The crawl reads each served office's own page and stamps it via db.mark_direct_alive. It sees only the "
+        "server-rendered window of each branch list (the rest loads from /api, which robots.txt disallows), so "
+        "an office outside the window is a candidate the own-page read decides, never a kill."),
     "shomou": _P(
         _pol("shomou", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set of in-date ads over the 26-page index; an ad past its own «تاريخ إنتهاء الإعلان» drops out. "
@@ -1382,11 +1424,11 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
-            "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
+            "abralosol", "abwbna", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj", "aqaratikom",
+            "arkaan", "awal", "bahadhabab", "erapulse",
             "jurash",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
-            "shmoualshmal", "therc",
+            "shmoualshmal",
         )
     },
 }
@@ -1443,6 +1485,17 @@ for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
                       "Daily direct revisit of every active listing (fleet_liveness.py, 2026-09-28). "
                       + POLICIES[_p]["note"])
+
+# GRACE 1 — remove on the FIRST affirmative reading (owner 2026-10-20: «once we see it, remove it»).
+# sakan prints «هذا العقار لم يعد متاحاً» on the expired ad's own page (aldarim stays at 3: it is a
+# FLEET_DAILY_DIRECT site whose daily revisit hides on three direct readings). That notice is the source's direct statement about THIS listing, so
+# the 3-crawl wait only kept dead ads on screen (sakan: 600 of 742 border ads were expired). Absence
+# still never kills: the at-grace verify_gone must answer «gone», and every UNKNOWN still holds.
+for _p in ("sakan",):
+    _old = POLICIES[_p]
+    POLICIES[_p] = _P(_pol(_p, 1, _old["policy"].max_verification_age_hours), _old["strategy"],
+                      _old["death_signals"], "GRACE 1 on the source's own removal (owner 2026-10-20). "
+                      + _old["note"])
 
 
 # remal and shmoualshmal gained a prune-time oracle on the ad's OWN url on 2026-10-02 (until then

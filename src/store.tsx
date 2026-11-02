@@ -1,6 +1,7 @@
+import { markEagleLightUp } from '@/lib/eagleLightUp';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useI18n, LOCALE_KEY, getLocale, getLocaleRevision, detectLocale, setLocalePersistence, type Locale } from '@/i18n';
+import { useI18n, LOCALE_KEY, getLocale, getLocaleRevision, detectLocale, setLocalePersistence, languageOnAuth, hasStoredAuthSession, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
@@ -15,7 +16,7 @@ import { shelfCount, zeroContradictsShelf } from '@/lib/shelfCheck';
 import { logZeroResult } from '@/data/zeroResultLog';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
-import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
+import { mapSupabaseUser, signOutBackend, deleteAccountBackend, persistNameSpellings, persistUiLocale } from '@/lib/auth';
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
 import { restoreChat, persistedOnly, pickLocalTranscripts, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
@@ -30,6 +31,12 @@ import { truncateGlyphs } from '@/lib/typedReveal';
 
 type DataSource = 'local' | 'supabase';
 
+/** The re-mapped user, keeping the in-memory spellings of the same name when the session has none yet. */
+export function keepSpellings(prev: AuthUser | null, next: AuthUser): AuthUser {
+  if (!prev || prev.name !== next.name || next.nameAr || next.nameEn) return next;
+  return { ...next, ...(prev.nameAr ? { nameAr: prev.nameAr } : {}), ...(prev.nameEn ? { nameEn: prev.nameEn } : {}) };
+}
+
 export type AuthUser = {
   method: 'google' | 'apple'; // phone sign-in removed (owner 2026-09-01)
   name: string; // the name as the user last typed it (canonical)
@@ -39,6 +46,10 @@ export type AuthUser = {
   nameAr?: string;
   initials: string;
   sub: string; // phone or email
+  namePromptSeen?: boolean; // user_metadata.name_prompt_seen — «وش نناديك؟» already shown to this account
+  createdAt?: string; // auth user created_at / last_sign_in_at — a fresh SIGN-UP gets «وش نناديك؟» (lib/loginWelcome isFreshSignUp)
+  lastSignInAt?: string;
+  uiLocale?: 'ar' | 'en'; // user_metadata.ui_locale — the account's interface language, the same on every device
 };
 
 // snapshot = the results the search actually returned, saved WITH the entry so reopening a saved
@@ -170,8 +181,8 @@ type AppState = {
   setActiveChat: (id: string | null) => void;
   // Support / About Us are shown as in-app popups (centered dialog over a dimmed page) rather than
   // full-screen routes, so they open from the drawer without navigating away.
-  modal: 'support' | 'about' | 'legal' | 'privacy' | null;
-  openModal: (m: 'support' | 'about' | 'legal' | 'privacy') => void;
+  modal: 'support' | 'about' | 'legal' | 'privacy' | 'af-how' | null;
+  openModal: (m: 'support' | 'about' | 'legal' | 'privacy' | 'af-how') => void;
   closeModal: () => void;
   // Sign-in popup (owner 2026-08-15): a true in-place overlay, same pattern as modal/openModal/
   // closeModal above — never a route, so the screen underneath (the Filter page, wherever the user
@@ -319,7 +330,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const historyRef = useRef<HistoryItem[]>([]);
   useEffect(() => { historyRef.current = history; }, [history]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | null>(null);
+  const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | 'af-how' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authNote, setAuthNote] = useState<string | null>(null);
   const [pendingMessage, setPendingMessageState] = useState<string | null>(null);
@@ -332,6 +343,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Adoption enables the stored preference; a COMPLETED signed-in→signed-out transition (incl.
   // external revocation observed via onAuthStateChange) resets to Light and clears the stored
   // preference. Boot-as-guest is NOT a transition — nothing to clear, the gate already gives Light.
+  const signedInNowRef = useRef(false);
+  useEffect(() => { signedInNowRef.current = !!user; }, [user]);
   const themeWasSignedInRef = useRef(false);
   useEffect(() => {
     if (!authChecked) return;
@@ -379,7 +392,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (nameSyncRef.current === nm) return;
     nameSyncRef.current = nm;
     let cancelled = false;
-    buildSyncedName(nm).then((synced) => { if (!cancelled) applySyncedName(synced); });
+    // Written ONCE to user_metadata (the queue in lib/auth.ts), so the next load starts with both spellings.
+    buildSyncedName(nm).then((synced) => { if (!cancelled) { applySyncedName(synced); persistNameSpellings(synced); } });
     return () => { cancelled = true; };
   }, [user?.name, user?.nameEn, user?.nameAr, applySyncedName]);
 
@@ -387,6 +401,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Guests start in Arabic on a fresh load; web restores signed-in preference at first paint.
   const { locale, setLocale } = useI18n();
   const localeInitRef = useRef<string | null>(null);
+  const localeRestoredRef = useRef(false); // this load's saved language has been applied (account or device)
   // WHICH account's history is currently loaded — not merely "did we load once". A boolean here was
   // a real bug: the hydrate effect is one-shot, so a user who signed in DURING a session (the guard
   // already having run while they were a guest) never had their own saved history read, and the
@@ -399,16 +414,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!authChecked) return;
     let cancelled = false;
+    // languageOnAuth (i18n.tsx): a slow sign-in is not a guest — never erase a signed-in user's language.
+    const step = languageOnAuth({ signedIn: !!user, storedSession: hasStoredAuthSession(), accountLocale: user?.uiLocale ?? null });
+    if (step.action === 'wait') return () => { cancelled = true; };
     if (user) {
       setLocalePersistence(true);
       if (localeInitRef.current !== user.sub) {
         localeInitRef.current = user.sub;
+        localeRestoredRef.current = false;
         const revisionBeforeRead = getLocaleRevision();
         AsyncStorage.getItem(LOCALE_KEY)
           .then((v) => {
-            if (!cancelled && getLocaleRevision() === revisionBeforeRead && (v === 'en' || v === 'ar')) setLocale(v as Locale);
+            const device = v === 'en' || v === 'ar' ? (v as Locale) : null;
+            const pick = languageOnAuth({ signedIn: true, storedSession: true, accountLocale: user.uiLocale ?? null, deviceLocale: device });
+            if (!cancelled && getLocaleRevision() === revisionBeforeRead && pick.action === 'restore' && pick.locale && pick.locale !== getLocale()) setLocale(pick.locale);
           })
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => { if (!cancelled) localeRestoredRef.current = true; });
       }
     } else {
       setLocalePersistence(false); // guest → never remember the language
@@ -429,6 +451,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) return;
     AsyncStorage.setItem(LOCALE_KEY, locale).catch(() => {});
+    // …and on the ACCOUNT, so every device shows it (owner 2026-10-27). Only after this load's restore has run,
+    // so the first paint's default can never overwrite the language another device saved.
+    if (localeRestoredRef.current && user.uiLocale !== locale) persistUiLocale(locale);
   }, [locale, user]);
 
   // Restore saved chats. SIGNED-IN only — see the persistence effect below for why a guest's
@@ -821,13 +846,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       onChecked: () => setAuthChecked(true),
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       const su = session?.user;
       if (su) {
         // Apple stays Apple; everything else (Google, and the two internal email test accounts) reads as
         // Google — the only other provider the product offers since phone sign-in was removed.
         const method = su.app_metadata?.provider === 'apple' ? 'apple' : 'google';
-        setUser(mapSupabaseUser(su, method));
+        // A re-map (token refresh, tab focus) must not drop spellings this tab already has for the SAME name
+        // before they are stored — that drop flipped «Yusuf» back to «يوسف» on an English screen.
+        // A real log-in / sign-up (signed out → signed in here, not a token refresh or a restored session):
+        // the sidebar eagle lights up once (lib/eagleLightUp.ts, owner 2026-10-24).
+        if (event === 'SIGNED_IN' && !signedInNowRef.current) markEagleLightUp();
+        setUser((prev) => keepSpellings(prev, mapSupabaseUser(su, method)));
       } else {
         setUser(null);
       }

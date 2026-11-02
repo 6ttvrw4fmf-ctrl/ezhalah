@@ -32,6 +32,7 @@ type Fns = { mapPoint: (r: Row | null) => { lat: number; lng: number } | null };
 const lift = async (file: string): Promise<Fns> => (await liftSymbols(file, [
   { header: 'const num = (', endsWith: /: NaN;$/ },
   { header: 'export function mapPoint(' },
+  { header: 'export const isCoarse = ', endsWith: /< 1e-6;$/ },
 ], ['mapPoint'])) as unknown as Fns;
 
 // Real rows, 2026-10-10: wasalt 7392441 publishes a pin; aqar 13462300 (the same house) publishes none.
@@ -42,11 +43,16 @@ const problems = ({ mapPoint }: Fns): string[] => {
   const out: string[] = [];
   const pin = mapPoint(WASALT);
   if (!pin || Math.abs(pin.lat - 24.920875653372303) > 1e-9 || Math.abs(pin.lng - 46.780616430492536) > 1e-9) out.push('a published pair (as PostgREST strings) did not become the pin');
-  if (!mapPoint({ latitude: 24.92, longitude: 46.78 })) out.push('a published numeric pair did not become the pin');
+  if (!mapPoint({ latitude: 24.920876, longitude: 46.780616 })) out.push('a published numeric pair did not become the pin');
+  // Mapping audit 2026-10-21: a point rounded to ≤ 2 decimals is an area, not a pin (wasalt 443497 at 25,49).
+  if (mapPoint({ latitude: 25, longitude: 49 })) out.push('a whole-degree point (25,49) got a pin');
+  if (mapPoint({ latitude: '24.47', longitude: '46.8' })) out.push('a 2-decimal point (24.47,46.8) got a pin');
+  if (mapPoint({ latitude: 24.920876, longitude: 46.78 })) out.push('a point coarse on ONE axis got a pin');
+  if (!mapPoint({ latitude: 24.921, longitude: 46.781 })) out.push('a 3-decimal point lost its pin (the line is 2 decimals, not 3)');
   if (mapPoint(AQAR)) out.push('a row with NO coordinates got a pin');
-  if (mapPoint({ latitude: 24.92, longitude: null })) out.push('latitude alone got a pin');
-  if (mapPoint({ latitude: null, longitude: 46.78 })) out.push('longitude alone got a pin');
-  if (mapPoint({ latitude: '', longitude: '46.78' })) out.push('an empty latitude string got a pin');
+  if (mapPoint({ latitude: 24.920876, longitude: null })) out.push('latitude alone got a pin');
+  if (mapPoint({ latitude: null, longitude: 46.780616 })) out.push('longitude alone got a pin');
+  if (mapPoint({ latitude: '', longitude: '46.780616' })) out.push('an empty latitude string got a pin');
   if (mapPoint({ latitude: 0, longitude: 0 })) out.push('the (0,0) default got a pin');
   if (mapPoint({ latitude: 'abc', longitude: 'def' })) out.push('garbage coordinates got a pin');
   if (mapPoint(null)) out.push('no row got a pin');
@@ -553,7 +559,7 @@ const mustCatch = async (what: string, from: string, to: string) => {
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
 await mustCatch('a pin from one coordinate', 'if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;', 'if (!Number.isFinite(lat) && !Number.isFinite(lng)) return null;');
-await mustCatch('a pin from the (0,0) default', 'if (lat === 0 || lng === 0) return null;', '');
+await mustCatch('a pin from the (0,0) default or a rounded point', 'if (isCoarse(lat) || isCoarse(lng)) return null;', '');
 sourceMutant('a district-centroid fallback for the pin', !wired(codeOnly(DATA_SRC).replace('const geo = mapPoint(own);', 'const geo = mapPoint(own) ?? { lat: 24.7136, lng: 46.6753 };'), PREVIEW));
 sourceMutant('the page drawing a map without a pin', !wired(codeOnly(DATA_SRC), PREVIEW.replace('{geo && IS_WEB ? (', '{IS_WEB ? (')));
 sourceMutant('the map opening a new tab from our UI', !wired(codeOnly(DATA_SRC), PREVIEW.replace('const openMap = () => {', "const openMap = () => { window.open(mapEmbedUrl(geo, locale, 15), '_blank');")));
@@ -594,7 +600,9 @@ const districtProblems = (f: DistrictFns): string[] => {
   // Aqar + Aqar Monthly (owner 2026-10-17) + Wasalt (owner 2026-10-19: «map Wasalt like Aqar»); nobody else yet.
   if (f.districtPlace({ platform: 'dealapp', district_ar: 'حي الساحل', city_ar: 'جدة' }) !== null) out.push('only Aqar, Aqar Monthly and Wasalt get the district map for now (dealapp must not)');
   if (f.districtPlace({ platform: 'wasalt', district_ar: 'حي الساحل', city_ar: 'جدة' })?.query !== 'حي الساحل، جدة') out.push('Wasalt gets the district map (owner 2026-10-19)');
-  for (const p of ['sakan', 'abralosol', 'nofodh', 'arkaan', 'bossbih', 'ksaaqar', 'mustqr', 'aqalemhajer', 'alshawaf', 'reinvest']) {
+  for (const p of ['sakan', 'abralosol', 'nofodh', 'arkaan', 'bossbih', 'ksaaqar', 'mustqr', 'aqalemhajer', 'alshawaf', 'reinvest',
+    // owner 2026-10-20: every remaining preview site
+    'haraj', 'muktamel', 'ialqarawi', 'aqarcity', 'rightcompound', 'sirdab', 'therc', 'sokok', 'raghdan', 'alsaedan', 'goldendeal', 'nufouth', 'akariyoun', 'sukna', 'aldarim', 'aqargate', 'shomou', 'abwbna', 'aqaratikom', 'thousand', 'alobid', 'jazwtn', 'aljassim', 'manafe', 'opensooq', 'justsa', 'senan', 'bahadhabab', 'erapulse', 'maqam', 'jawher', 'm3tmd', 'azure', 'holoul', 'superoffice', 'alhoshan', 'arsh', 'flow', 'nowaisiry', 'hasaad', 'almuteb', 'nawafeth', 'wadod', 'october', 'hazim', 'eydah', 'eightfloor']) {
     if (f.districtPlace({ platform: p, district_ar: 'حي الساحل', city_ar: 'جدة' })?.query !== 'حي الساحل، جدة') out.push(`${p} gets the district map (owner 2026-10-19, the ten largest native-preview sites)`);
   }
   if (f.districtPlace({ platform: 'aqarmonthly', district_ar: 'حي الملز', city_ar: 'الرياض' })?.query !== 'حي الملز، الرياض') out.push('Aqar Monthly gets the district map too (owner 2026-10-17)');
@@ -629,6 +637,7 @@ await mustCatchDistrict('the district map spreading past Aqar', "if (!DISTRICT_M
 await mustCatchDistrict('Aqar Monthly dropped from the district map', "  'aqar', 'aqarmonthly', 'wasalt',", "  'aqar', 'wasalt',");
 await mustCatchDistrict('Wasalt dropped from the district map', "  'aqar', 'aqarmonthly', 'wasalt',", "  'aqar', 'aqarmonthly',");
 await mustCatchDistrict('one of the ten sites dropped from the district map', "'sakan', 'abralosol', 'nofodh',", "'abralosol', 'nofodh',");
+await mustCatchDistrict('one of the 47 preview sites dropped from the district map (owner 2026-10-20)', "'haraj', 'muktamel', 'ialqarawi',", "'haraj', 'ialqarawi',");
 await mustCatchDistrict('the district embed losing the name', '`https://maps.google.com/maps?q=${q}&t=h&hl=${hl}&output=embed`', '`https://maps.google.com/maps?t=h&hl=${hl}&output=embed`');
 const districtWired = (dataSrc: string, previewSrc: string) =>
   /if \(!pin\) setArea\(districtPlace\(row, listingOpenUrl\(l\)\)\);/.test(previewSrc)   // only when the source published no pin; the ad's own link feeds the town fallback

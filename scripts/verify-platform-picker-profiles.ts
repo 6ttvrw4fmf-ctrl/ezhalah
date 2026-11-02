@@ -57,7 +57,10 @@ function verify(text: string, helperText = helper) {
     fingerprint.update(readFileSync(new URL(`../src/data/${file}`, import.meta.url)));
   }
   assert.equal(files.size, 143, 'all matching ZIP logos plus the official Haraj header are used');
-  assert.equal(fingerprint.digest('hex'), 'c1209285e5b9b8fe11702eae579ab2f5fafaf8d91218d324a61b1982879e9e83');
+  // Re-pinned 2026-10-27 (owner: «make it feel faster»): the same artwork resized to ≤320 px and saved as palette
+  // PNGs with real alpha (13.1 MB → 1.7 MB, PR "Speed: platform logos"). Checked side by side: no visible change.
+  // Any OTHER change to these bytes still fails here.
+  assert.equal(fingerprint.digest('hex'), 'f6e08146739cb8fe9f11396be84548b27025923b0e459d563fcfd553072e26df');
 }
 verify(source);
 function mustCatch(mutant: string) {

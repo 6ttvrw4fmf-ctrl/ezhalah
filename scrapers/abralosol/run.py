@@ -52,7 +52,7 @@ from scrapers.common.http import retry_smarter_session
 from scrapers.common.http_liveness import LivenessProbe
 from scrapers.common import normalize as N
 from scrapers.common.pii import redact_capture, redact_pii
-from scrapers.common.page_pin import pin_from_html
+from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link
 
 BASE = "https://abralosol.com"
 SOURCE = "Abr Alosol"
@@ -410,7 +410,11 @@ def _detail(s: cc.Session, nid: str) -> dict:
         "photo_urls": photos,
         "label": label,
         "age_raw": age_raw,
-        "pin": pin_from_html(page),   # the «الموقع» google.com/maps/place/LAT,LNG link (owner 2026-10-19)
+        # The «الموقع» link: google.com/maps/place/LAT,LNG, or a maps.app.goo.gl short link that is
+        # followed by redirect (measured 2026-10-19: ad 7890 carries only the short form).
+        # The ad's OWN article only (audit 2026-10-21): the page below it lists other ads, each with its own
+        # maps/place link, and reading the whole page stored a NEIGHBOUR's pin — 95 «الراشدية» ads shared one.
+        "pin": pin_from_html(body) or pin_from_short_link(short_maps_link(body), lambda u: resolve_redirect(s, u)),
     }
 
 
@@ -698,6 +702,10 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "description": detail.get("description"),
         "additional_info": redact_capture({k: v for k, v in {
             **(detail.get("pin") or {}),
+            # The ad's own article WAS read and carries no pin (audit 2026-10-21). keep_stored_pin keeps an old
+            # pin only for a write that does not say this, so a failed short-link hop still keeps its pin while a
+            # neighbour's pin stored before the article-only fix can finally leave.
+            **({"pin_absent": True} if detail and not detail.get("pin") else {}),
             "price_label": p["label"],
             "price_basis": basis,
             "price_basis_from": basis_from,
@@ -729,7 +737,7 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
     # 2,803 stored NULL (🔬 2026-10-10, ops_af_score abralosol kitchen we_miss). Land and farms are
     # skipped: «شرقا مواقف سيارات» on a plot describes a neighbour, not the property.
     if not property_type.endswith("Land") and property_type != "Farm":
-        row.update(N.prose_amenities_yes(detail.get("description"), skip=_PROSE_SKIP))
+        row.update(N.prose_amenities(detail.get("description"), skip=_PROSE_SKIP))
     return row, N.category_for_type(property_type).lower()
 
 

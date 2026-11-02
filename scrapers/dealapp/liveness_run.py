@@ -47,7 +47,8 @@ from scrapers.common.liveness_contract import (
 )
 from scrapers.common.liveness_policies import policy_for
 from scrapers.dealapp.liveness import (  # FRESH_MAX_AGE_S: one rule, shared with the crawl's alive stamp
-    FRESH_MAX_AGE_S, OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, sitemap_candidate_rank,
+    FRESH_MAX_AGE_S, OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, is_registration_wall,
+    sitemap_candidate_rank,
 )
 
 BASE = "https://dealapp.sa"
@@ -65,6 +66,8 @@ RUN_NAME_PROXY = "dealapp_liveness_proxy"
 
 
 _ORIGIN = OriginBudget()
+_LAST_EDGE = [False]   # did probe()'s last response come from CloudFront (not an origin render)?
+_RENDERS: list[tuple[str, str]] = []   # this run's fresh reads in order (adid, render_kind)
 _DEADLINE = time.monotonic() + 50 * 60   # pacing must never outlast the 60-min job
 
 
@@ -159,8 +162,13 @@ def _collect_candidates(client, limit: int) -> list[dict]:
     # rows at 3-5 strikes (served_after_source_gone:dealapp) had no sweep reading for days, and
     # this sweep is the only reader whose fresh render can decide a dealapp page. Struck rows head
     # the list; the kill rule (decide(), 3 strikes, trust gate, held-alive) is unchanged.
+    # NEAR-KILL ROWS MUST FIT IN THE WINDOW (2026-10-25). Ordered by probe age alone, the window of
+    # `limit` struck rows was always the 1-strike ones: the crawl re-stamps every row at >= 2 strikes
+    # nightly, so on 10-25 the 10:47 run read 17 struck rows and none at >= 2, while 117 served ads sat
+    # at 3-11 strikes with no alive reading in 48 h (76 of them read gone twice that morning).
     struck = (_execute(client.table(TABLE).select(cols)
                        .eq("active", True).gt("missing_count", 0)
+                       .order("missing_count", desc=True)
                        .order("last_liveness_probe_at", desc=False, nullsfirst=True)
                        .limit(limit or 20000),
                        what="dealapp struck candidates").data or [])
@@ -183,6 +191,8 @@ def _probe_order(r: dict, sitemap) -> tuple:
 # 10-08 on — alive 3,508/day on 10-11 → 0 on 10-16, checked-in-time 96% → 56.5%. Struck rows still
 # lead, inside their share; any share they do not use goes to the rotation, and vice versa.
 STRUCK_SHARE = 0.25
+# One more DEAD reading kills a row at this many strikes (grace 3).
+NEAR_KILL = 2
 
 
 def _plan_worklist(cands: list[dict], limit: int) -> list[dict]:
@@ -196,7 +206,22 @@ def _plan_worklist(cands: list[dict], limit: int) -> list[dict]:
     k = min(len(struck), max(1, int(limit * STRUCK_SHARE)))
     take_rest = min(len(rest), limit - k)
     k = min(len(struck), limit - take_rest)
-    return struck[:k] + rest[:take_rest]
+    # Half the struck share goes to rows one DEAD reading from a kill (2026-10-25), oldest-probed
+    # first among them; the other half to 1-strike rows, and either side's unused half to the other.
+    near = sorted((r for r in struck if (r.get("missing_count") or 0) >= NEAR_KILL),
+                  key=lambda r: (r.get("last_liveness_probe_at") is not None,
+                                 r.get("last_liveness_probe_at") or ""))
+    far = [r for r in struck if (r.get("missing_count") or 0) < NEAR_KILL]
+    kn = min(len(near), max((k + 1) // 2, k - len(far)))
+    struck = near[:kn] + far[:k - kn]
+    # INTERLEAVED, struck first (2026-10-23): a struck ad's own page is usually dealapp's no-listing
+    # render, which counts only between two live-ad renders (bracketed_none). Read as one block, struck
+    # rows had only each other as neighbours, so the bracket could almost never close around them.
+    picked_struck, picked_rest = struck[:k], rest[:take_rest]
+    out: list[dict] = []
+    for i in range(max(len(picked_struck), len(picked_rest))):
+        out += picked_struck[i:i + 1] + picked_rest[i:i + 1]
+    return out
 
 
 BOGUS_ADID = "999999999"
@@ -231,9 +256,58 @@ def _variants(listing_url: str) -> list[str]:
     return [base + "/", en + "/", en]
 
 
+def render_kind(verdict: str, status: Optional[int], body: str, edge: bool) -> str:
+    """What one fresh read rendered, for the bracket below: 'ad' (read ALIVE), 'none' (an ORIGIN
+    render of dealapp's own page with no listing in it: ng-state present, no listing schema, not
+    the view-quota wall), else 'other'. Pure."""
+    if verdict == ALIVE:
+        return "ad"
+    if (not edge and status == 200 and 'id="ng-state"' in (body or "")
+            and "real-estate-listing" not in body and not is_registration_wall(body)):
+        return "none"
+    return "other"
+
+
+def bracketed_none(log: list[tuple[str, str]]) -> list[str]:
+    """adids whose render was 'none' with a live ad rendered immediately before AND after it on
+    this runner ('other' breaks nothing, a wall breaks the bracket by not being 'ad'). The same
+    rule as the crawl's confirmed_absent (scrapers/dealapp/run.py, oracle
+    dealapp.crawl_fresh_render_no_listing.bracketed.ci). Pure."""
+    out: list[str] = []
+    for i, (adid, kind) in enumerate(log):
+        if kind != "none":
+            continue
+        before = next((k for _, k in reversed(log[:i]) if k != "none"), None)
+        after = next((k for _, k in log[i + 1:] if k != "none"), None)
+        if before == "ad" and after == "ad":
+            out.append(adid)
+    return out
+
+
+def promote_bracketed(pending: list, bracketed: set, policy) -> tuple[list, int]:
+    """A struck row this run read UNKNOWN whose render was a bracketed no-listing page becomes a DIRECT
+    DEAD reading (2026-10-24, backlog 766): one strike, the 3-strike grace and the trust gate unchanged.
+
+    Shadow evidence first (10-23 13:00 → 10-24 09:30, runs 40046091086…40078921277): 124 struck ads read
+    bracketed-none; 0 of them read alive by any reader since, and 8 were hidden meanwhile by the crawl's
+    own confirmed_absent (the same rule). Only rows ALREADY struck (missing_count >= 1) qualify, the way
+    the shadow counted them. Pure."""
+    out, n = [], 0
+    for row, action, strikes, status, read_iso in pending:
+        mc = int(row.get("missing_count") or 0)
+        if action == "none" and mc >= 1 and _adid(row["listing_url"]) in bracketed:
+            d = decide(DEAD, strikes=mc, policy=policy, evidence=EvidenceKind.DIRECT)
+            out.append((row, d.action, d.strikes, status, read_iso))
+            n += 1
+        else:
+            out.append((row, action, strikes, status, read_iso))
+    return out, n
+
+
 def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudget] = None
                   ) -> tuple[str, Optional[int]]:
-    """(verdict, http_status) for one ad: the first variant that is not UNKNOWN, else UNKNOWN."""
+    """(verdict, http_status) for one ad: the first variant that is not UNKNOWN, else UNKNOWN.
+    Each fresh read also lands in _RENDERS as (adid, render_kind), for the shadow bracket."""
     adid = _adid(listing_url)
     for url in _variants(listing_url):
         status, body, final = probe(s, url, budget)
@@ -242,8 +316,10 @@ def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudge
         # A fresh render is final — every extra key is one more render against dealapp's
         # per-visitor quota (liveness.OriginBudget). requested_url without the trailing slash: a
         # slash-stripping redirect must not read as "moved off the ad path" (DEAD).
-        return classify_dealapp(status, body=body, adid=adid, final_url=final,
-                                requested_url=url.rstrip("/")), status
+        verdict = classify_dealapp(status, body=body, adid=adid, final_url=final,
+                                   requested_url=url.rstrip("/"))
+        _RENDERS.append((adid, render_kind(verdict, status, body, _LAST_EDGE[0])))
+        return verdict, status
     return UNKNOWN, None
 
 
@@ -264,7 +340,8 @@ def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
             # ~10 renders and leaves the wall cached under each ad's URL for days.
             slot = _ORIGIN.acquire()
             r = s.get(url, timeout=45, allow_redirects=True)
-            if from_edge(r):
+            _LAST_EDGE[0] = bool(from_edge(r))
+            if _LAST_EDGE[0]:
                 _ORIGIN.refund(slot)
             try:
                 age = int((r.headers or {}).get("age") or 0)
@@ -354,6 +431,12 @@ def main() -> int:
         # (row, action, strikes, http_status, read_iso): read_iso is WHEN this sweep read the ad,
         # kept per row because the sweep reads for up to 50 minutes and applies at the end.
         pending: list[tuple[dict, str, int, int, str]] = []
+        # The crawl's bracketed no-listing render, read here too (backlog 766): 60 shown dealapp ads at
+        # 3+ strikes read UNKNOWN to every reader (a removed ad renders the bogus-id shell). Shadow from
+        # 10-23 13:00; promoted to a DIRECT reading 10-24 (promote_bracketed) after 124 shadow ads read
+        # alive 0 times since.
+        _RENDERS.clear()   # the canaries' reads are not part of the worklist's sequence
+        struck_adids = {_adid(r["listing_url"]) for r in cands if int(r.get("missing_count") or 0) >= 1}
         for row in cands:
             adid = _adid(row["listing_url"])
             if budget.exhausted:
@@ -375,6 +458,11 @@ def main() -> int:
                          **verification_patch(d, now_iso=now_iso)}
                 _execute(client.table(TABLE).update(patch).eq("id", row["id"]), what="dealapp verify")
                 stats["verified"] += 1
+
+        bracketed = [a for a in bracketed_none(_RENDERS) if a in struck_adids]
+        pending, stats["bracketed_dead"] = promote_bracketed(pending, set(bracketed), policy)
+        stats["dead"] += stats["bracketed_dead"]
+        stats["unknown"] -= stats["bracketed_dead"]
 
         # A run that verified almost nothing is being served shells; its deaths are not evidence.
         trusted = (environment_is_trustworthy(stats["alive"], stats["scanned"])
@@ -470,6 +558,8 @@ def main() -> int:
                 print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
                       f"{str(exc)[:160]}", flush=True)
 
+        print(f"BRACKETED no-listing renders among struck rows ({len(bracketed)}): "
+              f"{' '.join(bracketed)}", flush=True)
         note = (f"{'APPLY' if args.apply else 'DRY-RUN'} "
                 f"egress={'proxy' if proxy_url else 'ci'} "
                 f"requests={budget.used}{f'/{budget.cap}' if budget.cap else ''} "
@@ -479,7 +569,8 @@ def main() -> int:
                 f"inactivated={stats['deactivated']} held_alive={stats.get('held_alive', 0)} "
                 f"sitemap_ids={stats['sitemap_ids']} "
                 f"canary_live={canary['live']}/{canary['live_n']} "
-                f"canary_bogus={'ALIVE!' if canary['bogus_alive'] else 'not-alive'}"
+                f"canary_bogus={'ALIVE!' if canary['bogus_alive'] else 'not-alive'} "
+                f"bracketed_none={len(bracketed)} bracketed_dead={stats['bracketed_dead']}"
                 + ("" if trusted else " | QUARANTINED: verified-rate or canary failed, no deactivation written"))
         print(note, flush=True)
         end_run(run_id, ok=True, rows_seen=stats["scanned"],

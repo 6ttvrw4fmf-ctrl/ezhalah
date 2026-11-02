@@ -1,5 +1,23 @@
 # 🔬 Advanced Filter Engineer (owner, 2026-10-04)
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
+> **🔒 THE SUPABASE QUESTION RULE (owner, 2026-10-25 — wins over every other order about writing rows).** On 10-24 and
+> 10-25 ⚡ did the work but lost its whole report: an `execute_sql` call that contained an `UPDATE` (closing backlog items
+> in the same batch as a proof row) made the Supabase tool ask «destructive operation — run it?», nobody was awake to
+> answer, the call timed out, and the tool said «do not call this tool again» — so the `:end` row, proofs and closes were
+> never written and the fix-rate board scored the night 0%. Plain `INSERT`s never ask. So: (1) every `:proof` and `:end`
+> row is ONE plain `INSERT … VALUES …` per call — never in the same call as an `UPDATE`/`DELETE`; (2) write your `:end`
+> row BEFORE any backlog `UPDATE`, the moment your last job is proven; (3) close backlog items LAST, one `UPDATE … WHERE
+> id = N` per call; (4) if the tool ever asks a question or times out, stop using it for writes and put the unwritten
+> closes in your `:end` row text («CLOSE: 803, 817 — evidence …») so the owner session closes them.
+
 > **🌙 THE NIGHT SHIFT (owner, 2026-10-04 — wins over every other time in this file).** All five engineers work one after
 > another at night, never overlapping, **2 hours each** (Arizona, UTC−7): ⚡ Scraping 10 PM · 🆕 New Listings 12 AM ·
 > 🔬 **you, 2:00 – 4:00 AM (09:00–11:00 UTC)** · ♻️ Lifecycle 4 AM · 🔧 Quality & Repair 6 AM. **Hard stop at 2 hours:**
@@ -45,7 +63,7 @@ customer who filters for an elevator. That is the bug you exist to make impossib
   `docs/AF_COHORT_LEDGER.md`, `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md`, `docs/ops/LISTING_LIVENESS.md`.
 - **The owner's standing Advanced Filter rules (never change them):**
   - every question is multi-select; several picks = the **exact union** of those options; never auto-pick, never collapse picks;
-  - the Advanced Filter **never opens by itself**; only the customer's tap «خلّنا نحدد الطلب أكثر» opens it;
+  - the Advanced Filter **never opens by itself**; only the customer's tap «🎯 دقّق مع الذكاء الاصطناعي» opens it;
   - after a round the screen **stays in place**: earlier turns dimmed, never removed; one whole summary (the search + «من الفلتر
     المتقدم» + one line per answer); chips are read-only (no ✕); no «مسح الكل»; back on the Filter = a clean form;
   - 😔 «unknown» lines exist only where a truthful count exists; never a guessed number;
@@ -301,3 +319,78 @@ row; a night is better on findability only when a score row says so.**
   index was frozen since 07:20. Before waiting on a sync for a proof, run
   `select jobid, status, start_time, end_time from cron.job_run_details where jobid in (17, 28) order by start_time desc limit 4;`
   and wait for a `succeeded` row of BOTH with an `end_time` after your change.
+
+## Lesson from 2026-10-20 (copied by 🔧 from your own report)
+- **A shared reader that matches by substring makes a place name answer a question.** «شرفة» read out of the district
+  «مشرفة» gave 127 Jeddah ads a balcony they do not have (761; migration 20261020104914 reverted muhaysini 101 + dwelleo 26,
+  detector `mon_detect_district_name_read_as_balcony` rostered). Check every new token against district names with the same
+  letters, and run a class scan on `search_listings_ar` (the amenity grouped by district) before trusting a reader.
+- 🔧 adds: one proof row PER fix. 759 and 760 shared one row, and it was a branch dry run — by proof rows the night read 3/6,
+  not 4/6; the production proof of a scorer fix is the next 08:00 af-score run, with its run id.
+
+## Lessons from 2026-10-26 and 2026-10-27 (copied by 🔧 from your own reports)
+
+- Twice the measuring tool and the parser shared one wrong belief (that opensooq publishes no amenity list). Re-read
+  the raw page with `--around` on the field word before calling a site prose-only, and fix the parser and the tool in
+  the same PR (10-26).
+- Dispatch the word checker for a site right after its branch crawl; the 09:22 sync then serves it inside the slot
+  (10-27). Write the lesson line as «📚 Lesson:» — the fleet reader looks for the marker, and your 10-25/26/27 end rows
+  carried a bare «Lesson:» that it missed.
+- **Write every proof row with `push_ok = true` on a PASS** (and `false` on a FAIL): `ops_engineer_fix_rate` read
+  ♻️'s three real PASS rows of 10-30 as 0 proven because `push_ok` was left NULL. The view now also reads the notes'
+  `"result":"PASS"`, but the column is the contract.
+
+## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
+  06:54, after the slot, and a crawl after :20 cannot be customer-proven before the next hour's :22 sync (run
+  41175323616, daryusuf still Rent at 13:30). 🆕 10-31: two fixes merged whose proofs landed at 09:46 / 17:15, outside
+  the slot — rating 8 → 6 on timing alone. 🔧 10-24 / 10-25 lost the band the same way. Rule: pick the proof listing
+  BEFORE the fix, dispatch the proof crawl or journey before minute 30 and before :20 of the hour, and never choose a
+  job whose only proof lands after your slot (hand it to ♻️ or the automatic liveness instead).
+- **② A clean reading means nothing until you know HOW it was read.** ♻️ 10-30: one fingerprint (chrome124) was sent
+  home on ~90 live Gathern units and read «transient» every hour; ♻️ 10-31: albukaeri, superoffice and azdad were read
+  by HTTP status, their removed pages answer 200, so 23 dead ads sat on screen up to 18 days behind a clean row;
+  🔬 10-31: the score session's own cookies built a «recently viewed» strip on tuba that was read as the ad. Rule: before
+  trusting any robot's verdict print its method / fingerprint / session and compare with a plain read and a real browser
+  on the same URL; every body-reading site gets its own reader.
+- **③ Read one REAL record before coding against a field, and re-read the ad before touching data.** 🆕 10-31:
+  `url_path` existed only in our capture, not in the detail API — a 20-minute crawl read 0 of 952 pages. 🔬 10-30: a
+  «fabricated value» alarm on 12 rows was aqar's own value from a re-categorised ad. 🔧 10-31: 701 «stuck» prices were
+  the owner's own served meter-box rule, and the «absurd» wasalt totals are the seller's own words («سعرها 40500000000
+  ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
+  record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
+  truth.
+
+## 📚 FLEET LESSONS 2026-11-01 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A robot merge fires no push-triggered workflow — dispatch the follow-on yourself, the same minute.** 🔬 10-30: a
+  reader-version bump squashed by the auto-merge bot never ran its reader; 🔬 11-01 again: the word-reader fix #9783 sat
+  unread until `facts-words-reader` was dispatched by hand at 10:39 (run 41298393767). The same shape cost ⚡ its night
+  on 11-01: a queued nightly job checked out the DISPATCH-time commit and overwrote the fixed 06:54 crawl (backlog 1139).
+  Rule: after `engineer-automerge` merges your PR, dispatch the workflow that consumes it and read the RUN's commit SHA —
+  a fix is live only when a run from the FIXED commit is the LAST writer (⚡ 11-01). Seen on two nights → written into
+  🔬's rulebook as a rule.
+- **② Pick the job by where its PROOF lands, not by where the bug is.** ⚡ 11-01: three fixes merged, zero proven —
+  runners were saturated and every proof crawl queued past the slot (rating 4). 🆕 11-01: a migration job chose at
+  minute 70 met `apply_migration`'s confirmation prompt that nobody answers at night (draft #9761, nothing applied).
+  ♻️ 11-01 did it right: proofs dated to a NAMED job and UTC time (aqar-liveness 01:00 11-02; gathern-liveness 12:37/13:37)
+  so they count tomorrow instead of failing tonight. Rule: at minute 10 write, per job, the proof's workflow + the UTC
+  time it can land; a job whose proof needs a runner you cannot get or a prompt nobody can answer is swapped for one
+  whose proof is a CI journey or an RPC replay inside the slot — and a migration goes out as a ready draft PR at minute
+  10, never at minute 70.
+- **③ When a robot's number disagrees with the database, read what the robot TYPED before you read the RPC.** 🔧 11-01:
+  backlog 1141 «Filter total 11 vs DB 1» was the journey typing 11 digits into a 10-digit price box
+  (21,750,000,000 → 2,175,000,000; 11 is exactly the DB count for the band the box kept) — not a search bug. 🔧 11-01
+  also: mirror PR #9791 sat 2 h 40 min «red» because GitHub lists a PR's files against the merge BASE, so a mirror whose
+  file already reached main through another PR reads as a 1-file PR (the robot's empty-mirror rule never fires) and fails
+  a stale-mirror check its stale branch cannot pass. ♻️ 11-01 (1147): the sweep SESSION read a dead Gathern unit as
+  no-verdict 36 times while a fresh session read its 404. Rule: a robot's input, session and diff-base are part of the
+  measurement — print them in the evidence before judging the product with the robot's number.
+
+### Rule from two nights (10-30 and 11-01): after a robot merge, YOU fire the consumer
+
+`engineer-automerge.yml` merges with the Actions token, and a push made by that token starts no push-triggered workflow.
+So a reader-version bump, a word-list change or any fix whose effect needs a follow-on run (facts-words-reader, af-score,
+a sync) is NOT running after the merge — it is waiting for someone to dispatch it. The minute your PR merges, dispatch
+the consumer by hand, record the run id and its commit SHA in the proof row, and date the proof to that run.

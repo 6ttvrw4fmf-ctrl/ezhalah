@@ -25,6 +25,7 @@ const FILE = new URL('../src/data/adPageData.ts', import.meta.url).pathname.repl
 const lifted = await liftSymbols(FILE, [
   { header: 'const num = (', endsWith: /: NaN;$/ },
   { header: 'export function mapPoint(' },
+  { header: 'export const isCoarse = ', endsWith: /< 1e-6;$/ },
   { header: 'export const DISTRICT_MAP_PLATFORMS: ', endsWith: /^\];$/ },
   { header: 'export function aqarTownFromUrl(' },
   { header: 'export function districtPlace(' },
@@ -51,11 +52,13 @@ async function get<T>(path: string): Promise<T> {
   } finally { clearTimeout(timer); }
 }
 
-// 1. Every Aqar / Aqar Monthly ad first seen in the window, paged.
+// 1. Every district-map ad first seen in the window THAT SEARCH SERVES, paged. production_ready=true only
+// (2026-10-21): an unready row is held out of every search, so no customer can open its page; the 10-21 run
+// went red on 29 wasalt rows of which 23 were unready and the 6 served ones already had a city + district.
 const rows: Row[] = [];
 for (let from = 0; ; from += 1000) {
   const page = await get<Row[]>(`search_listings_ar?select=platform,city_ar,district_ar,latitude,longitude,source_table,listing_id`
-    + `&platform=in.(${PLATFORMS.join(',')})&first_seen_at=gte.${encodeURIComponent(since)}&order=listing_id.asc&offset=${from}&limit=1000`);
+    + `&platform=in.(${PLATFORMS.join(',')})&production_ready=eq.true&first_seen_at=gte.${encodeURIComponent(since)}&order=listing_id.asc&offset=${from}&limit=1000`);
   rows.push(...page);
   if (page.length < 1000) break;
 }

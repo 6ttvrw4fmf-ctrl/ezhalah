@@ -672,3 +672,18 @@ def test_the_session_asks_for_arabic_because_the_api_localises_its_payload():
     """Without `Accept-Language: ar` the API returns city "Riyadh" / state "AN-NARJIS" and an
     English description — every row would then skip as city_not_in_catalog."""
     assert S.session().headers.get("Accept-Language") == "ar"
+
+
+# ============================ THE UNIT'S OWN PIN (mapping audit 2026-10-21) ====================
+def test_the_units_published_point_is_its_pin():
+    """/api/admin/units/310 publishes latitude 24.749000364458364, longitude 46.694260009965774 — the unit's own
+    point (its project list carries other points). It was dropped, so all 286 served Sukna ads showed a border."""
+    rec = {**UNIT_197_NO_PRICE, "case": 0, "latitude": 24.749000364458364, "longitude": 46.694260009965774}
+    info = _row(rec)["additional_info"]
+    assert info["latitude"] == 24.749000364458364 and info["longitude"] == 46.694260009965774
+
+
+def test_no_point_or_a_point_outside_saudi_arabia_is_no_pin():
+    for lat, lng in ((None, None), (0, 0), (11.2477, 25.9967)):
+        info = _row({**UNIT_197_NO_PRICE, "case": 0, "latitude": lat, "longitude": lng})["additional_info"]
+        assert "latitude" not in info and "longitude" not in info, (lat, lng)

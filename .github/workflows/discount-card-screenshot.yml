@@ -1,0 +1,65 @@
+# Owner-requested one-off (2026-10-19): screenshot a real Aqar discount card on PRODUCTION from a
+# runner that can reach it (the agent sandbox cannot — docs/ops/VERIFYING_PRODUCTION.md). ONE browser,
+# one search, on demand only. Never runs on a schedule.
+name: Discount card screenshot (production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      district_typed:
+        description: 'text typed into the district field'
+        required: false
+        default: 'المهدية'
+      district_row:
+        description: 'suggestion row to tap'
+        required: false
+        default: 'حي المهدية'
+
+permissions:
+  contents: write   # the pictures are pushed to the orphan branch `screenshots/discount-card`
+
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  screenshot:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies + Chromium
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Drive the live site and screenshot the first discounted card
+        env:
+          BASE_URL: https://ezhalah-app.vercel.app
+          DISTRICT_TYPED: ${{ github.event.inputs.district_typed }}
+          DISTRICT_ROW: ${{ github.event.inputs.district_row }}
+        run: node e2e/screenshots/discount-card.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: discount-card-screenshots
+          path: out/
+          retention-days: 7
+      # The artifact zip is served from Azure blob storage, which the agent sandbox's egress policy
+      # denies (only api.github.com / github.com are reachable). A git branch IS reachable, so the
+      # pictures are also pushed to an orphan branch the operator can fetch; the branch is replaced on
+      # every run (force, orphan) so it never accumulates history.
+      - name: Publish the pictures on the screenshots/discount-card branch
+        if: always()
+        run: |
+          set -e
+          [ -d out ] || exit 0
+          rm -rf /tmp/shots && mkdir -p /tmp/shots && cp out/* /tmp/shots/
+          cd /tmp/shots && git init -q -b screenshots/discount-card
+          git config user.name 'ezhalah-screenshot-bot' && git config user.email 'actions@users.noreply.github.com'
+          git add -A && git commit -q -m "discount-card screenshots from run ${{ github.run_id }}"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:refs/heads/screenshots/discount-card
+          echo "pushed to screenshots/discount-card"

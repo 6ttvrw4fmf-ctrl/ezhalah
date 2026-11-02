@@ -76,10 +76,10 @@ function scriptContract(source: string) {
   assert.match(segments[2].text,/640,000/);
   for (const source of ['gathern','Aqar Monthly']) {
     const stay=script(scriptSource)('',[{...listing,source}],undefined,'en');
-    assert.match(stay[1].text,/Tap to see prices by length of stay/);
+    assert(!/Tap to see prices by length of stay/.test(stay[1].text)); // owner 2026-10-26: no price line, no note
     assert(!stay[1].text.includes('640,000'));
   }
 }
 scriptContract(scriptSource);
 await mustCatch('Arabic card facts returning in English speech',async ()=>scriptContract(scriptSource.replace('cardSpeech(listing, locale)','cardSpeech(listing)')));
-console.log('PASS English/native/web speech language, explicit voice, exact text, translated visible card facts, stay-length note, and wrong-language mutations.');
+console.log('PASS English/native/web speech language, explicit voice, exact text, translated visible card facts, no stay-length price line, and wrong-language mutations.');

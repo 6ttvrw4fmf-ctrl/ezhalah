@@ -291,6 +291,58 @@ def test_monthly_rent_compares_the_monthly_figure():
     assert compare_listing(stored, page("7000 ريال / شهر"))["price"] == MISMATCH
 
 
+# ── The yearly pool serves a per-month rent under «سنوي» (owner 2026-10-25/26); the SOURCE period decides ──
+# ashab 20927683 (2026-10-27 score): source rent_period monthly, price_annual 108000; index سنوي 108000.
+
+def test_source_monthly_rent_served_yearly_compares_the_monthly_figure():
+    stored = {"price_annual": 108000, "rent_period_ar": "سنوي",
+              "source_rent_period": "monthly", "source_price_annual": 108000}
+    assert compare_listing(stored, page("السعر 9,000 ريال شهري"))["price"] == MATCH
+    assert compare_listing(stored, page("السعر 8,000 ريال شهري"))["price"] == MISMATCH
+    # without the source period the same row reads as a yearly figure, as before
+    assert compare_listing({"price_annual": 108000, "rent_period_ar": "سنوي"},
+                           page("السعر 9,000 ريال شهري"))["price"] == MISMATCH
+
+
+def test_cheap_yearly_served_x12_compares_the_sources_own_figure():
+    # rent_price_annual_ar serves a «yearly» 3,000 on an apartment as 36,000; the source says annual 3000
+    stored = {"price_annual": 36000, "rent_period_ar": "سنوي",
+              "source_rent_period": "annual", "source_price_annual": 3000}
+    assert compare_listing(stored, page("السعر 3,000 ريال سنوي"))["price"] == MATCH
+    assert compare_listing(stored, page("السعر 36,000 ريال سنوي"))["price"] == MISMATCH
+
+
+def test_score_site_reads_the_source_tables_period():
+    stored = {"source_table": "fake_residential_listings", "listing_id": 8, "platform": "fakesite",
+              "deal_ar": "إيجار", "rent_period_ar": "سنوي", "type_ar": "شقة", "price_annual": 108000}
+    client = FakeClient({
+        "search_listings_ar": [stored],
+        "fake_residential_listings": [{"id": 8, "listing_url": "https://example.test/8",
+                                       "rent_period": "monthly", "price_annual": 108000}],
+    })
+    html = "<html><body><p>شقة للإيجار</p><p>السعر 9,000 ريال شهري</p></body></html>"
+    row = score_site(client, "fakesite", [("fake_residential_listings", 8)],
+                     night="2026-10-27", pace=0, probe=lambda url: (200, html))
+    assert row["fields"]["price"][MATCH] == 1 and row["fields"]["price"].get(MISMATCH, 0) == 0
+
+
+def test_latin_k_after_the_figure_is_thousands():
+    # tuba 21078156 (2026-10-27): page «SAR 990k», we store 990000
+    assert compare_listing({"price_total": 990000}, page("السعر :", "SAR 990k"))["price"] == MATCH
+    assert compare_listing({"price_total": 990000}, page("السعر :", "SAR 980k"))["price"] != MATCH
+    # a «k» that starts a word, or «km», is not thousands
+    assert compare_listing({"price_total": 990000}, page("السعر :", "990 km من المطار"))["price"] != MATCH
+
+
+def test_the_sites_category_menu_is_not_a_deal_claim():
+    # ashab 21084822 (2026-10-27): footer «بيع / إيجار / استثمار», the ad itself states no deal word
+    menu = ("الحد 230000 ر.س", "بيع", "إيجار", "استثمار")
+    assert compare_listing({"deal_ar": "بيع"}, page(*menu))["deal"] != MISMATCH
+    # a rent ad whose own line says «للإيجار» is still read, menu or not
+    assert compare_listing({"deal_ar": "بيع"}, page("أرض للإيجار", *menu))["deal"] == MISMATCH
+    assert compare_listing({"deal_ar": "إيجار"}, page("شقة للإيجار", *menu))["deal"] == MATCH
+
+
 def test_annual_rent_is_compared_as_stored():
     stored = {"price_annual": 75456, "rent_period_ar": "سنوي"}
     assert compare_listing(stored, page("75,456 ريال سنوياً"))["price"] == MATCH
@@ -437,6 +489,22 @@ def test_shell_page_platform_is_unreadable_not_wrong():
     assert other["normal_mismatch"] > 0
 
 
+def test_a_closed_ad_page_is_unreadable_not_wrong():
+    # aqarmonthly 18842133 (2026-10-20, re-read run 39384695539 verdict=dead): the closed ad's URL serves another
+    # listing's leftovers; scored as a 300 m² area MISMATCH that capped the night. aqar's own dead marker decides.
+    from scrapers.common.cleanup import AQAR_DEAD_MARKERS
+    alive = "<html><body><h1>شقة للإيجار في حي العارض</h1><p>المساحة 450 م²</p></body></html>"
+    dead = alive.replace("</body>", f"<p>{AQAR_DEAD_MARKERS[0]}</p></body>")
+    client = FakeClient({
+        "search_listings_ar": [{"source_table": "t", "listing_id": 1, "district_ar": "حي العارض", "area_m2": 300}],
+        "t": [{"id": 1, "listing_url": "https://sa.aqar.fm/x-6461856"}],
+    })
+    row = score_site(client, "aqarmonthly", [("t", 1)], night="2026-10-20", pace=0, probe=lambda url: (200, dead))
+    assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0
+    live = score_site(client, "aqarmonthly", [("t", 1)], night="2026-10-20", pace=0, probe=lambda url: (200, alive))
+    assert live["normal_mismatch"] > 0                     # a live page is still judged
+
+
 def test_area_the_page_labels_in_its_own_payload_is_the_page_value():
     # sanadak 17502436 (2026-10-13, re-read run 38361883389): the flight payload maps its area label to
     # lotSize and carries "lotSize":760 (= what we store); the visible text has only «المساحة : 150م تقريباً».
@@ -458,8 +526,15 @@ def test_area_the_page_labels_in_its_own_payload_is_the_page_value():
     ("الضاحية الحادي عشر", "أرض سكنية للبيع في حي الحادي عشر بضاحية هجر", MATCH),
     ("الضاحية الخامس", "ضاحية هجر(الحي الخامس)", MATCH),
     ("الضاحية الخامس", "أرض سكنية للبيع في حي الرابع بضاحية هجر", MISMATCH),
+    # bossbih 18985501 (2026-10-20, re-read run 39384692527): served «ضاحية هجر(الحي الخامس)», page «الضاحية الحي الخامس»
+    ("ضاحية هجر(الحي الخامس)", "نص أرض للبيع في الضاحية الحي الخامس (640/4) د", MATCH),
+    ("الضاحية الخامس", "مخطط الضاحية الحي الخامس", MATCH),
 ])
 def test_hajer_suburb_spellings_are_one_place(stored, text, want):
+    # Only the SAME ordinal is the same place, in the fourth form too (a bare «الضاحية الحي X» page is not read
+    # as naming a district at all, backlog #61, so the other ordinal is silence — never a match).
+    other = "نص أرض للبيع في الضاحية الحي الرابع (640/4) د"
+    assert compare_listing({"district_ar": "ضاحية هجر(الحي الخامس)"}, page(other, title=other))["district"] != MATCH
     # arkaan 17543658 … 17544564 (2026-10-13): served the catalog's «الضاحية X» for «حي X بضاحية هجر».
     assert compare_listing({"district_ar": stored}, page(text, title=text))["district"] == want
 
@@ -555,6 +630,23 @@ def test_muktamel_rooms_come_from_its_offer_record():
     assert muktamel_room_lines("https://example.test/x", fetch=lambda i: got) == []
 
 
+def test_dwelleo_bedrooms_come_from_its_api_record_not_the_title():
+    from scrapers.common.new_listings_score import dwelleo_room_lines
+    villa = {"id": 1, "bedrooms": 5, "property_type": {"name": "فيلا"}}
+    url = "https://www.dwelleo.sa/ar/properties/for-sale/villa/riyadh/x/villa-slug"
+    lines = dwelleo_room_lines(url, fetch=lambda slug: villa if slug == "villa-slug" else None)
+    assert lines == ["عدد غرف النوم 5"]
+    # 20013764 (2026-10-24, re-read 40078610599): record 5 bedrooms, title prose «فيلا 4 غرف».
+    p = page(*lines, "فيلا 4 غرف للبيع")
+    assert compare_listing({"bedrooms": 5}, p)["bedrooms"] == MATCH
+    assert compare_listing({"bedrooms": 3}, p)["bedrooms"] == MISMATCH
+    # A Building's count is its room stock: we store none, so the record says nothing to compare.
+    bld = {"id": 2, "bedrooms": 30, "property_type": {"name": "مبني"}}
+    assert dwelleo_room_lines(url, fetch=lambda slug: bld) == []
+    assert dwelleo_room_lines(url, fetch=lambda slug: None) == []
+    assert dwelleo_room_lines("https://example.test/x", fetch=lambda slug: villa) == []
+
+
 def test_wasalt_structured_rows_are_read_as_labelled_lines():
     # 17926766 (2026-10-16, re-read 38925580390): builtUpArea «96» = ours, while the REGA deed text names a land share.
     from scrapers.common.af_score import wasalt_page
@@ -592,6 +684,14 @@ def test_three_to_ten_written_as_words_on_the_keyword_line():
     assert compare_listing({"bedrooms": 5}, page("أربع غرف"))["bedrooms"] == MISMATCH
     # A word that only CONTAINS a number word is not one («مستودع» holds «ست»).
     assert compare_listing({"bedrooms": 6}, page("غرف مستودع"))["bedrooms"] != MATCH
+
+
+def test_every_worded_figure_on_a_keyword_line_counts():
+    # bossbih 18945171 (2026-10-20, re-read run 39384692527): the ad's own «غرفتين نوم», then the related-ads
+    # table's «المساحة194مأربع غرف» for another unit. Stored 2 = the ad's own figure; 3 is on no line.
+    p = page("شقة للايجار في حي الصحافه ب الدور الاول", "▫️غرفتين نوم\n▫️مطبخ\nحي الصحافه\nالمساحة194مأربع غرف")
+    assert compare_listing({"bedrooms": 2}, p)["bedrooms"] == MATCH
+    assert compare_listing({"bedrooms": 3}, p)["bedrooms"] == MISMATCH
 
 
 def test_tuba_street_width_comes_from_its_rega_record():
@@ -658,3 +758,20 @@ def test_a_price_written_in_thousands_is_the_same_figure():
     assert compare_listing({"price_annual": 150000}, page)["price"] == MATCH
     assert compare_listing({"price_annual": 160000}, page)["price"] != MATCH         # another figure is not ours
     assert compare_listing({"price_total": 1500000}, page)["price"] != MATCH         # 150 الف is not 1.5 million
+
+
+def test_dwelleo_bathrooms_and_livings_come_from_its_api_record_not_the_prose():
+    # backlog #890 (2026-10-26, dry re-score 40288432059): 19471735 «ست غرف نوم وخمس حمامات» (record bathrooms 5)
+    # and 19471811 «صالة مع بلكونة … شارع 30» (record livings 1) were scored as wrong.
+    from scrapers.common.new_listings_score import dwelleo_room_lines
+    apt = {"id": 3, "bedrooms": 6, "bathrooms": 5, "livings": 1, "floor_number": 0, "property_type": {"name": "شقة"}}
+    url = "https://dwelleo.sa/ar/properties/6-bedroom-apartment"
+    lines = dwelleo_room_lines(url, fetch=lambda slug: apt)
+    assert lines == ["عدد غرف النوم 6", "عدد الحمامات 5", "عدد الصالات 1"]
+    p = page(*lines, "وتضم ست غرف نوم وخمس حمامات", "صالة مع بلكونة واجهة شرقية على شارع 30")
+    assert compare_listing({"bathrooms": 5}, p)["bathrooms"] == MATCH
+    assert compare_listing({"bathrooms": 3}, p)["bathrooms"] == MISMATCH
+    assert compare_listing({"living_rooms": 1}, p)["living_rooms"] == MATCH
+    assert compare_listing({"living_rooms": 4}, p)["living_rooms"] == MISMATCH
+    # The floor is never restated: the page does not show it and the record's 0 is ambiguous.
+    assert not any("الطابق" in x or "الدور" in x for x in lines)

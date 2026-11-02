@@ -158,3 +158,15 @@ def test_the_title_names_the_district_when_the_field_does_not(monkeypatch, title
     monkeypatch.setattr(R, "find_district_in_text", lambda t, cid: t if t in _CATALOG else None)
     (row, _), _ = R.map_ad(_ad(title_ar=title, property={"district_name": "riyadh"}))
     assert row["district_ar"] == district
+
+
+@pytest.mark.parametrize("lat,lng", [(0, 0), ("0", "0"), (42.731165, 18.30999), (None, None)])
+def test_a_pin_outside_saudi_arabia_is_no_pin(lat, lng):
+    # 2026-10-25: 38 active ads stored «0,0» and one a Balkan pair; the one gate (sa_pin) refuses both.
+    (row, _), _ = R.map_ad(_ad(property={"lat": lat, "lng": lng}))
+    assert "latitude" not in row["additional_info"] and "longitude" not in row["additional_info"]
+
+
+def test_a_saudi_pin_is_kept():
+    (row, _), _ = R.map_ad(_ad())
+    assert row["additional_info"]["latitude"] == 24.7 and row["additional_info"]["longitude"] == 46.8

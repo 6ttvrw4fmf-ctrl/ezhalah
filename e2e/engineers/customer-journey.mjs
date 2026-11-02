@@ -34,13 +34,14 @@
 // docs/ops/VERIFYING_PRODUCTION.md (pinned executable, --proxy-server=$HTTPS_PROXY,
 // --ssl-version-max=tls1.2 — certificate verification stays ON). Politeness: ≤ 1 page action/sec,
 // ≤ 40 listings per run (hard-capped below), «عرض المزيد» capped at 8 presses.
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
   normUrl, isMainSearch, afTargetsFor, carriedOnRequest, typeUi, TYPE_UI,
-  priceOf, rangeAround, pickSpread, idKey,
+  priceOf, rangeAround, clampToPriceBox, pickSpread, idKey,
 } from './journey-lib.mjs';
 
 // ── environment ────────────────────────────────────────────────────────────────────────────
@@ -80,6 +81,11 @@ const COUNT_WATCH = arg('count-watch') ? Math.min(6, parseInt(arg('count-watch')
 if (MODE !== 'normal' && MODE !== 'af') { console.error("need --mode normal|af"); process.exit(2); }
 const SAMPLE = arg('sample') ? Math.min(8, parseInt(arg('sample'), 10)) : null;     // politeness cap
 const LISTINGS = arg('listings') ? JSON.parse(arg('listings')) : null;
+// --absent id,id: listing ids a lifecycle run HID that must not be on screen in the same search
+// (owner 2026-10-30: a hide is proven on the live site — the dead card gone from the cards). With it,
+// a normal journey pages through every result («عرض المزيد», same cap) after finding its card and
+// records every card id it could reach next to the search's own count; any absent id on screen FAILS.
+const ABSENT = new Set((arg('absent') || '').split(',').map((x) => x.trim()).filter(Boolean));
 if (!SAMPLE && !Array.isArray(LISTINGS)) { console.error("need --sample N or --listings '<json>'"); process.exit(2); }
 const MAX_PER_RUN = 12;                                   // hard politeness cap (<= 40 rule, with margin)
 const LOAD_MORE_MAX = 8;
@@ -246,7 +252,7 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     if (row.deal_ar === 'إيجار') {
       await tap('إيجار');
       await tap('شراء');                                  // deselect Buy → Rent-only (سنوي pre-selected)
-      if (row.rent_period_ar === 'شهري') { await tap('شهري'); await tap('سنوي'); }
+      if (row.rent_period_ar === 'شهري') { await tap('إقامات قصيرة'); await tap('سنوي'); } // button label since 2026-10-25; still sends شهري
     }
 
     step(`city «${row.city_ar}»`);
@@ -283,9 +289,10 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     // listings are left to narrow (INTERVIEW_STOP_AT, src/lib/afRanking.ts), and the AF answers
     // are what narrows — membership is proven on the request, so no area/price box is needed.
     const area = MODE === 'af' ? null : rangeAround(Number(row.area_m2));
-    const price = MODE === 'af' ? null : rangeAround(priceOf(row));
+    // The price boxes keep 10 digits — type only what a customer can (journey-lib clampToPriceBox, backlog 1141).
+    const price = MODE === 'af' ? null : clampToPriceBox(rangeAround(priceOf(row)));
     if (area) { step(`area ${area.min}–${area.max}`); await fillRange('area-min-input', area.min); await fillRange('area-max-input', area.max); }
-    if (price) { step(`price ${price.min}–${price.max}`); await fillRange('price-min-input', price.min); await fillRange('price-max-input', price.max); }
+    if (price) { step(`price ${price.min ?? '—'}–${price.max ?? '— (above the box\'s 10 digits)'}`); await fillRange('price-min-input', price.min); await fillRange('price-max-input', price.max); }
 
     step('بحث');
     const n0 = searches.length;
@@ -337,7 +344,37 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       // the search's own row count is already in result.evidence.search; it is never judged against the
       // number of cards on screen (scripts/live-card-count-sites.txt)
       if (!found) throw new Error(`card not found after ${LOAD_MORE_MAX} «عرض المزيد» presses`);
-      const text = (await card.first().innerText()).replace(/\s*\n+\s*/g, ' | ');
+      if (ABSENT.size) {
+        step('page through every result for --absent');
+        const revealEvery = async () => {                 // revealAll stops at our own card; this does not
+          let prev = -1;
+          for (let i = 0; i < 40; i++) {
+            const now = await all.count();
+            if (now === prev) return;
+            prev = now;
+            await all.last().scrollIntoViewIfNeeded().catch(() => {});
+            await page.mouse.wheel(0, 4000);
+            await page.waitForTimeout(1000);
+          }
+        };
+        for (let p = presses; p < LOAD_MORE_MAX; p++) {
+          await revealEvery();
+          const more = page.locator('[data-testid="results-load-more"]');
+          if (!(await more.count())) break;
+          await more.last().scrollIntoViewIfNeeded(); await more.last().click();
+          await page.waitForTimeout(2000);
+        }
+        await revealEvery();
+        const ids = await all.evaluateAll((els) => els.map((e) => (e.getAttribute('data-testid') || '').replace('card-listing-', '')));
+        const seenIds = [...new Set(ids)];
+        result.evidence.reachableCards = seenIds.length;
+        result.evidence.absentSeen = seenIds.filter((id) => ABSENT.has(id));
+        if (result.evidence.absentSeen.length) throw new Error(`hidden listing(s) still on screen: ${result.evidence.absentSeen.join(',')}`);
+      }
+      // innerText is "" for a card the browser has not painted yet (the phone result list, 2026-10-24:
+      // every card read empty, so a price check could never pass); textContent still has the words.
+      const text = ((await card.first().innerText()) || (await card.first().textContent()) || '')
+        .replace(/\s*\n+\s*/g, ' | ');
       result.evidence.card = text.slice(0, 300);
       step('click card');
       const link = card.first().getByRole('link').first();
@@ -377,9 +414,9 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     if (!targets.length) { result.status = 'UNKNOWN'; result.failedStep = 'listing carries no DB-known AF answer (all unknown/false)'; return result; }
     result.evidence.cardFoundBeforeAF = found;            // informative, not the AF verdict
     step(`open AF (targets: ${targets.map((t) => t.kind === 'amenity' ? t.token : 'furnished=yes').join(', ')})`);
-    // A round asks at most AF_ROUND_MAX_QUESTIONS (4) questions, so a chip the listing can answer
+    // A round asks at most AF_ROUND_MAX_QUESTIONS (7) questions, so a chip the listing can answer
     // (e.g. AC on annual-rent apartments, behind rnpl/furnished/age/bathrooms) is often only offered
-    // in ROUND 2. A customer who did not see it presses «خلّنا نحدد الطلب أكثر» again; so do we
+    // in ROUND 2. A customer who did not see it presses «🎯 دقّق مع الذكاء الاصطناعي» again; so do we
     // (2026-10-06: ksaaqar AC read UNKNOWN for that reason alone). Up to 3 rounds.
     const answered = [];
     let nAF = searches.length;
@@ -409,12 +446,12 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
         await narrow.last().click();
         opened = true;
       } else {
-        opened = await tap('خلّنا نحدد الطلب أكثر', 500).then(() => true)
+        opened = await tap('🎯 دقّق مع الذكاء الاصطناعي', 500).then(() => true)
           .catch(() => tap('نحدد الطلب أكثر', 500).then(() => true).catch(() => false));
       }
     }
     if (!opened && round > 1) { step(`round ${round}: no further narrowing offered`); break; }
-    if (!opened) throw new Error('AF entry (results-narrow / «خلّنا نحدد الطلب أكثر») never rendered');
+    if (!opened) throw new Error('AF entry (results-narrow / «🎯 دقّق مع الذكاء الاصطناعي») never rendered');
     step(`AF entry clicked (round ${round})`);
     await page.waitForTimeout(3500);
 

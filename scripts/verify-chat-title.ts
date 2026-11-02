@@ -93,8 +93,9 @@ check('the full detail list is still available to callers that want it',
 
 // ── A5. ANNUAL RENT IS THE DEFAULT AND IS NOT NOISE, BUT MONTHLY IS SHOWN ───────────────────────
 check('annual rent (the default) adds no chip', autoTitleForQuery(base) === 'شقق للإيجار في الرياض');
-check('monthly rent IS called out', autoTitleForQuery({ ...base, rentPeriod: 'monthly' }).includes('شهري'));
-check('«كلاهما» is called out', autoTitleForQuery({ ...base, rentPeriod: 'both' }).includes('شهري وسنوي'));
+// «شهري» became «إقامات قصيرة» (owner 2026-10-25, src/lib/rentPool.ts) — the title says the pool's real name.
+check('short-stays rent IS called out', autoTitleForQuery({ ...base, rentPeriod: 'monthly' }).includes('إقامات قصيرة'));
+check('«كلاهما» is called out', autoTitleForQuery({ ...base, rentPeriod: 'both' }).includes('إقامات قصيرة وسنوي'));
 
 // ── A6. ARABIC READS LIKE A PERSON WROTE IT ─────────────────────────────────────────────────────
 check('2 bathrooms → «حمامين» (dual), not «2 حمامات»', autoTitleForQuery({ ...base, bathMin: 2 }).includes('حمامين'));

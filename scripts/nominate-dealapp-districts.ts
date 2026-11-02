@@ -5,6 +5,7 @@
 // exactly ONE catalog district in that city matches (format-independent proof); 0 or >1 → rejected.
 // Output = a review table for the owner; nothing is written anywhere.
 //   node --experimental-strip-types scripts/nominate-dealapp-districts.ts
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
 import { normEn, skel, JUNK } from './lib-dealapp-bridge.ts';
 // Official KSA dataset (the same file the app's transliterator is built on): districts as

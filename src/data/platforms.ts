@@ -88,7 +88,7 @@ export const PLATFORMS: Platform[] = [
   // produce the other row, exactly the CompoundIn precedent below. Everything else maps both.
   { name: 'دويليو', domain: 'dwelleo.sa', brand: 'Dwelleo', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'مكتب أقاليم هجر للخدمات العقارية', domain: 'aqalemhajer.com', brand: 'Aqalem Hajer Real Estate Services Office', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
-  { name: 'سكني', domain: 'sakani.sa', brand: 'Sakani', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'سكني', domain: 'sakani.sa', brand: 'Sakani', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'الشاطري للتطوير العقاري', domain: 'shatrirealestate.com', brand: 'Shatri Real Estate Development', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'القاسم العقارية', domain: 'alqasem.com.sa', brand: 'Alqasem Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'فكر الإعمار', domain: 'fkralemar.com', brand: 'Fkr Alemar', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
@@ -172,7 +172,7 @@ export const PLATFORMS: Platform[] = [
   // manafe: 77 listings measured 2026-09-27 (210 Jeddah buildings; only REGA-licensed, available units).
   { name: 'منافع العقارية', domain: 'manafe.com.sa', brand: 'Manafe', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // wajaf: 44 Buraidah land/commercial listings measured 2026-09-27 (sold/reserved/let skipped).
-  { name: 'وجف العقارية', domain: 'wajaf.sa', brand: 'Wajaf', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'وجف العقارية', domain: 'wajaf.sa', brand: 'Wajaf', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // albukaeri: 28 direct-sale listings measured 2026-09-27 (Eastern Province, Riyadh).
   { name: 'البكيري العقارية', domain: 'albukaeri.sa', brand: 'AlBukairi', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   // ryadah: 18 buildings/compounds offering units measured 2026-09-27 (Khobar/Dammam; every price «عند الاتصال»).
@@ -192,7 +192,7 @@ export const PLATFORMS: Platform[] = [
   // opensooq: 78 real-estate items measured 2026-09-26 (72 kept: 2 under construction, 1 deal conflict, 1 multi-use plot, 2 duplicate posts skipped).
   { name: 'السوق المفتوح', domain: 'sa.opensooq.com', brand: 'OpenSooq', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // nafithh: 30 measured 2026-09-26 (22 sale + 8 rent; 2 «مجمع» unmapped). Server-rendered REGA blocks.
-  { name: 'معرض نافذة', domain: 'nafithh.sa', brand: 'Nafithh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'معرض نافذة', domain: 'nafithh.com', brand: 'Nafithh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // mobasher: 28 DIRECT-SALE real estate measured 2026-09-26 (auctions are a separate feed and never read). Owner 2026-09-25: keep.
   { name: 'مباشر', domain: 'mobasher.sa', brand: 'Mobasher', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   // muajarh: 11 real of 18 feed rows measured 2026-09-26 (7 are the platform's own demo records, no REGA licence); all Riyadh yearly rents.

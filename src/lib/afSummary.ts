@@ -1,4 +1,4 @@
-// AF emoji summary sentences (owner 2026-08-22). PURE — zero runtime deps.
+// AF emoji summary sentences (owner 2026-08-22). PURE — its one runtime import is the pure chip table (afChips.ts).
 // Each selected Advanced Filter attribute → emoji + Arabic label.
 //
 // TWO SENTENCES, TWO AUDIENCES — do not merge them.
@@ -18,19 +18,36 @@
 // «تخطيت: ...» on separate lines. The owner replaced it with a single ask-ordered line the same
 // day: read straight through, it tells the story of the interview — picked, skipped, picked — which
 // two sorted piles cannot. A skip therefore has to be legible WHERE IT HAPPENED, mid-sentence, and
-// that is why it carries ⏭️ rather than the question's own emoji: «عمر العقار 🏗️» sitting between
-// two real answers reads as a third answer. «تخطى عمر العقار ⏭️» cannot be mistaken for one.
+// that is why it carries ⏭️ rather than the question's own emoji: «🏗️ عمر العقار» sitting between
+// two real answers reads as a third answer. «⏭️ تخطى عمر العقار» cannot be mistaken for one.
+//
+// EMOJI FIRST, ALWAYS (owner 2026-11-01: «keep it after always better or before … what do you
+// recommend» → before). Every item this file builds starts with its emoji and the words follow:
+// «🛗 مصعد», «💳 يقبل التقسيط», «✨ عمر جديد», «🧭 شمال». The question cards and the property cards
+// already put the emoji first («🛗 مصعد»), so the pills, the round receipt and the search beat read
+// the same way. Before this the old pills put it last («يقبل التقسيط 💳») next to new chips that
+// put it first, and one line mixed both. Guard: scripts/verify-af-summary-emoji-first.ts.
+
+// The explicit entries win; every other chip token takes its emoji from CHIP_DEFS (src/lib/afChips.ts, pure),
+// so a token added to a card is never «✅» here. The derived tokens (migration 20261101100930) are named too.
+import { CHIP_DEFS } from './afChips.ts';
 
 const AMENITY_EMOJI: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(CHIP_DEFS).map(([k, d]) => [k, d.emoji])),
   kitchen: '🍳', parking: '🅿️', elevator: '🛗', ac: '❄️',
   private_entrance: '🚪', maid_room: '🧹', driver_room: '🚘',
   car_entrance: '🚗', sanitation: '🚰', furnished: '🛋️',
   electricity: '⚡', water_supply: '💧',
+  laundry_room: '🧺', pool: '🏊', garden: '🌳', gym: '🏋️', balcony: '🌅', majlis: '🛋️',
+  optical_fibers: '🌐', separate_electricity_meter: '⚡', separate_water_meter: '⚡', separate_meters: '⚡',
+  apts4: '🏢', apts8: '🏢', apts12: '🏢', apts20: '🏢', has_shops: '🏪',
 };
 
 // `total` = the size of the set this question was asked against (what the pick is checked against) — only the
 // Advanced Filter round's search beat reads it; the summary sentences never do.
-export type AfFacet = { id: string; keys: string[]; labels: string[]; total?: number };
+// `line` (optional): the question's OWN summary-line label key when two questions share an id — the
+// yearly «🏠 Space» card and the short-stays «🏠 Space & safety» card are both `space` (2026-11-01).
+export type AfFacet = { id: string; keys: string[]; labels: string[]; total?: number; line?: string };
 
 // ONE committed facet → its finished, reader-facing item(s). Shared by the summary and the round
 // log, so an answer is worded identically wherever it appears; a multi-select facet explodes into
@@ -41,31 +58,85 @@ function facetItems(f: AfFacet, locale: 'ar' | 'en' = 'ar'): string[] {
     switch (f.id) {
       // Every question takes several answers (owner 2026-10-03), so each pick is its own item.
       case 'property_age':
-        f.labels.forEach((l, i) => items.push(`${locale === 'en' ? 'Age' : 'عمر'} ${l} ${f.keys[i] === 'new' ? '✨' : '🏗️'}`));
+        f.labels.forEach((l, i) => items.push(`${f.keys[i] === 'new' ? '✨' : '🏗️'} ${locale === 'en' ? 'Age' : 'عمر'} ${l}`));
         break;
       case 'rnpl':
-        items.push(`${f.labels[0]} 💳`);
+        items.push(`💳 ${f.labels[0]}`);
         break;
       case 'amenities':
         for (let i = 0; i < f.keys.length; i++)
-          items.push(`${f.labels[i]} ${AMENITY_EMOJI[f.keys[i]] ?? '✅'}`);
+          items.push(`${AMENITY_EMOJI[f.keys[i]] ?? '✅'} ${f.labels[i]}`);
+        break;
+      // The short-stays halves (owner 2026-11-01): their chip labels already carry the emoji in front
+      // («🛗 مصعد», guidedOptions' `emoji`), so the item is the label as the user saw it.
+      // Same for every themed card of the Apartments & Co-living group (owner handoff 2026-10-31).
+      case 'comfort':
+      case 'space':
+      case 'fun':
+      case 'safety':
+      case 'perks':
+      case 'build':
+      case 'extras':
+      case 'who':
+      case 'features':
+      case 'services':
+      case 'outdoors':
+      case 'smart':
+      case 'papers':
+      case 'water':
+      case 'games':
+      case 'camp_life':
+      case 'water_land':
+      case 'land_papers':
+      case 'power':
+      case 'crops':
+      case 'animals':
+      case 'buildings':
+      case 'plot':
+      case 'deal_papers':
+      case 'land':
+      case 'location':
+      case 'cspace':
+      case 'cservices':
+      case 'business':
+      case 'office_kind':
+      case 'ready':
+      case 'building':
+      case 'trucks':
+      case 'loc_papers':
+      case 'inside':
+      case 'investment':
+      case 'hotel':
+      case 'station':
+      case 'deal_loc':
+      case 'space_papers':
+      case 'services_business':
+      case 'workshop':
+      case 'loc_business':
+      case 'building_papers':
+      case 'factory':
+      case 'loc_safety':
+      case 'papers_c':
+      case 'apartments':
+      case 'shops':
+        for (const l of f.labels) items.push(l);
         break;
       // SCOPE tiers (owner 2026-08-23) — multi-select like amenities, so each picked group/type is
       // its own item. Without these they would fall through `default:` and print as bare labels.
       case 'property_group':
-        for (const l of f.labels) items.push(`${l} 🏘️`);
+        for (const l of f.labels) items.push(`🏘️ ${l}`);
         break;
       case 'property_type':
-        for (const l of f.labels) items.push(`${l} 🏡`);
+        for (const l of f.labels) items.push(`🏡 ${l}`);
         break;
       case 'bathrooms':
-        for (const l of f.labels) items.push(`${l} ${locale === 'en' ? 'bathrooms' : 'حمامات'} 🚿`);
+        for (const l of f.labels) items.push(`🚿 ${l} ${locale === 'en' ? 'bathrooms' : 'حمامات'}`);
         break;
       case 'furnished':
-        f.labels.forEach((l, i) => items.push(`${l} ${f.keys[i] === 'yes' ? '🛋️' : '🏠'}`));
+        f.labels.forEach((l, i) => items.push(`${f.keys[i] === 'yes' ? '🛋️' : '🏠'} ${l}`));
         break;
       case 'street_width':
-        for (const l of f.labels) items.push(`${locale === 'en' ? 'Street' : 'شارع'} ${l} 🛣️`);
+        for (const l of f.labels) items.push(`🛣️ ${locale === 'en' ? 'Street' : 'شارع'} ${l}`);
         break;
       // «أو», not «و». p_directions is a membership filter — picking شمال and غرب returns listings
       // facing north OR west. «شمال وغرب» describes a DIFFERENT, buildable query: one corner listing
@@ -73,13 +144,13 @@ function facetItems(f: AfFacet, locale: 'ar' | 'en' = 'ar'): string[] {
       // read oddly, it names a real query we did not run. Every OTHER multi-select in this sentence is
       // genuinely conjunctive — amenities AND together in the RPC — which is why they stay on «و».
       case 'direction':
-        items.push(`${f.labels.join(locale === 'en' ? ' or ' : ' أو ')} 🧭`);
+        items.push(`🧭 ${f.labels.join(locale === 'en' ? ' or ' : ' أو ')}`);
         break;
       case 'rating':
-        for (const l of f.labels) items.push(`${locale === 'en' ? 'Rating' : 'تقييم'} ${l} ⭐`);
+        for (const l of f.labels) items.push(`⭐ ${locale === 'en' ? 'Rating' : 'تقييم'} ${l}`);
         break;
       case 'unit_subtype':
-        for (const l of f.labels) items.push(`${l} 🏢`);
+        for (const l of f.labels) items.push(`🏢 ${l}`);
         break;
       default:
         for (const l of f.labels) items.push(l);
@@ -140,6 +211,55 @@ export const AF_LINE_LABEL: Record<string, string> = {
   property_type: 'Selected property type',
   bathrooms: 'Bathrooms',
   amenities: 'Features',
+  comfort: 'Comfort',
+  space: 'Space & safety',
+  fun: 'Fun',
+  safety: 'Safety & smart',
+  perks: 'Building perks',
+  outdoors: 'Outdoors & fun',
+  smart: 'Extras & smart',
+  papers: 'Build, safety & papers',
+  water: 'Water',
+  games: 'Games',
+  camp_life: 'Camp life',
+  water_land: 'Water & land',
+  land_papers: 'Land & papers',
+  power: 'Water & power',
+  crops: 'Crops',
+  animals: 'Animals',
+  buildings: 'Buildings',
+  plot: 'Plot',
+  deal_papers: 'Papers & deal',
+  land: 'Land',
+  location: 'Location',
+  cspace: 'Space',
+  cservices: 'Services',
+  business: 'Business',
+  office_kind: 'Office kind',
+  ready: 'Ready to work',
+  building: 'Building',
+  trucks: 'Trucks & loading',
+  loc_papers: 'Location & papers',
+  inside: 'Inside the building',
+  investment: 'Investment',
+  hotel: 'Hotel',
+  station: 'On site',
+  deal_loc: 'Deal & location',
+  space_papers: 'Space & papers',
+  services_business: 'Services & business',
+  workshop: 'Space & services',
+  loc_business: 'Location & business',
+  building_papers: 'Building & papers',
+  factory: 'Factory building',
+  loc_safety: 'Location & safety',
+  papers_c: 'Papers',
+  build: 'Build & services',
+  extras: 'Extras',
+  who: 'Who it is for',
+  features: 'Building features',
+  services: 'Services',
+  apartments: 'Apartments',
+  shops: 'Shops',
   furnished: 'Furnishing',
   property_age: 'Property age',
   rnpl: 'Payment',
@@ -154,7 +274,7 @@ export function withAdvancedLines(base: string, facets: AfFacet[], translate: (k
   const order: string[] = [];
   const byLabel = new Map<string, { or: boolean; values: string[] }>();
   for (const f of facets) {
-    const label = translate(AF_LINE_LABEL[f.id] ?? AF_LINE_FALLBACK);
+    const label = translate(f.line ?? AF_LINE_LABEL[f.id] ?? AF_LINE_FALLBACK);
     let e = byLabel.get(label);
     if (!e) { e = { or: f.id === 'direction', values: [] }; byLabel.set(label, e); order.push(label); }
     for (const v of f.labels) if (!e.values.includes(v)) e.values.push(v);
@@ -164,8 +284,8 @@ export function withAdvancedLines(base: string, facets: AfFacet[], translate: (k
 }
 
 // «،» between, «، و» before the last — the one Arabic list joiner both sentences share, so the
-// receipt's two lines can never drift into different punctuation. Every item ends in its emoji and
-// the separator follows it: comma AFTER the emoji, never before (owner, universal).
+// receipt's two lines can never drift into different punctuation. Every item STARTS with its emoji
+// (see EMOJI FIRST in the header) and the separator follows the words.
 const joinAr = (items: string[]): string =>
   items.length === 0 ? ''
     : items.length === 1 ? items[0]
@@ -186,6 +306,55 @@ const SKIPPED_QUESTION: Record<string, string> = {
   property_age: 'عمر العقار',
   rnpl: 'التقسيط',
   amenities: 'المميزات',
+  comfort: 'الراحة',
+  space: 'المساحة والأمان',
+  fun: 'الترفيه',
+  safety: 'الأمان والذكاء',
+  perks: 'مميزات المبنى',
+  outdoors: 'الخارج والترفيه',
+  smart: 'الإضافات والذكاء',
+  papers: 'البناء والأمان والأوراق',
+  water: 'الماء',
+  games: 'الألعاب',
+  camp_life: 'أجواء المخيم',
+  water_land: 'الماء والأرض',
+  land_papers: 'الأرض والأوراق',
+  power: 'الماء والكهرباء',
+  crops: 'الزراعة',
+  animals: 'الحيوانات',
+  buildings: 'المباني',
+  plot: 'الأرض',
+  deal_papers: 'الأوراق والصفقة',
+  land: 'الأرض',
+  location: 'الموقع',
+  cspace: 'المساحة',
+  cservices: 'الخدمات',
+  business: 'النشاط',
+  office_kind: 'نوع المكتب',
+  ready: 'جاهز للعمل',
+  building: 'المبنى',
+  trucks: 'الشاحنات والتحميل',
+  loc_papers: 'الموقع والأوراق',
+  inside: 'وش فيه',
+  investment: 'الاستثمار',
+  hotel: 'الفندق',
+  station: 'في المحطة',
+  deal_loc: 'الصفقة والموقع',
+  space_papers: 'المساحة والأوراق',
+  services_business: 'الخدمات والنشاط',
+  workshop: 'المساحة والخدمات',
+  loc_business: 'الموقع والنشاط',
+  building_papers: 'المبنى والأوراق',
+  factory: 'مبنى المصنع',
+  loc_safety: 'الموقع والأمان',
+  papers_c: 'الأوراق',
+  build: 'البناء والخدمات',
+  extras: 'الإضافات',
+  who: 'لمين السكن',
+  features: 'مميزات العمارة',
+  services: 'الخدمات',
+  apartments: 'عدد الشقق',
+  shops: 'المحلات',
   bathrooms: 'دورات المياه',
   furnished: 'الفرش',
   street_width: 'عرض الشارع',
@@ -200,7 +369,7 @@ export const skippedQuestionNoun = (id: string): string | undefined => SKIPPED_Q
 const SKIP_MARK = '⏭️';
 const skipItem = (id: string): string | null => {
   const noun = SKIPPED_QUESTION[id];
-  return noun ? `تخطى ${noun} ${SKIP_MARK}` : null;
+  return noun ? `${SKIP_MARK} تخطى ${noun}` : null;
 };
 
 // THE ROUND, IN THE ORDER IT HAPPENED. `askedIds` is the ask order; a question with a committed
@@ -216,7 +385,7 @@ export function buildAfRoundLog(askedIds: string[], facets: AfFacet[], locale: '
   for (const id of askedIds) {
     const f = byId.get(id);
     if (f) items.push(...facetItems(f, locale));
-    else { const sk = locale === 'en' ? (AF_LINE_LABEL[id] ? `Skipped ${AF_LINE_LABEL[id]} ${SKIP_MARK}` : null) : skipItem(id); if (sk) items.push(sk); }
+    else { const sk = locale === 'en' ? (AF_LINE_LABEL[id] ? `${SKIP_MARK} Skipped ${AF_LINE_LABEL[id]}` : null) : skipItem(id); if (sk) items.push(sk); }
   }
   for (const f of facets) if (!askedIds.includes(f.id)) items.push(...facetItems(f, locale));
   if (locale === 'en') return [...new Set(items)].join(', ');

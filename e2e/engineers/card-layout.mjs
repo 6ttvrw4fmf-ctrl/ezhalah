@@ -2,6 +2,7 @@
 // laptop 1440×900 = photo-first cards 3 across with the gold «اضغط هنا»; a Deal App / Gathern click
 // opens the in-app pane and the cards go back to compact rows; other sites open a new tab;
 // phone 390×844 = the original card (no gold button). Read-only against production.
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');

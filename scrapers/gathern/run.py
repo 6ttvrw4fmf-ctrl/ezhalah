@@ -127,6 +127,27 @@ TYPE_MAP = {
     8: "Room",        # غرفة
 }
 
+# SHORT STAYS (owner 2026-10-25: every type the site shows; they belong in the future «Short stays» rent
+# group). Ingested only when GATHERN_SHORT_STAYS=1; the owner said yes 2026-10-27 and gathern-sync.yml
+# sets it. Measured live 2026-10-25 (distinct units): Al Kharj 72 chalets + 11 rest houses + 6 camps
+# of 454; Abha 79 + 22 + 6 of 990. Not mapped: 4 مزرعة (a Farm is a COMMERCIAL type; this scraper writes
+# only the residential table) and 1 منتجع (no catalogue type) — owner questions, never guessed.
+SHORT_STAY_TYPE_MAP = {
+    2: "Chalet",      # شاليه
+    3: "Rest House",  # استراحة
+    5: "Camp",        # مخيم
+}
+SHORT_STAYS = os.environ.get("GATHERN_SHORT_STAYS", "").strip() == "1"
+
+# The site's OWN Arabic name for each unit_type_id (the catalogue labels above). unit_type_ar feeds the
+# Advanced Filter's «نوع الوحدة» answer (استديو / شقق مخدومة / شقة) through sync_gathern_native_attrs.
+# Measured 2026-10-30: the list feed's event_data.unit_type_ar and chalet_category_text were gone on
+# 15,095 of 15,131 live rows, so Riyadh's «استديو» option read 1 where August read 3,719 — while
+# unit_type_id, the same source fact, was still on every item. The text wins when present; the id's
+# label is the fallback, never a guess (an unknown id stays NULL).
+UNIT_TYPE_AR = {6: "شقة", 9: "استديو", 11: "شقق مخدومة", 7: "فيلا", 8: "غرفة",
+                2: "شاليه", 3: "استراحة", 5: "مخيم"}
+
 # Gathern city label (English, from event_data.city_en / cities[].name_en) → canonical Ezhalah city.
 # Gathern's labels differ from Aqar's slugs, so we map the ones map_city() can't already resolve.
 CITY_EN_MAP = {
@@ -165,14 +186,36 @@ _PHONE_RE = re.compile(
 )
 
 _last = 0.0
+# The pace actually used. It starts at MIN_INTERVAL and only ever SLOWS: each time gathern says
+# «Too many requests» the gap between requests grows ×1.5 (up to MAX_INTERVAL) for the rest of the
+# run. Measured 2026-10-23 at a 0.3 s pace: Riyadh stopped at page 128 of ~390 and ~40 towns were
+# refused, because a refused page waited only 3-15 s in total before the city was given up.
+MAX_INTERVAL = 4.0
+_interval = MIN_INTERVAL
+# Waits after a throttle answer, per attempt. Long enough for gathern's window to clear (a
+# 3/6/9/12/15 s ladder was not); ~5.5 min in the worst case for one page.
+THROTTLE_WAITS_S = (20, 40, 60, 90, 120)
+_THROTTLE_HITS = 0
 
 
 def _throttle() -> None:
     global _last
-    wait = _last + MIN_INTERVAL - time.monotonic()
+    wait = _last + _interval - time.monotonic()
     if wait > 0:
         time.sleep(wait)
     _last = time.monotonic()
+
+
+def _on_throttled(attempt: int, sleep=None) -> None:
+    """gathern refused us for speed: wait out its window, then keep the slower pace."""
+    global _interval, _THROTTLE_HITS
+    _THROTTLE_HITS += 1
+    _interval = min(MAX_INTERVAL, max(_interval, MIN_INTERVAL) * 1.5)
+    (sleep or time.sleep)(THROTTLE_WAITS_S[min(attempt, len(THROTTLE_WAITS_S) - 1)])  # looked up at call time, so a patched time.sleep is honoured
+
+
+def pace_report() -> str:
+    return f"pace: started {MIN_INTERVAL:.2f}s/request, ended {_interval:.2f}s; throttled {_THROTTLE_HITS}×"
 
 
 def session() -> cc.Session:
@@ -311,7 +354,9 @@ def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tupl
             r = s.get(SEARCH, params=params, timeout=40)
         except Exception:
             time.sleep(2 * (attempt + 1)); continue
-        if r.status_code == 429 or r.status_code >= 500:
+        if r.status_code == 429:
+            _on_throttled(attempt); continue
+        if r.status_code >= 500:
             time.sleep(3 * (attempt + 1)); continue
         if r.status_code != 200:
             # gathern signals THROTTLING WITH HTTP 400, not 429. Observed live 2026-09-03 (run
@@ -328,7 +373,7 @@ def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tupl
             # Discriminate on the BODY, never on the status alone: a genuinely malformed request
             # must still fail fast rather than spin through the retry ladder.
             if _is_throttle_body(getattr(r, "text", "")):
-                time.sleep(3 * (attempt + 1)); continue
+                _on_throttled(attempt); continue
             # Capture the REJECTION ITSELF. Without the body and the exact params, the only way
             # forward is guessing which parameter is wrong, and guessing at an unobserved request is
             # how the sadin selector fix failed earlier today.
@@ -502,8 +547,8 @@ def _canary() -> tuple[bool, str]:
         if not url:
             continue
         tried += 1
-        status, body, _ = _probe.fetch(url)
-        if _oracle_signal(status, body, False) == "live":
+        status, body, home = _probe.fetch(url)
+        if _oracle_signal(status, body, home) == "live":   # a home landing is no control (10-24)
             ok, why = True, f"control {ad} still reads live (HTTP {status})"
             break
         if tried >= 3:
@@ -626,9 +671,17 @@ def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
         for x in (res.data if res else None) or []:
             held[x["ad_number"]] = (int(x["missing_count"]), bool(x["active"]))
     url = {r["ad_number"]: r.get("listing_url") or "" for r in rows}
+    # A 200 that LANDED ON GATHERN'S HOME PAGE is not this unit (2026-10-24): passing False here read
+    # it as live, so a unit hidden on three own-page 404s (10987196, killed 10-23 17:02) was revived
+    # by the next crawl, and struck units lost their strikes the same way. Only the unit's own page
+    # — /view/ itself, or its /ar/view/ address — answering live releases it.
+    from scrapers.gathern import liveness as _L  # lazy: liveness imports this module
     for ad in list(held):
-        status, body, _ = _probe.fetch(url[ad])
-        if body and _oracle_signal(status, body, False) == "live":
+        status, body, home = _probe.fetch(url[ad])
+        if home:
+            if _L._opens_at_ar_view(_oracle_session(), url[ad]):
+                del held[ad]
+        elif body and _oracle_signal(status, body, False) == "live":
             del held[ad]
     return held
 
@@ -964,9 +1017,9 @@ def _is_monthly_available(it: dict) -> bool:
 def map_listing(it: dict) -> Optional[dict]:
     """Gathern monthly-mode item → gathern_residential row, or None if not an eligible monthly unit."""
     type_id = it.get("unit_type_id")
-    property_type = TYPE_MAP.get(type_id)
+    property_type = TYPE_MAP.get(type_id) or (SHORT_STAY_TYPE_MAP.get(type_id) if SHORT_STAYS else None)
     if not property_type:
-        return None  # leisure type (resort/chalet/istraha/farm/camp) → not residential
+        return None  # leisure type (resort/chalet/istraha/farm/camp) → not ingested unless SHORT_STAYS
 
     if not _is_monthly_available(it):
         return None  # the host doesn't offer this unit for a 30-day stay
@@ -1039,7 +1092,7 @@ def map_listing(it: dict) -> Optional[dict]:
     # 22,711 carry description text, 462 say «مفروش», and ZERO say «غير مفروش» — the platform
     # carries no unfurnished units. (Deriving `furnished` from that text would NULL 29,384 of them
     # to recover 462, which is why text-derivation was considered and dropped.)
-    type_ar = ev.get("unit_type_ar") or it.get("chalet_category_text") or ""
+    type_ar = ev.get("unit_type_ar") or UNIT_TYPE_AR.get(type_id) or it.get("chalet_category_text") or ""
     if title:
         title = f"{title} — {type_ar} مفروشة للإيجار الشهري".strip(" —") if type_ar else title
 
@@ -1052,6 +1105,7 @@ def map_listing(it: dict) -> Optional[dict]:
         "district_ar": (ev.get("district_ar") or addr.get("area") or "").strip() or None,
         "unit_code": it.get("code"),
         "unit_type_ar": type_ar or None,
+        "short_stay": True if type_id in SHORT_STAY_TYPE_MAP else None,   # the future «Short stays» group
         "chalet_id": chalet_id,
         "monthly_price": monthly,
         "monthly_price_before_discount": _num(it.get("price_before_discount")) or _num(it.get("oldPrice")),
@@ -1119,8 +1173,43 @@ def _saudi_cities(all_cities: list[dict]) -> list[dict]:
     return out
 
 
+HARD_PAGE_CAP = 2000          # safety net only; a city that reaches it is reported INCOMPLETE
+RETRY_COOLDOWN_S = 120        # a throttled city is asked again once, after this pause
+
+
 def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
-          *, limit: int = 0, max_pages: int = 0, verbose: bool = True) -> tuple[dict[str, dict], int, dict[str, int]]:
+          *, limit: int = 0, max_pages: int = 0, verbose: bool = True,
+          cooldown_s: float = RETRY_COOLDOWN_S):
+    """crawl_once(), then ONE more try for every city gathern refused outright (2026-10-22: the same
+    cities — Najran, Sakaka, Al-Ahsa, Thuwal, Layla, Sabya … — came back «FETCH FAILED (exhausted)» night
+    after night because they sit late in a shard, after the big cities spent gathern's budget). A city
+    that answers the second time is crawled in full; one that still refuses stays a counted failure."""
+    rows_by_ad, scanned, per_city, outcomes = crawl_once(s, cities, ci, co, limit=limit, max_pages=max_pages, verbose=verbose)
+    refused = set(outcomes.get("_failed_ids", []))
+    retry = [c for c in cities if c.get("id") in refused]
+    if not retry or (limit and len(rows_by_ad) >= limit):
+        return rows_by_ad, scanned, per_city, outcomes
+    if verbose:
+        print(f"  ↻ {len(retry)} refused cit{'y' if len(retry) == 1 else 'ies'}: one more try after {int(cooldown_s)}s", flush=True)
+    time.sleep(cooldown_s)
+    r2, sc2, pc2, oc2 = crawl_once(s, retry, ci, co, limit=limit, max_pages=max_pages, verbose=verbose)
+    for k, v in r2.items():
+        rows_by_ad.setdefault(k, v)
+    for k, v in pc2.items():
+        per_city[k] = per_city.get(k, 0) + v
+    recovered = len(retry) - oc2.get("failed", 0)
+    outcomes["failed"] = max(0, outcomes.get("failed", 0) - recovered)
+    outcomes["recovered_on_retry"] = recovered
+    outcomes["_failed_ids"] = oc2.get("_failed_ids", [])
+    outcomes["failed_city_ids"] = oc2.get("failed_city_ids", [])   # what is STILL missing after the retry
+    for k, v in oc2.items():
+        if k.startswith("reason:cap") or k == "incomplete":
+            outcomes[k] = outcomes.get(k, 0) + v
+    return rows_by_ad, scanned + sc2, per_city, outcomes
+
+
+def crawl_once(s: cc.Session, cities: list[dict], ci: str, co: str,
+               *, limit: int = 0, max_pages: int = 0, verbose: bool = True) -> tuple[dict[str, dict], int, dict[str, int]]:
     """Page each city in MONTHLY mode. Returns (rows_by_ad, cards_scanned, per_city_counts).
 
     Pagination stops on the FIRST empty page (the API runs out of distinct monthly units well before
@@ -1142,6 +1231,7 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
             outcomes[outcome] = outcomes.get(outcome, 0) + 1
             if outcome == "failed":
                 failed_cities.append(f"{name}:{status}")
+                outcomes.setdefault("_failed_ids", []).append(cid)   # every one, for crawl()'s second try
                 outcomes.setdefault("failed_city_ids", [])
                 if len(outcomes["failed_city_ids"]) < 12:
                     outcomes["failed_city_ids"].append(cid)
@@ -1157,8 +1247,10 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
         total_meta = meta.get("totalCount") or 0
         # _meta.pageCount under-reports the real tail (Jeddah: pageCount=121 but units run to ~p129),
         # so we page until empty pages — not to pageCount. Guard with a generous hard cap so a
-        # mis-behaving city can't loop forever.
-        hard_cap = max_pages or 400
+        # mis-behaving city can't loop forever. The cap was 400 until 2026-10-22, and Riyadh reached it
+        # EVERY night (pagesRead=400 on 10-18…10-22) while items were still coming, so its tail was cut
+        # silently. Hitting the cap with items still arriving now marks the city INCOMPLETE.
+        hard_cap = max_pages or HARD_PAGE_CAP
         city_kept = 0
         page = 1
         empties = 0
@@ -1177,6 +1269,11 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
             if limit and len(rows_by_ad) >= limit:
                 break
             if page >= hard_cap:
+                if items and not max_pages:
+                    # still serving units at the safety cap: a cut, never a finished city
+                    incomplete_cities.append(f"{name}:p{page}:cap")
+                    outcomes["reason:cap"] = outcomes.get("reason:cap", 0) + 1
+                    truncated = True
                 break
             page += 1
             items, _, status = fetch_page(s, cid, page, ci, co)
@@ -1214,6 +1311,7 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
         rep = reject_report()
         if rep:
             print(rep, flush=True)
+    print(f"  {pace_report()}", flush=True)
     return rows_by_ad, scanned, per_city, outcomes
 
 
@@ -1348,7 +1446,14 @@ def main() -> int:
     # ── dry-run: print, no DB ──
     if args.dry_run:
         print(f"\nDRY RUN — scanned {scanned} cards → {len(rows)} unique monthly residential units")
-        for r in rows[:10]:
+        by_type: dict[str, int] = {}
+        for r in rows:
+            by_type[r.get("property_type") or "?"] = by_type.get(r.get("property_type") or "?", 0) + 1
+        print("   by type:", dict(sorted(by_type.items(), key=lambda kv: -kv[1])))
+        # With short stays on, show the short-stay units first: they are what a dry run is checking.
+        short = set(SHORT_STAY_TYPE_MAP.values())
+        shown = sorted(rows, key=lambda r: r.get("property_type") not in short)
+        for r in shown[:int(os.environ.get("GATHERN_DRY_SHOW", "10") or 10)]:
             print("  ", {k: r.get(k) for k in (
                 "ad_number", "property_type", "city", "region", "neighborhood",
                 "area_m2", "bedrooms", "price_annual", "rent_period")},

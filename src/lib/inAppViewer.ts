@@ -18,7 +18,7 @@
 // every client (haraj.com.sa, aqarcity.net, albdah.sa, 8floor.sa, nawafethalwatan.com, aqaralsaudia.com,
 // eydah.com, hazim.sa, alhoshan.sa, fursaghyr.com, manzo.com.sa, 1october.com.sa, wadod.sa,
 // nafithh.sa), blank
-// or error inside a frame (dwelleo.sa 404, alnowaisiry.com 403, sadin.com.sa 410), login wall
+// or error inside a frame (alnowaisiry.com 403, sadin.com.sa 410), login wall
 // (nawait.sa), site down (almuteb.sa 503), removed-at-source ads (just.sa, ialqarawi.com), and over
 // budget (muktamel.com ~37 s — the owner said to leave it). aqaralmuhaysini.com measured 9.96 s, right
 // on the line; the owner chose to keep it on anyway (2026-10-17: «put almuhaysini its fine»), so a red
@@ -30,6 +30,9 @@
 // We never proxy or strip a site's headers to force an embed; the preview allowlist uses already-
 // loaded data.
 export const IN_APP_VIEWER_HOSTS = [
+  // dwelleo.sa back 2026-10-21: its 2026-10-07 404s were the old /ar/properties/<slug> pages; the live pages
+  // (from its own sitemap) carry no X-Frame-Options / CSP and framed on a phone over 4G in 2.8–4.5 s (5 ads).
+  'dwelleo.sa',
   'dealapp.sa',
   'gathern.co',
   'sadiq-eltajer.sa',
@@ -54,7 +57,6 @@ export const IN_APP_VIEWER_HOSTS = [
   'ebriza.com.sa',
   'expattrustedhousingriyadh.com',
   'daraa.sa',
-  'razre.sa',
   'shatrirealestate.com',
   'azdadalaqaria.com',
   'aqaralriyadh.com',
@@ -94,7 +96,6 @@ export const IN_APP_VIEWER_HOSTS = [
   'remalre.com',
   'safainv.sa',
   'remax.sa',
-  'ibaax.sa',
   'qmra.sa',
   'aqaralmuhaysini.com',
   'albukaeri.sa',
@@ -170,6 +171,40 @@ export const IN_APP_PREVIEW_HOSTS = [
   'hasaadestate.com',
   'yameen.sa',
   'maktab.sa',
+  // razre.sa moved here from the iframe list 2026-10-21: since 17:17 UTC its pages send X-Frame-Options SAMEORIGIN
+  // and frame-ancestors 'self' (the speed guard went red: «now REFUSES framing»), so a framed card would be blank.
+  'razre.sa',
+  // ibaax.sa moved here from the iframe list 2026-10-22: its pages now send X-Frame-Options SAMEORIGIN (speed guard
+  // run 39867106284: «now REFUSES framing» on 810/785/493), so a framed card would be blank.
+  'ibaax.sa',
+  // Owner 2026-10-20 («every listing goes to the map … check all not inside the app»): the last eleven preview
+  // sites still opened the SOURCE in a new tab, so Ezhalah's ad page — and its pin / district border — never
+  // showed for them (muktamel 4,077 ads, ialqarawi 2,609, aqarcity 2,082 + eight small ones). Same page as
+  // the sites above; muktamel is here precisely because framing it is over budget (~37 s).
+  'muktamel.com',
+  'ialqarawi.com',
+  'aqarcity.net',
+  'alnowaisiry.com',
+  'almuteb.sa',
+  'nawafethalwatan.com',
+  'wadod.sa',
+  '1october.com.sa',
+  'hazim.sa',
+  'eydah.com',
+  '8floor.sa',
+  // 2026-10-27: the ten hosts #7836 missed (it covered the district-border set only). They refuse framing
+  // (or are login-walled / removed at source) and were opening the source in a new tab, so the card never
+  // reached Ezhalah's ad page. Owner rule 2026-10-20: every listing opens Ezhalah's ad page.
+  'haraj.com.sa',
+  'manzo.com.sa',
+  'albdah.sa',
+  'alhoshan.sa',
+  'aqaralsaudia.com',
+  'fursaghyr.com',
+  'nafithh.com',
+  'nawait.sa',
+  'just.sa',
+  'sadin.com.sa',
 ] as const;
 export function inAppPreviewHost(url: string | null | undefined): string | null {
   if (!url) return null;

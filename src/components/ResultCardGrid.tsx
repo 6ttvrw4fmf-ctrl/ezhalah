@@ -1,6 +1,7 @@
-import { Children, type ReactNode } from 'react';
+import { Children, useEffect, useRef, type ReactNode } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { useI18n } from '@/i18n';
+import { GLINT_CELL_PROPS, installScrollCalm, watchGlintCells } from '@/lib/scrollCalm';
 
 /** Only layout changes: children keep their original order, keys and listing callbacks. */
 /** `wide` (laptop): the cards use the room the column already has instead of stopping at the
@@ -11,8 +12,18 @@ import { useI18n } from '@/i18n';
 export function ResultCardGrid({ children, wide = false, cols }: { children: ReactNode; wide?: boolean; cols?: 2 | 3 }) {
   const { isRTL } = useI18n();
   const gridded = Platform.OS === 'web' && !!cols;
+  const gridRef = useRef<View>(null);
+  // THE LIVE-ANIMATION BUDGET (src/lib/scrollCalm.ts): every cell is a glint cell and the observer marks the ones near
+  // the screen, so a 500-card list keeps ~50 live animations at rest instead of 1,500, and none while scrolling.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const el = gridRef.current as unknown as HTMLElement | null;
+    if (!el) return;
+    installScrollCalm();
+    return watchGlintCells(el);
+  }, []);
   return (
-    <View testID="result-card-grid"
+    <View ref={gridRef} testID="result-card-grid"
       style={[
         styles.grid, wide && styles.gridWide,
         gridded && styles.gridCols,
@@ -20,7 +31,7 @@ export function ResultCardGrid({ children, wide = false, cols }: { children: Rea
         gridded && cols === 2 && styles.gridTwo,
         { direction: isRTL ? 'rtl' : 'ltr' },
       ]}>
-      {Children.map(children, (child) => <View style={{ width: '100%', minWidth: 0 }}>{child}</View>)}
+      {Children.map(children, (child) => <View {...GLINT_CELL_PROPS} style={{ width: '100%', minWidth: 0 }}>{child}</View>)}
     </View>
   );
 }

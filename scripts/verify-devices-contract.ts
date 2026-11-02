@@ -194,6 +194,12 @@ check('time: dual and plural agree in Arabic (2h → ساعتين, 3d → ٣ أ�
   lastActiveLabel(ago(125), NOW) === 'آخر نشاط قبل ساعتين'
   && lastActiveLabel(ago(3 * 24 * 60), NOW) === 'آخر نشاط قبل ٣ أيام'
   && lastActiveLabel(ago(15 * 60), NOW) === 'آخر نشاط قبل ١٥ ساعة');
+check('time: the English sheet never shows an Arabic last-active line (owner 2026-10-24)',
+  lastActiveLabel(ago(30), NOW, true) === 'Active in the last hour'
+  && lastActiveLabel(ago(60 * 10), NOW, true) === 'Last active 10 hours ago'
+  && lastActiveLabel(ago(24 * 60), NOW, true) === 'Last active 1 day ago'
+  && lastActiveLabel(ago(3 * 24 * 60), NOW, true) === 'Last active 3 days ago'
+  && !/[\u0600-\u06FF]/.test(lastActiveLabel(ago(400 * 24 * 60), NOW, true)));
 check('time: unusable timestamps render NOTHING rather than a guess',
   lastActiveLabel('garbage', NOW) === '' && lastActiveLabel(ago(-10), NOW) === '');
 

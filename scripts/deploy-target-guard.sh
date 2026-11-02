@@ -16,7 +16,9 @@
 DTG_EXPECT_PROJECT_ID="prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX"
 DTG_EXPECT_PROJECT_NAME="ezhalah-app"
 DTG_EXPECT_ORG_ID="team_0lVrGRoJbCRIWovPNkfnmwJ7"
-DTG_CANONICAL_URL="https://ezhalah-app.vercel.app"
+# ezhalah.com is the final address (owner 2026-10-26). The SAME project ezhalah-app serves it; the old
+# ezhalah-app.vercel.app forwards visitors there (vercel.json), so the bundle check reads ezhalah.com.
+DTG_CANONICAL_URL="https://ezhalah.com"
 
 # dtg_read_link_field <dir> <field> → prints .vercel/project.json's <field> for <dir> ("" on any error).
 dtg_read_link_field() {

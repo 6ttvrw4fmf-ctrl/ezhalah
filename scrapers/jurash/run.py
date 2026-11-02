@@ -423,7 +423,7 @@ def parking_answer(garage_txt: str) -> Optional[bool]:
 
 
 def prose_answers(description: Optional[str]) -> dict[str, bool]:
-    return {c: v for c, v in normalize.prose_amenities_yes(description, skip=("parking",)).items() if c in _PROSE_COLS}
+    return {c: v for c, v in normalize.prose_amenities(description, skip=("parking",)).items() if c in _PROSE_COLS}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],

@@ -133,9 +133,10 @@ if (existsSync(GUARD)) {
   check(/DTG_EXPECT_PROJECT_NAME="ezhalah-app"/.test(g),
     'target guard still pins project name ezhalah-app',
     'deploy-target-guard.sh no longer pins ezhalah-app as the production project');
-  check(/DTG_CANONICAL_URL="https:\/\/ezhalah-app\.vercel\.app"/.test(g),
-    'target guard still pins https://ezhalah-app.vercel.app',
-    'deploy-target-guard.sh no longer pins https://ezhalah-app.vercel.app');
+  // ezhalah.com is the production address (owner 2026-10-26); the old vercel.app forwards there.
+  check(/DTG_CANONICAL_URL="https:\/\/ezhalah\.com"/.test(g),
+    'target guard still pins https://ezhalah.com',
+    'deploy-target-guard.sh no longer pins https://ezhalah.com');
 }
 
 // ── 8. EVERY workflow that can deploy must carry these guards, not just the one named above. ──

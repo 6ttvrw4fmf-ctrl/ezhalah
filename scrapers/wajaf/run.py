@@ -27,8 +27,12 @@ PRICE TRAPS
     · «الحد» alone on LAND                            → unit unstated → NULL, raw kept (OWNER QUESTION)
     · «الحد» alone on a building/warehouse/office     → the «سعر نهائي» total (sale) / the rent
   A «00» per-metre cell (unit 67) is no value.
-STATUS: متاح only — مباع / محجوز / مؤجر / مؤجر جزئي … are skipped. All 4 rent ads are «مؤجر جزئي»
-(partly let) → skipped (OWNER QUESTION). A subdivision that is itself not متاح contributes no units.
+STATUS: متاح is a listing; مباع / محجوز / مؤجر / مؤجر بالكامل … are skipped. «مؤجر جزئي» (partly let) on a
+«إيجار» ad IS a listing (backlog 927, CI probe run 41088891792, 2026-10-30): all 4 rent ads carry it (2
+warehouses 9333/6871, 2 office buildings 4409 «١٥ مكتب إداري» / 7372) and each is still published under
+إيجار with its asking rent — the building is part-let and offers the rest. On any other deal it is skipped.
+No period word appears anywhere on those pages, so rent_period stays NULL (never guessed).
+A subdivision that is itself not متاح contributes no units.
 TYPE «شاليه / استراحة» (two types in one), «وحدة سكنية» and «أخرى» have no single honest mapping → skipped.
 DEAL «استثمار» (1424, a building «للاستثمار» at 150,000) states neither sale nor rent → skipped.
 PDPL: the page shows the office phone and e-mail only; the unlabelled number after the district in the
@@ -63,6 +67,11 @@ _DEAL = {"بيع": "Buy", "إيجار": "Rent"}
 _TYPE_OVERRIDES = {"أرض سكنية": "Residential Land", "عمارة سكنية": "Building",
                    "مستودعات": "Warehouse", "مكاتب إدارية": "Office"}
 _LAND = {"Residential Land", "Commercial Land"}
+
+
+def _offered(status: Optional[str], deal: Optional[str]) -> bool:
+    # a part-let building still offers its remaining space for rent; fully let / sold / reserved do not
+    return status == "متاح" or (status == "مؤجر جزئي" and deal == "إيجار")
 
 
 def get(s: cc.Session, url: str) -> str:
@@ -173,7 +182,7 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
     if d["units"]:
         return None, "project_container"
     status = d["badges"][0] if d["badges"] else None
-    if status != "متاح":
+    if not _offered(status, d.get("deal")):
         uid = re.search(r"/unit/(\d+)$", d.get("url") or "")    # the same ad_number map_page builds
         db.note_read_gone(f"{PREFIX}U{uid.group(1)}" if uid
                           else f"{PREFIX}{(d.get('url') or '').rstrip('/').rsplit('/', 1)[-1]}", status)

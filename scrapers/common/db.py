@@ -874,11 +874,76 @@ def mark_presence_unproven(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+# The contract owns the alive column's name (it alone may WRITE it); this module only reads it here.
+_ALIVE_COL = next(iter(direct_alive_patch(now_iso="")))
+
+
+def page_gone_holds(hidden: list[dict[str, Any]], probes: list[dict[str, Any]]) -> dict[str, tuple[int, bool]]:
+    """Which HIDDEN rows a feed sighting must leave hidden: those whose newest own-page reading in
+    `ops_stale_inactivation_probe` is GONE and newer than their last proven-alive stamp.
+
+    The same predicate `ops_lifecycle_false_resurrection()` (alert `false_resurrection`) applies to
+    rows that are already active again, so a row held here is exactly a row that detector would raise
+    the moment the upsert revived it. Pure: `hidden` = stored rows (ad_number, missing_count,
+    last_verified_alive_at) that are active=false; `probes` = their ledger rows (ad_number, verdict,
+    probed_at)."""
+    newest: dict[str, dict[str, Any]] = {}
+    for p in probes:
+        a, t = p.get("ad_number"), str(p.get("probed_at") or "")
+        if a and t and (a not in newest or t > str(newest[a].get("probed_at") or "")):
+            newest[a] = p
+    out: dict[str, tuple[int, bool]] = {}
+    for h in hidden:
+        p = newest.get(h.get("ad_number"))
+        if not p or p.get("verdict") != "GONE":
+            continue
+        gone_at = datetime.fromisoformat(str(p["probed_at"]).replace("Z", "+00:00"))
+        alive = h.get(_ALIVE_COL)
+        if alive and datetime.fromisoformat(str(alive).replace("Z", "+00:00")) >= gone_at:
+            continue
+        out[h["ad_number"]] = (int(h.get("missing_count") or 0), False)
+    return out
+
+
+def _page_gone_holds_for(table: str, ads: list[str]) -> dict[str, tuple[int, bool]]:
+    """Read what `page_gone_holds` needs for one batch: two indexed reads, only for rows that are
+    hidden. A failed read holds nothing (today's behaviour) and says so loudly — it never blocks
+    ingestion."""
+    hidden: list[dict[str, Any]] = []
+    probes: list[dict[str, Any]] = []
+    try:
+        c = sb()
+        for i in range(0, len(ads), 200):
+            hidden += _execute(c.table(table).select(f"ad_number,missing_count,{_ALIVE_COL}")
+                               .eq("active", False).in_("ad_number", ads[i:i + 200]),
+                               what=f"{table} hidden-row lookup").data or []
+        ha = [h["ad_number"] for h in hidden]
+        for i in range(0, len(ha), 200):
+            probes += _execute(c.table("ops_stale_inactivation_probe").select("ad_number,verdict,probed_at")
+                               .eq("source_table", table).in_("ad_number", ha[i:i + 200]),
+                               what="ops_stale_inactivation_probe lookup").data or []
+    except Exception as exc:  # noqa: BLE001 — never let a guard break ingestion; say it did not run
+        print(f"{table}: page-gone hold lookup FAILED ({type(exc).__name__}: {exc}); this batch may "
+              f"revive hidden rows whose own page read gone", flush=True)
+        return {}
+    return page_gone_holds(hidden, probes)
+
+
 def _wasalt_batch(table: str, rows: list[dict[str, Any]],
                   strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     if not rows:
         return
     now = datetime.now(timezone.utc).isoformat()
+    # A FEED SIGHTING NEVER UNDOES AN OWN-PAGE «GONE» (2026-11-02, ♻️; rulebook protection 4: «only
+    # the ad's own page can undo a hide»). Every crawl funnels through here, and the line below
+    # used to reset missing_count = 0 / active = true for any row the site's list still served, so
+    # an ad hidden because its own page read gone came back at the next crawl: nowaisiry NW4538
+    # (hidden 10-31 on two CI 404 reads, revived by the 11-01 crawl, then a dead ad on the 11-02
+    # dead-visible score) and NW4437, muhaysini MHS42 / MHS2213 (killed 3/3 on HTTP 400 every ~3
+    # days since 10-17 and revived by every crawl). gathern has its own page-strike hold (`strikes`);
+    # this is the same rule for every site, keyed on the probe ledger. A row whose own page THIS
+    # crawl read live (the direct-alive marker) is not held.
+    page_holds = _page_gone_holds_for(table, [r["ad_number"] for r in rows if r.get("ad_number")])
     # The REGISTRY decides whether a sighting is proof of life, not 300 call sites: the platform's
     # registered policy (wasalt, and the SOURCE_LIST_PRESENCE sites admitted one by one) either
     # declares presence_is_positive_evidence or presence_patch() returns nothing. Imported lazily:
@@ -897,6 +962,8 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]],
         # scraper that deliberately flags a row inactive (e.g. dealapp's مباع/مؤجر "sold" badge)
         # still wins, and _sanitize_price below can still force a price-typo row inactive.
         held = (strikes or {}).get(r["ad_number"])
+        if not held and not r.get(_DIRECT_ALIVE_KEY):
+            held = page_holds.get(r["ad_number"])
         if held:
             # The listing's OWN PAGE has it under strike (a direct read) and the caller could not
             # read that page live. A feed sighting is weaker evidence than the page, so it may
@@ -1089,9 +1156,13 @@ def prune_unseen(
         resaw = f"re-saw {len(existing) - len(gone)} of {len(existing)} active"
         if len(gone) > max_prune_frac * len(existing):
             _PRUNE_TRIPS.append(f"{table} collapse ({resaw})")
+            _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, len(existing),
+                                           max_prune_frac, min_active_guard, grace)
             return -1  # collapse guard: a big fraction vanished at once → treat as a broken crawl
         if (len(existing) - len(gone)) / len(existing) < min_coverage:
             _PRUNE_TRIPS.append(f"{table} coverage ({resaw}, floor {min_coverage:.0%})")
+            _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, len(existing),
+                                           max_prune_frac, min_active_guard, grace)
             return -1  # partial-scrape guard: saw too little of the catalog to trust a prune
     if not gone:
         return 0
@@ -1300,9 +1371,49 @@ def _own_page_session():
 READ_GONE_MAX_READS = 60   # own-page reads per table per run when a prune is guarded or skipped
 
 
+# Tables whose refused prune already read the unseen ads' own pages this process (see below), so a
+# caller that also calls strike_read_gone() after the -1 (manzo) does not strike the same ad twice.
+_READ_GONE_DONE: set[str] = set()
+# The ads that refused-prune reading struck, per table. A caller that then reads again with its OWN
+# oracle (a soft-404 site: superoffice, azdad, albukaeri, 2026-10-27) skips these, so no ad is
+# struck twice in one run and the collapse cap holds across both readings.
+_READ_GONE_STRUCK: dict[str, set[str]] = {}
+
+
+def _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, n_active,
+                                   max_prune_frac, min_active_guard, grace) -> None:
+    """A refused absence prune must not freeze an ad whose OWN page reads gone (2026-10-23).
+
+    tawia: 10 active, its walk re-saw 4 (the site republished 5 ads under new ids on 10-21), so the
+    collapse guard refused the prune every night and 3 of the 6 unseen ads stayed on screen with
+    missing_count 0 (dead-visible 10-23: 3 of 5 sampled gone). 125 crawlers print «prune guard
+    tripped — kept existing active rows» and stop there; only 5 (manzo, opensooq, ashab, haraj,
+    muktamel) went on to read the unseen ads' own pages. This does it for every caller with no
+    oracle of its own: the same own_page_status_oracle prune_unseen would use (404/410 while a page
+    this crawl saw answers live), the collapse cap respected, never raised. A sharded slice keeps its
+    own handling, and so does a table of 1,000+ active rows.
+
+    A caller WITH its own verify_gone is read through THAT oracle (2026-10-30). It used to be left
+    out on the belief that it «keeps its own handling», but most such callers (nowaisiry and the other
+    CANDIDATE_PLUS_DIRECT crawlers) have none: nowaisiry's walk re-saw 8 of 11 commercial ads on
+    10-30, the coverage guard refused the prune, and NW4437 — its post unpublished (REST 401, page
+    404, read gone by dead-visible-score AND a lifecycle spot-check) — stayed on screen at
+    missing_count 0, a strike it could never start. The site's own oracle (its controls, its signal)
+    decides, exactly as it would at grace; only ads it reads gone take a strike."""
+    if table in _READ_GONE_DONE or shards > 1 or not seen or n_active >= 1000:
+        return
+    _READ_GONE_DONE.add(table)
+    try:
+        strike_read_gone(table, seen, source, verify_gone=verify_gone, max_prune_frac=max_prune_frac,
+                         min_active_guard=min_active_guard, grace=grace, _from_refused_prune=True)
+    except Exception as e:  # noqa: BLE001 — a failed reading is UNKNOWN; the refused prune stands
+        print(f"{table}: own-page reading after a refused prune failed ({type(e).__name__}: {e})", flush=True)
+
+
 def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=None, *,
                      max_prune_frac: float = 0.30, min_active_guard: int = 8,
-                     max_reads: int = READ_GONE_MAX_READS) -> int:
+                     max_reads: int = READ_GONE_MAX_READS, grace: int = 3,
+                     _from_refused_prune: bool = False) -> int:
     """Strike ONLY the unseen active rows whose OWN page reads gone (2026-10-12).
 
     For a crawl whose absence prune was refused (a guard tripped, or the walk fell short) — the
@@ -1315,6 +1426,9 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
     needs a seen page to answer live first). UNKNOWN and live rows are counted as seen (kept, shown);
     only read-gone rows take a strike, at most the collapse cap's worth (oldest-seen first; the cap
     is respected, never raised). prune_unseen then runs with its grace and its at-grace re-read."""
+    if table in _READ_GONE_DONE and not _from_refused_prune and verify_gone is None:
+        return 0       # prune_unseen already read these unseen ads with the same default oracle
+    struck_before = set() if _from_refused_prune else set(_READ_GONE_STRUCK.get(table, ()))
     seen = {str(a) for a in seen_ads if a}
     if not seen:
         return 0       # nothing seen this run: the source may be down — no control, no reading
@@ -1322,31 +1436,138 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
     q = c.table(table).select("ad_number,last_seen_at").eq("active", True)
     if source:
         q = q.eq("source", source)
-    rows = [r for r in (_execute(q.range(0, 999), what=table + ".read_gone_slice").data or [])
-            if r.get("ad_number")]
+    # THE WHOLE ACTIVE SET, not a 1,000-row slice (2026-10-27). The slice made prune_unseen below compare
+    # 1,000 «seen» against every active row: haraj (13,702 active) read «re-saw 999 of 13702», tripped the
+    # collapse guard every run since 10-18 and never struck the one ad whose own page read gone. The read
+    # count is still capped by max_reads (oldest-seen first) and the strike by the collapse cap.
+    rows = [r for r in (_execute(q, what=table + ".read_gone_set").data or []) if r.get("ad_number")]
+    # The caller's OWN measured oracle may answer «live»; the shared default never does on a bare 200.
+    own_oracle = verify_gone is not None
     if verify_gone is None:
         verify_gone = own_page_status_oracle(c, table, seen)
-    unseen = sorted((r for r in rows if r["ad_number"] not in seen),
+    unseen = sorted((r for r in rows if r["ad_number"] not in seen and r["ad_number"] not in struck_before),
                     key=lambda r: str(r.get("last_seen_at") or ""))[:max_reads]
     gone: list[str] = []
+    live: list[str] = []
     for r in unseen:
         try:
             got = verify_gone(r["ad_number"])
         except Exception as e:  # noqa: BLE001 — an oracle that throws is UNKNOWN, never gone
             print(f"{table}: verify_gone({r['ad_number']}) raised {type(e).__name__}: {e} → unknown")
             continue
-        verdict = (got[0] if isinstance(got, (tuple, list)) else got) or "unknown"
-        if str(verdict).lower() == "gone":
+        verdict = str((got[0] if isinstance(got, (tuple, list)) else got) or "unknown").lower()
+        if verdict == "gone":
             gone.append(r["ad_number"])
+        elif verdict == "live" and own_oracle:
+            live.append(r["ad_number"])
+    # A LIVE READING IS AN ANSWER TOO (2026-10-31, ♻️). This used to keep only «gone», so an unseen ad
+    # whose own page the site's own oracle read live stayed unverified and kept its strikes forever:
+    # albukaeri's walk re-saw 6 of 12 every night, and 6 shown ads had no reading recorded since
+    # 10-13 (66.7% checked in time), 3 of them frozen at missing_count 2 (the 10-16 lesson: a reader
+    # that looks only for «gone» can never clear a strike). Recorded exactly as stamp_seen_alive
+    # records one — the contract's stamp — and, per the law, a live answer resets the strike count.
+    # Only for the caller's own oracle: the shared default reads status alone.
+    if live:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        patch = {"last_liveness_probe_at": now_iso, "missing_count": 0, **direct_alive_patch(now_iso=now_iso)}
+        for i in range(0, len(live), 200):
+            _execute(c.table(table).update(patch).eq("active", True).in_("ad_number", live[i:i + 200]),
+                     what=table + ".read_gone_live")
+        print(f"{table}: {len(live)} unseen ad(s) read live on their own page — stamped alive", flush=True)
     if len(rows) >= min_active_guard:
-        gone = gone[:int(max_prune_frac * len(rows))]
+        gone = gone[:max(0, int(max_prune_frac * len(rows)) - len(struck_before))]
+    if _from_refused_prune:
+        _READ_GONE_STRUCK[table] = set(gone)
     if not gone:
         print(f"{table}: no unseen ad read gone on its own page — nothing struck", flush=True)
         return 0
     print(f"{table}: striking only the {len(gone)} ad(s) whose own page read gone", flush=True)
+    # grace: 3 by default (unchanged). A caller whose verify_gone reads the source's OWN affirmative removal
+    # may pass 1 — owner 2026-10-20 «once we see it, remove it» (aldarim's API «unavailable»).
     return prune_unseen(table, {r["ad_number"] for r in rows} - set(gone), source=source,
                         verify_gone=verify_gone, min_coverage=0.0, max_prune_frac=max_prune_frac,
-                        min_active_guard=min_active_guard)
+                        min_active_guard=min_active_guard, grace=grace)
+
+
+SEEN_ALIVE_MAX_READS = 1000   # own-page reads per table per run by stamp_seen_alive (small sites only)
+
+
+def stamp_seen_alive(table: str, seen_ads, verify_gone, *, source: Optional[str] = None,
+                     max_reads: int = SEEN_ALIVE_MAX_READS, pace_s: float = 0.5) -> dict[str, int]:
+    """Read each SEEN active row's OWN page through the site's own oracle; record a LIVE answer.
+
+    WHY (owner, 2026-10-26: «the amount of listings we keep should also reflect on the amount of
+    listings we check»). A site whose crawl re-reads its whole list every night never lets a row
+    reach grace, so prune_unseen's verify_gone — the only DIRECT read such a site had — was never
+    asked about a single listing. Measured 2026-10-27: 11 CANDIDATE_PLUS_DIRECT sites (eastabha,
+    mizlaj, alsidra, alqasem, nowaisiry, alrifai, aqaralsaudia, fkralemar, aalbarrak, eydah, masar)
+    with healthy daily crawls and ZERO rows ever verified, because nothing ever went missing. This
+    asks the same oracle about the rows the crawl DID see, every run.
+
+    WHAT IT MAY WRITE. Exactly one thing: on a 'live' answer — a direct read of the listing's own
+    URL that the site's own measured oracle called live — the contract's stamp
+    (direct_alive_patch) plus `last_liveness_probe_at`. Nothing else, ever:
+      • 'gone' on a row the crawl just SAW is a conflict between the list and the page. It is
+        counted and printed, never acted on here: removal stays prune_unseen's (grace, collapse cap,
+        evidence row) and the source's list, never a second path.
+      • anything else (unknown, a raising oracle, a budget spent) is UNKNOWN and writes nothing.
+    So this function cannot hide a listing, by construction — it has no code path that writes
+    `active`, `missing_count` or `deactivated_at`.
+
+    Returns counts {'read', 'live', 'gone_conflict', 'unknown'}."""
+    out = {"read": 0, "live": 0, "gone_conflict": 0, "unknown": 0}
+    # Monitoring must never be able to fail ingestion: the crawl has already written its rows, so a
+    # failure here (DB unreachable, a broken oracle factory) is printed and the run carries on.
+    try:
+        return _stamp_seen_alive(table, seen_ads, verify_gone, source=source,
+                                 max_reads=max_reads, pace_s=pace_s, out=out)
+    except Exception as e:  # noqa: BLE001
+        print(f"{table}: own-page check of seen ads failed ({type(e).__name__}: {e}) — nothing stamped",
+              flush=True)
+        return out
+
+
+def _stamp_seen_alive(table: str, seen_ads, verify_gone, *, source: Optional[str], max_reads: int,
+                      pace_s: float, out: dict[str, int]) -> dict[str, int]:
+    seen = {str(a) for a in seen_ads if a}
+    if not seen or verify_gone is None:
+        return out          # nothing seen this run: no control, nothing to ask
+    c = sb()
+    q = c.table(table).select("ad_number").eq("active", True)
+    if source:
+        q = q.eq("source", source)
+    rows = _execute(q, what=table + ".stamp_seen_select").data or []
+    ads = sorted({r["ad_number"] for r in rows if r.get("ad_number") in seen})[:max(0, max_reads)]
+    live: list[str] = []
+    for i, ad in enumerate(ads):
+        if i and pace_s > 0:
+            time.sleep(pace_s)
+        out["read"] += 1
+        try:
+            got = verify_gone(ad)
+            verdict = (got[0] if isinstance(got, (tuple, list)) else got) or "unknown"
+        except Exception as e:  # noqa: BLE001 — an oracle that throws is UNKNOWN, never evidence
+            print(f"{table}: verify_gone({ad}) raised {type(e).__name__}: {e} → unknown", flush=True)
+            verdict = "unknown"
+        verdict = str(verdict).lower()
+        if verdict == "live":
+            live.append(ad)
+        elif verdict == "gone":
+            out["gone_conflict"] += 1
+            print(f"{table}: {ad} was served by this crawl but its own page read gone — left to "
+                  f"prune_unseen and the list; not acted on here", flush=True)
+        else:
+            out["unknown"] += 1
+    out["live"] = len(live)
+    if live:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        patch = {"last_liveness_probe_at": now_iso, **direct_alive_patch(now_iso=now_iso)}
+        for i in range(0, len(live), 200):
+            _execute(c.table(table).update(patch).eq("active", True).in_("ad_number", live[i:i + 200]),
+                     what=table + ".stamp_seen_alive")
+    print(f"{table}: own-page check of {out['read']} seen ad(s) → {out['live']} live (stamped), "
+          f"{out['gone_conflict']} gone-on-page (not acted on), {out['unknown']} unknown", flush=True)
+    return out
 
 
 def own_page_status_oracle(c, table: str, seen, *, session=None):
@@ -1417,8 +1638,81 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
             return "gone", f"{OWN_PAGE_ORACLE}: the ad's own published end date {ended} has passed"
         reads[0] += 1
         verdict, why = probe.verify_gone(ad_number)
+        if verdict == "unknown" and _BLOCK_WHY.search(why or ""):
+            second = second_reader(ad_number)
+            if second:
+                return second
         return verdict, f"{OWN_PAGE_ORACLE}: {why}"[:300]
+
+    # A 401/403 to THIS session is about our access (LISTING_LIVENESS.md §1), so it is no answer;
+    # the shared reader (cleanup._probe: the deletion tier's, the spot check's) escapes a block
+    # through other browser profiles and may get the page's real answer (2026-10-20, amlakalahsa:
+    # 5 shown ads at 4-11 strikes read 403 here every crawl for days; the spot check read 4 of
+    # them 404 and the 5th live from CI, controls trusted). Its 404/410 counts only when a page
+    # this crawl saw answers 200 THROUGH THE SAME READER: a source that 404s blocks fails there.
+    second_state: dict[str, Any] = {}
+
+    def second_control() -> bool:
+        if "ok" not in second_state:
+            second_state["ok"] = False
+            for ad in sorted(str(a) for a in seen)[:_OWN_PAGE_CONTROLS]:
+                url = url_for(ad)
+                if not url:
+                    continue
+                reads[0] += 1
+                status, body = _second_read(url)
+                if status == 200 and body and _own_page_status_signal(200, body, False) is None:
+                    second_state["ok"] = True
+                    break
+        return second_state["ok"]
+
+    def second_reader(ad_number: str):
+        url = url_for(ad_number)
+        if not url or reads[0] >= _OWN_PAGE_MAX_READS:
+            return None
+        reads[0] += 1
+        status, _body = _second_read(url)
+        if status in (404, 410) and second_control():
+            return "gone", (f"{OWN_PAGE_ORACLE}: own page 401/403 to the crawl's session, {status} through "
+                            f"the shared reader (a page this crawl saw answered 200 through it)")
+        return None
     return verify_gone
+
+
+_BLOCK_WHY = re.compile(r"HTTP 40[13]\b")
+
+
+_HOME_PATHS_2 = frozenset({"", "/ar", "/en"})   # cleanup._HOME_PATHS
+
+
+def _second_read(url: str):
+    """(status, body) through the shared session, escaping a 401/403 through the other browser
+    profiles exactly as cleanup._probe does; (None, '') on no answer or a landing on the home page.
+    Built on common.http, not cleanup: importing cleanup here drags scrapers.wasalt.browser into the
+    import graph of every crawler (verify-wasalt-probing-workflows-carry-the-browser.ts). Never raises."""
+    from urllib.parse import urlsplit as _split
+    from scrapers.common import http as _http
+
+    def one(sess):
+        r = sess.get(url, timeout=25, allow_redirects=True)
+        final = str(getattr(r, "url", "") or "")
+        want, got = _split(url).path.rstrip("/").lower(), _split(final).path.rstrip("/").lower()
+        if final and got in _HOME_PATHS_2 and got != want:
+            return None, ""
+        return r.status_code, (r.text or "")
+    try:
+        status, body = one(_http.session())
+    except Exception:  # noqa: BLE001
+        status, body = None, ""
+    if status is None or status in _http.BLOCK_STATUSES:
+        for profile in _http.FALLBACK_PROFILES:
+            try:
+                st, bd = one(_http._route_session(profile, False, fresh=True))
+            except Exception:  # noqa: BLE001
+                continue
+            if st is not None and st not in _http.BLOCK_STATUSES:
+                return st, bd
+    return status, body
 
 
 # The verdict a res/com supersession records, and the oracle that names WHY it was recorded.

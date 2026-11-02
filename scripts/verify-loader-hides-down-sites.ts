@@ -19,7 +19,7 @@ import { stripComments } from './lib/stripComments.ts';
 // loaderPlatforms.ts calls Metro's require() for its logo assets; in plain-Node ESM that name is
 // undefined, so give it one that returns the asset path. Nothing else in the module needs Metro.
 (globalThis as { require?: unknown }).require = (p: string) => p;
-const { PLATFORM_META, HIDDEN_STATUSES, hiddenLoaderNames, pickLoaderPlatforms, normalizeSource } =
+const { PLATFORM_META, HIDDEN_STATUSES, hiddenLoaderNames, hiddenFromVisibleSlugs, pickLoaderPlatforms, normalizeSource } =
   await import('../src/data/loaderPlatforms.ts');
 
 let failed = 0;
@@ -69,8 +69,11 @@ const hiddenInCatalog = catalog.filter((n) => hidden.has(n));
 check(`the count drops with the logos: ${strip.length} shown = ${catalog.length} catalog − ${hiddenInCatalog.length} down`,
   strip.length === catalog.length - hiddenInCatalog.length);
 const loader = stripComments(readFileSync(join(import.meta.dirname, '..', 'src/components/SearchLoader.tsx'), 'utf8'));
-check('the «Reviewing N platforms» number is the number of logos actually shown',
-  /platformCount=\{platforms\.length\}/.test(loader));
+// Owner 2026-10-20 («make it 148»): the «Reviewing N platforms» number is the ONE shared site count
+// (src/data/siteCount.ts — the WhatsApp card's number); the logos on screen are only its fallback
+// before that count has been read. The strip itself still hides dormant logos (asserted above).
+check('the «Reviewing N platforms» number is the shared site count, the on-screen roster only as fallback',
+  /platformCount=\{siteCountNow\(\) \?\? platforms\.length\}/.test(loader));
 
 check('a logo shared with a live slug stays: deal is down but dealapp is active → Deal App shown',
   strip.includes('Deal App'));
@@ -99,12 +102,30 @@ check('SearchLoader picks its roster with hiddenPlatformNames()',
 check('SearchLoader starts the status read at module scope, before the first search',
   /^if \(!IS_WEB \|\| typeof window !== 'undefined'\) void loadHiddenPlatformNames\(\);$/m.test(loader));
 const runtime = stripComments(readFileSync(join(import.meta.dirname, '..', 'src/data/loaderActivePlatforms.ts'), 'utf8'));
-check('the statuses come from loader_platform_status_ar through the bounded helper',
-  /boundedRpc<[^>]*>\(supabase\.rpc\('loader_platform_status_ar'\)\)/.test(runtime));
+check('the roster comes from loader_active_platforms_ar (the site count) through the bounded helper',
+  /boundedRpc<[^>]*>\(supabase\.rpc\('loader_active_platforms_ar'\)\)/.test(runtime));
 check('one successful read per session: a loaded or in-flight read is never repeated',
   /if \(hidden \|\| inFlight\) return/.test(runtime));
 check('a failed or empty read leaves the set unknown (full roster), never "nothing is down"',
-  /if \(error \|\| !Array\.isArray\(data\) \|\| data\.length === 0\) return;\s*hidden = hiddenLoaderNames\(data\);/.test(runtime));
+  /if \(error \|\| !Array\.isArray\(data\) \|\| data\.length === 0\) return;\s*hidden = hiddenFromVisibleSlugs\(data\);/.test(runtime));
+
+// ── 2b. THE ONE RULE (owner 2026-10-27): hidden listings → hidden logo, and the count drops ─────────
+// The roster follows the visible-sites list (loader_active_platforms_ar), the same list as the count.
+{
+  const visible = ['aqar', 'aqarmonthly', 'dealapp', 'wasalt', 'manzo'];
+  const hid = hiddenFromVisibleSlugs(visible);
+  const shown = pickLoaderPlatforms(undefined, 0, hid).map((p) => p.name);
+  check('a site with visible ads keeps its logo (Aqar, Deal App)', shown.includes('Aqar') && shown.includes('Deal App'));
+  check('a down site with no visible ads loses its logo (Sadin)', !shown.includes('Sadin'));
+  check('a retired site with no visible ads loses its logo (Toor; supersedes the 2026-09-19 keep)', !shown.includes('Toor'));
+  check('logo-only brands (no ads, ever) leave the strip', PLATFORM_META.filter((p) => p.logoOnly).every((p) => !shown.includes(p.name)));
+  check('the count drops with the logos: shown = catalog − hidden',
+    shown.length === catalog.length - [...hid].filter((n) => catalog.includes(n)).length);
+  check('a site that comes back returns on its own (Sadin visible again → its logo is back)',
+    pickLoaderPlatforms(undefined, 0, hiddenFromVisibleSlugs([...visible, 'sadin'])).some((p) => p.name === 'Sadin'));
+  mustCatch('a roster that ignores the visible list (Toor would still show)',
+    pickLoaderPlatforms(undefined, 0, new Set()).some((p) => p.name === 'Toor'));
+}
 
 // ── 3. Mutation proofs ─────────────────────────────────────────────────────────────────────────────
 const unfiltered = pickLoaderPlatforms(undefined, 0, null).map((p) => p.name);

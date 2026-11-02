@@ -21,7 +21,15 @@ unauth'd visitors).
 
 ⛔ PDPL: rows include `owner_phone`, `broker`, and a `raw_text` field full of phones / wa.me /
 brokerage names. We DROP `owner_phone`/`broker` outright and REDACT `description` / `title`
-before storing. `raw_text` is never stored.
+before storing. `raw_text` is never stored as-is and is never in the bulk select.
+
+AD TEXT (2026-10-30): 445/1,049 residential + 85/292 commercial active ads had `description` NULL,
+yet the ad page shows their full text — the site renders `raw_text || description`
+(PropertyPage `sa({rawText: s.raw_text||s.description})`; seen live on /property/4827, 4958, 5014).
+So for exactly the rows whose `description` is empty, `ad_texts()` fetches `id,raw_text` in a
+separate, failure-tolerant call and reduces each one IN MEMORY to the ad's own body (`ad_body()`:
+the office's licence/CR header, emoji and its sign-off/footer cut, then the shared redact_pii) —
+the raw string itself is discarded. A failed call leaves the description NULL, never ''.
 
 Usage:
   python -m scrapers.mustqr.run --type all --limit 20
@@ -44,6 +52,8 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.page_pin import pin_from_page, short_maps_link
+from scrapers.common.pii import redact_pii
 
 SITE = "https://mustqr.sa"
 PROJECT = "https://jzhotxuqwkpykavxpgeu.supabase.co"
@@ -710,7 +720,7 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
     region_hint = n_to_region.get(raw_neigh) if raw_neigh else None
 
     title = _redact(p.get("title"))
-    description = _redact(p.get("description"))
+    description = _description(p)
 
     photo_urls = _photos(p.get("images"))
     video_url = _video_url(p.get("videos"))
@@ -758,6 +768,17 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
             extras["lat"] = float(p["lat"]); extras["lng"] = float(p["lng"])
         except (TypeError, ValueError):
             pass
+    # THE PIN IS IN THE AD'S OWN TEXT, WHEN THE BROKER PASTED ONE (owner 2026-10-30: 1,340 ads, 0 pins). The API's
+    # lat/lng columns are restricted to the office (above), the page's JSON-LD «geo» is the office itself
+    # (27.5114,41.7208 on every ad — never read), and the ad text carries a Google Maps link on a minority of ads
+    # (14 descriptions + some raw_text bodies, 2026-10-30). ad_body() drops that link from the stored text, so the
+    # pin is read BEFORE the drop: here for a description, in ad_texts() for a raw_text body. No link anywhere →
+    # pin_absent (the text was read); a link whose hop failed → neither key (keep_stored_pin keeps yesterday's).
+    pin, linked = _ad_pin(p)
+    if pin:
+        extras.update(pin)
+    elif not linked:
+        extras["pin_absent"] = True
     if p.get("created_at"):
         extras["mustqr_created_at"] = p["created_at"]
     if p.get("updated_at"):
@@ -860,6 +881,86 @@ def stated_rate_ids(s: cc.Session, jwt: str, rows: list[dict]) -> set[int]:
     return out
 
 
+# ── the ad's own text for rows with no `description` (see module docstring "AD TEXT") ──────────────
+# Emoji, pictographs and the invisible direction marks the office pastes around every line.
+_DECOR_RE = re.compile(
+    "[\U0001F000-\U0001FAFF\u2190-\u21FF\u2300-\u23FF\u25A0-\u27BF\u2900-\u297F"
+    "\u2B00-\u2BFF\uFE0E\uFE0F\u200B-\u200F\u202A-\u202E\u2066-\u2069\u20E3]"
+)
+# The office's own header lines (its FAL licence and commercial register — the same on every ad) and the
+# «عرض جديد» tag: not this ad's text, and not shown on the site's ad page.
+_HEADER_LINE_RE = re.compile(r"رخصة\s*فال|السجل\s*التجاري|^عرض\s*جديد$")
+# Where the office's sign-off begins: «مباشر» / «مكتب مستقر العقاري» / a rule line / «لمتابعة عروضنا …».
+_SIGNOFF_RE = re.compile(r"^(?:مباشر|مكتب\s*مستقر.*|[_\-—–ـ=*.]{5,}.*|.*لمتابعة\s*عروضنا.*)$")
+_MAP_LINK_RE = re.compile(r"https?://(?:www\.)?(?:maps\.google\.\S+|maps\.app\.goo\.gl/\S+|goo\.gl/maps\S*"
+                          r"|google\.[a-z.]+/maps\S*)", re.I)
+
+
+def ad_body(raw: Optional[str]) -> Optional[str]:
+    """The ad's own text out of mustqr's `raw_text`, as its ad page shows it: header, emoji and sign-off
+    cut, map links dropped, then the shared PDPL redactor. Nothing readable left → None (never '')."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    lines: list[str] = []
+    for line in raw.splitlines():
+        t = re.sub(r"[ \t]+", " ", _DECOR_RE.sub("", line)).strip()
+        if not t:
+            continue
+        if _SIGNOFF_RE.match(t):
+            break
+        if _HEADER_LINE_RE.search(t):
+            continue
+        lines.append(t)
+    text = _MAP_LINK_RE.sub("", "\n".join(lines))
+    return redact_pii(text) or None
+
+
+AD_TEXT_CHUNK = 100
+
+
+def ad_texts(s: cc.Session, jwt: str, ids: list[int], pins: Optional[dict] = None) -> dict[int, str]:
+    """{id: ad_body(raw_text)} for `ids` (rows whose own `description` is empty). raw_text is read only
+    here, reduced at once and dropped. A failed or refused call is «not known»: those ids are simply
+    absent, so their description stays NULL — never an empty string, never a crash of the crawl.
+    `pins`, when given, is filled with {id: (pin_from_page(raw_text), the text carried a Maps link)} —
+    the ad's own map link, read before ad_body() drops it (map_listing reads it as `_ad_pin`)."""
+    out: dict[int, str] = {}
+    for i in range(0, len(ids), AD_TEXT_CHUNK):
+        chunk = ",".join(str(int(x)) for x in ids[i:i + AD_TEXT_CHUNK])
+        try:
+            _throttle()
+            r = s.get(f"{PROJECT}/rest/v1/properties?select=id,raw_text&id=in.({chunk})",
+                      headers=_headers(jwt), timeout=45)
+            if r.status_code != 200:
+                print(f"  ad_texts: HTTP {r.status_code} — {r.text[:160]!r}", flush=True)
+                continue
+            for row in r.json():
+                raw = row.get("raw_text")
+                if pins is not None and isinstance(raw, str) and row.get("id") is not None:
+                    pins[int(row["id"])] = (pin_from_page(raw), bool(_MAP_LINK_RE.search(raw) or short_maps_link(raw)))
+                body = ad_body(raw)
+                if body and row.get("id") is not None:
+                    out[int(row["id"])] = body
+        except Exception as e:  # noqa: BLE001
+            print(f"  ad_texts: {type(e).__name__}: {str(e)[:160]}", flush=True)
+            continue
+    return out
+
+
+def _ad_pin(p: dict) -> tuple[dict, bool]:
+    """(the ad's own map link as a pin, the text carried a link): from the raw_text body ad_texts() read
+    (`_ad_pin`, an in-memory annotation like `_ad_text`, not a column), else from the description."""
+    if p.get("_ad_pin") is not None:
+        return p["_ad_pin"]
+    desc_raw = p.get("description") if isinstance(p.get("description"), str) else ""
+    return pin_from_page(desc_raw), bool(_MAP_LINK_RE.search(desc_raw) or short_maps_link(desc_raw))
+
+
+def _description(p: dict) -> Optional[str]:
+    """The source's own description when it wrote one; else the ad's body from raw_text (ad_texts)."""
+    return _redact(p.get("description")) or p.get("_ad_text") or None
+
+
 def fetch_all(s: cc.Session, jwt: str, limit: Optional[int] = None) -> list[dict]:
     out: list[dict] = []
     offset = 0
@@ -952,6 +1053,16 @@ def main() -> int:
         if p.get("id") in rate_ids:
             p["_rate_stated"] = True
     print(f"  prices the ad's own text states per metre (server-side match): {len(rate_ids)}")
+    blank = [int(p["id"]) for p in raw if p.get("id") is not None and not _redact(p.get("description"))]
+    pins: dict[int, tuple] = {}
+    texts = ad_texts(s, jwt, blank, pins)
+    for p in raw:
+        if p.get("id") in texts:
+            p["_ad_text"] = texts[p["id"]]
+        if p.get("id") in pins:
+            p["_ad_pin"] = pins[p["id"]]
+    print(f"  map links in ad bodies: {sum(1 for v in pins.values() if v[1])}, pins read {sum(1 for v in pins.values() if v[0])}")
+    print(f"  ad text from the ad body for rows with no description: {len(texts)}/{len(blank)}")
 
     res: list[dict] = []
     com: list[dict] = []

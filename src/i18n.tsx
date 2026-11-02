@@ -35,6 +35,23 @@ function hasAuthSession(): boolean {
   return false;
 }
 
+/** A sign-in is stored on this device (web) — the session may still be loading, but this is NOT a guest. */
+export const hasStoredAuthSession = hasAuthSession;
+
+// WHAT HAPPENS TO THE INTERFACE LANGUAGE WHEN SIGN-IN SETTLES (owner 2026-10-27: «I kept English, when I refresh it
+// goes back to Arabic»). The refresh bug: session restore gives up after 6 s on a slow connection, the app read that
+// as «guest», ERASED the saved language and switched to Arabic — and the real session arriving a moment later found
+// nothing left to restore. Now:
+//   signed in            → restore: the ACCOUNT's language first (same on every device), else this device's;
+//   not yet, but a sign-in is stored on this device → wait (never erase, never force Arabic);
+//   genuinely signed out (nothing stored) → guest: Arabic-first, nothing remembered.
+// Executed by scripts/verify-signed-in-language-is-kept.ts.
+export type LanguageOnAuth = { action: 'restore'; locale: Locale | null } | { action: 'wait' } | { action: 'guest' };
+export function languageOnAuth(s: { signedIn: boolean; storedSession: boolean; accountLocale?: Locale | null; deviceLocale?: Locale | null }): LanguageOnAuth {
+  if (s.signedIn) return { action: 'restore', locale: s.accountLocale ?? s.deviceLocale ?? null };
+  return s.storedSession ? { action: 'wait' } : { action: 'guest' };
+}
+
 // Read the saved language SYNCHRONOUSLY at module load (web) so the very first paint is already in
 // the right language + direction. A SIGNED-IN user's saved language loads with no flash; a GUEST is
 // ALWAYS Arabic-first (we ignore any leftover saved value), and a refresh/return keeps them Arabic.
@@ -81,7 +98,37 @@ export function persistLocale(l: Locale): void {
   }
 }
 
-let _locale: Locale = readSavedLocale();
+// THE LANGUAGE SURVIVES THE SIGN-IN ROUND TRIP (2026-10-24: a visitor who picked English and signed in
+// with Google or Apple landed back in Arabic). The OAuth redirect leaves the page and comes back on a
+// FRESH load, where a guest's choice is never read (guests start in Arabic — pinned by
+// scripts/verify-chat-language-is-not-interface-language.ts). So the choice is handed across that ONE
+// trip: written just before the redirect (lib/auth.ts signInWithProvider), read once by the /auth
+// landing and removed there, and only while fresh. Once signed in, the store saves it like any
+// signed-in choice. Any other page ignores it, so an abandoned sign-in never turns a guest's next
+// visit English. Guard: scripts/verify-language-survives-sign-in.ts
+export const SIGN_IN_LOCALE_KEY = 'ezhalah:signInLocale:v1';
+export const SIGN_IN_LOCALE_MAX_MS = 10 * 60 * 1000;
+type KeyStore = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
+/** The language to start the /auth landing in, taken (read + removed) from the store; null anywhere else. */
+export function takeSignInLocale(store: KeyStore | null | undefined, path: string, now: number): Locale | null {
+  if (!store || !/^\/auth(\.html)?\/?$/.test(path)) return null;
+  try {
+    const raw = store.getItem(SIGN_IN_LOCALE_KEY);
+    store.removeItem(SIGN_IN_LOCALE_KEY);
+    const v = JSON.parse(raw ?? 'null');
+    const age = now - Number(v?.at);
+    return (v?.locale === 'en' || v?.locale === 'ar') && age >= 0 && age < SIGN_IN_LOCALE_MAX_MS ? v.locale : null;
+  } catch { return null; }
+}
+/** Called right before an OAuth redirect: carry the language on screen to the /auth landing. */
+export function rememberLocaleForSignIn(): void {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  try { window.localStorage?.setItem(SIGN_IN_LOCALE_KEY, JSON.stringify({ locale: _locale, at: Date.now() })); } catch {}
+}
+const signInLandingLocale = (): Locale | null =>
+  Platform.OS === 'web' && typeof window !== 'undefined' ? takeSignInLocale(window.localStorage, window.location?.pathname ?? '', Date.now()) : null;
+
+let _locale: Locale = signInLandingLocale() ?? readSavedLocale();
 let _localeRevision = 0;
 export const getLocaleRevision = (): number => _localeRevision;
 export const getLocale = (): Locale => _locale;
@@ -104,6 +151,10 @@ const AR: Record<string, string> = {
   // Top-nav ModeSwitch pill's AI tab — deliberately shorter than the full 'Ezhalah AI Agent' badge
   // title so the two-tab control stays compact. (top-nav redesign, 2026-07-24.)
   'Smart Assistant': 'الوسيط الذكي',
+  // Top-nav ModeSwitch pill's third tab (owner 2026-10-30): the Map way to search.
+  'Map': 'خريطة',
+  'The map could not load': 'تعذّر تحميل الخريطة',
+  'Whole Kingdom': 'كل المملكة',
 
   // Home
   'Find your place': 'اعثر على مكانك',
@@ -135,6 +186,14 @@ const AR: Record<string, string> = {
   'Monthly Rent Budget': 'الميزانية الشهرية للإيجار',
   'Purchase Budget': 'ميزانية الشراء',
   'Monthly': 'شهري',
+  // The rent-period button (owner 2026-10-25): «شهري» became «إقامات قصيرة» — Gathern + Aqar Monthly only, stays
+  // shorter than a year. Every other site's per-month figure is a YEARLY listing at ×12 (src/lib/rentPool.ts).
+  'Short stays': 'إقامات قصيرة',
+  'Short stays or yearly': 'إقامات قصيرة وسنوي',
+  'Short stays: stays shorter than a year, priced by length of stay.': 'إقامات قصيرة: إقامات أقل من سنة، وأسعارها حسب مدة الإقامة.',
+  'Advertised price {a}/month': 'السعر المعلن {a} شهرياً',
+  // The computed monthly under a yearly-quoted price (owner 2026-10-26): ÷12, marked ≈ like every derived figure.
+  '≈ {a}/month': '≈ {a} شهرياً',
   'Yearly': 'سنوي',
   'Both': 'كلاهما',
   // Tiny info note shown under the Monthly/Yearly toggle so the user knows what each period means.
@@ -144,7 +203,7 @@ const AR: Record<string, string> = {
   'Annual: 12-month lease, price/year.': 'سنوي: السعر المعروض سنوي.',
   // Owner 2026-08-18: the Monthly note says ONLY that prices are displayed per month — never any
   // claim about contract length (the old «من شهر إلى 11 شهر» wording is banned; a guard pins it out).
-  'Monthly: the displayed price is the monthly price.': 'الأسعار معروضة بالشهر',
+  'Monthly: includes short stays, priced by length of stay.': 'شهري: يشمل الإقامات القصيرة، وأسعارها حسب مدة الإقامة.',
   'Yearly: the displayed price is the yearly price.': 'سنوي: السعر المعروض سنوي.',
   // Owner feedback (2026-08-22): trimmed — the old wording ("Both: we show monthly and yearly
   // together") re-explained what selecting both buttons already makes obvious. Kept only the one
@@ -228,13 +287,51 @@ const AR: Record<string, string> = {
   // Deals + verbs
   'Rent': 'إيجار',
   'Buy': 'شراء',
+  'All': 'الكل',
+  'Draw': 'رسم',
+  'Draw an area': 'ارسم منطقة',
+  'Apply': 'تطبيق',
+  'Drag on the map to draw an area': 'اسحب على الخريطة لرسم منطقة',
+  'Remove boundary': 'إزالة الحدود',
+  // Map search row tags (owner 2026-11-01: tell a city from a district from a landmark).
+  'Mosque': 'مسجد',
+  'Mall': 'مول',
+  'Hospital': 'مستشفى',
+  'Airport': 'مطار',
+  'University': 'جامعة',
+  'Park': 'حديقة',
+  'Station': 'محطة',
+  'Place': 'مكان',
+  'Full screen': 'ملء الشاشة',
+  'Route': 'مسار',
+  'Swap': 'تبديل',
+  'Remove route': 'إزالة المسار',
+  'No route found between these two places': 'لم يُعثر على مسار بين المكانين',
+  'Zoom in': 'تكبير',
+  'Zoom out': 'تصغير',
+  'Map layers': 'طبقات الخريطة',
+  'Ground type': 'نوع الأرض',
+  'approximate': 'تقريبي',
+  'Sand': 'رمل',
+  'Rock': 'صخر',
+  'Sabkha': 'سبخة',
+  'Gravel': 'حصى',
+  'Clay': 'طين',
+  'Coming soon': 'قريباً',
+  'Explore': 'استكشاف',
+  'Satellite': 'قمر صناعي',
+  'Quiet': 'هادئ',
+  'Region, city, landmark, district or street': 'منطقة، مدينة، معلم، حي أو شارع',
+  ', ': '، ',
+  'Transaction': 'نوع الصفقة',
   'to rent': 'للإيجار',
   'to buy': 'للبيع',
   // Rent verb with the payment period the user picked (Monthly / Yearly) so the summary sentence
   // reflects the toggle exactly — "أبحث عن شقة للإيجار الشهري في جدة". (owner UI request 2026-07-18.)
-  'to rent monthly': 'للإيجار الشهري',
+  // The «monthly» pool is «إقامات قصيرة» (owner 2026-11-02): the sentence says short stay, never monthly.
+  'for a short stay': 'للإقامة القصيرة',
   'to rent yearly': 'للإيجار السنوي',
-  'to rent monthly or yearly': 'للإيجار الشهري أو السنوي',
+  'for a short stay or yearly rent': 'للإقامة القصيرة أو الإيجار السنوي',
   'to rent or buy': 'للإيجار أو الشراء',
   'Rent or Buy': 'إيجار أو شراء',
   // District, and the "district، city" place phrase used when the user picked a district in the filter.
@@ -399,7 +496,7 @@ const AR: Record<string, string> = {
   '"{city}" isn\'t a city I recognize, I\'ll still search using your other answers.':
     '«{city}» ليست مدينة أعرفها، سأظل أبحث باستخدام إجاباتك الأخرى.',
 
-  // Advanced-filter question engine («خلّنا نحدد الطلب أكثر») — عمر العقار is the first field built on
+  // Advanced-filter question engine («🎯 دقّق مع الذكاء الاصطناعي») — عمر العقار is the first field built on
   // this reusable card; new fields add their own strings here, never touch this block's wording.
   'How old is the property?': 'كم عمر العقار تقريباً؟',
   'New construction': 'جديد',
@@ -440,6 +537,9 @@ const AR: Record<string, string> = {
   '20 m or wider': '٢٠ م فأكثر',
   '25 m or wider': '٢٥ م فأكثر',
   '30 m or wider': '٣٠ م فأكثر',
+  '10 m or wider': '١٠ م فأكثر',
+  '40 m or wider': '٤٠ م فأكثر',
+  '60 m or wider': '٦٠ م فأكثر',
   'Which direction do you prefer?': 'وش الاتجاه اللي تفضله؟',
   'North': 'شمال',
   'South': 'جنوب',
@@ -452,6 +552,16 @@ const AR: Record<string, string> = {
   'Do you prefer listings with installment options?': 'تفضّل عقارات تتيح التقسيط / الدفع لاحقًا؟',
   'Offers installments': 'يقبل التقسيط',
   'What amenities matter to you?': 'وش المميزات المهمة لك؟',
+  // Short stays: the amenities card in two halves (owner 2026-10-31) — the question titles and the
+  // summary-line labels («• الراحة: مصعد»).
+  '🔑 Comfort: what matters to you?': '🔑 الراحة: وش الي يريحك؟',
+  '🏠 Space & safety: what matters to you?': '🏠 المساحة والأمان: وش الي يطمنك؟',
+  '✨ Fun: what matters to you?': '✨ الترفيه: وش الي يسعدك؟',
+  'Comfort': 'الراحة',
+  'Space & safety': 'المساحة والأمان',
+  'Space': 'المساحة',
+  'Fun': 'الترفيه',
+  'Washing machine': 'غسالة ملابس',
   'Do you prefer it furnished?': 'تفضلها مفروشة؟',
   'Unfurnished': 'غير مفروشة',
   'Driver room': 'غرفة سائق',
@@ -464,8 +574,262 @@ const AR: Record<string, string> = {
   'Balcony': 'بلكونة',
   'Laundry room': 'غرفة غسيل',
   'Optical fibers': 'ألياف بصرية',
+  'Majlis room': 'مجلس',
   'Separate electricity meter': 'عداد كهرباء مستقل',
   'Separate water meter': 'عداد ماء مستقل',
+  // Apartments & Co-living group (owner handoff 2026-10-31, built 2026-11-01): the themed card titles, the two
+  // building questions, the facing tip, the chips (src/lib/afChips.ts CHIP_DEFS labelKeys) and the summary-line labels.
+  '🏠 Space: what matters to you?': '🏠 المساحة: وش الي تحتاجه؟',
+  '🛡️ Safety & smart: what matters to you?': '🛡️ الأمان والذكاء: وش الي يطمنك؟',
+  '✨ Building perks: what matters to you?': '✨ مميزات المبنى: وش الي يسعدك؟',
+  '🧱 Build & services: what matters to you?': '🧱 البناء والخدمات: وش الي تبيه؟',
+  '🏡 Extras: what matters to you?': '🏡 إضافات: وش الي تبيه؟',
+  // Villas & Houses cards (owner lists 2026-11-01, built 2026-11-02)
+  '🌳 Outdoors & fun: what matters to you?': '🌳 الخارج والترفيه: وش الي يسعدك؟',
+  '✨ Extras & smart: what matters to you?': '✨ الإضافات والذكاء: وش الي تبيه؟',
+  '🧱 Build, safety & papers: what matters to you?': '🧱 البناء والأمان والأوراق: وش الي تبيه؟',
+  'Outdoors & fun': 'الخارج والترفيه',
+  'Extras & smart': 'الإضافات والذكاء',
+  'Build, safety & papers': 'البناء والأمان والأوراق',
+  "Women's majlis": 'مجلس نساء',
+  'Outdoor kitchen': 'مطبخ خارجي',
+  'Outdoor diwaniya': 'ديوانية خارجية',
+  'Waterfall': 'شلال',
+  'Well': 'بئر',
+  'Garden irrigation': 'نظام ري',
+  'Sports court': 'ملعب رياضي',
+  'Garden & yard': 'حديقة أو حوش',
+  'Jacuzzi & sauna': 'جاكوزي أو ساونا',
+  'Cameras & smart home': 'كاميرات أو منزل ذكي',
+  'Water tank & well': 'خزان ماء أو بئر',
+  'Smart home & entry': 'منزل ذكي أو دخول ذكي',
+  // Countryside, land and commercial cards + chips (owner lists 2026-11-01, built 2026-11-02)
+  'Own meter': 'عداد مستقل',
+  '🏊 Water: what matters to you?': '🏊 الماء: وش الي يسعدك؟',
+  '🎮 Games: what matters to you?': '🎮 الألعاب: وش الي يسليك؟',
+  'Games': 'الألعاب',
+  '🔥 Camp life: what matters to you?': '🔥 أجواء المخيم: وش الي تبيه؟',
+  'Camp life': 'أجواء المخيم',
+  '💧 Water & land: what matters to you?': '💧 الماء والأرض: وش الي تبيه؟',
+  'Water & land': 'الماء والأرض',
+  '📄 Land & papers: what matters to you?': '📄 الأرض والأوراق: وش الي تبيه؟',
+  'Land & papers': 'الأرض والأوراق',
+  '💧 Water & power: what matters to you?': '💧 الماء والكهرباء: وش الي تبيه؟',
+  'Water & power': 'الماء والكهرباء',
+  '🌴 Crops: what matters to you?': '🌴 الزراعة: وش الي تبيه؟',
+  'Crops': 'الزراعة',
+  '🐑 Animals: what matters to you?': '🐑 الحيوانات: وش الي تبيه؟',
+  'Animals': 'الحيوانات',
+  '🏡 Buildings: what matters to you?': '🏡 المباني: وش الي تبيه؟',
+  'Buildings': 'المباني',
+  '📐 Plot: what matters to you?': '📐 الأرض: وش الي تبيه؟',
+  'Plot': 'الأرض',
+  '📄 Papers & deal: what matters to you?': '📄 الأوراق والصفقة: وش الي تبيه؟',
+  'Papers & deal': 'الأوراق والصفقة',
+  '🧱 Land: what matters to you?': '🧱 الأرض: وش الي تبيه؟',
+  'Land': 'الأرض',
+  '📍 Location: what matters to you?': '📍 الموقع: وش الي تبيه؟',
+  'Location': 'الموقع',
+  '🏢 Space: what matters to you?': '🏢 المساحة: وش الي تحتاجه؟',
+  '⚙️ Services: what matters to you?': '⚙️ الخدمات: وش الي تبيه؟',
+  '📄 Business: what matters to you?': '📄 النشاط: وش الي تبيه؟',
+  'Business': 'النشاط',
+  '🏢 Office kind: what matters to you?': '🏢 نوع المكتب: وش الي تبيه؟',
+  'Office kind': 'نوع المكتب',
+  '🛋️ Ready to work: what matters to you?': '🛋️ جاهز للعمل: وش الي تبيه؟',
+  'Ready to work': 'جاهز للعمل',
+  '⚙️ Building: what matters to you?': '⚙️ المبنى: وش الي تبيه؟',
+  '🚛 Trucks & loading: what matters to you?': '🚛 الشاحنات والتحميل: وش الي تبيه؟',
+  'Trucks & loading': 'الشاحنات والتحميل',
+  '📍 Location & papers: what matters to you?': '📍 الموقع والأوراق: وش الي تبيه؟',
+  'Location & papers': 'الموقع والأوراق',
+  '🏬 Inside the building: what matters to you?': '🏬 وش فيه: وش الي تبيه؟',
+  'Inside the building': 'وش فيه',
+  '💰 Investment: what matters to you?': '💰 الاستثمار: وش الي تبيه؟',
+  'Investment': 'الاستثمار',
+  '🛎️ Hotel: what matters to you?': '🛎️ الفندق: وش الي تبيه؟',
+  '⛽ On site: what matters to you?': '⛽ في المحطة: وش الي تبيه؟',
+  'On site': 'في المحطة',
+  '💰 Deal & location: what matters to you?': '💰 الصفقة والموقع: وش الي تبيه؟',
+  'Deal & location': 'الصفقة والموقع',
+  '🏢 Space & papers: what matters to you?': '🏢 المساحة والأوراق: وش الي تبيه؟',
+  'Space & papers': 'المساحة والأوراق',
+  '⚙️ Services & business: what matters to you?': '⚙️ الخدمات والنشاط: وش الي تبيه؟',
+  'Services & business': 'الخدمات والنشاط',
+  '🔧 Space & services: what matters to you?': '🔧 المساحة والخدمات: وش الي تبيه؟',
+  'Space & services': 'المساحة والخدمات',
+  '📍 Location & business: what matters to you?': '📍 الموقع والنشاط: وش الي تبيه؟',
+  'Location & business': 'الموقع والنشاط',
+  '🏗️ Building & papers: what matters to you?': '🏗️ المبنى والأوراق: وش الي تبيه؟',
+  'Building & papers': 'المبنى والأوراق',
+  '🏭 Building: what matters to you?': '🏭 المبنى: وش الي تبيه؟',
+  'Factory building': 'مبنى المصنع',
+  '📍 Location & safety: what matters to you?': '📍 الموقع والأمان: وش الي تبيه؟',
+  'Location & safety': 'الموقع والأمان',
+  '📄 Papers: what matters to you?': '📄 الأوراق: وش الي تبيه؟',
+  'Papers': 'الأوراق',
+  'Monthly / split payments': 'دفعات / دفع شهري',
+  'Heated pool': 'مسبح مدفأ',
+  'Kids\' pool': 'مسبح أطفال',
+  'Water slide': 'زحليقة',
+  'Sea view': 'إطلالة بحرية',
+  'Football pitch': 'ملعب كرة قدم',
+  'PlayStation': 'بلايستيشن',
+  'Inflatable games & trampoline': 'نطيطة وألعاب هوائية',
+  'Sound system': 'نظام صوتي',
+  'Fire pit': 'موقد نار',
+  'Bait shaar': 'بيت شعر',
+  'Mandi pit': 'حفرة مندي',
+  'Outdoor seating': 'جلسة خارجية',
+  'Tent': 'خيمة',
+  'Desert & dunes view': 'إطلالة على الرمال',
+  'Women\'s section': 'قسم نساء',
+  'Two sections': 'قسمين',
+  'Events hall': 'صالة مناسبات',
+  'Privacy': 'ساتر وخصوصية',
+  'Trees': 'أشجار',
+  'Youth': 'للشباب',
+  'Events & parties': 'للمناسبات',
+  'Newlyweds': 'للعرسان',
+  'Quad bikes': 'دبابات',
+  'Horses & stable': 'خيل واسطبل',
+  'Camels': 'إبل',
+  'Toilets on site': 'دورات مياه',
+  'Lighting': 'إنارة',
+  'Artesian well': 'بئر ارتوازي',
+  'Solar power': 'طاقة شمسية',
+  'Palms': 'نخيل',
+  'Fruit trees': 'أشجار مثمرة',
+  'Fodder & crops': 'أعلاف ومحاصيل',
+  'Greenhouses': 'بيوت محمية',
+  'Producing farm': 'مزرعة منتجة',
+  'Animal pens': 'حظائر',
+  'Poultry': 'دواجن',
+  'House / villa': 'بيت أو فيلا',
+  'Rest house': 'استراحة',
+  'Workers\' housing': 'سكن عمال',
+  'Fence': 'مسورة',
+  'On a main road': 'على طريق رئيسي',
+  'Good soil': 'تربة صالحة للزراعة',
+  'Corner plot': 'زاوية',
+  '3+ streets': 'ثلاث شوارع فأكثر',
+  'Ready to build': 'جاهزة للبناء',
+  'Raised plot': 'أرض مرتفعة',
+  'Residential + commercial': 'سكني تجاري',
+  'All services': 'جميع الخدمات',
+  'Asphalt': 'مسفلتة',
+  'Street lights & pavement': 'إنارة وأرصفة',
+  'Approved plan': 'مخطط معتمد',
+  'Direct from owner': 'من المالك مباشرة',
+  'Inside a project': 'داخل مخطط',
+  'Floors allowed stated': 'نظام البناء',
+  'Grant land': 'أرض منحة',
+  'No services yet': 'بدون خدمات حالياً',
+  'Camels & horses': 'إبل وخيل',
+  'Palm & fruit trees': 'نخيل وأشجار مثمرة',
+  'Mezzanine': 'ميزانين',
+  'Pantry / kitchen': 'بوفيه / مطبخ تحضيري',
+  'Glass front': 'واجهة زجاجية',
+  'Frontage': 'واجهة',
+  'Inside a mall / center': 'داخل مول أو مجمع',
+  'In a tower': 'داخل برج',
+  'License mentioned': 'رخصة / سجل تجاري',
+  'Food & café allowed': 'يصلح مطعم أو كافيه',
+  'Takeover': 'تقبيل',
+  'New / first tenant': 'جديد / أول مستأجر',
+  'Internet': 'إنترنت',
+  'Civil-defense ready': 'دفاع مدني',
+  'High ceiling': 'سقف عالي',
+  'Hangar': 'هنجر',
+  'Insulated': 'ساندوتش بانل',
+  'Cold storage': 'تبريد',
+  'Concrete / epoxy floor': 'أرضية خرسانة أو إيبوكسي',
+  'Loading dock': 'رصيف تحميل',
+  'Big gate': 'بوابة كبيرة',
+  'Truck access': 'دخول الشاحنات',
+  'Crane': 'رافعة',
+  'Racks': 'أرفف',
+  'Office inside': 'مكتب داخلي',
+  'Heavy / 3-phase power': 'قوة كهربائية / 3 فاز',
+  'In an industrial area': 'في المنطقة الصناعية',
+  'Car-service ready': 'يصلح لخدمات السيارات',
+  'Meeting room': 'قاعة اجتماعات',
+  'Reception': 'استقبال',
+  'Co-working space': 'مساحة عمل مشتركة',
+  'Private / admin office': 'مكتب خاص',
+  'Central AC': 'تكييف مركزي',
+  'Offices': 'مكاتب',
+  'Staff housing': 'سكن موظفين',
+  'Restaurant / café': 'مطعم / كافيه',
+  'Car wash': 'مغسلة سيارات',
+  'Market': 'بقالة / ماركت',
+  'Earning income / rented': 'مؤجر / دخل',
+  'Stars mentioned': 'نجوم',
+  'Rooms & suites listed': 'غرف وأجنحة',
+  'Oil change': 'تغيير زيت',
+  'Pumps listed': 'مضخات',
+  'Building rules stated': 'نظام البناء',
+  'Pool & gym': 'مسبح وصالة رياضية',
+  '👤 Who is it for?': '👤 لمين السكن؟',
+  '🔑 Building features: what matters to you?': '🔑 مميزات العمارة: وش الي تبيه؟',
+  '🧱 Services: what matters to you?': '🧱 الخدمات: وش الي تبيه؟',
+  '🏢 How many apartments?': '🏢 كم عدد الشقق؟',
+  '🏪 Has shops on the ground floor?': '🏪 فيه محلات تجارية بالدور الأرضي؟',
+  '4+ apartments': '٤ شقق فأكثر',
+  '8+ apartments': '٨ شقق فأكثر',
+  '12+ apartments': '١٢ شقة فأكثر',
+  '20+ apartments': '٢٠ شقة فأكثر',
+  'Has shops': 'فيه محلات',
+  '💡 Tip: a north-facing home gets the least direct sun. South gets the most.': '💡 معلومة: الواجهة الشمالية أقل تعرضاً للشمس، والجنوبية الأكثر.',
+  'Private roof': 'سطح خاص',
+  'Two entrances': 'مدخلين',
+  'Annex': 'ملحق',
+  'Yard': 'حوش',
+  'Garage': 'كراج',
+  'Grill': 'مشب',
+  'Storage room': 'غرفة تخزين',
+  'Private water tank': 'خزان ماء خاص',
+  'Warranty': 'ضمانات',
+  'Electronic deed': 'صك إلكتروني',
+  'Basement': 'قبو',
+  'Self check-in': 'دخول ذاتي',
+  'Wi-Fi': 'واي فاي',
+  'Bills included': 'الكهرباء والماء مشمولة',
+  'Jacuzzi': 'جاكوزي',
+  'Smart TV / cinema room': 'شاشة ذكية / سينما',
+  'Billiards table': 'طاولة بلياردو',
+  'Cleaning service': 'خدمة تنظيف',
+  'Soundproof': 'عازل صوت',
+  'Cameras': 'كاميرات مراقبة',
+  'Guard': 'حارس',
+  'Smart entry': 'دخول ذكي',
+  'Smart home': 'منزل ذكي',
+  'Central gas': 'غاز مركزي',
+  'Sauna': 'ساونا',
+  "Kids' play area": 'ألعاب أطفال',
+  'Nursery': 'حضانة',
+  'Free maintenance': 'صيانة مجانية',
+  'Intercom': 'انتركم',
+  'Fire system': 'نظام إطفاء',
+  'EV charger': 'شاحن سيارات كهربائية',
+  'Central vacuum': 'مكنسة مركزية',
+  'Heat & water insulation': 'عزل حراري ومائي',
+  'Dining majlis': 'مقلط',
+  'Own bathroom': 'دورة مياه خاصة',
+  'Fridge': 'ثلاجة',
+  'Whole floor': 'دور كامل',
+  'Singles': 'عزاب',
+  'Families': 'عوائل',
+  'Separate meters': 'عدادات مستقلة',
+  'Safety & smart': 'الأمان والذكاء',
+  'Building perks': 'مميزات المبنى',
+  'Build & services': 'البناء والخدمات',
+  'Extras': 'الإضافات',
+  'Who it is for': 'لمين السكن',
+  'Building features': 'مميزات العمارة',
+  'Services': 'الخدمات',
+  'Apartments': 'الشقق',
+  'Shops': 'المحلات',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
   // The Advanced Filter's SCOPE steps (owner 2026-08-23) — asked before any certified question when
   // the user has chosen only a category (or only a group). The option LABELS reuse the group/type
@@ -478,6 +842,8 @@ const AR: Record<string, string> = {
   '2+': '+٢',
   '3+': '+٣',
   '4+': '+٤',
+  '5+': '+٥', // villa ladders (owner 2026-11-01)
+  '6+': '+٦',
   'Show {count} apartments': 'عرض {count} شقة',
   'No preference': 'لا يهمني',
   // Advanced Filter Design Contract (2026-07-20): generic footer + subtitle shared by every question.
@@ -726,7 +1092,6 @@ const AR: Record<string, string> = {
   'Annual Equivalent': 'المعادل السنوي',
   'Calculated from price per m² × area — not published by the source': 'محتسب من سعر المتر × المساحة — غير معلن من المصدر',
   'Price Per m²': 'سعر المتر',
-  'Tap to see prices by length of stay': 'اضغط للاطلاع على الأسعار حسب مدة الإقامة', // Gathern + Aqar Monthly, owner 2026-10-02
   // Unit suffix for the source-published «سعر المتر» rate. It is printed NEXT TO the number so the
   // card reads «سعر المتر 750 ريال/م²» — a per-square-metre RATE, never mistakable for a total.
   // (owner 2026-08-09: "display it clearly as ريال/م²".)
@@ -799,7 +1164,7 @@ const AR: Record<string, string> = {
     'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
   'I showed you the first {n} listings. For a new search, open the menu and choose Search.':
     'عرضت لك أول {n} إعلانات. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
-  // …and the narrow-only pair: «عرض المزيد» is not rendered but «خلّنا نحدد الطلب أكثر» is, so the
+  // …and the narrow-only pair: «عرض المزيد» is not rendered but «🎯 دقّق مع الذكاء الاصطناعي» is, so the
   // sentence invites exactly the one button that exists.
   'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أساعدك توصل لنتائج أدق؟',
   'I showed you the first {n} listings. Want help finding more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أساعدك توصل لنتائج أدق؟',
@@ -808,10 +1173,10 @@ const AR: Record<string, string> = {
   'We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها. تبي أساعدك نلقى نتائج أدق؟',
   'We found {total} listings matching your search, and showed you {shown}.': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها.',
   'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
-  'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
+  '🎯 Refine with AI': '🎯 دقّق مع الذكاء الاصطناعي',
   // COMPLETED-ROUND RECEIPT (owner 2026-08-24) — replaces the action buttons on the results turn a
   // finished Advanced Filter round was opened from. A record of what happened, never a control.
-  'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة',
+  'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء الاصطناعي',
   // Read Aloud closing note (owner request, 2026-08-23 — "read the note... and say the button
   // also"): spoken ONLY when the matching buttons are actually on screen (agent.tsx gates this the
   // same way), naming the exact same button label(s) so it can never mention an action that isn't
@@ -972,6 +1337,7 @@ const AR: Record<string, string> = {
   // In-app ad viewer (owner 2026-10-03)
   'Open in a new window': 'فتح في نافذة جديدة',
   'Taking a while?': 'يأخذ وقتًا؟',
+  'This site is slow to open': 'هذا الموقع بطيء في الفتح',
   'Oldest tab closed': 'أُغلق أقدم تبويب',
   'New tab': 'تبويب جديد',
   'Hide tabs': 'إخفاء التبويبات',
@@ -1004,6 +1370,7 @@ const AR: Record<string, string> = {
   'To confirm availability and details': 'للتأكد من التوفر والتفاصيل',
   'See {n} more':                     'عرض {n} أخرى',
   'Hosted on {name}':                  'مستضاف على {name}',
+  'Discount {pct}%':                   'خصم {pct}٪',
   // Source BRAND names — must localize in Arabic too (rule: Arabic UI = everything Arabic except
   // numbers/domains). The card translates the source name through t() before display, so an Arabic
   // card reads "مستضاف على وصلت" not "Hosted on Wasalt". Applies to every source. ('AQAR' is already
@@ -1275,6 +1642,7 @@ const AR: Record<string, string> = {
   'Photo {n} of {total}': 'الصورة {n} من {total}',
   // The in-app ad page (components/ListingPreview.tsx, owner 2026-10-10).
   'Next photo': 'الصورة التالية',
+  'Photos are not available from {site} right now': 'الصور غير متاحة حالياً من {site}',
   '{n} rooms': '{n} غرف',
   '{n} bathrooms': '{n} دورات',
   'Location as published by {name}': 'الموقع كما نشره {name}',
@@ -1319,6 +1687,13 @@ const AR: Record<string, string> = {
   'Show the similar listings ({n})': 'عرض الإعلانات المشابهة ({n})',
   'Similar listings in the district': 'إعلانات مشابهة في الحي',
   '{n} listings': '{n} إعلاناً',
+  '{n} listings at this spot': '{n} إعلانات في هذا الموقع',
+  'Show listings': 'عرض الإعلانات',
+  'Show {n} listings': 'عرض {n} إعلان',
+  'SAR': 'ر.س',
+  'Listing': 'الإعلان',
+  'Could not load this listing. Try again.': 'تعذّر تحميل الإعلان. حاول مرة أخرى.',
+  'Some listings could not be loaded.': 'تعذّر تحميل بعض الإعلانات.',
   '{n} bedrooms': '{n} غرف',
   'Same district and type, area within 20% of this ad, same bedrooms when stated. Each property once, nearest first, prices as published.': 'نفس الحي والنوع، والمساحة ضمن 20% من هذا الإعلان، ونفس عدد الغرف عند ذكره. كل عقار مرة واحدة، الأقرب أولاً، والأسعار كما نُشرت.',
   'Tap «Show the similar listings» under our half to see the ads closest to this one (same district and type, area within 20%, same bedrooms when stated), each on its own website at its published price.': 'اضغط «عرض الإعلانات المشابهة» تحت جانبنا لترى أقرب الإعلانات لهذا الإعلان (نفس الحي والنوع، والمساحة ضمن 20%، ونفس عدد الغرف عند ذكره)، كلٌّ في موقعه الأصلي وبسعره المنشور.',
@@ -1382,6 +1757,8 @@ const AR: Record<string, string> = {
   // Sign-in popup heading + support line (owner 2026-09-03: simple, natural Arabic).
   'Sign in or create your free account': 'سجّل دخولك أو أنشئ حسابك مجاناً',
   'Sign in to unlock more of Ezhalah.': 'احفظ بحثك واحصل على المزيد',
+  'Sign in and it opens right away': 'سجّل دخولك وتنفتح لك فوراً',
+  'Sign up free and start searching': 'سجّل مجاناً وابدأ البحث',
   'More than 25 Saudi property platforms — in one place.': 'أكثر من ٢٥ منصة عقارية سعودية — في مكان واحد.',
   'Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.':
     'إزهله تجمع العقارات المعروضة من مختلف منصات العقار السعودية في مكان واحد.',
@@ -1430,6 +1807,17 @@ const AR: Record<string, string> = {
   // Settings
   'Account': 'الحساب',
   'Sign out': 'تسجيل الخروج',
+  'Add your name': 'أضف اسمك',
+  // The temporary name of an account with none (Apple sign-up that pressed «تخطي», owner 2026-10-26).
+  'Ezhalah Guest': 'ضيف إزهله',
+  'What should we call you?': 'وش نناديك؟',
+  'Later': 'لاحقاً',
+  'Type your name': 'اكتب اسمك',
+  "We'll greet you by name and share a property fact every day": 'نرحّب فيك باسمك، ونعطيك معلومة عقارية كل يوم',
+  'In English:': 'بالإنجليزي:',
+  'In Arabic:': 'بالعربي:',
+  "We'll write it in English for you": 'نكتب اسمك بالإنجليزي تلقائياً',
+  "We'll write it in Arabic for you": 'نكتب اسمك بالعربي تلقائياً',
   'Save searches and continue beyond your free search': 'احفظ عمليات بحثك وتابع بعد بحثك المجاني',
   'Language': 'اللغة',
   'How Ezhalah works': 'كيف تعمل إزهله',
@@ -1452,6 +1840,7 @@ const AR: Record<string, string> = {
   // «تواصل مع الدعم» in-app form (owner 2026-09-02). Saudi-natural, calm, no exclamation marks.
   'Subject': 'الموضوع',
   'Message': 'الرسالة',
+  'Your signed-in email': 'بريد حسابك',
   'Your email': 'بريدك الإلكتروني',
   'What is this about?': 'وش موضوع رسالتك؟',
   'Tell us what happened.': 'اكتب لنا التفاصيل.',
@@ -1472,6 +1861,14 @@ const AR: Record<string, string> = {
   'Privacy Policy': 'سياسة الخصوصية',
   // «الشروط والخصوصية» reader (owner 2026-09-03): the account-menu row + its two tabs.
   'Terms & Privacy': 'الشروط والخصوصية',
+  // The Advanced Filter card's note and its reader (owner 2026-11-01). No emoji.
+  "Counts come from the ads' own words": 'الأرقام من كلام الإعلانات نفسها',
+  'Skip and you get more questions and options': 'تخطى وبنسألك أسئلة وخيارات أكثر',
+  'Ezhalah does not guarantee the payment method or the provider. Confirm with the lister directly.': 'إزهله لا تضمن طريقة الدفع ولا مزود التقسيط. تأكد من المعلن مباشرة.',
+  'How it works?': 'كيف يشتغل؟',
+  'How Refine with AI works': 'كيف يشتغل دقّق مع الذكاء الاصطناعي؟',
+  'Please turn off your VPN': 'فضلاً أوقف الـ VPN',
+  'Ezhalah is not available over VPN, Tor or server networks. Turn off your VPN and try again.': 'إزهله غير متاح عبر شبكات VPN أو Tor أو الخوادم. أوقف الـ VPN وحاول مرة ثانية.',
   'Terms of Use': 'شروط الاستخدام',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',
 
@@ -1532,6 +1929,7 @@ const AR: Record<string, string> = {
 
   // Settings (account)
   'Display Name': 'الاسم المعروض',
+  'Tap here to change your name': 'اضغط هنا لتغيير اسمك',
   'Edit': 'تعديل',
   'Save': 'حفظ',
   'Apple Account': 'حساب Apple',
@@ -1734,6 +2132,61 @@ const EN: Record<string, string> = {
   'Any count': 'Any', // «أي عدد»
   'SAR currency': 'SAR', // «ريال»
   'ads': 'listings', // «إعلان», after a count
+  // Source-published Arabic deed/licence labels and closed values (owner 2026-10-24: the English card showed Arabic labels).
+  'المنفعة وثيقة نوع / الملكية وثيقة نوع': 'Ownership / usufruct document type',
+  'مصدر ترخيص الاعلان': 'Ad license source',
+  'تاريخ ترخيص الاعلان': 'Ad license date',
+  'تاريخ انتهاء الصلاحية': 'Expiry date',
+  'قنوات العقار': 'Advertising channels',
+  'رقم البناية': 'Building number',
+  'الإلتزامات على العقار': 'Obligations on the property',
+  'الضمانات ومدتها': 'Guarantees and their term',
+  'سعر بيع المتر': 'Price per meter',
+  'اجمالي سعر بيع الارض': 'Total land sale price',
+  'اجمالي الايجار السنوي للأرض': 'Total annual land rent',
+  'مطابقة كود البناء السعودي': 'Complies with the Saudi Building Code',
+  'مفروشة': 'Furnished',
+  'وجود قيد ؟': 'Any restriction?',
+  'وجود رهن ؟': 'Any mortgage?',
+  'بركة سباحة': 'Swimming pool',
+  'عدد البلوكات': 'Number of blocks',
+  'متوفر': 'Available',
+  'صك إلكتروني': 'Electronic deed',
+  'صك السجل العقاري': 'Real estate registry deed',
+  'عقد ايجار الكتروني': 'Electronic lease contract',
+  'لأيوجد': 'None',
+  'لاتوجد': 'None',
+  'مرهون': 'Mortgaged',
+  'رهن': 'Mortgage',
+  'منصة مرخصة': 'Licensed platform',
+  'منصات التواصل الإجتماعي': 'Social media',
+  'الإذاعة': 'Radio',
+  'أخرى': 'Other',
+  'قطعة': 'Plot',
+  'شارع': 'Street',
+  'ارتداد': 'Setback',
+  'جزء من': 'Part of',
+  'إضاءة إضافية': 'Extra lighting',
+  'بروجكتر': 'Projector',
+  'تلفزيون': 'TV',
+  'صالة طعام': 'Dining area',
+  'قسمين': 'Two sections',
+  'دخول ذاتي': 'Self check-in',
+  'ماستر': 'Master bedroom',
+  'هاتف': 'Phone',
+  'ألياف ضوئية': 'Fiber optic',
+  'نوع الحد الشمالي': 'North boundary type',
+  'وصف الحد الشمالي': 'North boundary description',
+  'طول الحد الشمالي': 'North boundary length',
+  'نوع الحد الجنوبي': 'South boundary type',
+  'وصف الحد الجنوبي': 'South boundary description',
+  'طول الحد الجنوبي': 'South boundary length',
+  'نوع الحد الشرقي': 'East boundary type',
+  'وصف الحد الشرقي': 'East boundary description',
+  'طول الحد الشرقي': 'East boundary length',
+  'نوع الحد الغربي': 'West boundary type',
+  'وصف الحد الغربي': 'West boundary description',
+  'طول الحد الغربي': 'West boundary length',
 };
 
 // Pure translate for an explicit locale — no dependence on module state. The React provider binds

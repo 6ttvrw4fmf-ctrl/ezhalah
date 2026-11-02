@@ -24,6 +24,17 @@ it and then do the four steps, or say plainly that you have not. Back-end-only w
 column, a sync) is not exempt: it is live when its effect shows on a real card. How to drive the
 browser from an agent session: `docs/ops/VERIFYING_PRODUCTION.md`.
 
+# ALWAYS FAST (owner, 2026-10-27 — permanent)
+
+**In the owner's words: «always keep it fast».** Measured that day on ezhalah.com: the home page downloaded 13.7 MB of
+logos (stored at up to 1,417 px for ~96×48 px frames) and a 1,208 KB (brotli) entry bundle carrying the unused native Sentry
+SDK. Both were cut (logos → 1.7 MB, bundle → ~972 KB) and are now guarded on every PR:
+
+- **Logos:** each ≤ 60 KB, pack ≤ 2.5 MB — `scripts/verify-logo-weight-budget.ts`. Add a logo shrunk (≤ 320 px, palette PNG with alpha).
+- **First download:** web entry ≤ 1,100 KB brotli — `scripts/web-bundle-budget.mjs`, run by `web-runtime-smoke.yml` after the build.
+  A new heavy library loads LATER (lazy) or not at all; raising the budget is a reviewed decision, never a way to go green.
+- **Web-only bundle hygiene:** `metro.config.js` keeps native-only packages out of the web build (`verify-web-bundle-skips-native-sentry.ts`).
+
 # OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN (2026-10-09 — permanent)
 
 Production has no separate test database: every live check, sweep, smoke and agent browser runs on the
@@ -50,23 +61,42 @@ and on PRs with `count=null`.
 
 English user message → English reply. Arabic → Arabic. Mixed Arabic/English → the language with more words, never more characters; numerals and emoji do not count as words. A tie retains established conversation language; a letterless follow-up inherits the most recent language-bearing turn, falling back to the UI language only without one. Typed messages stay verbatim.
 
-The language button changes only the UI, settings and displayed account name. Existing chat replies, summaries and closing notes retain their own language; switching never translates history, reruns a search or adds paid translation calls. Save a signed-in user's UI language choice on the device and restore it on refresh/return. Guest fresh loads stay Arabic-first. Canonical detail: `docs/ARCHITECTURE.md` i18n section. Guard: `scripts/verify-chat-language-is-not-interface-language.ts`.
+The language button changes only the UI, settings and displayed account name. Existing chat replies, summaries and closing notes retain their own language; switching never translates history, reruns a search or adds paid translation calls. Save a signed-in user's UI language choice on the device and restore it on refresh/return. **Signed-in choices follow the ACCOUNT (owner 2026-10-27: «the phone and laptop same account … same things»):** the language is also written to `user_metadata.ui_locale` and the account's value wins on every device; a slow sign-in on refresh is never read as a guest, so nothing a signed-in user set is erased (`languageOnAuth` in src/i18n.tsx, guard `scripts/verify-signed-in-language-is-kept.ts`). New signed-in preferences follow the same rule: saved to the account, restored everywhere. Guest fresh loads stay Arabic-first. Canonical detail: `docs/ARCHITECTURE.md` i18n section. Guard: `scripts/verify-chat-language-is-not-interface-language.ts`.
 
-# GATHERN + AQAR MONTHLY SHOW NO PRICE — ONLY THE STAY-LENGTH NOTE (owner, 2026-10-02 — permanent)
+# GATHERN + AQAR MONTHLY SHOW NO PRICE LINE AT ALL (owner, 2026-10-02; note removed 2026-10-26 — permanent)
 
-**Every Gathern and Aqar Monthly listing, today's and every new one we ingest, shows
-«اضغط للاطلاع على الأسعار حسب مدة الإقامة» where the price would be. Never a price.** Their stays are
-priced by length (the guest picks the dates on the platform), so one monthly figure misstates them.
-They stay under «شهري».
+**Every Gathern and Aqar Monthly listing, today's and every new one we ingest, shows NOTHING where the
+price would be — no figure, and since 2026-10-26 no note either («remove the إقامات قصيرة price, no need
+for it»).** Their stays are priced by length (the guest picks the dates on the platform), so one monthly
+figure misstates them. They are the whole of the «إقامات قصيرة» pool (owner 2026-10-25).
 
-- Render every price through `listingPrice()` in `src/lib/listingDisplay.ts` (card, Read Aloud, the
-  agent's card summary). Never print `listing.price` raw for these sources. Their details panel shows
-  no discount / pre-discount / nightly rows.
+- Render every price through `listingPrice()` in `src/lib/listingDisplay.ts` (card, ad page, Read
+  Aloud, the agent's card summary); it returns `''` for these sources and every surface prints nothing.
+  Never print `listing.price` raw for these sources. Their details panel shows no discount /
+  pre-discount / nightly rows.
+- Every OTHER yearly rent card carries a monthly line under the yearly price (owner 2026-10-26):
+  «السعر المعلن 3,000 شهرياً» when the site quoted per month, «≈ 3,000 شهرياً» (÷12) when it quoted per
+  year — `monthlyLineText()` in the same file.
 - Display only. Scrapers keep storing the source's price (PRICE = SOURCE). Never NULL it: a NULL
   price turns the row into «السعر عند الطلب», which is found under every rent period, not just «شهري».
 - A new stay-length (nightly / calendar-booked) platform joins `isStayLengthPriced()` only with the
   owner's approval.
 - Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
+
+# RENT POOLS AND THE CHEAP-«YEARLY» RULE (owner, 2026-10-25/26 — permanent; full text `docs/ARCHITECTURE.md` §20)
+
+**«إقامات قصيرة» (the old «شهري» pool) is Gathern + Aqar Monthly ONLY. Every other site's rent listing is
+YEARLY: a per-month figure pools under «سنوي» at ×12 and the card keeps the site's word — «السعر المعلن
+3,000 شهرياً». A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
+Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom, Commercial Building) is a
+per-month price and is SERVED ×12; rooms, land, rest houses, chalets, camps and farms are out.** The
+SOURCE TABLES ARE UNTOUCHED (PRICE = SOURCE, PERIOD = SOURCE still hold there) — the index serves through
+`rent_pool_ar()` / `rent_price_annual_ar()` and the card through `src/lib/rentPool.ts`. Never "fix" a
+scraper to ×12 a cheap yearly figure (that double-applies the rule), never add a third platform to the
+short-stays pool, never clear `mon_detect_short_stays_pool_drift` / `mon_detect_cheap_yearly_rent_served`
+by widening a pool, raising the threshold or shrinking the type list. Off switches:
+`ops_feature_flags.short_stays_pool`, `ops_feature_flags.cheap_yearly_is_monthly`. Guards:
+`verify-short-stays-pool.ts`, `verify-cheap-yearly-is-monthly.ts`.
 
 # Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
 
@@ -490,6 +520,12 @@ Two rules that exist specifically to stop autonomy becoming recklessness:
 
 # Production target (P0, non-negotiable — 2026-07-21)
 
+**UPDATED 2026-10-26 (owner): the production address is now https://ezhalah.com — the final domain.** The same
+Vercel project `ezhalah-app` serves it; `ezhalah-app.vercel.app` forwards every page to ezhalah.com (vercel.json,
+except `/sb/` and `/api/` so open tabs keep working), and `DTG_CANONICAL_URL` (scripts/deploy-target-guard.sh)
+is ezhalah.com, so every deploy proves ezhalah.com serves the new bundle. Everything below still applies with
+ezhalah.com in place of the old URL; `www` forwards to the apex.
+
 **The production frontend lives at ONE URL only: `https://ezhalah-app.vercel.app`.** When the owner
 says "deploy" / "test deploy" / "push it live," it means THIS URL — never a preview URL, never a
 different Vercel project, never a different alias. This applies to every path that could put the
@@ -639,6 +675,21 @@ named `<that timestamp>_<a name>.sql` (or recover it later from
 `supabase_migrations.schema_migrations.statements`, which is exact and queryable). Do not leave it
 for the next deploy, the drift sweep, or another session to clean up: the person/session that ran
 `apply_migration` is responsible, immediately.
+
+**The mirror ships in its OWN tiny PR, opened right after the apply — never only inside a feature PR
+(owner, 2026-10-22).** Measured 2026-10-21/22: **77 of 91 frontend deploys (85%) were refused** by the
+drift gate, every sampled one for `missing_in_git`. The files mostly existed — inside large feature PRs
+that wait ~9 minutes per CI round and lose the race to `main` for hours, while the gate correctly blocks
+EVERY session's deploy (the owner's own WhatsApp-card fix sat merged-but-unshipped ~12 h behind one).
+So, the moment `apply_migration` returns:
+1. branch `mirror/<version>` from `origin/main`, add ONLY `supabase/migrations/<version>_<name>.sql`,
+   byte-exact (`ops_migration_sql(<version>)` returns what production executed);
+2. open the PR with **«mirror» in the title** (`--head mirror/<version> --base main`).
+`engineer-automerge.yml` (every 15 min) merges a mirror-only PR through `safe-pr-merge.ts` once every
+required check — including byte-parity against production — is green (owner, 2026-10-19). Your feature
+PR may carry the same file too; identical content does not conflict. GitHub's merge queue (owner,
+2026-10-22) keeps the required checks from restarting every time `main` moves; the three required-check
+workflows run on `merge_group` for that reason.
 
 **Check the SQL's citations BEFORE you apply it, not in CI afterwards.** Write the SQL to a file
 first and run `node --experimental-strip-types scripts/check-migration-before-apply.ts <file.sql>`.

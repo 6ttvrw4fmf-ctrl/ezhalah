@@ -150,3 +150,35 @@ def test_a_control_that_did_not_read_live_says_what_its_page_answered(monkeypatc
     misses = L.control_misses(ctl, verdicts)
     assert len(misses) == 2 and "HTTP 403, 20 bytes" in misses[0] and misses[0].startswith("https://almuteb.sa/property/x/")
     assert L.control_misses(ctl, [L.ALIVE, L.ALIVE]) == []
+
+
+def test_a_void_website_is_read_once_more_at_the_end_of_the_run(monkeypatch, tmp_path):
+    """2026-10-24: 12 websites voided at 09:05 behind a passing wall and read 60/60 live at 11:18.
+    The run now re-reads its void rows once at the end; a row still void says so."""
+    calls = []
+
+    def fake_score(client, p, shown, **k):
+        calls.append(p)
+        first = calls.count(p) == 1
+        if p == "walled" and first:
+            return S.empty_row(k["night"], p, shown, note="void: known-live controls 0/5 alive, nothing decided")
+        if p == "down":
+            return S.empty_row(k["night"], p, shown, note="void: known-live controls 0/5 alive, nothing decided")
+        r = S.empty_row(k["night"], p, shown)
+        r["live"] = 5
+        return r
+    monkeypatch.setattr(S, "sb", lambda: None)
+    monkeypatch.setattr(S, "registered_sites", lambda c: ["ok", "walled", "down"])
+    monkeypatch.setattr(S, "shown_count", lambda c, p: 10)
+    monkeypatch.setattr(S, "score_site", fake_score)
+    written = []
+    monkeypatch.setattr(S, "write_rows", lambda c, rows: written.extend(rows) or "ok")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["x"])
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    S.main()
+    assert calls == ["ok", "walled", "down", "walled", "down"]
+    by = {r["platform"]: r for r in written}
+    assert by["walled"]["live"] == 5 and not by["walled"]["note"]
+    assert by["down"]["note"].startswith("void") and "still void" in by["down"]["note"] and by["ok"]["live"] == 5
+    assert S.retry_void([{"note": "void: x"}, {"note": None}, {"note": "error: y"}]) == [0]

@@ -26,14 +26,17 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import os
 import random
 import re
 import sys
 import time
 from collections import defaultdict
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 
+from scrapers.common import http
 from scrapers.common.cleanup import _probe
 from scrapers.common.db import sb
 from scrapers.common.new_listings_score import (
@@ -42,6 +45,7 @@ from scrapers.common.new_listings_score import (
     empty_row, fold, norm,
 )
 from scrapers.common.source_reread import page_evidence
+from scrapers.common.normalize import amenities_from_text
 
 TABLE = "ops_af_score"
 PAGE = 1000
@@ -68,6 +72,10 @@ CHROME = re.compile(r"^(?:\S+\s){0,3}(?:للايجار|للبيع)$")
 # 37600467768): aqar's 5/10 and tuba's 5/6 findability «misses» were prose («موقف سيارات» in the ad body)
 # against aqar's extended_details.special_parking / flat amenity keys and tuba's `garages` count, which
 # those ads leave unfilled — our NULL is the source's answer, not a trapped value.
+# RULE B (owner 2026-10-25, «We trust the sellers sentence»): these fields are still judged from the page's
+# structured data, but merged with the ad's own QUOTED sentence exactly as the index merges it (rule_b,
+# text_says: the overlay's fact counts only while its quote is still on the page). Prose the overlay did not
+# quote is still never read for them.
 STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     "aqar": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
              "private_entrance", "furnished"),
@@ -97,6 +105,10 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # _FEATURE_COLS). Its 10-13 misses (13602723, 13602726, CI re-read 38384423613) were description prose
     # («يوجد مصعد في العمارة», «غرفة خادمة مع دورة مياة») on ads whose chip list names neither (🔬, backlog 515).
     "squares": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room"),
+    # reinvest publishes parking as a COUNT, `info_fields.parking_count` (scrapers/reinvest/run.py: «parking» is
+    # count_flag(parking_count) and wins over prose). Its 10-24 misses (6 of 7, af-score run 40076306911) all asked
+    # parking from description prose («موقف») on ads whose count is blank; our NULL is the source's answer (law §2).
+    "reinvest": ("parking",),
     # eastabha (WordPress «WP Residence») prints its WHOLE feature taxonomy as a checklist: a ticked item is
     # `<div class="listing_detail col-md-4 …"><i class="fas fa-check"></i>مطبخ مجهز</div>`, an unticked one the
     # same with `not_present` and an ✗ (CI source-reread 39020724177, 595393 and 595406). The scraper reads
@@ -117,6 +129,33 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # Read by muktamel_props().
     "muktamel": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
                  "private_entrance", "furnished"),
+    # aldarim (the Nuzul SaaS) publishes these as COUNTS in its listing payload (kitchens, elevators, parking_spots,
+    # maid_rooms, driver_rooms; is_ac_installed from the API), and its scraper stores N ≥ 1 as yes and 0 as silence
+    # (scrapers/aldarim/run.py). Its 10-14 and 10-20 «misses» asked kitchen from prose («مطبخ داخلي ألماني», 49170)
+    # on ads whose own count is 0 (CI re-read; backlog 555): a structured null outranks prose (law §2). Read by
+    # nuzul_props(). abwbna / alobid / bahadhabab run the same SaaS but were not reachable to verify (10-20): not added.
+    # furnished: the API's is_furnished (filed in additional_info, 0 on all 132 active ads on 10-20): 576300's ask
+    # on the 10-20 branch dry run was prose. Structured silence, never a miss.
+    "aldarim": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "furnished"),
+    # superoffice prints each office's own services as `<ul class="service_ul">` («أثاث», «إنترنت عالي السرعه» …),
+    # the list its scraper reads (scrapers/superoffice/run.py). Its 10-20 «misses» (parking 5 of 5, 0 of 4 findable)
+    # were the description's marketing line «نحن نقدم: … مواقف السيارات», on offices whose list names no parking.
+    # Read by superoffice_props().
+    "superoffice": ("elevator", "parking", "kitchen", "air_conditioner", "furnished"),
+    # erapulse's page embeds the listing's own `features` list and `elevator` flag (the API object its scraper
+    # maps); the re-read ads carry «features":[]» and print «لا توجد مميزات متاحة». Its 10-20 «misses» (0 of 4)
+    # asked kitchen / elevator from the free «تفاصيل العقار» prose (backlog 551). Read by erapulse_props().
+    "erapulse": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "furnished"),
+    # maqrat's «خدمات العقار» chip row (`ap-ro-field-label`, scrapers/maqrat/run.py _SERVICES) expresses utilities and
+    # «مصعد»: elevator is the one Advanced Filter field it publishes. Its 10-23 asks (13605174, 19039930) took
+    # elevator from description prose («ومصعدين» in the building) on ads whose chips name none. The other fields
+    # have no structured home there, so their prose stays a statement (backlog 790). Read by maqrat_props().
+    "maqrat": ("elevator",),
+    # opensooq's ad page ticks its own amenities under «وسائل الراحة» (flight data `dynamicTabsSection`, read by the
+    # scraper's page_amenities() since 2026-10-26, CI source-reread 40301252058). Its 0-of-5 nights asked «elevator»
+    # from the site menu and from OTHER ads' cards printed on the page («شقة … مصعد راكب», 13872036). Read by
+    # opensooq_props(). furnished stays the card chip, scored as before.
+    "opensooq": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance"),
 }
 # A rakez listing's page is its PROJECT's page: one shared feature list and every unit's price · rooms · area. A UNIT
 # trait the project list names («غرفة خادمة», «غرفة سائق», «مواقف خاصة», «مطبخ») describes some of the project's units,
@@ -165,6 +204,27 @@ def structured_says(page: dict, field: str) -> bool | None:
     return said[0] if said else None
 
 
+def rule_b(box: bool | None, text: bool | None) -> bool | None:
+    """Mirror of public.af_rule_b (owner 2026-10-25, «We trust the sellers sentence»): the seller's quoted
+    sentence beside the site's own field. text silent → box; no box → text; box no + text yes → yes;
+    box yes + text explicitly no → None (a conflict is unknown, never judged)."""
+    if text is None:
+        return box
+    if box is None or box == text:
+        return text
+    return True if text else None
+
+
+def text_says(text: dict | None, col: str, page: dict) -> bool | None:
+    """The overlay's answer for one column (listing_text_facts.facts), believed only while its quote is still
+    printed on the live page — a quote the page no longer carries is the stale text the index must not serve."""
+    t = (text or {}).get(col) or {}
+    q = norm(t.get("q") or "")
+    if not q or not isinstance(t.get("v"), bool):
+        return None
+    return t["v"] if q in " ".join(page_lines(page)) else None
+
+
 def structured_result(stored, says: bool | None) -> str:
     if says is None:
         return PAGE_SILENT
@@ -189,14 +249,16 @@ def labelled_number(stored, lines: list[str], label: str) -> str:
     return WE_MISS if states else PAGE_SILENT
 
 
-def structured_only(platform: str, results: dict[str, str], stored: dict, page: dict) -> dict[str, str]:
+def structured_only(platform: str, results: dict[str, str], stored: dict, page: dict,
+                    text: dict | None = None) -> dict[str, str]:
     out = dict(results)
     for (site, f), label in STRUCTURED_LABEL.items():
         if site == platform and f in out and out[f] != UNREADABLE:
             out[f] = labelled_number(stored.get(COL[f]), page_lines(page), label)
     for f in STRUCTURED_ONLY.get(platform, ()):
         if f in out and out[f] != UNREADABLE:
-            out[f] = structured_result(stored.get(COL[f]), structured_says(page, f))
+            # Rule B (2026-10-25): the box is the page's structured data, the sentence is the overlay's quoted fact.
+            out[f] = structured_result(stored.get(COL[f]), rule_b(structured_says(page, f), text_says(text, COL[f], page)))
     for f in PROJECT_PAGE_UNIT_TRAITS.get(platform, ()):
         if f in out and out[f] != UNREADABLE:
             out[f] = PAGE_SILENT
@@ -220,38 +282,84 @@ def page_lines(page: dict) -> list[str]:
 # Measured 2026-10-06 (source-reread 37445697709): each produced a 5/5 «we miss» that no parser could
 # fix. Applied only with TEMPLATE_MIN_PAGES readable pages, so two ads that happen to agree stay ads.
 TEMPLATE_MIN_PAGES = 3
+# A ROTATING strip is template too (🔬 2026-10-31). tuba prints a «featured ads» strip of OTHER ads' titles on every
+# page, a few of a rotating set at a time («شقة مفروشة في جدة حي الفيصلية إيجار شهري سنوي», «شقة مؤثثة للإيجار …
+# جدة حي السلامة»), so no single title is on EVERY page and the old all-pages intersection kept them as the ad's
+# own words. The score then asked «furnished» of Riyadh / Taif / Dammam SALE ads that never say it: 4 of tuba's
+# 4 misses on 10-31 08:00 and 11 of 11 in the 20-page dry run 41188548521 («why furnished:» was always one of those
+# three titles). A line printed on at least half of a website's readable sample pages is that website's, not the ad's.
+TEMPLATE_SHARE = 0.5
 
 
 def template_lines(pages: list[list[str]]) -> set[str]:
     readable = [set(p) for p in pages if p]
     if len(readable) < TEMPLATE_MIN_PAGES:
         return set()
-    return set.intersection(*readable)
+    if len(readable) < 2 * TEMPLATE_MIN_PAGES:
+        # 3 to 5 pages: «half» would be 2 or 3 pages, too few to tell a template from two ads that agree. Every page.
+        return set.intersection(*readable)
+    need = math.ceil(TEMPLATE_SHARE * len(readable))        # 6+ pages: at least 3, the nightly 10-page sample 5
+    seen: dict[str, int] = defaultdict(int)
+    for p in readable:
+        for x in p:
+            seen[x] += 1
+    return {x for x, n in seen.items() if n >= need}
+
+
+# A deed's boundary text («… وتمام الحد المصعد وتمام الحد المنور …», «يحده شمالاً …») names what the unit's border
+# touches, not what the ad offers: fursaghyr 3237533 was asked elevator from its licence boundary block on 10-20,
+# 10-22 and 10-23 while its description names no lift (page read 2026-10-23).
+DEED_BOUNDARY = re.compile(r"تمام\s*الحد|يحده|الحد\s*(?:الشمالي|الجنوبي|الشرقي|الغربي)")
+
+
+# The same boundary text printed as a labelled detail row («وصف الحد الغربي: الوحدة رقم 4 / أ والمنور رقم 2 وبيت الدرج
+# والمصعد», the Houzez detail list on fursaghyr): the evidence line keeps the VALUE and loses its label, so
+# DEED_BOUNDARY cannot see it. fursaghyr 4367079 was asked elevator from exactly that row on 10-24 (run 40076306911)
+# while its «خدمات العقار» names none. Every value printed under a «… الحد …» label is dropped before the page is read.
+_BOUNDARY_ROW = re.compile(r"<strong>\s*(?:وصف|نوع|طول)\s+(?:ال)?حد[^<:]{0,20}:?\s*</strong>\s*<span[^>]*>([^<]{1,300})</span>")
+
+
+def strip_boundary(page: dict, body: str) -> dict:
+    rows = {norm(html.unescape(v)) for v in _BOUNDARY_ROW.findall(body or "") if v.strip()}
+    rows.discard("")
+    if not rows:
+        return page
+
+    def keep_line(x: str) -> bool:
+        nx = norm(x)
+        # a short value («شارع») is matched whole, so it cannot take an unrelated line with it
+        return not any(nx == r or (len(r) >= 12 and r in nx) for r in rows)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
 
 
 def page_says_yes(lines: list[str], field: str) -> bool:
     """The ad itself names the amenity and does not negate it («مصعد» yes, «لا يوجد مصعد» no)."""
     kw = BOOL_KW[field]
+    lines = [y for y in lines if not DEED_BOUNDARY.search(y)]
     hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
     return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
 
 
-def says_yes(lines: list[str], field: str, platform: str = "", page: dict | None = None) -> bool:
-    """The ad states YES. For a field the website publishes structurally, only its structured data can
-    say so (law §2) — the same reading structured_only() scored it by, so a request is never built
-    from prose the score itself refused to believe."""
+def says_yes(lines: list[str], field: str, platform: str = "", page: dict | None = None,
+             text: dict | None = None) -> bool:
+    """The ad states YES. For a field the website publishes structurally, its structured data merged with the
+    overlay's quoted sentence under Rule B — the same reading structured_only() scored it by, so a request is
+    never built from prose the score itself refused to believe."""
     if field in STRUCTURED_ONLY.get(platform, ()):
-        return structured_says(page or {}, field) is True
+        return rule_b(structured_says(page or {}, field), text_says(text, COL[field], page or {})) is True
     return page_says_yes(lines, field)
 
 
 def customer_answers(lines: list[str], results: dict[str, str], platform: str = "",
-                     page: dict | None = None) -> list[str]:
+                     page: dict | None = None, text: dict | None = None) -> list[str]:
     """Advanced Filter answers the ad really states as YES: the ones a customer would ask for. Both a stored
     true (does the filter find it) and a stored NULL (the trapping failure) qualify; a stored false never
     does, the customer asking for it would be excluding the ad correctly or the ad disagrees (precision)."""
     cols = [c for c in (*AMENITY_SLUG, FURNISHED)
-            if results.get(c) in (MATCH, WE_MISS) and says_yes(lines, c, platform, page)]
+            if results.get(c) in (MATCH, WE_MISS) and says_yes(lines, c, platform, page, text)]
     return cols[:MAX_ANSWERS]
 
 
@@ -259,9 +367,18 @@ def offered(answers: list[str], stored: dict) -> list[str]:
     """Only answers a customer can actually give in this listing's scope. The Advanced Filter never asks
     «furnished» on a Monthly search (src/lib/afCohorts.ts: no RentMonthly cohort lists it), so a request
     carrying it is not a customer's request and its miss is not a customer's miss."""
+    if is_land(stored.get("type_ar")):
+        return []
     if stored.get("rent_period_ar") == MONTHLY:
         return [a for a in answers if a != FURNISHED]
     return answers
+
+
+def is_land(type_ar) -> bool:
+    """Every land cohort (أرض سكنية / تجارية / صناعية / خام / أرض, src/lib/afCohorts.ts) asks only street width and
+    facade, and COHORT_CHIPS gives no land a building chip. On 10-27 the score asked «kitchen» of 6 lands (abaad 3,
+    jurash 2, opensooq 1: the word sat in the site's template, not the ad) and counted 6 of its 29 misses there."""
+    return isinstance(type_ar, str) and type_ar.startswith("أرض")
 
 
 def rpc_params(stored: dict, answers: list[str]) -> dict | None:
@@ -520,6 +637,80 @@ def muktamel_props(body: str) -> list[dict]:
     return [{"name": _PROP_NAME[f], "value": "نعم"} for lab, f in MUKTAMEL_LABELS.items() if lab in ticked]
 
 
+# The Nuzul SaaS prints the ad's counts as escaped JSON in its RSC payload: «\\"kitchens\\":1». The same key also
+# appears once in the label dictionary with a STRING value («\\"kitchens\\":\\"Kitchen\\"»), which is never read.
+# A count ≥ 1 is a yes, 0 is silence (the scraper's own rule); two different counts for one key cannot be
+# attributed to this ad and say nothing.
+NUZUL_COUNTS = {"kitchens": "kitchen", "elevators": "elevator", "parking_spots": "parking", "maid_rooms": "maid_room",
+                "driver_rooms": "driver_room", "is_ac_installed": "air_conditioner", "is_furnished": "furnished"}
+
+
+def nuzul_props(body: str) -> list[dict]:
+    out = []
+    for key, f in NUZUL_COUNTS.items():
+        vals = set(re.findall(r'\\"' + key + r'\\":(\d+)', body or ""))
+        if len(vals) == 1 and int(vals.pop()) >= 1:
+            out.append({"name": _PROP_NAME[f], "value": "نعم"})
+    return out
+
+
+def is_nuzul(url: str) -> bool:
+    return "aldarim.sa" in url
+
+
+_SO_SERVICES = re.compile(r'<ul class="service_ul">(.*?)</ul>', re.S)
+_SO_ITEM = re.compile(r"<li>(.*?)</li>", re.S)
+
+
+def superoffice_props(body: str) -> list[dict]:
+    """The office's own service list, read item by item exactly as its scraper does («أثاث» is furnished)."""
+    items = [re.sub(r"<[^>]+>|\s+", " ", html.unescape(x)).strip()
+             for block in _SO_SERVICES.findall(body or "") for x in _SO_ITEM.findall(block)]
+    said = {c for x in items for c, v in amenities_from_text(x).items() if v is True}
+    if "أثاث" in items:
+        said.add("furnished")
+    return [{"name": _PROP_NAME[f], "value": "نعم"} for f in _PROP_NAME if f in said]
+
+
+def erapulse_props(body: str) -> list[dict]:
+    """erapulse's embedded listing object: its `features` names and its `elevator` flag. A value that is not
+    exactly one per page cannot be attributed to this ad and says nothing."""
+    said: set[str] = set()
+    feats = set(re.findall(r'"features":(\[[^\]]*\])', body or ""))
+    if len(feats) == 1:
+        try:
+            names = [x if isinstance(x, str) else (x.get("nameAr") or x.get("name") or "")
+                     for x in json.loads(feats.pop()) if isinstance(x, (str, dict))]
+        except ValueError:
+            names = []
+        said |= {c for x in names for c, v in amenities_from_text(x).items() if v is True}
+    lift = set(re.findall(r'"elevator":(true|false)', body or ""))
+    if lift == {"true"}:
+        said.add("elevator")
+    return [{"name": _PROP_NAME[f], "value": "نعم"} for f in _PROP_NAME if f in said]
+
+
+_MQ_CHIPS = re.compile(r'class="ap-ro-field-label">خدمات العقار</span>\s*<div class="pd-chip-row">(.*?)</div>', re.S)
+
+
+def maqrat_props(body: str) -> list[dict]:
+    """maqrat's own «خدمات العقار» chips, read as its scraper reads them: «مصعد» listed is a yes, else silence."""
+    chips = {re.sub(r"\s+", " ", html.unescape(x)).strip()
+             for block in _MQ_CHIPS.findall(body or "") for x in re.findall(r'class="pd-chip">(.*?)</span>', block)}
+    return [{"name": _PROP_NAME["elevator"], "value": "نعم"}] if "مصعد" in chips else []
+
+
+def opensooq_props(body: str) -> list[dict]:
+    """opensooq's own ticked list, read by the scraper's own reader (one reader, never a copy)."""
+    from scrapers.opensooq.run import page_amenities
+    got = page_amenities(body) or {}
+    return [{"name": _PROP_NAME[f], "value": "نعم"} for f in _PROP_NAME if got.get(f)]
+
+
+SITE_PROPS = {"superoffice": superoffice_props, "erapulse": erapulse_props, "maqrat": maqrat_props,
+              "opensooq": opensooq_props}
+
+
 def is_muktamel(url: str) -> bool:
     return "muktamel.com" in url
 
@@ -532,12 +723,29 @@ def is_sanadak(url: str) -> bool:
     return "sanadak.sa" in url
 
 
+# The tag that makes the handshake visible (backlog 817, 2026-10-25). Supabase's API logs keep x-client-info but not
+# x-ezhalah-gate, and custom headers REPLACE supabase-py's defaults, so without it every gated call read as a bare-key
+# call (x_client_info = '') in the owner's edge_logs count. Same tag scripts/lib/gateFetch.mjs appends for node robots.
+GATE_TAG = {"X-Client-Info": "supabase-py ezhalah-gate"}
+
+
 def anon_client():
     """The customer's path: the public anon key, never the service key (trap 10)."""
     from supabase import create_client
     url = os.environ["SUPABASE_URL"]
     key = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("EXPO_PUBLIC_SUPABASE_ANON_KEY") or ""
-    return create_client(url, key) if key else None
+    if not key:
+        return None
+    # Secret handshake (docs/ops/SCRAPE_GUARD.md): still the customer's anon path, plus x-ezhalah-gate so this check keeps
+    # working once the database refuses the bare public key. Sent only to our own database.
+    gate = os.environ.get("EZ_GATE_SECRET") or ""
+    if gate:
+        try:
+            from supabase.lib.client_options import SyncClientOptions as _Options
+        except ImportError:  # older supabase-py
+            from supabase.lib.client_options import ClientOptions as _Options
+        return create_client(url, key, options=_Options(headers={"x-ezhalah-gate": gate} | GATE_TAG))
+    return create_client(url, key)
 
 
 def ask(anon, params: dict) -> list[dict] | None:
@@ -610,15 +818,44 @@ def sample_size(n: int, per_site: int | None) -> int:
     return N_BIG if n >= BIG_SITE else min(N_SMALL, n)
 
 
+# A website that remembers what THIS visitor opened (🔬 2026-10-31). tuba prints a «recently viewed» strip from the
+# visitor's cookies, and the score's probe session (scrapers/common/http.session(), one per thread) keeps cookies for
+# the whole run, so each tuba page carried the titles of the ads the robot itself had opened before it («شقة مؤثثة
+# للإيجار … جدة حي السلامة» on a Dammam sale). A fresh re-read of the same page (source-reread 41189800679) shows
+# no strip at all. A customer opening the ad's link is a first-time visitor: so is the score.
+FRESH_VISIT_HOSTS = ("tuba.com.sa",)
+
+
+def forget_visits(url: str, session=None) -> int:
+    """Drop the probe session's cookies for a FRESH_VISIT_HOSTS site before reading one of its pages. Returns how
+    many cookies were dropped; a site outside the list, or a session that cannot be read, is left untouched."""
+    host = (urlsplit(url or "").netloc or "").lower()
+    if not any(host == h or host.endswith("." + h) for h in FRESH_VISIT_HOSTS):
+        return 0
+    try:
+        jar = (session if session is not None else http.session()).cookies.jar
+        mine = [c for c in list(jar) if any((c.domain or "").lstrip(".").endswith(h) for h in FRESH_VISIT_HOSTS)]
+        for c in mine:
+            jar.clear(c.domain, c.path, c.name)
+        return len(mine)
+    except Exception:  # noqa: BLE001 — a session we cannot read is read as before, never failed
+        return 0
+
+
 def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None, wasalt=wasalt_page, sanadak=sanadak_page) -> dict:
     probe = probe or _probe
     row = new_row(night, platform)
     last = 0.0
     read: list[tuple[str, int, dict, dict]] = []
+    texts: dict[tuple[str, int], dict] = {}
     for table, rid in picks:
         stored = (client.table("search_listings_ar").select(STORED).eq("source_table", table)
                   .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
+        # The Rule B overlay row (owner 2026-10-25): the ad's quoted facts the index merges; stale text never counts.
+        tf = (client.table("listing_text_facts").select("facts,stale_at").eq("source_table", table)
+              .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
+        texts[(table, rid)] = {} if tf.get("stale_at") else (tf.get("facts") or {})
         url = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0].get("listing_url")
         if not url:
             row["sampled"] += 1
@@ -635,11 +872,14 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         elif is_sanadak(url) and sanadak is not None:
             page = sanadak(url)
         else:
+            forget_visits(url)
             try:
                 status, body = probe(url)
             except Exception:  # noqa: BLE001
                 status, body = None, ""
             page = page_evidence(body) if status == 200 and body else None
+            if page is not None:
+                page = strip_boundary(page, body)
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
             if page is not None and platform in WARRANTY_SITES:
@@ -648,6 +888,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": wpresidence_props(body)}]}
             if page is not None and is_muktamel(url):
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": muktamel_props(body)}]}
+            if page is not None and platform in SITE_PROPS:
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": SITE_PROPS[platform](body)}]}
+            if page is not None and is_nuzul(url):
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": nuzul_props(body)}]}
             if page is not None and is_gathern(url):
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": gathern_props(body)}]}
         if page is None:
@@ -660,10 +904,11 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     for table, rid, stored, page in read:
         key = f"{table}:{rid}"
         results = compare_listing(stored, page, skip_price=False)
-        af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)
+        af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page,
+                                  texts.get((table, rid)))
         fold(row, key, af_only, stored)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
-        answers = offered(customer_answers(ad_lines, af_only, platform, page), stored)
+        answers = offered(customer_answers(ad_lines, af_only, platform, page, texts.get((table, rid))), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
         if params:
             verdict = findable(ask(anon, params), table, rid)

@@ -44,8 +44,9 @@ def test_silence_stays_unknown_never_no():
         assert row.get(col) is None
 
 
-def test_a_negation_is_never_written_as_false():
-    assert _row("شقة\nسكنية\nللايجار", "لا يوجد مصعد").get("elevator") is None
+def test_an_explicit_negation_is_written_as_false():
+    # owner 2026-10-24: yes / an explicit no tied to the token / unknown — «لا يوجد مصعد» is a stated no
+    assert _row("شقة\nسكنية\nللايجار", "لا يوجد مصعد").get("elevator") is False
 
 
 def test_land_neighbour_parking_is_not_the_property():

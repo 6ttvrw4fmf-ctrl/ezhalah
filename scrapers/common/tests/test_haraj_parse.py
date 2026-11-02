@@ -65,6 +65,9 @@ def test_facade_diagonals_are_one_facade(raw, want):
 
 
 @pytest.mark.parametrize("raw,want", [("Less Than Year", 0), ("less than a year", 0), ("أقل من سنة", 0),
-                                      ("اكثر من عشر سنوات", None), ("Seven Year", 7)])
+                                      # REGA's open top bucket = «10 or more» → 10 (the AF clause reads a haraj
+                                      # 10 as ≥ 10, upper end unknown; 2026-10-25). Any other open bound stays unknown.
+                                      ("اكثر من عشر سنوات", 10), ("أكثر من 10 سنوات", 10), ("Ten Year", 10),
+                                      ("أكثر من 20 سنة", None), ("45سنه", 45), ("٤٥ سنة", 45), ("Seven Year", 7)])
 def test_less_than_a_year_is_new(raw, want):
     assert P.age_of(raw) == want

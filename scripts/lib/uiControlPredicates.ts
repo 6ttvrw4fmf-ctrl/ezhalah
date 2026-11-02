@@ -97,6 +97,58 @@ export const AF_QUESTION_FIELDS: Record<string, string[]> = {
   furnished: ['furnished'],
   // The amenity question's own fields are the chip keys, judged separately and by name.
   amenities: [],
+  // The themed cards (owner 2026-10-31 / 11-01) and the two Residential Building ladders offer p_amenities chip keys
+  // (CHIP_DEFS + apts4/8/12/20 + has_shops) — judged separately and by name, like the amenities card.
+  comfort: [],
+  space: [],
+  safety: [],
+  perks: [],
+  build: [],
+  extras: [],
+  who: [],
+  features: [],
+  services: [],
+  fun: [],
+  // the Villas & Houses cards (owner lists 2026-11-01, built 2026-11-02) — chip keys, judged by name like the others
+  outdoors: [],
+  smart: [],
+  papers: [],
+  water: [],
+  games: [],
+  camp_life: [],
+  water_land: [],
+  land_papers: [],
+  power: [],
+  crops: [],
+  animals: [],
+  buildings: [],
+  plot: [],
+  deal_papers: [],
+  land: [],
+  location: [],
+  cspace: [],
+  cservices: [],
+  business: [],
+  office_kind: [],
+  ready: [],
+  building: [],
+  trucks: [],
+  loc_papers: [],
+  inside: [],
+  investment: [],
+  hotel: [],
+  station: [],
+  deal_loc: [],
+  space_papers: [],
+  services_business: [],
+  workshop: [],
+  loc_business: [],
+  building_papers: [],
+  factory: [],
+  loc_safety: [],
+  papers_c: [],
+  apartments: [],
+  shops: [],
   street_width: ['street_width_m'],
   direction: ['direction_ar'],
   // The 9.0+rc10 rung sets BOTH ratingMin and reviewsMin (advancedFilters.ts RATING_QUESTION.apply),
@@ -131,10 +183,15 @@ export function afQuestionIds(advancedSrc: string): string[] {
  * applied via p_bath_min — neither is an amenity, so the scan is scoped to the questions that
  * actually call addAmenities().
  */
-export function amenityChipKeys(advancedSrc: string): string[] {
-  const blocks = [...advancedSrc.matchAll(/const (RNPL_QUESTION|AMENITIES_QUESTION)[\s\S]*?apply: addAmenities/g)]
+export function amenityChipKeys(advancedSrc: string, chipsSrc = ''): string[] {
+  // the inline defs: the classic card, rnpl, and the two Residential Building ladders (apts4/8/12/20, has_shops)
+  const blocks = [...advancedSrc.matchAll(/const (RNPL_QUESTION|AMENITIES_QUESTION|APARTMENTS_QUESTION|SHOPS_QUESTION)[\s\S]*?apply:/g)]
     .map((m) => m[0]).join('\n');
-  return [...blocks.matchAll(/\{\s*key:\s*'([a-z_]+)'\s*,\s*labelKey:/g)].map((m) => m[1]);
+  const inline = [...blocks.matchAll(/\{\s*key:\s*'([a-z_0-9]+)'\s*,\s*labelKey:/g)].map((m) => m[1]);
+  // the themed cards (owner 2026-10-31) draw every chip from CHIP_DEFS (src/lib/afChips.ts): `token: { labelKey: …`
+  const chipTable = /export const CHIP_DEFS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(chipsSrc)?.[1] ?? '';
+  const chips = [...chipTable.matchAll(/(?:^|[\s{,])([a-z_0-9]+):\s*\{\s*labelKey:/g)].map((m) => m[1]);
+  return [...new Set([...inline, ...chips])];
 }
 
 /**

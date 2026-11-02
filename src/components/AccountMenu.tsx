@@ -11,8 +11,10 @@ import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
 import { detectDevice, readDeviceEnv } from '@/lib/deviceInfo';
 import { useReducedMotion } from '@/lib/useReducedMotion';
-import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
-import { isBackendLive, persistDisplayName, signOutBackend } from '@/lib/auth';
+import { pickName, initialsOf } from '@/lib/nameSync';
+import { isBackendLive, signOutBackend } from '@/lib/auth';
+import { openNamePrompt } from '@/components/NamePrompt';
+import { useSaveName } from '@/lib/useSaveName';
 import {
   currentSessionId, lastActiveLabel, listDeviceSessions, revokeDeviceSession,
   signOutOtherDevices, type DeviceSession,
@@ -74,10 +76,10 @@ export default function AccountMenu({
   const router = useRouter();
   const { height: winH } = useWindowDimensions();
   const { t, locale, setLocale } = useI18n();
-  const { user, updateUser, applySyncedName, signOut, deleteAccount } = useApp();
+  const { user, signOut, deleteAccount } = useApp();
   const { mode, setMode, resolved, colors: C } = useTheme();
   const reduced = useReducedMotion();
-  const s = useMemo(() => makeStyles(C, resolved === 'dark'), [C, resolved]);
+  const s = useMemo(() => makeStyles(C, resolved === 'dark', locale === 'ar'), [C, resolved, locale]);
 
   // Mount while visible; on close, play the exit and unmount on a TIMER (the animation is
   // decoration — the unmount must happen even with rAF frozen).
@@ -163,20 +165,8 @@ export default function AccountMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locale, user?.name, user?.nameEn, user?.nameAr]);
 
-  const persistName = (v: string) => {
-    const sc = scriptOf(v);
-    const immediate = sc === 'ar' ? { name: v, nameAr: v } : { name: v, nameEn: v };
-    updateUser({ ...immediate, initials: initialsOf(v) });
-    // Refresh-proof (owner 2026-08-29): the store patch above is in-memory only — the auth
-    // backend's user_metadata is what mapSupabaseUser rebuilds from on the next load.
-    persistDisplayName(v);
-    // applySyncedName, NOT updateUser: this is a network round trip, so renaming twice in quick
-    // succession leaves two continuations in flight and the slower one lands last. An unguarded
-    // updateUser here reverted the name AND the avatar initial to a value the user had already
-    // replaced (routine #8, 2026-09-24 — the #319/#599/#648 stale-continuation class). The store's
-    // applySyncedName drops a patch whose `name` is no longer the current one.
-    buildSyncedName(v).then((synced) => applySyncedName({ ...synced, initials: initialsOf(v) }));
-  };
+  // The one rename path, shared with «وش نناديك؟» and Apple's first-sign-in name (src/lib/useSaveName.ts).
+  const persistName = useSaveName();
   const saveName = () => {
     const v = name.trim();
     if (v && v !== shownName) {
@@ -367,15 +357,16 @@ export default function AccountMenu({
               {/* Profile header — clean and compact (owner 2026-08-29: no banner/hero image here):
                   avatar · name · email, nothing else. Tapping it opens إدارة الحساب with the
                   display-name editor already active — the profile IS the edit affordance. */}
+              {/* No name yet → «أضف اسمك ✏️» opens the «وش نناديك؟» box itself (owner 2026-10-23, name-box-v4 frame 3). */}
               <Pressable
                 testID="account-menu-profile"
-                onPress={() => { setEditing(true); go('account', 1); }}
+                onPress={() => { if (!pickName(user, locale)) { onClose(); openNamePrompt(); return; } setEditing(true); go('account', 1); }}
                 style={({ hovered, pressed }: any) => [s.profile, (hovered || pressed) && s.rowHover]}
               >
                 {({ hovered, pressed }: any) => { const on = !!(hovered || pressed); return (<>
                   <View style={s.avatar}><Text style={s.avatarText}>{initialsOf(pickName(user, locale))}</Text></View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={[s.profileName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale)}</Text>
+                    <Text style={[s.profileName, !pickName(user, locale) && s.addName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale) || t('Ezhalah Guest')}{pickName(user, locale) ? '' : ' ✏️'}</Text>
                     {!!user.sub && <Text style={[s.profileSub, on && s.rowSubOn]} numberOfLines={1}>{user.sub}</Text>}
                   </View>
                   <Ionicons name="create-outline" size={15} color={on ? C.onFill : C.muted} />
@@ -453,7 +444,7 @@ export default function AccountMenu({
                 hitSlop={8}
                 style={({ hovered }: any) => [s.centerClose, hovered && s.quietHover]}
               >
-                <Ionicons name="close" size={18} color={C.muted} />
+                <Ionicons name="close" size={18} color={C.ink} />
               </Pressable>
           {view === 'account' && (
             <ScrollView style={{ maxHeight: winH * 0.72 }} showsVerticalScrollIndicator={false}>
@@ -491,6 +482,8 @@ export default function AccountMenu({
                       placeholderTextColor={C.muted}
                       onChangeText={setName}
                       onSubmitEditing={saveName}
+                      // Leaving the field saves it (owner 2026-10-23: «when user leaves … it gets saved»).
+                      onBlur={saveName}
                       returnKeyType="done"
                     />
                     {nameChanged && (
@@ -501,7 +494,11 @@ export default function AccountMenu({
                     )}
                   </>
                 ) : (
-                  <Text style={s.fieldValue} numberOfLines={1}>{name || shownName}</Text>
+                  <>
+                    <Text style={s.fieldValue} numberOfLines={1}>{name || shownName}</Text>
+                    {/* Owner 2026-10-23: say the name is editable — it saves by itself when you leave the field. */}
+                    <Text testID="account-menu-name-hint" style={s.fieldNote}>{t('Tap here to change your name')}</Text>
+                  </>
                 )}
               </Pressable>
 
@@ -573,7 +570,7 @@ export default function AccountMenu({
                               <Text style={s.deviceNote}>{t('Signs out within an hour at most')}</Text>
                             ) : (
                               <Text style={s.deviceActive} numberOfLines={1}>
-                                {lastActiveLabel(s0.refreshed_at, Date.now())}
+                                {lastActiveLabel(s0.refreshed_at, Date.now(), locale === 'en')}
                               </Text>
                             )}
                             {revokeErrSid === s0.session_id ? (
@@ -756,7 +753,11 @@ function ShimmerDeviceCard({ s, reduced }: { s: ReturnType<typeof makeStyles>; r
 
 
 // Theme-aware styles: rebuilt only when the resolved theme flips (useMemo above).
-function makeStyles(C: Record<string, string>, dark: boolean) {
+// The sheet follows the SCREEN language (owner 2026-10-23, English screenshots: «it must be» left-to-right in
+// English). Arabic keeps the 2026-08-29 right-first hierarchy; English starts from the left.
+function makeStyles(C: Record<string, string>, dark: boolean, rtl = true) {
+  const dir = rtl ? 'rtl' : 'ltr';
+  const start = rtl ? 'right' : 'left';
   return StyleSheet.create({
     // Full-viewport click-catcher (web position:fixed; native falls back to filling the sidebar).
     scrim: {
@@ -768,7 +769,7 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     // Grows upward from its trigger — never centered on the screen.
     panel: {
       position: 'absolute', left: 10, right: 10, bottom: 64, zIndex: 61,
-      direction: 'rtl' as any,
+      direction: dir as any,
       backgroundColor: C.surface, borderRadius: radius.card, borderWidth: 1, borderColor: C.fieldLine,
       paddingVertical: 6, paddingHorizontal: 6, overflow: 'hidden',
       shadowColor: '#0b140f', shadowOpacity: dark ? 0.55 : 0.22, shadowRadius: 24,
@@ -778,8 +779,9 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     profile: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10 },
     avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
     avatarText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-    profileName: { fontSize: 13.5, fontWeight: '700', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any },
-    profileSub: { fontSize: 11, color: C.muted, marginTop: 1, textAlign: 'right', writingDirection: 'auto' as any },
+    addName: { color: C.primary },
+    profileName: { fontSize: 13.5, fontWeight: '700', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any },
+    profileSub: { fontSize: 11, color: C.muted, marginTop: 1, textAlign: start as any, writingDirection: 'auto' as any },
 
     hairline: { height: 1, backgroundColor: C.line, marginVertical: 5, marginHorizontal: 4 },
 
@@ -789,14 +791,16 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     // an intimate 360. Both inherit the theme surface so dark mode is the card, not just the menu.
     centerRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
     centerBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: dark ? 'rgba(4,8,6,0.62)' : 'rgba(8,18,12,0.5)', ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } as any) : null) },
-    centerCard: { direction: 'rtl' as any, width: '100%', maxWidth: 360, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, padding: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
-    centerCardWide: { direction: 'rtl' as any, width: '100%', maxWidth: 560, backgroundColor: C.surface, borderRadius: 24, borderWidth: 1, borderColor: C.fieldLine, paddingVertical: 20, paddingHorizontal: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 34, shadowOffset: { width: 0, height: 22 }, elevation: 14 },
+    centerCard: { direction: dir as any, width: '100%', maxWidth: 360, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, padding: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
+    centerCardWide: { direction: dir as any, width: '100%', maxWidth: 560, backgroundColor: C.surface, borderRadius: 24, borderWidth: 1, borderColor: C.fieldLine, paddingVertical: 20, paddingHorizontal: 22, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 34, shadowOffset: { width: 0, height: 22 }, elevation: 14 },
     // PHYSICAL top-right (owner: «X always at the visual TOP-RIGHT»). Arabic forces app-wide RTL
     // (i18n.tsx: documentElement.dir + I18nManager.forceRTL), which makes RN flip `right:` to the
     // physical LEFT — so under RTL the physical right is spelled `left:`. Direction-aware so a
     // future LTR locale keeps the × on the same physical corner.
-    centerClose: { position: 'absolute', top: 12, ...(I18nManager.isRTL ? { left: 12 } : { right: 12 }), zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-    centerTitle: { fontSize: 19, lineHeight: 26, fontWeight: '800', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingTop: 4, paddingBottom: 14, paddingHorizontal: 8 },
+    // × top-RIGHT in both languages, never mirrored (owner 2026-10-24, supersedes 10-23 «Arabic left»).
+    centerClose: { position: 'absolute', top: 12, right: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: dark ? C.surface2 : C.tint }, // a soft circle so the × reads clearly, apart from the words (owner 2026-10-24)
+    // Room for the × on its side (owner 2026-10-23: the × sat on top of «Manage account»).
+    centerTitle: { fontSize: 19, lineHeight: 26, fontWeight: '800', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any, paddingTop: 4, paddingBottom: 14, paddingHorizontal: 8, paddingRight: 44 }, // the × is top-right in both languages (owner 2026-10-24)
     // Identity fields live in ONE inset group (iOS grouped-list idiom, 2026-08-30 refresh): the
     // group surface owns the boundary, an inset hairline separates the rows, and the fields keep
     // their exact structures — the wrapper is the only new element.
@@ -810,7 +814,7 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     rowSubOn: { color: 'rgba(255,255,255,0.78)' },
     // The centered account popup's controls keep a quiet neutral hover — they are not sidebar rows.
     quietHover: { backgroundColor: dark ? '#1d2a22' : '#f2f5f2' },
-    rowLabel: { flex: 1, fontSize: 13.5, fontWeight: '600', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any },
+    rowLabel: { flex: 1, fontSize: 13.5, fontWeight: '600', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any },
     rowLabelDanger: { color: '#d05b4c' },
     rowValue: { fontSize: 12, color: C.muted, fontWeight: '500' },
 
@@ -819,15 +823,15 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
 
     field: { paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
     fieldHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    fieldLabel: { flex: 1, fontSize: 11.5, color: C.muted, textAlign: 'right' },
-    fieldValue: { fontSize: 13.5, fontWeight: '600', color: C.ink, marginTop: 3, textAlign: 'right', writingDirection: 'auto' as any },
-    fieldNote: { fontSize: 11.5, color: C.muted, lineHeight: 16, marginTop: 6, textAlign: 'right' },
+    fieldLabel: { flex: 1, fontSize: 11.5, color: C.muted, textAlign: start as any },
+    fieldValue: { fontSize: 13.5, fontWeight: '600', color: C.ink, marginTop: 3, textAlign: start as any, writingDirection: 'auto' as any },
+    fieldNote: { fontSize: 11.5, color: C.muted, lineHeight: 16, marginTop: 6, textAlign: start as any },
     savedTag: { flexDirection: 'row', alignItems: 'center', gap: 3 },
     savedText: { fontSize: 11, fontWeight: '600', color: C.primary },
     // >= 16 on web or mobile Safari zooms on focus and never restores (verify-input-font-no-ios-zoom).
     input: {
       fontSize: Platform.OS === 'web' ? 16 : 15, fontWeight: '600', color: C.ink, marginTop: 3,
-      textAlign: 'right' as const, writingDirection: 'auto' as any,
+      textAlign: start as any, writingDirection: 'auto' as any,
       borderBottomWidth: 1, borderBottomColor: C.primary, paddingVertical: 2,
       ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}),
     },
@@ -859,13 +863,13 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     },
     deviceGlyphCurrent: { backgroundColor: C.surface },
     deviceBody: { flex: 1, minWidth: 0 },
-    deviceTitle: { fontSize: 13.5, fontWeight: '700', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any },
-    deviceSub: { fontSize: 11.5, color: C.muted, marginTop: 1, textAlign: 'right' },
-    deviceActiveNow: { fontSize: 11, fontWeight: '600', color: C.primary, marginTop: 3, textAlign: 'right' },
-    deviceActive: { fontSize: 11, color: C.muted, marginTop: 3, textAlign: 'right' },
+    deviceTitle: { fontSize: 13.5, fontWeight: '700', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any },
+    deviceSub: { fontSize: 11.5, color: C.muted, marginTop: 1, textAlign: start as any },
+    deviceActiveNow: { fontSize: 11, fontWeight: '600', color: C.primary, marginTop: 3, textAlign: start as any },
+    deviceActive: { fontSize: 11, color: C.muted, marginTop: 3, textAlign: start as any },
     // The honest revocation note — the victim's issued token can outlive the row by up to an hour.
-    deviceNote: { fontSize: 10.5, color: C.body, lineHeight: 14, marginTop: 3, textAlign: 'right' },
-    deviceErr: { fontSize: 11, color: '#d05b4c', marginTop: 4, textAlign: 'right' },
+    deviceNote: { fontSize: 10.5, color: C.body, lineHeight: 14, marginTop: 3, textAlign: start as any },
+    deviceErr: { fontSize: 11, color: '#d05b4c', marginTop: 4, textAlign: start as any },
     deviceTrailing: { alignItems: 'center', gap: 4 },
     devicePill: { backgroundColor: C.primary, borderRadius: 999, paddingVertical: 3, paddingHorizontal: 9 },
     devicePillText: { color: C.onFill, fontSize: 10.5, fontWeight: '700' },
@@ -882,7 +886,7 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     devicesOthers: { marginTop: 12, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: C.tint, borderWidth: 1, borderColor: C.tintLine ?? C.line },
     devicesOthersText: { fontSize: 12.5, fontWeight: '700', color: C.primary },
     devicesRetry: { paddingVertical: 6 },
-    devicesRetryText: { fontSize: 11.5, color: C.muted, textAlign: 'right' },
+    devicesRetryText: { fontSize: 11.5, color: C.muted, textAlign: start as any },
     devicesRetryLink: { color: C.primary, fontWeight: '600' },
     shimmerBlock: { backgroundColor: C.surface2 },
     shimmerLine: { height: 10, borderRadius: 5, backgroundColor: C.surface2 },

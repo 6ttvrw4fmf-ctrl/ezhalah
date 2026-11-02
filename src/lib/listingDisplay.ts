@@ -2,10 +2,11 @@
 // headline (type / location / price), extracted so a second consumer (Read Aloud, owner 2026-08-19)
 // can never say something that disagrees with what the card actually shows. Always resolves to
 // Arabic in the *Ar helpers; the English speech helpers share ResultCard's catalog/transliteration.
-import type { Listing } from '@/data/listings';
+import type { Listing, ListingDiscount } from '@/data/listings';
 import { englishCatalogText, translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, type Locale } from '@/i18n';
 import { arabicOrPlaceholder } from './arabicText';
 import { translitPlace } from './translitPlace';
+import { advertisedMonthly } from './rentPool';
 
 // #1 (source-accurate, mirrors ResultCard.tsx): the RAW scraped type when it's already Arabic, else
 // the clean-type mapping translated to Arabic — never leaks a raw English type string.
@@ -26,19 +27,60 @@ export function listingLocationAr(listing: Listing): string {
   return listing.district ? `${listing.district}، ${city}` : city;
 }
 
-// STAY-LENGTH PLATFORMS SHOW NO PRICE, ONLY THIS NOTE (owner rule 2026-10-02): Gathern and Aqar
-// Monthly (Aqar's DailyRenting vertical, the Gathern twin). A stay there is priced by its length —
-// the guest picks the dates on the platform — so one monthly figure misstates it. Display only: the
-// stored price, the monthly-only search and every filter/sort are unchanged.
-export const STAY_LENGTH_PRICE_NOTE = 'Tap to see prices by length of stay';
+// STAY-LENGTH PLATFORMS SHOW NO PRICE LINE AT ALL (owner 2026-10-26, «remove the إقامات قصيرة price, no need
+// for it»; before that, 2026-10-02, they showed a «tap to see prices by length of stay» note). Gathern and Aqar
+// Monthly (Aqar's DailyRenting vertical, the Gathern twin): a stay there is priced by its length — the guest picks
+// the dates on the platform — so no single figure on our card is right. Display only: the stored price, the
+// short-stays pool and every filter/sort are unchanged. listingPrice() returns '' for them and every surface
+// (card, ad page, Read Aloud, the agent's card memory) prints nothing where the price would be.
 export const isStayLengthPriced = (source: string): boolean => /gathern|aqar\s*monthly/i.test(source || '');
 
-// The price line every surface prints (card, Read Aloud, the agent's card summary).
+// The price line every surface prints (card, Read Aloud, the agent's card summary). '' = print nothing.
 export function listingPrice(listing: Listing, loc: Locale): string {
-  return isStayLengthPriced(listing.source) ? translate(loc, STAY_LENGTH_PRICE_NOTE) : tPrice(listing.price, loc);
+  return isStayLengthPriced(listing.source) ? '' : tPrice(listing.price, loc);
 }
 export function listingPriceAr(listing: Listing): string {
   return listingPrice(listing, 'ar');
+}
+
+// THE MONTHLY LINE UNDER EVERY YEARLY RENT PRICE (owner 2026-10-26): Saudi rent is quoted yearly, but a user may
+// think per month, so every yearly card carries the per-month figure under the big yearly price:
+//   • the site itself quoted per month (pool yearly at ×12, src/lib/rentPool.ts) → «السعر المعلن 3,000 شهرياً»
+//     — the site's exact figure and word;
+//   • the site quoted per year → «≈ 3,000 شهرياً» — our arithmetic (÷12, rounded), marked with ≈ like every
+//     derived figure (the per-metre total).
+// Only on the yearly pool with a real figure; short-stay platforms and unpriced rows get null.
+export function monthlyLineText(listing: Listing, loc: Locale): string | null {
+  if (isStayLengthPriced(listing.source)) return null;
+  if (listing.rentPeriod !== 'annual') return null;
+  const annual = listing.priceAnnual;
+  if (typeof annual !== 'number' || !Number.isFinite(annual) || annual <= 0) return null;
+  const a = `${translate(loc, 'SAR')} ${Math.round(annual / 12).toLocaleString('en-US')}`;
+  const advertised = advertisedMonthly('annual', listing.sourceRentPeriod, annual);
+  return advertised != null ? translate(loc, 'Advertised price {a}/month', { a }) : translate(loc, '≈ {a}/month', { a });
+}
+
+// A DISCOUNT IS SHOWN ONLY WHEN THE SOURCE PUBLISHED ONE, AND ONLY NEXT TO THE FINAL PRICE
+// (owner 2026-10-19: «show the final price with the discount; no discount → the normal price»).
+// Buy only: aqar's discounted Buy page prints «~~60,000,000~~ 45,000,000 خصم 25%», and
+// price_original / discount_pct carry exactly those two facts (price_total is already the 45M).
+// Rent rows carry a discount_pct but no usable price_original, so they show nothing until a scraper
+// stores both. Stay-length platforms show no price at all (rule above), and a derived price has no
+// published figure to strike. Every guard returns null — a card without a discount line is the
+// card as it was, never a wrong line.
+export function listingDiscountFrom(
+  deal: unknown, source: unknown, priceTotal: unknown, priceOriginal: unknown, discountPct: unknown,
+): ListingDiscount | null {
+  if (deal !== 'Buy') return null;
+  if (isStayLengthPriced(typeof source === 'string' ? source : '')) return null;
+  if (typeof priceTotal !== 'number' || !(priceTotal > 0)) return null;
+  if (typeof priceOriginal !== 'number' || !Number.isFinite(priceOriginal) || !(priceOriginal > priceTotal)) return null;
+  if (typeof discountPct !== 'number' || !Number.isInteger(discountPct) || discountPct <= 0 || discountPct >= 100) return null;
+  return { original: priceOriginal, pct: discountPct };
+}
+// The struck-through line, formatted like every Buy price (listingPriceString → tPrice): «ر.س 1,250,000».
+export function listingDiscountOldPrice(discount: ListingDiscount, loc: Locale): string {
+  return tPrice(`SAR ${discount.original.toLocaleString('en-US')}`, loc);
 }
 
 // Platform display name from the raw scraped `source` slug — MOVED here from ResultCard.tsx

@@ -55,6 +55,8 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.pii import redact_pii
+from scrapers.common.source_pin import pin_dict
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
 _PII = {"whatsapp_number", "rega_advertiser_number"}
@@ -394,11 +396,17 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "city": normalize.map_city(OWNER_CITY_AR),
         "neighborhood": district_ar,
         "title": L.get("name_en") or L.get("name_ar"),
+        # The ad's own text (🔬 AF 2026-10-27): the Rule B word checker reads only `description`, and this Nuzul
+        # tenant left it NULL, so «ومتاح مصعد» in description_ar never reached the Advanced Filter (0 text facts).
+        "description": redact_pii(L.get("description_ar") or L.get("description_en")) or None,
         "photo_urls": _photos(L),
         "property_age": None if property_type in AGELESS_TYPES
                         else _age_from_year_built(L.get("year_built")),
         "rega_location_verified": bool(L.get("rega_ad_number")),
-        "additional_info": _additional_info(L),
+        # Owner 2026-10-20: the API item's own latitude/longitude (strings). The panel rows keep their
+        # legacy shape under "rows" (src/data/remote.ts buildAdditionalInfo unwraps it); the index reads
+        # the pin from the object (listing_rich_attrs → search_listings_ar.latitude).
+        "additional_info": {"rows": _additional_info(L), **pin_dict(L.get("latitude"), L.get("longitude"))},
         # Feature-grid booleans the card renders with icons — mapped from Aldarim's flags/counts so the
         # card shows real features (Electricity/Water/Sewage/AC/parking…) instead of "No features".
         # Tri-state (2026-08-11): silence is NOT a denial. All four keys are 0/1 flags aldarim really

@@ -48,11 +48,21 @@ concurrency:
   group: journey-sweep
   cancel-in-progress: false
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   sweep:
     name: journeys on ${{ matrix.engine }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # 90, not 45 (🔧 2026-10-20, backlog 579): at JOURNEY_N=2 every engine now needs 40–45 minutes
+    # (10-20 run 39402030730: chromium 40 min green, firefox 44 min green, webkit CANCELLED at the
+    # cap after 43 min), so a 45-minute cap killed the slowest engine on every scheduled run since
+    # 09-27 and the attendance step below correctly refused to call those runs clean. The cap is a
+    # runaway guard, not a budget: the concurrency group already serialises sweeps.
+    timeout-minutes: 90
     strategy:
       # ONE ENGINE'S FAILURE MUST NOT CANCEL THE OTHERS. The entire question this workflow answers is
       # "where do the engines DIFFER" — killing the siblings the moment one goes red destroys exactly
@@ -146,7 +156,7 @@ jobs:
   alert:
     needs: [sweep]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

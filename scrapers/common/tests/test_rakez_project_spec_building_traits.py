@@ -23,14 +23,14 @@ from scrapers.rakez import run as R  # noqa: E402
 
 def test_plural_lifts_is_an_elevator_fleet_wide():
     # verbatim rakez feature terms (projects 68407, 70181)
-    assert N.prose_amenities_yes("مصاعد").get("elevator") is True
-    assert N.prose_amenities_yes("مصاعد إيطالية").get("elevator") is True
-    assert N.prose_amenities_yes("يوجد مصاعد حديثة").get("elevator") is True
+    assert N.prose_amenities("مصاعد").get("elevator") is True
+    assert N.prose_amenities("مصاعد إيطالية").get("elevator") is True
+    assert N.prose_amenities("يوجد مصاعد حديثة").get("elevator") is True
 
 
 def test_plural_keeps_the_negation_and_prepared_only_rules():
-    assert N.prose_amenities_yes("تأسيس مصاعد").get("elevator") is None
-    assert N.prose_amenities_yes("بدون مصاعد").get("elevator") is None
+    assert N.prose_amenities("تأسيس مصاعد").get("elevator") is None
+    assert N.prose_amenities("بدون مصاعد").get("elevator") is False   # a stated no (owner 2026-10-24)
     assert N.amenities_from_text("بدون مصاعد").get("elevator") is False
 
 

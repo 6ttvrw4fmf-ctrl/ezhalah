@@ -123,9 +123,10 @@ def test_a_gone_first_unit_does_not_strip_the_shard():
 
 
 def test_three_unreadable_units_still_fall_back_to_the_old_query():
-    answer_for, asked = _units(gone={1, 2, 3, 4})
-    assert R.settle_across_units(answer_for, [1, 2, 3, 4]) == ()
-    assert 4 not in asked                                     # bounded: never more than SETTLE_TRIES units
+    ids = list(range(1, R.SETTLE_TRIES + 3))
+    answer_for, asked = _units(gone=set(ids))
+    assert R.settle_across_units(answer_for, ids) == ()
+    assert len(set(asked)) == R.SETTLE_TRIES               # bounded: never more than SETTLE_TRIES units
 
 
 # ── parking from the search result's extended_details (🔬 2026-10-06, backlog 79b) ──────────────────

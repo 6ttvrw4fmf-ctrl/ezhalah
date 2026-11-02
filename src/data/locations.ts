@@ -6,7 +6,7 @@
 // first with English fallbacks. (PRD §5.1, prototype matchLocations — extended to nationwide data.)
 
 import raw from './sa-locations.json';
-import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, type CatalogCity, type CatalogDistrict } from '../lib/locationSuggest';
+import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, populatedDistrictRows, orderCityBoxRows, cityOutweighsDistricts, liveDistrictKey, type CatalogCity, type CatalogDistrict, type LiveDistrictRow } from '../lib/locationSuggest';
 import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
@@ -105,15 +105,33 @@ export const regionNameEn = (regionId: number | null, regionAr: string | null): 
   (regionId != null ? REGION_BY_ID.get(regionId)?.en : undefined) ?? (regionAr ? translitPlace(regionAr) : null);
 let _districtEn: Map<string, string> | null = null;
 const districtEnKey = (cityId: number, ar: string) => `${cityId}:${stripAl(stripDistrictWord(norm(ar)))}`;
-export function districtNameEn(cityId: number, districtAr: string): string {
+let _districtKeys: Set<string> | null = null;
+/** Every catalog district, keyed per city exactly like districtEnMap (folded, «حي» and «ال» dropped). */
+function districtEnKeys(): Set<string> {
+  if (!_districtKeys) {
+    _districtKeys = new Set();
+    for (const list of CATALOG_DISTRICTS_BY_CITY.values()) for (const d of list) _districtKeys.add(districtEnKey(d.cityId, d.districtAr));
+  }
+  return _districtKeys;
+}
+function districtEnMap(): Map<string, string> {
   if (!_districtEn) {
     _districtEn = new Map();
     for (const list of CATALOG_DISTRICTS_BY_CITY.values()) {
       for (const d of list) if (d.districtEn) _districtEn.set(districtEnKey(d.cityId, d.districtAr), d.districtEn);
     }
   }
-  return _districtEn.get(districtEnKey(cityId, districtAr)) ?? translitPlace(districtAr.replace(/^حي\s+/, ''));
+  return _districtEn;
 }
+export function districtNameEn(cityId: number, districtAr: string): string {
+  return districtEnMap().get(districtEnKey(cityId, districtAr)) ?? translitPlace(districtAr.replace(/^حي\s+/, ''));
+}
+// OFFICIAL English names only — null where the catalog has none (no transliteration). For sentences a person
+// reads as English (the home headline's facts, owner 2026-10-22): «Drh Al Arws» is not English; such a fact
+// is skipped instead.
+export const cityNameEnOfficial = (cityId: number): string | null => CITY_BY_ID.get(cityId)?.en ?? null;
+export const districtNameEnOfficial = (cityId: number, districtAr: string): string | null =>
+  districtEnMap().get(districtEnKey(cityId, districtAr)) ?? null;
 
 // ---------------------------------------------------------------------------------------------
 // Normalization + search keys
@@ -729,6 +747,11 @@ export type CityOption = {
   // false = this row came from the built-in catalog while the scoped pool is not loaded (or does not carry
   // the place): its count is UNKNOWN, so the UI prints no number and no «nothing here» claim (2026-10-03).
   scopeKnown?: boolean;
+  // Set on a «حي X · City» row (owner decision 2026-10-19, backlog 522/566): the customer typed a DISTRICT name into the
+  // city box and this served district carries it; tapping the row selects the city AND the district. `districtMatchValues`
+  // = every raw spelling the index serves for it (twin-safe recall, like DistrictOption). Never set on a plain city row.
+  districtAr?: string;
+  districtMatchValues?: string[];
 };
 
 // Keyed by Deal ('Buy'/'Rent') — the Top-6 + typed-autocomplete pool is scoped to the deal the user
@@ -1260,6 +1283,41 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal | null, catego
 // normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
 // exact-prefix matches before substring matches, then by listing count (bigger cities first).
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
+// location_index_live rows as the city box's «حي X · City» candidates (owner decision 2026-10-19, backlog 522/566): the
+// index names the city by its English DB label («Khobar», «Riyadh»), which is mapped to the catalog id the same way
+// placeHasInventory does (the label itself, else CITY_AR_DISPLAY → the Arabic name). A label that lands on two catalog
+// cities (the الهفوف twins) or on none contributes no row: a district row must never select the wrong city.
+// Memoised against the index array itself: ensureLocationIndex replaces LIVE_DISTRICTS on every (re)load, so the rows
+// follow it without that function having to know about this one (its failure-path barrier lifts it on its own).
+let _liveDistrictRows: { src: LiveDistrict[]; rows: LiveDistrictRow[] } | null = null;
+function liveDistrictRows(): LiveDistrictRow[] {
+  if (_liveDistrictRows && _liveDistrictRows.src === LIVE_DISTRICTS) return _liveDistrictRows.rows;
+  const byEn = new Map<string, number[]>();
+  const byAr = new Map<string, number[]>();
+  for (const [id, c] of CITY_BY_ID) {
+    const ke = flatLoc(c.en); byEn.set(ke, [...(byEn.get(ke) ?? []), id]);
+    const ka = norm(c.ar); byAr.set(ka, [...(byAr.get(ka) ?? []), id]);
+  }
+  const idFor = new Map<string, number | null>();
+  const out: LiveDistrictRow[] = [];
+  for (const d of LIVE_DISTRICTS) {
+    const k = flatLoc(d.city);
+    let id = idFor.get(k);
+    if (id === undefined) {
+      const ids = byEn.get(k) ?? byAr.get(norm(CITY_AR_DISPLAY[k] ?? '')) ?? [];
+      id = ids.length === 1 ? ids[0] : null;
+      idFor.set(k, id);
+    }
+    if (id === null) continue;
+    const n = Number(d.n) || 0;
+    // Only a district our catalog knows for THAT city becomes a row (owner 2026-10-24): an address the advertiser
+    // typed («مكة المكرمة السعودية», «… شارع 60 مخطط ولي العهد») is not a district and is never offered.
+    if (n > 0 && d.district && districtEnKeys().has(districtEnKey(id, d.district))) out.push({ districtAr: d.district, cityId: id, n, key: liveDistrictKey(d.district) });
+  }
+  _liveDistrictRows = { src: LIVE_DISTRICTS, rows: out };
+  return out;
+}
+
 export function matchCitiesByText(deal: Deal | null, periodTok: string | null, category: Category | null, query: string, types: string[] | null, af: AfParams | null): CityOption[] {
   const q = norm(query);
   if (!q) return [];
@@ -1298,7 +1356,19 @@ export function matchCitiesByText(deal: Deal | null, periodTok: string | null, c
     cityId: c.cityId, cityAr: c.cityAr, regionId: c.regionId, regionAr: c.regionAr,
     listingCount: 0, totalInCohort: 0, scopeKnown: exactPool !== undefined,
   }));
-  return [...fromPool, ...extras];
+  // A typed DISTRICT name offers its populated «حي X · City» rows, ranked above the 0-served homonym cities (owner
+  // decision 2026-10-19, backlog 522/566: «البديعة» → حي البديعة · الرياض, «الراكة» → حي الراكة الجنوبية · الخبر).
+  const liveRows = populatedDistrictRows(query, liveDistrictRows(), 4);
+  const typedCity = cityOutweighsDistricts(scored.filter((sc) => sc.rank === 0).map((sc) => sc.opt.listingCount), liveRows);
+  const districtRows = (typedCity ? [] : liveRows).flatMap((r): CityOption[] => {
+    const cat = CITY_BY_ID.get(r.cityId);
+    if (!cat) return [];
+    return [{
+      cityId: r.cityId, cityAr: cat.ar, regionId: cat.regionId, regionAr: REGION_BY_ID.get(cat.regionId)?.ar ?? null,
+      listingCount: 0, totalInCohort: 0, scopeKnown: false, districtAr: r.districtAr, districtMatchValues: r.matchValues ?? [r.districtAr],
+    }];
+  });
+  return orderCityBoxRows(fromPool, districtRows, extras);
 }
 
 // True when two-or-more results in the given result set share the same display name — the ONLY
@@ -1306,7 +1376,8 @@ export function matchCitiesByText(deal: Deal | null, periodTok: string | null, c
 // duplicate city names, use the confirmed hidden region internally so the wrong city is never
 // selected." Most results are unambiguous and need no extra label.
 export function hasNameCollision(results: CityOption[], cityAr: string): boolean {
-  return results.filter((r) => r.cityAr === cityAr).length > 1;
+  // A «حي X · City» row names its city on purpose; it is not a second city of that name.
+  return results.filter((r) => !r.districtAr && r.cityAr === cityAr).length > 1;
 }
 
 // Converts a selected CityOption into the exact same LocationResolution shape resolveLocation()

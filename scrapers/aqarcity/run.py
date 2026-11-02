@@ -59,6 +59,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://www.aqarcity.net"
 # /sitemaps/sitemap-index.xml answers 404 since the 2026-09 redesign; robots.txt now names
@@ -391,6 +392,30 @@ def _redact(text: Optional[str]) -> Optional[str]:
 
 
 # ── Sitemap enumeration ───────────────────────────────────────────────────────
+# THE ARABIC PAGE IS THE SOURCE (2026-10-24, 🆕). Since 2026-10-22 04:34 UTC aqarcity's sitemap lists
+# /en/property/<id>, and that page is now really English: «Apartment for rent in Ar Rawdah, Riyadh», an English
+# spec table and JSON-LD city «Riyadh». Every label this parser reads is Arabic (التصنيف, نوع العرض …), so all
+# 2,102 /en/ rows were stored as Buy with type «unknown», rents included, and 298 new ones with no city at all
+# (1,901 served as «بيع / غير معروف»). The same ad at /property/<id> is the Arabic page (214 rows read right in
+# the same crawl). So every url is fetched as /property/<id>, one per id.
+_EN_PREFIX = re.compile(r"^(https?://[^/]+)/en(/property/\d+)$")
+
+
+def arabic_url(u: str) -> str:
+    return _EN_PREFIX.sub(r"\1\2", u)
+
+
+def is_english_page(body: str, pi: dict, ld: Optional[dict]) -> bool:
+    """True for the English rendering. Its labels are not the Arabic ones this parser reads, so a row mapped
+    from it would be Buy / «unknown» by construction — it is skipped, never written."""
+    if re.search(r"<html[^>]*\blang=\"en", body or "", re.I):
+        return True
+    arabic = re.compile(r"[\u0600-\u06FF]")
+    if pi:
+        return not any(arabic.search(k) for k in pi)
+    return not arabic.search(str((ld or {}).get("name") or ""))
+
+
 def sitemap_urls(s: cc.Session) -> list[str]:
     """Return /property/<id> URLs from the sitemap (a plain urlset, or an index of child sitemaps)."""
     urls: list[str] = []
@@ -416,7 +441,7 @@ def sitemap_urls(s: cc.Session) -> list[str]:
             pass
     # de-dup, keep ONLY /property/<id> (exclude /properties/, /property/create, etc.)
     seen, out = set(), []
-    for u in urls:
+    for u in map(arabic_url, urls):
         if re.search(r"/property/\d+$", u) and u not in seen:
             seen.add(u)
             out.append(u)
@@ -789,6 +814,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         return None, "residential"
     pid = re.search(r"/property/(\d+)", url).group(1)
     pi = _pi_table(body)
+    if is_english_page(body, pi, ld):
+        return None, "residential"
     crumb = _breadcrumb_parts(bc)
 
     # ── type + category ──
@@ -898,6 +925,10 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         fal_no = _int(m.group(1))
 
     geo = ld.get("geo") or {}
+    # Owner 2026-10-20 («first let's investigate those ones»): the JSON-LD geo block vanished with the
+    # 2026-09 redesign (0 of 2,245 ads served a pin), while every sampled ad page (5/5) still prints its own
+    # Maps link «google.com/maps?q=LAT%2CLNG». Read it when the JSON-LD has no geo; the LD still wins.
+    page_pin = pin_from_html(body) if not geo.get("latitude") else {}
 
     # ── amenity columns from خدمات العقار ──
     amenities: dict[str, bool] = {}
@@ -945,8 +976,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "deed_location_text": pi.get("وصف موقع العقار حسب الصك"),
         "building_code_compliant": pi.get("مطابقة كود البناء السعودي"),
         "warranties": pi.get("الضمانات و مددها"),
-        "latitude": geo.get("latitude"),
-        "longitude": geo.get("longitude"),
+        "latitude": geo.get("latitude") or page_pin.get("latitude"),
+        "longitude": geo.get("longitude") or page_pin.get("longitude"),
         "street_address": _redact(addr.get("streetAddress")),
         "postal_code": addr.get("postalCode"),
         "date_published": ld.get("datePublished"),
@@ -980,11 +1011,14 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "property_age": 0 if pi.get("عمر العقار") in ("جديد", "جديده") else None,
         "direction": pi.get("واجهة العقار") or None,
         "street_width_m": _int(pi.get("عرض الشارع")),
-        "price_total": price if not is_rent else None,
+        # The other side of the price is SETTLED empty, so it is written as AUTHORITATIVE_NULL: a plain None is
+        # dropped by the upsert and would leave the total that the English-page era (2026-10-22..24) stored on
+        # 249 rent rows. A rent has no sale total; a sale has no annual rent.
+        "price_total": price if not is_rent else db.AUTHORITATIVE_NULL,
         # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays
         # round(price_annual/12), so storing the raw monthly showed 1/12 of the real rent.
         # (price-fidelity fix 2026-07-13)
-        "price_annual": (normalize.annualize_rent(price, "monthly") if rent_period == "monthly" else price) if is_rent else None,
+        "price_annual": (normalize.annualize_rent(price, "monthly") if rent_period == "monthly" else price) if is_rent else db.AUTHORITATIVE_NULL,
         "price_per_meter": price_per_meter,
         "rent_period": rent_period,
         "city": city,

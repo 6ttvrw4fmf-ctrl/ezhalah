@@ -27,7 +27,12 @@ import { cohortAllows } from './afCohorts.ts';
 
 export type AfIntentId =
   | 'property_age' | 'street_width' | 'direction' | 'bathrooms'
-  | 'rating' | 'rnpl' | 'unit_subtype' | 'furnished' | 'amenities';
+  | 'rating' | 'rnpl' | 'unit_subtype' | 'furnished' | 'amenities'
+  // The Apartments & Co-living cards and the Residential Building ladders (owner 2026-10-31): bag questions whose
+  // tokens the amenity path certifies per token (partitionRequestedAmenities); listed so the registry is COMPLETE.
+  | 'comfort' | 'space' | 'safety' | 'perks' | 'build' | 'extras' | 'who' | 'features' | 'services' | 'fun' | 'outdoors' | 'smart' | 'papers'
+  | 'water' | 'games' | 'camp_life' | 'water_land' | 'land_papers' | 'power' | 'crops' | 'animals' | 'buildings' | 'plot' | 'deal_papers' | 'land' | 'location' | 'cspace' | 'cservices' | 'business' | 'office_kind' | 'ready' | 'building' | 'trucks' | 'loc_papers' | 'inside' | 'investment' | 'hotel' | 'station' | 'deal_loc' | 'space_papers' | 'services_business' | 'workshop' | 'loc_business' | 'building_papers' | 'factory' | 'loc_safety' | 'papers_c'
+  | 'apartments' | 'shops';
 
 export type AfIntent = {
   /** The canonical AF question id. cohortAllows(q, id) is the certification gate — always. */
@@ -107,7 +112,14 @@ const UNIT_SUBTYPES = ['استديو', 'شقق مخدومة', 'شقة'] as const
 // merely a guess, it is a guess on the wrong scale, and it would match almost everything.
 const RATING_KEYS = ['9.5', '9.0', '9.0_rc10'] as const;
 
+// Registry-only intents (the themed cards, owner 2026-10-31 → 2026-11-02): no chat vocabulary of their own — every chip is a
+// certified p_amenities token the amenities intent already handles — so one shape, generated, instead of one line each.
+const REGISTRY_ONLY_IDS = ['outdoors', 'smart', 'papers', 'water', 'games', 'camp_life', 'water_land', 'land_papers', 'power', 'crops', 'animals', 'buildings', 'plot', 'deal_papers', 'land', 'location', 'cspace', 'cservices', 'business', 'office_kind', 'ready', 'building', 'trucks', 'loc_papers', 'inside', 'investment', 'hotel', 'station', 'deal_loc', 'space_papers', 'services_business', 'workshop', 'loc_business', 'building_papers', 'factory', 'loc_safety', 'papers_c'] as const;
+const registryOnly = <K extends AfIntentId>(ids: readonly K[]): Record<K, AfIntent> =>
+  Object.fromEntries(ids.map((id) => { const i: AfIntent = { id, vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q }; return [id, i]; })) as unknown as Record<K, AfIntent>;
+
 export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
+  ...registryOnly(REGISTRY_ONLY_IDS),
   property_age: {
     id: 'property_age',
     vocabulary: AGE_KEYS, // canonicalizeAge ALSO accepts a plain integer "N" ("less than N years")
@@ -196,11 +208,85 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
       return keep.length === (q.amenities?.length ?? 0) ? q : { ...q, amenities: keep.length ? keep : null };
     },
   },
+  comfort: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'comfort', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  space: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'space', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  safety: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'safety', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  perks: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'perks', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  // The Villas & Houses cards (owner 2026-11-01/02) — same shape, registry-only.
+  // countryside, land, commercial cards (owner 2026-11-01/02) — registry-only, chips certified per token
+  build: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'build', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  extras: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'extras', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  who: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'who', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  features: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'features', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  services: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'services', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  fun: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'fun', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  apartments: {
+    // The Residential Building ladder: one p_amenities token (apts4/8/12/20 = apartments_count >= n).
+    id: 'apartments', vocabulary: ['apts4', 'apts8', 'apts12', 'apts20'],
+    canonicalize: (raw) => (['apts4', 'apts8', 'apts12', 'apts20'].includes(raw) ? raw : null),
+    apply: (q, key) => ({ ...q, amenities: [...new Set([...(q.amenities ?? []).filter((t) => !/^apts\d+$/.test(t)), key])] }),
+    clear: (q) => {
+      const keep = (q.amenities ?? []).filter((t) => !/^apts\d+$/.test(t));
+      return keep.length === (q.amenities?.length ?? 0) ? q : { ...q, amenities: keep.length ? keep : null };
+    },
+  },
+  shops: {
+    // «Has shops on the ground floor»: the has_shops token (shops_count >= 1).
+    id: 'shops', vocabulary: ['has_shops'],
+    canonicalize: (raw) => (raw === 'has_shops' ? raw : null),
+    apply: (q, key) => ({ ...q, amenities: [...new Set([...(q.amenities ?? []), key])] }),
+    clear: (q) => {
+      const keep = (q.amenities ?? []).filter((t) => t !== 'has_shops');
+      return keep.length === (q.amenities?.length ?? 0) ? q : { ...q, amenities: keep.length ? keep : null };
+    },
+  },
 };
 
 /** Ids the generic apply loop owns. amenities is handled by its own per-token gate. */
+// Bag intents have no canonical value of their own: the amenity path certifies their tokens one by one.
+export const BAG_INTENT_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'outdoors', 'smart', 'papers', 'water', 'games', 'camp_life', 'water_land', 'land_papers', 'power', 'crops', 'animals', 'buildings', 'plot', 'deal_papers', 'land', 'location', 'cspace', 'cservices', 'business', 'office_kind', 'ready', 'building', 'trucks', 'loc_papers', 'inside', 'investment', 'hotel', 'station', 'deal_loc', 'space_papers', 'services_business', 'workshop', 'loc_business', 'building_papers', 'factory', 'loc_safety', 'papers_c']);
 export const GENERIC_INTENT_IDS: AfIntentId[] =
-  (Object.keys(AF_INTENTS) as AfIntentId[]).filter((id) => id !== 'amenities');
+  (Object.keys(AF_INTENTS) as AfIntentId[]).filter((id) => !BAG_INTENT_IDS.has(id));
 
 /**
  * Apply the model's proposed AF intents through the REAL certification gate.

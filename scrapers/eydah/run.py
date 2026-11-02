@@ -250,6 +250,27 @@ def _make_verify_gone(control_ad: Optional[str], url_by_ad: dict[str, str]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
+CRAWL_LIVE_ORACLE = "eydah.detail_fetch.jsonld_url_instock"
+
+
+def mark_crawl_read_live(row: dict, d: dict) -> bool:
+    """Stamp a row whose OWN offer page this crawl read live, by the oracle's own rule (2026-10-27).
+
+    _make_signal's LIVE is «200 + a RealEstateListing JSON-LD whose url is THIS listing's url». The
+    crawl reads exactly that page for every row it writes (fetch_detail returns None on a non-200 or
+    a page with no such JSON-LD — the homepage soft-404). A two-offer catalogue re-read in full every
+    night never let a row reach grace, so the oracle was never asked and nothing was ever verified.
+    Stamped only when the JSON-LD names this row's url AND the offer says InStock (the only measured
+    availability); any other availability is kept but not certified. Zero extra requests."""
+    ld = (d or {}).get("ld") or {}
+    offer = ld.get("offers") if isinstance(ld.get("offers"), dict) else {}
+    availability = str(offer.get("availability") or "").rsplit("/", 1)[-1]
+    if not row.get("listing_url") or ld.get("url") != row["listing_url"] or availability != "InStock":
+        return False
+    db.mark_direct_alive(row, oracle=CRAWL_LIVE_ORACLE)
+    return True
+
+
 def db_listing_url(ad_number: str) -> Optional[str]:
     """The row's OWN stored URL (case-sensitive on this host — never rebuilt from the ad_number)."""
     from scrapers.common.http_liveness import stored_listing_url
@@ -282,6 +303,8 @@ def main() -> int:
                 skipped["detail_unreachable_or_not_a_listing"] = skipped.get("detail_unreachable_or_not_a_listing", 0) + 1
                 continue
             row, cat, why = map_listing(href, d)
+            if row:
+                mark_crawl_read_live(row, d)
             if why:
                 skipped[why] = skipped.get(why, 0) + 1
             if not row:

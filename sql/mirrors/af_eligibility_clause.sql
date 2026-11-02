@@ -1,4 +1,48 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-11-02 (migrations 20261102100954 countryside + residential-land group, 20261102101415 commercial group —
+--   owner lists 2026-11-01): CHANGED — the amenity whitelist gains the 60 countryside tokens (58 boolean text facts
+--   split_payments … no_services + camels_horses, palm_fruit_trees) between ''smart_home_entry'' and ''furnished'', then the
+--   46 commercial tokens (mezzanine … building_rules + pool_gym) after ''palm_fruit_trees''; one arm each; everything else
+--   byte-identical. md5 of pg_get_functiondef (verify-sql-mirrors-not-stale): 0688e2b44db6a79ac4d505964ec81878
+-- Re-verified 2026-11-02 (migration 20261102055240, the Villas & Houses group — owner lists 2026-11-01, approved 2026-11-02):
+--   CHANGED — the amenity whitelist gains the 12 villa tokens between ''has_shops'' and ''furnished'' (7 boolean text
+--   facts + 5 merged EITHER predicates) and one arm each; everything else byte-identical.
+-- Re-verified 2026-11-01 (migration 20261101100930, the Apartments & Co-living group — owner handoff 2026-10-31):
+--   CHANGED — the amenity whitelist gains the 45 group tokens between ''majlis'' and ''furnished'' (39 boolean
+--   text-fact columns roof … families + 6 derived: separate_meters = (separate_electricity_meter or
+--   separate_water_meter), apts4/8/12/20 = apartments_count >= n, has_shops = shops_count >= 1), and one predicate
+--   arm per token after the majlis arm, each `and (not (''<token>'' = any(p_amenities)) or <pred>)` exactly as the
+--   migration's format('           and (not (%L = any(p_amenities)) or %s)', token, pred) wrote it. Rebuilt by
+--   rebuild_af_filter_rpcs(); top_cities_by_deal_ar carries the byte-identical copy. Body below = the previous body
+--   plus exactly those edits, applied to this file with the same replace the migration ran on production:
+--   Recorded md5 of pg_get_functiondef: a0a75c9727a6131321840156e5cbf276   (2026-11-02, migration 20261102055240; before it: 126242b981111b6879a3f27c162478b7)
+--   (length 15,487; the previous text hashed 62539dd9f79949bfbb7842182e72e4f7, 11,546.) NOT YET registered in ops_sql_mirror_expected —
+--   af_eligibility_clause.sql sits in verify-mirror-md5-is-registered.ts UNREGISTERED_MIRROR_BASELINE.
+-- Re-verified 2026-10-26 (migration 20261026011638_majlis_advanced_filter_amenity):
+--   CHANGED — the amenity whitelist gains ''majlis'' and the predicate arm `and (not (''majlis'' = any(p_amenities)) or s.majlis)`
+--   (owner decision #3: the first filter question born from the stored text facts; search_listings_ar.majlis =
+--   af_rule_b(the site''s majlis count > 0, the ad''s own quoted «مجلس»)). Rebuilt by rebuild_af_filter_rpcs(); parity 0;
+--   chip == referee == direct at apply time. Body below = the previous body plus exactly those two edits, applied to
+--   this file with the same replace the migration ran on production, and PROVEN equal to production:
+--   Recorded md5 of pg_get_functiondef: 62539dd9f79949bfbb7842182e72e4f7
+--   (length 11,546; the previous text hashed 34abb6adfc2654cdbd83fb255c0be7b3, 11,448.)
+-- Re-verified 2026-10-25 (migration 20261025072931_six_sites_open_age_bucket_never_answers_up_to):
+--   CHANGED — the open-bucket condition moves from the two aqar tables to seven platforms (aqar, aqarcity,
+--   haraj, muhaysini, reinvest, tuba, wasalt), each proven on its own published age field to store an
+--   open «more than 10» as 10. Rebuilt by rebuild_af_filter_rpcs(); «up to 15» buy 168,663 → 163,374.
+--   Body below = the previous body plus exactly that edit, PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 34abb6adfc2654cdbd83fb255c0be7b3
+--   (length 11,448; the previous text hashed 3379f3308b6790c0d8f3b1a70cf5ac11, 11,295.)
+-- Re-verified 2026-10-25 (migration 20261025065509_aqar_open_age_bucket_never_answers_up_to):
+--   CHANGED — the age-range arm gains one condition: with p_age_max set, a row of
+--   aqar_residential_listings / aqar_commercial_listings stored at 10 or more is excluded. aqar's own
+--   field dictionary renders «أكثر من 10 سنوات» for every raw age above 10 and the scraper floors it to 10,
+--   so the stored 10 has no upper end (16 of 20 live stored-10 pages read «أكثر من 10 سنوات»). Rebuilt by
+--   rebuild_af_filter_rpcs(); unchanged surfaces asserted identical; «up to 15» buy 179,932 → 168,662.
+--   Body below = the previous body plus exactly that edit, and the rendering's own spacing
+--   («$function$ select E'» / «'::text $function$»), PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 3379f3308b6790c0d8f3b1a70cf5ac11
+--   (length 11,295; the previous text hashed 0e7153e98f68fa6aa26b7a00fb6e4334, 10,998.)
 -- Re-verified 2026-10-17 (migration 20261017103017_af_rail_catches_up_to_district_fold): UNCHANGED.
 --   That migration only CALLS af_eligibility_clause() inside rebuild_af_filter_rpcs(); production's
 --   md5(pg_get_functiondef) read 0e7153e98f68fa6aa26b7a00fb6e4334 after it, the md5 recorded below.
@@ -215,7 +259,7 @@ CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql
  IMMUTABLE
-AS $function$select E'
+AS $function$ select E'
     where (s.production_ready or ((p_cities is null or cardinality(p_cities) = 0) and (p_districts is null or cardinality(p_districts) = 0) and p_region_ids is null and not public.search_row_price_gated(s.deal_ar, s.price_total) and (s.region_id is null or s.city_id is null)))
       -- read-side defense-in-depth (2026-08): block only Ezhalah-side impossible/invalid states;
       -- never hides a source price (no magnitude check; 0 legal); production_ready must have a location.
@@ -225,7 +269,7 @@ AS $function$select E'
       and (p_deal       is null or s.deal_ar = p_deal)
       and (p_rent_period is null
            or s.deal_ar <> ''إيجار''
-           or (s.price_annual is null and p_rent_period in (''شهري'',''سنوي'',''كلاهما''))  -- price on request: no figure a period could misstate (owner 2026-09-28)
+           or (s.price_annual is null and (p_rent_period in (''سنوي'',''كلاهما'') or (p_rent_period = ''شهري'' and s.platform in (''gathern'',''aqarmonthly''))))  -- price on request: no figure a period could misstate (owner 2026-09-28)
            or (p_rent_period = ''شهري'' and s.payment_monthly = true and not coalesce(s.rent_now_pay_later, false))
            or (p_rent_period = ''سنوي'' and (s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
            or (p_rent_period = ''كلاهما'' and (s.payment_monthly = true or s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
@@ -289,7 +333,11 @@ AS $function$select E'
       and (p_furnished  is null or s.furnished = p_furnished)
       and ((p_age_min is null and p_age_max is null)
            or (s.property_age is not null
-               and s.property_age >= coalesce(p_age_min, 0) and s.property_age <= coalesce(p_age_max, 32767)))
+               and s.property_age >= coalesce(p_age_min, 0) and s.property_age <= coalesce(p_age_max, 32767)
+               -- an OPEN top bucket stored as its floor 10 («أكثر من 10 سنوات», «اكثر من عشر سنوات», «10+ years», REGA «Ten Year»)
+               -- has no upper end, so on these platforms it never answers «up to N» (aqar + six proven siblings, 2026-10-25)
+               and (p_age_max is null or s.property_age < 10
+                    or s.platform not in (''aqar'', ''aqarcity'', ''haraj'', ''muhaysini'', ''reinvest'', ''tuba'', ''wasalt''))))
       and (p_age_unknown is null or (s.property_age is null) = p_age_unknown)
       and (p_is_new_construction is null or (s.property_age = 0) = p_is_new_construction)
       and (p_tenant     is null or s.tenant_ar = p_tenant)
@@ -297,7 +345,7 @@ AS $function$select E'
       and (p_has_license is null or (p_has_license and s.license_number is not null))
       and (p_amenities is null or (
                not exists (select 1 from unnest(p_amenities) tok
-                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''furnished'',''rnpl'',''rent_now_pay_later''))
+                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''majlis'',''roof'',''two_entrances'',''annex'',''yard'',''garage'',''grill'',''storage'',''water_tank'',''warranty'',''electronic_deed'',''basement'',''self_checkin'',''wifi'',''bills_included'',''jacuzzi'',''smart_tv'',''billiards'',''cleaning_service'',''soundproof'',''cameras'',''guard'',''smart_entry'',''smart_home'',''central_gas'',''sauna'',''kids_play_area'',''nursery'',''free_maintenance'',''intercom'',''fire_system'',''ev_charger'',''central_vacuum'',''insulation'',''dining_majlis'',''own_bathroom'',''fridge'',''whole_floor'',''singles'',''families'',''separate_meters'',''apts4'',''apts8'',''apts12'',''apts20'',''has_shops'',''women_majlis'',''outdoor_kitchen'',''outdoor_diwaniya'',''waterfall'',''well'',''irrigation'',''sports_court'',''garden_yard'',''jacuzzi_sauna'',''cameras_smart_home'',''water_tank_well'',''smart_home_entry'',''split_payments'',''heated_pool'',''kids_pool'',''water_slide'',''sea_view'',''football_pitch'',''playstation'',''inflatable_games'',''sound_system'',''fire_pit'',''bait_shaar'',''mandi_pit'',''outdoor_seating'',''tent'',''dunes_view'',''women_section'',''two_sections'',''events_hall'',''privacy_screen'',''trees'',''for_families'',''for_youth'',''for_events'',''for_newlyweds'',''quad_bikes'',''horses_stable'',''camels'',''toilets_on_site'',''lighting'',''artesian_well'',''solar_power'',''palms'',''fruit_trees'',''fodder_crops'',''greenhouses'',''producing_farm'',''animal_pens'',''poultry'',''farm_house'',''farm_rest_house'',''workers_housing'',''fence'',''main_road'',''good_soil'',''corner_plot'',''three_streets'',''ready_to_build'',''raised_plot'',''residential_commercial'',''all_services'',''asphalt'',''street_lights'',''approved_plan'',''direct_owner'',''inside_project'',''floors_allowed'',''grant_land'',''no_services'',''camels_horses'',''palm_fruit_trees'',''mezzanine'',''pantry'',''glass_front'',''frontage'',''in_mall'',''in_tower'',''license'',''food_allowed'',''takeover'',''first_tenant'',''internet'',''civil_defense'',''high_ceiling'',''hangar'',''insulated_panel'',''cold_storage'',''concrete_floor'',''loading_dock'',''big_gate'',''truck_access'',''crane'',''racks'',''office_inside'',''heavy_power'',''industrial_area'',''car_service'',''meeting_room'',''reception'',''coworking'',''private_office'',''central_ac'',''shops_inside'',''offices_inside'',''apartments_inside'',''staff_housing_inside'',''restaurant_cafe'',''car_wash'',''market'',''earning_income'',''stars_mentioned'',''rooms_suites'',''oil_change'',''pumps'',''mosque'',''building_rules'',''pool_gym'',''furnished'',''rnpl'',''rent_now_pay_later''))
            and (not (''elevator''         = any(p_amenities)) or s.elevator)
            and (not (''parking''          = any(p_amenities)) or s.parking)
            and (not (''kitchen''          = any(p_amenities)) or s.kitchen)
@@ -317,6 +365,170 @@ AS $function$select E'
            and (not (''optical_fibers''                = any(p_amenities)) or s.optical_fibers)
            and (not (''separate_electricity_meter''    = any(p_amenities)) or s.separate_electricity_meter)
            and (not (''separate_water_meter''          = any(p_amenities)) or s.separate_water_meter)
+           and (not (''majlis''                       = any(p_amenities)) or s.majlis)
+           and (not (''roof'' = any(p_amenities)) or s.roof)
+           and (not (''two_entrances'' = any(p_amenities)) or s.two_entrances)
+           and (not (''annex'' = any(p_amenities)) or s.annex)
+           and (not (''yard'' = any(p_amenities)) or s.yard)
+           and (not (''garage'' = any(p_amenities)) or s.garage)
+           and (not (''grill'' = any(p_amenities)) or s.grill)
+           and (not (''storage'' = any(p_amenities)) or s.storage)
+           and (not (''water_tank'' = any(p_amenities)) or s.water_tank)
+           and (not (''warranty'' = any(p_amenities)) or s.warranty)
+           and (not (''electronic_deed'' = any(p_amenities)) or s.electronic_deed)
+           and (not (''basement'' = any(p_amenities)) or s.basement)
+           and (not (''self_checkin'' = any(p_amenities)) or s.self_checkin)
+           and (not (''wifi'' = any(p_amenities)) or s.wifi)
+           and (not (''bills_included'' = any(p_amenities)) or s.bills_included)
+           and (not (''jacuzzi'' = any(p_amenities)) or s.jacuzzi)
+           and (not (''smart_tv'' = any(p_amenities)) or s.smart_tv)
+           and (not (''billiards'' = any(p_amenities)) or s.billiards)
+           and (not (''cleaning_service'' = any(p_amenities)) or s.cleaning_service)
+           and (not (''soundproof'' = any(p_amenities)) or s.soundproof)
+           and (not (''cameras'' = any(p_amenities)) or s.cameras)
+           and (not (''guard'' = any(p_amenities)) or s.guard)
+           and (not (''smart_entry'' = any(p_amenities)) or s.smart_entry)
+           and (not (''smart_home'' = any(p_amenities)) or s.smart_home)
+           and (not (''central_gas'' = any(p_amenities)) or s.central_gas)
+           and (not (''sauna'' = any(p_amenities)) or s.sauna)
+           and (not (''kids_play_area'' = any(p_amenities)) or s.kids_play_area)
+           and (not (''nursery'' = any(p_amenities)) or s.nursery)
+           and (not (''free_maintenance'' = any(p_amenities)) or s.free_maintenance)
+           and (not (''intercom'' = any(p_amenities)) or s.intercom)
+           and (not (''fire_system'' = any(p_amenities)) or s.fire_system)
+           and (not (''ev_charger'' = any(p_amenities)) or s.ev_charger)
+           and (not (''central_vacuum'' = any(p_amenities)) or s.central_vacuum)
+           and (not (''insulation'' = any(p_amenities)) or s.insulation)
+           and (not (''dining_majlis'' = any(p_amenities)) or s.dining_majlis)
+           and (not (''own_bathroom'' = any(p_amenities)) or s.own_bathroom)
+           and (not (''fridge'' = any(p_amenities)) or s.fridge)
+           and (not (''whole_floor'' = any(p_amenities)) or s.whole_floor)
+           and (not (''singles'' = any(p_amenities)) or s.singles)
+           and (not (''families'' = any(p_amenities)) or s.families)
+           and (not (''separate_meters'' = any(p_amenities)) or (s.separate_electricity_meter or s.separate_water_meter))
+           and (not (''apts4'' = any(p_amenities)) or s.apartments_count >= 4)
+           and (not (''apts8'' = any(p_amenities)) or s.apartments_count >= 8)
+           and (not (''apts12'' = any(p_amenities)) or s.apartments_count >= 12)
+           and (not (''apts20'' = any(p_amenities)) or s.apartments_count >= 20)
+           and (not (''has_shops'' = any(p_amenities)) or s.shops_count >= 1)
+           and (not (''women_majlis'' = any(p_amenities)) or s.women_majlis)
+           and (not (''outdoor_kitchen'' = any(p_amenities)) or s.outdoor_kitchen)
+           and (not (''outdoor_diwaniya'' = any(p_amenities)) or s.outdoor_diwaniya)
+           and (not (''waterfall'' = any(p_amenities)) or s.waterfall)
+           and (not (''well'' = any(p_amenities)) or s.well)
+           and (not (''irrigation'' = any(p_amenities)) or s.irrigation)
+           and (not (''sports_court'' = any(p_amenities)) or s.sports_court)
+           and (not (''garden_yard'' = any(p_amenities)) or (s.garden or s.yard))
+           and (not (''jacuzzi_sauna'' = any(p_amenities)) or (s.jacuzzi or s.sauna))
+           and (not (''cameras_smart_home'' = any(p_amenities)) or (s.cameras or s.smart_home))
+           and (not (''water_tank_well'' = any(p_amenities)) or (s.water_tank or s.well))
+           and (not (''smart_home_entry'' = any(p_amenities)) or (s.smart_home or s.smart_entry))
+           and (not (''split_payments'' = any(p_amenities)) or s.split_payments)
+           and (not (''heated_pool'' = any(p_amenities)) or s.heated_pool)
+           and (not (''kids_pool'' = any(p_amenities)) or s.kids_pool)
+           and (not (''water_slide'' = any(p_amenities)) or s.water_slide)
+           and (not (''sea_view'' = any(p_amenities)) or s.sea_view)
+           and (not (''football_pitch'' = any(p_amenities)) or s.football_pitch)
+           and (not (''playstation'' = any(p_amenities)) or s.playstation)
+           and (not (''inflatable_games'' = any(p_amenities)) or s.inflatable_games)
+           and (not (''sound_system'' = any(p_amenities)) or s.sound_system)
+           and (not (''fire_pit'' = any(p_amenities)) or s.fire_pit)
+           and (not (''bait_shaar'' = any(p_amenities)) or s.bait_shaar)
+           and (not (''mandi_pit'' = any(p_amenities)) or s.mandi_pit)
+           and (not (''outdoor_seating'' = any(p_amenities)) or s.outdoor_seating)
+           and (not (''tent'' = any(p_amenities)) or s.tent)
+           and (not (''dunes_view'' = any(p_amenities)) or s.dunes_view)
+           and (not (''women_section'' = any(p_amenities)) or s.women_section)
+           and (not (''two_sections'' = any(p_amenities)) or s.two_sections)
+           and (not (''events_hall'' = any(p_amenities)) or s.events_hall)
+           and (not (''privacy_screen'' = any(p_amenities)) or s.privacy_screen)
+           and (not (''trees'' = any(p_amenities)) or s.trees)
+           and (not (''for_families'' = any(p_amenities)) or s.for_families)
+           and (not (''for_youth'' = any(p_amenities)) or s.for_youth)
+           and (not (''for_events'' = any(p_amenities)) or s.for_events)
+           and (not (''for_newlyweds'' = any(p_amenities)) or s.for_newlyweds)
+           and (not (''quad_bikes'' = any(p_amenities)) or s.quad_bikes)
+           and (not (''horses_stable'' = any(p_amenities)) or s.horses_stable)
+           and (not (''camels'' = any(p_amenities)) or s.camels)
+           and (not (''toilets_on_site'' = any(p_amenities)) or s.toilets_on_site)
+           and (not (''lighting'' = any(p_amenities)) or s.lighting)
+           and (not (''artesian_well'' = any(p_amenities)) or s.artesian_well)
+           and (not (''solar_power'' = any(p_amenities)) or s.solar_power)
+           and (not (''palms'' = any(p_amenities)) or s.palms)
+           and (not (''fruit_trees'' = any(p_amenities)) or s.fruit_trees)
+           and (not (''fodder_crops'' = any(p_amenities)) or s.fodder_crops)
+           and (not (''greenhouses'' = any(p_amenities)) or s.greenhouses)
+           and (not (''producing_farm'' = any(p_amenities)) or s.producing_farm)
+           and (not (''animal_pens'' = any(p_amenities)) or s.animal_pens)
+           and (not (''poultry'' = any(p_amenities)) or s.poultry)
+           and (not (''farm_house'' = any(p_amenities)) or s.farm_house)
+           and (not (''farm_rest_house'' = any(p_amenities)) or s.farm_rest_house)
+           and (not (''workers_housing'' = any(p_amenities)) or s.workers_housing)
+           and (not (''fence'' = any(p_amenities)) or s.fence)
+           and (not (''main_road'' = any(p_amenities)) or s.main_road)
+           and (not (''good_soil'' = any(p_amenities)) or s.good_soil)
+           and (not (''corner_plot'' = any(p_amenities)) or s.corner_plot)
+           and (not (''three_streets'' = any(p_amenities)) or s.three_streets)
+           and (not (''ready_to_build'' = any(p_amenities)) or s.ready_to_build)
+           and (not (''raised_plot'' = any(p_amenities)) or s.raised_plot)
+           and (not (''residential_commercial'' = any(p_amenities)) or s.residential_commercial)
+           and (not (''all_services'' = any(p_amenities)) or s.all_services)
+           and (not (''asphalt'' = any(p_amenities)) or s.asphalt)
+           and (not (''street_lights'' = any(p_amenities)) or s.street_lights)
+           and (not (''approved_plan'' = any(p_amenities)) or s.approved_plan)
+           and (not (''direct_owner'' = any(p_amenities)) or s.direct_owner)
+           and (not (''inside_project'' = any(p_amenities)) or s.inside_project)
+           and (not (''floors_allowed'' = any(p_amenities)) or s.floors_allowed)
+           and (not (''grant_land'' = any(p_amenities)) or s.grant_land)
+           and (not (''no_services'' = any(p_amenities)) or s.no_services)
+           and (not (''camels_horses'' = any(p_amenities)) or (s.camels or s.horses_stable))
+           and (not (''palm_fruit_trees'' = any(p_amenities)) or (s.palms or s.fruit_trees))
+           and (not (''mezzanine'' = any(p_amenities)) or s.mezzanine)
+           and (not (''pantry'' = any(p_amenities)) or s.pantry)
+           and (not (''glass_front'' = any(p_amenities)) or s.glass_front)
+           and (not (''frontage'' = any(p_amenities)) or s.frontage)
+           and (not (''in_mall'' = any(p_amenities)) or s.in_mall)
+           and (not (''in_tower'' = any(p_amenities)) or s.in_tower)
+           and (not (''license'' = any(p_amenities)) or s.license)
+           and (not (''food_allowed'' = any(p_amenities)) or s.food_allowed)
+           and (not (''takeover'' = any(p_amenities)) or s.takeover)
+           and (not (''first_tenant'' = any(p_amenities)) or s.first_tenant)
+           and (not (''internet'' = any(p_amenities)) or s.internet)
+           and (not (''civil_defense'' = any(p_amenities)) or s.civil_defense)
+           and (not (''high_ceiling'' = any(p_amenities)) or s.high_ceiling)
+           and (not (''hangar'' = any(p_amenities)) or s.hangar)
+           and (not (''insulated_panel'' = any(p_amenities)) or s.insulated_panel)
+           and (not (''cold_storage'' = any(p_amenities)) or s.cold_storage)
+           and (not (''concrete_floor'' = any(p_amenities)) or s.concrete_floor)
+           and (not (''loading_dock'' = any(p_amenities)) or s.loading_dock)
+           and (not (''big_gate'' = any(p_amenities)) or s.big_gate)
+           and (not (''truck_access'' = any(p_amenities)) or s.truck_access)
+           and (not (''crane'' = any(p_amenities)) or s.crane)
+           and (not (''racks'' = any(p_amenities)) or s.racks)
+           and (not (''office_inside'' = any(p_amenities)) or s.office_inside)
+           and (not (''heavy_power'' = any(p_amenities)) or s.heavy_power)
+           and (not (''industrial_area'' = any(p_amenities)) or s.industrial_area)
+           and (not (''car_service'' = any(p_amenities)) or s.car_service)
+           and (not (''meeting_room'' = any(p_amenities)) or s.meeting_room)
+           and (not (''reception'' = any(p_amenities)) or s.reception)
+           and (not (''coworking'' = any(p_amenities)) or s.coworking)
+           and (not (''private_office'' = any(p_amenities)) or s.private_office)
+           and (not (''central_ac'' = any(p_amenities)) or s.central_ac)
+           and (not (''shops_inside'' = any(p_amenities)) or s.shops_inside)
+           and (not (''offices_inside'' = any(p_amenities)) or s.offices_inside)
+           and (not (''apartments_inside'' = any(p_amenities)) or s.apartments_inside)
+           and (not (''staff_housing_inside'' = any(p_amenities)) or s.staff_housing_inside)
+           and (not (''restaurant_cafe'' = any(p_amenities)) or s.restaurant_cafe)
+           and (not (''car_wash'' = any(p_amenities)) or s.car_wash)
+           and (not (''market'' = any(p_amenities)) or s.market)
+           and (not (''earning_income'' = any(p_amenities)) or s.earning_income)
+           and (not (''stars_mentioned'' = any(p_amenities)) or s.stars_mentioned)
+           and (not (''rooms_suites'' = any(p_amenities)) or s.rooms_suites)
+           and (not (''oil_change'' = any(p_amenities)) or s.oil_change)
+           and (not (''pumps'' = any(p_amenities)) or s.pumps)
+           and (not (''mosque'' = any(p_amenities)) or s.mosque)
+           and (not (''building_rules'' = any(p_amenities)) or s.building_rules)
+           and (not (''pool_gym'' = any(p_amenities)) or (s.pool or s.gym))
            and (not (''furnished''        = any(p_amenities)) or s.furnished)
            and (not (''rnpl''             = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later)))
       and ((p_street_width_min is null and p_street_width_max is null)
@@ -341,4 +553,4 @@ AS $function$select E'
             (''9.5'' = any(p_rating_buckets) and s.rating >= 9.5)
          or (''9.0'' = any(p_rating_buckets) and s.rating >= 9.0)
          or (''9.0_rc10'' = any(p_rating_buckets) and s.rating >= 9.0 and s.reviews_count >= 10))))
-'::text$function$
+'::text $function$

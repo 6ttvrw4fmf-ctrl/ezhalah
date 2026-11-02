@@ -294,5 +294,5 @@ def facts(title: str, body: str, ptype: Optional[str]) -> dict:
         out["street_width_m"] = width
     if facade:
         out["direction"] = facade
-    out.update(N.prose_amenities_yes(text))
+    out.update(N.prose_amenities(text))
     return out

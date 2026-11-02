@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, I18nManager, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import Animated, {
   Easing,
   interpolate,
@@ -25,6 +26,7 @@ import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup } from '@/lib/authPopupBehavior';
 import { attachCardDrag, clampOffsetOnScreen } from '@/lib/cardDrag';
 import { getLegalDocs, hasLegalDocs } from '@/data/legal';
+import { getAfHowItWorks } from '@/data/afHowItWorks';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const IN = { duration: 240, easing: Easing.bezier(0.22, 1, 0.36, 1) };
@@ -60,10 +62,15 @@ const TOP_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP;
 const SUPPORT_MAX_W = 540;
 const ABOUT_MAX_W = 760;
 const LEGAL_MAX_W = 640;
+// «كيف يشتغل؟» opens at the Advanced Filter QUESTION CARD's own width and height, not the Terms reader's
+// (owner 2026-11-02: «i dont like how its very big … make it the same size»). 380 = AdvancedQuestionCard
+// `card.maxWidth`; the text scrolls inside, the box never grows past the card's footprint.
+const AF_HOW_MAX_W = 380;
+const AF_HOW_MAX_H = 640;
 const ABOUT_MAX_H = 700;
 
-const EAGLE = require('../../assets/images/eagle-mark.png');
-type Kind = 'support' | 'about' | 'legal';
+const EAGLE = require('../../assets/images/logo-cloud-green-static.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
+type Kind = 'support' | 'about' | 'legal' | 'afhow';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
 // blurred, dimmed page. Mounted at the app root (Shell) so it overlays every screen and works in
@@ -72,7 +79,9 @@ type Kind = 'support' | 'about' | 'legal';
 export default function InfoModal() {
   const { modal, closeModal } = useApp();
   if (!modal) return null;
-  const kind: Kind = modal === 'privacy' ? 'legal' : modal;
+  // 'af-how' is «كيف يشتغل دقّق مع الذكاء الاصطناعي؟» (owner 2026-11-01): the Advanced Filter card's note, read in
+  // this same host as the Terms reader — white card, eagle, ✕ top-right in both languages.
+  const kind: Kind = modal === 'privacy' ? 'legal' : modal === 'af-how' ? 'afhow' : modal;
   return <Sheet kind={kind} legalTab={modal === 'privacy' ? 'privacy' : 'terms'} onClose={closeModal} />;
 }
 
@@ -87,7 +96,9 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   const about = kind === 'about';
   // «من نحن» has NO close button (owner 2026-09-03): the backdrop closes it, and its header is the
   // drag grip. Support and the legal reader keep the × — they are forms and long reads.
-  const hasClose = kind !== 'about';
+  // EVERY info popup carries the × (owner 2026-10-23: «all those information popups must show x» — reverses
+  // 2026-09-03's About-without-×). It sits top-RIGHT in both languages, never mirrored (owner 2026-10-24).
+  const hasClose = true;
 
   const progress = useSharedValue(0);
   useEffect(() => {
@@ -136,14 +147,14 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   // moves the card and still leaves the × under the prompt (ops_incident #670 — see centredDialogBox).
   const dialogBox = centredDialogBox(height, 16, insets, promptInsets, 48);
   const availH = dialogBox.availHeight;
-  const maxH = Math.min(availH, about ? ABOUT_MAX_H : 720);
-  const maxW = about ? ABOUT_MAX_W : kind === 'legal' ? LEGAL_MAX_W : SUPPORT_MAX_W;
+  const maxH = Math.min(availH, about ? ABOUT_MAX_H : kind === 'afhow' ? AF_HOW_MAX_H : 720);
+  const maxW = about ? ABOUT_MAX_W : kind === 'afhow' ? AF_HOW_MAX_W : kind === 'legal' ? LEGAL_MAX_W : SUPPORT_MAX_W;
 
   return (
     <View
       style={[
         s.overlay,
-        kind === 'legal' && s.overlayTop,
+        (kind === 'legal' || kind === 'afhow') && s.overlayTop,
         // ── A FIXED OVERLAY IS INVISIBLE TO THE ROOT'S RESERVED BAND (ops_incident #670) ─────────
         // `_layout.tsx` reserves a top-docked auth prompt's height as the app root's paddingTop,
         // and that correctly moves everything laid out INSIDE it. This overlay is not: it resolves
@@ -189,16 +200,17 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
               testID="info-modal-close"
               accessibilityRole="button"
               accessibilityLabel={t('Close')}
-              style={({ hovered, pressed }: any) => [s.xBtn, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
+              style={({ hovered, pressed }: any) => [s.xBtn, s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
             >
               {({ hovered, pressed }: any) => (
-                <Ionicons name="close" size={20} color={hovered || pressed ? colors.ink : colors.muted} />
+                <Ionicons name="close" size={20} color={colors.ink} />
               )}
             </Pressable>
           )}
           <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
             {kind === 'support' ? <SupportBody t={t} />
               : kind === 'about' ? <AboutBody t={t} reduced={reduced} gripRef={gripRef} drag={drag} />
+              : kind === 'afhow' ? <HowItWorksBody t={t} />
               : <LegalBody t={t} initial={legalTab} />}
           </ScrollView>
         </Animated.View>
@@ -256,12 +268,12 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
   // draft is restored from the session-scoped cache rather than starting empty. See the long note
   // in lib/supportDraft.ts for the measured loss and why the cache is memory, never disk.
   // Lazy initialisers: `recallSupportDraft()` must run on MOUNT, not on every render.
-  const [email, setEmail] = useState(
-    // Signed-in users authenticate with Google/Apple, so `sub` IS their email — prefill it rather
-    // than making them type an address we already know. Signed-out users type their own. A recalled
-    // address wins: the user may have deliberately typed a different one before being interrupted.
-    () => recallSupportDraft()?.email || (user?.sub && user.sub.includes('@') ? user.sub : ''),
-  );
+  // LOCKED FOR A SIGNED-IN USER (owner 2026-10-23: «lock the email … that's his logged-in email»): Google/Apple
+  // sign-in means `sub` IS their address, so the reply goes to the account itself and the field cannot be
+  // edited. A signed-out user types their own (a recalled draft address is kept for them).
+  const accountEmail = user?.sub && user.sub.includes('@') ? user.sub : '';
+  const [typedEmail, setEmail] = useState(() => (accountEmail ? '' : recallSupportDraft()?.email || ''));
+  const email = accountEmail || typedEmail;
   const [subject, setSubject] = useState(() => recallSupportDraft()?.subject ?? '');
   const [message, setMessage] = useState(() => recallSupportDraft()?.message ?? '');
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
@@ -365,14 +377,16 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
           onChangeText={setEmail}
           onFocus={() => setFocus('email')}
           onBlur={() => setFocus(null)}
-          editable={!sending}
+          editable={!sending && !accountEmail}
+          accessibilityHint={accountEmail ? t('Your signed-in email') : undefined}
           keyboardType="email-address"
           autoCapitalize="none"
           autoComplete="email"
           placeholder="name@example.com"
           placeholderTextColor={colors.muted}
-          style={[s.input, s.inputLtr]}
+          style={[s.input, s.inputLtr, !!accountEmail && s.inputLocked]}
         />
+        {accountEmail ? <Ionicons name="lock-closed" size={14} color={colors.muted} style={s.lockIcon} accessible={false} /> : null}
       </Field>
 
       {state === 'error' ? (
@@ -471,7 +485,8 @@ function AboutBody({ t, reduced, gripRef, drag }: {
   const animate = IS_WEB && !reduced;
   const shown = useShown(!animate);
   const rev = { shown, animate };
-  const a = useMemo(() => makeAbout(pal, dark), [pal, dark]);
+  const { isRTL: aboutRtl } = useI18n();
+  const a = useMemo(() => makeAbout(pal, dark, aboutRtl), [pal, dark, aboutRtl]);
 
   return (
     <View style={a.body}>
@@ -479,9 +494,8 @@ function AboutBody({ t, reduced, gripRef, drag }: {
         <Reveal {...rev} delay={40}>
           <Text style={a.eyebrow}>{t('About Us')}</Text>
           <View style={a.lockup}>
-            <RNImage source={EAGLE} style={a.eagle} resizeMode="contain" />
+            <XImage source={EAGLE} style={a.eagle} contentFit="contain" />
             <Text style={a.wordmark}>{t('Ezhalah')}</Text>
-            <View style={a.wordDot} />
           </View>
         </Reveal>
       </View>
@@ -494,6 +508,37 @@ function AboutBody({ t, reduced, gripRef, drag }: {
         <Text style={a.note}>{t('Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.')}</Text>
         <Text style={a.note}>{t('We collect only what the service needs, and we do not sell user data.')}</Text>
       </Reveal>
+    </View>
+  );
+}
+
+// ————————————————————————————— «كيف يشتغل دقّق مع الذكاء الاصطناعي؟» ————————————————————————————————
+// The Advanced Filter card's note, opened from its «كيف يشتغل؟» link (owner 2026-11-01). Same reading
+// dialog as the Terms: the eagle lockup, then the owner's six sections (src/data/afHowItWorks.ts),
+// rendered with the legal reader's own styles so the two popups look like one family. No tabs, no
+// emoji, no contact address.
+function HowItWorksBody({ t }: { t: Tr }) {
+  const { locale, isRTL } = useI18n();
+  const docs = getAfHowItWorks(locale);
+  return (
+    <View testID="af-how-it-works">
+      <View style={s.head}>
+        <View style={s.legalLockup}>
+          <XImage source={EAGLE} style={s.afHowEagle} contentFit="contain" />
+          <Text style={[s.h, s.legalTitle, s.afHowTitle, !isRTL && s.textLtr]}>{t('How Refine with AI works')}</Text>
+        </View>
+      </View>
+      <View style={s.bodyPad}>
+        {docs.map((p, i) => {
+          const [heading, ...paragraphs] = p.split('\n\n');
+          return (
+            <View key={i}>
+              <Text accessibilityRole="header" style={[s.legalSectionTitle, !isRTL && s.textLtr]}>{heading}</Text>
+              {paragraphs.map((paragraph, j) => <Text key={j} style={[s.legalP, !isRTL && s.textLtr]}>{paragraph}</Text>)}
+            </View>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -514,7 +559,7 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
     <View>
       <View style={s.head}>
         <View style={s.legalLockup}>
-          <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
+          <XImage source={EAGLE} style={s.legalEagle} contentFit="contain" />
           <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('Terms & Privacy')}</Text>
         </View>
       </View>
@@ -598,13 +643,15 @@ const s = StyleSheet.create({
   // Close, pinned to the PHYSICAL top-right (RN `right` is physical — RTL never flips it): a
   // quiet neutral glyph at rest, a soft fill on hover, hitSlop widening the target to ≥ 44.
   xBtn: {
-    // Physical top-right under BOTH directions: RTL (forced app-wide for Arabic) flips `right:` to
-    // the physical left, so the physical right is spelled `left:` there. (owner 2026-08-29)
-    position: 'absolute', top: CLOSE_INSET, ...(I18nManager.isRTL ? { left: CLOSE_INSET } : { right: CLOSE_INSET }), zIndex: 5,
+    // Top-RIGHT in both languages (owner 2026-10-24), on a soft circle so it reads clearly, apart from the words.
+    position: 'absolute', top: CLOSE_INSET, zIndex: 5, backgroundColor: colors.surface2,
     width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
     alignItems: 'center', justifyContent: 'center',
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
+  // Measured 2026-10-23: on the web physical sides are NOT mirrored under Arabic, so the × side is chosen by
+  // language. Both sides spelled so a merge never leaves the other one set.
+  xBtnRight: { right: CLOSE_INSET, left: 'auto' as any },
   xBtnHover: { backgroundColor: colors.surface2 },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 4, paddingBottom: BODY_PAD },
@@ -622,7 +669,9 @@ const s = StyleSheet.create({
   // the ROW, not the text: `h`'s own paddingRight (still asserted by that barrier, untouched) is
   // cancelled back to 0 on this specific usage so the clearance is never reserved twice.
   legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
-  legalEagle: { width: 20, height: 20 },
+  legalEagle: { width: 44, height: 44 }, // big and sharp enough to read as our logo (owner 2026-10-25; was 20 px)
+  afHowEagle: { width: 34, height: 34 },
+  afHowTitle: { fontSize: 18, lineHeight: 26 }, // the question card's title scale, not the Terms reader's 22
   legalTitle: { paddingRight: 0, flexShrink: 1 },
 
   // ——— «تواصل مع الدعم» form (owner 2026-09-02; spacing/inputs 2026-09-03) ———
@@ -647,20 +696,22 @@ const s = StyleSheet.create({
   },
   textLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
   inputLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
+  inputLocked: { color: colors.muted, paddingRight: 30 },
+  lockIcon: { position: 'absolute', right: 12, top: '50%', marginTop: -7 } as any,
   area: { minHeight: 132, paddingTop: 12, lineHeight: 22 },
   errRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
   errTx: { flex: 1, fontSize: 12.5, color: colors.danger, textAlign: 'right', lineHeight: 18 },
   // Send: full width, the brand green, the same radius as the inputs, spaced from the email field.
   sendBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: colors.primary, borderRadius: 12, height: 50, marginTop: 6,
+    backgroundColor: colors.selFill, borderRadius: 12, height: 50, marginTop: 6,
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
   sendBtnHover: { backgroundColor: colors.dark },
   sendBtnBusy: { opacity: 0.75 },
   sendTx: { fontSize: 15, fontWeight: '800', color: colors.onFill },
   sentCard: { alignItems: 'center', paddingVertical: 28, paddingHorizontal: 18 },
-  sentIc: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  sentIc: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   sentH: { fontSize: 17, fontWeight: '800', color: colors.ink, textAlign: 'center' },
   sentTx: { fontSize: 13.5, color: colors.body, textAlign: 'center', marginTop: 6, lineHeight: 20 },
   againBtn: { marginTop: 16, paddingVertical: 8, paddingHorizontal: 14, ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}) },
@@ -691,21 +742,22 @@ const s = StyleSheet.create({
 // Arabic script), weights carry the hierarchy, body leading stays generous (~1.7).
 // Keep this page intentionally close to the legal reader: one calm reading column, clear hierarchy,
 // and no decorative panels competing with the explanation.
-function makeAbout(pal: Record<string, string>, dark: boolean) {
+// English reads left-to-right (owner 2026-10-23, English screenshot: the About text sat on the right).
+function makeAbout(pal: Record<string, string>, dark: boolean, rtl = true) {
+  const start = rtl ? 'right' : 'left';
   void dark;
   return StyleSheet.create({
     body: { paddingHorizontal: BODY_PAD + 4, paddingTop: BODY_PAD, paddingBottom: BODY_PAD },
-    head: { paddingBottom: 12 },
+    head: { paddingBottom: 12, paddingRight: CLOSE_CLEAR }, // keeps «من نحن» clear of the top-right × (owner 2026-10-24)
     eyebrow: { fontSize: 12.5, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 8 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    eagle: { width: 30, height: 30, opacity: 0.9 },
+    eagle: { width: 64, height: 64 }, // still dark-green eagle, lights on, big and sharp (owner 2026-10-25)
     wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
-    wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
     readingColumn: { maxWidth: 640, width: '100%', alignSelf: 'center' },
-    heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: 'right', marginTop: 8, marginBottom: 18 },
-    paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: 'right', marginBottom: 16 },
+    heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: start as any, marginTop: 8, marginBottom: 18 },
+    paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: start as any, marginBottom: 16 },
     rule: { height: 1, backgroundColor: pal.line, marginTop: 4, marginBottom: 18 },
-    note: { fontSize: 13.5, lineHeight: 24, fontWeight: '400', color: pal.muted, textAlign: 'right', marginBottom: 12 },
+    note: { fontSize: 13.5, lineHeight: 24, fontWeight: '400', color: pal.muted, textAlign: start as any, marginBottom: 12 },
   });
 }
 

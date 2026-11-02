@@ -363,3 +363,37 @@ def test_a_control_pool_site_takes_its_controls_from_its_own_source(monkeypatch)
     monkeypatch.setattr(F, "controls", lambda *a, **k: (_ for _ in ()).throw(AssertionError("crawl pool used")))
     assert [r["ad_number"] for r in F.controls_for(None, "fakesite", {})] == [f"X{i}" for i in range(F.MIN_CANARIES)]
     assert F.CONTROL_POOLS["haraj"] == "scrapers.haraj.run:liveness_controls"
+
+
+def test_the_recheck_stops_a_site_at_its_own_budget_not_the_daily_one(site, monkeypatch):
+    # 2026-10-19 20:47: dwelleo's struck backlog read for the recheck job's whole two hours, so haraj
+    # (after it alphabetically) was never rechecked and its dead ads stayed on screen.
+    site([_probed_ago(i, 1, 8) for i in range(1, 11)] + _controls(), {})
+    monkeypatch.setattr(F, "RECHECK_BUDGET_S", -1)
+    st = F.run_site("testsite", shadow=False, struck_only=True)
+    assert st["probed"] == 0, "the recheck must use RECHECK_BUDGET_S, not the daily BUDGET_S"
+    assert F.RECHECK_BUDGET_S * 4 < 120 * 60, "one site may never eat the recheck job's ceiling"
+
+
+def test_the_recheck_reads_the_smallest_struck_backlog_first(monkeypatch):
+    counts = {"big": 6634, "small": 4, "mid": 30}
+    monkeypatch.setattr(F, "struck", lambda client, s: counts[s] if s != "broken" else 1 / 0)
+    assert F.recheck_order(None, ["big", "broken", "mid", "small"]) == ["small", "mid", "big", "broken"]
+
+
+def test_a_transient_502_on_a_hide_is_retried_and_the_hide_lands(site, monkeypatch):
+    # 2026-10-20 10:40: one Cloudflare 502 raised out of run_site and lost three hours of haraj strikes.
+    import scrapers.common.db as D
+    monkeypatch.setattr(D.time, "sleep", lambda s: None)
+    c = site([_probed_ago(1, 2, 8)] + _controls(), {"A1": "gone"})
+    real = _Q.execute
+    fail = {"left": 1}
+
+    def flaky(self):
+        if self.op and self.op[0] == "update" and self.op[1].get("active") is False and fail["left"]:
+            fail["left"] -= 1
+            raise Exception("{'message': 'JSON could not be generated', 'code': 502}")
+        return real(self)
+    monkeypatch.setattr(_Q, "execute", flaky)
+    st = F.run_site("testsite", shadow=False, struck_only=True)
+    assert st["hidden"] == 1 and _updates(c, 1)[-1]["active"] is False and not fail["left"]

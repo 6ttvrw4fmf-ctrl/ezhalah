@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -8,6 +9,9 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
+import HeroFalconer from '@/components/HeroFalconer';
+import CloudWisp from '@/components/CloudWisp';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { HERO_TAGLINE_KEYS, nextHeroTaglineIndex } from '@/data/heroTaglineRotation';
 import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -16,6 +20,7 @@ import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
+import TopBarLanguage from '@/components/TopBarLanguage';
 import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { cityNameEn, regionNameEn, districtNameEn, ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
@@ -33,10 +38,13 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
-import { decodeSharePayload, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
+import { NAME_PARTY_EVENT, SHINE_MS } from '@/lib/nameParty';
+import { InsightHowItWorks } from '@/components/InsightHowItWorks';
+import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
-import { pickName } from '@/lib/nameSync';
+import { sentenceName } from '@/lib/nameSync';
+import { typedDir } from '@/lib/typedDir';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
@@ -123,6 +131,20 @@ function cityPoolScopeOf(query: SearchQuery) {
   return { effDeal, rentPeriodTok, effCategory, cohortTypes, af };
 }
 
+/** The headline's emoji (👋 🌙 ☀️ …) in its own span (owner 2026-10-28: «the emoji after the name doesn't show»). The
+ *  shine paints the text see-through over a gradient, and on iPhone an emoji painted see-through simply vanishes; the
+ *  nameParty CSS gives [data-ezh-emoji] its own fill, so the emoji stays visible through the shine. */
+const EMOJI_RE = /([☀-➿]️?|[\uD83C-\uD83E][\uDC00-\uDFFF]️?)/;
+const PARTY_EMOJI = '🥳';
+function withVisibleEmoji(text: string) {
+  const parts = text.split(EMOJI_RE);
+  if (parts.length === 1) return text;
+  return parts.map((p, i) => (i % 2 === 1
+    // 🥳 keeps shaking and blowing while the welcome is up (owner 2026-10-30, CSS in lib/nameParty.ts)
+    ? <Text key={i} {...({ dataSet: { ezhEmoji: p === PARTY_EMOJI ? 'party' : '' } } as any)}>{p}</Text>
+    : p));
+}
+
 export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -137,6 +159,8 @@ export default function Home() {
   const cityLabel = (o: { cityId: number; cityAr: string }) => (locale === 'en' ? cityNameEn(o.cityId, o.cityAr) : o.cityAr);
   const regionLabel = (o: { regionId: number | null; regionAr: string | null }) => (locale === 'en' ? regionNameEn(o.regionId, o.regionAr) : o.regionAr);
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
+  // A «حي X · City» row in the city box (owner decision 2026-10-19, backlog 522/566) names the district AND its city.
+  const cityRowLabel = (o: CityOption) => (o.districtAr ? `${districtLabel(o.cityId, o.districtAr)} · ${cityLabel(o)}` : cityLabel(o));
   const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked } = useApp();
   // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
   // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
@@ -163,8 +187,18 @@ export default function Home() {
       return () => { alive = false; };
     }
     const s = decodeSharePayload(raw);
-    if (s) setSharedSearch(s);
+    if (s) { setSharedSearch(s); return; }
+    // An invitation to join (owner 2026-10-23): no search, no chat — the welcome popup for a guest, nothing
+    // for someone already signed in.
+    const inv = decodeInvitePayload(raw);
+    if (inv) setSharedJoin(inv);
   }, []);
+  const [sharedJoin, setSharedJoin] = useState<{ name: string; locale: 'ar' | 'en' } | null>(null);
+  useEffect(() => {
+    if (!sharedJoin || !authChecked) return;
+    if (!user) openAuth(shareJoinNote(sharedJoin.name, locale === 'en' ? 'en' : 'ar') ?? undefined);
+    setSharedJoin(null);
+  }, [sharedJoin, authChecked, user, openAuth, locale]);
   const openSharedSearch = useCallback(async (s: { q: SearchQuery | null; code?: string }) => {
     try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
     setSharedSearch(null);
@@ -248,7 +282,17 @@ export default function Home() {
   // `welcomeSettled` gates the headline's ENTRANCE (owner 2026-10-17: it must never visibly change
   // after it appears): the title stays at opacity 0 until the session restore knows the visitor and,
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
-  const { line: welcomeLine, settled: welcomeSettled } = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
+  const [howOpen, setHowOpen] = useState(false);
+  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight, celebrate: welcomeCelebrate } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
+  const [heroShine, setHeroShine] = useState(false);
+  useEffect(() => {
+    let id: ReturnType<typeof setTimeout> | undefined;
+    const on = () => { setHeroShine(true); if (id) clearTimeout(id); id = setTimeout(() => setHeroShine(false), SHINE_MS); };
+    globalThis.addEventListener?.(NAME_PARTY_EVENT, on);
+    return () => { globalThis.removeEventListener?.(NAME_PARTY_EVENT, on); if (id) clearTimeout(id); };
+  }, []);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
@@ -279,6 +323,7 @@ export default function Home() {
     () => reconcileCommittedAf(storeQuery, AF_ALL_QUESTIONS),
     [storeQuery],
   );
+  const reducedSceneMotion = useReducedMotion();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
   // (focus, empty text) or the Arabic-matched typed results — never a mix, and never a
@@ -308,6 +353,13 @@ export default function Home() {
   const [districtMsg, setDistrictMsg] = useState('');
   const districtRef = useRef<TextInput>(null);
   const districtTextRef = useRef('');
+  // The Arabic-only note belongs to the Arabic UI. Switching to English, where Latin typing is the user's own
+  // language, must not leave «هذا التطبيق يدعم اللغة العربية فقط» standing under «Riyadh» (seen live 2026-10-29).
+  useEffect(() => {
+    if (locale === 'ar') return;
+    setLocMsg((m) => (m === ARABIC_ONLY_MSG ? '' : m));
+    setDistrictMsg((m) => (m === ARABIC_ONLY_MSG ? '' : m));
+  }, [locale]);
   // One place to wipe all district state — called wherever the city changes/clears.
   const clearDistrict = () => {
     districtTextRef.current = '';
@@ -347,6 +399,8 @@ export default function Home() {
   // unexpected value here (e.g. from some future code path that bypasses TypeScript's own type)
   // must still fall back to the safe default rather than leaving both buttons unselected.
   const rentPeriod: 'monthly' | 'annual' | 'both' = validRentPeriod(query.rentPeriod) ?? 'annual';
+  // only «إقامات قصيرة» picked (Rent, not شراء+إيجار): the price box is hidden — see the PRICE range block
+  const shortStaysOnly = query.deal === 'Rent' && !query.dealCombined && rentPeriod === 'monthly';
   // Buy+Rent combined multi-select (owner feature 2026-08-20): every Trending/pool call below reads
   // effDeal instead of query.deal directly — null tells top_cities_by_deal_ar/district_options_ar
   // (and every locations.ts pool wrapping them) to scope to the combined Buy ∪ Rent(any period) set,
@@ -695,12 +749,17 @@ export default function Home() {
       await ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).catch(() => null);
       // Then the trending DISTRICTS of the six trending cities (owner 2026-10-04: «the moment the user opens Ezhalah it
       // loads, not when he clicks»): most users pick one of them, and its district list is then already there.
+      // TOGETHER, not one after another (P1 2026-10-23): each call is ~40-60 ms of database time since the AF RPCs plan
+      // per call, but ~0.6 s of round trip through the front door, so six in a row kept city #6's list ~4 s away.
+      // Same six calls, same arguments, same cache keys — only the waiting changed.
+      // scripts/verify-trending-pools-warm-at-open.ts
+      if (cancelled) return;
+      const warm: number[] = [];
       for (const c of topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams)) {
-        if (cancelled) return;
         if (c.scopeKnown === false) break; // provisional names only: the pool did not load, nothing honest to warm
-        const cid = c.cityId;
-        await ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).catch(() => null);
+        warm.push(c.cityId);
       }
+      await Promise.all(warm.map((cid) => ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).catch(() => null)));
       for (const sel of ['Rent', 'Both', 'Buy'] as const) {
         if (cancelled) return;
         const sc = cityPoolScopeOf({ ...query, ...dealSelectionToQuery(sel, query.deal) });
@@ -941,6 +1000,9 @@ export default function Home() {
   // listing-bearing districts were all the same invisible box. Each now shows ONE small muted
   // Arabic row. English typing is excluded on purpose: that case already has its own message
   // (ARABIC_ONLY_MSG under the field) and must keep it, unchanged.
+  // What the city field SHOWS: a picked city carries its Arabic name for the search but reads in English in the
+  // English UI. Its side follows what is shown — reading the hidden Arabic put «Riyadh» on the right (owner 2026-10-30).
+  const cityShown = locale === 'en' && citySelected && query.location === citySelected.cityAr ? cityLabel(citySelected) : query.location;
   const cityLatin = !!query.location && wrongScript(query.location);
   const cityStatus = cityPoolStatus(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams);
   // A NON-EMPTY LIST IS NOT EVIDENCE THAT THIS COHORT HAS LOADED (routine #8, 2026-09-23, #648).
@@ -1121,7 +1183,7 @@ export default function Home() {
     runAfterAnimation(
       (onFinished) => RNAnimated.timing(heroAnim, {
         toValue: 1,
-        duration: 300,
+        duration: reducedSceneMotion ? 0 : 300,
         easing: RNEasing.out(RNEasing.cubic),
         useNativeDriver: true,
       }).start(onFinished),
@@ -1280,6 +1342,13 @@ export default function Home() {
     // Instant, not a rise (owner 2026-10-17): the text is final, so it is simply there.
     titleAnim.setValue(1);
   }, [welcomeSettled, entranceKey, titleAnim]);
+  // THE SIGN-IN WELCOME HANDS OVER TO A MARKET INSIGHT, VISIBLY (owner 2026-10-22: «so they are aware on the
+  // spot the message changes»). The one headline change the owner asked to SEE: the new line rises in.
+  useEffect(() => {
+    if (!welcomeSwapKey) return;
+    titleAnim.setValue(0);
+    RNAnimated.timing(titleAnim, { toValue: 1, duration: 650, useNativeDriver: Platform.OS !== 'web' }).start();
+  }, [welcomeSwapKey, titleAnim]);
   // A RETURN TO THE FILTER IS A CLEAN FILTER (owner 2026-10-03). Coming back from a search — the
   // toggle, the browser's Back, a new visit — always opens an empty form: the previous search is NOT
   // kept here and there is no «مسح الكل» to undo it. Signed in, that search is in the sidebar history,
@@ -1319,22 +1388,10 @@ export default function Home() {
       { scale: Platform.OS === 'web' ? 1 : entrance.interpolate({ inputRange: [0, 1], outputRange: [0.965, 1] }) },
     ],
   };
-  const heroOpacity = heroAnim.interpolate({
-    inputRange: [0, 1],
-    // idle → searching. Web idles a bit darker; both lighten to the same soft level on Search.
-    outputRange: [Platform.OS === 'web' ? 0.92 : 0.82, 0.3],
-  });
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {/* Hand-drawn Saudi landmarks sketch — soft full-bleed backdrop. On phones it shows in full
-          ('contain'); on wide web it fills ('cover'). It dims when idle and lightens while searching. */}
-      <HeroBackground
-        imageOpacity={heroOpacity}
-        resizeMode={Platform.OS === 'web' ? 'cover' : 'contain'}
-        fadeStart={0.8}
-        fadeEnd={1}
-      />
+      {/* Filter: the sky only, no desert landscape below (owner 2026-10-24). */}
+      <HeroBackground />
 
       <ScrollView
         ref={scrollRef}
@@ -1342,7 +1399,8 @@ export default function Home() {
         contentContainerStyle={[s.scroll, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}
         keyboardShouldPersistTaps="handled"
       >
-        <RNAnimated.View style={[s.col, entranceStyle]}>
+        <RNAnimated.View style={[s.page, entranceStyle]}>
+          <View style={s.col}>
           {/* Top bar is pinned LTR (see s.top) so the menu always sits on the physical LEFT — it does
               NOT mirror to the right under Arabic. Matches the docked side menu, which is left in both
               languages per product decision. */}
@@ -1386,6 +1444,8 @@ export default function Home() {
                   <Text style={[s.topSignInText, x.topSignInText]}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
                 </Pressable>
               )}
+              {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
+              <TopBarLanguage />
               {/* Share — a labelled pill, not a bare glyph (owner 2026-09-05). An unlabelled icon in a
                   corner reads as decoration; «مشاركة» beside it states the action, which is what every
                   major platform does with the one control it wants people to use. The label is hidden
@@ -1413,11 +1473,32 @@ export default function Home() {
             </View>
           </View>
 
-          {/* Hero — title then subtitle rise in, staggered (user request). */}
+          </View>
+
+          {/* Logos use the available page width; the form keeps its readable column. */}
           <HomeWebsiteStrip />
+          <View style={s.col}>
+          {/* Hero — title then subtitle rise in, staggered (user request). */}
           <View style={s.hero}>
-            <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
-            <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
+            <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
+            <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
+            <View style={heroWide ? s.heroTitleBlockWide : s.heroTitleBlock}>
+              <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}</RNAnimated.Text>
+              </Pressable>
+            </View>
+            <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
+            {/* The falconer ENDS THE EZHALAH LINE, ONE FIXED SPOT (owner 2026-10-27: «for the falconer sign in sign out I want
+                them to always be in the same position … without changing its location»). This line is the same words for
+                everyone, so he stands in the same place signed in or out, whatever the headline says (he moved with the
+                headline's words when he ended it). Small, inline after the last word, on the text line, no clouds over
+                the words. His box is held from the first frame (an empty box until sign-in is known), so the line never
+                re-wraps when he appears. A guest sees the plain falconer whose falcon takes off on every open; a signed-in
+                user sees the green bearded falconer with his hooded gold falcon and a golden bulb lit inside his head, and
+                the moment they sign in the whole story plays once (HeroFalconer). In Arabic the drawing is flipped. */}
+            <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}{' '}<View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerInline]}>
+              {authChecked ? <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} inline /> : null}
+            </View></RNAnimated.Text>
           </View>
 
           {/* Filter / AI Agent — the hero's focal choice: centered between the headline and the search
@@ -1432,7 +1513,7 @@ export default function Home() {
               halves of the toggle replace, so toggling costs no history and mounts no duplicates.
               (Search «بحث» still PUSHES — results ARE a child of the form; see onSearch above.) */}
           <RNAnimated.View style={[s.modeWrap, reveal(badgeAnim, 12)]}>
-            <ModeSwitch active="filter" onSwitch={() => router.replace('/agent')} t={t} />
+            <ModeSwitch active="filter" onSwitch={(to) => (to === 'map' ? router.replace('/map') : router.replace('/agent'))} t={t} />
           </RNAnimated.View>
 
           {/* Search card */}
@@ -1508,7 +1589,7 @@ export default function Home() {
                   {(['annual', 'monthly'] as const).map((which) => (
                     <OptionBox compact
                       key={which}
-                      label={t(which === 'monthly' ? 'Monthly' : 'Yearly')}
+                      label={t(which === 'monthly' ? 'Short stays' : 'Yearly')}
                       img={PERIOD_IMG[which === 'monthly' ? 'Monthly' : 'Yearly']}
                       selected={which === 'monthly' ? rentPeriod === 'monthly' || rentPeriod === 'both'
                                                      : rentPeriod === 'annual' || rentPeriod === 'both'}
@@ -1530,7 +1611,7 @@ export default function Home() {
                   ))}
                 </View>
                 <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: the displayed price is the monthly price.'
+                  {t(rentPeriod === 'monthly' ? 'Short stays: stays shorter than a year, priced by length of stay.'
                     // Owner feedback (2026-08-22): drop the "this means you want both, so you get
                     // both" framing — selecting both buttons is already self-explanatory. Keep only
                     // the one genuinely non-obvious fact: mixed results show mixed price units.
@@ -1563,8 +1644,8 @@ export default function Home() {
                   testID="city-input"
                   placeholder={t('Choose a city')}
                   placeholderTextColor={colors.muted}
-                  style={[s.flInput, x.flInput]}
-                  value={locale === 'en' && citySelected && query.location === citySelected.cityAr ? cityLabel(citySelected) : query.location}
+                  style={[s.flInput, x.flInput, typedDir(cityShown)]}
+                  value={cityShown}
                   autoCorrect={false}
                   onFocus={() => {
                     clearBlurTimer(cityBlurTimer); // P3: a pending close from a just-blurred state must not outlive the refocus
@@ -1672,6 +1753,12 @@ export default function Home() {
                   // New city → drop any prior district; the [query.deal, effCategory, citySelected]
                   // effect above warms THIS city's district catalog so District shows its Top-6 instantly.
                   clearDistrict();
+                  // A «حي X · City» row (owner decision 2026-10-19, backlog 522/566): the customer typed a district
+                  // into the city box, so the tap selects the city AND that district, with every spelling the index
+                  // serves for it. Its count is unmeasured (scopeKnown:false) until the city's own pool answers.
+                  if (opt.districtAr) {
+                    setDistrictsSelected([{ districtAr: opt.districtAr, listingCount: 0, matchValues: opt.districtMatchValues ?? [opt.districtAr], totalInCity: 0, scopeKnown: false }]);
+                  }
                   scrollDown(districtAnchorRef); // carry them down to the next step (district)
                 };
                 return (
@@ -1717,14 +1804,14 @@ export default function Home() {
                         const cityEmpty = opt.scopeKnown !== false && !(opt.listingCount > 0);
                         return (
                         <Tappable
-                          key={opt.cityId}
+                          key={opt.districtAr ? `${opt.cityId}:${opt.districtAr}` : String(opt.cityId)}
                           dip={0.03}
                           style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider, cityEmpty && s.suggRowEmpty]}
                           onPress={() => cityOnPress(opt)}
                         >
-                          <Image source={LOC_IMG.city} style={[s.suggLocIcon, cityEmpty && s.suggIconEmpty]} />
+                          <Image source={opt.districtAr ? LOC_IMG.district : LOC_IMG.city} style={[s.suggLocIcon, cityEmpty && s.suggIconEmpty]} />
                           <View style={{ flex: 1 }}>
-                            <Text style={[s.suggCity, x.suggCity, cityEmpty && s.suggCityEmpty]}>{cityLabel(opt)}</Text>
+                            <Text style={[s.suggCity, x.suggCity, cityEmpty && s.suggCityEmpty]}>{cityRowLabel(opt)}</Text>
                             {/* Region stays hidden per spec ("use the confirmed hidden region internally")
                                 UNLESS two results in this exact list share a display name — a real,
                                 verified case (e.g. الهفوف exists as two distinct real cities) — in which
@@ -1780,7 +1867,7 @@ export default function Home() {
                   ref={districtRef}
                   testID="district-input"
                   editable={!!citySelected}
-                  style={[s.flInput, x.flInput]}
+                  style={[s.flInput, x.flInput, typedDir(districtText)]}
                   placeholder={citySelected ? '' : t('Select a city first')}
                   placeholderTextColor={colors.muted}
                   value={districtText}
@@ -2144,6 +2231,12 @@ export default function Home() {
                     </>
                   )}
 
+                  {/* NO PRICE BOX FOR SHORT STAYS (owner 2026-11-01: «remove price for short stays»). Their stays are
+                      priced by length (the guest picks dates on the platform) and every card already shows no price
+                      (listingPrice → ''), so a من/إلى budget there filters on a figure the user never sees. Hidden only when
+                      «إقامات قصيرة» is the ONLY period; «سنوي» alone or both keep it. The period toggle already clears
+                      typed bounds when the period changes. */}
+                  {!shortStaysOnly && (<>
                   {/* PRICE range (من / إلى ريال) — always available, independent of beds/area. HARD filter.
                       When شراء+إيجار are BOTH selected (owner feature 2026-08-20), this box is the BUY
                       budget and a SECOND, independent Rent budget box renders right below it — owner
@@ -2174,6 +2267,7 @@ export default function Home() {
                   {priceHint && (
                     <Text style={[s.rangeNote, x.rangeNote, priceHint.warn ? s.rangeNoteWarn : null]}>{priceHint.text}</Text>
                   )}
+                  </>)}
 
                   {query.dealCombined && (
                     <Reveal>
@@ -2273,6 +2367,7 @@ export default function Home() {
               behind — `git revert` of that commit restores the whole block. The styles (onbWrap/
               onbHeading/onbDesc/suggGrid/chip*) are deliberately KEPT so a restore needs no re-authoring.
               The AI Agent page still shows its own version of this block to guests. */}
+          </View>
         </RNAnimated.View>
       </ScrollView>
 
@@ -2284,10 +2379,10 @@ export default function Home() {
       {sharedSearch && user && !sharedSearch.code && (
         <View style={s.sharedBackdrop} accessibilityViewIsModal>
           <View style={s.sharedCard}>
-            <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, isRTL ? { left: 12 } : { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
+            <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
               <Ionicons name="close" size={20} color={colors.muted} />
             </Pressable>
-            <Image source={require('../../assets/images/eagle-mark.png')} style={s.sharedEagle} resizeMode="contain" accessibilityIgnoresInvertColors />
+            <XImage source={require('../../assets/images/logo-cloud-green-static.svg')} style={s.sharedEagle} contentFit="contain" />
             <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
               {shareLandingTitle(sharedSearch.name, sharedSearch.q, locale === 'en' ? 'en' : 'ar')}
             </Text>
@@ -2337,6 +2432,13 @@ const SHARED_PENDING_TTL_MS = 30 * 60 * 1000;
 const SHARED_IMPORTED_KEY = 'ezhalah:sharedChat:imported';
 
 const s = StyleSheet.create({
+  heroTitleBlock: { width: '100%' },
+  // a laptop title runs a little wider than the 560 px form column (owner 2026-10-26: «make the text wide a bit»)
+  heroTitleBlockWide: { alignSelf: 'stretch', marginHorizontal: -60 },
+  heroFalconer: { width: 40, height: 46 },
+  heroFalconerWide: { width: 50, height: 58 },
+  // web: an inline box on the text line, its feet a little under the baseline so he stands with the words
+  heroFalconerInline: { display: 'inline-flex', verticalAlign: 'middle', marginBottom: -4, overflow: 'visible' } as any,
   sharedBackdrop: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
     backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,
@@ -2349,12 +2451,13 @@ const s = StyleSheet.create({
   sharedEagle: { width: 36, height: 36, marginBottom: 10 },
   sharedTitle: { fontSize: 16, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 24 },
   sharedButton: {
-    marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.primary, borderRadius: 14,
+    marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.selFill, borderRadius: 14,
     paddingVertical: 14, alignItems: 'center',
   },
   sharedButtonText: { color: colors.onFill, fontSize: 16, fontWeight: '700' },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center' },
+  page: { width: '100%', alignItems: 'center' },
   col: { width: '100%', maxWidth: MAX_W },
 
   // Force LTR for the top bar so it never mirrors under Arabic: the hamburger stays pinned to the
@@ -2363,12 +2466,12 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // Note #4 — mobile brand text next to the hamburger.
-  topBrand: { fontSize: 18, fontWeight: '800', color: colors.dark, letterSpacing: -0.4 },
+  topBrand: { fontSize: 22, fontWeight: '800', color: colors.ink }, // same size as الوسيط الذكي's title (owner 2026-10-31: «ezhalah must all be the same size, big»)
   // AI Agent badge + Share icon, grouped and pushed to the far-right edge (marginStart:auto) so they
   // sit together in the top-right corner in BOTH languages. (user request.)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  word: { fontSize: 12, fontWeight: '700', letterSpacing: 1.2, color: colors.ink },
+  word: { fontSize: 12, fontWeight: '700', color: colors.ink },
   // The bar is forced LTR (see s.top), so `marginStart: 'auto'` pushes the badge away from the
   // left-pinned hamburger toward the share button on the right.
   // Redesigned to match the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius,
@@ -2407,8 +2510,11 @@ const s = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: 8, marginHorizontal: 4 },
   // The Filter / AI Agent control, centered in the hero flow between the tagline and the card.
   modeWrap: { alignSelf: 'center', marginTop: 8 },
-  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 28 },
-  heroSub: { fontSize: 12, fontWeight: '600', color: colors.dark, textAlign: 'center', marginTop: 4, lineHeight: 17 },
+  // NO letter-spacing on Arabic: it breaks joining and ligatures («الله» lost its ligature in the welcome
+  // headline, owner 2026-10-24). Latin tracking lives in the English-only layer E. Guard:
+  // scripts/verify-no-letter-spacing-on-arabic.ts
+  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
+  heroSub: { fontSize: 12, fontWeight: '600', color: colors.ink, textAlign: 'center', marginTop: 4, lineHeight: 17 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
@@ -2476,7 +2582,7 @@ const s = StyleSheet.create({
     borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10,
   },
   // flexShrink so the NAME truncates at narrow widths — the fixed 14px art and the ✕ never overflow.
-  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.ink, flexShrink: 1 },
   districtChipIcon: { width: 14, height: 14, resizeMode: 'contain' },
   suggIconEmpty: { opacity: 0.5 },
   suggCityEmpty: { color: colors.muted, fontWeight: '500' },

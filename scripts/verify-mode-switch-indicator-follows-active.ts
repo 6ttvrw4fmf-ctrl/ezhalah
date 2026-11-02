@@ -61,7 +61,8 @@ export const readPolicy = (src: string): Policy => {
   const code = codeOnly(src);
   // press(): the optimistic pre-navigation glide, `toValue` driven by the tapped tab, not by `active`
   const press = code.slice(code.indexOf('const press ='), code.indexOf('return (', code.indexOf('const press =')));
-  const optimisticGlide = /Animated\.spring\(\s*x\s*,\s*\{\s*toValue:\s*to\s*===/.test(press);
+  // `to === …` was the two-tab form; `SLOT[to]` is the three-tab form (Filter | Smart Broker | Map, 2026-10-30).
+  const optimisticGlide = /Animated\.spring\(\s*x\s*,\s*\{\s*toValue:\s*(to\s*===|SLOT\[to\])/.test(press);
   // the settle: a spring of the indicator value onto `toX` (the position `active` demands)
   const focusIdx = code.indexOf('useFocusEffect(');
   const focusBlock = focusIdx < 0 ? '' : code.slice(focusIdx, code.indexOf('const breath', focusIdx));

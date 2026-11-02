@@ -1,4 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
+// Robot pass + secret handshake (docs/ops/SCRAPE_GUARD.md): our own test browser is never refused once the back door
+// closes. A no-op without EZ_GATE_SECRET (local runs, fork PRs).
+import { grantRobotPass } from '../scripts/lib/robotPassCore.mjs';
+test.beforeEach(async ({ context }) => { await grantRobotPass(context); });
 
 // Production-UI parity: drives the real app end-to-end (Filter mode + AI mode) and asserts the
 // results actually render, in Arabic, with the right classification. Real clicks + Playwright
@@ -107,7 +111,7 @@ test('Filter mode — Rent + Monthly in Riyadh returns results', async ({ page }
   // tap إيجار (→ both), tap شراء (turns Buy off → Rent-only) — only then does شهري exist to tap.
   await page.getByText('إيجار', { exact: true }).click();   // Rent (both, briefly)
   await page.getByText('شراء', { exact: true }).click();    // turn Buy off → Rent-only
-  await page.getByText('شهري', { exact: true }).click();     // Monthly period
+  await page.getByText('إقامات قصيرة', { exact: true }).click();     // Short-stays period (was «شهري» until 2026-10-25)
   await pickCity(page, 'الرياض');
   await runSearch(page);
   await expect(page.getByText(FOUND).first()).toBeVisible();

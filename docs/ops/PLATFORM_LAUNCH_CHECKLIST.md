@@ -23,6 +23,7 @@ live check, never passes silently. The barriers are the lock; this list is the k
 | 7 | **Image coverage declared** | an entry in `scripts/image-coverage-baseline.json` (a real `floor_pct`, or `imageless_at_source` with a reason) | `verify-image-coverage-ratchet.ts` (+ live half) |
 | 8 | **AF attribute views cover it** | present in both Advanced-Filter attribute views | `verify-af-attribute-views-cover-every-platform.ts` (+ live half) |
 | 9 | **Loader roster** | appears in `loader_active_platforms_ar()` so the SearchLoader advertises it | `verify-loader-platforms-match-active.ts` |
+| 10 | **Pin capture proven (publishes / proven-silent) with URL** | a row in `data/pin-sources.json`: `pin_source` ∈ ad-page · page-json · feed · project-page · partial · none, the proof URL (the page that shows the pin, or the page proven silent after looking in ALL FOUR places — the ad page, its embedded JSON / data attributes / network calls, a site-wide map or list feed, the parent project/compound page), the date, and a coverage floor (`none` ⇒ 0; anything else ≥ 1). The same row is seeded into `ops_pin_source_declared` by a `*_pin_source*` migration, and `mon_detect_pin_coverage_below_floor()` holds the served index to it hourly (P1) | `verify-pin-capture-declared.ts` (offline, mutation-proven) + the detector ← the rakez gap (3,660 ads, 0 pins for 6 weeks, 2026-10-30) |
 
 ## Why boxes 6 and 7 are separate
 

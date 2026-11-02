@@ -8,6 +8,7 @@
 // covers less than the floor is itself a failure — that is the way a rotation system rots.
 //
 //   node e2e/live-sweep/run.mjs
+import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { FLOORS, WATCHES, findings, undecideds, journeys, ledgerPlan, ledgerRecord, note, dbCount, pickCityForDeal, sleep,
          watchStatus, unobservedWatches, WATCH_OFFLINE_COVER, productionVerified } from './sweep.mjs';
 import { normalFilter, trendingCity, trendingDistrict, advancedFilter, zeroResult,

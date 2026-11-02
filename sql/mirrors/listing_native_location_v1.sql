@@ -1,6 +1,9 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-11-01 (migration 20261101144106 reads this matview, it does not change it): UNCHANGED,
+-- pg_get_viewdef(..., true) still hashes to the value recorded below.
+--
 -- Re-verified 2026-09-27 (migration 20260927014059_w3b_maqam_earthapp_nawafeth_wiring_into_search):
 -- CHANGED. 28 arms added since the 2026-09-26 wave-2 refresh, all spliced immediately after the
 -- nufouth commercial arm by six wiring passes that each forgot this file and the registered digest:
@@ -41,6 +44,15 @@
 -- Re-verified 2026-10-18 (migrations 20261018081657_district_recovery_carries_the_source_word and
 --   20261018083435_source_district_carried_fleet_wide_null_district_is_red): UNCHANGED. Both only READ this view
 --   (refresh_district_recovery_table selects from it; the proofs count rows it holds); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
+-- Re-verified 2026-10-21 (migration 20261021003001_internal_views_are_not_a_public_api): UNCHANGED. That migration
+--   only REVOKES anon/authenticated SELECT on this view (security Phase 1.3); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
+-- Re-verified 2026-10-25 (migration 20261025035403_pin_district_fill_table_and_recovery_arm): UNCHANGED. That migration
+--   only READS this view (the new pin arm of refresh_district_recovery_table joins it); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
+-- Re-verified 2026-10-30 (migration 20261030063801_retired_place_homes_move_to_their_real_town): UNCHANGED. That migration
+--   only READS this view (retired_place_remap_rows / refresh_listing_city_correction join it); md5(live pg_get_viewdef) ==
 --   ea8174b63953cfc25aef4a39af032f0a == body below.
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,

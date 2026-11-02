@@ -1,0 +1,64 @@
+name: Border ads — weekly missed-pin check
+
+# Owner 2026-10-20: «we keep getting mistakes» → «yeah do that». Once a week this opens a few ads of every
+# DISTRICT_MAP_PLATFORMS site that Ezhalah shows WITH A BORDER (no pin) in a real Chromium, and checks
+# whether the source page publishes the ad's own pin after all (escaped JSON, DMS links, embeds, hidden
+# fields, short links). Any site where two or more sampled ads carry an unsaved pin turns this red and
+# raises an alert naming the exact ads. Office / default points, «similar ads» cards and rows we strip on
+# purpose are not counted (scripts/lib/missedPinCandidates.ts, proven by verify-missed-pin-candidates.ts).
+# Load: ONE browser against the SOURCE sites, sequential; a few tiny anon REST reads against Ezhalah.
+
+on:
+  schedule:
+    - cron: '17 3 * * 0' # Sundays 03:17 UTC — away from the Friday audit and the 06:46 Wasalt sync
+  workflow_dispatch:
+    inputs:
+      per_site:
+        description: 'ads opened per site'
+        default: '6'
+      sites:
+        description: 'optional comma-separated platforms (blank = every district-map site)'
+        default: ''
+
+concurrency:
+  group: border-ads-missed-pin-weekly
+  cancel-in-progress: false
+
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  sweep:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps chromium
+      - name: Every border ad's source page — does it publish a pin we did not save?
+        env:
+          PER_SITE: ${{ inputs.per_site || '6' }}
+          SITES: ${{ inputs.sites }}
+          # The two exclusion registers are hidden from the anon key by row-level security (they answer []).
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node --experimental-strip-types scripts/check-border-ads-for-missed-pins.ts
+          --per-site "$PER_SITE" ${SITES:+--sites "$SITES"}
+
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind journey_live_check_failed
+          --workflow border-ads-missed-pin-weekly.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

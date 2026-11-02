@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 LIST = "https://marketplace.sirdab.co/ar/ads"
@@ -193,10 +194,12 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
         if p.get(flag) is True:
             row[col] = True
     # The API has no kitchen / parking / AC / entrance field (its property object: ramps, licences, has_water,
-    # has_sewage, has_electricity, security_cameras …), so the ad's own words are the only statement of them:
-    # YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2). 115 of 566 active ads named one and all stored NULL,
-    # so the Advanced Filter never found them (🔬 2026-10-12). A structured utility above always wins.
-    for col, val in normalize.prose_amenities_yes(desc).items():
+    # has_sewage, has_electricity, security_cameras …), so the ad's own words are the only statement of them.
+    # 115 of 566 active ads named one and all stored NULL, so the Advanced Filter never found them (🔬 2026-10-12).
+    # A stated NO is read too (owner, 2026-10-25: explicit «لا» / «غير مؤثثة» = false): the yes-only reader left
+    # 4 ads furnished = yes over «مفروشة: لا» once the shared reader stopped calling that a yes, because a reader
+    # that can only say yes can never take a yes back. A structured utility above always wins.
+    for col, val in normalize.amenities_from_lines(desc).items():
         row.setdefault(col, val)
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     stored = None if stored is db.AUTHORITATIVE_NULL else stored
@@ -213,8 +216,9 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "hazard_level": p.get("hazard_level"),
         "number_of_doors": p.get("number_of_doors"),
         "available_from": a.get("available_from"),
-        "latitude": p.get("lat"),
-        "longitude": p.get("lng"),
+        # Through the one gate (sa_pin): 38 active ads carried «0,0» and one a Balkan pair (42.73, 18.31) that search
+        # drops anyway (2026-10-25); the raw pair stays in source_capture.property.
+        **pin_dict(p.get("lat"), p.get("lng")),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [])})
     cap_prop = {k: v for k, v in p.items() if k not in _NEVER_STORE}

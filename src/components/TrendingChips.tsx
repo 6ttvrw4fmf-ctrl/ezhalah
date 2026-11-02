@@ -44,7 +44,7 @@ export function TrendingChips({
 const s = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 8, marginHorizontal: 2 },
   flame: { fontSize: 14 },
-  title: { fontSize: 13, fontWeight: '700', color: colors.dark, textAlign: 'right', writingDirection: 'rtl' },
+  title: { fontSize: 13, fontWeight: '700', color: colors.ink, textAlign: 'right', writingDirection: 'rtl' },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     flexDirection: 'row',

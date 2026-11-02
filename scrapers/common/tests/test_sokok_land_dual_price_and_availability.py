@@ -695,3 +695,12 @@ def test_an_unparsed_plot_page_is_unknown_and_never_an_empty_plot():
     every, green, plot, excluded = R.fetch_plot_map(_Dead(), "19")
     assert every is None, "unreadable is UNKNOWN, not zero pieces"
     assert green == [] and plot == {} and excluded == {}
+
+
+def test_the_piece_own_map_pin_is_read_and_the_plot_point_is_not():
+    # owner 2026-10-20 night: piece 234328341's page carries map {26.3177414, 43.9071396}
+    row, _cat, why = R.map_listing(_p(COM, map={"latitude": 26.317741424323515, "longitude": 43.907139560208286}), PLOT_19)
+    assert why == "" and row["additional_info"]["latitude"] == 26.317741424323515
+    assert row["additional_info"]["longitude"] == 43.907139560208286
+    row, _cat, _why = R.map_listing(_p(COM, map=None), PLOT_19)
+    assert "latitude" not in row["additional_info"]                    # no piece pin → border, never the plot's

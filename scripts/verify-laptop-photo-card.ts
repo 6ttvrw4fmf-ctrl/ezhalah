@@ -68,7 +68,10 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
       && /tone === 'silver' \? \[pal\.silverLight, pal\.silverDeep\] : \[pal\.goldLight, pal\.goldDeep\]/.test(reveal),
     // The screen-level party: above the ad sheet/pane, which covers the card\'s own layer on a phone.
     'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap':
-      /<\/AdViewer>|\/>\n    \)\}\n[\s\S]{0,300}<ConfettiOverlay \/>\n    <\/View>\n  \);\n\}/.test(agent) && /pointerEvents="none" style=\{\[StyleSheet\.absoluteFill, s\.top\]\} testID="confetti-overlay"/.test(overlay)
+      /<\/AdViewer>|\/>\n    \)\}\n[\s\S]{0,300}<ConfettiOverlay \/>\n    <\/View>\n  \);\n\}/.test(agent)
+      // EVERY overlay root (the web Web-Animations layer AND the native Animated layer) never takes a tap.
+      && (overlay.match(/testID="confetti-overlay"/g) ?? []).length >= 1
+      && (overlay.match(/testID="confetti-overlay"/g) ?? []).length === (overlay.match(/pointerEvents="none" style=\{\[StyleSheet\.absoluteFill, s\.top\]\} testID="confetti-overlay"/g) ?? []).length
       && /if \(!live \|\| reduced\) return null;/.test(overlay) && /setTimeout\(\(\) => setLive\(false\)/.test(overlay) && !/\.start\(\s*\(/.test(overlay) && !/Math\.random/.test(overlay),
     // Owner 2026-10-17: «whenever a user clicks on a listing I want this party confetti … on everything».
     'EVERY card presses the shared handler — the compact row and the phone card too, never onOpen directly':

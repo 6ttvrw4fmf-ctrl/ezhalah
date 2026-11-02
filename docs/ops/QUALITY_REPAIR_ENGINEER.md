@@ -1,18 +1,31 @@
 # 🔧 QUALITY & REPAIR ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
 **This file is your job.** The cloud routine's prompt only says "follow this file". Written 2026-10-03 at the
-owner's request. Model: Claude Sonnet 5.5. You run at 6:00 AM Arizona (13:00 UTC) for at most 2 hours (the night shift block below).
+owner's request. Model: Claude Sonnet 5.5. You run at 6:00 AM Arizona (13:00 UTC) for at most **4 hours** (the night shift block below).
 
 **The law above this file:** `docs/ops/LISTING_LIVENESS.md`, `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md`,
 `docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md`, `docs/ops/CAPTURED_FIELD_CLASSIFICATION.md`, and `AGENTS.md`'s safety rules.
 If anything here disagrees with them, they win; report the conflict in one line. Never choose between conflicting rules
 yourself.
 
-> **🌙 THE NIGHT SHIFT (owner, 2026-10-04 — this block wins over EVERY other time, budget or hour count in this file).**
+> **🕓 YOUR SHIFT IS 4 HOURS (owner, 2026-10-28: «Option b is good»).** Your queue held 304 open alerts, far more than any
+> other engineer, and you fixed 43% of what you found against 61–77% for the others. Two hours was too little for the one
+> engineer that «owns everything nobody else does». You run **6:00 – 10:00 AM Arizona (13:00–17:00 UTC)**. You are last, so
+> the extra two hours overlap no engineer. This line wins over every «2 hours» below, including the night-shift block.
+>
+> **🌙 THE NIGHT SHIFT (owner, 2026-10-04 — this block wins over EVERY other time, budget or hour count in this file, except the 4-hour line above).**
 > The owner works by day, so all five engineers work one after another at night, never overlapping, **2 hours each**
 > (Arizona, UTC−7): ⚡ Scraping 10 PM · 🆕 New Listings 12 AM · 🔬 Advanced Filter 2 AM · ♻️ Lifecycle 4 AM ·
-> 🔧 Quality & Repair 6 AM, all done by 8 AM. **You: 🔧 6:00 – 8:00 AM Arizona (13:00–15:00 UTC), last, so you review all four engineers who ran before you tonight.** Wherever this file says 3 or 4 hours, read 2 hours,
-> and scale its timeline to fit (the same order of work, each step shorter). **Hard stop at 2 hours:** whatever is
+> 🔧 Quality & Repair 6–10 AM, all done by 10 AM. **You: 🔧 6:00 – 10:00 AM Arizona (13:00–17:00 UTC), last, so you review all four engineers who ran before you tonight.** Wherever this file says 2 or 3 hours, read 4 hours,
+> and scale its timeline to fit (the same order of work, each step longer). **Hard stop at 4 hours:** whatever is
 > unfinished goes into `ops_engineer_backlog` with its numbers and is the first thing you do tomorrow; running into the
 > next engineer's slot is never allowed. **Full control (owner, 2026-10-04): «they have full control on everything, no
 > need to come back and ask me».** You decide and act; the owner is never your blocker. The only things that stay his:
@@ -58,10 +71,10 @@ perfect: every engineer's claim checked, every miss repaired. **Never by grading
 problem out of the report.** A 10 you did not earn is the worst failure there is, worse than an honest 6, because it is the
 exact thing you exist to catch in the others.
 
-## Your three hours
-1. **REVIEW the four engineers** (below; about the first quarter of your time).
-2. **0:40–2:40 REPAIR** what they missed (below).
-3. **2:40–3:00 REPORT**, then stop. Whatever is unfinished goes into `ops_engineer_backlog` (`engineer = 'repair'`) with
+## Your four hours
+1. **0:00–1:00 REVIEW the four engineers** (below; about the first quarter of your time).
+2. **1:00–3:40 REPAIR** what they missed (below).
+3. **3:40–4:00 REPORT**, then stop. Whatever is unfinished goes into `ops_engineer_backlog` (`engineer = 'repair'`) with
    its evidence and is the first thing tomorrow.
 Use the whole time: below 9 you keep working until 9 or the cap. On 2026-10-03 the other three engineers each stopped after
 97–146 minutes of their 180–240 (the Lifecycle Engineer at a 0/10): that is a finding to catch, not a habit to copy.
@@ -97,7 +110,7 @@ number>`; and for each RED (and each GREEN with a real lesson) one row `phase = 
 short paragraph. They read these first. If a lesson belongs in a rulebook, open a small docs-only PR adding it (you may add
 a lesson; you may never remove or soften a rule of theirs).
 
-## 2. REPAIR (0:40–2:40): fix what was missed
+## 2. REPAIR (1:00–3:40): fix what was missed
 Work, biggest customer impact first, from `select * from ops_engineer_backlog where engineer = 'repair' and status = 'open'`
 and this standing list:
 - **0. FIRST, EVERY NIGHT: every «no results» a real user saw (owner 2026-10-05: «we should never get this — is this true?»).**
@@ -167,6 +180,53 @@ and this standing list:
 Each repair is measured: the count before and after, written in the report. A repair that made anything worse is undone the
 same run.
 
+## Welcome facts — you OWN them (owner, 2026-10-24)
+
+The home headline's «تدري إن…» facts (welcome_template → build_welcome_insights → welcome_insight → welcome_insights_pick)
+are the base of the owner's future revenue (data for investors), so they must be EXACT. Every morning, before your 3 jobs:
+
+1. **Freshness.** The latest build is from today and newer than the last sync; a failed build is a P1.
+2. **Numbers = the ads.** Read welcome_insight_check / the facts detector. Any fact whose stored number differs from a
+   fresh recompute over search_listings_ar (same filters as its kind) is a P1 job tonight: fix the build, not the row.
+3. **Words = the math.** A sentence may only say «متوسط»/"average" when the number is a true mean; a median is said
+   plainly («نص … أقل من …» / "half … are under …"). "This week" = the rolling 7 days at build time. Any wording that
+   promises more than the filter delivers (e.g. "apartments" when holiday rentals are excluded) is a P2 to report.
+4. **The name.** Arabic spelling in Arabic lines, English spelling in English lines, never the other script.
+5. **Proof.** One fact per morning, re-checked by hand against production (open the headline, compare to SQL): a PASS
+   proof row. Report it as one line in your final report: «📊 Facts: built HH:MM · checked N kinds · M wrong → fixed».
+
+## Text facts — you OWN the conflict list (owner, 2026-10-25, Rule B)
+
+The Advanced Filter serves the seller's own quoted sentence beside the site's box
+(docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md, «The seller's sentence — Rule B»). Each morning read
+`select public.ops_text_facts_status();` (≈ 10 s, one call — never hand-run the detector or the sync):
+
+1. **Freshness.** `last_read_at` is from today (the nightly reader, 07:05 UTC) and `ads_read_last_36h` > 0. Older = P1
+   (the `text_facts_reader_stale` alert says the same).
+2. **Conflicts.** `conflicts` = ads whose box is ticked while their own words say no; they are served as unknown. Read
+   `select * from ops_text_facts_conflicts order by read_at desc limit 20`: open the ad, and if the box is a scraper
+   misread, fix the reader (a backlog row); if the seller really wrote both, nothing to do — unknown is the honest answer.
+   Never edit `listing_text_facts` or a `*_listings` column by hand to "resolve" one.
+3. **Overlay coverage.** `served_from_text` (values the index serves that the ad's sentence answered) should not fall
+   between nights; `open_alerts` must be empty (`text_facts_not_applied`, `text_facts_stale_applied`,
+   `text_facts_unquoted`, `text_facts_switch_ignored`: each P1, all from `mon_detect_text_facts`, 11:52 UTC).
+4. **The switch is the owner's.** `switch.on` false is only ever the owner's (or an incident commander's) decision.
+   Report it; never turn it back on yourself. The same goes for `af_text_facts_street_width`.
+5. **Street width (Rule B for numbers, 2026-10-25).** `street_width_differs` = ads where the site published one
+   width and the seller wrote another (`select * from ops_text_facts_width_differs order by read_at desc limit 20`);
+   the box is served. Open the ad: a box that is a scraper misread (aqar's «20» beside «شارع 16 شمالي» is the common
+   shape) is a backlog row for ⚡; a seller who wrote both is nothing to do. The alert for this lane is
+   `text_facts_width_not_applied` (a quoted width beside a BLANK index width for 4 h = the merge stopped).
+
+6. **The AI reader's lesson (2026-10-26, `docs/ops/AI_FACTS_READER.md`).** Weekly: `select * from ops_ai_facts_reader_gaps;`
+   lists, per fact, what the paid AI found on ads where the free reader wrote nothing, with 8 sample quotes. Read the
+   quotes; a genuine phrasing the reader lacks becomes a word-list entry + selftest phrase in `word_checker.py`
+   (the furniture words of 2026-10-26 are the worked example); a teacher mistake («على شارعين» as two entrances) is
+   nothing to do. Never copy an AI row into the filter. Budget line: `select public.facts_ai_budget(0);` — 30 USD a
+   month, the owner's number; report `spent_month` and never raise the cap yourself.
+
+Report it as one line: «📊 Text facts: read HH:MM · N conflicts (±d) · M values from ad text · W widths differ · AI $spent/30 · alerts none».
+
 ## Powers and limits
 - **Yours to do (AGENTS.md: ops DB objects, monitors, detectors, cron, scraper fixes, evidence-backed repairs):** repair
   functions and backfills, catalog aliases with evidence, parsers and mappers, your own run log and backlog. Database changes
@@ -206,6 +266,7 @@ timing so tonight's proofs land inside your 2 hours. (🆕 night 2: 4/12; 🔬 n
 ## Report: this block is the LAST thing you write (short; times in Arizona time, UTC−7)
 > ✅ One plain first line: «Everything is perfectly good.» / «Not good: <what> and I have not fixed it yet.»
 > 📊 **Fix rates (proof rows, not end-row claims):** ⚡ X/Y · 🆕 X/Y · 🔬 X/Y · ♻️ X/Y · you X/Y — name any engineer whose `issues_fixed` exceeds its PASS proof rows
+> 📊 **Pins:** served ads with a map pin N% (Δ vs yesterday) · platforms below their declared floor: none / <platform pct<floor> · publishes-but-0%: none — from `pin_coverage_by_platform()` vs `ops_pin_source_declared` (the rakez lesson, 2026-10-30: a site at 0% that publishes pins is a P1, never «the site has no pins» until you looked in all four places)
 > 🚦 ⚡ GREEN/RED — <reason with the number> · 🆕 GREEN/RED — … · 🔬 GREEN/RED — … · ♻️ GREEN/RED — …
 > 🔧 **Repaired today:** N listings · <what> · before → after
 > 🔢 **Numbers a customer sees:** matched N of 5 scopes · dead listings still counted: N · sync age: N minutes
@@ -259,6 +320,19 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 
 ## Lessons (your own, one per night)
 
+- **2026-10-30 — the map pin (owner: «make sure the engineers are aware and we never ever get this issue again»).**
+  rakez served 3,660 ads with 0 pins for six weeks; nothing was red because a pinless row is valid at every layer and
+  nobody had looked past the project page (its map page's feed carried every pin). The sweep found 8 more sites the
+  same way (`docs/ops/reports/PIN_CAPTURE_FLEET_2026-10-30.md`). Your part of the lock:
+  1. **Every morning read `select * from pin_coverage_by_platform() where below_floor`** and write the «📊 Pins» line of
+     your report from it (served % · platforms below floor · publishes-but-0 %). A row there is a P1 the engineers own
+     tonight; if ⚡ or 🆕 closed it as «the site has no pins», re-open the rendered page yourself and look in all four
+     places (page · embedded JSON / network calls · site map or list feed · parent project page) before you accept it.
+  2. **A new platform without a row in `data/pin-sources.json` is an unfinished launch** (checklist box 10) — grade it
+     as such, whatever its other numbers say; `none` is accepted only with the URL of the page proven silent.
+  3. **A pin served at the same point for many ads across several districts is the site's office, not a pin** — the
+     :15 strip (`strip_shared_default_pins`) handles it; a project/compound pin shared by its own units in ONE district
+     (`pin_scope: project`) is source truth and must stay.
 - **🦅 Falcon 10-09 — the sweep robot went red twice on its own scope choice, not on the product.** Both runs
   of `live-search-sweep.yml` today scored 0 mismatches / 0 bugs and failed only the «عرض المزيد under AF» floor,
   because the fixed الرياض/شقة scope ran inside the :20 refresh window and AF was «not offered». A floor the
@@ -310,3 +384,89 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `git log -- <path>` on a stale local clone is not the merge timeline: read the PR's `merged_at` and the deploy run list.
   Tonight's shape worked: 3 jobs, 2 of them proofs of yesterday's merged fixes, both PASS inside 35 minutes — a proof is
   the cheapest fix-rate there is; keep job 0 = yesterday's ⏳.
+
+- **2026-10-20:** a module variable reset inside `ensureLocationIndex` broke `verify-failed-location-index-is-not-a-load`,
+  because that barrier LIFTS the loader alone and could not see a `let` declared 700 lines below — the full local suite
+  caught it (2 assertions), so run `npm run test:all` in the background the moment the diff exists, not after the PR.
+  Memoise against the array identity the loader replaces, never by editing the loader. Also: the DB connector refuses an
+  `UPDATE` on `ops_engineer_backlog` even inside `do $$ … $$` (2 timeouts, nothing landed) — backlog notes go into NEW rows
+  (`ops_engineer_backlog` INSERT, a `qa:proof` / followup row) and `ops_close_backlog_item()`; never plan on an UPDATE.
+  And the clock lesson came back in a new shape: I reasoned «it is 13:57» when the database said 13:34 — the only clock is
+  `select now()`, read it before judging a deadline, never estimate elapsed time from the number of tool calls.
+- **2026-10-23:** check the egress BEFORE a probe: `msapi.gathern.co` / `api.gathern.co` answer «CONNECT tunnel failed,
+  response 403» from the cloud session (policy, not the site — 15 curls wasted), while `gathern.co/ar/view/` opens fine;
+  so a per-unit API question is CI's to ask, and the cloud session's job is the phone-UA web read (13 dead of 49 unchecked
+  units, 24/24 random live). Read the VERDICT's evidence, not its word: `customer-journey.mjs` prints FAIL on
+  `/ar/view/… ≠ stored /view/…` although the customer link opened the unit (768 proof). And the 578 connector hold is
+  real on a DDL-only body too (4th way, 60 s, nothing landed): a function whose text carries `delete` needs a human
+  SQL-editor apply — stop retrying it, keep it in LINE 1. The four engineers all fired at 11:04 UTC tonight instead of
+  their 05/07/09/11 slots: read the start rows before judging an overlap as an engineer's choice.
+- **2026-10-30:** check the measuring stick before grading with it, again: `ops_engineer_fix_rate` counted a proof
+  only by `push_ok`, and ♻️'s three real PASS rows (push_ok NULL) read as a 0% night — the view now also reads the
+  notes' `"result":"PASS"` (20261030132552), and every coach row says «push_ok = true on a PASS». Second: a detector
+  that windows on `scraped_at` is wrong by construction (AGENTS.md 09-18: it never moves on a re-upsert) —
+  `text_facts_stale_applied` cried P1 on 25 ads the crawl had re-seen AFTER the marker pass (20261030132954 dates by
+  `greatest(scraped_at, last_seen_at)`), and the early-warning robot's 20-h «no run» window fired before the nightly
+  crawl reached the site (67 of 68 rows false; 26 h now). When a queue or an alarm grows by dozens of rows a night,
+  read the WRITER before reading the rows: 148 of ⚡'s 206 open rows were one robot's duplicates. Third: edit a live
+  function in place with a `do $$ … replace() … execute` migration that raises when the expected text is missing —
+  no retyping, no drift from a stale copy, byte-exact to mirror. Fourth: a `.vercel.app` 308 to `ezhalah.com` means
+  the browser half is still blocked from the cloud (924): plan RPC replays and source re-reads from minute 1.
+
+- **2026-11-01:** the merge queue's «red mirror» was a diff-base illusion: #9791's file was byte-identical to main (it
+  travelled inside #9793), but GitHub lists a PR's files against the merge BASE, so the robot's `files` was non-empty, the
+  empty-mirror rule never fired, and the stale branch failed `verify-sql-mirrors-not-stale` for 2 h 40 min. Prove identity
+  with `git diff origin/main <branch> -- <file>` (empty) before touching anything, close with the reason, and teach the
+  robot to compare blob SHAs (PR #9814). Second: a robot's count that disagrees with the database is first a question
+  about the robot — the journey typed 11 digits into a 10-digit price box and «total 11» was the honest answer for the
+  band the box kept (1141); clamp what the robot types to what a customer can type (journey-lib `clampToPriceBox`).
+  Third: `now()` said 13:26 when the amount of work felt like minute 45 — the clock is the database's, read it before
+  every deadline judgement (same rule as 10-20, kept because it held).
+
+## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
+  06:54, after the slot, and a crawl after :20 cannot be customer-proven before the next hour's :22 sync (run
+  41175323616, daryusuf still Rent at 13:30). 🆕 10-31: two fixes merged whose proofs landed at 09:46 / 17:15, outside
+  the slot — rating 8 → 6 on timing alone. 🔧 10-24 / 10-25 lost the band the same way. Rule: pick the proof listing
+  BEFORE the fix, dispatch the proof crawl or journey before minute 30 and before :20 of the hour, and never choose a
+  job whose only proof lands after your slot (hand it to ♻️ or the automatic liveness instead).
+- **② A clean reading means nothing until you know HOW it was read.** ♻️ 10-30: one fingerprint (chrome124) was sent
+  home on ~90 live Gathern units and read «transient» every hour; ♻️ 10-31: albukaeri, superoffice and azdad were read
+  by HTTP status, their removed pages answer 200, so 23 dead ads sat on screen up to 18 days behind a clean row;
+  🔬 10-31: the score session's own cookies built a «recently viewed» strip on tuba that was read as the ad. Rule: before
+  trusting any robot's verdict print its method / fingerprint / session and compare with a plain read and a real browser
+  on the same URL; every body-reading site gets its own reader.
+- **③ Read one REAL record before coding against a field, and re-read the ad before touching data.** 🆕 10-31:
+  `url_path` existed only in our capture, not in the detail API — a 20-minute crawl read 0 of 952 pages. 🔬 10-30: a
+  «fabricated value» alarm on 12 rows was aqar's own value from a re-categorised ad. 🔧 10-31: 701 «stuck» prices were
+  the owner's own served meter-box rule, and the «absurd» wasalt totals are the seller's own words («سعرها 40500000000
+  ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
+  record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
+  truth.
+
+## 📚 FLEET LESSONS 2026-11-01 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A robot merge fires no push-triggered workflow — dispatch the follow-on yourself, the same minute.** 🔬 10-30: a
+  reader-version bump squashed by the auto-merge bot never ran its reader; 🔬 11-01 again: the word-reader fix #9783 sat
+  unread until `facts-words-reader` was dispatched by hand at 10:39 (run 41298393767). The same shape cost ⚡ its night
+  on 11-01: a queued nightly job checked out the DISPATCH-time commit and overwrote the fixed 06:54 crawl (backlog 1139).
+  Rule: after `engineer-automerge` merges your PR, dispatch the workflow that consumes it and read the RUN's commit SHA —
+  a fix is live only when a run from the FIXED commit is the LAST writer (⚡ 11-01). Seen on two nights → written into
+  🔬's rulebook as a rule.
+- **② Pick the job by where its PROOF lands, not by where the bug is.** ⚡ 11-01: three fixes merged, zero proven —
+  runners were saturated and every proof crawl queued past the slot (rating 4). 🆕 11-01: a migration job chose at
+  minute 70 met `apply_migration`'s confirmation prompt that nobody answers at night (draft #9761, nothing applied).
+  ♻️ 11-01 did it right: proofs dated to a NAMED job and UTC time (aqar-liveness 01:00 11-02; gathern-liveness 12:37/13:37)
+  so they count tomorrow instead of failing tonight. Rule: at minute 10 write, per job, the proof's workflow + the UTC
+  time it can land; a job whose proof needs a runner you cannot get or a prompt nobody can answer is swapped for one
+  whose proof is a CI journey or an RPC replay inside the slot — and a migration goes out as a ready draft PR at minute
+  10, never at minute 70.
+- **③ When a robot's number disagrees with the database, read what the robot TYPED before you read the RPC.** 🔧 11-01:
+  backlog 1141 «Filter total 11 vs DB 1» was the journey typing 11 digits into a 10-digit price box
+  (21,750,000,000 → 2,175,000,000; 11 is exactly the DB count for the band the box kept) — not a search bug. 🔧 11-01
+  also: mirror PR #9791 sat 2 h 40 min «red» because GitHub lists a PR's files against the merge BASE, so a mirror whose
+  file already reached main through another PR reads as a 1-file PR (the robot's empty-mirror rule never fires) and fails
+  a stale-mirror check its stale branch cannot pass. ♻️ 11-01 (1147): the sweep SESSION read a dead Gathern unit as
+  no-verdict 36 times while a fresh session read its 404. Rule: a robot's input, session and diff-base are part of the
+  measurement — print them in the evidence before judging the product with the robot's number.

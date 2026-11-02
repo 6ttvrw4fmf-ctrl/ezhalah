@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Animated, Image, Platform, StyleSheet, Text } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { colors } from '@/theme/tokens';
 import { useApp } from '@/store';
@@ -34,7 +35,7 @@ export const INTRO_ENABLED = INTRO_SOURCE != null;
 // the user into the app. Keep it a little above the clip length (~5s clip → 9s ceiling).
 const SAFETY_MS = 9000;
 
-const EAGLE_MARK = require('../../assets/images/eagle-mark.png');
+const EAGLE_MARK = require('../../assets/images/logo-cloud-green-lit.svg');
 
 export default function IntroVideo() {
   const { showIntro, dismissIntro } = useApp();
@@ -117,7 +118,7 @@ function IntroPlayer({ source, onDone }: { source: number | string; onDone: () =
       />
       {/* Branded poster — covers the brief load gap, then fades as the first frame paints. */}
       <Animated.View style={[StyleSheet.absoluteFill, styles.poster, { opacity: poster }]} pointerEvents="none">
-        <Image source={EAGLE_MARK} style={styles.mark} resizeMode="contain" />
+        <XImage source={EAGLE_MARK} style={styles.mark} contentFit="contain" />
         <Text style={styles.word}>EZHALAH</Text>
       </Animated.View>
     </Animated.View>

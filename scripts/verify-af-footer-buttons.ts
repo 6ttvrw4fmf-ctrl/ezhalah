@@ -90,10 +90,10 @@ check('both controls declare accessibilityRole="button"',
   /accessibilityRole="button"/.test(backBlock) && /accessibilityRole="button"/.test(skipBlock));
 check('«رجوع» carries the RTL-aware back chevron (the AuthModal idiom: forward in RTL, back in LTR)',
   /isRTL \? 'chevron-forward' : 'chevron-back'/.test(backBlock));
-check('the labels are button-weight, not footnote-weight (semibold ≥14, ink-dark)',
+check('the labels are button-weight, not footnote-weight (semibold ≥14, theme-aware ink)',
   /secondaryTxt:\s*\{[^}]*font\.family\.semibold/.test(cardRaw)
   && /secondaryTxt:\s*\{[^}]*fontSize:\s*14/.test(cardRaw)
-  && /secondaryTxt:\s*\{[^}]*color:\s*colors\.dark/.test(cardRaw));
+  && /secondaryTxt:\s*\{[^}]*color:\s*colors\.ink/.test(cardRaw));
 check('design tokens only — no raw hex/rgba anywhere in the card',
   !/#[0-9a-fA-F]{3,8}\b/.test(cardSrc) && !/rgba\(/.test(cardSrc));
 
@@ -107,7 +107,10 @@ check('the intro card has no «عرض النتائج» decline link either — �
   !/onShowResults/.test(cardSrc) && !/t\('Show results'\)/.test(cardSrc));
 check('the footer row itself holds exactly the two secondary controls',
   (() => {
-    const row = cardSrc.slice(cardSrc.indexOf('s.footRow'), cardSrc.indexOf('</Reanimated.View>', cardSrc.indexOf('s.footRow')));
+    // The ROW ends at its own closing tag (it nests only Pressables, never a View). It used to be read
+    // up to </Reanimated.View>, which since 2026-11-02 also covers the «af-skip-note» caption under it.
+    const start = cardSrc.indexOf('s.footRow');
+    const row = cardSrc.slice(start, cardSrc.indexOf('</View>', start));
     return (row.match(/testID="af-/g) ?? []).length === 2
       && /testID="af-back"/.test(row) && /testID="af-skip"/.test(row);
   })());

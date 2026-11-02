@@ -46,6 +46,8 @@ def _no_catalog_network(monkeypatch):
     for EVERY test so a regression that reaches the catalog fails on an assertion, offline."""
     monkeypatch.setattr(R, "to_catalog", lambda c, region_hint=None: _CITIES.get(c, (None, None)))
     monkeypatch.setattr(R, "find_district_in_text", lambda t, cid: _DISTRICTS.get(t) if t else None)
+    monkeypatch.setattr(R, "bridge_rows", lambda city_en: ())          # the EN→AR bridge is a Supabase read
+    R._bridge_en_ar.cache_clear()
 
 
 # ── daryusuf fixtures (verbatim REST posts, content trimmed to the blocks run.py reads; captured 2026-09-24) ──

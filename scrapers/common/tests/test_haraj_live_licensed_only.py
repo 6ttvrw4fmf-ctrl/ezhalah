@@ -122,7 +122,7 @@ def test_licence_location_arabic_fallback_and_corner_facade():
     row, cat, skip, _ = mapped("عمارة على شارع تجاري في حي الخالدية للبيع", NO_DEED, city="المدينة")
     assert skip == "" and row["city_id"] == 14 and row["district_ar"] == "الخالدية"
     assert row["direction"] is None and row["additional_info"]["facade_printed"] == "جنوبية - شرقية"
-    assert row["property_age"] is None                                  # «اكثر من عشر سنوات» is an open bound
+    assert row["property_age"] == 10    # «اكثر من عشر سنوات» = REGA's open «10+»; the AF clause reads it as ≥ 10 (2026-10-25)
     assert row["optical_fibers"] is True
     assert row["additional_info"]["other_obligations"] == "مرهونه لصالح صندوق التنميه"
     assert row["license_number"] == "7201131815"
@@ -221,7 +221,7 @@ def test_first_crawl_enums_fibreoptics_and_warehouses():
     assert R.type_of("Warehouses", None, "") == "Warehouse"
 
 
-# ── licensed catch-up (owner 2026-10-17) ──────────────────────────────────────────────────────────
+# ── catch-up (owner 2026-10-17; every offer since 2026-10-25) ──────────────────────────────────────────────────────────
 @pytest.mark.parametrize("title,keep", [
     ("ارض للبيع", True), ("شقة دورين للإيجار", True), ("دور علوي للايجار", True),
     ("للبيع فله خلف مستشفى السعودي الالماني خميس مشيط", True), ("محل للتقبيل", True),
@@ -240,14 +240,14 @@ def test_catchup_walks_older_files_newest_first_and_moves_the_cursor(monkeypatch
     locs = [_file(f"2026-10-1{d}-0{h}") for d in (5, 6) for h in (1, 2, 3)]       # oldest first
     read = []
     monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: (read.append((u, tight)) or [u[-6:-4]]))
-    def fake_crawl(files, skip, limit=0, today=None, only=None, licensed_only=False, meta=None):
-        assert licensed_only and only
+    def fake_crawl(files, skip, limit=0, today=None, only=None, meta=None):
+        assert only          # owner 2026-10-25: every offer, licensed or not — crawl() has no licence filter
         return [{"ad_number": "HRJ" + only[0]}], [], R.Counter(fetched=1), R.Counter(), meta
     monkeypatch.setattr(R, "crawl", fake_crawl)
     # first run: no cursor → everything older than the live window, newest first
     res, _, c, _, head = R.catchup(locs, locs[-2:], 3600, None)
     assert [u for u, _ in read] == locs[:-2][::-1] and all(t for _, t in read)
-    assert head == {"catchup_before": "2026-10-15-01", "catchup_files_left": 0, "catchup_stored": 4}
+    assert head == {"catchup_all_before": "2026-10-15-01", "catchup_files_left": 0, "catchup_stored": 4}
     # next run resumes below the cursor; nothing left → nothing read
     read.clear()
     assert R.catchup(locs, locs[-2:], 3600, "2026-10-15-01")[4]["catchup_stored"] == 0 and not read
@@ -258,7 +258,7 @@ def test_catchup_budget_stops_and_keeps_the_cursor_at_the_last_finished_file(mon
     monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: ["1"])
     monkeypatch.setattr(R, "crawl", lambda *a, **k: ([], [], R.Counter(), R.Counter(), None))
     head = R.catchup(locs, locs[-1:], 0, None)[4]          # budget 0: the first file runs, then it stops
-    assert head["catchup_before"] == "2026-10-16-05" and head["catchup_files_left"] == 4
+    assert head["catchup_all_before"] == "2026-10-16-05" and head["catchup_files_left"] == 4
     assert R._CURSOR.search(R._notes(R.Counter(fetched=3), R.Counter(), head)).group(1) == "2026-10-16-05"
 
 
@@ -438,3 +438,11 @@ def test_a_title_that_names_the_other_deal_is_a_doubt(title, why):
 def test_mutation_one_block_agreeing_with_its_title_is_still_stored():
     row, _, skip, _ = mapped("شقة مميزة للإيجار في حي الجنادرية", FLAT_AR, city="الرياض")
     assert skip == "" and row["transaction_type"] == "Rent" and P.licence_deals(FLAT_AR) == ["Rent"]
+
+
+def test_catchup_cursor_ignores_the_finished_licensed_only_walk():
+    """2026-10-25: the licensed-only walk ended at «catchup_before» 2026-07-20-00 having dropped every
+    unlicensed offer. Its key must not resume the all-offers walk, or the walk would start finished."""
+    old = '{"catchup_before": "2026-07-20-00", "catchup_files_left": 0}'
+    assert R._CURSOR.search(old) is None
+    assert R._CURSOR.search('{"catchup_all_before": "2026-09-01-03"}').group(1) == "2026-09-01-03"

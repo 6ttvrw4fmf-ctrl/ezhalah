@@ -98,6 +98,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://1000.com.sa"
 SOURCE = "1000 العقارية"
@@ -261,6 +262,8 @@ def parse_detail(page_html: str) -> dict:
         "attrs": attrs,
         "sections": sections,
         "photos": photos,
+        # Owner 2026-10-20: the ad's own Maps frame «maps.google.com/maps?q=LAT,LNG&output=embed» (5/5 sampled).
+        "pin": pin_from_html(page_html),
     }
 
 
@@ -440,6 +443,7 @@ def map_listing(card: dict, detail: Optional[dict]) -> tuple[Optional[dict], str
             "card_features": card.get("feats") or None,
             "building_features": sections.get("مميزات المبنى"),
             "included_services": sections.get("الخدمات المشمولة"),
+            **(detail.get("pin") or {}),
         }.items() if v is not None}),
         "source_capture": redact_capture({
             "schema": "thousand.v1",

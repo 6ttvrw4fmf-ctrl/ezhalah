@@ -137,7 +137,7 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_ar, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
-from scrapers.common.page_pin import pin_from_html  # noqa: E402
+from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 
 BASE = "https://bossbihoffice.com.sa"
 SOURCE = "مكتب بوصبيح"
@@ -540,6 +540,9 @@ def fetch_detail(s: cc.Session, nid: str) -> Optional[dict]:
         return None
     # The same identity test _signal_for() uses for a life: this page is node `nid` itself.
     d["_own_node"] = f'data-history-node-id="{nid}"' in r.text
+    if not d.get("pin"):
+        # Same office-site template as abralosol/aqalemhajer: the «الموقع» link may be a short link.
+        d["pin"] = pin_from_short_link(short_maps_link(r.text), lambda u: resolve_redirect(s, u))
     return d
 
 

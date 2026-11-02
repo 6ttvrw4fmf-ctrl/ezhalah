@@ -66,6 +66,17 @@ MIN_GROUPS = 1_000              # fewer district·class groups than this = a bro
 ALL_TIME_DEALS_FLOOR = 712_741  # the report's all-time «عدد الصفقات» on 2026-10-10; it only grows
 STALE_DAYS = 120                # anon RLS hides a row whose window_to has not advanced for this long
 BATCH = 500
+# THE ARCHIVE (owner 2026-10-21: «make sure we're capturing everything»). The card's tables keep only the
+# latest 12 months, only سكني/تجاري and only deals whose district matches ours: 80,289 of the 715,322 deals the
+# ministry published (Jan 2023 → Sep 2026). public.moj_sales_archive keeps EVERY published deal — every year,
+# every class (سكني, تجاري, زراعي, سكني تجاري), matched or not — exactly as the ministry wrote it, for the price
+# estimate. Service-role only (no anon policy): the ad page keeps reading the card tables, unchanged.
+# The ministry's «نوع العقار», «رقم القطعة», «المخطط» and «البلوك» columns exist but are EMPTY on all 715,322 deals
+# (measured 2026-10-21), so there is nothing more to keep from them; ARCHIVE_COLUMNS is the whole filled set.
+ARCHIVE_TABLE = "moj_sales_archive"
+ARCHIVE_OVERLAP_DAYS = 45       # every run re-reads its last weeks: late registrations land on past dates
+ARCHIVE_MAX_REQUESTS = 400      # the one-off backfill reads ~45 months, halving any month over WINDOW_ROWS
+ARCHIVE_MIN_REF_SHARE = Decimal("0.99")  # distinct deal refs read vs the ministry's own «عدد الصفقات» for the span
 
 # The truth check every run must reproduce exactly before it may write anything.
 TRUTH = {"area": "الرياض/الرمال", "cls": "سكني", "from": "2025-10-10", "to": "2026-05-18",
@@ -329,6 +340,49 @@ def deal_table_rows(deal_rows: list[dict], aggs: list[dict], ours: list[dict], f
     return out
 
 
+def archive_rows(raw: list[dict], fetched_at: str) -> tuple[list[dict], int]:
+    """Every readable deal, as the ministry wrote it — any class, matched or not. Only a row with no deal ref or no
+    readable date is left out (it has no key); a missing number stays NULL, never invented. One row per key: the
+    upsert cannot carry the same key twice in a batch, and the ministry repeats a deal across its m² values."""
+    out: dict[tuple, dict] = {}
+    skipped = 0
+    for r in raw:
+        d, ref = deal_day(r.get("date")), r.get("ref")
+        if d is None or ref is None or str(ref).strip() == "":
+            skipped += 1
+            continue
+        def num(v, exact=False):
+            if v is None:
+                return None
+            try:
+                return str(Decimal(str(v)) if exact else money(v))
+            except (InvalidOperation, ValueError):
+                return None
+        row = {"moj_region": r.get("region") or "", "moj_city": r.get("city") or "", "moj_area": r.get("area") or "",
+               "property_class": r.get("cls") or "", "deal_ref": str(ref).strip(), "deal_date": d,
+               "area_m2": num(r.get("area_m2"), exact=True), "price": num(r.get("price")), "ppm": num(r.get("ppm")),
+               "fetched_at": fetched_at}
+        out[(row["moj_region"], row["moj_area"], row["property_class"], row["deal_ref"], row["area_m2"])] = row
+    return list(out.values()), skipped
+
+
+def archive_span(anchor: str, first: str, stored_max: str | None) -> tuple[str, str]:
+    """What one run reads: everything from the ministry's first date when the archive is empty (the backfill),
+    else the last ARCHIVE_OVERLAP_DAYS before what we hold through the ministry's newest date."""
+    if not stored_max:
+        return first, anchor
+    start = max(date.fromisoformat(first), date.fromisoformat(stored_max) - timedelta(days=ARCHIVE_OVERLAP_DAYS))
+    return start.isoformat(), anchor
+
+
+def archive_complete(rows: list[dict], ministry_total: int) -> str | None:
+    """None when the distinct deals read cover the ministry's own count for the span; else why not."""
+    refs = len({(r["moj_region"], r["moj_area"], r["property_class"], r["deal_ref"]) for r in rows})
+    if ministry_total and Decimal(refs) < ARCHIVE_MIN_REF_SHARE * ministry_total:
+        return f"read {refs} distinct deals, the ministry counts {ministry_total} for the span: partial read"
+    return None
+
+
 # ── the ministry (sequential, paused, retried, capped) ────────────────────────────────────────────
 def _tls() -> ssl.SSLContext:
     try:
@@ -339,8 +393,9 @@ def _tls() -> ssl.SSLContext:
 
 
 class Ministry:
-    def __init__(self, post=None, sleep=time.sleep):
+    def __init__(self, post=None, sleep=time.sleep, cap: int | None = None):
         self.n = 0
+        self.cap = cap or MAX_REQUESTS
         self._post = post or self._http
         self._sleep = sleep
 
@@ -358,8 +413,8 @@ class Ministry:
     def query(self, select: list[tuple[str, dict]], where: list[dict]) -> tuple[list[dict], bool]:
         payload = json.dumps(body(select, where), ensure_ascii=False).encode()
         for attempt in range(RETRIES + 1):
-            if self.n >= MAX_REQUESTS:
-                raise SourceChanged(f"hard cap: {MAX_REQUESTS} requests in one run")
+            if self.n >= self.cap:
+                raise SourceChanged(f"hard cap: {self.cap} requests in one run")
             if self.n:
                 self._sleep(PAUSE_S)
             self.n += 1
@@ -387,9 +442,10 @@ class Ministry:
         return {"anchor": day(r["maxd"]), "first": day(r["mind"]), "all_deals": int(r["all_deals"]),
                 "refreshed_at": datetime.fromtimestamp(int(r["refreshed"]) / 1000, timezone.utc).isoformat()}
 
-    def total(self, start: str, end: str, where: list[dict] = ()) -> int:
+    def total(self, start: str, end: str, where: list[dict] = (), classes: tuple[str, ...] | None = CLASSES) -> int:
+        cls = [is_in("تصنيف العقار", classes)] if classes else []
         rows, _ = self.query([("n", mea("عدد الصفقات"))],
-                             [on_or_after(DATE, start), on_or_before(DATE, end), is_in("تصنيف العقار", CLASSES), *where])
+                             [on_or_after(DATE, start), on_or_before(DATE, end), *cls, *where])
         return int(rows[0]["n"]) if rows and rows[0]["n"] is not None else 0
 
     def aggregates(self, start: str, end: str, where: list[dict] = ()) -> list[dict]:
@@ -421,12 +477,29 @@ class Ministry:
         mid = a + (b - a) // 2
         return self.deals(start, mid.isoformat(), where) + self.deals((mid + timedelta(days=1)).isoformat(), end, where)
 
-    def month_slices(self, start: date, end: date) -> list[dict]:
+    def archive_deals(self, start: str, end: str) -> list[dict]:
+        """EVERY published deal between two dates — no class filter, city kept — for public.moj_sales_archive.
+        A truncated slice is halved, exactly like deals()."""
+        rows, complete = self.query(
+            [("region", col("المنطقة")), ("city", col("المدينة")), ("area", col("الحي")), ("cls", col("تصنيف العقار")),
+             ("ref", col("الرقم المرجعي للصفقة")), ("price", mea("السعر بالريال السعودي")), ("date", col("تاريخ الصفقة ميلادي")),
+             ("area_m2", col("المساحة")), ("ppm", mea("سعر المتر المربع"))],
+            [on_or_after(DATE, start), on_or_before(DATE, end)])
+        if complete:
+            return rows
+        a, b = date.fromisoformat(start), date.fromisoformat(end)
+        if a >= b:
+            raise SourceChanged(f"one day ({start}) holds more than {WINDOW_ROWS} deals")
+        mid = a + (b - a) // 2
+        return self.archive_deals(start, mid.isoformat()) + self.archive_deals((mid + timedelta(days=1)).isoformat(), end)
+
+    def month_slices(self, start: date, end: date, read=None) -> list[dict]:
+        read = read or self.deals
         out, a = [], start
         while a <= end:
             nxt = (a.replace(day=1) + timedelta(days=32)).replace(day=1)
             b = min(nxt - timedelta(days=1), end)
-            out += self.deals(a.isoformat(), b.isoformat())
+            out += read(a.isoformat(), b.isoformat())
             a = nxt
         return out
 
@@ -518,6 +591,43 @@ def write_deals(rows: list[dict], window_start: str) -> None:
     ex(client.table("moj_district_deals").delete().lt("deal_date", window_start), what="moj deals prune")
 
 
+def archive_stored_max() -> str | None:
+    client, ex = _db()
+    data = ex(client.table(ARCHIVE_TABLE).select("deal_date").order("deal_date", desc=True).limit(1), what="archive max").data
+    return data[0]["deal_date"] if data else None
+
+
+def write_archive(rows: list[dict]) -> None:
+    """Upsert only — the archive never prunes; a deal the ministry once published stays."""
+    client, ex = _db()
+    for i in range(0, len(rows), BATCH):
+        ex(client.table(ARCHIVE_TABLE).upsert(rows[i:i + BATCH], on_conflict="moj_region,moj_area,property_class,deal_ref,area_m2"),
+           what=f"archive upsert {i}")
+
+
+def run_archive(dry_run: bool, post=None, sleep=time.sleep, stored_max=None, write=None) -> dict:
+    """Read the span (backfill or overlap), prove it complete against the ministry's own count, then upsert."""
+    mj = Ministry(post=post, sleep=sleep, cap=ARCHIVE_MAX_REQUESTS)
+    meta = mj.meta()
+    if stored_max is None and not dry_run and post is None:
+        stored_max = archive_stored_max()
+    start, end = archive_span(meta["anchor"], meta["first"], stored_max)
+    raw = mj.month_slices(date.fromisoformat(start), date.fromisoformat(end), read=mj.archive_deals)
+    rows, skipped = archive_rows(raw, datetime.now(timezone.utc).isoformat())
+    total = mj.total(start, end, classes=None)
+    why = archive_complete(rows, total)
+    if why:
+        raise SourceChanged(why)
+    classes: dict[str, int] = defaultdict(int)
+    for r in rows:
+        classes[r["property_class"]] += 1
+    report = {"archive_from": start, "archive_to": end, "ministry_deals": total, "rows": len(rows),
+              "skipped_unkeyable": skipped, "by_class": dict(classes), "requests": mj.n}
+    if not dry_run:
+        (write or write_archive)(rows)
+    return report
+
+
 def guard_against_regression(meta: dict, stored: list[dict]) -> None:
     """The ministry's data never moves backwards; if its anchor is older than what we already store, the
     model changed — write nothing."""
@@ -560,8 +670,14 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--monitor", action="store_true")
     ap.add_argument("--dump", help="write the run's rows + report as JSON here")
+    ap.add_argument("--archive", action="store_true", help="only the full archive (backfill when empty, else the overlap)")
     args = ap.parse_args()
     t0 = time.time()
+    if args.archive:
+        rep = run_archive(args.dry_run)
+        print(json.dumps(rep, ensure_ascii=False, indent=1), flush=True)
+        print(("(dry run, nothing written) " if args.dry_run else "✓ archive upserted ") + f"{rep['rows']} rows in {round(time.time() - t0, 1)}s", flush=True)
+        return 0
     mj = Ministry()
     if not args.monitor:
         got = fetch(mj)
@@ -588,6 +704,9 @@ def main() -> int:
         print(f"✓ upserted {len(rows)} rows in {round(time.time() - t0, 1)}s", flush=True)
         write_deals(deal_table, got["start"])
         print(f"✓ upserted {len(deal_table)} deals, pruned those before {got['start']}", flush=True)
+    if not args.monitor:
+        rep = run_archive(args.dry_run)
+        print("✓ archive: " + json.dumps(rep, ensure_ascii=False), flush=True)
     for c in monitor(mj, random.Random()):
         s, f = c["stored"], c["fresh"]
         print(f"✓ monitor {s['city_ar']} · {s['district_ar']} · {s['property_class']}: "

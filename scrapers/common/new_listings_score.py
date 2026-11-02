@@ -148,6 +148,10 @@ DISTRICT_ON_PAGE = re.compile(r"(?<![^\s|،,(:\-–ب])حي\s+\S+")
 # never the ad: aqalemhajer prints «الأحساء, الهفوف, حي الملك فهد, هاتف:…» under every ad (2026-10-12).
 CONTACT_LINE = re.compile(r"هاتف|جوال|واتس|س\.ت|السجل التجاري|tel:|<num>|\d{9,}", re.I)
 DEAL_KW = {"بيع": r"للبيع|شراء", "ايجار": r"للايجار|ايجار"}
+# The site's own category menu is not the ad: ashab 21084822 (2026-10-27, re-read run 40470543056), a land
+# plot for sale whose page states no deal word, carries the footer links «بيع / إيجار / استثمار» on three
+# consecutive lines, and the bare «إيجار» scored a rent claim. Only that exact consecutive run is dropped.
+SITE_DEAL_MENU = re.compile(r"(?m)^بيع\nايجار\nاستثمار$")
 
 
 def _num_pattern(v) -> re.Pattern:
@@ -185,13 +189,18 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
         if name == "price":
             if skip_price:
                 continue
-            stored_v = stored.get("price_total") or stored.get("price_annual") or stored.get("price_per_meter")
+            # PRICE = SOURCE: the source table's own price_annual and period when score_site read them. Since
+            # the owner's yearly-pool rule (2026-10-25/26) the index serves a per-month rent under «سنوي», and a
+            # cheap «yearly» figure ×12 (rent_price_annual_ar), so the index alone no longer says how the
+            # site quoted it: ashab 20927683 (10-27) page «9,000» monthly, index سنوي 108,000 → scored wrong.
+            annual = stored.get("source_price_annual") or stored.get("price_annual")
+            stored_v = stored.get("price_total") or annual or stored.get("price_per_meter")
             # The fleet stores a MONTHLY rent ×12 in price_annual (normalize.rent_period_from_ad) and the
             # card shows it ÷12; the page prints the monthly figure. Compare what the page prints
             # (superoffice 15485140, 2026-10-05: page «6288.40 ريال / شهر», stored 75456 = 6288×12).
-            if (not stored.get("price_total") and stored.get("price_annual")
-                    and stored.get("rent_period_ar") == "شهري"):
-                stored_v = float(stored["price_annual"]) / 12
+            if (not stored.get("price_total") and annual
+                    and (stored.get("rent_period_ar") == "شهري" or stored.get("source_rent_period") == "monthly")):
+                stored_v = float(annual) / 12
                 if stored_v == int(stored_v):
                     stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
@@ -209,7 +218,9 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             # different price. Thousands («الف/ألف») and millions («مليون») only, the figure exact.
             if out[name] != MATCH and stored_v:
                 v = float(stored_v)
-                for unit, words in ((1_000_000, r"مليون"), (1_000, r"الف|ألف|آلاف|الاف")):
+                # tuba 21078156 (2026-10-27, re-read run 40470538881) prints «SAR 990k» for our 990,000: a Latin
+                # «k» right after the figure is thousands too (never «km», never a letter that starts a word).
+                for unit, words in ((1_000_000, r"مليون"), (1_000, r"الف|ألف|آلاف|الاف|[kK](?![A-Za-z])")):
                     k = v / unit
                     if v >= unit and k == int(k) and re.search(
                             r"(?<![\d.,])" + str(int(k)) + r"\s*(?:" + words + r")(?!\S*\s*مليون)", whole):
@@ -217,15 +228,36 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                         break
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
+            # ONE hall is written as the bare noun: haraj 21839188 «غرفة وصالة», 21839193 «4 غرف وصالة كبيره» (score run
+            # 41009231494, 2026-10-30, backlog 1090) store living_rooms 1; the room line's «4» read as the hall count.
+            if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
+                    and float(stored.get(col)) == 1 and any(SINGLE_HALL.search(x) for x in lines)):
+                out[name] = MATCH
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
             out[name] = PAGE_SILENT if prose_only_district else _cmp_district(stored.get(col), whole_loc)
         elif kind == "deal":
-            out[name] = _cmp_valued(stored.get(col), whole, DEAL_KW)
+            out[name] = _cmp_valued(stored.get(col), SITE_DEAL_MENU.sub("", whole), DEAL_KW)
         else:
             out[name] = _cmp_word(stored.get(col), whole, kw)
+            # haraj's REGA licence block prints the facade in English («واجهة العقار: Eastern», 21831096, backlog 1090).
+            if name == "direction_ar" and out[name] == MISMATCH and stored.get(col):
+                en = FACADE_EN.get(norm(str(stored.get(col))))
+                if en and any(re.search(kw, x) and re.search(en, x, re.I) for x in lines):
+                    out[name] = MATCH
     return out
+
+
+# «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
+SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
+# The facades in English, as a REGA licence block prints them. A compound one too: haraj 22820527 prints
+# «واجهة العقار: South west» and we store «جنوب غرب» (re-score 41406084400, 2026-11-02, scored MISMATCH).
+FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
+             "شمال": r"\bnorth(?:ern)?\b", "جنوب": r"\bsouth(?:ern)?\b"}
+for _ar, _en in (("شمال شرق", "north[\\s-]*east"), ("شمال غرب", "north[\\s-]*west"),
+                 ("جنوب شرق", "south[\\s-]*east"), ("جنوب غرب", "south[\\s-]*west")):
+    FACADE_EN[_ar] = FACADE_EN[_ar + "ي"] = r"\b" + _en + r"(?:ern)?\b"
 
 
 _UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
@@ -256,9 +288,21 @@ WORD_NUMBERS = {"ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, 
 WORD_NUMBER = re.compile(r"(?<![\u0621-\u064A])(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
                          + r")(?![\u0621-\u064A])")
 
+EN_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+              "ten": 10, "eleven": 11, "twelve": 12}
+EN_NUMBER = re.compile(r"(?<![A-Za-z])(" + "|".join(EN_NUMBERS) + r")(?![A-Za-z])", re.I)
+
+WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
+                               + r")\s*(?:سنوات|سنين|سنه|غرف|غرفه|صالات|دورات مياه)?\s*$")
+
 
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
+    # A LABEL («keyword:») that ENDS its line, its value cut off, states nothing ON that line: haraj's meta
+    # description is cut off at «…نوع العقار: Apartment سعر الوحدة: 27000 عمر العقار:» (21839193, re-read run
+    # 41288305920, 2026-11-01), and the other field's 27000 before it read as a stated age, scoring our 9 a
+    # MISMATCH. That line is emptied; a label/value neighbour («عمر العقار» / «جديد») still counts.
+    lines = ["" if i in kw_hits and re.search("(?:" + kw + r")\s*[:：]\s*$", x) else x for i, x in enumerate(lines)]
     if not AREA_UNIT.search(kw):
         lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
     page_states = any(re.search(r"\d", lines[i]) for i in kw_hits)
@@ -293,13 +337,24 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # because the previous row's bare «220 م²» read as a stated age).
         # «دورة مياه واحدة» is gathern's way of printing ONE bathroom: the word, not the digit (af_score
         # 2026-10-07: gathern 12857258 / 13191014 / 13971729 stored 1, scored «mismatch» 3/3).
+        # Every worded figure on a keyword line counts, like a digit there does: bossbih 18945171 / 18945121
+        # (2026-10-20, re-read run 39384692527) print the ad's own «غرفتين نوم» AND, in the related-ads table under
+        # it, another unit's «المساحة194مأربع غرف»; reading the number word first scored our 2 bedrooms a MISMATCH.
         worded = {WORD_NUMBERS[m.group(1)] for i in kw_hits for m in WORD_NUMBER.finditer(lines[i])}
+        # A label/value page puts the worded figure on the NEXT line: reinvest 21664052 (2026-10-30, re-read run
+        # 41098655633) prints «عمر العقار» / «ثلاث سنوات» (stored 3), and the bare «3179» of the row before read as
+        # a stated age, so the night scored it a MISMATCH. Only a line that is nothing but the worded figure counts.
+        worded |= {WORD_NUMBERS[m.group(1)] for i in kw_hits if i + 1 < len(lines)
+                   for m in [WORDED_VALUE_LINE.match(lines[i + 1])] if m}
+        # haraj's REGA licence block writes the figure in English: «عمر العقار: Nine Year» (21839193, stored 9; branch
+        # re-score 41284494062, 2026-11-01). An English number word on the keyword's own line states that figure too.
+        worded |= {EN_NUMBERS[m.group(1).lower()] for i in kw_hits for m in EN_NUMBER.finditer(lines[i])}
+        if any(ONE_WORD.search(lines[i]) for i in kw_hits):
+            worded.add(1)
+        if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
+            worded.add(2)
         if worded:
             return MATCH if float(stored) in worded else MISMATCH
-        if any(ONE_WORD.search(lines[i]) for i in kw_hits):
-            return MATCH if float(stored) == 1 else MISMATCH
-        if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
-            return MATCH if float(stored) == 2 else MISMATCH
         if kw == AGE_KW and (NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)) or any(
                 i + 1 < len(lines) and re.match(r"^\s*جديد\s*$", lines[i + 1]) for i in kw_hits)):
             return MATCH if float(stored) == 0 else MISMATCH
@@ -360,8 +415,12 @@ def _cmp_bool(stored, lines: list[str], kw: str) -> str:
 # / الخامس / الحادي عشر» for exactly those pages and scored 4 district mismatches. Only the SAME ordinal is
 # the same place: «الرابع بضاحية هجر» never matches «الضاحية الخامس».
 _HAJER_ORDINAL = r"(الاول|الثاني عشر|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر)"
+# bossbih / aqalemhajer write it a fourth way, «الضاحية الحي الخامس» (bossbih 18985501, 2026-10-20 re-read run
+# 39384692527: page «الضاحية الحي الخامس (640/4)», served «ضاحية هجر(الحي الخامس)», scored MISMATCH). The stored
+# value is aliased too, so either side may carry any of the four forms.
 _HAJER_FORMS = (re.compile(r"(?:الحي\s+)?" + _HAJER_ORDINAL + r"\s+بضاحيه\s+هجر"),
-                re.compile(r"ضاحيه\s+هجر\s*\(?\s*الحي\s+" + _HAJER_ORDINAL))
+                re.compile(r"ضاحيه\s+هجر\s*\(?\s*الحي\s+" + _HAJER_ORDINAL),
+                re.compile(r"الضاحيه\s+الحي\s+" + _HAJER_ORDINAL))
 
 
 def _hajer_aliases(whole: str) -> str:
@@ -377,6 +436,10 @@ def _cmp_district(stored, whole: str) -> str:
         return MATCH
     if d and re.search(r"(?<!\S)" + re.escape(d) + r"(?!\S)", _hajer_aliases(whole)):
         return MATCH
+    page_hajer = _hajer_aliases(whole) + " " + whole
+    for m in re.finditer(r"الضاحيه " + _HAJER_ORDINAL, _hajer_aliases(d or "")):
+        if re.search(r"(?<!\S)" + re.escape(m.group(0)) + r"(?!\S)", page_hajer):
+            return MATCH
     # The article is not the name: the catalogue's «حي السدرة» is the page's «روشن سدرة» / «حي سدرة»
     # (eilmalriyada 18624025, 2026-10-19 re-read run 39215210951: its own district field says «حي سدرة»).
     # Whole words only, so «السدره» never matches inside another name.
@@ -392,6 +455,17 @@ def _cmp_district(stored, whole: str) -> str:
 # login banner and a featured ad «جدة - حي الزهراء» / «الغرف 1», and scored our الخرج / العيون villa (6 rooms)
 # as 3 mismatches. Such a page has said nothing about the ad: unreadable, never wrong.
 SHELL_PAGE_PLATFORMS = frozenset({"ebriza"})
+
+
+# A closed ad's page is not the ad: aqarmonthly 18842133 (2026-10-20, re-read run 39384695539, verdict=dead) now
+# serves «فيلا مفروشة للحجز في حي العارض» with the default villa image, and its leftovers scored our flat's 300 m²
+# a MISMATCH that capped the night. The platform's own dead marker (scrapers/common/cleanup.PLATFORMS, the one
+# liveness uses) decides; a closed ad is ♻️'s finding, and for the score the page has said nothing: unreadable.
+def closed_ad_page(platform: str, status, body: str) -> bool:
+    from scrapers.common.cleanup import PLATFORMS
+    from scrapers.common.liveness_contract import DEAD, classify_response
+    marker = PLATFORMS.get(platform, {}).get("dead_marker")
+    return marker is not None and classify_response(status, body or "", dead_marker=marker) == DEAD
 
 
 # A share link that names its ad by CODE in the query («/latest-offers?ads-N5470=1», nufouth) opens the ad in a JS
@@ -418,7 +492,28 @@ def page_lacks_its_ad(url: str | None, body: str) -> bool:
 _CARD_START = re.compile(r'<div[^>]*class="[^"]*\bcard-item\b')
 
 
+# A page's «similar ads» block is OTHER ads, and so is the footer under it: ashab 21679061 (2026-10-30, re-read
+# runs 41088522215 / 41088846088) — the ad's own header badge says «بيع» (stored بيع), but the sibling cards under
+# «عقارات مشابهة» carry «إيجار» badges, which scored the deal MISMATCH and capped the night. The site's own scraper
+# stops at the same markers (scrapers/ashab/run.py::parse_page); the scorer reads exactly what the scraper reads.
+# alshawaf 21664551 (2026-10-30, re-read runs 41089939871 / 41090169747): the node's own table says «المساحة 250م»
+# (stored 250), and the «related listings» Views table under it (`…duplicate-of-frontpage-block-1`, trap 1 in
+# scrapers/alshawaf/run.py) prints other plots' «المساحة 422.22م»; the area scored MISMATCH and capped the night.
+_SIMILAR_BLOCK = {"ashab.sa": ('id="similar-properties"', "عقارات مشابهة"),
+                  "alshawaf.com.sa": ("duplicate-of-frontpage-block-1",)}
+
+
+def drop_similar_block(url: str | None, body: str) -> str:
+    for host, stops in _SIMILAR_BLOCK.items():
+        if host in (url or "") and body:
+            for stop in stops:
+                if (k := body.find(stop)) > 0:
+                    body = body[:k]
+    return body
+
+
 def scope_to_its_ad(url: str | None, body: str) -> str:
+    body = drop_similar_block(url, body)
     m = _AD_CODE_IN_URL.search(url or "")
     if not m or not body:
         return body
@@ -602,6 +697,26 @@ def new_listings(client, hours: int) -> dict[str, list[tuple[str, int]]]:
     return dict(out)
 
 
+def explicit_picks(tokens: list[str]) -> list[tuple[str, int]]:
+    """«table:id» tokens given through --sites: exactly those ads, whatever their age (backlog #583,
+    2026-10-26 — a scorer fix could only be proven on ads that happened to arrive again that night)."""
+    out: list[tuple[str, int]] = []
+    for t in tokens:
+        table, sep, rid = t.partition(":")
+        if sep and table and rid.isdigit():
+            out.append((table, int(rid)))
+    return out
+
+
+def picks_by_platform(client, picks: list[tuple[str, int]]) -> dict[str, list[tuple[str, int]]]:
+    out: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for table, rid in picks:
+        r = (client.table("search_listings_ar").select("platform").eq("source_table", table)
+             .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
+        out[r.get("platform") or table.split("_")[0]].append((table, rid))
+    return dict(out)
+
+
 def sample_size(n_new: int, per_site: int | None) -> int:
     if per_site:
         return min(per_site, n_new)
@@ -650,6 +765,230 @@ def muktamel_room_lines(url: str, fetch=None) -> list[str]:
     return out
 
 
+def dwelleo_room_lines(url: str, fetch=None) -> list[str]:
+    """dwelleo's own bedroom count, from the API record its page is rendered from (backlog #838, 2026-10-25).
+
+    We store the record's structured `bedrooms` for a dwelling (scrapers/dwelleo/run.py), and a structured field
+    beats prose (ADVANCED_FILTER_SOURCE_TRUTH). The page the reader sees carries the title prose, so the 10-24 score
+    called 20013764 wrong (record 5, title «فيلا 4 غرف») and missed 20019678's «غرفة نوم واحدة» = stored 1: dwelleo
+    94.7%, a cap from two ads we store right (re-read 40078610599). A Building's count is its room stock and we
+    store none, so no line is given for it. [] when the record cannot be read (unknown, never wrong)."""
+    from urllib.parse import unquote, urlparse
+    slug = unquote(urlparse(url or "").path.rstrip("/").rsplit("/", 1)[-1])
+    if "dwelleo.sa" not in (url or "") or not slug:
+        return []
+    try:
+        from scrapers.dwelleo import run as dwelleo
+        from scrapers.common import normalize
+        rec = fetch(slug) if fetch is not None else dwelleo.fetch_detail(dwelleo.session(), slug)
+        if not isinstance(rec, dict):
+            return []
+        type_ar = ((rec.get("property_type") or {}).get("name") or "").strip()
+        if normalize.map_type_exact(type_ar, overrides=dwelleo._TYPE_OVERRIDES) not in dwelleo._DWELLINGS:
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+    # The record's other structured rooms are read the same way (backlog #890, 2026-10-26, dry re-score run
+    # 40288432059): prose «ست غرف نوم وخمس حمامات» scored stored bathrooms 5 wrong (19471735), and «صالة مع
+    # بلكونة … شارع 30» scored stored living_rooms 1 wrong (19471811); the record says bathrooms 5 and livings 1.
+    # floor_number is NOT restated: the page never shows it, and its 0 is ambiguous (19534092: record 0, prose
+    # «في الطابق ٣»), so the score keeps reading the page there.
+    out = []
+    for key, label in (("bedrooms", "عدد غرف النوم"), ("bathrooms", "عدد الحمامات"), ("livings", "عدد الصالات")):
+        v = rec.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+            out.append(f"{label} {int(v)}")
+    return out
+
+
+def wahadat_unit_lines(body: str, url: str, ad_number: str | None) -> list[str]:
+    """wahadat's own figures for THIS unit, from the unitsData payload its project page ships (🆕 2026-11-02).
+
+    Every unit of a project links to that project's page (scrapers/wahadat/run.py: no per-unit page exists), and the
+    visible page prints only spans («111 - 136 م²») and the instalment calculator («القسط السنوي» / «القسط الشهري»),
+    whose ريال figures read as a stated price: 8 of 10 sampled units scored a price MISMATCH on 2026-11-02 (score run
+    41394865647, 22783632 stored 842,622) with no unit price printed at all. The unit's own record in the page payload
+    states price and area; [] when the unit is not in it (sold / reserved / renamed: unknown, never wrong)."""
+    if "wahadat.sa" not in (url or "") or not ad_number or not body:
+        return []
+    try:
+        from scrapers.wahadat import run as wahadat
+        _, units = wahadat.parse_project(body, url)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[str] = []
+    for u in units:
+        if f"{wahadat.PREFIX}{wahadat.unit_uid(u)}" != ad_number:
+            continue
+        price, area = u.get("price"), u.get("area")
+        if isinstance(price, (int, float)) and not isinstance(price, bool) and price > 0:
+            out.append(f"السعر {int(price) if price == int(price) else price} ريال")
+        if isinstance(area, (int, float)) and not isinstance(area, bool) and area > 0:
+            out.append(f"المساحة {int(area) if area == int(area) else area} م²")
+        break
+    return out
+
+
+def nufouth_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
+    """A nufouth ad read from its own record (backlog #683, 2026-10-23). The share link
+    («/latest-offers?ads-N4175=1») opens the ad in a JS modal filled from get_property_data; the static HTML is
+    the vacancy table of OTHER units, so the score called every nufouth page unreadable: 0 decided ads on
+    10-20, 10-21, 10-22 and 10-23. This restates the record's own fields for THIS ad and unit (ad_number
+    NFZ<code>A<ad>U<unit name hash | P>), labelled the way the modal prints them. None = unreadable."""
+    m = re.search(r"[?&]ads-([HNR]\d+)=", url or "")
+    a = re.match(r"^NFZ([HNR]\d+)A(\d+)U(P|[0-9a-f]{8})$", ad_number or "")
+    if not m or not a or a.group(1) != m.group(1):
+        return None
+    code, ad_num, unit_key = a.groups()
+    try:
+        if fetch is None:
+            from scrapers.nufouth import run as nufouth
+            msg = nufouth.fetch_property(nufouth.session(), code)
+        else:
+            msg = fetch(code)
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(msg, dict):
+        return None
+    import hashlib
+    prop = msg.get("property") or {}
+    for item in msg.get("ads") or []:
+        ad = (item or {}).get("ad") or {}
+        if (re.sub(r"\D", "", str(ad.get("name") or "")) or "0") != ad_num:
+            continue
+        units = item.get("units") or []
+        if unit_key == "P":
+            unit = None if not units else False
+        else:
+            unit = next((u for u in units if hashlib.sha1(str((u or {}).get("name") or "").encode("utf-8"))
+                         .hexdigest()[:8] == unit_key), False)
+        if unit is False:
+            return None
+        src = unit if unit is not None else ad
+        ad_type = str(ad.get("ad_type") or "").strip()
+        lines = []
+
+        def put(label, v, tail=""):
+            if isinstance(v, bool) or v in (None, "", 0, "0"):
+                return
+            lines.append(f"{label} {str(v).strip()}{tail}")
+        put("المدينة", prop.get("city"))
+        put("الحي", prop.get("district"))
+        put("نوع الإعلان", {"ايجار": "للايجار", "بيع": "للبيع"}.get(ad_type))
+        put("نوع الوحدة", (unit or {}).get("unit_type") if unit else prop.get("property_type"))
+        put("المساحة", ((unit or {}).get("space") or (unit or {}).get("area")) if unit
+            else (ad.get("total_area") or prop.get("property_area")), " م²")
+        if unit:
+            put("عدد الغرف", unit.get("no_of_rooms"))
+            put("دورات المياه", unit.get("no_of_bathrooms"))
+        put("الإيجار السنوي" if ad_type == "ايجار" else "السعر",
+            src.get("annual_rent") if ad_type == "ايجار" else src.get("selling_price"), " ريال")
+        put("عرض الشارع", prop.get("street_width"))
+        put("عمر العقار", prop.get("age_property"))
+        text = str((unit or {}).get("details") if unit else ad.get("custom_property_details") or "")
+        lines += [y.strip() for y in text.splitlines() if y.strip()]
+        title = str((unit or {}).get("name") if unit else prop.get("name") or "")
+        return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+                "text_head": " | ".join(lines)[:1500]}
+    return None
+
+
+def safa_page(url: str, fetch=None) -> dict | None:
+    """A safa unit read from its OWN card and sheet (backlog 1087, 2026-10-30). safa has no page per unit: the
+    stored link is a shared list page (/project/units/58?page=1&property_id=14144) carrying 21 OTHER units, and
+    the unit's rooms, area and price live only in the POST /unit/details sheet (scrapers/safa/run.py). 21671007
+    (3 rooms, re-read run 41088522215) scored bedrooms MISMATCH against «عدد الغرف 1» of a co-working unit on
+    that list and capped the 10-30 night at 5. This restates the card's deal and type and the sheet's own
+    facts, labelled; None when either cannot be read (unknown, never wrong)."""
+    m = re.search(r"[?&]property_id=(\d+)", url or "")
+    if not m:
+        return None
+    uid = m.group(1)
+    try:
+        from scrapers.safa import run as safa
+        if fetch is not None:
+            card_html, popup_html = fetch(url, uid)
+        else:
+            s = safa.session()
+            body = safa._get(s, url)
+            token = safa._csrf(body)
+            card_html = dict(safa._CARD_RE.findall(body)).get(uid)
+            popup_html = safa.fetch_unit(s, uid, token) if token and card_html else None
+        if not card_html or not popup_html:
+            return None
+        card, popup = safa.parse_card(card_html), safa.parse_popup(popup_html)
+    except Exception:  # noqa: BLE001
+        return None
+    lines = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", card.get("deal_ar"))
+    put("نوع العقار", card.get("type_ar"))
+    put("الموقع", card.get("card_location"))
+    put("المساحة", popup.get("area_total_raw"), " م²")
+    put("عدد الغرف", popup.get("rooms"))
+    put("دورات المياه", popup.get("bathrooms"))
+    put("السعر", popup.get("price_raw"), " ريال")
+    title = str(popup.get("unit_title") or card.get("unit_code") or "")
+    lines += [y.strip() for y in f"{title}\n{popup.get('description') or ''}".splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
+_DALLALI_RECORDS: "dict | None" = None
+
+
+def dallali_page(url: str, fetch=None) -> dict | None:
+    """A dallali ad read from the storefront's own JSON feed (2026-10-23). dallali.com/advertisements/property/<uuid>
+    is a client-rendered shell («دلّالي | نظام إدارة العقارات والوساطة العقارية في السعودية», re-read run
+    39944419156): no ad text at all, so a template «إيجار» scored 20007459 — «شقة للبيع», REGA advertisementType
+    «بيع», listing_type sale — a deal MISMATCH and capped the 10-23 night at 5 on one ad. This restates the
+    listing object's own fields, labelled; None when the feed cannot be read or lacks the id (unknown, never
+    wrong). The feed is walked once per run."""
+    global _DALLALI_RECORDS
+    m = re.search(r"/advertisements/property/([0-9a-fA-F-]{8,})", url or "")
+    if not m:
+        return None
+    try:
+        if _DALLALI_RECORDS is None:
+            if fetch is not None:
+                items = fetch()
+            else:
+                from scrapers.dallali import run as dallali
+                s, _ = dallali.retry_smarter_session(f"{dallali.API}?purpose=all&page=1", timeout=40)
+                items = dallali.walk(s)[0]
+            _DALLALI_RECORDS = {str(x.get("id")): x for x in items if isinstance(x, dict)}
+        x = _DALLALI_RECORDS.get(m.group(1))
+    except Exception:  # noqa: BLE001
+        return None
+    if not x:
+        return None
+    rega = x.get("rega_display_data") or {}
+    loc = rega.get("location") or {}
+    lines = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", {"sale": "للبيع", "rent": "للايجار"}.get(x.get("listing_type") or ""))
+    put("المنطقة", loc.get("region"))
+    put("المدينة", loc.get("city") or (x.get("property") or {}).get("city"))
+    put("الحي", loc.get("district") or (x.get("property") or {}).get("district"))
+    put("نوع العقار", rega.get("propertyType"))
+    put("المساحة", rega.get("propertyArea"), " م²")
+    put("عدد الغرف", rega.get("numberOfRooms"))
+    put("السعر", x.get("price"), " ريال")
+    put("عرض الشارع", rega.get("streetWidth"))
+    title = str(x.get("title") or "")
+    lines += [y.strip() for y in f"{title}\n{x.get('description') or ''}".splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _TUBA_RECORDS: "dict | None" = None
 
 
@@ -685,7 +1024,8 @@ def tuba_rega_lines(url: str, fetch=None) -> list[str]:
 
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None,
+               nufouth=None, dallali=None, dwelleo=None, safa=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -704,8 +1044,14 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
     for table, rid in picks:
         stored = (client.table("search_listings_ar").select(STORED).eq("source_table", table)
                   .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
-        raw = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0]
+        try:
+            raw = (client.table(table).select("listing_url,price_annual,rent_period").eq("id", rid).limit(1)
+                   .execute().data or [{}])[0]
+        except Exception:  # noqa: BLE001 — a table without those columns still gives its URL
+            raw = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0]
         url = raw.get("listing_url")
+        if raw.get("rent_period") is not None:
+            stored = {**stored, "source_rent_period": raw["rent_period"], "source_price_annual": raw.get("price_annual")}
         key = f"{table}:{rid}"
         if not url:
             row["sampled"] += 1
@@ -714,6 +1060,14 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
+        if "dallali.com/advertisements/" in url:
+            own = dallali or dallali_page
+        if "safainv.sa" in url:
+            own = safa or safa_page
+        if "nufouth.com" in url:
+            ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
+                         or [{}])[0].get("ad_number")
+            own = (lambda u, _n=ad_number: (nufouth or nufouth_page)(u, _n))
         if own is not None:
             page = own(url)                 # the ad's own record; None = unreadable, never wrong
             if page is None:
@@ -727,10 +1081,11 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             status, body = probe(url)
         except Exception:  # noqa: BLE001 — a transport failure has said nothing about the ad
             status, body = None, ""
-        if status != 200 or not body:
+        if status != 200 or not body or closed_ad_page(platform, status, body):
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
+        raw_body = body
         body = scope_to_its_ad(url, body)
         page = page_evidence(body)
         if (platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page)
@@ -744,8 +1099,23 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         if "tuba.com.sa" in url:
             extra = (tuba or tuba_rega_lines)(url)
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
-        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
-                                       prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
+        if "wahadat.sa" in url:
+            ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
+                         or [{}])[0].get("ad_number")
+            page = {**page, "evidence_lines": wahadat_unit_lines(raw_body, url, ad_number)
+                    + list(page.get("evidence_lines") or [])}
+        if "dwelleo.sa" in url:
+            extra = (dwelleo or dwelleo_room_lines)(url)
+            page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
+        results = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                  prose_only_district=platform in PROSE_ONLY_DISTRICT)
+        # Which ad and which stored value: a site line says «furnished: mismatch=1» but not on which of the
+        # sampled ads, so every AF cap had to be re-derived by hand (dwelleo #890, 2026-10-26).
+        for name, verdict in results.items():
+            if verdict == MISMATCH:
+                col = next(c for n, _, c, _ in FIELDS if n == name)
+                print(f"    mismatch {key} {name}: stored={stored.get(col)!r}", flush=True)
+        fold(row, key, results, stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
     return row
@@ -806,8 +1176,14 @@ def main() -> int:
     client = sb()
     rng = random.Random(a.seed)
     night = datetime.now(timezone.utc).date().isoformat()
-    arrivals = new_listings(client, a.hours)
-    sites = a.sites or sorted(arrivals)
+    explicit = explicit_picks(a.sites or [])
+    if explicit:
+        # Re-scoring named ads (a proof that a reader fix decides them right) is never the night's score.
+        a.dry_run = True
+        arrivals = picks_by_platform(client, explicit)
+    else:
+        arrivals = new_listings(client, a.hours)
+    sites = sorted(arrivals) if explicit else (a.sites or sorted(arrivals))
     rows: list[dict] = []
     for p in sites:
         picks = arrivals.get(p) or []

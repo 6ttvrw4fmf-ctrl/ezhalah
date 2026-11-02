@@ -15,13 +15,18 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { getListingFeedback, setListingFeedback, type FeedbackRating } from '@/lib/listingFeedback';
+import { openWhatsAppCompose, isTouchDevice } from '@/lib/shareToWhatsApp';
+import { SHARE_LINK } from '@/lib/share';
 import { speakReadAloud, stopReadAloud, subscribeReadAloud, readAloudRefusal, hasSpeakableContent,
          type ReadAloudSegment } from '@/lib/readAloud';
 import { readAloudRefusalMessageKey, type ReadAloudRefusal } from '@/lib/readAloudVoice';
 
 export default function FeedbackRow({
-  feedbackKey, shareUrl, shareText, prepareShare, onFeedback, readAloudSegments,
+  feedbackKey, shareUrl, shareText, prepareShare, onFeedback, readAloudSegments, rtl,
 }: {
+  // The reply's own direction (owner 2026-10-23: an English answer in the Arabic UI keeps its
+  // thumbs on the LEFT). Omitted = the UI locale's direction.
+  rtl?: boolean;
   feedbackKey: string;
   shareUrl?: string;
   // The line sent next to the link (owner 2026-10-17: a signed-in user shares THEIR SEARCH with
@@ -37,7 +42,8 @@ export default function FeedbackRow({
   // messages), this component only ever plays whatever it's given.
   readAloudSegments?: ReadAloudSegment[];
 }) {
-  const { t, isRTL, locale } = useI18n();
+  const { t, isRTL: uiRTL, locale } = useI18n();
+  const isRTL = rtl ?? uiRTL;
   const [rating, setRating] = useState<FeedbackRating | null>(() => getListingFeedback(feedbackKey));
   const reducedMotion = useReducedMotion();
   const [copied, setCopied] = useState(false);
@@ -95,16 +101,27 @@ export default function FeedbackRow({
     if (next) onFeedback?.();
   };
 
-  // Normal share/copy flow: OS share sheet where available, else copy the link (the share icon
-  // briefly becomes a check). Never throws to the user (cancel = no-op).
+  // Share flow: on a phone, the phone's share menu with the link only (owner 2026-10-22), WhatsApp's
+  // composer when the browser has no menu (src/lib/shareToWhatsApp.ts); on a desktop, copy the link
+  // (the share icon briefly becomes a check). Never throws
+  // to the user (cancel = no-op).
   const onShare = async () => {
-    let url = shareUrl || 'https://ezhalah-app.vercel.app';
+    let url = shareUrl || SHARE_LINK;
     if (prepareShare) { try { url = (await prepareShare()) || url; } catch { /* the search link still works */ } }
     const withText = shareText ? `${shareText}\n${url}` : url;
     try {
       if (Platform.OS === 'web') {
+        // THE PHONE'S OWN SHARE MENU (owner 2026-10-22: «why direct WhatsApp, that isn't what we agreed»), so
+        // the person can pick Instagram, Snapchat, Messages… The LINK ONLY is handed over — no text next to it —
+        // so the target builds the card from the link (2026-10-20: link + text through the menu reached
+        // WhatsApp without a card). A touch browser with no share menu still opens WhatsApp's composer;
+        // a desktop copies. A cancelled menu (AbortError) is a choice, not a failure.
         const nav: any = typeof navigator !== 'undefined' ? navigator : null;
-        if (nav?.share) { await nav.share(shareText ? { text: shareText, url } : { url }); return; }
+        if (isTouchDevice(nav, typeof window !== 'undefined' ? (window as any) : null) && typeof nav?.share === 'function') {
+          // The invite line rides as the message text (owner 2026-10-22); the card's title stays the invite.
+          try { await nav.share(shareText ? { text: shareText, url } : { url }); return; } catch (e: any) { if (e?.name === 'AbortError') return; }
+        }
+        if (openWhatsAppCompose(url)) return;
         await Clipboard.setStringAsync(withText);
         setCopied(true);
         setTimeout(() => setCopied(false), 1600);
@@ -116,12 +133,15 @@ export default function FeedbackRow({
 
   return (
     <View style={[fb.container, { alignItems: isRTL ? 'flex-end' : 'flex-start' }]}>
-      <View style={[fb.row, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+      {/* THE ICON ORDER NEVER MIRRORS (owner 2026-10-23: «keep it standard, copied like the English, just fix the
+          order»): 👍 👎 share 🔊 reads left to right in every language. Only the row's EDGE follows the
+          language — the container above right-aligns it for an Arabic reply. */}
+      <View style={[fb.row, { flexDirection: 'row' }]}>
         {/* Reserve the pair's space so share/read-aloud never jump as the thumbs merge. */}
         <View style={fb.thumbs}>
           {(['up', 'down'] as const).map((direction, index) => (
             <ThumbVote key={direction} direction={direction} index={index} rating={rating}
-              rtl={isRTL} reducedMotion={reducedMotion} onPress={() => vote(direction)}
+              rtl={false} reducedMotion={reducedMotion} onPress={() => vote(direction)}
               label={t(direction === 'up' ? 'Helpful' : 'Not helpful')} />
           ))}
         </View>

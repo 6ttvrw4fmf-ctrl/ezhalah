@@ -77,12 +77,29 @@ export function pairCountForSelection(
  * `p_is_new_construction: true` for «جديد» — `literal` is false and the caller falls back to
  * `movedKeys`, which must be non-empty: the paired body has to have moved off the pre-tap scope.
  */
+/**
+ * Options the app prices under a DIFFERENT name than the option key. property_age «جديد» (key `new`) is priced with
+ * `p_is_new_construction: true`, while the cumulative age rungs list `"new"` inside `p_age_buckets` — so once the
+ * priming walk has run, «some call spells "new"» is always true, the fallback below is refused, and the call that
+ * really priced «جديد» was never accepted. Measured 2026-10-23 on الرياض / تجاري / إيجار سنوي / محل: card 436 =
+ * the `p_is_new_construction: true` call; the walk's other calls carried p_age_buckets ["new","1_2"…] and returned
+ * 476 / 593 / 674 (af-live-truth run 39940963632 FAILED «matched NO count call that also carried «new»»).
+ */
+const SPELLED_AS: Record<string, (body: any) => boolean> = {
+  new: (b) => b?.p_is_new_construction === true
+    || (Array.isArray(b?.p_age_buckets) && b.p_age_buckets.length === 1 && b.p_age_buckets[0] === 'new'),
+};
+
 export function pricedTheTappedOption(paired: CountPair | null, preBody: any, tappedKey: string): {
   literal: boolean; movedKeys: string[]; ok: boolean;
 } {
   if (!paired) return { literal: false, movedKeys: [], ok: false };
-  const literal = JSON.stringify(paired.body).includes(`"${tappedKey}"`)
-    || Object.values(paired.body ?? {}).some((v) => String(v) === tappedKey);
+  // A key with a known spelling is judged by that spelling ONLY: «"new"» inside a cumulative p_age_buckets rung is a
+  // different option's request, and a substring match would let a rung's number pass for «جديد».
+  const literal = tappedKey in SPELLED_AS
+    ? SPELLED_AS[tappedKey](paired.body ?? {})
+    : JSON.stringify(paired.body).includes(`"${tappedKey}"`)
+      || Object.values(paired.body ?? {}).some((v) => String(v) === tappedKey);
   const movedKeys = preBody
     ? Object.keys({ ...preBody, ...paired.body })
         .filter((k) => JSON.stringify(preBody[k]) !== JSON.stringify(paired.body[k]))

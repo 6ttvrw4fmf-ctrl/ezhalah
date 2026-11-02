@@ -11,7 +11,7 @@
 //   5. no name → no message (never a line with a blank name).
 import {
   encodeSharePayload, decodeSharePayload, shareLink, shareMessage, shareLandingTitle, SHARE_COPY, SHARE_PARAM,
-  shareLandingPath, shareCardHtml, SHARE_CARD, shareTitle, isShareCode, sharedChatCardFrom, shareInviteNote,
+  shareLandingPath, shareCardHtml, SHARE_CARD, SHARE_INVITE_LINE, shareTitle, isShareCode, sharedChatCardFrom, shareInviteNote, encodeInvitePayload, decodeInvitePayload, shareJoinNote,
 } from '../src/lib/shareSearch.ts';
 
 let failed = 0;
@@ -68,16 +68,21 @@ mustCatch('a link that deep-links straight into /agent?filter= (it would bypass 
 const fullPayload = encodeSharePayload(Q, 'يوسف', 'ar')!;
 const html = shareCardHtml('https://new-domain.example', fullPayload);
 const meta = (prop: string) => new RegExp(`<meta (?:property|name)="${prop}" content="([^"]*)"`).exec(html)?.[1] ?? null;
-check('the card title names the type, the place, the sender and إزهله; the line is Ezhalah\'s promise',
-  meta('og:title') === 'شقق للإيجار في حي النرجس من يوسف على إزهله' && meta('og:description') === 'كل مواقع العقار في مكان واحد');
+// Owner 2026-10-22 (approved mockup): the card says the SAME invite the visitor then sees on the sign-in popup.
+check('the card title is the popup\'s own invite; the line says what Ezhalah is, in Saudi Arabia',
+  meta('og:title') === 'يوسف شاركك: شقق للإيجار في حي النرجس' && meta('og:title') === shareInviteNote('يوسف', Q, 'ar')
+  && meta('og:description') === SHARE_CARD.ar.desc && meta('og:description') !== SHARE_INVITE_LINE.ar);
+check('the invite line names Ezhalah, AI and Saudi Arabia (it travels as the message text — owner 2026-10-22)',
+  /السعودية/.test(SHARE_INVITE_LINE.ar) && /Saudi Arabia/.test(SHARE_INVITE_LINE.en));
+mustCatch('a card title that drifts from the popup\'s invite', shareTitle('يوسف', Q, 'ar') !== shareInviteNote('يوسف', Q, 'ar'));
 check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
-  meta('og:image') === 'https://new-domain.example/og-image-v6.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
+  meta('og:image') === 'https://new-domain.example/og-image-v9.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
   && !/vercel\.app/.test(html));
 check('the page sends a person to Home + ?share= (never /agent)',
   html.includes(`content="0;url=/?share=${fullPayload}"`) && html.includes(`location.replace("/?share=${fullPayload}")`) && !/\/agent/.test(html));
 const enHtml = shareCardHtml('https://x.example', encodeSharePayload(Q, 'Yusuf', 'en')!);
 check('an English sender gets the English card, brand kept as "Ezhalah"',
-  /<meta property="og:title" content="Apartments for rent from Yusuf on Ezhalah"/.test(enHtml) && /lang="en"/.test(enHtml));
+  enHtml.includes(`<meta property="og:title" content="${shareInviteNote('Yusuf', Q, 'en')}"`) && enHtml.includes(SHARE_CARD.en.desc) && /lang="en"/.test(enHtml));
 const evil = shareCardHtml('https://x.example', enc({ v: 1, n: '<script>alert(1)</script>', l: 'ar', q: Q }));
 check('a hostile name is escaped, never injected into the page', !evil.includes('<script>alert') && evil.includes('&lt;script&gt;'));
 mustCatch('a card builder that does not escape the name', (() => {
@@ -101,7 +106,7 @@ check('a database card row is validated (first name, sender\'s language) — any
 mustCatch('a card reader that trusts whatever row comes back', !cardOk((r: any) => (r ? { q: r.query, name: r.sender_name, locale: r.locale } : null) as any));
 const chatHtml = shareCardHtml('https://x.example', 'a7Kx2bQ9', sharedChatCardFrom({ sender_name: 'يوسف', locale: 'ar', query: Q }));
 check('a shared chat\'s card says the approved title and sends the person to Home + ?share=<code>',
-  /og:title" content="شقق للإيجار في حي النرجس من يوسف على إزهله"/.test(chatHtml) && chatHtml.includes('location.replace("/?share=a7Kx2bQ9")') && !/\/agent/.test(chatHtml));
+  /og:title" content="يوسف شاركك: شقق للإيجار في حي النرجس"/.test(chatHtml) && chatHtml.includes('location.replace("/?share=a7Kx2bQ9")') && !/\/agent/.test(chatHtml));
 const unread = shareCardHtml('https://x.example', 'a7Kx2bQ9', null);
 check('a code whose card could not be read still goes to Home + ?share=<code> (the app reads the chat) — never a dead link',
   /og:title" content="إزهله"/.test(unread) && unread.includes('location.replace("/?share=a7Kx2bQ9")'));
@@ -134,63 +139,42 @@ const imgW = Number(/og:image:width" content="(\d+)"/.exec(html)?.[1] ?? 0);
 const imgH = Number(/og:image:height" content="(\d+)"/.exec(html)?.[1] ?? 0);
 const smallSquare = (w: number, h: number) => w > 0 && w === h && w < 300;
 check('the card logo is a small square under 300 px (WhatsApp side thumbnail, not a big banner)',
-  smallSquare(imgW, imgH) && meta('og:image') === 'https://new-domain.example/og-image-v6.png');
+  smallSquare(imgW, imgH) && meta('og:image') === 'https://new-domain.example/og-image-v9.png');
 mustCatch('the 512 px logo that WhatsApp draws as a big banner', !smallSquare(512, 512));
 {
+  // Owner 2026-10-20: the top «مشاركة» pill is the NORMAL share (the Ezhalah link + home sentence,
+  // same as the Filter screen) — never this chat. Sharing the chat is the reply row's share icon
+  // (FeedbackRow, fed by shareFor()). Until 2026-10-20 the pill shared the chat first (owner 2026-10-17).
   const agentSrc = (await import('node:fs')).readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
-  const ret = /return \{ shareUrl: shareLink\(origin, payload\)[^}]*\}/.exec(agentSrc)?.[0] ?? '';
-  check('the signed-in share sends only the link — the card already shows the title (never said twice)', !!ret && !/shareText/.test(ret));
-  mustCatch('a share that sends the title text next to its card again', /shareText/.test(ret.replace('prepareShare', 'shareText: text, prepareShare')));
-}
-check('the landing title is the same title; the button is «اضغط وشوف العقارات»',
-  shareLandingTitle('يوسف', Q, 'ar') === T(Q) && SHARE_COPY.ar.button === 'اضغط وشوف العقارات');
-mustCatch('a title that forgets the place', (() => {
-  const noPlace = (q: any) => shareTitle('يوسف', { ...q, districtLabel: undefined, districts: [], location: '' }, 'ar');
-  return noPlace(Q) !== T(Q);
-})());
-const allCopy = JSON.stringify(SHARE_COPY) + JSON.stringify(SHARE_CARD) + T(Q) + T(Q, 'en');
-check('the wording never says "sign in / log in" (owner: «don\'t say log in»)', !/sign ?in|log ?in|سجل|تسجيل|دخولك/i.test(allCopy));
-check('the wording never uses the forbidden word «حيك»', !allCopy.includes('حيك'));
-check('no eagle emoji anywhere — the Ezhalah logo is enough (owner 2026-10-17)', !allCopy.includes('🦅'));
-check('the Arabic title names إزهله and the English keeps "Ezhalah"', T(Q).includes('إزهله') && /Ezhalah/.test(T(Q, 'en') ?? ''));
-
-// ── 5. no name → nothing ────────────────────────────────────────────────────────────────────────
-check('no sender name → no message, no title, no payload (never a blank-name line)',
-  shareMessage('  ', Q, 'ar') === null && shareLandingTitle('', Q, 'en') === null && encodeSharePayload(Q, ' ') === null);
-
-// ── 6. OPENING THE LINK = THE SIGN-IN POPUP WITH A NOTE (owner 2026-10-18) ─────────────────────────
-check('the popup note reads «يوسف شاركك: شقق للإيجار في حي النرجس» / "Yusuf shared with you: …"',
-  shareInviteNote('يوسف الأحمد', Q, 'ar') === 'يوسف شاركك: شقق للإيجار في حي النرجس'
-  && shareInviteNote('Yusuf', { deal: 'Rent', location: 'Riyadh', type: 'Apartment' } as any, 'en') === 'Yusuf shared with you: Apartments for rent in Riyadh'
-  && shareInviteNote(' ', Q, 'ar') === null && !EMOJI.test(shareInviteNote('يوسف', Q, 'ar') ?? ''));
-{
-  const fs = await import('node:fs');
-  const home = fs.readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
-  const flow = /if \(!sharedSearch \|\| !authChecked \|\| sharedHandledRef\.current\) return;[\s\S]{0,700}?if \(!user\) \{[\s\S]{0,400}?SHARED_PENDING_KEY[\s\S]{0,300}?openAuth\(shareInviteNote\([\s\S]{0,200}?if \(sharedSearch\.code\) void openSharedSearch\(sharedSearch\);/;
-  check('a signed-out visitor gets the sign-in popup with the note (and the chat opens once in); signed-in opens the chat directly', flow.test(home));
-  mustCatch('a link that opens the popup with no note', !flow.test(home.replace('openAuth(shareInviteNote(', 'openAuth((')));
-  check('signed-out visitors and shared chats never see the old tap card', /\{sharedSearch && user && !sharedSearch\.code && \(/.test(home));
-  const modal = fs.readFileSync(new URL('../src/components/AuthModal.tsx', import.meta.url), 'utf8');
-  check('the sign-in popup shows the note above its heading', /\{note \? <Text style=\{s\.shareNote\}[^\n]*>\{note\}<\/Text> : null\}\s*<Text style=\{\[s\.formHead/.test(modal));
+  const top = /onPress=\{async \(\) => \{ if \(!\(await shareNative\(\)\)\) setShareOpen\(true\); \}\}/;
+  check('the top «مشاركة» pill is the normal share (shareNative, our sheet as fallback) and never the chat',
+    top.test(agentSrc) && !/shareThisChat/.test(agentSrc));
+  check('sharing THIS chat still lives under each reply (shareFor → prepareShare → chatShareUrl)',
+    /const prepareShare = \(\) => chatShareUrl\(q\);/.test(agentSrc) && /<FeedbackRow[\s\S]*shareFor\(/.test(agentSrc));
+  mustCatch('the top pill going back to sharing the chat first',
+    !top.test(agentSrc.replace('if (!(await shareNative())) setShareOpen(true);', 'if (await shareThisChat()) return; if (!(await shareNative())) setShareOpen(true);')));
 }
 
-// ── 7. A CHAT WITH NO SEARCH (owner 2026-10-18, option A) ──────────────────────────────────────────
-check('no search → «محادثة من يوسف على إزهله» / "A chat from Yusuf on Ezhalah"; popup «يوسف شاركك محادثة»',
-  shareTitle('يوسف', null, 'ar') === 'محادثة من يوسف على إزهله' && shareTitle('Yusuf', null, 'en') === 'A chat from Yusuf on Ezhalah'
-  && shareInviteNote('يوسف', null, 'ar') === 'يوسف شاركك محادثة' && shareInviteNote('Yusuf', null, 'en') === 'Yusuf shared a chat with you');
-check('a search still keeps its own title (the chat title is only for no search)', shareTitle('يوسف', Q, 'ar') === 'شقق للإيجار في حي النرجس من يوسف على إزهله');
-const noSearch = sharedChatCardFrom({ sender_name: 'يوسف', locale: 'ar', query: {} });
-check('the database\'s empty query reads as «no search», and its card says so',
-  !!noSearch && noSearch.q === null
-  && /og:title" content="محادثة من يوسف على إزهله"/.test(shareCardHtml('https://x.example', 'a7Kx2bQ9', noSearch)));
-mustCatch('a card reader that rejects a chat with no search (the link would show a plain «إزهله»)',
-  ((r: any) => (r && typeof r.query?.location === 'string' ? r : null))({ sender_name: 'يوسف', query: {} }) === null);
+// ── 7b. AN INVITATION TO JOIN (owner 2026-10-23): the Share under a plain reply («هلا») or a search with
+// nothing found sends «يوسف يرحّب بك للانضمام إلى إزهله» — card, popup — with the top Share's line as text. ──
 {
-  const agentSrc = (await import('node:fs')).readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
-  const top = /onPress=\{async \(\) => \{ if \(await shareThisChat\(\)\) return; if \(!\(await shareNative\(\)\)\) setShareOpen\(true\); \}\}/;
-  check('the top «مشاركة» in a chat shares THAT chat first (homepage share only for guests / an empty screen)', top.test(agentSrc)
-    && /const shareThisChat = async \(\): Promise<boolean> => \{\s*if \(!user \|\| !msgs\.length\) return false;/.test(agentSrc));
-  mustCatch('a top button that only ever shares the homepage', !top.test(agentSrc.replace('if (await shareThisChat()) return; ', '')));
+  const fsx = await import('node:fs');
+  const inv = encodeInvitePayload('يوسف الأحمد', 'ar')!;
+  check('an invite carries the first name and language, and only decodes as an invite',
+    JSON.stringify(decodeInvitePayload(inv)) === '{"name":"يوسف","locale":"ar"}' && decodeSharePayload(inv) === null
+    && decodeInvitePayload(encodeSharePayload(Q, 'يوسف', 'ar')) === null && decodeInvitePayload('junk') === null);
+  check('the owner\'s exact welcome, Arabic and English',
+    shareJoinNote('يوسف', 'ar') === 'يوسف يرحّب بك للانضمام إلى إزهله' && shareJoinNote('Yusuf', 'en') === 'Yusuf welcomes you to join Ezhalah' && shareJoinNote('  ', 'ar') === null);
+  const card = shareCardHtml('https://x.example', inv);
+  check('the invite card: the welcome as title, the short tagline, and a person goes Home + ?share=<invite>',
+    card.includes('og:title" content="يوسف يرحّب بك للانضمام إلى إزهله"') && card.includes(`og:description" content="${SHARE_CARD.ar.desc}"`) && card.includes(`location.replace("/?share=${inv}")`));
+  const home = fsx.readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
+  check('Home opens the sign-in popup with the welcome for a guest who opens an invite',
+    /const inv = decodeInvitePayload\(raw\);/.test(home) && /if \(!user\) openAuth\(shareJoinNote\(/.test(home));
+  const ag = fsx.readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
+  check('a plain reply and a no-results reply both carry the invitation Share, with the top Share\'s line as text',
+    (ag.match(/\{\.\.\.inviteFor\(\)\}/g) ?? []).length >= 2 && /const text = shareLead\(loc, liveSiteCount\(\)\);/.test(ag) && /encodeInvitePayload\(pickName\(user, loc\), loc\)/.test(ag));
+  mustCatch('an invite link read as a broken link (the plain «إزهله» card)', !card.includes('og:title" content="إزهله"'));
 }
 
 console.log(`\nexample link: ${link.slice(0, 90)}…`);

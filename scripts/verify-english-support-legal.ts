@@ -18,7 +18,8 @@ assert.equal(pick('ar'),ar);
 for (const key of ['terms','privacy']) {
   assert.equal(en[key].length,ar[key].length);
   assert.equal(en[key].length,key==='terms'?17:15);
-  assert.equal(en[key][0],'Last updated: 4 September 2026');
+  // The privacy policy changed 2026-10-21 (Cloudflare Turnstile line, owner-approved); the terms did not.
+  assert.equal(en[key][0], key === 'privacy' ? 'Last updated: 21 October 2026' : 'Last updated: 4 September 2026');
   for(let i=1;i<en[key].length;i++) {
     assert(en[key][i].startsWith(`${i}) `));
     assert(en[key][i].includes('\n\n'));
@@ -40,7 +41,7 @@ function render(source: string, locale: 'ar'|'en', component: string, initial='t
   const js = ts.transpileModule(fragments,{compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.None,target:ts.ScriptTarget.ES2022}}).outputText;
   const React={createElement:(type:any,props:any,...children:any[])=>({type,props:props??{},children})};
   const useState=(value:any)=>[typeof value==='function'?value():value,()=>{}];
-  const ctx={React,useState,useEffect:()=>{},useI18n:()=>({locale,isRTL:locale==='ar'}),useApp:()=>({user:null}),recallSupportDraft:()=>({subject:'',message:'',email:''}),rememberSupportDraft:()=>{},validateSupportMessage:()=>null,SUBJECT_MAX:140,MESSAGE_MAX:5000,Platform:{OS:'web'},I18nManager:{isRTL:false},StyleSheet:{create:(x:any)=>x},colors:{},cardShadow:{},View:'View',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',ActivityIndicator:'ActivityIndicator',Ionicons:'Icon',RNImage:'Image',EAGLE:'eagle',getLegalDocs:pick,hasLegalDocs:()=>true};
+  const ctx={React,useState,useEffect:()=>{},useI18n:()=>({locale,isRTL:locale==='ar'}),useApp:()=>({user:null}),recallSupportDraft:()=>({subject:'',message:'',email:''}),rememberSupportDraft:()=>{},validateSupportMessage:()=>null,SUBJECT_MAX:140,MESSAGE_MAX:5000,Platform:{OS:'web'},I18nManager:{isRTL:false},StyleSheet:{create:(x:any)=>x},colors:{},cardShadow:{},View:'View',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',ActivityIndicator:'ActivityIndicator',Ionicons:'Icon',RNImage:'Image',XImage:'Image',EAGLE:'eagle',getLegalDocs:pick,hasLegalDocs:()=>true};
   const run=new Function(...Object.keys(ctx),`${js};return ${component};`)(...Object.values(ctx));
   const root=run({t:(key:string)=>key,initial,icon:'business',email:'address',desc:'description',text:'Typical response time: 72 hours.',label:'Subject'});
   const nodes:any[]=[];
@@ -62,7 +63,7 @@ function layoutContract(source: string) {
     const nodes=render(source,'en','LegalBody',tab);
     const text=nodes.filter(n=>n.type==='Text').flatMap(n=>n.children).join(' ');
     assert(!/[\u0600-\u06ff]/.test(text));
-    assert(text.includes('4 September 2026'));
+    assert(text.includes(tab === 'privacy' ? '21 October 2026' : '4 September 2026'));
     assert(!text.includes('{{CONTACT_EMAIL}}'));
   }
   const arabic=render(source,'ar','RtRow');

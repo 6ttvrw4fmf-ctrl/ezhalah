@@ -403,6 +403,12 @@ _RENT_PERIOD_ENUM: dict[int, str] = {2: "monthly", 3: "annual"}
 # The period word aqar prints next to a specific figure, matched with and without thousands commas.
 _PERIOD_WORDS = (("سنوي", "annual"), ("شهري", "monthly"))
 
+# What aqar prints between a figure and its period word. Since ~2026-10-18 the price slot renders
+# «3,700 § ريال /سنوي» — a hidden «§» glyph, then the word «ريال», then «/سنوي» — and aqar's payload
+# now sends `rent_period: null`. A one-character currency slot stopped matching, so 95% → ~55% of new
+# aqar rentals lost their period and fell out of the «سنوي» filter (~7,200 priced rows by 10-30).
+_CUR = r"(?:\s*(?:§|﷼|ريال|ر\.\s?س\.?|ر))*"
+
 
 def _period_beside(price: Optional[int], text: str, is_rnpl_page: bool = False) -> Optional[str]:
     """The billing period aqar prints beside THIS listing's published figure, or None.
@@ -431,7 +437,7 @@ def _period_beside(price: Optional[int], text: str, is_rnpl_page: bool = False) 
         if period == "monthly" and is_rnpl_page:
             continue          # on a financing page every «شهري» is an instalment, never the rent
         for num in {str(price), grouped}:
-            if re.search(rf"{re.escape(num)}\s*[§ر﷼]?\s*/?\s*{pattern}", text):
+            if re.search(rf"{re.escape(num)}{_CUR}\s*/?\s*{pattern}", text):
                 return period
     return None
 
@@ -795,7 +801,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # evidence can never claim a source it did not come from (see the evidence block below).
     price_ev_raw: Any = None          # str window (prose) or int (structured payload)
     price_ev_origin = "spec_table"
-    price_text = re.sub(r"ابتداء\S*\s*من\s*\d[\d,]*\s*[§ر﷼]?\s*شهري\w*", " ", price_text)
+    price_text = re.sub(rf"ابتداء\S*\s*من\s*\d[\d,]*{_CUR}\s*شهري\w*", " ", price_text)
     # PRICE = SOURCE, layer 2+4 (owner invariant 2026-08-04). Everything below scans price_text,
     # and price_text is NOT the price element — it is the whole pre-«تفاصيل الإعلان» prefix, which
     # carries the seller's free-text blurb. Two real classes were repaired live on 2026-08-04
@@ -823,8 +829,8 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # `/rnpl/` is the bulletproof signal (Aqar embeds it only when financing is enabled).
     is_rnpl_page = "/rnpl/" in html
 
-    mp_yr = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*سنوي", price_text)
-    mp_mo = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*شهري", price_text)
+    mp_yr = re.search(rf"(\d[\d,]{{2,}}){_CUR}\s*/?\s*سنوي", price_text)
+    mp_mo = re.search(rf"(\d[\d,]{{2,}}){_CUR}\s*/?\s*شهري", price_text)
 
     # PRICE = SOURCE, primary path (2026-08-09). aqar publishes the price as a STRUCTURED field in
     # its RSC payload; everything above is a regex over rendered prose, kept only as the fallback for

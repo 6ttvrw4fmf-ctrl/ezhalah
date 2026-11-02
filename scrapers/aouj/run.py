@@ -28,7 +28,9 @@ WHAT THIS SOURCE DOES NOT PUBLISH (persisted as NULL, never defaulted — SOURCE
     therefore carry rent_period = NULL. We do NOT read a period out of the description prose
     (listing 187's body says «إيجار سنوي 60 ألف ريال») — a token anywhere in a blob is exactly
     the detector shape killed on 2026-08-11 for producing confident wrong numbers.
-  * AMENITIES / FURNISHED. `features` is [] on all 76 — every amenity facet stays NULL.
+  * AMENITIES / FURNISHED. `features` is [] on all 76, so the site has no amenity statement of its own
+    except two: `garage` (a structured count, «1»/«2» on 4 of 74 on 2026-10-25) is parking, and the ad's
+    own description box, read through normalize.prose_amenities for a built unit (see amenities() below).
   * AGE. `year_built` on 8/76 only; kept raw in additional_info, no age column is written.
   * A PER-LISTING per-m² price. See PRICE below.
   * A PER-LISTING REGA advertisement licence on 68/76 (the 76/76 `fal_license` is the agency's
@@ -202,6 +204,31 @@ def _details(o: dict) -> tuple[Optional[str], dict[str, str]]:
     return flat.get(REGA_AD_LABEL) or None, flat
 
 
+# A plot has no kitchen, AC or parking of its own (sadiqeltajer 10-23 stamped parking on plots from «يليه مواقف»).
+_NOT_A_UNIT = {"Residential Land", "Commercial Land", "Raw Land", "Agricultural Land", "Farm"}
+
+
+def amenities(o: dict, property_type: str) -> dict[str, bool]:
+    """Amenity answers: yes, an explicit no tied to the word, or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2,
+    owner 2026-10-24). Silence, «مؤسس» and «لاحق» stay NULL, never «no».
+
+    PARKING is the structured `garage` count and ONLY that: a count above 0 is yes, anything else is silence
+    (the CRM's «0» is its not-provided sentinel, see bedrooms below), and prose is never read for it.
+    The REST comes from the ad's own description, for a built unit, and only while the structured `features`
+    list is empty for this ad: it has been [] on every ad since 2026-09-02, and the day it is filled it is
+    the site's statement and prose must stop answering. 2026-10-25: of 36 active built units, 20 descriptions
+    name a kitchen and 6 AC or air conditioning, 4 carry a garage count, and every amenity was NULL on all of
+    them, which is why the score's aouj misses (10283211 AC, 10283218 furnished) were not findable."""
+    out: dict[str, bool] = {}
+    garage = N.to_int(o.get("garage"))
+    if garage and garage > 0:
+        out["parking"] = True
+    if property_type not in _NOT_A_UNIT and not o.get("features"):
+        text = N.html_block_lines(_redact((o.get("description") or {}).get("ar")))
+        out.update(N.prose_amenities(text, skip=("parking",)))
+    return out
+
+
 def map_item(o: dict) -> tuple[Optional[dict], str]:
     """(row, category) for an ingestible listing, else (None, skip-reason)."""
     ad_id = str(o.get("id") or "").strip()      # opaque: 75 numeric strings + 1 UUID. Never cast.
@@ -309,6 +336,7 @@ def map_item(o: dict) -> tuple[Optional[dict], str]:
         "description": _redact((o.get("description") or {}).get("ar")),
         "photo_urls": _photos(o),
         "additional_info": info,
+        **amenities(o, property_type),
         # Complete source payload, once, so a field we do not model today never needs a re-scrape.
         # redact_capture() scrubs contact PII out of FREE TEXT only and leaves licences, coordinates
         # and prices byte-identical (owner rule 2026-08-09).

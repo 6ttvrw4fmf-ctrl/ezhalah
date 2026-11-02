@@ -14,8 +14,8 @@ def test_kitchen_comes_from_the_ad_words_and_parking_never_from_prose():
     assert out == {"kitchen": True}
 
 
-def test_prose_says_yes_or_nothing():
-    assert R.prose_answers("لا يوجد مطبخ") == {}
+def test_prose_says_yes_an_explicit_no_or_nothing():
+    assert R.prose_answers("لا يوجد مطبخ") == {"kitchen": False}
     assert R.prose_answers(None) == {}
 
 

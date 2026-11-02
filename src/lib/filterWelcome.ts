@@ -12,6 +12,7 @@
 //   • a line whose fact is missing, failed, or not true today (e.g. «كل مناطق المملكة الـ13» when not
 //     every region has listings) is NOT shown — the normal subtitle stays. Never a stale or made-up number.
 // Pure: no React, no network, no storage. Executed by scripts/verify-filter-welcome.ts.
+import { isInsightLineId } from './insightWelcome.ts';
 
 export type WelcomeFacts = {
   sites?: number;        // distinct websites with searchable listings (loader_active_platforms_ar)
@@ -98,6 +99,25 @@ export const WELCOME_LINES: readonly WelcomeLine[] = [
 export const NEW_TODAY_MIN = 100;
 // Riyadh is UTC+3 all year (no DST): the calendar day "today" means in the line above.
 export const riyadhDay = (t: number): number => Math.floor((t + 3 * 3600_000) / 86_400_000);
+/** A daily fact is TRUE ONLY ON THE SAUDI DAY IT WAS BUILT FOR (owner 2026-10-27: «yesterday, 1 week should be based on
+ *  real fact … it goes a day, I am talking in days … we can go to jail»): «أمس» / «آخر 7 أيام» said after midnight would
+ *  be a day off. A fact line prepared or shown on one Saudi day is never shown on the next. */
+export const sameRiyadhDay = (a: number, b: number): boolean => riyadhDay(a) === riyadhDay(b);
+
+/** A TAB KEEPS ITS LINE (owner 2026-10-28: «after 2 hours when I enter Ezhalah … I see the swap»). Safari shows a saved
+ *  picture of an old tab and then reloads it, so a line that changed while the tab slept visibly swaps. The line a tab
+ *  showed (and its greeting) is kept in that tab's sessionStorage, which survives Safari's reload, and is shown again in
+ *  the same tab for the rest of that Saudi day; a NEW visit (a new tab) still gets the next line after 2 hours. */
+export const TAB_KEY = 'ezhalah:filterWelcome:tab:v1';
+export type TabLine = { id: number; at: number; ar: string; en: string; greet: number | null };
+export function tabLine(raw: string | null | undefined, now: number): TabLine | null {
+  try {
+    const v = JSON.parse(raw ?? 'null');
+    if (!v || !Number.isFinite(v.id) || !Number.isFinite(v.at) || typeof v.ar !== 'string' || typeof v.en !== 'string' || !v.ar || !v.en) return null;
+    if (v.at > now || !sameRiyadhDay(v.at, now)) return null; // never yesterday's line
+    return { id: Number(v.id), at: Number(v.at), ar: v.ar, en: v.en, greet: Number.isInteger(v.greet) ? v.greet : null };
+  } catch { return null; }
+}
 
 /** Saudi Arabia has 13 administrative regions; «كل المناطق» is said only when every one has listings. */
 export const SAUDI_REGION_COUNT = 13;
@@ -105,9 +125,11 @@ const REGION_AR = { riyadh: 'منطقة الرياض', makkah: 'منطقة مك�
 
 /**
  * How long one line stays before the next (owner 2026-10-17: «not every refresh … every now and then,
- * hours» → every 4 hours, and a signed-in user always sees a personal line).
+ * hours» → every 4 hours; owner 2026-10-20: «every 2 hours»; owner 2026-10-22: «1 hour»; owner 2026-10-28: «every user should
+ * get a new message every 2 hours» — a new fact every 2 hours, never on every refresh; a signed-in user always sees a
+ * personal line).
  */
-export const HOLD_MS = 4 * 60 * 60 * 1000;
+export const HOLD_MS = 2 * 60 * 60 * 1000;
 /** A user with a searched district sees one of THEIR district's lines about this share of periods. */
 export const MY_DISTRICT_SHARE = 1 / 3;
 /** «من أنشط أحياء {city}» is said only when the district is within this rank in its city. */
@@ -160,8 +182,9 @@ export const NAME_SLOT = '⟦n⟧';
 export function fillName(text: string | null | undefined, name: string, locale: 'ar' | 'en'): string | null {
   if (!text) return null;
   const first = (name ?? '').trim().split(/\s+/)[0] ?? '';
-  if (!first || (locale === 'ar' && /[A-Za-z]/.test(first))) return null;
-  return text.split(NAME_SLOT).join(first);
+  if (!first || (locale === 'ar' && /[A-Za-z]/.test(first)) || (locale === 'en' && /[\u0600-\u06FF]/.test(first))) return null;
+  // Isolated (U+2068 … U+2069): an Arabic name in an English line (or the reverse) can't drag the comma.
+  return text.split(NAME_SLOT).join(`\u2068${first}\u2069`);
 }
 
 /** Fill a line, or null when any fact it states is missing or not true today. */
@@ -326,16 +349,63 @@ export function headlineReduce(s: HeadlineState, ev: HeadlineEvent): HeadlineSta
 //   hasSession = a Supabase session is stored on this device (synchronous; the restore only confirms it)
 //   cache      = what this device showed last; reused only while held (HOLD_MS) and while it still
 //                fits the moment (a morning line is not reused at night)
+//   next       = the line PREPARED in the background for the next period, not yet seen. Its hour starts
+//                when it is first SHOWN (`promoted`: the caller then remembers it as the shown line).
+//
+// WHY `next` EXISTS (owner 2026-10-22: «I keep seeing the same one always»). The background used to
+// write the next period's line over the shown one, stamped with the moment it was PREPARED. A visitor
+// who came back more than 2 hours later found it already expired, so the screen fell back to one of
+// the five lines with no numbers — measured live: four visits 2 h apart showed «حياك {n}، وفر ساعات من
+// التدوير…» three times while lines 6, 37 and 30 were prepared and thrown away unseen.
+export const PREPARED_MAX_MS = 24 * 60 * 60 * 1000;
 export type WelcomeCache = { id: number; at: number; ar: string; en: string };
-export function instantWelcome(a: { hasSession: boolean; cache: WelcomeCache | null; now: Date; name: string; rand?: () => number }): { id: number; ar: string; en: string; fromCache: boolean } | null {
+
+// THE SIGN-IN WELCOME (owner 2026-10-22: «whenever the user logs in or signs up, this message appears»; since
+// 2026-10-28 every line opens «نورت {n} 🥳،» — owner: «نورت then name», «yeah with 🥳» —
+// with five wordings so users see different ones). Approved Arabic, word for word; the English is its
+// translation, with the brand never translated. Shown on the page right after a sign-in (or sign-up),
+// then held GREET_HOLD_MS so a reload keeps it; after that the normal rotation resumes. Never chosen
+// by the normal rotation (they are not in WELCOME_LINES).
+export const GREET_LINES: readonly WelcomeLine[] = [
+  { id: 101, when: 'any', needs: [], ar: 'نورت {n} 🥳، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.', en: 'Welcome {n} 🥳, Ezhalah is your new way to find your property in Saudi Arabia.' },
+  { id: 102, when: 'any', needs: [], ar: 'نورت {n} 🥳، مع إزهله صار البحث عن عقارك في السعودية أسهل.', en: 'Welcome {n} 🥳, with Ezhalah, finding your property in Saudi Arabia just got easier.' },
+  { id: 103, when: 'any', needs: [], ar: 'نورت {n} 🥳، إزهله يدور لك على عقارك في كل السعودية.', en: 'Welcome {n} 🥳, Ezhalah searches all of Saudi Arabia for your property.' },
+  { id: 104, when: 'any', needs: [], ar: 'نورت {n} 🥳، عقارك في السعودية صار أقرب مع إزهله.', en: 'Welcome {n} 🥳, your property in Saudi Arabia is closer with Ezhalah.' },
+  { id: 105, when: 'any', needs: [], ar: 'نورت {n} 🥳، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.', en: 'Welcome {n} 🥳, Ezhalah is your fresh start in the search for property in Saudi Arabia.' },
+];
+export const GREET_HOLD_MS = 30 * 60 * 1000;
+/** Which of the five a sign-in shows: starts from the user's own id (so users differ), then moves one
+ *  step per sign-in on this device (so the same user does not always see the same one). */
+export function greetIndex(userId: string, signIns: number): number {
+  let h = 0;
+  for (const ch of String(userId ?? '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return (h + Math.max(0, Math.trunc(signIns))) % GREET_LINES.length;
+}
+/** The sign-in welcome in both languages, name still slotted (fillName puts it in per language). */
+export function greetingFor(userId: string, signIns: number, name: string): { id: number; ar: string; en: string } | null {
+  const line = GREET_LINES[greetIndex(userId, signIns)];
+  const ar = renderWelcome(line, name, {}, 'ar');
+  const en = renderWelcome(line, name, {}, 'en');
+  return ar && en ? { id: line.id, ar, en } : null;
+}
+
+const cachedFits = (c: WelcomeCache, now: Date, maxAge: number): boolean => {
+  const age = now.getTime() - c.at;
+  // A daily-insight line (lib/insightWelcome.ts): its greeting is put in when shown, from Saudi time, so it
+  // fits any hour; only its age counts.
+  if (isInsightLineId(c.id)) return age >= 0 && age < maxAge && sameRiyadhDay(c.at, now.getTime()) && !!c.ar && !!c.en;
+  const greet = GREET_LINES.find((l) => l.id === c.id);
+  if (greet) return age >= 0 && age < Math.min(maxAge, GREET_HOLD_MS) && !!c.ar && !!c.en;
+  const line = WELCOME_LINES.find((l) => l.id === c.id);
+  return !!line && age >= 0 && age < maxAge && lineFitsTime(line, now) && !!c.ar && !!c.en
+    && (!line.needs.includes('newToday') || riyadhDay(c.at) === riyadhDay(now.getTime()));
+};
+export function instantWelcome(a: { hasSession: boolean; cache: WelcomeCache | null; next?: WelcomeCache | null; now: Date; name: string; rand?: () => number }): { id: number; ar: string; en: string; fromCache: boolean; promoted?: boolean } | null {
   if (!a.hasSession) return null;
   const c = a.cache;
-  if (c) {
-    const line = WELCOME_LINES.find((l) => l.id === c.id);
-    const age = a.now.getTime() - c.at;
-    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, a.now) && c.ar && c.en
-      && (!line.needs.includes('newToday') || riyadhDay(c.at) === riyadhDay(a.now.getTime()))) return { id: c.id, ar: c.ar, en: c.en, fromCache: true };
-  }
+  if (c && cachedFits(c, a.now, HOLD_MS)) return { id: c.id, ar: c.ar, en: c.en, fromCache: true };
+  const n = a.next;
+  if (n && n.id !== c?.id && cachedFits(n, a.now, PREPARED_MAX_MS)) return { id: n.id, ar: n.ar, en: n.en, fromCache: true, promoted: true };
   const line = fallbackLine(c?.id ?? null, a.rand);
   const ar = renderWelcome(line, a.name, {}, 'ar');
   const en = renderWelcome(line, a.name, {}, 'en');

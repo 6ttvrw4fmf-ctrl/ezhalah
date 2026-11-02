@@ -47,10 +47,18 @@ export function mapPoint(row: { latitude?: unknown; longitude?: unknown } | null
   if (!row) return null;
   const lat = num(row.latitude), lng = num(row.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  // ponytail: a 0 on either axis is the classic unset default, not a Saudi address — treated as silent.
-  if (lat === 0 || lng === 0) return null;
+  // A 0 on either axis (the classic unset default) is caught here too: 0 has no decimals.
+  // A point rounded to 2 decimals or fewer on either axis (±1 km at best) is an AREA, not a property's pin
+  // (mapping audit 2026-10-21, the same rule as shared_default_pins() in 20261021114821). The database strips
+  // such points from every table that keeps its pin in additional_info; wasalt keeps it in ar_data, where
+  // that strip cannot reach, and served 443497 at exactly 25,49. The page therefore refuses it too, and the
+  // ad falls back to its district / city border.
+  if (isCoarse(lat) || isCoarse(lng)) return null;
   return { lat, lng };
 }
+
+/** At most 2 decimals: 24, 24.5, 24.47 → coarse; 24.471 → a real coordinate. */
+export const isCoarse = (v: number): boolean => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6;
 
 /** The map embed: Google's official Maps Embed API (satellite) when the owner's key is set in the build
  *  (EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY — never logged, never hardcoded), else today's keyless embed with
@@ -104,6 +112,18 @@ export const DISTRICT_MAP_PLATFORMS: readonly string[] = [
   // restricts lat/lng); the other eight publish one that the scraper reads partly (arkaan, alshawaf)
   // or not yet (sakan, abralosol, nofodh, bossbih, aqalemhajer, reinvest) — the border bridges until it does.
   'sakan', 'abralosol', 'nofodh', 'arkaan', 'bossbih', 'ksaaqar', 'mustqr', 'aqalemhajer', 'alshawaf', 'reinvest',
+  // Owner 2026-10-20 («we want more, not 4 — check all not inside the app»): EVERY remaining preview site
+  // whose ads can lack a pin (47 sites, 12,653 pin-less ads measured that day). Sites that open inside the
+  // app (IN_APP_VIEWER_HOSTS) show the source page itself and are not here. The border bridges until a
+  // site's pin is read; a site whose page carries a pin is handled one by one, biggest first.
+  'haraj', 'muktamel', 'ialqarawi', 'aqarcity', 'rightcompound', 'sirdab', 'therc', 'sokok',
+  'raghdan', 'alsaedan', 'goldendeal', 'nufouth', 'akariyoun', 'sukna', 'aldarim', 'aqargate',
+  'shomou', 'abwbna', 'aqaratikom', 'thousand', 'alobid', 'jazwtn', 'aljassim', 'manafe',
+  'opensooq', 'justsa', 'senan', 'bahadhabab', 'erapulse', 'maqam', 'jawher', 'm3tmd',
+  'azure', 'holoul', 'superoffice', 'alhoshan', 'arsh', 'flow', 'nowaisiry', 'hasaad',
+  'almuteb', 'nawafeth', 'wadod', 'october', 'hazim', 'eydah', 'eightfloor',
+  'razre',   // 2026-10-21: refuses framing now, so its ad opens on Ezhalah's page — 94 ads, all with a district, no pin
+  'ibaax',   // 2026-10-22: refuses framing now (SAMEORIGIN), its ad opens on Ezhalah's page — 150 ads, all with a district, no pin
 ];
 /** The place an Aqar ad's own link names, e.g. sa.aqar.fm/شارع-الصليحى-212-الفرعاء-منطقة-عسير-6836489 →
  *  «شارع الصليحى 212 الفرعاء منطقة عسير، السعودية». Only sa.aqar.fm; the trailing ad number is dropped; a

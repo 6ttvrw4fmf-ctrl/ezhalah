@@ -30,12 +30,13 @@ const check = (name: string, ok: boolean) => {
 // Every host here passed a live frame proof (Deal App + Gathern 2026-10-03, the rest 2026-10-16; the
 // proof table is in src/lib/inAppViewer.ts and the PR that added them). A host joins only with one.
 const PROVEN_HOSTS = [
+  'dwelleo.sa',   // re-proven 2026-10-21: no frame headers, 5 live ads framed on 4G in 2.8–4.5 s
   'dealapp.sa', 'gathern.co',
   'sadiq-eltajer.sa', 'rakez.sa', 'tuba.com.sa', 'amlakalahsa.com', 'listings.satel.sa',
   'snam.sa', 'alqasem.com.sa', 'moftah-aleaqar.com', 'safera.inblaj.net', 'tawia.sa', 'daryusuf.com',
   'hajerhouses.com', 'wslnaa.com', 'alrifai.com.sa', 'shmoua-alshmal.com', 'alkhaas.net',
   'ramzalqasim.com', 'alajlan-re.com', 'alta.com.sa', 'ebriza.com.sa', 'expattrustedhousingriyadh.com',
-  'daraa.sa', 'razre.sa', 'shatrirealestate.com', 'azdadalaqaria.com',
+  'daraa.sa', 'shatrirealestate.com', 'azdadalaqaria.com',
   'aqaralriyadh.com', 'fkralemar.com', 'fahadalshahri.com', 'eastabha.sa', 'suwar.sa', 'sqcc.sa',
   'aalbarrak.com', 'abeea.com.sa', 'wajaf.sa', 'alsidra.com.sa', 'squares.com.sa',
   'muajarh.com', 'compoundin.com', 'gomenassat.com', 'almotmkenah.com', 'gudai.inblaj.net',
@@ -44,7 +45,7 @@ const PROVEN_HOSTS = [
   'amaall.com', 'jurash.sa', 'awaalun.com', 'ego-aqar.com', 'rawaf.ai', 'rawasi-dark.com',
   'mobasher.sa', 'villas-sa.com', 'vm-ksa.com', 'eaqartabuk.com', '24.com.sa', 'livingcompound.com',
   'wahadat.sa', 'dallali.com', 'remalre.com', 'safainv.sa', 'remax.sa',
-  'ibaax.sa', 'qmra.sa',
+  'qmra.sa', // ibaax.sa left 2026-10-22: it now refuses framing (SAMEORIGIN); it opens on Ezhalah's ad page
   'aqaralmuhaysini.com', // 9.96 s on the runner; owner keeps it on (2026-10-17)
   'albukaeri.sa', 'tamyaz-sa.com', 'ashab.sa', 'macsaib.sa', 'sanadak.sa', 'masaraqarat.com', // 0.7–2.7 s, run 39026362475
   'ryadah.com.sa', 'sodasyat.sa', 'app.abaadapp.sa', // 1.6–4.8 s, run 39033523902 (challenge-aware guard)
@@ -238,16 +239,21 @@ check('agent.tsx: every card click goes through openAdTab', /openAdTab\(adPaneRe
 // THE AD OPENS IN THE APP'S LANGUAGE (owner 2026-10-03).
 const D = 'https://dealapp.sa/ar/ad-details/541315', DE = 'https://dealapp.sa/en/ad-details/541315';
 const G1 = 'https://gathern.co/view/193264/unit/270328', GE = 'https://gathern.co/en/view/193264/unit/270328';
+// 2026-10-20 (🔧, backlog 768): the stored unprefixed /view/ path sends ~2.5% of LIVE units to gathern.co/ar?error=500
+// on a phone, while /ar/view/ opens every one of them — so the Arabic app opens /ar/…, never the bare path.
+const GA = 'https://gathern.co/ar/view/193264/unit/270328';
 const localeFails = (f: (u: string, l: string) => string | undefined): string[] => {
   const bad: string[] = [];
   const eq = (got: unknown, want: unknown, what: string) => { if (got !== want) bad.push(`${what} (got ${String(got)})`); };
   eq(f(D, 'ar'), D, 'Arabic app keeps a Deal App /ar/ ad');
   eq(f(DE, 'ar'), D, 'Arabic app turns a /en/ Deal App ad into /ar/');
   eq(f(D, 'en'), DE, 'English app turns a Deal App /ar/ ad into /en/');
-  eq(f(G1, 'ar'), G1, 'Arabic app keeps the unprefixed (Arabic) Gathern ad');
-  eq(f(GE, 'ar'), G1, 'Arabic app strips /en from a Gathern ad');
+  eq(f(G1, 'ar'), GA, 'Arabic app opens a stored (unprefixed) Gathern ad at /ar/ — the bare path redirects live units to ?error=500');
+  eq(f(GE, 'ar'), GA, 'Arabic app turns a Gathern /en/ ad into /ar/');
+  eq(f(GA, 'ar'), GA, 'Arabic app does not double the /ar');
   eq(f(G1, 'en'), GE, 'English app adds /en to a Gathern ad');
   eq(f(GE, 'en'), GE, 'English app does not double the /en');
+  eq(f(GA, 'en'), GE, 'English app turns a Gathern /ar/ ad into /en/');
   // 2026-10-16: the same /ar ↔ /en first-segment rule, proven on real ads of each site.
   for (const [ar, en] of [
     ['https://rakez.sa/ar/project/59340/', 'https://rakez.sa/en/project/59340/'],
@@ -293,6 +299,33 @@ const mustCatch = (label: string, caught: boolean) => {
 // A decision that lets EVERY host in (the "forgot the allowlist" mutant).
 const letsEveryoneIn = (url: string | null | undefined) => { try { return new URL(url ?? '').hostname; } catch { return null; } };
 mustCatch('a decision that opens every site in-app', letsEveryoneIn('https://sa.aqar.fm/x') !== null);
+
+// THE LIVE GUARD TELLS A BLOCKED ROBOT FROM A BLANK FRAME (🔧 2026-10-20, backlog 741). razre.sa answered HTTP 403 (no
+// cf-* header) / NO CONTENT to every datacenter egress and 200 to a phone, and e2e/viewer/speed-live.mjs read it ✗ on
+// every run for two days — a guard red on its own egress hides a real slow site. The guard must record each ad's
+// top-level status and exclude a blank frame whose top-level load answered 4xx/5xx (or nothing) as inconclusive,
+// exactly as it already excludes 429 and the challenge page; a 200 page that stays blank must still be measured.
+const guardSrc = readFileSync(new URL('../e2e/viewer/speed-live.mjs', import.meta.url), 'utf8');
+const guardTellsBlockedFromBlank = (src: string) =>
+  /topStatus\.set\(u, res \? res\.status : 0\)/.test(src)
+  && /seen === null && \(top === 0 \|\| top >= 400\)/.test(src)
+  && /excluded as inconclusive/.test(src)
+  && /times\.push\(seen \?\? 99_999\)/.test(src);
+check('speed-live.mjs excludes a blank frame over a 4xx/5xx top-level load as inconclusive (never ✗)', guardTellsBlockedFromBlank(guardSrc));
+mustCatch('a guard that drops the top-level status check', !guardTellsBlockedFromBlank(guardSrc.replace('seen === null && (top === 0 || top >= 400)', 'false')));
+mustCatch('a guard that stops measuring a blank 200 page', !guardTellsBlockedFromBlank(guardSrc.replace('times.push(seen ?? 99_999)', 'if (seen !== null) times.push(seen)')));
+
+// AN ERROR PAGE'S HEADERS ARE NOT THE AD'S (🔧 2026-10-23). ibaax.sa answered HTTP 521 to the runner (run 39940456792)
+// and Cloudflare's 521 page carries X-Frame-Options: SAMEORIGIN, so step 1 read «REFUSES framing» ×3 on the very loads
+// step 2 excluded as inconclusive. The header check must run only on a 2xx/3xx answer: a 4xx/5xx or no answer is
+// skipped, said aloud, and left to the step-2 exclusion.
+const guardSkipsHeadersOnErrorPage = (src: string) =>
+  /if \(!res \|\| res\.status >= 400\) \{[^\n]*header check skipped[^\n]*continue; \}/.test(src)
+  && src.indexOf('if (!res || res.status >= 400)') < src.indexOf("res?.headers.get('x-frame-options')");
+check('speed-live.mjs skips the framing-header check on a 4xx/5xx (or absent) top-level answer', guardSkipsHeadersOnErrorPage(guardSrc));
+mustCatch('a guard that reads X-Frame-Options off an error page', !guardSkipsHeadersOnErrorPage(guardSrc.replace('if (!res || res.status >= 400)', 'if (false)')));
+mustCatch('a guard that checks the headers before it looks at the status', !guardSkipsHeadersOnErrorPage(
+  guardSrc.replace("const xfo = res?.headers.get('x-frame-options') ?? '';", '').replace("const topStatus = new Map();", "const xfo0 = res?.headers.get('x-frame-options') ?? ''; const topStatus = new Map();")));
 // A suffix match without the dot boundary (the lookalike mutant).
 const sloppySuffix = (url: string) => IN_APP_VIEWER_HOSTS.find((h) => new URL(url).hostname.endsWith(h)) ?? null;
 mustCatch('a host match without the dot boundary', sloppySuffix('https://notdealapp.sa/x') !== null);
@@ -325,6 +358,7 @@ mustCatch('a loading page with no slow-page way out', !frameNeverCoveredOrRemove
 mustCatch('a «+» tab coming back', /ad-tab-new/.test(viewer + 'testID="ad-tab-new"'));
 mustCatch('an ad language that ignores the app language', localeFails((u) => u).length > 0);
 mustCatch('an English app that doubles Gathern /en', localeFails((u, l) => (l === 'en' && u.includes('gathern.co') ? u.replace('gathern.co', 'gathern.co/en') : localizeAdUrl(u, l))).length > 0);
+mustCatch('an Arabic app that opens Gathern\'s bare /view/ path (the one that redirects to ?error=500)', localeFails((u, l) => (l === 'ar' && u.includes('gathern.co') ? localizeAdUrl(u, l)!.replace('/ar/view/', '/view/') : localizeAdUrl(u, l))).length > 0);
 mustCatch('an Arabic app that leaves Deal App on /en', localeFails((u, l) => localizeAdUrl(u, 'en')).length > 0);
 // A first-segment rule that forgets the 2026-10-16 sites (Rakez stays /ar in an English app).
 mustCatch('an English app that leaves Rakez on /ar', localeFails((u, l) => (u.includes('rakez.sa') ? u : localizeAdUrl(u, l))).length > 0);
@@ -439,7 +473,7 @@ mustCatch('same host added to both lists', !disjoint([...IN_APP_PREVIEW_HOSTS, '
 mustCatch('preview is a framed subdomain', !disjoint([...IN_APP_PREVIEW_HOSTS, 'sub.gathern.co'], IN_APP_VIEWER_HOSTS));
 
 const previewRoute = (src: string) => {
-  const route = windowBetween(codeOnly(src), 'const openAd =', 'pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? \'\' });', 'agent.tsx');
+  const route = windowBetween(codeOnly(src), 'const openAd =', 'pushAdTab({ source: l.source, id: l.id, title: tabTitle(l), url: url ?? \'\' });', 'agent.tsx');
   return /if \(IS_WEB && inAppPreviewHost\(url\)\) \{\s*pushAdTab\(\{[^}]*listing: l\s*\}\);\s*return;\s*\}\s*if \(!\(IS_WEB && inAppViewerHost\(url\)\)\) \{ void openListing\(l\); return; \}/.test(route);
 };
 check('preview precedes external fallback and carries the card Listing', previewRoute(agent));
@@ -472,11 +506,11 @@ const previewPrice = (src: string) => {
 };
 // window.open with 'noopener' always returns null, so the page opens plainly and severs the opener by
 // hand — that is what lets a blocked tab be told apart from an opened one (and never navigates us away).
-const previewContact = (src: string) => /const open = \(href: string = url\): boolean => \{[^}]*const w = window\.open\(href, '_blank'\);\s*if \(w\) w\.opener = null;/.test(codeOnly(src)) && !/window\.location/.test(codeOnly(src));
+const previewContact = (src: string) => /const open = \(href: string = url\): boolean => \{[^}]*const w = window\.open\((?:href|safe), '_blank'\);\s*if \(w\) w\.opener = null;/.test(codeOnly(src)) && !/window\.location/.test(codeOnly(src));
 const previewPhotos = (src: string) => {
   const code = codeOnly(src);
   return /l\.photos\?\.length \? l\.photos : \[l\.photo\]/.test(code)
-    && /priority="high" loading="eager"/.test(code) && /priority="low" loading="lazy"/.test(code);
+    && /eager=\{i === main\}/.test(code) && /priority=\{eager \? 'high' : 'low'\} loading=\{eager \? 'eager' : 'lazy'\}/.test(code);
 };
 check('preview price only uses the shared price contract', previewPrice(preview));
 check('contact opens the original URL in a new tab with the opener severed, never by navigating this tab', previewContact(preview));
@@ -484,7 +518,7 @@ check('source-ordered gallery prioritizes the shown photo and lazy-loads the res
 mustCatch('preview formats its own price', !previewPrice(preview.replace('listingPrice(l, locale)', 'l.price')));
 mustCatch('contact drops opener protection', !previewContact(preview.replace('if (w) w.opener = null;', '')));
 mustCatch('a blocked tab navigates Ezhalah away', !previewContact(preview.replace("if (!open()) blockedOnce.current = true;\n      busy.current = false;", "if (!open()) window.location.assign(url);\n      busy.current = false;")));
-mustCatch('90 photos load eagerly', !previewPhotos(preview.replaceAll('loading="lazy"', 'loading="eager"')));
+mustCatch('90 photos load eagerly', !previewPhotos(preview.replace("loading={eager ? 'eager' : 'lazy'}", 'loading="eager"')));
 
 
 // Execute the actual facts block (the key line's stats + the details rows) against real-world raw-field
@@ -524,14 +558,15 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
     'react-native': { Platform: { OS: 'web' }, Pressable: 'Pressable', ScrollView: 'ScrollView', Text: 'Text', View: 'View', StyleSheet: { create: (x: unknown) => x } },
     'expo-image': { Image: 'Image' }, '@expo/vector-icons/Ionicons': { default: 'Ionicons' },
     '@/theme/tokens': { colors: {}, radius: {}, font: { family: {} }, lightColors: {} }, '@/theme/palette': { TAP44: {}, BUZZER_GOLD: {} },
-    '@/i18n': { useI18n: () => ({ locale, isRTL: locale === 'ar', t: (key: string, vars?: Record<string, string | number>) => translate(locale, key, vars) }) },
-    '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price' },
+    '@/i18n': { useI18n: () => ({ locale, isRTL: locale === 'ar', t: (key: string, vars?: Record<string, string | number>) => translate(locale, key, vars) }), englishCatalogText: (x: string) => x },
+    '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price', monthlyLineText: () => null },
     '@/lib/arabicText': arabicText,
-    '@/lib/translitPlace': { translitPlace: (x: string) => x }, '@/lib/afEvidence': { DIRECTION_LABEL: {} },
+    '@/lib/translitPlace': { translitPlace: (x: string) => x }, '@/lib/freeTextEn': { freeTextEn: (x: string) => x }, '@/lib/afEvidence': { DIRECTION_LABEL: {} },
     '@/lib/useAtLeast': { useAtLeast: () => false }, '@/lib/responsive': { PICKER_SHEET_BREAKPOINT: 768 }, '@/lib/useReducedMotion': { useReducedMotion: () => true },
-    '@/components/ResultCard': { SourceBadge: 'SourceBadge', FEATURE_META: [], arAttrValue: (_l: string, v: string) => v },
+    '@/components/ResultCard': { SourceBadge: 'SourceBadge', FEATURE_META: [], arAttrValue: (_l: string, v: string) => v, isBlankAttrValue: () => false },
     '@/data/adPageData': { fetchAdPage: () => Promise.resolve({ geo: null, row: null }), fetchAskingPrices: () => Promise.resolve(null), fetchGroupPrices: () => Promise.resolve(null), fetchMojSales: () => Promise.resolve(null), fetchSameAd: () => Promise.resolve([]), dearerSplit: () => null, pricesBlockEligible: () => false, typePluralAr: (x: string) => x, typeWordAr: (_n: number, x: string) => x, mapEmbedUrl: () => '' },
     '@/lib/openListing': { listingOpenUrl: () => '' },
+    '@/lib/safeUrl': { safeHttpUrl: (u: string) => u },
   };
   const exports: Record<string, any> = {};
   new Function('require', 'exports', output)((name: string) => {
@@ -540,8 +575,11 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
   }, exports);
   return exports.default({ listing: { source, photos, photo: null, city: 'Riyadh', district: '', type: 'Apartment', area: 0, beds: 0 }, url: 'https://example.com/ad/1', ...extra }) as Node;
 };
+// A function-type node is a small component (e.g. PhotoSlide): render it like React would, so what it
+// draws (the Image) is counted, not hidden behind its wrapper.
 const nodes = (root: any): Node[] => !root || typeof root !== 'object' ? [] : Array.isArray(root)
-  ? root.flatMap(nodes) : [root, ...nodes(root.props?.children)];
+  ? root.flatMap(nodes) : typeof root.type === 'function' ? nodes(root.type(root.props))
+  : [root, ...nodes(root.props?.children)];
 const textOf = (root: any): string => root == null || root === false ? '' : typeof root !== 'object'
   ? String(root) : Array.isArray(root) ? root.map(textOf).join('') : textOf(root.props?.children);
 // The places the page names the site — the top-bar pill and the button to the real ad — all use the
