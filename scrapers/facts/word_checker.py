@@ -324,6 +324,31 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "main_road": ["re:(?:علي|ع) (?:ال)?(?:طريق|خط|دائري)(?!\\w)", "re:طريق (?:ال)?(?:ملك|امير)(?!\\w)", "re:شارع (?:رئيسي|تجاري|عام)",
                   "re:شارعين تجاريين", "main road", "main street"],
     "good_soil": ["re:صالحه للزراعه", "re:تربه (?:خصبه|صالحه)", "re:ارض خصبه", "fertile"],
+    # ── GROUP B — residential land (owner handoff 2026-11-01) ──
+    "three_streets": ["re:(?:ثلاث|ثلاثه|3) شوارع", "three streets"],
+    # a bare «جاهزة» is any unit («جاهزة للسكن», «جاهزة للإفراغ») — only the land's own readiness
+    "ready_to_build": ["re:جاهزه للبناء", "^مستويه$", "re:منسوب جاهز", "re:(?:ارض|الارض|قطعه|القطعه) جاهزه", "ready to build"],
+    "raised_plot": ["re:(?:ارض|الارض|قطعه|القطعه) مرتفعه", "re:منسوب(?:ها)? مرتفع", "^مرتفعه$", "elevated plot"],
+    "residential_commercial": ["re:سكني(?:ه)? و?تجاري(?:ه)?", "re:تجاري(?:ه)? و?سكني(?:ه)?", "residential commercial"],
+    "all_services": ["re:(?:جميع|كامل|كافه|كل) (?:ال)?خدمات", "^مخدومه", "^مخدوم$", "re:(?:ال)?خدمات (?:متوفره|متوفر|واصله|مكتمله)",
+                     "re:(?:متوفر|متوفره|مكتمل|مكتمله) (?:بها |فيها )?(?:جميع |كل |كافه )?(?:ال)?خدمات", "all services"],
+    "asphalt": ["^مسفلت", "^مسفلته", "^سفلته", "^اسفلت", "asphalt", "paved"],
+    "street_lights": ["re:اناره (?:ال)?شوارع", "re:اناره (?:ال)?شارع", "^ارصفه", "^رصيف$", "re:اناره و ?ارصفه", "street lights", "pavements"],
+    # a bare «معتمد» is also an office / agent («مكتب معتمد») — excluded below
+    "approved_plan": ["re:مخطط (?:معتمد|رسمي)", "^معتمد$", "^معتمده$", "approved plan"],
+    # «تفويض من المالك» is an agent's authorisation — excluded below
+    "direct_owner": ["re:من (?:ال)?مالك(?: مباشره)?", "re:(?:ال)?مالك مباشره", "re:بدون (?:عموله|وسيط|وسطاء|سعي)", "direct from owner",
+                     "no commission"],
+    "inside_project": ["re:(?:داخل|ضمن) (?:ال)?(?:مخطط|مشروع)", "inside project"],
+    # what MAY be built (the permit guard's own words): the span carries them, so the guard reads nothing before it
+    "floors_allowed": ["re:عدد (?:ال)?ادوار (?:ال)?مسموح", "re:نظام (?:ال)?بناء", "re:نسبه (?:ال)?بناء", "^ارتداد", "^ارتدادات",
+                       "re:(?:مسموح|يسمح) (?:ب|بال)?(?:بناء )?(?:\d+ )?(?:ادوار|دورين|دور|طوابق)", "floors allowed"],
+    "grant_land": ["^منحه$", "re:ارض منحه", "re:منحه ملكيه", "grant land"],
+    # the VALUE of a services field, never across the next label: aqar's «لا يوجد خدمات العقار: كهرباء, مياه» HAS services
+    "no_services": ["re:(?:ارض|الارض|قطعه) خام", "^خام$", "re:(?:بدون|لا يوجد|لا توجد|لايوجد|لاتوجد|من غير) خدمات(?! (?:ال)?(?:عقار|ارض|قطعه))",
+                    "re:(?:ال)?خدمات(?: (?:ال)?(?:عقار|ارض|قطعه))? (?:لا يوجد|لا توجد|لايوجد|لاتوجد|غير متوفره|غير متوفر|غير موجوده)",
+                    "re:(?:بدون|لا يوجد|لا توجد|لايوجد|لاتوجد|من غير) (?:كهرباء|كهربا|كهربه|ماء|مياه|مويه)", "re:غير مخدومه", "no services",
+                    "raw land"],
 }
 for _k, _src in _INHERITED.items():
     FACT_TOKENS[_k] = list(N._AMENITY_TOKENS[_src]) + FACT_TOKENS[_k]
@@ -364,7 +389,7 @@ _PARTIAL_BEFORE = tuple(_n(w) for w in N._PARTIAL_BEFORE)
 
 # Negators that TOUCH the token. One word («غير», «بدون») or two («لا يوجد», «لا نقبل»).
 _NEG1 = frozenset(_n(w) for w in ("غير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "no", "without", "not",
-                                   "non"))
+                                   "non", "ليس", "ليست"))      # «ليست منحة» (owner handoff 2026-11-01)
 _NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتوفر", "لا تتوفر", "ما فيه", "ما في", "لا يشمل",
                                    "لا تشمل", "عدم وجود", "لا نقبل", "لا يقبل", "من غير", "ما يوجد", "is not"))
 # …and AFTER it: «مطبخ غير راكب», «مفروشة: لا», «الضمانات ومدتها: لا يوجد», «المطابخ: 0».
@@ -433,6 +458,13 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "dunes_view": (("حي", "شارع", "طريق", "مخطط", "مجمع"), ()),                           # «حي الرمال», «حي النفود»
     "horses_stable": (("حي", "شارع", "طريق", "مخطط"), ()),
     "main_road": ((), ("الصحيح", "صحيح")),
+    # ── group B (owner handoff 2026-11-01) ──
+    "raised_plot": (("سعر", "اسعار", "قيمه", "ايجار", "اسقف", "سقف", "ارتفاع", "نسبه", "طلب"), ()),   # a high price / ceiling
+    "all_services": ((), ("قريبه", "قريب", "بالقرب", "المجاوره", "مجاوره", "حولها", "حوله")),       # «جميع الخدمات قريبة»
+    "street_lights": ((), ("تحميل", "للتحميل", "تنزيل")),                                        # «رصيف تحميل» is a dock
+    "approved_plan": (("مكتب", "مسوق", "وسيط", "مقاول", "مهندس", "مقيم", "مثمن", "وكيل"), ()),
+    "direct_owner": (("تفويض", "توكيل", "وكاله", "بتفويض", "مفوض", "مفوضين", "وكيل", "موكل"), ()),
+    "no_services": (("مواد", "بترول", "نفط"), ()),                                                # «مواد خام»
 }
 # Facts that only count with a context word near them (or as a bare list item) — «واصل كهرباء»,
 # «خدمات العقار: كهرباء، مياه»; never a bare «مياه» inside a sentence (it is a bathroom, a well, a sea …).
@@ -1365,6 +1397,61 @@ def selftest() -> None:
         ("تربة خصبة", {"good_soil": True}, ()),
         ("غير صالحه للزراعة", {"good_soil": False}, ()),
         ("أرض زاوية", {"corner_plot": True}, ()),
+        # ── GROUP B (owner handoff 2026-11-01): residential land ──
+        ("أرض على ثلاث شوارع", {"three_streets": True, "corner_plot": True}, ()),
+        ("3 شوارع", {"three_streets": True}, ()),
+        ("على شارعين", {"corner_plot": True}, ("three_streets",)),
+        ("أرض جاهزة للبناء", {"ready_to_build": True}, ()),
+        ("مستوية ومنسوب جاهز", {"ready_to_build": True}, ()),
+        ("شقة جاهزة للسكن", {}, ("ready_to_build",)),
+        ("غير جاهزه للبناء", {"ready_to_build": False}, ()),
+        ("أرض مرتفعة", {"raised_plot": True}, ()),
+        ("منسوب مرتفع عن الشارع", {"raised_plot": True}, ()),
+        ("أسقف مرتفعة", {}, ("raised_plot",)),
+        ("سعر مرتفع", {}, ("raised_plot",)),
+        ("أرض سكني تجاري", {"residential_commercial": True}, ()),
+        ("سكنية تجارية", {"residential_commercial": True}, ()),
+        ("أرض سكنية", {}, ("residential_commercial",)),
+        ("جميع الخدمات متوفرة", {"all_services": True}, ()),
+        ("أرض مخدومة", {"all_services": True}, ()),
+        ("كامل الخدمات", {"all_services": True}, ()),
+        ("جميع الخدمات قريبة", {}, ("all_services",)),
+        ("غير مخدومة", {"all_services": False, "no_services": True}, ()),
+        ("شوارع مسفلتة", {"asphalt": True}, ()),
+        ("سفلتة وإنارة وأرصفة", {"asphalt": True, "street_lights": True, "lighting": True}, ()),
+        ("بدون سفلتة", {"asphalt": False}, ()),
+        ("إنارة الشوارع", {"street_lights": True}, ()),
+        ("رصيف وانارة", {"street_lights": True}, ()),
+        ("رصيف تحميل", {}, ("street_lights",)),
+        ("مخطط معتمد", {"approved_plan": True}, ()),
+        ("مخطط رسمي معتمد", {"approved_plan": True}, ()),
+        ("مكتب معتمد", {}, ("approved_plan",)),
+        ("البيع من المالك مباشرة", {"direct_owner": True}, ()),
+        ("بدون عمولة", {"direct_owner": True}, ()),
+        ("بدون وسيط", {"direct_owner": True}, ()),
+        ("تفويض من المالك", {}, ("direct_owner",)),
+        ("بدون عمولة ومطبخ راكب", {"direct_owner": True, "kitchen": True}, ()),
+        ("داخل مخطط", {"inside_project": True}, ()),
+        ("ضمن مشروع", {"inside_project": True}, ()),
+        ("خارج المخطط", {}, ("inside_project",)),
+        ("نظام البناء: سكني 3 ادوار", {"floors_allowed": True}, ("floors",)),
+        ("مسموح 4 أدوار", {"floors_allowed": True}, ("floors",)),
+        ("نسبة البناء 60%", {"floors_allowed": True}, ()),
+        ("ارتداد 3 متر", {"floors_allowed": True}, ()),
+        ("عمارة 3 أدوار", {"floors": 3.0}, ("floors_allowed",)),
+        ("أرض منحة", {"grant_land": True}, ()),
+        ("منحة ملكية", {"grant_land": True}, ()),
+        ("ليست منحه", {"grant_land": False}, ()),
+        ("أرض خام", {"no_services": True}, ()),
+        ("بدون خدمات", {"no_services": True}, ()),
+        ("الخدمات: لا يوجد", {"no_services": True}, ()),
+        ("خدمات العقار: لا يوجد", {"no_services": True}, ()),
+        ("بدون كهرباء", {"no_services": True, "electricity": False}, ()),
+        ("لا يوجد كهرباء", {"no_services": True, "electricity": False}, ()),
+        ("بدون مياه", {"no_services": True}, ()),
+        ("استخدامات العقار: لا يوجد خدمات العقار: كهرباء, مياه", {"electricity": True, "water_supply": True}, ("no_services",)),
+        ("مواد خام", {}, ("no_services",)),
+        ("جميع الخدمات", {"all_services": True}, ("no_services",)),
         ("عدد الشقق 12", {"apartments_count": 12.0}, ()),
         ("عمارة فيها محلين", {"shops_count": 2.0}, ()),
     ]

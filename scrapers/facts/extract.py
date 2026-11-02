@@ -113,7 +113,10 @@ NEW_BOOL = ("majlis", "roof", "warranty", "water_tank", "well", "annex", "two_en
             "women_section", "two_sections", "events_hall", "privacy_screen", "trees", "for_families", "for_youth", "for_events",
             "for_newlyweds", "quad_bikes", "horses_stable", "camels", "toilets_on_site", "lighting", "artesian_well",
             "solar_power", "palms", "fruit_trees", "fodder_crops", "greenhouses", "producing_farm", "animal_pens", "poultry",
-            "farm_house", "farm_rest_house", "workers_housing", "fence", "main_road", "good_soil")
+            "farm_house", "farm_rest_house", "workers_housing", "fence", "main_road", "good_soil",
+            # GROUP B — residential land (owner handoff 2026-11-01)
+            "three_streets", "ready_to_build", "raised_plot", "residential_commercial", "all_services", "asphalt",
+            "street_lights", "approved_plan", "direct_owner", "inside_project", "floors_allowed", "grant_land", "no_services")
 BOOL_FACTS = frozenset(EXISTING_BOOL + NEW_BOOL)
 NUM_FACTS = frozenset(("street_width_m", "floors", "apartments_count", "shops_count", "property_age_years"))
 TEXT_FACTS = frozenset(("boundaries",))
