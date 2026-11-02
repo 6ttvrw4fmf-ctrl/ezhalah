@@ -37,6 +37,7 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
   const [hits, setHits] = useState<PlaceSuggestion[]>([]);
   const [focused, setFocused] = useState(false);
   const seq = useRef(0);
+  const inputRef = useRef<TextInput>(null);
   useEffect(() => { setQ(value); }, [value]);
   useEffect(() => {
     const id = ++seq.current;
@@ -44,13 +45,16 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
     const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r); }); }, 220);
     return () => clearTimeout(h);
   }, [q, locale, value]);
-  const pick = (p: PlaceSuggestion) => { setQ(p.name ?? p.displayLines[0]); setHits([]); setFocused(false); onPick(p); };
+  // THE KEYBOARD CLOSES ON A PICK (owner 2026-11-02, phone: «doesn't look nice on a phone» — the keyboard stayed up
+  // over a squeezed map). Blurring the field is what dismisses iOS's keyboard; the state flag alone does not.
+  const pick = (p: PlaceSuggestion) => { setQ(p.name ?? p.displayLines[0]); setHits([]); setFocused(false); inputRef.current?.blur(); onPick(p); };
   const open = focused && hits.length > 0;
   return (
     <View style={s.searchWrap}>
       <View style={s.search}>
         {dot ? <View style={[s.dot, { backgroundColor: dot }]} /> : <Ionicons name="search" size={16} color={colors.muted} />}
         <TextInput
+          ref={inputRef}
           style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
           value={q}
           onChangeText={setQ}
