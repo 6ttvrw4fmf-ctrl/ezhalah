@@ -1688,6 +1688,7 @@ const AR: Record<string, string> = {
   'Similar listings in the district': 'إعلانات مشابهة في الحي',
   '{n} listings': '{n} إعلاناً',
   '{n} listings at this spot': '{n} إعلانات في هذا الموقع',
+  '{n} listings inside the boundary': '{n} إعلان داخل الحدود',
   'Show listings': 'عرض الإعلانات',
   'Show {n} listings': 'عرض {n} إعلان',
   'SAR': 'ر.س',
