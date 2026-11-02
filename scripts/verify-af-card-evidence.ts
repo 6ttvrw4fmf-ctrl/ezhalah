@@ -177,6 +177,10 @@ const HAND: Record<string, { row: AfCanon; text: string; not: AfCanon }> = {
   'street_width:20': { row: { street_width_m: 25 }, text: 'عرض الشارع 25 م', not: { street_width_m: 15 } },
   'street_width:25': { row: { street_width_m: 25 }, text: 'عرض الشارع 25 م', not: { street_width_m: 20 } },
   'street_width:30': { row: { street_width_m: 40 }, text: 'عرض الشارع 40 م', not: { street_width_m: 29 } },
+  // the plots / retail ladders (owner 2026-11-01, counts since 20261102101415): the same STRICT >= rule
+  'street_width:10': { row: { street_width_m: 12 }, text: 'عرض الشارع 12 م', not: { street_width_m: 8 } },
+  'street_width:40': { row: { street_width_m: 45 }, text: 'عرض الشارع 45 م', not: { street_width_m: 36 } },
+  'street_width:60': { row: { street_width_m: 60 }, text: 'عرض الشارع 60 م', not: { street_width_m: 50 } },
   'property_age:new': { row: { property_age: 0 }, text: 'جديد', not: { property_age: 3 } },
   'property_age:1_2': { row: { property_age: 2 }, text: 'عمر سنتين', not: { property_age: 5 } },
   'property_age:3_5': { row: { property_age: 4 }, text: 'عمر 4 سنوات', not: { property_age: 6 } },
