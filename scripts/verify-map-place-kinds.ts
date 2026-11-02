@@ -67,6 +67,13 @@ const redSea = [
 ];
 const d = dedupePlaces(redSea);
 check('dedupe: Red Sea Mall ×4 → 1, Lego kept', d.length === 2 && d[0].kind === 'mall' && d[1].name.startsWith('Lego'), JSON.stringify(d.map((r) => r.name)));
+const branches = dedupePlaces([
+  { name: 'ستاربكس', subtitle: 'حي العليا، الرياض', locality: 'الرياض', coordinate: { latitude: 24.69, longitude: 46.685 }, kind: 'place' as PlaceKind },
+  { name: 'ستاربكس', subtitle: 'حي الجنادرية، الرياض', locality: 'الرياض', coordinate: { latitude: 24.83, longitude: 46.86 }, kind: 'place' as PlaceKind },
+  { name: 'ستاربكس', subtitle: 'حي العليا، الرياض', locality: 'الرياض', coordinate: { latitude: 24.6905, longitude: 46.6852 }, kind: 'place' as PlaceKind },
+]);
+check('dedupe: a chain\'s branches in different districts of one town all stay; the one 60 m away folds', branches.length === 2, JSON.stringify(branches.map((r) => r.subtitle)));
+mustCatch('a dedupe that folds a chain\'s branches across a town', dedupePlaces([{ name: 'c', locality: 't', kind: 'place' as PlaceKind, subtitle: 'a' }, { name: 'c', locality: 't', kind: 'place' as PlaceKind, subtitle: 'b' }]).length === 2);
 check('dedupe: two cities sharing a name far apart both stay', dedupePlaces([
   { name: 'الرياض', subtitle: 'منطقة الرياض', coordinate: { latitude: 24.7, longitude: 46.68 } },
   { name: 'الرياض', subtitle: 'الخرج', coordinate: { latitude: 24.52, longitude: 47.21 } },
