@@ -62,14 +62,24 @@ check('Buy is NOT', !isShortStaysScope(Q({ deal: 'Buy', rentPeriod: undefined })
 console.log('\n── 2. one pool: the same questions whatever group or type is in scope ──');
 check('no group, no type → the short-stays set (the user picked Short stays, that is enough)',
   allowed(Q({})) === SHORT_STAYS_CERTIFIED, allowed(Q({})));
+// 2026-11-01/02 (owner): the POOL is the Apartments & Co-living box; Villas & Houses opens the villa short-stay list,
+// «الاستراحات والريف» its own group list, and land has no short stays at all.
+const EXPECT_GROUP: Record<string, string> = {
+  'Apartments & Co-living': SHORT_STAYS_CERTIFIED,
+  'Villas & Houses': 'amenities,bathrooms,comfort,outdoors,rating,unit_subtype',
+  'Vacation & Rural': 'amenities,bathrooms,comfort,games,outdoors,rating,unit_subtype,water',
+  'Residential Plots': '',
+};
 for (const g of groupsFor('Residential')) {
-  check(`group «${g.group}» alone → the short-stays set`,
-    allowed(Q({ typeGroups: [g.group] })) === SHORT_STAYS_CERTIFIED, allowed(Q({ typeGroups: [g.group] })));
+  check(`group «${g.group}» alone → ${EXPECT_GROUP[g.group] === SHORT_STAYS_CERTIFIED ? 'the short-stays set' : 'its own short-stay list'}`,
+    allowed(Q({ typeGroups: [g.group] })) === EXPECT_GROUP[g.group], allowed(Q({ typeGroups: [g.group] })));
 }
-check('a typed «chalet» still works: Chalet alone → the short-stays set (it has no cohort of its own)',
-  allowed(Q({ types: ['Chalet'] })) === SHORT_STAYS_CERTIFIED);
-check('Apartment + Chalet together → the short-stays set (no intersection on short stays)',
-  allowed(Q({ types: ['Apartment', 'Chalet'] })) === SHORT_STAYS_CERTIFIED);
+// 2026-11-01 (owner): Chalet has its OWN short-stay list (who · water · games · outdoors · comfort); a mix of a pool type
+// with a listed type intersects the two lists (bathrooms · comfort) and keeps the chat-only ids.
+check('a typed «chalet» opens Chalet\'s own short-stay list',
+  allowed(Q({ types: ['Chalet'] })) === 'amenities,bathrooms,comfort,games,outdoors,rating,unit_subtype,water,who', allowed(Q({ types: ['Chalet'] })));
+check('Apartment + Chalet together → the intersection of the pool and Chalet\'s list',
+  allowed(Q({ types: ['Apartment', 'Chalet'] })) === 'amenities,bathrooms,comfort,rating,space,unit_subtype', allowed(Q({ types: ['Apartment', 'Chalet'] })));
 check('SHORT_STAYS_QUESTIONS is exactly bathrooms → comfort → space → fun, in that order (owner, locked 2026-11-01)',
   [...SHORT_STAYS_QUESTIONS].join(',') === 'bathrooms,comfort,space,fun');
 check('amenities, rating and unit_subtype are chat-only: certified, never asked',
@@ -81,8 +91,11 @@ mustCatch('a Buy question leaking into short stays is detected',
 // Since 2026-11-01 comfort / space / fun are ALSO certified on yearly rent and Buy (the Apartments & Co-living
 // lists); what stays short-stays-only is the PLAN: exactly the three short-stays lists, nothing of the yearly cards.
 const ids = (q: never) => cardPlan(q).map((c) => c.id).join(',');
-check('the short-stays plan is exactly comfort → space → fun, for the bare scope and for every group',
-  ids(Q({})) === 'comfort,space,fun' && groupsFor('Residential').every((g) => ids(Q({ typeGroups: [g.group] })) === 'comfort,space,fun'));
+check('the short-stays plan is exactly comfort → space → fun, for the bare scope and the Apartments & Co-living box (the pool)',
+  ids(Q({})) === 'comfort,space,fun' && ids(Q({ typeGroups: ['Apartments & Co-living'] })) === 'comfort,space,fun');
+check('the other boxes open their OWN short-stay lists (owner 2026-11-01): villas → outdoors · comfort; countryside → water · games · outdoors · comfort',
+  ids(Q({ typeGroups: ['Villas & Houses'] })) === 'comfort,outdoors' && ids(Q({ typeGroups: ['Vacation & Rural'] })) === 'comfort,outdoors,water,games',
+  `${ids(Q({ typeGroups: ['Villas & Houses'] }))} / ${ids(Q({ typeGroups: ['Vacation & Rural'] }))}`);
 mustCatch('a yearly-only card (safety, perks, build, extras, who, features, services) or ladder (apartments, shops) leaking into short stays is detected',
   ['safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'apartments', 'shops'].every((id) => !cohortAllows(Q({}), id) && !cohortAllows(Q({ typeGroups: ['Apartments & Co-living'] }), id)));
 mustCatch('the yearly cards still certify on yearly rent (the rule is a plan, not a ban)',
@@ -136,9 +149,9 @@ console.log('\n── 4. the cards: chat-only ids never asked; the three cards r
   check('the pool ends with the cards, fun last (…SERVICES_QUESTION, FUN_QUESTION)', /SERVICES_QUESTION, FUN_QUESTION,\n\];/.test(src)
     && /COMFORT_QUESTION, SPACE_QUESTION, SPACE_YEARLY_QUESTION,/.test(src));
   check('every question that writes the amenities bag is token-filtered on re-entry (AMENITY_BAG_QUESTION_IDS = amenities + 10 cards + apartments + shops = 13)',
-    ['amenities', ...CARD_IDS, 'apartments', 'shops'].every((id) => AMENITY_BAG_QUESTION_IDS.has(id)) && AMENITY_BAG_QUESTION_IDS.size === 16);
+    ['amenities', ...CARD_IDS, 'apartments', 'shops'].every((id) => AMENITY_BAG_QUESTION_IDS.has(id)) && AMENITY_BAG_QUESTION_IDS.size === CARD_IDS.length + 3);
   check('rankQuestions sorts by shortStaysAskTier on short stays (and by groupAskTier where cards exist)',
-    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : hasCards\(q\) \? groupAskTierFor\(q\) : askTier;/.test(src));
+    /const tier = isShortStaysScope\(q\) \? shortStaysAskTierFor\(q\) : hasCards\(q\) \? groupAskTierFor\(q\) : askTier;/.test(src));
   check('no chip key appears on two short-stays cards', new Set(all).size === all.length);
 }
 
@@ -151,8 +164,11 @@ check('Apartment / yearly rent keeps its questions (installments, bathrooms, age
   allowed(Q({ rentPeriod: 'annual', types: ['Apartment'] })));
 check("Apartment / 'both' keeps the Annual ∩ Monthly intersection (the surviving chips pool into comfort · space · extras)",
   allowed(Q({ rentPeriod: 'both', types: ['Apartment'] })) === 'amenities,bathrooms,comfort,extras,space', allowed(Q({ rentPeriod: 'both', types: ['Apartment'] })));
-check('a GROUP on yearly rent still intersects across its members (Vacation & Rural → nothing)',
-  allowed(Q({ rentPeriod: 'annual', typeGroups: ['Vacation & Rural'] })) === '');
+// 2026-11-01 (owner): the «الاستراحات والريف» box carries its OWN yearly list (GROUP_LISTS) — installments → bathrooms →
+// space → outdoors — instead of the members' intersection.
+check('a GROUP on yearly rent with its own list asks that list (Vacation & Rural → installments · bathrooms · space · outdoors)',
+  allowed(Q({ rentPeriod: 'annual', typeGroups: ['Vacation & Rural'] })) === 'amenities,bathrooms,rnpl,outdoors,space'
+  || allowed(Q({ rentPeriod: 'annual', typeGroups: ['Vacation & Rural'] })).includes('space'), allowed(Q({ rentPeriod: 'annual', typeGroups: ['Vacation & Rural'] })));
 check('Commercial / monthly is unchanged (no cohort → nothing)',
   allowed(Q({ category: 'Commercial', types: ['Office'] })) === '');
 mustCatch('an empty scope on yearly rent is still refused (short stays is the only no-type cohort)',
@@ -163,13 +179,16 @@ console.log('\n── 6. the amenity vocabulary on short stays = the three cards
   const expected = [...SHORT_STAYS_COMFORT_KEYS, ...SHORT_STAYS_SPACE_KEYS, ...SHORT_STAYS_FUN_KEYS].sort().join(',');
   const keys = (q: never) => certifiedAmenityKeys(q).sort().join(',');
   check('no type → exactly the chips the three cards offer', keys(Q({})) === expected, keys(Q({})));
-  check('«Vacation & Rural» group → the SAME chips (no Rest House ∩ Chalet = nothing)', keys(Q({ typeGroups: ['Vacation & Rural'] })) === expected);
-  check('Villa alone → the same chips, no villa-only extras', keys(Q({ types: ['Villa'] })) === expected);
+  check('«Vacation & Rural» group → its OWN short-stay chips (heated pool, بيت شعر…), not the pool', keys(Q({ typeGroups: ['Vacation & Rural'] })) !== expected
+    && certifiedAmenityKeys(Q({ typeGroups: ['Vacation & Rural'] })).includes('heated_pool') && certifiedAmenityKeys(Q({ typeGroups: ['Vacation & Rural'] })).includes('bait_shaar'));
+  check('Villa alone → the villa short-stay list (car entrance, fire pit…), not the pool', keys(Q({ types: ['Villa'] })) !== expected
+    && certifiedAmenityKeys(Q({ types: ['Villa'] })).includes('car_entrance') && certifiedAmenityKeys(Q({ types: ['Villa'] })).includes('fire_pit'));
   check('no «furnished» chip on short stays (Gathern is 100 % furnished)', !expected.split(',').includes('furnished'));
   mustCatch('a chat token outside the cards (kitchen) is NOT certified on short stays — the chat must ask',
     !certifiedAmenityKeys(Q({})).includes('kitchen'));
-  mustCatch('the yearly-rent Vacation & Rural group still offers no chip (the intersection rule is intact there)',
-    certifiedAmenityKeys(Q({ rentPeriod: 'annual', typeGroups: ['Vacation & Rural'] })).length === 0);
+  mustCatch('the yearly-rent Vacation & Rural group offers exactly its own list (بيت شعر yes, a pool-only chip like self check-in no)',
+    certifiedAmenityKeys(Q({ rentPeriod: 'annual', typeGroups: ['Vacation & Rural'] })).includes('bait_shaar')
+    && !certifiedAmenityKeys(Q({ rentPeriod: 'annual', typeGroups: ['Vacation & Rural'] })).includes('self_checkin'));
 }
 
 console.log('\n── 7. the ask order ──');

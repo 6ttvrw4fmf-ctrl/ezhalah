@@ -432,7 +432,23 @@ AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", 
               "nursery", "free_maintenance", "intercom", "fire_system", "ev_charger", "central_vacuum", "insulation",
               "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families",
               # … and the 7 Villas & Houses facts (owner lists 2026-11-01, built 2026-11-02), in the migration's order
-              "women_majlis", "outdoor_kitchen", "outdoor_diwaniya", "waterfall", "well", "irrigation", "sports_court")
+              "women_majlis", "outdoor_kitchen", "outdoor_diwaniya", "waterfall", "well", "irrigation", "sports_court",
+              # … the countryside / land / commercial facts (owner lists 2026-11-01, built 2026-11-02), in the migrations' order
+              "split_payments", "heated_pool", "kids_pool", "water_slide", "sea_view", "football_pitch", "playstation",
+              "inflatable_games", "sound_system", "fire_pit", "bait_shaar", "mandi_pit", "outdoor_seating", "tent",
+              "dunes_view", "women_section", "two_sections", "events_hall", "privacy_screen", "trees", "for_families",
+              "for_youth", "for_events", "for_newlyweds", "quad_bikes", "horses_stable", "camels", "toilets_on_site",
+              "lighting", "artesian_well", "solar_power", "palms", "fruit_trees", "fodder_crops", "greenhouses",
+              "producing_farm", "animal_pens", "poultry", "farm_house", "farm_rest_house", "workers_housing", "fence",
+              "main_road", "good_soil", "corner_plot", "three_streets", "ready_to_build", "raised_plot", "residential_commercial",
+              "all_services", "asphalt", "street_lights", "approved_plan", "direct_owner", "inside_project", "floors_allowed",
+              "grant_land", "no_services", "mezzanine", "pantry", "glass_front", "frontage",
+              "in_mall", "in_tower", "license", "food_allowed", "takeover", "first_tenant", "internet",
+              "civil_defense", "high_ceiling", "hangar", "insulated_panel", "cold_storage", "concrete_floor", "loading_dock",
+              "big_gate", "truck_access", "crane", "racks", "office_inside", "heavy_power", "industrial_area",
+              "car_service", "meeting_room", "reception", "coworking", "private_office", "central_ac", "shops_inside",
+              "offices_inside", "apartments_inside", "staff_housing_inside", "restaurant_cafe", "car_wash", "market", "earning_income",
+              "stars_mentioned", "rooms_suites", "oil_change", "pumps", "mosque", "building_rules")
 # The NUMERIC index columns an ad's text may fill — public.text_facts_af_num_columns(), same order. Rule B for
 # numbers (owner 2026-10-25, handoff decision #1): the number fills a BLANK box only, the site's own number is never
 # replaced. The DB CHECK admits a JSON number 4..150 with its quote; the checker already refuses a corner plot,

@@ -22,6 +22,7 @@
 //   - the client never sends an empty array for p_directions, which fails CLOSED (documented at
 //     docs/AF_COHORT_LEDGER.md:138) and would hand the user an honest-looking but wrong empty page.
 
+import { AMENITY_BAG_QUESTION_IDS } from '../src/lib/afCohorts.ts';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './lib/stripComments.ts';
@@ -212,11 +213,17 @@ const mustCatch = (label: string, caught: boolean) => {
   const rec = recorder();
   const cells = await buildMatrix(L, { guided: rec.row, age: rec.row });
   const chipKeys = [...new Set(cells.flatMap((c) =>
-    c.fields.filter((f) => f.question.id === 'amenities').flatMap((f) => f.options.map((o) => o.key))))]
+    // the generic amenities question is not asked where the themed cards exist (every type since 2026-11-02), so the
+    // real chips are the CARD options too (AMENITY_BAG_QUESTION_IDS) — else this proof picks nothing and goes vacuous
+    c.fields.filter((f) => f.question.id === 'amenities' || AMENITY_BAG_QUESTION_IDS.has(f.question.id)).flatMap((f) => f.options.map((o) => o.key))))]
     .filter((k) => k !== 'furnished');
   const target = chipKeys[0];
+  // A migration either writes its sweep rows as literals, or (since 2026-11-01, the group migrations) declares its
+  // tokens in a temp table — `(n,'token','bool'|'derived', …)` — and format()s the rows from it; both are coverage.
+  const TOKEN_ROW = (t: string) => new RegExp(`\\(\\d+,\\s*'${t}',\\s*'(?:bool|derived)'`, 'g');
   const sweptTokensOf = (s: string) =>
-    new Set([...s.matchAll(/p_amenities:=array\[''([a-z_]+)''\]/g)].map((m) => m[1]));
+    new Set([...s.matchAll(/p_amenities:=array\[''([a-z_]+)''\]/g)].map((m) => m[1])
+      .concat([...s.matchAll(/\(\d+,\s*'([a-z_0-9]+)',\s*'(?:bool|derived)'/g)].map((m) => m[1])));
 
   // sweep is the UNION of every migration that has ever defined the option table (by design — see
   // the header comment: later migrations needle-edit rows in rather than replacing the whole body,
@@ -225,7 +232,7 @@ const mustCatch = (label: string, caught: boolean) => {
   // copies and leaves the token still "covered" via the others — caught on this proof's first run.
   // The realistic mutant is the token absent from EVERY migration's history, which replaceAll models.
   mustCatch(`a real, currently-swept chip ("${target}") has its sweep entry deleted from every migration that carries it — proving nothing about it`,
-    !sweptTokensOf(sweep.replaceAll(`p_amenities:=array[''${target}'']`, `p_amenities:=array[]::text[]`))
+    !sweptTokensOf(sweep.replaceAll(`p_amenities:=array[''${target}'']`, `p_amenities:=array[]::text[]`).replace(TOKEN_ROW(target), "(0,'zz_struck','bool'"))
       .has(target));
   mustCatch('…while the genuine, unmutated sweep still covers that same real chip (negative control)',
     sweptTokensOf(sweep).has(target));

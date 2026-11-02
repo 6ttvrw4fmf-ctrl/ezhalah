@@ -99,6 +99,9 @@ const ORACLE_DERIVED: Record<string, string> = {
   garden_yard: 'or=(garden.is.true,yard.is.true)', jacuzzi_sauna: 'or=(jacuzzi.is.true,sauna.is.true)',
   cameras_smart_home: 'or=(cameras.is.true,smart_home.is.true)', water_tank_well: 'or=(water_tank.is.true,well.is.true)',
   smart_home_entry: 'or=(smart_home.is.true,smart_entry.is.true)',
+  camels_horses: 'or=(camels.is.true,horses_stable.is.true)',
+  palm_fruit_trees: 'or=(palms.is.true,fruit_trees.is.true)',
+  pool_gym: 'or=(pool.is.true,gym.is.true)',
 };
 check('every derived token the clause guards has a stated oracle translation (and no stray derived guard exists)',
   [...derivedGuards.keys()].sort().join() === Object.keys(ORACLE_DERIVED).sort().join(),

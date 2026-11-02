@@ -97,6 +97,9 @@ const rich = [...(sweep.match(/RICH_TOKENS = \[([^\]]*)\]/)?.[1] ?? '').matchAll
 const EITHER_COLS: Record<string, string[]> = {
   separate_meters: ['separate_electricity_meter', 'separate_water_meter'], garden_yard: ['garden', 'yard'], jacuzzi_sauna: ['jacuzzi', 'sauna'],
   cameras_smart_home: ['cameras', 'smart_home'], water_tank_well: ['water_tank', 'well'], smart_home_entry: ['smart_home', 'smart_entry'],
+  camels_horses: ['camels', 'horses_stable'],
+  palm_fruit_trees: ['palms', 'fruit_trees'],
+  pool_gym: ['pool', 'gym'],
 };
 const chipCols = CHIP_TOKENS.flatMap((k) => EITHER_COLS[k] ?? [k === 'ac' ? 'air_conditioner' : k]);
 const allPredCols = [...new Set([...predCols, ...amenityColNames, ...rich, ...chipCols, 'apartments_count', 'shops_count'])];

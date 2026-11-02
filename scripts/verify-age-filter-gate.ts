@@ -53,11 +53,13 @@ for (const [type, cfg] of Object.entries(COHORT_QUESTIONS)) {
 // ── the 5 types this bug named by name (the owner's own reproduction set) ────────────────────────
 console.log('\n── the 5 types this bug named: real COHORT_QUESTIONS data, unreachable before the fix ──');
 const NAMED_FIVE: Array<{ type: string; buy: boolean; rentAnnual: boolean }> = [
-  { type: 'Shop', buy: true, rentAnnual: true },
-  { type: 'Workshop', buy: true, rentAnnual: true },
-  { type: 'Commercial Building', buy: true, rentAnnual: true },
-  { type: 'Farm', buy: true, rentAnnual: false },
-  { type: 'Rest House', buy: true, rentAnnual: true },
+  // 2026-11-02: the owner's locked lists (2026-11-01) for commercial and countryside types carry NO property-age
+  // question — age stays on the dwelling lists (Apartment, Floor, Villa, Duplex, Studio, Residential Building).
+  { type: 'Shop', buy: false, rentAnnual: false },
+  { type: 'Workshop', buy: false, rentAnnual: false },
+  { type: 'Commercial Building', buy: false, rentAnnual: false },
+  { type: 'Farm', buy: false, rentAnnual: false },
+  { type: 'Rest House', buy: false, rentAnnual: false },
 ];
 for (const { type, buy, rentAnnual } of NAMED_FIVE) {
   const macro = CLEAN_MACRO[type] ?? 'Residential';

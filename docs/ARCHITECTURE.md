@@ -1387,6 +1387,18 @@ migration-drift-guard rule in `AGENTS.md`).
   🌳 outdoors · ✨ extras & smart. Merged chips (garden & yard, jacuzzi & sauna, cameras & smart home, tank & well,
   smart home & entry) match when EITHER fact is true (migration 20261102055240). `docs/ops/ADVANCED_FILTER_VILLAS_GROUP.md`.
 
+- **Every remaining group of «🎯 Refine with AI» has owner-LOCKED chip lists too (handoff 2026-11-01, built 2026-11-02):**
+  «الاستراحات والريف» (Rest house, Chalet, Camp, Farm, Agricultural land — the group box with no type has its OWN short-stay /
+  annual / buy lists, each type its own), Residential land, and the whole Commercial side (Retail & Workspace = Office / Shop /
+  Showroom, Industrial & Logistics = Warehouse / Workshop / Factory, Buildings & Facilities = Commercial building / Hotel /
+  Gas station, Commercial & Industrial plots). Street width offers each scope's own rungs (plots 15/20/30/40/60 m+, retail
+  15/20/30/40, countryside 15/20/30, else 15/20/25/30). The Apartments & Co-living types stay ONE short-stays pool; Villa,
+  Chalet, Rest house, Camp and the countryside box carry their own short-stay lists. **Commercial is never combined with
+  residential** (the Filter holds one category; a cross-category scope certifies nothing). Migrations 20261102100954
+  (58 countryside / land facts + camels_horses, palm_fruit_trees) and 20261102101415 (45 commercial facts + pool_gym + the
+  three street-width rungs + 11 cohort rows). `docs/ops/ADVANCED_FILTER_COUNTRYSIDE_GROUP.md`; guard
+  `scripts/verify-af-remaining-groups-cards.ts`. Changing a list is a product decision.
+
 - **Owner rules for every chip list (handoff 2026-11-01, recorded 2026-11-02):**
   1. Whatever the AI reads must help matching — nothing it finds in a description sits unused (AI teaches → free word
      reader → filter value; or an index-level correction sampled against the source). Source tables untouched.
@@ -1397,7 +1409,8 @@ migration-drift-guard rule in `AGENTS.md`).
      (Not built yet; needs its own owner go.)
   4. One payment question on every rent list, «💳 Rent now, pay later / split payments», two chips; under the provider
      logos a disclaimer: Ezhalah does not guarantee the payment method or the provider — confirm with the lister
-     (owner 2026-11-02, `af-payment-note`). The split-payments chip is not built yet.
+     (owner 2026-11-02, `af-payment-note`). Both chips live since 2026-11-02 (split_payments is a text fact; picking both
+     narrows to listings with both, like every chip card).
   5. No «Nearby» / «suitable for» chips — the seller's opinion; the map shows what's near. «On a main road» is a fact
      about the plot and stays.
   6. A chip says only what the ad says · Skip on every question · pick many · a chip at 0 hides itself · source tables
