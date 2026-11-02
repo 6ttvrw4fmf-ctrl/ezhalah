@@ -84,6 +84,11 @@ jobs:
                   git show "$1:$f" | grep -cE '\b(check|mustCatch|assert|assertEqual|expect|problems\.push|bad\.push|fail)\(' || true
                 done | awk '{s+=$1} END {print s+0}'
           }
+          # Compare against the MERGE BASE, not the base branch's live head (🔧 2026-11-02). base.sha is
+          # main as it stood when the event fired, so a branch cut before a sibling PR added a barrier read as
+          # "REMOVES assertions" (16,272 → 16,249 on #9980, which touched one migration file) the moment that
+          # sibling merged — every PR in flight went red. The merge base is what this PR actually changes.
+          BASE_SHA=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           base=$(count "$BASE_SHA"); head=$(count "$HEAD_SHA")
           echo "assertions: base=$base head=$head (approved=$APPROVED)"
           if [ "$head" -lt "$base" ] && [ "$APPROVED" != "true" ]; then
