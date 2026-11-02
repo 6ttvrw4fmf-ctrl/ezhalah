@@ -22,27 +22,28 @@ const base = { category: 'Residential', location: '', amenities: [] } as unknown
 const Q = (q: Partial<SearchQuery>): SearchQuery => ({ ...base, ...q } as SearchQuery);
 type Plan = ReturnType<typeof cardPlan>;
 const flat = (p: Plan) => p.map((c) => `${c.id}:${c.keys.join(',')}`).join(' | ');
-const asks = (q: SearchQuery) => ['rnpl', 'property_age', 'bathrooms', 'street_width', 'direction', 'comfort', 'space', 'extras', 'safety', 'build', 'furnished']
+const asks = (q: SearchQuery) => ['rnpl', 'property_age', 'bathrooms', 'street_width', 'direction', 'comfort', 'space', 'outdoors', 'smart', 'papers', 'extras', 'safety', 'build', 'furnished']
   .filter((id) => cohortAllows(q, id));
 
 // The owner's lists, verbatim (2026-11-02). Edit here only with a new owner decision.
-const BUY = 'comfort:kitchen,majlis,dining_majlis,maid_room,driver_room,elevator,car_entrance'
-  + ' | space:roof,laundry_room,annex,yard,storage,two_entrances,pool'
-  + ' | build:separate_meters,warranty,sanitation,insulation,grill,garden,basement';
-const RENT = 'comfort:kitchen,ac,majlis,maid_room,car_entrance,furnished,parking'
-  + ' | space:roof,dining_majlis,laundry_room,yard,storage,driver_room,annex'
-  + ' | safety:separate_meters,guard,cameras,smart_entry,kids_play_area,gym,own_bathroom'
-  + ' | extras:pool,garden,grill,balcony,garage,optical_fibers,elevator';
+// The owner's locked lists (2026-11-01), as pasted on 2026-11-02. Merged chips match when EITHER fact is true.
+const BUY = 'space:majlis,women_majlis,dining_majlis,maid_room,driver_room,annex,roof,elevator'
+  + ' | outdoors:pool,garden_yard,grill,outdoor_kitchen,outdoor_diwaniya,waterfall,garage,jacuzzi_sauna'
+  + ' | papers:warranty,sanitation,water_tank_well,separate_meters,electronic_deed,basement,two_entrances,car_entrance,cameras_smart_home';
+const RENT = 'comfort:kitchen,ac,furnished,parking,car_entrance,private_entrance,laundry_room'
+  + ' | space:majlis,women_majlis,dining_majlis,maid_room,driver_room,annex,roof'
+  + ' | outdoors:pool,garden_yard,grill,irrigation,garage,storage,balcony'
+  + ' | smart:elevator,gym,jacuzzi_sauna,sports_court,smart_home_entry,central_gas,cameras';
 
 console.log('\n§1 single legs are the owner\'s lists, verbatim\n');
 const villaBuy = Q({ deal: 'Buy', types: ['Villa'] });
 const villaRent = Q({ deal: 'Rent', types: ['Villa'] });
-check('Buy → Villa: 🔑 comfort · 🏠 space · 🧱 build, 7 chips each, in the owner\'s order', flat(cardPlan(villaBuy)) === BUY, flat(cardPlan(villaBuy)));
-check('Annual rent → Villa: 🔑 comfort · 🏠 space · 🏡 extras · 🛡️ safety (CARD_IDS order; the ask order is below)', flat(cardPlan(villaRent)) === RENT, flat(cardPlan(villaRent)));
-check('Buy → Villa asks age, bathrooms, street width, direction and the three cards; no installments, no furnished question',
-  asks(villaBuy).join() === 'property_age,bathrooms,street_width,direction,comfort,space,build', asks(villaBuy).join());
-check('Annual rent → Villa asks installments, bathrooms, age and the four cards; «furnished» stays certified for the typed sentence',
-  asks(villaRent).join() === 'rnpl,property_age,bathrooms,comfort,space,extras,safety,furnished', asks(villaRent).join());
+check('Buy → Villa: 🏠 space · 🌳 outdoors & fun · 🧱 build, safety & papers, in the owner\'s order', flat(cardPlan(villaBuy)) === BUY, flat(cardPlan(villaBuy)));
+check('Annual rent → Villa: 🔑 comfort · 🏠 space · 🌳 outdoors · ✨ extras & smart', flat(cardPlan(villaRent)) === RENT, flat(cardPlan(villaRent)));
+check('Buy → Villa asks age, bathrooms, street width, direction and the three cards; no installments, no furnished, no kitchen/AC card',
+  asks(villaBuy).join() === 'property_age,bathrooms,street_width,direction,space,outdoors,papers', asks(villaBuy).join());
+check('Annual rent → Villa asks installments, bathrooms, age and the four cards; no street width / direction; «furnished» stays certified for the typed sentence',
+  asks(villaRent).join() === 'rnpl,property_age,bathrooms,comfort,space,outdoors,smart,furnished', asks(villaRent).join());
 check('Duplex shares the villa lists on both deals (owner 2026-11-02)',
   COHORT_CARDS.Duplex === COHORT_CARDS.Villa && flat(cardPlan(Q({ deal: 'Buy', types: ['Duplex'] }))) === BUY
   && flat(cardPlan(Q({ deal: 'Rent', types: ['Duplex'] }))) === RENT
@@ -57,17 +58,17 @@ check('«Villas & Houses» + annual rent = the full Rent lists', flat(cardPlan(g
 
 console.log('\n§3 ask order is the owner\'s\n');
 const order = (q: SearchQuery) => asks(q).filter((id) => id !== 'furnished').sort((a, b) => groupAskTier(b, q) - groupAskTier(a, q)).join(' → ');
-check('Buy: age → bathrooms → street width → direction → comfort → space → build',
-  order(villaBuy) === 'property_age → bathrooms → street_width → direction → comfort → space → build', order(villaBuy));
-check('Rent: installments → bathrooms → age → comfort → space → extras → safety',
-  order(villaRent) === 'rnpl → bathrooms → property_age → comfort → space → extras → safety', order(villaRent));
+check('Buy: age → bathrooms → street width → direction → space → outdoors → papers',
+  order(villaBuy) === 'property_age → bathrooms → street_width → direction → space → outdoors → papers', order(villaBuy));
+check('Rent: installments → bathrooms → age → comfort → space → outdoors → smart',
+  order(villaRent) === 'rnpl → bathrooms → property_age → comfort → space → outdoors → smart', order(villaRent));
 
 console.log('\n§4 mixing keeps the intersection rule (never union)\n');
 const mixBuy = cardPlan(Q({ deal: 'Buy', types: ['Villa', 'Apartment'] }));
 const villaBuyKeys = new Set(cardPlan(villaBuy).flatMap((c) => c.keys));
 const aptBuyKeys = new Set(cardPlan(Q({ deal: 'Buy', types: ['Apartment'] })).flatMap((c) => c.keys));
 check('Villa + Apartment on Buy offers only chips BOTH lists carry, in the villa (primary) layout',
-  mixBuy.length > 0 && mixBuy.flatMap((c) => c.keys).every((k) => villaBuyKeys.has(k) && aptBuyKeys.has(k)) && mixBuy[0].id === 'comfort', flat(mixBuy));
+  mixBuy.length > 0 && mixBuy.flatMap((c) => c.keys).every((k) => villaBuyKeys.has(k) && aptBuyKeys.has(k)) && mixBuy[0].id === 'space', flat(mixBuy));
 check('Villa + Apartment on Buy drops street width (Apartment never asks it)', !cohortAllows(Q({ deal: 'Buy', types: ['Villa', 'Apartment'] }), 'street_width'));
 const combined = cardPlan(Q({ dealCombined: true, types: ['Villa'] }));
 check('Villa with Buy + Rent together offers only chips in all three villa lists (buy, annual, short stays)',
@@ -95,17 +96,17 @@ async function mutant(...edits: Array<[from: string, to: string]>): Promise<{ ca
 }
 const noDuplex = await mutant(['  Duplex: VILLA_CARDS,', '']);
 mustCatch('Duplex losing the shared lists (the group box would intersect to nothing again)', noDuplex.cardPlan(groupBuy).length === 0);
-const swapped = await mutant(["  comfort: ['kitchen', 'majlis', 'dining_majlis', 'maid_room', 'driver_room', 'elevator', 'car_entrance'],",
-  "  comfort: ['kitchen', 'majlis', 'dining_majlis', 'maid_room', 'driver_room', 'elevator', 'parking'],"]);
-mustCatch('a chip swapped on the Buy comfort card', flat(swapped.cardPlan(villaBuy)) !== BUY);
-const rnplOnBuy = await mutant(["    Buy: ['property_age', 'bathrooms', 'street_width', 'direction', 'comfort', 'space', 'build', 'amenities'],\n    // Monthly 2026-08-18",
-  "    Buy: ['rnpl', 'property_age', 'bathrooms', 'street_width', 'direction', 'comfort', 'space', 'build', 'amenities'],\n    // Monthly 2026-08-18"]);
+const swapped = await mutant(["  space: ['majlis', 'women_majlis', 'dining_majlis', 'maid_room', 'driver_room', 'annex', 'roof', 'elevator'],",
+  "  space: ['majlis', 'women_majlis', 'dining_majlis', 'maid_room', 'driver_room', 'annex', 'roof', 'kitchen'],"]);
+mustCatch('a chip swapped on the Buy space card', flat(swapped.cardPlan(villaBuy)) !== BUY);
+const rnplOnBuy = await mutant(["    Buy: ['property_age', 'bathrooms', 'street_width', 'direction', 'space', 'outdoors', 'papers', 'amenities'],\n    // Monthly 2026-08-18",
+  "    Buy: ['rnpl', 'property_age', 'bathrooms', 'street_width', 'direction', 'space', 'outdoors', 'papers', 'amenities'],\n    // Monthly 2026-08-18"]);
 mustCatch('installments creeping onto the villa Buy list (0 ads accept)', rnplOnBuy.cohortAllows(villaBuy, 'rnpl') === true);
 const unionGate = await mutant(["    .map((id) => ({ id, keys: (primary[id] ?? []).filter((k) => unions.every((u) => u!.has(k))) }))",
   "    .map((id) => ({ id, keys: (primary[id] ?? []).filter((k) => unions.some((u) => u!.has(k))) }))"]);
 mustCatch('the intersection becoming a union (Villa + Apartment would offer villa-only chips)',
   unionGate.cardPlan(Q({ deal: 'Buy', types: ['Villa', 'Apartment'] })).flatMap((c) => c.keys).some((k) => !aptBuyKeys.has(k)));
-mustCatch('the §1 Buy string going blind to a reorder', flat(cardPlan(villaBuy)) !== BUY.replace('kitchen,majlis', 'majlis,kitchen'));
+mustCatch('the §1 Buy string going blind to a reorder', flat(cardPlan(villaBuy)) !== BUY.replace('majlis,women_majlis', 'women_majlis,majlis'));
 
 if (failed) { console.error(`\n❌ ${failed} check(s) FAILED — the villas group is not the owner's lists`); process.exit(1); }
 console.log('\n✓ verify-af-villas-group-cards: Villa and Duplex carry the owner\'s approved lists, the group box opens them, mixing intersects');

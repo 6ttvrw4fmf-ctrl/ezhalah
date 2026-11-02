@@ -130,7 +130,7 @@ const EXPECTED: Record<string, Record<string, number>> = {
   'Apartments & Co-living': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 7, 'Rent/both': 2, 'Buy+Rent': 2 },
   // Buy 0 -> 1 on 2026-08-23: Duplex certified with its one source-verified field (bathrooms).
   // 2026-11-02 (owner approved the Villas & Houses group lists; Duplex shares them — recomputed by EXECUTING cohortAllows):
-  'Villas & Houses': { Buy: 8, 'Rent/Annual': 9, 'Rent/Monthly': 7, 'Rent/both': 4, 'Buy+Rent': 3 },
+  'Villas & Houses': { Buy: 6, 'Rent/Annual': 7, 'Rent/Monthly': 7, 'Rent/both': 3, 'Buy+Rent': 3 },
   'Vacation & Rural': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 7, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 7, 'Rent/both': 0, 'Buy+Rent': 0 },
   // Buy 1 -> 2, Rent/Annual 1 -> 2 on 2026-09-01: same property_age unification — every member of
@@ -221,7 +221,7 @@ const CEILING: Record<string, Record<string, number>> = {
   // gained a Buy list), Rent/Monthly 2 -> 4 (amenities · comfort · space · fun, shared by Apartment, Room and Studio).
   'Apartments & Co-living': { Buy: 4, 'Rent/Annual': 2, 'Rent/Monthly': 4 },
   // 2026-11-02: Duplex shares the villa lists, so the ceiling is the villa lists themselves (Buy 8, Rent 9; Monthly 6 = Villa's monthly row).
-  'Villas & Houses': { Buy: 8, 'Rent/Annual': 9, 'Rent/Monthly': 6 },
+  'Villas & Houses': { Buy: 6, 'Rent/Annual': 7, 'Rent/Monthly': 6 },
   'Vacation & Rural': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 0 },
   'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
   'Retail & Workspace': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },

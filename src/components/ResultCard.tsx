@@ -37,7 +37,7 @@ const IS_WEB = Platform.OS === 'web';
 
 // Feature key → (icon, EN label key) — the wrapping amenities row on the listing card.
 // The label is run through t() so it localizes to Arabic. Order matters: most useful features first.
-const AMENITY_BAG_IDS = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'apartments', 'shops']);
+const AMENITY_BAG_IDS = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'outdoors', 'smart', 'papers', 'apartments', 'shops']);
 export const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: any; label: string }> = [
   { key: 'parking',          icon: 'car-outline',           label: 'Parking' },
   { key: 'maid_room',        icon: 'person-outline',        label: 'Maid Room' },

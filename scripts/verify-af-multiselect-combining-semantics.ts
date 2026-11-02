@@ -95,6 +95,10 @@ const ORACLE_DERIVED: Record<string, string> = {
   separate_meters: 'or=(separate_electricity_meter.is.true,separate_water_meter.is.true)',
   apts4: 'apartments_count=gte.4', apts8: 'apartments_count=gte.8', apts12: 'apartments_count=gte.12', apts20: 'apartments_count=gte.20',
   has_shops: 'shops_count=gte.1',
+  // the five villa merged chips (20261102055240): EITHER column true, the same or=() group
+  garden_yard: 'or=(garden.is.true,yard.is.true)', jacuzzi_sauna: 'or=(jacuzzi.is.true,sauna.is.true)',
+  cameras_smart_home: 'or=(cameras.is.true,smart_home.is.true)', water_tank_well: 'or=(water_tank.is.true,well.is.true)',
+  smart_home_entry: 'or=(smart_home.is.true,smart_entry.is.true)',
 };
 check('every derived token the clause guards has a stated oracle translation (and no stray derived guard exists)',
   [...derivedGuards.keys()].sort().join() === Object.keys(ORACLE_DERIVED).sort().join(),

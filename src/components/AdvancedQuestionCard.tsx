@@ -492,6 +492,12 @@ export default function AdvancedQuestionCard({
           {brandImage && BRAND_IMAGES[brandImage] ? (
             <View style={s.brandStrip}>
               <Image source={BRAND_IMAGES[brandImage]} style={s.brandImg} contentFit="contain" />
+              {/* PAYMENT DISCLAIMER (owner 2026-11-02): the strip says these providers EXIST, never that this ad or
+                  Ezhalah guarantees a method or a provider — the user confirms with the lister. One quiet line,
+                  under the logos, on every question that shows them (the «💳» question of every rent list). */}
+              <Text testID="af-payment-note" style={[s.paymentNote, { textAlign: isRTL ? 'right' : 'left' }]}>
+                {t('Ezhalah does not guarantee the payment method or the provider. Confirm with the lister directly.')}
+              </Text>
             </View>
           ) : null}
           <View style={s.list}>
@@ -697,5 +703,6 @@ const s = StyleSheet.create({
   secondaryBtnPress: { backgroundColor: colors.segTrack, borderColor: colors.pickLine, transform: [{ scale: 0.98 }] },
   secondaryBtnFocus: { borderColor: colors.primary },
   secondaryTxt: { fontFamily: font.family.semibold, fontSize: 14, color: colors.ink },
+  paymentNote: { fontFamily: font.family.regular, fontSize: 12, lineHeight: 18, color: colors.muted, marginTop: 6, alignSelf: 'stretch' },
   skipNote: { fontFamily: font.family.regular, fontSize: 12, lineHeight: 18, color: colors.muted, paddingHorizontal: space.card, paddingBottom: 10, marginTop: -4 },
 });

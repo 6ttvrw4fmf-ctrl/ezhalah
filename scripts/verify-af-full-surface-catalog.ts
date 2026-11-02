@@ -62,7 +62,7 @@ const ageType = remote.slice(remote.indexOf('export type AgeOptionCounts'), remo
 const knownCols = new Set([...`${guidedType}\n${ageType}`.matchAll(/\b(cnt_[a-z0-9_]+)\b/g)].map((m) => m[1]));
 const catalogCols = [...new Set([
   ...[...sweep.matchAll(/col: '(cnt_[a-z0-9_]+)'/g)].map((m) => m[1]),
-  ...[...sweep.matchAll(/col: `cnt_(bath|stw)\$\{n\}`/g)].flatMap((m) => (m[1] === 'bath' ? [1, 2, 3, 4].map((n) => `cnt_bath${n}`) : [15, 20, 25, 30].map((n) => `cnt_stw${n}`))),
+  ...[...sweep.matchAll(/col: `cnt_(bath|stw)\$\{n\}`/g)].flatMap((m) => (m[1] === 'bath' ? [1, 2, 3, 4, 5, 6].map((n) => `cnt_bath${n}`) : [15, 20, 25, 30].map((n) => `cnt_stw${n}`))),
   ...[...sweep.matchAll(/'cnt_(sub_[a-z]+|dir_[a-z]+)'/g)].map((m) => `cnt_${m[1]}`),
   'cnt_kitchen', 'cnt_parking', 'cnt_elevator', 'cnt_ac', 'cnt_private_entrance', 'cnt_maid_room', 'cnt_driver_room', 'cnt_car_entrance', 'cnt_sanitation', 'cnt_electricity', 'cnt_water_supply', 'cnt_furnished',
   ...CHIP_TOKENS.map((k) => `cnt_${k}`),
@@ -93,7 +93,12 @@ const amenityCols = [...sweep.matchAll(/AMENITY_COL: Record<string, string> = \{
 const amenityColNames = [...amenityCols.matchAll(/: '([a-z_]+)'/g)].map((m) => m[1]);
 const rich = [...(sweep.match(/RICH_TOKENS = \[([^\]]*)\]/)?.[1] ?? '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 // the card chips read their own column (token = column, `ac` → air_conditioner); separate_meters reads the two meters
-const chipCols = CHIP_TOKENS.flatMap((k) => (k === 'separate_meters' ? ['separate_electricity_meter', 'separate_water_meter'] : [k === 'ac' ? 'air_conditioner' : k]));
+// Every «EITHER column» token reads two columns (separate_meters since 20261101100930; the five villa merged chips since 20261102055240).
+const EITHER_COLS: Record<string, string[]> = {
+  separate_meters: ['separate_electricity_meter', 'separate_water_meter'], garden_yard: ['garden', 'yard'], jacuzzi_sauna: ['jacuzzi', 'sauna'],
+  cameras_smart_home: ['cameras', 'smart_home'], water_tank_well: ['water_tank', 'well'], smart_home_entry: ['smart_home', 'smart_entry'],
+};
+const chipCols = CHIP_TOKENS.flatMap((k) => EITHER_COLS[k] ?? [k === 'ac' ? 'air_conditioner' : k]);
 const allPredCols = [...new Set([...predCols, ...amenityColNames, ...rich, ...chipCols, 'apartments_count', 'shops_count'])];
 check('every column a catalog predicate reads is a column af_eligibility_clause() filters (same column, both evaluators)',
   allPredCols.every((c) => clauseCols.has(c)),

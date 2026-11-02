@@ -68,6 +68,9 @@ export const AMENITY_COL: Record<string, string> = {
   // their own — DERIVED_TOKEN_HOLDS below.
   roof: 'roof',
   two_entrances: 'two_entrances',
+  // Villas & Houses (owner lists 2026-11-01): seven text facts, column name = token.
+  women_majlis: 'women_majlis', outdoor_kitchen: 'outdoor_kitchen', outdoor_diwaniya: 'outdoor_diwaniya',
+  waterfall: 'waterfall', well: 'well', irrigation: 'irrigation', sports_court: 'sports_court',
   annex: 'annex',
   yard: 'yard',
   garage: 'garage',
@@ -168,6 +171,11 @@ export const AMENITY_LABEL: Record<string, string> = {
   // the derived tokens (no column; DERIVED_TOKEN_HOLDS decides)
   separate_meters: 'Separate meters', apts4: '4+ apartments', apts8: '8+ apartments', apts12: '12+ apartments',
   apts20: '20+ apartments', has_shops: 'Has shops',
+  // Villas & Houses (owner lists 2026-11-01)
+  women_majlis: "Women's majlis", outdoor_kitchen: 'Outdoor kitchen', outdoor_diwaniya: 'Outdoor diwaniya',
+  waterfall: 'Waterfall', well: 'Well', irrigation: 'Garden irrigation', sports_court: 'Sports court',
+  garden_yard: 'Garden & yard', jacuzzi_sauna: 'Jacuzzi & sauna', cameras_smart_home: 'Cameras & smart home',
+  water_tank_well: 'Water tank & well', smart_home_entry: 'Smart home & entry',
 };
 // DERIVED TOKENS (migration 20261101100930): a p_amenities slug whose SQL predicate reads a column that is NOT
 // the token's own name. `reads` names the columns; `holds` re-runs the predicate on the row and answers null
@@ -182,6 +190,10 @@ const atLeast = (col: string, n: number): DerivedToken => ({
   reads: [col],
   holds: (r) => { const v = numOrNull(r[col]); return v == null ? null : v >= n; },
 });
+const either = (a: string, b: string): DerivedToken => ({
+  reads: [a, b],
+  holds: (r) => (r[a] === true || r[b] === true) ? true : (r[a] == null || r[b] == null) ? null : false,
+});
 export const DERIVED_TOKEN: Record<string, DerivedToken> = {
   separate_meters: {
     reads: ['separate_electricity_meter', 'separate_water_meter'],
@@ -191,6 +203,11 @@ export const DERIVED_TOKEN: Record<string, DerivedToken> = {
   apts4: atLeast('apartments_count', 4), apts8: atLeast('apartments_count', 8),
   apts12: atLeast('apartments_count', 12), apts20: atLeast('apartments_count', 20),
   has_shops: atLeast('shops_count', 1),
+  // Villas & Houses merged chips (owner 2026-11-01: «merged chips match if EITHER fact is true»). Positive-only text
+  // facts: one TRUE decides; neither true and one unknown stays UNKNOWN; both known-false is false.
+  garden_yard: either('garden', 'yard'), jacuzzi_sauna: either('jacuzzi', 'sauna'),
+  cameras_smart_home: either('cameras', 'smart_home'), water_tank_well: either('water_tank', 'well'),
+  smart_home_entry: either('smart_home', 'smart_entry'),
 };
 /** token → true/false when the row can answer, null when a column it needs is null (unknown). */
 export const DERIVED_TOKEN_HOLDS: Record<string, (canon: AfCanon) => boolean | null> = Object.fromEntries(

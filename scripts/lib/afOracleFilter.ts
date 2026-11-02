@@ -80,6 +80,9 @@ export const AMENITY_TOKEN_COL: Record<string, string> = {
   nursery: 'nursery', free_maintenance: 'free_maintenance', intercom: 'intercom', fire_system: 'fire_system', ev_charger: 'ev_charger',
   central_vacuum: 'central_vacuum', insulation: 'insulation', dining_majlis: 'dining_majlis', own_bathroom: 'own_bathroom',
   fridge: 'fridge', whole_floor: 'whole_floor', singles: 'singles', families: 'families',
+  // Villas & Houses (migration 20261102055240): seven text facts, column name = token
+  women_majlis: 'women_majlis', outdoor_kitchen: 'outdoor_kitchen', outdoor_diwaniya: 'outdoor_diwaniya',
+  waterfall: 'waterfall', well: 'well', irrigation: 'irrigation', sports_court: 'sports_court',
 };
 // The 6 DERIVED tokens of the same migration — one p_amenities slug standing for a predicate over OTHER columns,
 // mirroring the clause arms exactly:
@@ -91,6 +94,12 @@ export const AMENITY_TOKEN_COL: Record<string, string> = {
 export type DerivedAmenity = { cols: string[]; filter: string; orGroup?: boolean };
 export const AMENITY_TOKEN_DERIVED: Record<string, DerivedAmenity> = {
   separate_meters: { cols: ['separate_electricity_meter', 'separate_water_meter'], filter: 'separate_electricity_meter.is.true,separate_water_meter.is.true', orGroup: true },
+  // the five villa merged chips (20261102055240): EITHER column true, the same OR-group shape
+  garden_yard: { cols: ['garden', 'yard'], filter: 'garden.is.true,yard.is.true', orGroup: true },
+  jacuzzi_sauna: { cols: ['jacuzzi', 'sauna'], filter: 'jacuzzi.is.true,sauna.is.true', orGroup: true },
+  cameras_smart_home: { cols: ['cameras', 'smart_home'], filter: 'cameras.is.true,smart_home.is.true', orGroup: true },
+  water_tank_well: { cols: ['water_tank', 'well'], filter: 'water_tank.is.true,well.is.true', orGroup: true },
+  smart_home_entry: { cols: ['smart_home', 'smart_entry'], filter: 'smart_home.is.true,smart_entry.is.true', orGroup: true },
   apts4: { cols: ['apartments_count'], filter: 'apartments_count=gte.4' },
   apts8: { cols: ['apartments_count'], filter: 'apartments_count=gte.8' },
   apts12: { cols: ['apartments_count'], filter: 'apartments_count=gte.12' },
