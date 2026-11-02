@@ -100,15 +100,10 @@ ok('mon_detect_field_integrity has a committed migration definition', played.bod
 // One such migration exists and is PINNED rather than ignored, with what it costs stated. It is a
 // SHRINK-ONLY ledger: a NEW unreplayable edit is RED, and a pinned entry that has stopped being
 // unreplayable is RED as stale, so this can never read better than the tree.
-const UNREPLAYABLE: Record<string, string> = {
-  '20260826070355_field_integrity_bedrooms_respects_source_published_counts.sql':
-    'needle-edits the LIVE body via `execute replace(pg_get_functiondef(...), anchor, new)`, so its '
-    + 'anchor is not a declared literal and no static replay can resolve it. WHAT IT COSTS: the body '
-    + 'asserted below is the one BEFORE that patch. The patch only ADDS '
-    + '`and not public.bedrooms_source_corroborated(...)` to the bedrooms filter — verified against '
-    + 'the live function on 2026-09-24, which carries all three phone/ID guards AND the bedrooms '
-    + 'clause (def_len 7490) — so none of the assertions below are affected by the gap.',
-};
+// Emptied 2026-11-02: rpcReplay now reads E'…' literals and `a || E'…'` concatenations, so
+// 20260826070355 replays. Its replayed body was compared with production: identical apart from the
+// letter case of the CREATE header that pg_get_functiondef normalises.
+const UNREPLAYABLE: Record<string, string> = {};
 for (const u of played.unresolved) {
   const file = u.replace(/\s*\(.*\)$/, '');
   ok(`unreplayable edit is pinned: ${file}`, Boolean(UNREPLAYABLE[file]),

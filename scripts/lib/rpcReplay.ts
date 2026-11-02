@@ -72,6 +72,37 @@ function parseConcatenatedLiteral(expr: string): string {
   return out;
 }
 
+/** Decode the body of a Postgres E'…' literal: `''` and `\'` are a quote, `\n`/`\t`/`\r`/`\\` their characters. */
+function decodeEString(body: string): string {
+  return body.replace(/''/g, "'").replace(/\\(.)/g, (_m, ch: string) =>
+    ch === 'n' ? '\n' : ch === 't' ? '\t' : ch === 'r' ? '\r' : ch);
+}
+
+/**
+ * Evaluate a declaration expression made of `'plain'`, `E'escaped'` and EARLIER-declared variable
+ * segments joined by `||` (20261102212825: `v_new constant text := v_needle || E'\n    -- …';`).
+ * Returns undefined when any segment is something else (a function call, an unknown variable) — such
+ * a declaration is not a literal and must stay invisible, never guessed.
+ */
+function evalDeclExpr(expr: string, decls: Map<string, string>): string | undefined {
+  const segRe = /\s*(?:(E)'((?:[^'\\]|''|\\.)*)'|'((?:[^']|'')*)'|([A-Za-z_][A-Za-z0-9_]*))\s*(\|\||$)/gy;
+  let out = '';
+  let m: RegExpExecArray | null;
+  let consumed = 0;
+  while (consumed < expr.length && (m = segRe.exec(expr))) {
+    if (m[1]) out += decodeEString(m[2]);
+    else if (m[3] !== undefined) out += m[3].replace(/''/g, "'");
+    else {
+      const v = decls.get(m[4]);
+      if (v === undefined) return undefined;
+      out += v;
+    }
+    consumed = segRe.lastIndex;
+    if (m[5] === '') break;
+  }
+  return consumed >= expr.trimEnd().length ? out : undefined;
+}
+
 function extractPatches(sql: string): { anchor: string; replacement: string }[] {
   // NAME [constant] text := 'literal';   (multi-line, '' = escaped quote)
   //
@@ -85,6 +116,19 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     /([A-Za-z_][A-Za-z0-9_]*)\s+(?:constant\s+)?text\s*:=\s*('(?:[^']|'')*'(?:\s*\|\|\s*'(?:[^']|'')*')*)\s*;/g;
   let d: RegExpExecArray | null;
   while ((d = declRe.exec(sql))) decls.set(d[1], parseConcatenatedLiteral(d[2]));
+
+  // (e) E-STRINGS and VARIABLE CONCATENATION (20261102212825) — `v_needle constant text := E'…\n…';`
+  // and `v_new constant text := v_needle || E'…';`. Evaluated in declaration order so a later
+  // declaration may build on an earlier one; anything that is not literals-and-known-variables is
+  // skipped (left to the unresolved path), never guessed.
+  const exprDeclRe = /([A-Za-z_][A-Za-z0-9_]*)\s+(?:constant\s+)?text\s*:=\s*((?:\s*(?:E'(?:[^'\\]|''|\\.)*'|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_]*)\s*(?:\|\|)?)+)\s*;/g;
+  let e: RegExpExecArray | null;
+  while ((e = exprDeclRe.exec(sql))) {
+    if (decls.has(e[1])) continue;                      // a plain literal already read it
+    if (!/E'|\|\|/.test(e[2])) continue;                // only the two new shapes
+    const v = evalDeclExpr(e[2].trim(), decls);
+    if (v !== undefined) decls.set(e[1], v);
+  }
 
   const out: { anchor: string; replacement: string }[] = [];
 
