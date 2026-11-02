@@ -27,7 +27,7 @@
 // → «تعذّر تحميل الخريطة» in the same box, not an empty beige rectangle (A FAILED FETCH IS NOT AN EMPTY ANSWER).
 // Regions that fail to load leave the plain map (still usable) and are reported in the console.
 import { useEffect, useRef, useState } from 'react';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
@@ -405,6 +405,13 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
   // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
   // with labels (hybrid), and muted. Driving / transit / traffic exist only in Apple's own apps, not on the web.
   const [layersOpen, setLayersOpen] = useState(false);
+  // GROUND TYPE (owner 2026-11-02, «the soil thing on the map»): a second round button beside the layers button —
+  // its own button, not a row inside layers (owner: «make another button, so he can select like he wants»). DESIGN
+  // ONLY today, like «رسم» was on 2026-10-31: the card lists the five ground types the planned layer will colour
+  // (sand, rock, sabkha, gravel, clay) and says «قريباً»; nothing is ticked and nothing is drawn, because the data
+  // (Saudi Geological Survey + USGS Arabia bedrock, one saved type per listing) does not exist yet. Failure is shown,
+  // never faked: no toggle pretends to work.
+  const [groundOpen, setGroundOpen] = useState(false);
   // Satellite with labels by default (owner 2026-10-31: «keep the default satellite»).
   const [mapType, setMapType] = useState<'standard' | 'hybrid' | 'muted'>('hybrid');
   const applyMapType = (k: 'standard' | 'hybrid' | 'muted') => {
@@ -706,6 +713,24 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
           ))}
         </View>
       ) : null}
+      {/* Ground type, beside the layers button (owner 2026-11-02: «add it beside it»). Same circle, same lift in Arabic. */}
+      {!failed && !drawing ? (
+        <Pressable style={[s.groundBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => { setGroundOpen((o) => !o); setLayersOpen(false); }} accessibilityRole="button" accessibilityLabel={t('Ground type')} testID="map-ground-btn">
+          <MaterialCommunityIcons name="waves" size={21} color={colors.ink} />
+        </Pressable>
+      ) : null}
+      {groundOpen && !failed && !drawing ? (
+        <View style={[s.layersCard, locale === 'ar' && s.layersCardAr]} testID="map-ground-popup">
+          <Text style={s.groundTitle}>{t('Ground type')} <Text style={s.groundHint}>({t('approximate')})</Text></Text>
+          {([['Sand', '#e9d98e'], ['Rock', '#b89b7a'], ['Sabkha', '#e4a96b'], ['Gravel', '#cfcac0'], ['Clay', '#c9a27e']] as const).map(([label, color]) => (
+            <View key={label} style={[s.layerRow, s.groundRow]} accessibilityRole="text">
+              <View style={[s.groundDot, { backgroundColor: color }]} />
+              <Text style={[s.layerT, s.groundRowT]}>{t(label)}</Text>
+            </View>
+          ))}
+          <Text style={s.groundSoon}>{t('Coming soon')}</Text>
+        </View>
+      ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
   );
@@ -751,6 +776,16 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   layersBtnAr: { bottom: 32 },
+  groundBtn: {
+    position: 'absolute', right: 60, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
+  },
+  groundTitle: { fontFamily: font.family.bold, fontSize: 13.5, color: colors.ink, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4 },
+  groundHint: { fontFamily: font.family.medium, fontSize: 12, color: colors.muted },
+  groundRow: { paddingVertical: 7, opacity: 0.55 },
+  groundRowT: { fontFamily: font.family.medium },
+  groundDot: { width: 14, height: 14, borderRadius: 4, borderWidth: 1, borderColor: colors.tintLine },
+  groundSoon: { fontFamily: font.family.medium, fontSize: 12, color: colors.primary, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 6 },
   layersCardAr: { bottom: 78 },
   layersCard: {
     position: 'absolute', right: 12, bottom: 58, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
