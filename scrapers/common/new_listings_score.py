@@ -294,6 +294,11 @@ WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len,
 
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
+    # A LABEL («keyword:») that ENDS its line, its value cut off, states nothing ON that line: haraj's meta
+    # description is cut off at «…نوع العقار: Apartment سعر الوحدة: 27000 عمر العقار:» (21839193, re-read run
+    # 41288305920, 2026-11-01), and the other field's 27000 before it read as a stated age, scoring our 9 a
+    # MISMATCH. That line is emptied; a label/value neighbour («عمر العقار» / «جديد») still counts.
+    lines = ["" if i in kw_hits and re.search("(?:" + kw + r")\s*[:：]\s*$", x) else x for i, x in enumerate(lines)]
     if not AREA_UNIT.search(kw):
         lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
     page_states = any(re.search(r"\d", lines[i]) for i in kw_hits)
