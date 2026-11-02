@@ -45,22 +45,22 @@ export function alwaysJobProblems(file: string, text: string): string[] {
 // ── self-proof: the predicate must catch the real 2026-11-02 shape and pass the fixed one ──
 const job = (cond: string, mins?: number) =>
   `jobs:\n  sweep:\n    runs-on: ubuntu-latest\n${mins ? `    timeout-minutes: ${mins}\n` : ''}    if: ${cond}\n    steps:\n      - run: echo\n`;
-const selfProofs: Array<[string, boolean]> = [
-  ['the 2026-11-02 sweep (always, 90 min) is RED', alwaysJobProblems('x', job("always() && needs.gate.outputs.shipped == 'yes'", 90)).length === 1],
-  ['an always() job with no timeout (360 min default) is RED', alwaysJobProblems('x', job('always()')).length === 1],
-  ['the fixed sweep (!cancelled, 90 min) is GREEN', alwaysJobProblems('x', job("${{ !cancelled() && needs.gate.outputs.shipped == 'yes' }}", 90)).length === 0],
-  ['a 5-minute always() reporter is GREEN', alwaysJobProblems('x', job('always()', 5)).length === 0],
-  ['a step-level always() is not a job condition', alwaysJobProblems('x', 'jobs:\n  a:\n    timeout-minutes: 90\n    steps:\n      - if: always()\n        run: echo\n').length === 0],
-];
-
 let failed = 0;
-for (const [name, ok] of selfProofs) {
-  if (!ok) { failed++; console.error(`✗ self-proof: ${name}`); }
-}
+// mustCatch: the predicate MUST flag the defective workflow (a mutant that slips through fails the run).
+const mustCatch = (label: string, caught: boolean) => { if (!caught) { failed++; console.error(`✗ mutant not caught: ${label}`); } };
+// mustPass: the predicate must NOT flag a correct workflow (it is not vacuously strict).
+const mustPass = (label: string, ok: boolean) => { if (!ok) { failed++; console.error(`✗ false alarm: ${label}`); } };
+mustCatch('the 2026-11-02 sweep (always, 90 min)', alwaysJobProblems('x', job("always() && needs.gate.outputs.shipped == 'yes'", 90)).length === 1);
+mustCatch('an always() job with no timeout (360 min default)', alwaysJobProblems('x', job('always()')).length === 1);
+mustPass('the fixed sweep (!cancelled, 90 min)', alwaysJobProblems('x', job("${{ !cancelled() && needs.gate.outputs.shipped == 'yes' }}", 90)).length === 0);
+mustPass('a 5-minute always() reporter', alwaysJobProblems('x', job('always()', 5)).length === 0);
+mustPass('a step-level always() is not a job condition', alwaysJobProblems('x', 'jobs:\n  a:\n    timeout-minutes: 90\n    steps:\n      - if: always()\n        run: echo\n').length === 0);
+const SELF_PROOFS = 5;
+
 const dir = join(process.cwd(), '.github', 'workflows');
 const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).sort();
 const problems = files.flatMap((f) => alwaysJobProblems(f, readFileSync(join(dir, f), 'utf8')));
 for (const p of problems) console.error(`✗ ${p}`);
 if (failed || problems.length) process.exit(1);
 console.log(`✓ ${files.length} workflows: every job-level always() is a reporter capped at ${MAX_ALWAYS_MINUTES} min; ` +
-  `${selfProofs.length} self-proofs hold`);
+  `${SELF_PROOFS} self-proofs hold`);
