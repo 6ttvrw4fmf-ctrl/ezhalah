@@ -48,6 +48,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize, sold_pin
+from scrapers.common.named_city import single_named_city  # noqa: E402
 # ONE definition of "transient" for the whole fleet — a second local copy here is how the two
 # drift and a newly-seen Cloudflare status silently stops being retried on one platform only.
 from scrapers.common.http import TRANSIENT_STATUSES
@@ -361,6 +362,14 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     # `city` column even though it's separately preserved in additional_info.city_ar below. An
     # honest None is correct in both cases.
 
+    # No structured city → the ONE Qassim city the ad's own description names («حي الرحاب – عنيزة», «شمال بريدة»,
+    # «بالرس»), never a default (backlog 1205: 43 active rows sat quarantined with city NULL).
+    city_named_ar = None
+    if not city:
+        named = single_named_city([_strip_tags(rec.get("description"))])
+        if named:
+            city, city_named_ar = named
+
     district = (rec.get("district") or "").strip() or None
 
     # photo_urls — prefer original_url (full-size). Filter logos / placeholders.
@@ -402,14 +411,15 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     title_bits.append("للإيجار" if is_rent else "للبيع")
     if district:
         title_bits.append(f"- {district}")
-    if raw_city_key:
-        title_bits.append(f", {raw_city_key}")
+    if raw_city_key or city_named_ar:
+        title_bits.append(f", {raw_city_key or city_named_ar}")
     title = " ".join(title_bits)
 
     # additional_info — every remaining useful field.
     ai: dict[str, Any] = {
         "region_ar": REGION_AR,
-        "city_ar": raw_city_key or None,
+        "city_ar": raw_city_key or city_named_ar,
+        **({"city_source": "description"} if city_named_ar else {}),
         "district_ar": district,
         "property_type_raw": type_raw,
         "status_raw": status_raw,
