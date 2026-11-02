@@ -32,7 +32,7 @@ import { Image as XImage } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapPins, cellForSpan, paddedBox, pinColor, pinHead, bubbleText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, cellForSpan, paddedBox, pinColor, pinHead, bubbleText, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
@@ -310,6 +310,17 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   return sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
 }
 
+/** HOW MANY PINS A FILTER LEAVES IN THE CURRENT VIEW (the popup's button): one coarse count-cell read over the
+ *  visible rectangle, summed. null when the fetch failed or no map is up — the button then shows no number. */
+export async function countPinsInView(filter: PinFilter): Promise<number | null> {
+  const m = live.map;
+  if (!m) return null;
+  const { center, span } = m.region;
+  const rows = await fetchMapPins(paddedBox(center, span), Math.max(0.01, span.latitudeDelta / 4), filter, 5000);
+  if (rows === 'unknown') return null;
+  return rows.reduce((a, r) => a + r.n, 0);
+}
+
 /** Glide the map to a suggestion: Apple's bounding region for it when it has one, else a town-sized view around it. */
 export function flyToPlace(p: PlaceSuggestion) {
   const mk = mapkitOf(); const m = live.map;
@@ -371,6 +382,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const ptsRef = useRef<Coord[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [sketch, setSketch] = useState<Shape | null>(null);
+  const [poly, setPoly] = useState<PinFilter['poly']>(null);  // the applied drawn boundary, as the pin query's polygon
   const [hasShape, setHasShape] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   const [routeOn, setRouteOn] = useState(false);
@@ -514,11 +526,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // answer replaces the layer whole; a view that moved on before the answer came is dropped (sequence number); a
   // failed fetch keeps what is on screen (A FAILED FETCH IS NOT AN EMPTY ANSWER — an empty map must never read as
   // «no listings here»). Tapping a bubble zooms into it; tapping a pin hands its row up (the card sheet).
-  const pinsKey = JSON.stringify(pins ?? null);
+  const pinFilter: PinFilter | undefined = pins ? { ...pins, poly: poly ?? pins.poly ?? null } : undefined;
+  const pinsKey = JSON.stringify(pinFilter ?? null);
+  const [pinCount, setPinCount] = useState<number | null>(null);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
   useEffect(() => {
     const mk = mapkitOf(); const m = mapRef.current;
-    if (!mk || !m || !pins) return;
+    if (!mk || !m || !pinFilter) return;
+    const pins = pinFilter;
     let seq = 0; let timer: ReturnType<typeof setTimeout> | null = null; let mine: unknown[] = [];
     const loc = localeRef.current === 'ar' ? 'ar' : 'en';
     const element = (row: PinRow, cell: number) => {
@@ -544,6 +559,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const cell = cellForSpan(span.latitudeDelta);
       const rows = await fetchMapPins(paddedBox(center, span), cell, pins);
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
+      setPinCount(rows.reduce((a, r) => a + r.n, 0));
       clear();
       mine = rows.map((row) => new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, cell), {
         data: { pin: row, cell }, calloutEnabled: false, anchorOffset: cell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -8),
@@ -607,6 +623,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   };
   // Apply keeps the boundary and leaves the map exactly where it is — like Zillow, it does NOT fly to the shape
   // (owner 2026-10-31: «drawing just creates a boundary, it doesn't take you there»).
+  // THE DRAWN SHAPE FILTERS THE PINS (owner 2026-11-02: «when I draw then I click apply … show me listings inside
+  // that area … strictly inside what the user draws»): Apply turns the sketch into a GeoJSON polygon the pin query
+  // keeps points strictly inside of (point-in-polygon in the database); Remove drops it and every pin returns.
   const applyDrawing = () => {
     const m = mapRef.current;
     const shape = sketchRef.current;
@@ -614,11 +633,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     if (shapeRef.current) m.removeOverlay(shapeRef.current);
     shapeRef.current = shape; sketchRef.current = null;
     setHasShape(true); setSketch(null); setDrawing(false); gestures(true);
+    setPoly(polygonOf(shape.points as { latitude: number; longitude: number }[]));
   };
   const removeDrawing = () => {
     const m = mapRef.current;
     if (m && shapeRef.current) m.removeOverlay(shapeRef.current);
-    shapeRef.current = null; setHasShape(false);
+    shapeRef.current = null; setHasShape(false); setPoly(null);
   };
   useEffect(() => {
     if (!drawing) return;
@@ -772,12 +792,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           <Text style={s.groundSoon}>{t('Coming soon')}</Text>
         </View>
       ) : null}
+      {hasShape && !drawing && pinCount !== null ? (
+        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') })}</Text></View>
+      ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
   );
 }
 
 const s = StyleSheet.create({
+  countPill: { position: 'absolute', left: 12, bottom: 12, backgroundColor: 'rgba(36,35,43,0.86)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  countPillT: { color: '#fff', fontSize: 13, fontWeight: '700' },
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
