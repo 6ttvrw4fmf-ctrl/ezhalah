@@ -5,8 +5,8 @@ import ts from 'typescript';
 import { msgRTL } from '../src/lib/textDirection.ts';
 import { buildAfSummaryItems } from '../src/lib/afSummary.ts';
 
-assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['Up to 2 years'] }], 'en'), ['Age Up to 2 years 🏗️']);
-assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['سنتين'] }]), ['عمر سنتين 🏗️']);
+assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['Up to 2 years'] }], 'en'), ['🏗️ Age Up to 2 years']);
+assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['سنتين'] }]), ['🏗️ عمر سنتين']);
 
 const source = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
 // Location names do not change the paragraph language. Leading numbers and emoji are neutral.

@@ -97,6 +97,7 @@ type MKPlace = {
   locality?: string; subLocality?: string; administrativeArea?: string; thoroughfare?: string; region?: MKRegion;
 };
 type MKSearch = {
+  region?: unknown;
   autocomplete: (q: string, cb: (err: unknown, data: { results: PlaceSuggestion[] }) => void) => number;
   search: (q: string | PlaceSuggestion, cb: (err: unknown, data: { boundingRegion?: MKRegion; places: MKPlace[] }) => void) => number;
 };
@@ -264,6 +265,11 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
     live.lang = language;
   }
   const search = live.search!;
+  // NEAR WHERE THE USER IS LOOKING (walked live 2026-11-01: «ماكدونالدز» with the map on Riyadh gave ONE row, in
+  // Madinah, because a country-limited autocomplete with no region picks nationally; with the map's region it gave
+  // fifteen Riyadh branches). Apple ranks around `region`, so the search follows the map: a chain or a common name
+  // lists the nearby ones first, and a city or region name is still found wherever it is.
+  if (live.map) search.region = live.map.region;
   const rows = await new Promise<PlaceSuggestion[]>((resolve) => {
     // Only real PLACES: Apple also returns query completions («adidas · Search Nearby») that carry no coordinate and
     // land nowhere (owner 2026-11-01 saw one in the route fields).
@@ -331,7 +337,9 @@ export function flyToPlace(p: PlaceSuggestion) {
     }
     const circle = () => {
       if (live.markSeq !== seq) return;
-      const radius = region ? Math.max(120, Math.min(600, region.span.latitudeDelta * 111_000 * 0.35)) : 250;
+      // A fixed 120 m: the circle says «here», it is not a boundary (walked live 2026-11-01: Apple's region for a school
+      // made a 600 m ring that read as a fake area).
+      const radius = 120;
       live.mark.overlay = new mk.CircleOverlay(new mk.Coordinate(c.latitude, c.longitude), radius, { style: style(0.12, 1.5), enabled: false });
       m.addOverlay(live.mark.overlay);
     };
@@ -345,7 +353,8 @@ export function flyToPlace(p: PlaceSuggestion) {
     };
     const fallback = landmark ? circle : rectangle;
     const kind: ShapeKind = p.kind && isAreaKind(p.kind) ? p.kind : 'place';
-    placeShapeAt(c.latitude, c.longitude, kind).then((shape) => {
+    // The picked name only breaks a tie between shapes AT the point (an airport and the terminal inside it).
+    placeShapeAt(c.latitude, c.longitude, kind, (place ? place.name : undefined) ?? p.name).then((shape) => {
       if (live.markSeq !== seq) return;
       if (!shape || shape === 'unknown') return fallback();
       live.mark.shapes = shape.rings.map((poly) => new mk.PolygonOverlay(poly.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng))), { style: style(kind === 'place' ? 0.14 : 0.08, 2), enabled: false }));
@@ -712,7 +721,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
   },
   zoomCol: { position: 'absolute', right: 12, bottom: 62, width: 40, backgroundColor: colors.surface, borderRadius: 20, borderWidth: 1, borderColor: colors.tintLine, alignItems: 'center', overflow: 'hidden' },
-  zoomColAr: { bottom: 94 },
+  zoomColAr: { bottom: 82 },
   zoomBtn: { width: 40, height: 38, alignItems: 'center', justifyContent: 'center' },
   zoomRule: { width: 22, height: 1, backgroundColor: colors.tintLine },
   drawPad: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, touchAction: 'none', cursor: 'crosshair' } as any,
@@ -741,8 +750,8 @@ const s = StyleSheet.create({
     position: 'absolute', right: 12, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
-  layersBtnAr: { bottom: 44 },
-  layersCardAr: { bottom: 90 },
+  layersBtnAr: { bottom: 32 },
+  layersCardAr: { bottom: 78 },
   layersCard: {
     position: 'absolute', right: 12, bottom: 58, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
     borderWidth: 1, borderColor: colors.tintLine,

@@ -37,8 +37,8 @@ mustCatch('a bbox that is not the shape\'s', !(typeof a === 'object' && a !== nu
 // Wiring.
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const mod = readFileSync(join(root, 'src/data/placeShape.ts'), 'utf8');
-check('placeShape.ts asks by coordinate through the bounded RPC', /boundedRpc<ShapeRow\[\]>\(supabase\.rpc\('place_shape_at', \{ p_lat: lat, p_lng: lng, p_kind: kind \}\)\)/.test(mod));
-check('AppleMap.web.tsx: EVERY pick fetches its shape and draws every polygon (owner 2026-11-01: «anything»)', /placeShapeAt\(c\.latitude, c\.longitude, kind\)/.test(web) && /live\.mark\.shapes = shape\.rings\.map\(\(poly\) => new mk\.PolygonOverlay\(/.test(web));
+check('placeShape.ts asks by coordinate through the bounded RPC', /boundedRpc<ShapeRow\[\]>\(supabase\.rpc\('place_shape_at', \{ p_lat: lat, p_lng: lng, p_kind: kind, p_name: name \?\? null \}\)\)/.test(mod));
+check('AppleMap.web.tsx: EVERY pick fetches its shape and draws every polygon (owner 2026-11-01: «anything»)', /placeShapeAt\(c\.latitude, c\.longitude, kind, \(place \? place\.name : undefined\) \?\? p\.name\)/.test(web) && /live\.mark\.shapes = shape\.rings\.map\(\(poly\) => new mk\.PolygonOverlay\(/.test(web));
 check('AppleMap.web.tsx: an area asks for its own kind, everything else for a site footprint', /const kind: ShapeKind = p\.kind && isAreaKind\(p\.kind\) \? p\.kind : 'place';/.test(web));
 check('AppleMap.web.tsx: the circle / rectangle is only the fallback (no shape, or the fetch failed)', /if \(!shape \|\| shape === 'unknown'\) return fallback\(\);/.test(web) && /const fallback = landmark \? circle : rectangle;/.test(web));
 check('AppleMap.web.tsx: a landmark keeps its pin whatever the shape lookup says', /if \(landmark\) \{\n\s+live\.mark\.pin = new mk\.MarkerAnnotation\(/.test(web));
@@ -48,6 +48,8 @@ check('AppleMap.web.tsx: the view fits the shape with air around it', /\(n - s0\
 check('the loader, its workflow and the shapes data exist', existsSync(join(root, 'scripts/load-place-shapes.ts')) && existsSync(join(root, '.github/workflows/place-shapes-load.yml')) && existsSync(join(root, 'data/place-shapes.geojson.gz')));
 check('the workflow runs the loader with the service key', /scripts\/load-place-shapes\.ts/.test(readFileSync(join(root, '.github/workflows/place-shapes-load.yml'), 'utf8')) && /SUPABASE_SERVICE_ROLE_KEY/.test(readFileSync(join(root, '.github/workflows/place-shapes-load.yml'), 'utf8')));
 check('a committed migration admits the place (footprint) kind with a tolerant lookup', readdirSync(join(root, 'supabase/migrations')).some((f) => { const t = readFileSync(join(root, 'supabase/migrations', f), 'utf8'); return /check \(kind in \('district', 'city', 'region', 'place'\)\)/.test(t) && /case when p_kind = 'place' then 0\.0005 else 0 end/.test(t); }));
+check('a committed migration draws a site footprint only when its name is the picked site\'s own (mosque ≠ its hospital)', readdirSync(join(root, 'supabase/migrations')).some((f) => { const t = readFileSync(join(root, 'supabase/migrations', f), 'utf8'); return /p_kind <> 'place' or \(q\.n is not null and length\(q\.n\) >= 3 and exists \(/.test(t); }));
+check('AppleMap.web.tsx: the no-footprint circle is a fixed 120 m marker, not a fake boundary', /const radius = 120;/.test(web));
 check('a committed migration creates place_shapes and place_shape_at()', readdirSync(join(root, 'supabase/migrations')).some((f) => { const t = readFileSync(join(root, 'supabase/migrations', f), 'utf8'); return /create table if not exists public\.place_shapes/.test(t) && /function public\.place_shape_at\(/.test(t); }));
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-map-area-pick-draws-real-boundary: all checks passed');

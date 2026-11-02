@@ -43,7 +43,7 @@ const liveChat = () => ({
     { id: 'm6', role: 'results', result: { listings: listings(12, 'r3'), matchTotal: 88, pageOffset: 12, hasMore: false, query: { deal: 'Rent', types: ['Apartment'], bathrooms: 2 } } },
   ],
   revealCount: { m3: 30, m5: 20, m6: 12 },          // «عرض المزيد» pressed on the first turn
-  afReceipt: { m5: 'شقة 🏢', m6: 'شقة 🏢، و+٢ حمامات 🚿' },  // two AF rounds, two receipts
+  afReceipt: { m5: '🏢 شقة', m6: '🏢 شقة، و🚿 +٢ حمامات' },  // two AF rounds, two receipts
   guidedPills: { msgId: 'm6', baseQ: { deal: 'Rent' }, facets: [{ id: 'unit_subtype', keys: ['Apartment'], labels: ['شقة'] }, { id: 'bathrooms', keys: ['2'], labels: ['+٢'] }], asked: ['unit_subtype', 'bathrooms'], total: 88 },
 });
 
