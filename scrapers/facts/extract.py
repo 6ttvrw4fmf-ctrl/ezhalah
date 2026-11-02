@@ -116,7 +116,14 @@ NEW_BOOL = ("majlis", "roof", "warranty", "water_tank", "well", "annex", "two_en
             "farm_house", "farm_rest_house", "workers_housing", "fence", "main_road", "good_soil",
             # GROUP B — residential land (owner handoff 2026-11-01)
             "three_streets", "ready_to_build", "raised_plot", "residential_commercial", "all_services", "asphalt",
-            "street_lights", "approved_plan", "direct_owner", "inside_project", "floors_allowed", "grant_land", "no_services")
+            "street_lights", "approved_plan", "direct_owner", "inside_project", "floors_allowed", "grant_land", "no_services",
+            # GROUP C — commercial (owner handoff 2026-11-01); own_toilet rides the existing own_bathroom
+            "mezzanine", "pantry", "glass_front", "frontage", "in_mall", "in_tower", "license", "food_allowed", "takeover",
+            "first_tenant", "internet", "civil_defense", "high_ceiling", "hangar", "insulated_panel", "cold_storage",
+            "concrete_floor", "loading_dock", "big_gate", "truck_access", "crane", "racks", "office_inside", "heavy_power",
+            "industrial_area", "car_service", "meeting_room", "reception", "coworking", "private_office", "central_ac",
+            "shops_inside", "offices_inside", "apartments_inside", "staff_housing_inside", "restaurant_cafe", "car_wash",
+            "market", "earning_income", "stars_mentioned", "rooms_suites", "oil_change", "pumps", "mosque", "building_rules")
 BOOL_FACTS = frozenset(EXISTING_BOOL + NEW_BOOL)
 NUM_FACTS = frozenset(("street_width_m", "floors", "apartments_count", "shops_count", "property_age_years"))
 TEXT_FACTS = frozenset(("boundaries",))
