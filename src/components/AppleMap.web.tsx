@@ -610,7 +610,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
   const [short, setShort] = useState(false);
   const roomy = full || !short;
   return (
-    <View style={s.frame} onLayout={(e) => setShort(e.nativeEvent.layout.height < 280)}>
+    <View style={s.frame} onLayout={(e) => { const boxPx = e.nativeEvent.layout.height; setShort(boxPx < 280); }}>
       <View ref={hostRef} style={s.host} />
       {/* Compact: ⤢ top-left opens the map full screen; the box itself pans and zooms in place. */}
       {/* «رجوع» under the top-left button, only once zoomed in (owner 2026-10-31: «a button that allows the user to go
