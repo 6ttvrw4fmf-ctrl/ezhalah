@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pinFilterOf, isNarrowed, EMPTY_MAP_FILTER } from '../src/lib/mapFilter.ts';
-import { pinColor, pinHead, shortMoney, cellForSpan, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
+import { pinColor, pinHead, shortMoney, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
 let failed = 0;
@@ -33,10 +33,12 @@ check('shortMoney keeps one decimal under 10 and none above (1.25M → 1.3M, 12.
 mustCatch('a Short-stays pin printing its stored price', !/3/.test(pinHead(one('short', 3000, 'gathern'), 'ar')));
 mustCatch('a shared spot printing a price instead of its count', !/ألف|مليون/.test(pinHead({ n: 4, deal: 'buy', price: 650000, platform: 'aqar' }, 'ar')));
 
-// Zoom → cell: exact points from city zoom inward, cells sized to ~30 columns wider out, never below 0.01°.
+// Zoom → cell: exact points from city zoom inward, cells sized to ~7 rows wider out (measured live 2026-11-02: /30 drew
+// hundreds of overlapping «1» bubbles over the country), never below 0.01°.
 check('city zoom and closer asks for exact points (cell 0)', cellForSpan(0.12) === 0 && cellForSpan(0.03) === 0);
-check('a region view asks for cells of span/30; the country view (17°) ~0.57°; a floor of 0.01°', Math.abs(cellForSpan(3) - 0.1) < 1e-9 && Math.abs(cellForSpan(17) - 17 / 30) < 1e-9 && cellForSpan(0.2) === 0.01);
+check('a region view asks for cells of span/7; the country view (17°) ~2.4°; a floor of 0.01°', Math.abs(cellForSpan(0.7) - 0.1) < 1e-9 && Math.abs(cellForSpan(17) - 17 / 7) < 1e-9 && Math.abs(cellForSpan(0.14) - 0.02) < 1e-9 && cellForSpan(0.121) >= 0.01);
 mustCatch('exact points requested for the whole country (424k rows)', cellForSpan(17) > 0);
+mustCatch('a bubble grid finer than ~12 rows (the overlapping-bubbles defect of 2026-11-02)', cellForSpan(17) >= 17 / 12);
 check('the padded box is a fifth wider on every side and clamped to the globe', (() => { const b = paddedBox({ latitude: 24.7, longitude: 46.7 }, { latitudeDelta: 1, longitudeDelta: 2 }); return Math.abs(b.n - 25.4) < 1e-9 && Math.abs(b.s - 24.0) < 1e-9 && Math.abs(b.e - 48.1) < 1e-9 && Math.abs(b.w - 45.3) < 1e-9 && paddedBox({ latitude: 89.9, longitude: 0 }, { latitudeDelta: 1, longitudeDelta: 1 }).n === 90; })());
 check('bubble text shortens thousands', bubbleText(12400, 'ar') === '12 ألف' && bubbleText(840, 'en') === '840');
 
@@ -80,6 +82,19 @@ const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const screen = readFileSync(join(root, 'src/app/map.tsx'), 'utf8');
 check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure arguments', /boundedRpc<PinRow\[\]>\(supabase\.rpc\('map_pins_ar', rpcArgs\(box, cell, filter, limit\)\)\)/.test(data) && /return pinsFrom\(result\)/.test(data));
 check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins\)/.test(web) && /mine = rows\.map\(\(row\) => new mk\.Annotation\(/.test(web));
+// The layer mounts BEFORE MapKit has loaded and returns early; the map's arrival must re-run it (measured live
+// 2026-11-02: a fresh /map load drew nothing until the deal changed).
+check('AppleMap.web.tsx re-runs the pin layer once the map object exists (mapReady bumped where live.map is set, in the deps)',
+  /live\.map = map;\n\s*setMapReady\(\(n\) => n \+ 1\);/.test(web) && /\}, \[pinsKey, failed, mapReady\]\);/.test(web) && /if \(!mk \|\| !m \|\| !pinFilter\) return;/.test(web));
+check('AppleMap.web.tsx adds the biggest count last so it sits on top', /rows\.sort\(\(a, b\) => a\.n - b\.n\);\n\s*setPinCount\(/.test(web));
+// NEVER A PARTIAL SET OF PINS: an exact-point read that hit PIN_LIMIT is re-read as a fine bubble grid (every listing
+// counted), and the bubbles are drawn with THAT cell (element, data and anchor all follow drawCell).
+check('AppleMap.web.tsx falls back to a fine bubble grid when the exact read hit its cap, and draws with that cell',
+  /if \(cell === 0 && rows\.length >= PIN_LIMIT\) \{\n\s*drawCell = fineCellForSpan\(span\.latitudeDelta\);\n\s*rows = await fetchMapPins\(paddedBox\(center, span\), drawCell, pins\);/.test(web)
+  && /element\(row, drawCell\)/.test(web) && /data: \{ pin: row, cell: drawCell \}/.test(web) && /anchorOffset: drawCell > 0/.test(web));
+check('the fine grid is ~14 rows with a floor of 0.002° and finer than the normal grid', Math.abs(fineCellForSpan(0.14) - 0.01) < 1e-9 && fineCellForSpan(0.001) === 0.002 && fineCellForSpan(1) < cellForSpan(1));
+mustCatch('a fine grid coarser than the normal grid (the fallback would not resolve a dense view)', fineCellForSpan(0.5) < cellForSpan(0.5));
+check('PIN_LIMIT is the cap the data module sends by default', PIN_LIMIT === 3000 && /limit = 3000\)/.test(readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8')));
 check('AppleMap.web.tsx reloads on region-change-end and drops a late answer', /addEventListener\('region-change-end', onRegion\)/.test(web) && /if \(my !== seq \|\| rows === 'unknown'/.test(web));
 check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('clear();\n      mine = rows.map'));
 check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape && !drawing && pinCount !== null/.test(web));
