@@ -1,4 +1,7 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-11-02 (migration 20261102055240, the Villas & Houses group — owner lists 2026-11-01, approved 2026-11-02):
+--   CHANGED — the amenity whitelist gains the 12 villa tokens between ''has_shops'' and ''furnished'' (7 boolean text
+--   facts + 5 merged EITHER predicates) and one arm each; everything else byte-identical.
 -- Re-verified 2026-11-01 (migration 20261101100930, the Apartments & Co-living group — owner handoff 2026-10-31):
 --   CHANGED — the amenity whitelist gains the 45 group tokens between ''majlis'' and ''furnished'' (39 boolean
 --   text-fact columns roof … families + 6 derived: separate_meters = (separate_electricity_meter or
