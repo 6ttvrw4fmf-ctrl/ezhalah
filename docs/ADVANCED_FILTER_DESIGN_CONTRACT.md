@@ -733,3 +733,22 @@ and extended to pin `MIN_REAL_OPTION_COUNT`, new §3 pins the zero-survivor kill
 `scripts/verify-af-narrowing-gate.ts` (§3's single-select arity assertion inverted in place with the
 dated reason; every other assertion untouched). Both EXECUTE the real pure gate; neither was deleted
 or unwired.
+
+## Amendment 2026-11-01 (b) — the card note is one short line + «كيف يشتغل؟» (owner-approved)
+
+**The owner's words:** «we want it shorter and include something like how it works where the user can click
+and read» · «similar to the terms and policy, the way it pops up, with an x button always on the top right no
+matter the language» · «white with logo» · «no emojis or anything».
+
+**The rule.** Every question card shows one line: «الأرقام من كلام الإعلانات نفسها · كيف يشتغل؟» ("Counts come
+from the ads' own words · How it works?"). «كيف يشتغل؟» opens InfoModal with `modal = 'af-how'`: the Terms &
+Privacy reader's own host (white card, the eagle lockup, ✕ pinned top-right in both languages, above the
+Advanced Filter card), showing the owner's five sections from `src/data/afHowItWorks.ts` — source, the AI's
+role (reads and classifies only), what the number means, limits, the user's responsibility (Ezhalah is an AI
+search engine whose only goal is to send the user to the lister; no payment or commission from any deal;
+information "as is"; Terms and Privacy apply). No emoji anywhere in that text, Arabic and English kept
+section-for-section. The «😔 N إعلان لم يذكر هذه المعلومة» caption under the line is unchanged.
+
+**Guard.** `scripts/verify-af-how-it-works-note.ts` (in `npm test`): executes the text module (five sections,
+heading + paragraph, no emoji, the owner's non-negotiable phrases present in both languages) and pins the
+wiring card → store → InfoModal.

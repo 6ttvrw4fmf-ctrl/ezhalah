@@ -26,6 +26,7 @@ import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup } from '@/lib/authPopupBehavior';
 import { attachCardDrag, clampOffsetOnScreen } from '@/lib/cardDrag';
 import { getLegalDocs, hasLegalDocs } from '@/data/legal';
+import { getAfHowItWorks } from '@/data/afHowItWorks';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const IN = { duration: 240, easing: Easing.bezier(0.22, 1, 0.36, 1) };
@@ -64,7 +65,7 @@ const LEGAL_MAX_W = 640;
 const ABOUT_MAX_H = 700;
 
 const EAGLE = require('../../assets/images/logo-cloud-green-static.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
-type Kind = 'support' | 'about' | 'legal';
+type Kind = 'support' | 'about' | 'legal' | 'afhow';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
 // blurred, dimmed page. Mounted at the app root (Shell) so it overlays every screen and works in
@@ -73,7 +74,9 @@ type Kind = 'support' | 'about' | 'legal';
 export default function InfoModal() {
   const { modal, closeModal } = useApp();
   if (!modal) return null;
-  const kind: Kind = modal === 'privacy' ? 'legal' : modal;
+  // 'af-how' is «كيف يشتغل دقّق مع الذكاء؟» (owner 2026-11-01): the Advanced Filter card's note, read in
+  // this same host as the Terms reader — white card, eagle, ✕ top-right in both languages.
+  const kind: Kind = modal === 'privacy' ? 'legal' : modal === 'af-how' ? 'afhow' : modal;
   return <Sheet kind={kind} legalTab={modal === 'privacy' ? 'privacy' : 'terms'} onClose={closeModal} />;
 }
 
@@ -140,13 +143,13 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   const dialogBox = centredDialogBox(height, 16, insets, promptInsets, 48);
   const availH = dialogBox.availHeight;
   const maxH = Math.min(availH, about ? ABOUT_MAX_H : 720);
-  const maxW = about ? ABOUT_MAX_W : kind === 'legal' ? LEGAL_MAX_W : SUPPORT_MAX_W;
+  const maxW = about ? ABOUT_MAX_W : kind === 'legal' || kind === 'afhow' ? LEGAL_MAX_W : SUPPORT_MAX_W;
 
   return (
     <View
       style={[
         s.overlay,
-        kind === 'legal' && s.overlayTop,
+        (kind === 'legal' || kind === 'afhow') && s.overlayTop,
         // ── A FIXED OVERLAY IS INVISIBLE TO THE ROOT'S RESERVED BAND (ops_incident #670) ─────────
         // `_layout.tsx` reserves a top-docked auth prompt's height as the app root's paddingTop,
         // and that correctly moves everything laid out INSIDE it. This overlay is not: it resolves
@@ -202,6 +205,7 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
           <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
             {kind === 'support' ? <SupportBody t={t} />
               : kind === 'about' ? <AboutBody t={t} reduced={reduced} gripRef={gripRef} drag={drag} />
+              : kind === 'afhow' ? <HowItWorksBody t={t} />
               : <LegalBody t={t} initial={legalTab} />}
           </ScrollView>
         </Animated.View>
@@ -499,6 +503,37 @@ function AboutBody({ t, reduced, gripRef, drag }: {
         <Text style={a.note}>{t('Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.')}</Text>
         <Text style={a.note}>{t('We collect only what the service needs, and we do not sell user data.')}</Text>
       </Reveal>
+    </View>
+  );
+}
+
+// ————————————————————————————— «كيف يشتغل دقّق مع الذكاء؟» ————————————————————————————————
+// The Advanced Filter card's note, opened from its «كيف يشتغل؟» link (owner 2026-11-01). Same reading
+// dialog as the Terms: the eagle lockup, then the owner's five sections (src/data/afHowItWorks.ts),
+// rendered with the legal reader's own styles so the two popups look like one family. No tabs, no
+// emoji, no contact address.
+function HowItWorksBody({ t }: { t: Tr }) {
+  const { locale, isRTL } = useI18n();
+  const docs = getAfHowItWorks(locale);
+  return (
+    <View testID="af-how-it-works">
+      <View style={s.head}>
+        <View style={s.legalLockup}>
+          <XImage source={EAGLE} style={s.legalEagle} contentFit="contain" />
+          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('How Refine with AI works')}</Text>
+        </View>
+      </View>
+      <View style={s.bodyPad}>
+        {docs.map((p, i) => {
+          const [heading, ...paragraphs] = p.split('\n\n');
+          return (
+            <View key={i}>
+              <Text accessibilityRole="header" style={[s.legalSectionTitle, !isRTL && s.textLtr]}>{heading}</Text>
+              {paragraphs.map((paragraph, j) => <Text key={j} style={[s.legalP, !isRTL && s.textLtr]}>{paragraph}</Text>)}
+            </View>
+          );
+        })}
+      </View>
     </View>
   );
 }

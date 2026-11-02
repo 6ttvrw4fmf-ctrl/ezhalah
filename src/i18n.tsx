@@ -1654,6 +1654,10 @@ const AR: Record<string, string> = {
   'Privacy Policy': 'سياسة الخصوصية',
   // «الشروط والخصوصية» reader (owner 2026-09-03): the account-menu row + its two tabs.
   'Terms & Privacy': 'الشروط والخصوصية',
+  // The Advanced Filter card's note and its reader (owner 2026-11-01). No emoji.
+  "Counts come from the ads' own words": 'الأرقام من كلام الإعلانات نفسها',
+  'How it works?': 'كيف يشتغل؟',
+  'How Refine with AI works': 'كيف يشتغل دقّق مع الذكاء؟',
   'Please turn off your VPN': 'فضلاً أوقف الـ VPN',
   'Ezhalah is not available over VPN, Tor or server networks. Turn off your VPN and try again.': 'إزهله غير متاح عبر شبكات VPN أو Tor أو الخوادم. أوقف الـ VPN وحاول مرة ثانية.',
   'Terms of Use': 'شروط الاستخدام',
