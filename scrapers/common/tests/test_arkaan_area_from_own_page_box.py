@@ -10,6 +10,8 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
 _supabase_mod = types.ModuleType("supabase")
 _supabase_mod.Client = object
 _supabase_mod.create_client = lambda url, key: object()
@@ -20,8 +22,14 @@ sys.modules.setdefault("dotenv", _dotenv_mod)
 
 import scrapers.arkaan.run as R  # noqa: E402
 
-R.to_catalog = lambda city_ar, region_hint=None: ((3677, 5) if city_ar else (None, None))
-R.catalog_district = lambda *a, **k: None   # the district catalog is live-DB infrastructure with its own tests
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_catalog(monkeypatch):
+    """The location catalog is live-DB infrastructure with its own tests: stubbed for THESE cases only
+    (a module-level patch leaked into test_arkaan_town_suffix_district)."""
+    monkeypatch.setattr(R, "to_catalog", lambda city_ar, region_hint=None: ((3677, 5) if city_ar else (None, None)))
+    monkeypatch.setattr(R, "catalog_district", lambda *a, **k: None)
 
 # Trimmed from the real /property/2440 page (2026-11-02); the title also says «| 230 م²», which is NOT the source used.
 PAGE = """<html><head><title>شقة دبلكسية للبيع في حي الدانة بالهفوف | 230 م² | مكتب أركان العقار</title></head><body>
