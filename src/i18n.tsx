@@ -328,9 +328,10 @@ const AR: Record<string, string> = {
   'to buy': 'للبيع',
   // Rent verb with the payment period the user picked (Monthly / Yearly) so the summary sentence
   // reflects the toggle exactly — "أبحث عن شقة للإيجار الشهري في جدة". (owner UI request 2026-07-18.)
-  'to rent monthly': 'للإيجار الشهري',
+  // The «monthly» pool is «إقامات قصيرة» (owner 2026-11-02): the sentence says short stay, never monthly.
+  'for a short stay': 'للإقامة القصيرة',
   'to rent yearly': 'للإيجار السنوي',
-  'to rent monthly or yearly': 'للإيجار الشهري أو السنوي',
+  'for a short stay or yearly rent': 'للإقامة القصيرة أو الإيجار السنوي',
   'to rent or buy': 'للإيجار أو الشراء',
   'Rent or Buy': 'إيجار أو شراء',
   // District, and the "district، city" place phrase used when the user picked a district in the filter.
