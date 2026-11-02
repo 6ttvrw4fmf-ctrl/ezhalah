@@ -66,6 +66,7 @@ const check = (ok: boolean, name: string, detail = '') => {
   console.log(`${ok ? '  ✓' : '  ✗'} ${name}${ok || !detail ? '' : ` — ${detail}`}`);
   if (!ok) failed++;
 };
+const mustCatch = (label: string, caught: boolean) => check(caught, `(mutation) catches ${label}`);
 
 const src = readFileSync(WORKFLOW, 'utf8');
 const jobs = parseJobs(src);
@@ -79,9 +80,9 @@ const parallel = src
   .replace(/^(  af-surface-city:\n    needs: )\[[^\]]*\]/m, '$1[gate, af-truth, af-card-state]')
   .replace(/^(  af-matrix:\n    needs: )\[[^\]]*\]/m, '$1[gate, af-truth, af-card-state]');
 check(parallel !== src, 'self-proof: the mutation really rewrote the two needs lines');
-check(sweepChainProblems(parseJobs(parallel)).length > 0, 'mutation: the 2026-11-02 fan-out (three sweeps beside each other) is RED');
+mustCatch('the 2026-11-02 fan-out (three sweeps beside each other)', sweepChainProblems(parseJobs(parallel)).length > 0);
 const fork = src.replace(/^(  af-matrix:\n    needs: )\[[^\]]*\]/m, '$1[gate, af-surface-region]');
-check(sweepChainProblems(parseJobs(fork)).length > 0, 'mutation: two sweeps hanging off the same predecessor is RED');
+mustCatch('two sweeps hanging off the same predecessor', sweepChainProblems(parseJobs(fork)).length > 0);
 const synthetic = parseJobs('jobs:\n  a:\n    steps:\n      - run: node scripts/verify-af-matrix-truth-live.ts\n  b:\n    needs: [a]\n    steps:\n      - run: node scripts/verify-af-full-surface-differential.ts\n');
 check(sweepChainProblems(synthetic).length === 0, 'self-proof: a strict chain of two sweeps is GREEN');
 
