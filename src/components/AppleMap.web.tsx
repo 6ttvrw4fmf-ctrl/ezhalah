@@ -481,7 +481,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         });
         map.addEventListener('select', (e) => {
           const r = e.overlay?.data;
-          if (!r || !map) return;
+          // An outline that has faded to nothing (zoomed in past IN_FADE_END) is not there for the user, so it must
+          // not be clickable either: measured live 2026-11-02 on a phone, a tap between two price pins in central
+          // Riyadh flew the map out to the whole region (the invisible polygon took the tap).
+          if (!r || !map || fade <= 0) return;
           chosen = (e.overlay as typeof chosen) ?? null;
           paint();
           live.history.push(map.region);
