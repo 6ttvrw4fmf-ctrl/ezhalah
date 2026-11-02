@@ -27,6 +27,7 @@ import random
 import re
 import sys
 import time
+import types
 from collections import Counter, defaultdict
 from typing import Any, Optional
 
@@ -459,13 +460,36 @@ AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", 
 AF_NUM_COLUMNS = ("street_width_m", "apartments_count", "shops_count", "bathrooms")
 
 
-def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def place_names_for(client, table: str, ids: list[int], tries: int = 3, sleep=time.sleep) -> dict[int, tuple[str, ...]]:
+    """{listing id: (district_ar, city_ar)} for one page — the ad's OWN place names, which the checker blanks before
+    reading (backlog 1188: «دور-بيشة-الخزان» read water_tank from district «الخزان»). One light read per page, not a
+    change to text_facts_todo. A table with no such column (42703) has no names to give → {}; any other failure is
+    raised after `tries`, never read as «no names» (a failed fetch is not an empty answer)."""
+    if not ids:
+        return {}
+    for attempt in range(1, tries + 1):
+        try:
+            rows = client.table(table).select("id,district_ar,city_ar").in_("id", ids).execute().data or []
+            return {int(x["id"]): tuple(n for n in (x.get("district_ar"), x.get("city_ar")) if n) for x in rows}
+        except Exception as e:
+            if "42703" in str(e):
+                return {}
+            if attempt == tries:
+                raise
+            print(f"  ! {table} place names retry {attempt}: {str(e)[:120]}")
+            sleep(5 * attempt)
+    return {}
+
+
+def overlay_row(table: str, r: dict[str, Any], run_id: str,
+                place_names: tuple[str, ...] = ()) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """One text_facts_todo row → (its listing_text_facts row, every fact the checker found).
 
     The overlay row keeps only the AF columns (AF_COLUMNS + AF_NUM_COLUMNS), each {v, q}. An ad with no AF fact (or too little text)
-    still gets a row with facts {} — that row is the memory that this exact text (src_hash) was read."""
+    still gets a row with facts {} — that row is the memory that this exact text (src_hash) was read.
+    place_names: the ad's own district / city (place_names_for) — blanked by the checker, never read as a fact."""
     text = W.clean_text(r.get("title"), r.get("body"))
-    found = W.check(text) if W.readable(norm(text)) else []
+    found = W.check(text, place_names) if W.readable(norm(text)) else []
     facts = {f["fact"]: {"v": f["value_bool"], "q": f["quote"]}
              for f in found if f["fact"] in AF_COLUMNS and f["value_bool"] is not None and (f["quote"] or "").strip()}
     facts.update({f["fact"]: {"v": f["value_num"], "q": f["quote"]}
@@ -531,8 +555,9 @@ def run_incremental(args: argparse.Namespace) -> int:
             after = int(page[-1]["id"])
             got += len(page)
             cur, hist = [], []
+            names = place_names_for(client, table, [int(r["id"]) for r in page])
             for r in page:
-                row, found = overlay_row(table, r, args.run_id)
+                row, found = overlay_row(table, r, args.run_id, names.get(int(r["id"]), ()))
                 cur.append(row)
                 stats["ads_read"] += 1
                 stats["ads_with_af_fact"] += bool(row["facts"])
@@ -643,6 +668,34 @@ def selftest() -> None:
             raise AssertionError(f"write_batch swallowed {code}")
         except RuntimeError:
             pass
+    # backlog 1188: the page's own place names reach the checker (abaad 13214542 «دور-بيشة-الخزان», district «الخزان»)
+    slug = dict(id=13214542, ad_number="13214542", src_hash="0" * 32, title="دور-بيشة-الخزان", body="دور للبيع")
+    assert overlay_row("abaad_residential_listings", slug, "t")[0]["facts"].get("water_tank", {}).get("v") is True, \
+        "premise: read without its place names, the slug carries water_tank"
+    assert "water_tank" not in overlay_row("abaad_residential_listings", slug, "t", ("الخزان", "بيشة"))[0]["facts"]
+
+    class _Q:
+        def __init__(self, result): self.result = result
+        def select(self, *_a): return self
+        def in_(self, *_a): return self
+        def execute(self):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return types.SimpleNamespace(data=self.result)
+
+    class _C:
+        def __init__(self, result): self.result = result
+        def table(self, _t): return _Q(self.result)
+
+    got = place_names_for(_C([{"id": 13214542, "district_ar": "الخزان", "city_ar": "بيشة"}, {"id": 2, "district_ar": None, "city_ar": "تربة"}]),
+                          "abaad_residential_listings", [13214542, 2])
+    assert got == {13214542: ("الخزان", "بيشة"), 2: ("تربة",)}, got
+    assert place_names_for(_C(RuntimeError("42703 column district_ar does not exist")), "x_listings", [1]) == {}
+    try:
+        place_names_for(_C(RuntimeError("57014 statement timeout")), "x_listings", [1], sleep=lambda _s: None)
+        raise AssertionError("a failed place-name read was swallowed as «no names»")
+    except RuntimeError:
+        pass
     print("words selftest ok")
 
 

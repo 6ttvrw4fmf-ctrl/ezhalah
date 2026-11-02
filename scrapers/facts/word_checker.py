@@ -929,13 +929,30 @@ def _num_hits(fact: str, t: str, ci: int) -> list[Hit]:
     return hits
 
 
-def check(text: str) -> list[dict[str, Any]]:
-    """Facts the ad's text states: [{fact, value_bool|value_num|value_text, quote}], quote = the ad's own span."""
+def _blank_place_names(t: str, names: tuple[str, ...]) -> str:
+    """The ad's OWN district / city names, blanked (same length, so quote offsets hold) before any fact is read.
+
+    Backlog 1188 (🔬 2026-11-02): «حي X» is caught in _judge, but a title that is a URL slug — abaad 13214542
+    «دور-بيشة-الخزان» (type-city-district) — has no «حي» before the name, and district «الخزان» read water_tank = yes.
+    The listing already KNOWS its place, so its own names are removed as whole words: no stem list, no guessing.
+    Only the exact normalised name goes («الخزان»); a bare «خزان ماء» in the same ad is still read."""
+    for name in names:
+        nn = norm(name or "").strip()
+        if len(nn) >= 3:
+            t = re.sub(r"(?<!\S)" + re.escape(nn) + r"(?!\S)", lambda m: " " * len(m.group(0)), t)
+    return t
+
+
+def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+    """Facts the ad's text states: [{fact, value_bool|value_num|value_text, quote}], quote = the ad's own span.
+    place_names: the listing's own district / city — never read as a fact (_blank_place_names)."""
     if not text:
         return []
     raw = unicodedata.normalize("NFKC", text)
     full_norm = norm(raw)
     clauses = [(off, c) + norm_map(c) for off, c in _clauses(raw)]
+    if place_names:
+        clauses = [(off, c, _blank_place_names(t, place_names), idx) for off, c, t, idx in clauses]
     bool_hits: dict[str, dict[bool, tuple[int, int, int]]] = {}
     num_hits: dict[str, list[Hit]] = {}
     cue_in = near_in = False
@@ -1080,9 +1097,10 @@ def quote_of_t(c: str, t: str, idx: list[int], s: int, e: int) -> str:
     return c[idx[s]: idx[e - 1] + 1].strip() if e > s else ""
 
 
-def facts_of(text: str) -> dict[str, Any]:
+def facts_of(text: str, place_names: tuple[str, ...] = ()) -> dict[str, Any]:
     """{fact: value} — a convenience view of check() for tests and the finder."""
-    return {r["fact"]: next(r[k] for k in ("value_bool", "value_num", "value_text") if r[k] is not None) for r in check(text)}
+    return {r["fact"]: next(r[k] for k in ("value_bool", "value_num", "value_text") if r[k] is not None)
+            for r in check(text, place_names)}
 
 
 # ── self-check: real tricky phrases from the LLM run's report (FACTS_EXTRACT_TEST_2026-10-24.md) ──────────
@@ -1781,6 +1799,14 @@ def selftest() -> None:
     assert "050" not in t and "966" not in t and facts_of(t).get("majlis") is True, t
     assert names_a_person("ملك فلان بنت فلان") and names_a_person("آل فلان") and not names_a_person("مسجد فلان بن فلان")
     assert not names_a_person("بن") and not names_a_person("شارع 15 م")
+    # backlog 1188: the ad's OWN place names are never a fact — the URL-slug title has no «حي» before the name
+    slug = clean_text("دور-بيشة-الخزان", "دور للبيع")
+    assert facts_of(slug).get("water_tank") is True, "premise: without its place names the slug reads water_tank"
+    assert "water_tank" not in facts_of(slug, ("الخزان", "بيشة")), facts_of(slug, ("الخزان", "بيشة"))
+    assert "garden" not in facts_of(clean_text("فيلا-الرياض-الحديقة", "فيلا للبيع"), ("الحديقة", "الرياض"))
+    both = facts_of(clean_text("دور-بيشة-الخزان", "دور للبيع مع خزان ماء"), ("الخزان", "بيشة"))
+    assert both.get("water_tank") is True, both          # a real «خزان ماء» in the same ad is still read
+    assert facts_of(slug, ("",)) == facts_of(slug) and facts_of(slug, ("ال",)) == facts_of(slug)   # empty / too-short names: no-op
     print(f"word_checker selftest ok ({len(cases)} phrases)")
 
 
