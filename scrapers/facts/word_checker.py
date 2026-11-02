@@ -240,6 +240,20 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "singles": ["^عزاب", "singles", (rf"re:{_NOT_ALLOWED} {_TO}عزاب(?:ي|يه)?", False), (rf"re:{_ALLOWED} {_TO}عزاب(?:ي|يه)?", True)],
     "families": ["^عوائل", "^عائلات", "families", (rf"re:{_NOT_ALLOWED} {_TO}(?:عوائل|عائلات)", False),
                  (rf"re:{_ALLOWED} {_TO}(?:عوائل|عائلات)", True)],
+    # ── the villa facts (owner 2026-11-01): seven text facts, each a future Advanced Filter chip. `well` already sits
+    # above (its place guard: «بير السلم», «بير عثمان»). A fact is true only when the ad SAYS it; the shared guards
+    # («بدون», «لا يوجد», «قريب من», «يمكن عمل») apply unchanged. ──
+    "women_majlis": ["re:مجلس (?:ال)?(?:نساء|حريم|نسائي|نسوان)", "re:مجالس (?:ال)?(?:نساء|حريم|نسائيه)",
+                     "women s majlis", "ladies majlis"],
+    # «ري» alone is two letters inside many words — only with its system / method / network word
+    "irrigation": ["re:نظام (?:ال)?ري", "re:شبك(?:ه|ات) (?:ال)?ري", "re:(?:ال)?ري (?:ال)?(?:الي|اوتوماتيكي|اوتوماتيك|اتوماتيك|تلقائي|بالتنقيط)",
+                   "irrigation", "sprinkler"],
+    # a bare «ملعب» as a whole word (the owner's list); the plural «ملاعب» is the district's pitches, like «حدائق» (garden)
+    "sports_court": ["^ملعب$", "re:ملعب (?:ال)?(?:تنس|اسكواش|سكواش|بادل|كره (?:ال)?(?:سله|قدم|طائره|يد))",
+                     "tennis court", "squash court", "basketball court", "football pitch", "padel court"],
+    "outdoor_kitchen": ["re:مطبخ خارجي", "re:مطابخ خارجيه", "outdoor kitchen"],
+    "outdoor_diwaniya": ["re:ديوانيه خارجيه", "re:ديوانيات خارجيه", "outdoor diwaniya"],
+    "waterfall": ["^شلال$", "^شلالات$", "waterfall"],
 }
 for _k, _src in _INHERITED.items():
     FACT_TOKENS[_k] = list(N._AMENITY_TOKENS[_src]) + FACT_TOKENS[_k]
@@ -256,7 +270,9 @@ _LIST_WORDS = frozenset(_n(w) for w in (
     "مكيفات", "مكيف", "مطبخ", "مصعد", "مسبح", "اثاث", "مواقف", "موقف", "حوش", "سطح", "ملحق", "مجلس", "خزان",
     "خزانات", "عداد", "كهرباء", "مياه", "ماء", "صرف", "تكييف", "حديقه", "كراج", "مستودع", "بلكونه", "بئر",
     # the apartment chips a negator may reach across (owner 2026-10-31): «بدون واي فاي وكاميرات وثلاجه»
-    "واي", "فاي", "وايفاي", "نت", "انترنت", "كاميرات", "ثلاجه", "جاكوزي", "ساونا", "حارس", "حراسه", "انتركوم", "غساله"))
+    "واي", "فاي", "وايفاي", "نت", "انترنت", "كاميرات", "ثلاجه", "جاكوزي", "ساونا", "حارس", "حراسه", "انتركوم", "غساله",
+    # the villa facts (owner 2026-11-01): «بدون مسبح وشلال وملعب»
+    "شلال", "شلالات", "ملعب", "ديوانيه"))
 
 # ── guards ────────────────────────────────────────────────────────────────────────────────────────────────
 # PREPARED / POSSIBLE: the thing is not there yet — no row (the scrapers' _PREPARED_ONLY + «possible» words).
@@ -308,6 +324,8 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "water_tank": ((), ("ملابس", "مطبخ", "المطبخ", "حائط", "جداري", "دولاب", "خشب", "حائطيه", "ملابس",
                         "غاز", "الغاز", "وقود", "ديزل")),            # «خزان غاز» is the gas fact, not a water tank
     "well": ((), ("السلم", "سلم", "الدرج", "درج", "المصعد", "مصعد", "عثمان", "سلوي")),
+    # «ملعب أطفال» is the kids_play_area fact; «ملعب الحي» / «ملعب عام» the neighbourhood's (owner 2026-11-01)
+    "sports_court": ((), ("اطفال", "الاطفال", "للاطفال", "الحي", "عام", "عامه", "بلدي", "البلديه")),
     "annex": (("حمام", "دوره", "دورات", "مطبخ", "غرف", "غرفه"),
               ("به", "بها", "بالغرفه", "بالصاله", "بالمطبخ", "بالمجلس", "بغرفه", "بالمبني", "بالفيلا")),
     "storage": (("خلف", "بجوار", "مقابل", "صناعي", "صناعيه"),     # «خلف مخازن …» is an address, «أرض صناعية ومستودعات» the type
@@ -342,7 +360,7 @@ _UTILITY = tuple(_n(w) for w in ("كهرب", "مياه", "ماء", "مويه", "
                                  "sanitation", "fibre", "fiber", "telephone", "phone"))
 # Public amenities a neighbourhood also has: «مسجد وحديقة قريبة من العمارة», «حديقة … مقابل العمارة»,
 # and the items of a «خدمات قريبة: مسجد - حديقة» list — the nearby word may come AFTER, or a clause before.
-_PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking", "nursery", "kids_play_area"})
+_PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking", "nursery", "kids_play_area", "sports_court"})
 _NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "بجوار", "مقابل"))
 _METER_FACTS = frozenset({"separate_water_meter", "separate_electricity_meter"})
 _DIGITS = "0123456789"
@@ -1090,6 +1108,31 @@ def selftest() -> None:
         ("سكن عوائل", {"families": True}, ()),
         ("للعوائل فقط", {"families": True}, ("singles",)),
         ("لا نقبل العوائل", {"families": False}, ()),
+        # the villa facts (owner 2026-11-01): said → yes, negated → no, nearby / prepared / a place name → nothing
+        ("مجلس نساء ومجلس رجال", {"women_majlis": True, "majlis": True}, ()),
+        ("مجلس حريم مستقل", {"women_majlis": True}, ()),
+        ("فيلا بدون مجلس نسائي", {"women_majlis": False}, ()),
+        ("حديقة بنظام ري آلي", {"irrigation": True, "garden": True}, ()),
+        ("شبكة ري بالتنقيط", {"irrigation": True}, ()),
+        ("حديقة بدون نظام ري", {"irrigation": False}, ()),
+        ("يمكن عمل نظام ري", {}, ("irrigation",)),
+        ("ملعب تنس خاص", {"sports_court": True}, ()),
+        ("ملعب كرة قدم", {"sports_court": True}, ()),
+        ("فيلا مع ملعب ومسبح", {"sports_court": True, "pool": True}, ()),
+        ("لا يوجد ملعب", {"sports_court": False}, ()),
+        ("قريب من ملاعب الحي", {}, ("sports_court",)),
+        ("ملعب أطفال", {"kids_play_area": True}, ("sports_court",)),
+        ("مطبخ خارجي ومطبخ داخلي", {"outdoor_kitchen": True, "kitchen": True}, ()),
+        ("مطبخ خارجى", {"outdoor_kitchen": True}, ()),
+        ("بدون مطبخ خارجي", {"outdoor_kitchen": False}, ()),
+        ("ديوانية خارجية", {"outdoor_diwaniya": True}, ()),
+        ("ديوانيه خارجيه مع مشب", {"outdoor_diwaniya": True, "grill": True}, ()),
+        ("لا توجد ديوانية خارجية", {"outdoor_diwaniya": False}, ()),
+        ("شلال ومسبح", {"waterfall": True, "pool": True}, ()),
+        ("حديقة بها شلالات", {"waterfall": True}, ()),
+        ("بدون شلال", {"waterfall": False}, ()),
+        ("بئر ماء", {"well": True}, ()),
+        ("بدون بئر", {"well": False}, ()),
         ("عدد الشقق 12", {"apartments_count": 12.0}, ()),
         ("عمارة فيها محلين", {"shops_count": 2.0}, ()),
     ]
