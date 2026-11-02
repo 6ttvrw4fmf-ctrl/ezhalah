@@ -192,6 +192,13 @@ check('the nightly job posts to pin_district_load and never inserts into listing
 check('the nightly job reads the 4-spot ring before calling a home middle', jobReadsTheRing(job));
 mustCatch('nightly: a job that inserts directly is refused', !jobLoadsOnlyThroughLoader(job.replace('rest/v1/rpc/pin_district_load`', 'rest/v1/listing_pin_district`')));
 mustCatch('nightly: a job that skips the ring is refused', !jobReadsTheRing(job.replace('verdict = "edge"; break;', 'break;')));
+// 🆕 2026-11-02 (backlog 1098): the loader refuses an ad whose SITE names a district and writes no row for it, so a job
+// that asks Apple about those spends its whole cap on them every night (01:17 run: 50 asked, 50 site-named, 0 switched on).
+const jobSkipsSiteNamed = (src: string): boolean =>
+  /listing_native_location_v2\?select=listing_id/.test(src) && /listing_source_district_ar\?select=listing_id/.test(src)
+  && /named\.has\(/.test(src);
+check('the nightly job skips ads whose site names its own district before asking Apple', jobSkipsSiteNamed(job));
+mustCatch('nightly: a job that asks Apple about site-named ads is refused', !jobSkipsSiteNamed(job.replace('named.has(', 'named.size === -1 && named.has(').replace(/listing_source_district_ar\?select=listing_id/g, 'x')));
 
 const files: Array<[string, string]> = all.map((f) => [f, readFileSync(join(dir, f), 'utf8')]);
 const liveFlip = flipProblems(files);
