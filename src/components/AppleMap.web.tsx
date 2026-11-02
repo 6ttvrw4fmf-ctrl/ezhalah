@@ -27,13 +27,17 @@
 // → «تعذّر تحميل الخريطة» in the same box, not an empty beige rectangle (A FAILED FETCH IS NOT AN EMPTY ANSWER).
 // Regions that fail to load leave the plain map (still usable) and are reported in the console.
 import { useEffect, useRef, useState } from 'react';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
+import { Image as XImage } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
+// The ground-type button's face (owner 2026-11-02: «replace it with the mascot»): the falconer in the farmer's
+// draped shemagh with a pickaxe — assets/images/soil-mascot.svg, built from insight-falconer-original.png.
+const GROUND_MASCOT = require('../../assets/images/soil-mascot.svg');
 const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
 const TOKEN_URL = '/api/mapkit-token';
 const REGIONS_URL = '/ksa-regions.json';
@@ -682,7 +686,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
       {/* Ground type, beside the layers button (owner 2026-11-02: «add it beside it»). Same circle, same lift in Arabic. */}
       {!failed && !drawing ? (
         <Pressable style={[s.groundBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => { setGroundOpen((o) => !o); setLayersOpen(false); }} accessibilityRole="button" accessibilityLabel={t('Ground type')} testID="map-ground-btn">
-          <MaterialCommunityIcons name="waves" size={21} color={colors.ink} />
+          <XImage source={GROUND_MASCOT} contentFit="contain" accessible={false} style={s.groundMascot} />
         </Pressable>
       ) : null}
       {groundOpen && !failed && !drawing ? (
@@ -746,6 +750,7 @@ const s = StyleSheet.create({
     position: 'absolute', right: 60, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
+  groundMascot: { width: 34, height: 30 },
   groundTitle: { fontFamily: font.family.bold, fontSize: 13.5, color: colors.ink, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4 },
   groundHint: { fontFamily: font.family.medium, fontSize: 12, color: colors.muted },
   groundRow: { paddingVertical: 7, opacity: 0.55 },
