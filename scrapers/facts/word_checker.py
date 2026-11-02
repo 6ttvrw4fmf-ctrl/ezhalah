@@ -845,6 +845,8 @@ _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
     ),
 }
 _COUNT_RANGE = {"floors": (1, 60), "apartments_count": (2, 500), "shops_count": (1, 300), "bathrooms": (1, 20)}
+# one UN-numbered bathroom («دورة مياه»), singular: alongside a counted one it makes the stated count incomplete
+_BATH_BARE = re.compile(r"(?:(?<= )|^)(?:ال|و|وال|ب|ل)?دوره (?:ال)?مياه(?!\w)")
 # a pool, an outside / annex toilet, or a per-unit / per-room count is not the home's bathroom count
 _BATH_SKIP_AFTER = ("سباح", "خارج", "بالخارج", "ملحق", "بالملحق", "بالحوش", "بالسطح", "للسائق", "السائق", "بكل", "لكل",
                     "في كل", "كل شقه", "كل غرفه", "مشترك")
@@ -1014,6 +1016,22 @@ def check(text: str) -> list[dict[str, Any]]:
         if len(by_val) == 1:                       # both a yes and a no → the ad has not stated it
             v, (ci, s, e) = next(iter(by_val.items()))
             emit(fact, v, quote_of(ci, s, e))
+    # a counted «2 دورة مياه» next to an UN-numbered «دورة مياه» elsewhere (wasalt 5952515: «دورة مياه تخدم القسم
+    # الرجالي … 2دورة مياه» — the page totals 3) is two statements that do not add up to a stated count → none
+    bath_hits = num_hits.get("bathrooms", [])
+    if bath_hits:
+        for ci, (_off, _c, t, _idx) in enumerate(clauses):
+            if ci in void:
+                continue
+            for m in _BATH_BARE.finditer(t):
+                if any(h.clause == ci and h.s <= m.start() < h.e for h in bath_hits):
+                    continue
+                if any(t[m.end():m.end() + 14].lstrip().startswith(x) for x in _BATH_SKIP_AFTER + ("واحد",)):
+                    continue
+                num_hits["bathrooms"] = []
+                break
+            if not num_hits["bathrooms"]:
+                break
     for fact in ("floors", "apartments_count", "shops_count", "bathrooms", "property_age_years"):
         hits = num_hits.get(fact, [])
         if len({h.value for h in hits}) == 1:      # several different counts → none, never a pick
@@ -1141,6 +1159,8 @@ def selftest() -> None:
         ("3 دورات مياه بكل شقة", {}, ("bathrooms",)),
         ("عمارة 8 شقق كل شقة 2 دورات مياه", {}, ("bathrooms",)),
         ("الدور الاول 3 دورات مياه والارضي دورتين مياه", {}, ("bathrooms",)),
+        ("مجلس رجال . دورة مياه تخدم القسم الرجالي . 3 غرف نوم . 2دورة مياه .", {}, ("bathrooms",)),
+        ("3 دورات مياه ودورة مياه خارجية", {"bathrooms": 3.0}, ()),
         ("عرض الشارع: 15", {"street_width_m": 15.0}, ()),
         ("زاوية على شارع 20م شرقي", {}, ("street_width_m",)),
         ("شارع 15 م شمالي، شارع 20 م غربي", {}, ("street_width_m",)),
