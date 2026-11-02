@@ -1,4 +1,10 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-11-02 (re-derived, see below) by the 🔧 Quality & Repair Engineer (2nd daily run) for migration
+--   20261102212825_stale_breaker_escape_resolves_on_reset, which needle-edits this body: exactly one
+--   match of the breaker-reset UPDATE asserted, a mon_resolve_key('stale_breaker_escape', …) line added
+--   after it, nothing else changed. This body = the 2026-09-21 verified body + that exact replacement
+--   (no other migration touched the function in between). Derived, not re-read from production this run;
+--   the next session with SQL should confirm md5(pg_get_functiondef) equals it. md5 of everything below (with its trailing newline, the same convention as the 2026-09-21 line): 46b864145225e1897ce0ad014c0732e2
 -- Refreshed 2026-08-29 (first capture) by the Senior Production Engineer routine, in the same
 --   change that fixed the coverage gate (migration 20260829142111, owner-directed).
 --   mark_stale_listings_inactive() is the daily stale sweep (pg_cron jobid 13, 04:00 UTC). Two
@@ -109,6 +115,8 @@ begin
     update public.mon_stale_breaker_state
        set consecutive_breaker_days = 0, updated_at = now()
      where tbl = t and consecutive_breaker_days <> 0;
+    -- 2026-11-02: the breaker did not trip for this table on this run, so its escape alert is no longer true.
+    perform public.mon_resolve_key('stale_breaker_escape', 'stale_breaker_escape:' || t);
 
     plat := regexp_replace(t, '_(residential|commercial)_listings$', '');
 
