@@ -55,8 +55,11 @@ check('Annual rent → Residential Building: no direction, no furnished question
   !cohortAllows(Q({ deal: 'Rent', types: ['Residential Building'] }), 'direction')
   && cardPlan(Q({ deal: 'Rent', types: ['Residential Building'] })).map((c) => c.id).sort().join() === 'features,services');
 // (Villa carried no cards when this was written; it got the owner's group lists on 2026-11-02 — verify-af-villas-group-cards.ts.)
-check('Rest House is untouched (no cards; its own cohort list still asks)', cardPlan(Q({ deal: 'Rent', types: ['Rest House'] })).length === 0
-  && cohortAllows(Q({ deal: 'Rent', types: ['Rest House'] }), 'amenities'));
+// (Rest House carried no cards when this was written; every residential type got cards on 2026-11-02 — the last list-less
+// cohort is Raw Land under Commercial, which still asks its own street width.)
+check('Raw Land is untouched (no cards; its own cohort list still asks)',
+  cardPlan({ ...Q({ deal: 'Buy', types: ['Raw Land'] }), category: 'Commercial' } as SearchQuery).length === 0
+  && cohortAllows({ ...Q({ deal: 'Buy', types: ['Raw Land'] }), category: 'Commercial' } as SearchQuery, 'street_width'));
 
 console.log('\n§2 the owner\'s worked examples (intersection, never union)\n');
 const aptFloor = cardPlan(Q({ deal: 'Rent', types: ['Apartment', 'Floor'] }));
@@ -149,15 +152,14 @@ mustCatch('a mixed scope that never pools its small cards (the owner\'s all-thre
 const anyLeg = await mutant(["  if (unions.some((u) => !u)) return [];", "  "],
   ["unions.every((u) => u!.has(k))", "unions.every((u) => !u || u.has(k))"]);
 mustCatch('a leg with no lists certifying nothing is read as «no constraint» (Rest House + Apartment would get apartment chips)',
-  anyLeg(Q({ deal: 'Rent', types: ['Apartment', 'Rest House'] })).length > 0);
+  anyLeg({ ...Q({ deal: 'Buy', types: ['Shop', 'Raw Land'] }), category: 'Commercial' } as SearchQuery).length > 0);
 const monthlyVeto = await mutant(["    .filter((deal) => !COHORT_CARDS[type] || COHORT_QUESTIONS[type]?.[deal])", "    .filter(() => true)"]);
 mustCatch('Floor\'s empty short-stay leg vetoing its Rent ∩ Buy list', monthlyVeto(floorBoth).length === 0);
-const wrongShort = await mutant(["  const types = shortStays ? ['Apartment'] : scopeCleanTypes(q);", "  const types = scopeCleanTypes(q);"]);
+const wrongShort = await mutant(["  if (shortStaysPool(q)) return [{ key: 'short-stays', cards: SHORT_STAYS_CARDS, questions: SHORT_STAYS_QUESTIONS }];", "  if (false as boolean) return [];"]);
 // On «Apartments & Co-living» the monthly-veto rule already skips Floor / Building, so the discriminating box is one
 // whose members have NO cohort at all (Vacation & Rural: Chalet, Camp…) — the real plan is the one pool, the mutant nothing.
-mustCatch('short stays on a group box intersecting its members instead of reading the one pool (Vacation & Rural → nothing)',
-  wrongShort(Q({ deal: 'Rent', rentPeriod: 'monthly', typeGroups: ['Vacation & Rural'] })).length === 0
-  && cardPlan(Q({ deal: 'Rent', rentPeriod: 'monthly', typeGroups: ['Vacation & Rural'] })).length === 3);
+mustCatch('short stays with NO group and no type (the user picked Short stays, that is enough) reading nothing instead of the one pool',
+  wrongShort(Q({ deal: 'Rent', rentPeriod: 'monthly' })).length === 0 && cardPlan(Q({ deal: 'Rent', rentPeriod: 'monthly' })).length > 0);
 
 console.log(failed === 0 ? '\n✅ the Apartments & Co-living cards are the owner\'s lists, combined by intersection.\n' : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);

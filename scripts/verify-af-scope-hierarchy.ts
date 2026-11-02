@@ -22,7 +22,7 @@ import {
   SCOPE_GROUP_ID, SCOPE_TYPE_ID, SCOPE_QUESTION_IDS, isScopeQuestionId,
   unresolvedScopeTiers, scopeCandidates, applyScopeAnswer, nextScopeTier,
 } from '../src/lib/afPlan.ts';
-import { cohortAllows, scopeCleanTypes } from '../src/lib/afCohorts.ts';
+import { cohortAllows, scopeCleanTypes, GROUP_LISTS } from '../src/lib/afCohorts.ts';
 import { deriveGuided, type GuidedStep } from '../src/lib/afSteps.ts';
 import { HIERARCHY, groupsFor, groupMembers, groupOf, groupsOf, CLEAN_MACRO, offeredUnder } from '../src/data/propertyTypes.ts';
 import { effectiveGroups, effectiveTypes, scopeCrossesMacro } from '../src/lib/searchDefaults.ts';
@@ -85,6 +85,7 @@ for (const macro of ['Residential', 'Commercial'] as const)
   for (const g of HIERARCHY[macro]) {
     const q = RENT({ category: macro, typeGroups: [g.group] });
     const mem = groupMembers(g.group);
+    if (GROUP_LISTS[g.group]) continue; // owner 2026-11-01: the box has its OWN list (GROUP_LISTS), not the members' intersection
     check(`«${g.group}» group offering never exceeds any single member's`,
       mem.every((t) => allowed(q).length <= allowed(RENT({ category: macro, types: [t] })).length));
   }

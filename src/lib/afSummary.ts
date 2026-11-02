@@ -83,6 +83,40 @@ function facetItems(f: AfFacet, locale: 'ar' | 'en' = 'ar'): string[] {
       case 'outdoors':
       case 'smart':
       case 'papers':
+      case 'water':
+      case 'games':
+      case 'camp_life':
+      case 'water_land':
+      case 'land_papers':
+      case 'power':
+      case 'crops':
+      case 'animals':
+      case 'buildings':
+      case 'plot':
+      case 'deal_papers':
+      case 'land':
+      case 'location':
+      case 'cspace':
+      case 'cservices':
+      case 'business':
+      case 'office_kind':
+      case 'ready':
+      case 'building':
+      case 'trucks':
+      case 'loc_papers':
+      case 'inside':
+      case 'investment':
+      case 'hotel':
+      case 'station':
+      case 'deal_loc':
+      case 'space_papers':
+      case 'services_business':
+      case 'workshop':
+      case 'loc_business':
+      case 'building_papers':
+      case 'factory':
+      case 'loc_safety':
+      case 'papers_c':
       case 'apartments':
       case 'shops':
         for (const l of f.labels) items.push(l);
@@ -185,6 +219,40 @@ export const AF_LINE_LABEL: Record<string, string> = {
   outdoors: 'Outdoors & fun',
   smart: 'Extras & smart',
   papers: 'Build, safety & papers',
+  water: 'Water',
+  games: 'Games',
+  camp_life: 'Camp life',
+  water_land: 'Water & land',
+  land_papers: 'Land & papers',
+  power: 'Water & power',
+  crops: 'Crops',
+  animals: 'Animals',
+  buildings: 'Buildings',
+  plot: 'Plot',
+  deal_papers: 'Papers & deal',
+  land: 'Land',
+  location: 'Location',
+  cspace: 'Space',
+  cservices: 'Services',
+  business: 'Business',
+  office_kind: 'Office kind',
+  ready: 'Ready to work',
+  building: 'Building',
+  trucks: 'Trucks & loading',
+  loc_papers: 'Location & papers',
+  inside: 'What\'s inside',
+  investment: 'Investment',
+  hotel: 'Hotel',
+  station: 'On site',
+  deal_loc: 'Deal & location',
+  space_papers: 'Space & papers',
+  services_business: 'Services & business',
+  workshop: 'Space & services',
+  loc_business: 'Location & business',
+  building_papers: 'Building & papers',
+  factory: 'Factory building',
+  loc_safety: 'Location & safety',
+  papers_c: 'Papers',
   build: 'Build & services',
   extras: 'Extras',
   who: 'Who it is for',
@@ -246,6 +314,40 @@ const SKIPPED_QUESTION: Record<string, string> = {
   outdoors: 'الخارج والترفيه',
   smart: 'الإضافات والذكاء',
   papers: 'البناء والأمان والأوراق',
+  water: 'الماء',
+  games: 'الألعاب',
+  camp_life: 'أجواء المخيم',
+  water_land: 'الماء والأرض',
+  land_papers: 'الأرض والأوراق',
+  power: 'الماء والكهرباء',
+  crops: 'الزراعة',
+  animals: 'الحيوانات',
+  buildings: 'المباني',
+  plot: 'الأرض',
+  deal_papers: 'الأوراق والصفقة',
+  land: 'الأرض',
+  location: 'الموقع',
+  cspace: 'المساحة',
+  cservices: 'الخدمات',
+  business: 'النشاط',
+  office_kind: 'نوع المكتب',
+  ready: 'جاهز للعمل',
+  building: 'المبنى',
+  trucks: 'الشاحنات والتحميل',
+  loc_papers: 'الموقع والأوراق',
+  inside: 'وش فيه',
+  investment: 'الاستثمار',
+  hotel: 'الفندق',
+  station: 'في المحطة',
+  deal_loc: 'الصفقة والموقع',
+  space_papers: 'المساحة والأوراق',
+  services_business: 'الخدمات والنشاط',
+  workshop: 'المساحة والخدمات',
+  loc_business: 'الموقع والنشاط',
+  building_papers: 'المبنى والأوراق',
+  factory: 'مبنى المصنع',
+  loc_safety: 'الموقع والأمان',
+  papers_c: 'الأوراق',
   build: 'البناء والخدمات',
   extras: 'الإضافات',
   who: 'لمين السكن',

@@ -31,6 +31,7 @@ export type AfIntentId =
   // The Apartments & Co-living cards and the Residential Building ladders (owner 2026-10-31): bag questions whose
   // tokens the amenity path certifies per token (partitionRequestedAmenities); listed so the registry is COMPLETE.
   | 'comfort' | 'space' | 'safety' | 'perks' | 'build' | 'extras' | 'who' | 'features' | 'services' | 'fun' | 'outdoors' | 'smart' | 'papers'
+  | 'water' | 'games' | 'camp_life' | 'water_land' | 'land_papers' | 'power' | 'crops' | 'animals' | 'buildings' | 'plot' | 'deal_papers' | 'land' | 'location' | 'cspace' | 'cservices' | 'business' | 'office_kind' | 'ready' | 'building' | 'trucks' | 'loc_papers' | 'inside' | 'investment' | 'hotel' | 'station' | 'deal_loc' | 'space_papers' | 'services_business' | 'workshop' | 'loc_business' | 'building_papers' | 'factory' | 'loc_safety' | 'papers_c'
   | 'apartments' | 'shops';
 
 export type AfIntent = {
@@ -224,6 +225,41 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
   outdoors: { id: 'outdoors', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
   smart: { id: 'smart', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
   papers: { id: 'papers', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  // countryside, land, commercial cards (owner 2026-11-01/02) — registry-only, chips certified per token
+  water: { id: 'water', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  games: { id: 'games', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  camp_life: { id: 'camp_life', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  water_land: { id: 'water_land', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  land_papers: { id: 'land_papers', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  power: { id: 'power', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  crops: { id: 'crops', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  animals: { id: 'animals', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  buildings: { id: 'buildings', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  plot: { id: 'plot', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  deal_papers: { id: 'deal_papers', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  land: { id: 'land', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  location: { id: 'location', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  cspace: { id: 'cspace', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  cservices: { id: 'cservices', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  business: { id: 'business', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  office_kind: { id: 'office_kind', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  ready: { id: 'ready', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  building: { id: 'building', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  trucks: { id: 'trucks', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  loc_papers: { id: 'loc_papers', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  inside: { id: 'inside', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  investment: { id: 'investment', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  hotel: { id: 'hotel', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  station: { id: 'station', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  deal_loc: { id: 'deal_loc', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  space_papers: { id: 'space_papers', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  services_business: { id: 'services_business', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  workshop: { id: 'workshop', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  loc_business: { id: 'loc_business', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  building_papers: { id: 'building_papers', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  factory: { id: 'factory', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  loc_safety: { id: 'loc_safety', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  papers_c: { id: 'papers_c', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
   build: {
     // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
     // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
@@ -278,7 +314,7 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
 
 /** Ids the generic apply loop owns. amenities is handled by its own per-token gate. */
 // Bag intents have no canonical value of their own: the amenity path certifies their tokens one by one.
-export const BAG_INTENT_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'outdoors', 'smart', 'papers']);
+export const BAG_INTENT_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'outdoors', 'smart', 'papers', 'water', 'games', 'camp_life', 'water_land', 'land_papers', 'power', 'crops', 'animals', 'buildings', 'plot', 'deal_papers', 'land', 'location', 'cspace', 'cservices', 'business', 'office_kind', 'ready', 'building', 'trucks', 'loc_papers', 'inside', 'investment', 'hotel', 'station', 'deal_loc', 'space_papers', 'services_business', 'workshop', 'loc_business', 'building_papers', 'factory', 'loc_safety', 'papers_c']);
 export const GENERIC_INTENT_IDS: AfIntentId[] =
   (Object.keys(AF_INTENTS) as AfIntentId[]).filter((id) => !BAG_INTENT_IDS.has(id));
 
