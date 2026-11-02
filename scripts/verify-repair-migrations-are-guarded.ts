@@ -48,6 +48,12 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-11-02. Two kitchens whose ad says «مطبخ غير راكب» went back to unknown (alert 12326, backlog 1189).
+  '20261102105648_kitchen_not_installed_stays_unknown.sql':
+    'two-row evidence repair (akariyoun 12049465, therc 10283616) to NULL, the value the reader already computes; it is ' +
+    'watched by the standing detector that found it, mon_detect_not_installed_served_as_yes (alert not_installed_served_as_yes), ' +
+    'which re-raises if any stored kitchen yes sits on an ad whose own words say the kitchen is not installed. The applied ' +
+    'file cannot be edited to name it (content parity: this is its byte-exact mirror).',
   // 2026-10-31. AI facts reader: 13 sites' description text arrived AFTER the AI had read the title alone, so every AI row
   // written before those crawls is stamped text_hash = 'read-before-text:2026-10-31' and the ad reads as UNREAD again.
   '20261031080211_ai_facts_reader_rereads_when_the_text_arrives_or_changes.sql':
