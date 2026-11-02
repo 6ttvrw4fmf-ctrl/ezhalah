@@ -32,7 +32,8 @@ import { Image as XImage } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
+import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
@@ -72,6 +73,7 @@ type Region = {
 };
 
 type MKMap = {
+  element: HTMLElement;
   destroy: () => void;
   mapType: string;
   isScrollEnabled: boolean;
@@ -583,10 +585,60 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       return el;
     };
     const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; };
+    // EVERY SPOT, AT ANY ZOOM (owner 2026-11-02: «even when I am zoomed out they all show»): zoomed out with no
+    // narrowing (deal only), the dots feed — every pinned listing's 1 km cell, downloaded once — is painted on a canvas
+    // over the map: all 23k spots in a few ms, where 23k annotations would freeze a phone. The canvas is hidden while
+    // the map moves and repainted when it settles, projected through two points MapKit itself placed on the page.
+    const host = hostRef.current as unknown as HTMLElement | null;
+    const canvas = document.createElement('canvas');
+    canvas.setAttribute('data-testid', 'map-dots-canvas');
+    canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:5;opacity:0;transition:opacity .15s';
+    host?.appendChild(canvas);
+    let shown: MapDot[] = []; let project: ((lat: number, lng: number) => [number, number]) | null = null;
+    const narrowed = !!(pins.category || pins.types?.length || pins.beds?.length || pins.areaMin != null || pins.areaMax != null
+      || pins.priceMin != null || pins.priceMax != null || pins.poly);
+    const paint = (dots: MapDot[]) => {
+      const rect = canvas.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(rect.width * dpr); canvas.height = Math.round(rect.height * dpr);
+      const ctx = canvas.getContext('2d'); if (!ctx) return false;
+      const { center, span } = m.region;
+      const conv = (m as unknown as { convertCoordinateToPointOnPage: (c: unknown) => { x: number; y: number } }).convertCoordinateToPointOnPage.bind(m);
+      const ref = (lat: number, lng: number) => { const p = conv(new mk.Coordinate(lat, lng)); return { lat, lng, x: p.x - rect.left - window.scrollX, y: p.y - rect.top - window.scrollY }; };
+      project = projectorFrom(ref(center.latitude + span.latitudeDelta / 4, center.longitude - span.longitudeDelta / 4), ref(center.latitude - span.latitudeDelta / 4, center.longitude + span.longitudeDelta / 4));
+      if (!project) return false;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, rect.width, rect.height);
+      const r = dotRadius(span.latitudeDelta);
+      ctx.lineWidth = 0.8; ctx.strokeStyle = 'rgba(255,255,255,.85)';
+      for (const deal of ['buy', 'rent', 'short'] as const) {
+        ctx.fillStyle = PIN_COLOR[deal]; ctx.beginPath();
+        for (const d of dots) { if (d.deal !== deal) continue; const [x, y] = project(d.lat, d.lng); ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, Math.PI * 2); }
+        ctx.fill(); ctx.stroke();
+      }
+      shown = dots; canvas.style.opacity = '1';
+      return true;
+    };
+    const hideCanvas = () => { canvas.style.opacity = '0'; };
+    const onCanvasTap = (e: MouseEvent) => {
+      if (!shown.length || !project) return;
+      const rect = canvas.getBoundingClientRect();
+      const d = nearestDot(shown, project, e.clientX - rect.left, e.clientY - rect.top);
+      if (d) pick({ lat: d.lat, lng: d.lng, n: d.n, deal: d.deal, type_ar: null, platforms: 0, ids: null, price: null, platform: null } as PinRow, cellForSpan(m.region.span.latitudeDelta) || 0.01);
+    };
     const load = async () => {
       const my = ++seq;
       const { center, span } = m.region;
       const cell = cellForSpan(span.latitudeDelta);
+      if (cell > 0 && !narrowed) {
+        const all = await fetchMapDots();
+        if (my !== seq || mapRef.current !== m) return;
+        if (all !== 'unknown') {
+          const inView = dotsInView(all, pins.deals, paddedBox(center, span));
+          clear();
+          if (paint(inView)) { setPinCount(dotsTotal(inView)); return; }
+        }
+        // The feed failed (or the projection could not be calibrated): the live grid path below, never an empty map.
+      }
+      hideCanvas(); shown = [];
       // Exact points are read with a small cap: one row over PIN_SHOW_MAX is enough to know the view is too dense.
       let rows = await fetchMapPins(paddedBox(center, span), cell, pins, cell === 0 ? PIN_SHOW_MAX + 1 : PIN_LIMIT);
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
@@ -615,12 +667,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       pick(d.pin, d.cell ?? 0);
     };
     m.addEventListener('region-change-end', onRegion);
+    m.addEventListener('region-change-start', hideCanvas);
     m.addEventListener('select', onSelect);
+    m.element.addEventListener('click', onCanvasTap);
     void load();
     return () => {
       seq++; if (timer) clearTimeout(timer);
       m.removeEventListener('region-change-end', onRegion as unknown as (e: unknown) => void);
+      m.removeEventListener('region-change-start', hideCanvas as unknown as (e: unknown) => void);
       m.removeEventListener('select', onSelect as unknown as (e: unknown) => void);
+      m.element.removeEventListener('click', onCanvasTap);
+      canvas.remove();
       if (mapRef.current === m) clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
