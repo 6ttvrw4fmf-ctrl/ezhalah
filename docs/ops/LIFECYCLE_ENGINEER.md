@@ -1192,6 +1192,20 @@ or rewrite another engineer's work, and never start a big change in another engi
   its red run attaches to the head commit and the merge gate refuses ANY non-success check. Push the
   next commit (the lesson line) after the diagnostics, or dispatch them on a scratch branch.
 
+- **2026-11-02 (♻️):** a feed sighting un-hid every own-page «gone» hide on every site. `db._wasalt_batch` reset
+  `missing_count = 0 / active = true` for any row the list still served, so a hide made on the ad's own page
+  lasted until the next crawl (nowaisiry NW4538 hidden 10-31, back 11-01, dead on the 11-02 score; muhaysini
+  MHS42/MHS2213 killed 3/3 every ~3 days since 10-17). `db.page_gone_holds` now keeps a hidden row hidden while
+  its newest probe-ledger reading is GONE and newer than its last alive stamp (#9959). When a hide «does not
+  stick», read the ledger against `last_seen_at` before suspecting the checker.
+- **2026-11-02 (♻️):** a long-lived session is a reader, and it can go blind. Gathern's hourly sweep reads
+  ~1,500 units on one session; gathern sent that session home for a growing set of units, so 178 served units
+  read «transient» for 26+ h while a fresh session read 33 of 43 of them 404 (spot-check 41434405092). The
+  proxy fallback could not help: it only takes a 200. A unit still without a verdict is now re-read once on a
+  fresh session (`liveness.fresh_read`, #9959). When «transient» grows while controls stay 10/10, compare a
+  fresh-session read of the same ids before touching anything else. And a seller's own «(تم البيع)» /
+  «(تم التأجير)» in a 200 title is a removal (haraj, 52 served, #9960).
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
