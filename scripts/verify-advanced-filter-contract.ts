@@ -248,9 +248,13 @@ check('the primary reads Continue · {count} results with the live count, for ev
   /Continue · \{count\} results/.test(cardSrc));
 // §11: one tiny plain-language availability line; the technical unknown-count phrasing is gone.
 // Owner-approved 2026-10-01: one notice above the choices explains published-source limits.
-// Count-honesty checks remain independent of this presentation-only wording.
-check('availability is explained naturally (no database language, no unknown-count phrasing)',
-  /Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing/.test(cardSrc)
+// SHORTENED 2026-11-01 (owner: «we want it shorter and include something like how it works where the user
+// can click and read»): the notice is one line — «الأرقام من كلام الإعلانات نفسها · كيف يشتغل؟» — and the
+// link opens the How-it-works reader (InfoModal 'af-how'); the full wording moved into src/data/afHowItWorks.ts
+// (scripts/verify-af-how-it-works-note.ts). Count-honesty checks remain independent of this wording.
+check('availability is explained naturally (one short line + a How-it-works link, no unknown-count phrasing)',
+  /Counts come from the ads' own words/.test(cardSrc)
+  && /openModal('af-how')/.test(cardSrc)
   && /af-source-note/.test(cardSrc)
   && !/Age unknown for \{count\}/.test(cardSrc));
 // §2: the opening state is its own calm card — count, invitation, soft supporting line, opt-in
