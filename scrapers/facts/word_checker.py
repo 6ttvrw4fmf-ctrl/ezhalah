@@ -484,6 +484,12 @@ def _negated_after(nxt: list[str], fact: str) -> int:
     return 0
 
 
+# A DISTRICT NAME IS NOT A FACT (🔬 2026-11-02): «حي الخزان» read water_tank = yes, «حي الحديقة» garden, «حي المستودعات»
+# storage, «حي الشرفة» balcony — ~100 ads on 9+ sites, every one in that district. The word right before the token
+# says it is a place: «حي» with its glued prepositions. (Jeddah's «مشرفة» is the glued case, N._inside_a_name.)
+_DISTRICT_WORDS = frozenset(_n(w) for w in ("حي", "بحي", "وحي", "لحي", "فحي", "وبحي", "بالحي", "الحي"))
+
+
 def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: int,
            cue_in: bool = False, near_in: bool = False) -> tuple[Optional[bool], int, int]:
     """The outcome of ONE token hit: (True|False|None, quote start, quote end) in the normalised clause.
@@ -493,6 +499,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     nxt = t[we:].split()
     head = t[ws:s]                                   # the glued part of the word before a loose hit
     if fact == "balcony" and N._inside_a_name(t, s, t[s:e]):
+        return None, s, e
+    if prev and prev[-1] in _DISTRICT_WORDS:         # «حي الخزان», «بحي الحديقة»: the ad's district, not a fact (🔬 11-02)
         return None, s, e
     if fact == "majlis" and nxt[:1] and nxt[0] in ("طعام", "الطعام"):   # «مجلس طعام» is the dining_majlis fact
         return None, s, e
@@ -1031,6 +1039,11 @@ def selftest() -> None:
         ("مكيف سبليت", {"air_conditioner": True}, ()),
         ("غرفة خادمة مع دورة مياه", {"maid_room": True}, ("water_supply",)),
         ("حي المشرفة", {}, ("balcony",)),
+        ("ارض للبيع حي الخزان مدينة تربة", {}, ("water_tank",)),
+        ("فيلا بحي الحديقة بالمدينة المنورة", {}, ("garden",)),
+        ("شقة للايجار في حي المستودعات", {}, ("storage",)),
+        ("شقة في حي الشرفة", {}, ("balcony",)),
+        ("فيلا مع حديقة خاصة وخزان ماء", {"garden": True, "water_tank": True}, ()),
         ("شقة كبيرة", {}, ("well",)),
         # ── the 28 apartment chips (owner 2026-10-31): one yes each, the old guards still hold ──
         ("شقة بنظام دخول ذاتي", {"self_checkin": True}, ()),
