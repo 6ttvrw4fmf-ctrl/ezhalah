@@ -67,7 +67,7 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
 }
 
 const s = StyleSheet.create({
-  sheet: { position: 'absolute', left: 8, right: 8, bottom: 8, maxHeight: '62%', backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.tintLine, overflow: 'hidden', zIndex: 20 },
+  sheet: { position: 'absolute', left: 8, right: 8, bottom: 8, maxHeight: '80%', backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.tintLine, overflow: 'hidden', zIndex: 20 },
   head: { alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.tintLine },
   title: { fontSize: 15, fontWeight: '700', color: colors.ink },
   close: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
