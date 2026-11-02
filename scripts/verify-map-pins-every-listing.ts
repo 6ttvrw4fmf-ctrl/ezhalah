@@ -6,7 +6,8 @@
 // the deal button feeds it, and a committed migration creates the function.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { pinColor, pinHead, shortMoney, cellForSpan, paddedBox, bubbleText, rpcArgs, pinsFrom, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
+import { pinFilterOf, isNarrowed, EMPTY_MAP_FILTER } from '../src/lib/mapFilter.ts';
+import { pinColor, pinHead, shortMoney, cellForSpan, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
 let failed = 0;
@@ -51,16 +52,46 @@ check('a failed RPC is «unknown», never an empty list', pinsFrom({ data: null,
 check('a real empty answer is an empty list (known: nothing here)', Array.isArray(pinsFrom({ data: [], error: null })) && (pinsFrom({ data: [], error: null }) as unknown[]).length === 0);
 mustCatch('a failed fetch read as no listings here', pinsFrom({ data: null, error: { message: 'timeout' } }) !== null && !Array.isArray(pinsFrom({ data: null, error: { message: 'timeout' } })));
 
+// The tap sheet (Zillow-style): ids grouped by table in the RPC's order, cards put back in that order.
+const sheetRow = { ids: [{ t: 'aqar_residential_listings', i: 9 }, { t: 'wasalt_residential_listings', i: 4 }, { t: 'aqar_residential_listings', i: 7 }, null as unknown as { t: string; i: number }] };
+const grouped = idsByTable(sheetRow);
+check('idsByTable groups by table, keeps order, skips a malformed entry', grouped.get('aqar_residential_listings')?.join(',') === '9,7' && grouped.get('wasalt_residential_listings')?.join(',') === '4' && grouped.size === 2);
+const ordered = orderLike(sheetRow, [{ sourceTable: 'aqar_residential_listings', id: 7 }, { sourceTable: 'wasalt_residential_listings', id: 4 }, { sourceTable: 'aqar_residential_listings', id: 9 }, { sourceTable: 'x', id: 1 }]);
+check('orderLike restores the RPC order (newest first) and parks an unnamed card last', ordered.map((c) => c.id).join(',') === '9,4,7,1');
+mustCatch('a sheet that shows the cards in fetch order instead of the pin order', orderLike(sheetRow, [{ sourceTable: 'aqar_residential_listings', id: 7 }, { sourceTable: 'aqar_residential_listings', id: 9 }])[0].id === 9);
+
+// Draw → Apply: the sketch becomes a closed GeoJSON polygon in [lng, lat]; fewer than three points is no area.
+const polyOut = polygonOf([{ latitude: 24.7, longitude: 46.6 }, { latitude: 24.8, longitude: 46.6 }, { latitude: 24.8, longitude: 46.7 }]);
+check('polygonOf closes the ring and writes [lng, lat]', polyOut?.type === 'Polygon' && polyOut.coordinates[0].length === 4 && polyOut.coordinates[0][0][0] === 46.6 && polyOut.coordinates[0][0][1] === 24.7 && polyOut.coordinates[0][3][0] === 46.6);
+check('polygonOf refuses a line (two points) and skips a bad point', polygonOf([{ latitude: 1, longitude: 2 }, { latitude: 3, longitude: 4 }]) === null && polygonOf([{ latitude: NaN, longitude: 1 }, { latitude: 1, longitude: 1 }, { latitude: 2, longitude: 1 }, { latitude: 2, longitude: 2 }])?.coordinates[0].length === 4);
+mustCatch('a polygon written [lat, lng] (would land in the Indian Ocean)', polyOut?.coordinates[0][0][0] !== 24.7);
+
+// The filter popup's state → the pin query (executed): groups become the index's Arabic type labels, 5+ beds a
+// range, blank fields null; an empty state narrows nothing.
+const typeAr = (groups: string[]) => (groups.includes('Villas & Houses') ? ['فيلا', 'دوبلكس'] : null);
+const pf = pinFilterOf({ ...EMPTY_MAP_FILTER, category: 'Residential', groups: ['Villas & Houses'], beds: ['2', '5+'], areaMin: '250', priceMax: '1,500,000' }, typeAr);
+check('pinFilterOf maps category, group → type_ar labels, beds (5+ = 5…12), area and price', pf.category === 'residential' && (pf.types ?? []).includes('فيلا') && (pf.types ?? []).includes('دوبلكس') && pf.beds?.[0] === 2 && pf.beds?.includes(12) === true && pf.areaMin === 250 && pf.areaMax === null && pf.priceMax === 1500000);
+check('an empty filter narrows nothing and is not «on»', Object.values(pinFilterOf(EMPTY_MAP_FILTER, typeAr)).every((v) => v === null) && !isNarrowed(EMPTY_MAP_FILTER) && isNarrowed({ ...EMPTY_MAP_FILTER, beds: ['1'] }));
+mustCatch('a group sent as its English name instead of the index\'s Arabic labels', !(pf.types ?? []).includes('Villas & Houses'));
+
 // Wiring.
 const data = readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8');
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const screen = readFileSync(join(root, 'src/app/map.tsx'), 'utf8');
-check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure arguments', /boundedRpc<PinRow\[\]>\(supabase\.rpc\('map_pins_ar', rpcArgs\(box, cell, filter\)\)\)/.test(data) && /return pinsFrom\(result\)/.test(data));
+check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure arguments', /boundedRpc<PinRow\[\]>\(supabase\.rpc\('map_pins_ar', rpcArgs\(box, cell, filter, limit\)\)\)/.test(data) && /return pinsFrom\(result\)/.test(data));
 check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins\)/.test(web) && /mine = rows\.map\(\(row\) => new mk\.Annotation\(/.test(web));
 check('AppleMap.web.tsx reloads on region-change-end and drops a late answer', /addEventListener\('region-change-end', onRegion\)/.test(web) && /if \(my !== seq \|\| rows === 'unknown'/.test(web));
 check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('clear();\n      mine = rows.map'));
+check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape && !drawing && pinCount !== null/.test(web));
 check('a bubble tap zooms in; a pin tap hands the row up', /d\.cell && d\.cell > 0/.test(web) && /onPinSelectRef\.current\?\.\(d\.pin\)/.test(web));
-check('the map screen feeds the deal button into the pins', /<MapDealRow deals=\{deals\} onDeals=\{setDeals\} \/>/.test(screen) && /pins=\{\{ deals \}\}/.test(screen));
+check('the map screen feeds the deal button into the pins and clears the sheet on a deal change', /<MapDealRow deals=\{deals\} onDeals=\{\(d\) => \{ setDeals\(d\); setPinRow\(null\); \}\} onFilter=/.test(screen) && /pins=\{\{ deals, \.\.\.pinFilterOf\(mapFilter\) \}\}/.test(screen));
+check('the Filter button opens the centered filter card; Apply feeds the pins and counts in view', /onFilter=\{\(\) => setFilterOpen\(true\)\} filterOn=\{isNarrowed\(mapFilter\)\}/.test(screen) && /<MapFilterCard value=\{mapFilter\}/.test(screen) && /countPins=\{\(f\) => countPinsInView\(\{ deals, \.\.\.pinFilterOf\(f\) \}\)\}/.test(screen));
+const cardSrc = readFileSync(join(root, 'src/components/MapFilterCard.tsx'), 'utf8');
+check('the filter card is the site\'s own tiles (OptionBox + the same icons), X top right, no transaction section', /<OptionBox compact key=\{cat\} label=\{t\(cat\)\} img=\{categoryImg\(cat\)\}/.test(cardSrc) && /img=\{groupImg\(g\.group\)\}/.test(cardSrc) && /img=\{BED_IMG\[opt\]\}/.test(cardSrc) && /testID="map-filter-close"/.test(cardSrc) && !/DEALS|MapDeal\b/.test(cardSrc));
+check('a tapped pin opens the card sheet inside the map (Zillow-style), full screen', /onPinSelect=\{\(row\) => \{ setPinRow\(row\); setFull\(true\); \}\}/.test(screen) && /<MapPinSheet row=\{pinRow\} onClose=/.test(screen));
+const sheet = readFileSync(join(root, 'src/components/MapPinSheet.tsx'), 'utf8');
+check('the sheet loads every listing through fetchListingCards (the search\'s own card path) and opens with openListing', /fetchListingCards\(table, ids\)/.test(sheet) && /openListing\(l\)/.test(sheet) && /<ResultCard listing=\{l\}/.test(sheet));
+check('the sheet says a failed load is a failed load, never «no listings»', /if \(!all\.length && \(row\.ids\?\.length \?\? 0\) > 0\) setFailed\(true\);/.test(sheet));
 check('a committed migration creates map_pins_ar with the price and the filter arguments', readdirSync(join(root, 'supabase/migrations')).some((f) => { const t = readFileSync(join(root, 'supabase/migrations', f), 'utf8'); return /create function public\.map_pins_ar\(/.test(t) && /p_price_min numeric/.test(t) && /price numeric, platform text/.test(t); }));
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-map-pins-every-listing: all checks passed');

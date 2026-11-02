@@ -6,13 +6,13 @@ import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
 import { pinsFrom, rpcArgs, type PinFilter, type PinRow } from '@/lib/mapPins';
 
-export { cellForSpan, paddedBox, pinColor, pinHead, bubbleText, type PinFilter, type PinRow } from '@/lib/mapPins';
+export { cellForSpan, paddedBox, pinColor, pinHead, bubbleText, polygonOf, idsByTable, orderLike, type PinFilter, type PinRow } from '@/lib/mapPins';
 
 /** The pins (or count cells) for one view. 'unknown' when the fetch failed — the caller keeps what it has. */
-export async function fetchMapPins(box: { s: number; w: number; n: number; e: number }, cell: number, filter: PinFilter): Promise<PinRow[] | 'unknown'> {
+export async function fetchMapPins(box: { s: number; w: number; n: number; e: number }, cell: number, filter: PinFilter, limit = 3000): Promise<PinRow[] | 'unknown'> {
   if (!supabase) return 'unknown';
   try {
-    const result = await boundedRpc<PinRow[]>(supabase.rpc('map_pins_ar', rpcArgs(box, cell, filter)));
+    const result = await boundedRpc<PinRow[]>(supabase.rpc('map_pins_ar', rpcArgs(box, cell, filter, limit)));
     return pinsFrom(result);
   } catch {
     return 'unknown';
