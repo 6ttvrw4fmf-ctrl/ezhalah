@@ -168,10 +168,21 @@ def parse_page(page: str) -> dict[str, Any]:
     }
 
 
+def _ungroup_dots(fig: str) -> str:
+    """Ashab groups thousands with DOTS («4.500.000», «4.500000», «60.000»): more than one dot, or a dot
+    followed by 3+ digits, is grouping → dropped HERE. The shared to_int cannot decide this, because other
+    sources send str(float) «430389.3999…» where the same shape is a decimal (backlog 1209 / PR #4771).
+    A 1–2-digit tail («1500.50») is left for to_int to read as halalas."""
+    if fig.count(".") > 1 or re.search(r"\.[\d٠-٩]{3,}$", fig):
+        return fig.replace(".", "")
+    return fig
+
+
 def _sar(text: str) -> Optional[int]:
     """The one «N ر.س» figure a cell states; 0, none, or two figures («يبدأ من X إلى Y ر.س») → None."""
     hits = _SAR_RE.findall(text or "")
-    v = normalize.to_int(hits[0]) if len(hits) == 1 and len(set(_NUM_RE.findall(text))) == 1 else None
+    v = (normalize.to_int(_ungroup_dots(hits[0]))
+         if len(hits) == 1 and len(set(_NUM_RE.findall(text))) == 1 else None)
     return v if v else None
 
 
