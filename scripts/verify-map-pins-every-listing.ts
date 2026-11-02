@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pinFilterOf, isNarrowed, EMPTY_MAP_FILTER } from '../src/lib/mapFilter.ts';
-import { pinColor, dotColor, MIXED_DOT, pinHead, shortMoney, cellForSpan, fineCellForSpan, CELL_LADDER, PIN_LIMIT, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
+import { pinColor, dotColor, MIXED_DOT, pinHead, shortMoney, cellForSpan, fineCellForSpan, CELL_LADDER, PIN_LIMIT, PIN_SHOW_MAX, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
 let failed = 0;
@@ -92,7 +92,7 @@ const data = readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8');
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const screen = readFileSync(join(root, 'src/app/map.tsx'), 'utf8');
 check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure arguments', /boundedRpc<PinRow\[\]>\(supabase\.rpc\('map_pins_ar', rpcArgs\(box, cell, filter, limit\)\)\)/.test(data) && /return pinsFrom\(result\)/.test(data));
-check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins\)/.test(web) && /mine = rows\.map\(\(row\) => new mk\.Annotation\(/.test(web));
+check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins, cell === 0 \? PIN_SHOW_MAX \+ 1 : PIN_LIMIT\)/.test(web) && /mine = rows\.map\(\(row\) => new mk\.Annotation\(/.test(web));
 // The layer mounts BEFORE MapKit has loaded and returns early; the map's arrival must re-run it (measured live
 // 2026-11-02: a fresh /map load drew nothing until the deal changed).
 check('AppleMap.web.tsx re-runs the pin layer once the map object exists (mapReady bumped where live.map is set, in the deps)',
@@ -105,11 +105,15 @@ mustCatch('a region select that fires while the outline is invisible', !/if \(!r
 // NEVER A PARTIAL SET OF PINS: an exact-point read that hit PIN_LIMIT is re-read as a fine bubble grid (every listing
 // counted), and the bubbles are drawn with THAT cell (element, data and anchor all follow drawCell).
 check('AppleMap.web.tsx falls back to a fine bubble grid when the exact read hit its cap, and draws with that cell',
-  /if \(cell === 0 && rows\.length >= PIN_LIMIT\) \{\n\s*drawCell = fineCellForSpan\(span\.latitudeDelta\);\n\s*rows = await fetchMapPins\(paddedBox\(center, span\), drawCell, pins\);/.test(web)
+  /if \(cell === 0 && rows\.length > PIN_SHOW_MAX\) \{\n\s*drawCell = fineCellForSpan\(span\.latitudeDelta\);\n\s*rows = await fetchMapPins\(paddedBox\(center, span\), drawCell, pins\);/.test(web)
   && /element\(row, drawCell\)/.test(web) && /data: \{ pin: row, cell: drawCell \}/.test(web) && /anchorOffset: drawCell > 0/.test(web));
 check('the fine grid is ~14 rows on the ladder, floor 0.01°, and finer than the normal grid', fineCellForSpan(0.14) === 0.01 && fineCellForSpan(0.001) === 0.01 && fineCellForSpan(1) === 0.04 && fineCellForSpan(1) < cellForSpan(1));
 mustCatch('a fine grid coarser than the normal grid (the fallback would not resolve a dense view)', fineCellForSpan(0.5) < cellForSpan(0.5));
 check('PIN_LIMIT is the cap the data module sends by default', PIN_LIMIT === 3000 && /limit = 3000\)/.test(readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8')));
+// A VIEW SHOWS AT MOST PIN_SHOW_MAX PRICE HEADS (owner 2026-11-02: «when I zoom in I start seeing so many things»): a
+// denser view keeps the fine dots until the user zooms closer. The exact read asks for one row over the cap, no more.
+check('PIN_SHOW_MAX is a few hundred heads, well under the read cap', PIN_SHOW_MAX === 400 && PIN_SHOW_MAX < PIN_LIMIT);
+mustCatch('a view that draws thousands of overlapping heads (the cap gone)', PIN_SHOW_MAX <= 500);
 check('AppleMap.web.tsx reloads on region-change-end and drops a late answer', /addEventListener\('region-change-end', onRegion\)/.test(web) && /if \(my !== seq \|\| rows === 'unknown'/.test(web));
 check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('clear();\n      mine = rows.map'));
 check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape \? '\{n\} listings inside the boundary'/.test(web));
