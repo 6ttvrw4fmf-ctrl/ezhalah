@@ -92,7 +92,11 @@ const data = readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8');
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const screen = readFileSync(join(root, 'src/app/map.tsx'), 'utf8');
 check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure arguments', /boundedRpc<PinRow\[\]>\(supabase\.rpc\('map_pins_ar', rpcArgs\(box, cell, filter, limit\)\)\)/.test(data) && /return pinsFrom\(result\)/.test(data));
-check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins, cell === 0 \? PIN_SHOW_MAX \+ 1 : PIN_LIMIT\)/.test(web) && /mine = rows\.map\(\(row\) => new mk\.Annotation\(/.test(web));
+check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins, cell === 0 \? PIN_SHOW_MAX \+ 1 : PIN_LIMIT\)/.test(web) && /keyed\.set\(k, a\); m\.addAnnotation\(a\);/.test(web) && /mine = \[\.\.\.keyed\.values\(\)\];/.test(web));
+// KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan removes only the pins that left the view and adds only
+// the new ones, keyed by what the head shows; never the old clear-all-then-add-all flicker.
+check('AppleMap.web.tsx diffs the pins by key on every load (remove the gone, add the new, keep the rest)', /for \(const \[k, a\] of keyed\) if \(!next\.has\(k\)\) \{ m\.removeAnnotation\(a\); keyed\.delete\(k\); \}/.test(web) && /if \(keyed\.has\(k\)\) continue;/.test(web) && /const keyOf = \(r: PinRow\) => `\$\{drawCell\}\|\$\{r\.lat\}\|\$\{r\.lng\}\|\$\{r\.n\}\|\$\{r\.deal\}\|\$\{r\.price \?\? ''\}`/.test(web));
+mustCatch('the clear-all-then-add-all redraw (the flicker on every pan)', !/clear\(\);\n\s*mine = rows\.map/.test(web));
 // The layer mounts BEFORE MapKit has loaded and returns early; the map's arrival must re-run it (measured live
 // 2026-11-02: a fresh /map load drew nothing until the deal changed).
 check('AppleMap.web.tsx re-runs the pin layer once the map object exists (mapReady bumped where live.map is set, in the deps)',
@@ -115,7 +119,7 @@ check('PIN_LIMIT is the cap the data module sends by default', PIN_LIMIT === 300
 check('PIN_SHOW_MAX is a few hundred heads, well under the read cap', PIN_SHOW_MAX === 400 && PIN_SHOW_MAX < PIN_LIMIT);
 mustCatch('a view that draws thousands of overlapping heads (the cap gone)', PIN_SHOW_MAX <= 500);
 check('AppleMap.web.tsx reloads on region-change-end and drops a late answer', /addEventListener\('region-change-end', onRegion\)/.test(web) && /if \(my !== seq \|\| rows === 'unknown'/.test(web));
-check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('clear();\n      mine = rows.map'));
+check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('const keyOf = (r: PinRow)'));
 check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape \? '\{n\} listings inside the boundary'/.test(web));
 check('a bubble tap zooms in; a pin tap hands the row up (one shared pick)', /const pick = \(row: PinRow, cell: number\) => \{[\s\S]{0,400}?if \(cell > 0\) \{[\s\S]{0,300}?\} else onPinSelectRef\.current\?\.\(row\);/.test(web));
 // TOUCH: on a phone MapKit's `select` never fired for a tap on a custom annotation (owner 2026-11-02: «when I click it
