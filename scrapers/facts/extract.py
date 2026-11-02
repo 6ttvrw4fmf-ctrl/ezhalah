@@ -105,7 +105,15 @@ NEW_BOOL = ("majlis", "roof", "warranty", "water_tank", "well", "annex", "two_en
             "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families",
             # the villa facts (owner 2026-11-01) — read by the word checker, saved like corner_plot until their chips' migration
             # adds them to text_facts_af_columns() (well already rides NEW_BOOL above)
-            "women_majlis", "irrigation", "sports_court", "outdoor_kitchen", "outdoor_diwaniya", "waterfall")
+            "women_majlis", "irrigation", "sports_court", "outdoor_kitchen", "outdoor_diwaniya", "waterfall",
+            # GROUP A — countryside / short stays / villa extras (owner handoff 2026-11-01): read by the word checker,
+            # saved like corner_plot until the chips' migration adds them to text_facts_af_columns()
+            "split_payments", "heated_pool", "kids_pool", "water_slide", "sea_view", "football_pitch", "playstation",
+            "inflatable_games", "sound_system", "fire_pit", "bait_shaar", "mandi_pit", "outdoor_seating", "tent", "dunes_view",
+            "women_section", "two_sections", "events_hall", "privacy_screen", "trees", "for_families", "for_youth", "for_events",
+            "for_newlyweds", "quad_bikes", "horses_stable", "camels", "toilets_on_site", "lighting", "artesian_well",
+            "solar_power", "palms", "fruit_trees", "fodder_crops", "greenhouses", "producing_farm", "animal_pens", "poultry",
+            "farm_house", "farm_rest_house", "workers_housing", "fence", "main_road", "good_soil")
 BOOL_FACTS = frozenset(EXISTING_BOOL + NEW_BOOL)
 NUM_FACTS = frozenset(("street_width_m", "floors", "apartments_count", "shops_count", "property_age_years"))
 TEXT_FACTS = frozenset(("boundaries",))
