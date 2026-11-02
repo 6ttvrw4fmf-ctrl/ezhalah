@@ -496,8 +496,16 @@ jobs:
           AF_FSD_SCOPES: region:1
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
 
+  # ONE SWEEP AT A TIME (🔧 2026-11-02, owner rule 2026-10-09 «our own robots must not take production
+  # down»). The three sweeps used to start together the moment the browser jobs ended — 3 × 2 probes =
+  # 6 concurrent RPC walkers against a knee of 3. Measured 2026-11-02: they fanned out at 14:00:17 UTC
+  # (18:00 Riyadh, evening peak); the production search mean went 257–1,147 ms → 2,228–7,242 ms for the
+  # next hour (ops_search_latency_sample), nine robot callers sat in robot_gate() at once, every PR's
+  # required smoke («built app runs») failed journey I on load symptoms for 50 minutes and the merge
+  # queue stalled on eleven PRs. The sweeps now run region → city → matrix; each still `if: always()`
+  # on the gate so a failed sibling never skips coverage (attendance still needs every one of them).
   af-surface-city:
-    needs: [gate, af-truth, af-card-state]
+    needs: [gate, af-surface-region]
     if: always() && needs.gate.outputs.shipped == 'yes'
     name: …and the same option surface inside a CITY scope (جدة), single-type stages
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
@@ -605,7 +613,7 @@ jobs:
   # options / tens of thousands of rows, so it runs as its OWN job in parallel with the browser
   # journeys rather than inside their 30-minute budget. Offline twin: scripts/verify-af-matrix-truth.ts.
   af-matrix:
-    needs: [gate, af-truth, af-card-state]
+    needs: [gate, af-surface-city]
     if: always() && needs.gate.outputs.shipped == 'yes'
     name: Every certified AF option shows, sends, applies, returns and carries one truth
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
