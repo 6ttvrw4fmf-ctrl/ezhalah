@@ -1,6 +1,8 @@
 -- MIRROR of the `af_canon` projection injected into public.location_search_candidates_ar's template
 -- by 20260903_af_canon_on_results_rpc (owner rule §12A / R13.12, 2026-09-03: "whatever the user
 -- selected in Advanced Filter must be visibly and truthfully shown on the returned property card").
+-- Re-verified 2026-11-02 (migration 20261102055240, the Villas & Houses group): a THIRD jsonb_build_object (|| joined)
+-- packs the 7 villa text-fact columns (women_majlis … sports_court) after ''shops_count''; 77 keys in all.
 --
 -- THIS FILE IS NOT EXECUTED. It is the repo-side copy of one expression that lives inside the
 -- af_rpc_templates row, so scripts/verify-af-card-evidence.ts can hold the SQL and the TypeScript to
@@ -78,4 +80,4 @@ case when (
     'kids_play_area', s.kids_play_area, 'nursery', s.nursery, 'free_maintenance', s.free_maintenance, 'intercom', s.intercom, 'fire_system', s.fire_system,
     'ev_charger', s.ev_charger, 'central_vacuum', s.central_vacuum, 'insulation', s.insulation, 'dining_majlis', s.dining_majlis, 'own_bathroom', s.own_bathroom,
     'fridge', s.fridge, 'whole_floor', s.whole_floor, 'singles', s.singles, 'families', s.families,
-    'apartments_count', s.apartments_count, 'shops_count', s.shops_count) end
+    'apartments_count', s.apartments_count, 'shops_count', s.shops_count) || jsonb_build_object('women_majlis', s.women_majlis, 'outdoor_kitchen', s.outdoor_kitchen, 'outdoor_diwaniya', s.outdoor_diwaniya, 'waterfall', s.waterfall, 'well', s.well, 'irrigation', s.irrigation, 'sports_court', s.sports_court) end
