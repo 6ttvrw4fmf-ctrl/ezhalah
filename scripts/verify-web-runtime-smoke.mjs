@@ -1059,16 +1059,24 @@ try {
   const jStart = await waitForCount(45000);
   check(`[J] 1-question scope (Duplex/Buy/الهفوف) lands with a real start count ABOVE the ${INTERVIEW_STOP_AT} stop line`, Number.isFinite(jStart) && jStart > INTERVIEW_STOP_AT, `start=${jStart}`);
 
+  // 2026-11-02: Duplex/Buy follows the owner's Villas & Houses list (age, bathrooms, street width, facing, three cards),
+  // so opening the interview probes ~8 questions before the card can show — a 7-second window read a busy CI as "never
+  // opened" (3 of 5 runs that day). Tap, then poll for up to 40 s the way Journey I does; re-tap only every 5 s.
   let jOpened = false;
-  for (let i = 0; i < 6 && !jOpened; i++) {
-    await tap('🎯 دقّق مع الذكاء الاصطناعي').catch(() => {});
-    await page.waitForTimeout(1200);
+  const jOpenDeadline = Date.now() + 40000;
+  let jLastTap = 0;
+  while (!jOpened && Date.now() < jOpenDeadline) {
+    if (Date.now() - jLastTap >= 5000) { await tap('🎯 دقّق مع الذكاء الاصطناعي').catch(() => {}); jLastTap = Date.now(); }
+    await page.waitForTimeout(500);
     jOpened = await afPresent();
   }
-  check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened);
+  check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened,
+    `af-card never appeared within 40s of the first tap — see the JOURNEY I note: a probe-timeout artefact under load reads as a declined plan`);
 
   let jTitles = [];
   let jAnswered = null;                 // the option testid actually clicked, or null if none was offered
+  let jNextTitle = null;                // the question that replaced the first one (the interview continued above the stop line)
+  let jChipCount = null;                // the live count chip on that next question
   if (jOpened) {
     // Same render race Journey I already guards against: af-card can mount a beat before its
     // question TITLE/options actually paint (real network round trip via rankQuestions), and CI's
@@ -1091,14 +1099,20 @@ try {
       await page.locator('[data-testid="af-confirm"]:visible').first().click({ timeout: 8000 });
       jAnswered = snap.options[0];
     }
+    // 2026-11-02: Duplex/Buy follows the villa list, so after the first answer the interview is RIGHT to continue with a
+    // DIFFERENT question while the count stays above the 25 stop line (owner 2026-10-13); it closes only at or below it.
+    // What must never happen is the SAME question coming back, or the card hanging with no next question.
     let waited = 0;
     while (waited < 45000) {
       await page.waitForTimeout(500); waited += 500;
       if (!(await afPresent())) break;
+      const t = (await afSnapshot()).title;
+      if (t && t !== snap.title) { jNextTitle = t; jChipCount = (await afSnapshot()).count; break; }
     }
   }
   const jFinalOpen = await afPresent();
-  check('[J] after answering the single question, the interview closes CLEANLY (no second question)', !jFinalOpen);
+  check('[J] after answering the first question the interview closes CLEANLY or moves to a DIFFERENT question (never the same one again, never a hang)',
+    !jFinalOpen || (jNextTitle != null && jNextTitle !== jTitles[0]), `open=${jFinalOpen} first=${JSON.stringify(jTitles[0])} next=${JSON.stringify(jNextTitle)}`);
   // Same staleness trap Journey I already documents: af-card unmounting is NOT "the new count
   // landed" — finishGuided's mining transition holds the OLD pre-AF results on screen underneath for
   // a guaranteed minimum beat first. Give that floor time, then require two reads a second apart to
@@ -1129,9 +1143,11 @@ try {
       + 'latency symptom Journey I skips for. A REAL regression looks different: options ARE offered, '
       + 'one is committed, and the count still does not move — which the check below still enforces.');
   } else {
-    check('[J] the closed interview lands on a genuinely narrowed, non-null result',
-      !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart,
-      `answered=${jAnswered ?? '(none)'} start=${jStart} final=${jFinal}`);
+    // closed → the landed count narrowed; still open on the NEXT question → that question's live chip narrowed
+    const jNarrowedTo = jFinalOpen ? jChipCount : jFinal;
+    check('[J] the answer genuinely narrowed the set (landed count when closed, the next question\'s live chip when it continued) — never back at the start',
+      Number.isFinite(jNarrowedTo) && jNarrowedTo < jStart,
+      `answered=${jAnswered ?? '(none)'} start=${jStart} final=${jFinal} open=${jFinalOpen} next-chip=${jChipCount}`);
     // THE STOP-LINE RULE, END TO END (owner 2026-09-04; rendering restyled 2026-09-05; the line
     // itself moved 50 → 25 on 2026-09-20): a round that lands at or below it FINISHES the chat — every remaining listing is revealed with no «عرض المزيد», and the
     // composer LOCKS in place (owner request 2026-09-05: no replacement card): the same box goes

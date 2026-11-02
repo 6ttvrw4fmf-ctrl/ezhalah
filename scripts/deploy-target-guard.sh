@@ -76,3 +76,29 @@ dtg_bundle_is_authentic() {
   want="$(dtg_bundle_hash "$2")"
   [ -n "$want" ] && [ -s "$file" ] && [ "$(dtg_md5 "$file")" = "$want" ]
 }
+
+# ROUTE SPLITTING (expo export emits per-route chunks since 2026-11-02): the ENTRY is rewritten after Expo names it, so
+# md5(entry bytes) != the hash in its filename (measured 2026-11-02: local build entry-65389cfe… md5 534eac6c…), while a
+# split chunk such as __common-<hash>.js IS named by the md5 of its bytes (measured: __common-27339972… md5 27339972…).
+# So the proof of "the alias serves this build's real artifact, not an error page" moves to the shared chunk:
+#   dtg_chunk_hash <path>              → the hash in any <name>-<32 hex>.js chunk filename ("" otherwise)
+#   dtg_chunk_is_authentic <file> <path> → md5(bytes) == that hash (empty / tampered / unparseable → refused)
+#   dtg_entry_is_real_js <file> <hash>   → the entry body is a real script (not an HTML error page, not truncated) that
+#                                           references the authenticated chunk's hash
+dtg_chunk_hash() {
+  printf '%s' "$1" | sed -nE 's|^.*/[A-Za-z0-9_]+-([a-f0-9]{32})\.js$|\1|p'
+}
+dtg_chunk_is_authentic() {
+  local file="$1" want
+  want="$(dtg_chunk_hash "$2")"
+  [ -n "$want" ] && [ -s "$file" ] && [ "$(dtg_md5 "$file")" = "$want" ]
+}
+dtg_entry_is_real_js() {
+  local file="$1" hash="$2" first size
+  [ -n "$hash" ] && [ -s "$file" ] || return 1
+  size="$(wc -c < "$file" | tr -d ' ')"
+  [ "$size" -ge 65536 ] || return 1
+  first="$(head -c 1 "$file")"
+  [ "$first" != "<" ] || return 1
+  grep -q "$hash" "$file"
+}
