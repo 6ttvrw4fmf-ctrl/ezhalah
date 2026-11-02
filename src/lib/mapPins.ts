@@ -34,7 +34,7 @@ export function pinColor(row: Pick<PinRow, 'n' | 'deal'>): string {
  *  deal's colour, a neutral dark when the cell mixes deals; never gold (a cell is not a shared spot) and no number. */
 export const MIXED_DOT = '#5B4A6B';
 export function dotColor(row: Pick<PinRow, 'deal'>): string {
-  return PIN_COLOR[row.deal] ?? MIXED_DOT;
+  return row.deal === 'mixed' ? MIXED_DOT : PIN_COLOR[row.deal] ?? MIXED_DOT;
 }
 
 /** STAY-LENGTH PLATFORMS SHOW NO PRICE (the standing Gathern / Aqar Monthly rule, src/lib/listingDisplay.ts). Kept as
