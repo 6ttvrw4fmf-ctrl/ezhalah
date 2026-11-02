@@ -10,7 +10,9 @@
 // Flags: --url (default the production /map) · --taps a comma list of targets, each `tab:<aria-label>`,
 //        `text:<exact visible text>` or `testid:<data-testid>` · --repeat N rounds (default 2) · --gap ms between
 //        taps (default 150 — «twice fast» is the shape the Sentry event came from) · --phone (mobile emulation)
-//        · --settle ms to wait after the last tap (default 2500) · --json (machine output only) · --selftest.
+//        · --settle ms to wait after the last tap (default 2500) · --json (machine output only) · --selftest
+//        · --fail-once <url substring>: abort the FIRST matching request (a route chunk a deploy renamed, 🔧 11-02,
+//          Sentry REACT-NATIVE-J/K) — PASS then also needs the page to have reloaded itself once and to be clean after it.
 //
 // Verdict: PASS when the page loaded, every tap found its target, and the browser reported 0 uncaught exceptions and
 // 0 unhandled rejections — the two shapes Sentry's `onerror` / `onunhandledrejection` would have sent; FAIL otherwise,
@@ -43,8 +45,9 @@ export const selectorFor = (t) => {
 
 /** The verdict from what the browser reported. Pure, self-tested: ANY error is a FAIL; a console warning is not,
  *  unless `strict` asks for it. */
-export const verdictFor = ({ loaded, missedTaps, errors, warnings = [], strict = false }) =>
-  loaded && missedTaps.length === 0 && errors.length === 0 && (!strict || warnings.length === 0) ? 'PASS' : 'FAIL';
+export const verdictFor = ({ loaded, missedTaps, errors, warnings = [], strict = false, reloadExpected = false, reloaded = false }) =>
+  loaded && missedTaps.length === 0 && errors.length === 0 && (!strict || warnings.length === 0)
+    && (!reloadExpected || reloaded) ? 'PASS' : 'FAIL';
 
 if (has('selftest')) {
   const assert = (await import('node:assert/strict')).default;
@@ -63,6 +66,11 @@ if (has('selftest')) {
     'a third-party console.error is reported, not the verdict (run 41311890931)');
   assert.equal(verdictFor({ loaded: true, missedTaps: [], errors: [], warnings: ['console.error: x'], strict: true }), 'FAIL',
     '--strict-console makes a console error fail');
+  assert.equal(verdictFor({ loaded: true, missedTaps: [], errors: [], reloadExpected: true, reloaded: false }), 'FAIL',
+    '--fail-once: a page that did not reload itself is a FAIL (the stale-chunk fix did not fire)');
+  assert.equal(verdictFor({ loaded: true, missedTaps: [], errors: [], reloadExpected: true, reloaded: true }), 'PASS');
+  assert.equal(verdictFor({ loaded: true, missedTaps: [], errors: ['pageerror: x'], reloadExpected: true, reloaded: true }), 'FAIL',
+    '--fail-once: an error AFTER the reload still fails');
   console.log('page-probe self-check: OK');
   process.exit(0);
 }
@@ -86,6 +94,7 @@ const GAP = Math.max(0, Number(arg('gap', 150)) || 0);
 const SETTLE = Math.max(0, Number(arg('settle', 2500)) || 0);
 const PHONE = has('phone');
 const STRICT = has('strict-console');
+const FAIL_ONCE = arg('fail-once', null);
 const JSON_ONLY = has('json');
 const OUT_DIR = process.env.PROBE_OUT_DIR || path.join(os.tmpdir(), 'page-probe');
 const log = (...m) => { if (!JSON_ONLY) console.log(...m); };
@@ -99,7 +108,10 @@ const browser = await chromium.launch({
 const errors = [];
 const warnings = [];
 const missedTaps = [];
+const beforeReload = []; // errors the planted failure caused, kept as evidence, not as the verdict
 let loaded = false;
+let failedOnce = null;
+let reloaded = false;
 let screenshot = null;
 try {
   const ctx = await browser.newContext({
@@ -117,11 +129,37 @@ try {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`pageerror: ${String(e?.message || e).slice(0, 300)}`));
   page.on('console', (m) => { if (m.type() === 'error') warnings.push(`console.error: ${m.text().slice(0, 300)}`); });
+  if (FAIL_ONCE) {
+    // The stale-tab shape: the FIRST request for the named chunk fails (as a renamed chunk does after a deploy);
+    // every later request goes through. The fix must reload the page once; what it threw before the reload is
+    // evidence, and the verdict is read from the page AFTER its reload.
+    await ctx.route((u) => u.href.includes(FAIL_ONCE), (route) => {
+      if (failedOnce) return route.continue();
+      failedOnce = route.request().url();
+      log(`    · aborting once: ${failedOnce}`);
+      return route.abort('failed');
+    });
+    let loads = 0;
+    page.on('load', () => {
+      loads++;
+      if (loads >= 2 && failedOnce) {
+        reloaded = true;
+        beforeReload.push(...errors.splice(0, errors.length));
+      }
+    });
+  }
   log(`▶ page probe — ${URL_} · ${TAPS.map((t) => `${t.kind}:${t.value}`).join(' → ')} × ${REPEAT} · gap ${GAP} ms${PHONE ? ' · phone' : ''}`);
   const resp = await page.goto(URL_, { waitUntil: 'domcontentloaded', timeout: 60000 });
   loaded = !!resp && resp.status() < 400;
   if (!loaded) errors.push(`load: HTTP ${resp ? resp.status() : 'no response'} on ${URL_}`);
   await page.waitForTimeout(4000); // the app shell mounts and the first screen renders
+  if (FAIL_ONCE) {
+    await page.waitForFunction(() => performance.getEntriesByType('navigation')[0]?.type === 'reload', null, { timeout: 20000 })
+      .then(() => { reloaded = true; }).catch(() => {});
+    if (!failedOnce) errors.push(`fail-once: no request matched «${FAIL_ONCE}» — nothing was planted`);
+    log(`    · planted ${failedOnce ? 'once' : 'nothing'} · page reloaded itself: ${reloaded}`);
+    await page.waitForTimeout(4000); // the reloaded shell mounts
+  }
   for (let round = 1; loaded && round <= REPEAT; round++) {
     for (const t of TAPS) {
       const sel = selectorFor(t);
@@ -149,8 +187,9 @@ try {
 } finally {
   await browser.close().catch(() => {});
 }
-const verdict = verdictFor({ loaded, missedTaps, errors, warnings, strict: STRICT });
-const out = { url: URL_, taps: TAPS, repeat: REPEAT, gapMs: GAP, phone: PHONE, loaded, missedTaps, errors, warnings, screenshot, status: verdict };
+const verdict = verdictFor({ loaded, missedTaps, errors, warnings, strict: STRICT, reloadExpected: !!FAIL_ONCE, reloaded });
+const out = { url: URL_, taps: TAPS, repeat: REPEAT, gapMs: GAP, phone: PHONE, loaded, missedTaps, errors, warnings, screenshot, status: verdict,
+  ...(FAIL_ONCE ? { failOnce: FAIL_ONCE, failedOnce, reloaded, beforeReload } : {}) };
 console.log(JSON.stringify(out));
-log(`SUMMARY page-probe ${verdict} · loaded=${loaded} · taps missed=${missedTaps.length} · errors=${errors.length} · console warnings=${warnings.length}${STRICT ? ' (strict)' : ''}`);
+log(`SUMMARY page-probe ${verdict} · loaded=${loaded} · taps missed=${missedTaps.length} · errors=${errors.length} · console warnings=${warnings.length}${STRICT ? ' (strict)' : ''}${FAIL_ONCE ? ` · planted=${failedOnce ? 1 : 0} reloaded=${reloaded} errorsBeforeReload=${beforeReload.length}` : ''}`);
 process.exit(verdict === 'PASS' ? 0 : 1);

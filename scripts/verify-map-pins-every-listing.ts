@@ -64,6 +64,12 @@ mustCatch('a sheet that shows the cards in fetch order instead of the pin order'
 
 // Draw → Apply: the sketch becomes a closed GeoJSON polygon in [lng, lat]; fewer than three points is no area.
 const polyOut = polygonOf([{ latitude: 24.7, longitude: 46.6 }, { latitude: 24.8, longitude: 46.6 }, { latitude: 24.8, longitude: 46.7 }]);
+// MapKit hands the overlay's points back as RINGS ([[Coordinate, …]]); the outer ring is the boundary (measured live
+// 2026-11-02: the drawn boundary applied to nothing because the nested list filtered down to nothing → null).
+const ringOut = polygonOf([[{ latitude: 24.7, longitude: 46.6 }, { latitude: 24.8, longitude: 46.6 }, { latitude: 24.8, longitude: 46.7 }]]);
+check('polygonOf accepts MapKit rings and reads the outer ring', JSON.stringify(ringOut) === JSON.stringify(polyOut));
+mustCatch('a polygon builder that cannot read MapKit rings (the apply-to-nothing defect of 2026-11-02)', ringOut !== null);
+check('the boundary count pill has its Arabic text', /'\{n\} listings inside the boundary': '\{n\} إعلان داخل الحدود'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
 check('polygonOf closes the ring and writes [lng, lat]', polyOut?.type === 'Polygon' && polyOut.coordinates[0].length === 4 && polyOut.coordinates[0][0][0] === 46.6 && polyOut.coordinates[0][0][1] === 24.7 && polyOut.coordinates[0][3][0] === 46.6);
 check('polygonOf refuses a line (two points) and skips a bad point', polygonOf([{ latitude: 1, longitude: 2 }, { latitude: 3, longitude: 4 }]) === null && polygonOf([{ latitude: NaN, longitude: 1 }, { latitude: 1, longitude: 1 }, { latitude: 2, longitude: 1 }, { latitude: 2, longitude: 2 }])?.coordinates[0].length === 4);
 mustCatch('a polygon written [lat, lng] (would land in the Indian Ocean)', polyOut?.coordinates[0][0][0] !== 24.7);

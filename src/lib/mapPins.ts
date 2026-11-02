@@ -131,8 +131,12 @@ export function orderLike<T extends { sourceTable?: string; id: number }>(row: {
 }
 
 /** A drawn overlay's points → a closed GeoJSON polygon ([lng, lat] rings), or null when too small to be an area. */
-export function polygonOf(points: { latitude: number; longitude: number }[]): PinFilter['poly'] {
-  const ring = points.filter((p) => p && Number.isFinite(p.latitude) && Number.isFinite(p.longitude)).map((p) => [p.longitude, p.latitude]);
+export function polygonOf(points: unknown[]): PinFilter['poly'] {
+  // MapKit's PolygonOverlay.points is RINGS — [[Coordinate, …]] — even when the overlay was built from a flat list
+  // (measured live 2026-11-02: a drawn boundary applied to nothing because the ring never flattened → null → no
+  // polygon). The outer ring is the boundary; a flat list is taken as is.
+  const outer = (Array.isArray(points[0]) ? points[0] : points) as { latitude: number; longitude: number }[];
+  const ring = outer.filter((p) => p && Number.isFinite(p.latitude) && Number.isFinite(p.longitude)).map((p) => [p.longitude, p.latitude]);
   if (ring.length < 3) return null;
   const [x0, y0] = ring[0]; const [xn, yn] = ring[ring.length - 1];
   if (x0 !== xn || y0 !== yn) ring.push([x0, y0]);

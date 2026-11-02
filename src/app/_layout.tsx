@@ -5,7 +5,8 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppProvider } from '@/store';
-import { classifyRejection, initObservability, reportError } from '@/lib/observability';
+import { classifyRejection, initObservability, reportError, reportMessage } from '@/lib/observability';
+import { browserStaleChunkEnv, handleStaleChunk } from '@/lib/staleChunkReload';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
 import { colors } from '@/theme/tokens';
@@ -41,6 +42,12 @@ initObservability();
 if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis as any).__ezhalahGlobalHandlers) {
   (globalThis as any).__ezhalahGlobalHandlers = true;
   globalThis.addEventListener?.('unhandledrejection', (ev: any) => {
+    // 🔧 2026-11-02 (Sentry REACT-NATIVE-J/K): a route chunk the entry named before a deploy answers 404 now —
+    // reload once so the fresh entry names the fresh chunks; a repeat for the same URL is reported below.
+    if (handleStaleChunk(ev?.reason, browserStaleChunkEnv())) {
+      reportMessage('stale route chunk after a deploy — reloaded once', { source: 'unhandledrejection', path: (globalThis as any).location?.pathname });
+      return;
+    }
     // eslint-disable-next-line no-console
     console.error('[ezhalah] unhandled promise rejection:', ev?.reason);
     // 🔧 2026-10-16: Sentry REACT-NATIVE-D/E were bare «NetworkError» rejections with no stack and
@@ -62,6 +69,10 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
     }, cls.thirdPartyTransport ? { level: cls.level, fingerprint: cls.fingerprint, tags: cls.tags } : undefined);
   });
   globalThis.addEventListener?.('error', (ev: any) => {
+    if (handleStaleChunk(ev?.error ?? ev?.message, browserStaleChunkEnv())) {
+      reportMessage('stale route chunk after a deploy — reloaded once', { source: 'window.error', path: (globalThis as any).location?.pathname });
+      return;
+    }
     // eslint-disable-next-line no-console
     console.error('[ezhalah] uncaught error:', ev?.error || ev?.message);
     reportError(ev?.error ?? new Error(String(ev?.message ?? 'uncaught')), { source: 'window.error' });
