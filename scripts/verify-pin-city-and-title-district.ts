@@ -43,6 +43,9 @@ const DISTRICT: Rule[] = [
     /and public\.loc_display_district_ar\(coalesce\(s\.city_id, v1\.city_id\), v1\.district_ar\) is null/],
   ['…and overrides an earlier recovery only when that one displays as nothing', /_drt\.district_ar\) is null;/],
   ['the location view serves a title recovery ahead of a hidden source value', /ELSE CASE WHEN \(dr\.basis = ''title''::text\) THEN dr\.district_ar/],
+  ['a title district replaces a NAMED source district only when that is another town of the region (never a real neighbourhood)',
+    /create or replace function public\.district_is_other_town[\s\S]*?c\.region_id = \(select c0\.region_id from public\.loc_catalog_city c0 where c0\.city_id = p_city_id\)/],
+  ['…and the hourly arm uses that test, not a bare «off the list»', /or public\.district_is_other_town\(coalesce\(s\.city_id, v1\.city_id\), v1\.district_ar\)\)/],
   ['the decider runs hourly', /cron\.schedule\('title-district'/],
   ['its detector is on the roster', /needle \|\| E'\\n    ''mon_detect_title_district_unserved'','\)/],
 ];
