@@ -46,5 +46,22 @@ mustCatch('the Arabic says «للإيجار الشهري» again', !(await clean
 mustCatch('the both-pools sentence says monthly', !(await clean(SEARCH.replace("t('for a short stay or yearly rent')", "t('to rent monthly or yearly')"), I18N)));
 mustCatch('the Arabic entry is missing (falls back to English)', !(await clean(SEARCH, I18N.replace("'for a short stay': 'للإقامة القصيرة',", ''))));
 
+// The toggle's own hints (owner 2026-11-02, same day): the line under «Short stays / Yearly» and the «price cleared»
+// note must not say monthly either. Every t('…') key in that block, in English and in its real Arabic entry.
+const INDEX = readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
+const hintKeys = (index: string) => {
+  const a = index.indexOf('<Text style={s.rentHint}>');
+  const b = index.indexOf('</Text>', index.indexOf('periodPriceCleared', a));
+  if (a < 0 || b < 0) return null;
+  return [...index.slice(a, b).replace(/\/\/[^\n]*/g, '').matchAll(/'([^'\n]{12,})'/g)].map((m) => m[1]);
+};
+const hintsClean = (index: string, dict: string) => {
+  const keys = hintKeys(index);
+  return !!keys && keys.length >= 3 && keys.every((k) => { const ar = arabicOf(dict, k); return !/month/i.test(k) && ar != null && !/شهر/.test(ar); });
+};
+check('the toggle hints and the «price cleared» note never say monthly / شهري', hintsClean(INDEX, I18N));
+mustCatch('the both-hint says «(monthly or yearly)» again', !hintsClean(INDEX.replace("'Short stays show no price (it depends on the dates); yearly listings show the yearly price.'", "'Each listing shows its own price basis (monthly or yearly).'"), I18N + "\n  'Each listing shows its own price basis (monthly or yearly).': 'x',"));
+mustCatch('the cleared note\'s Arabic says شهري', !hintsClean(INDEX, I18N.replace('(إقامات قصيرة ↔ سنوي)', '(شهري ↔ سنوي)')));
+
 if (fails) { console.error(`\n${fails} check(s) failed`); process.exit(1); }
 console.log('\nverify-short-stays-sentence-never-says-monthly: OK');

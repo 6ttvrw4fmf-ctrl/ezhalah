@@ -249,7 +249,7 @@ check("the old boolean-scoped 'both → null' Trending gap is gone",
 for (const [label, key] of [
   ['monthly', 'Monthly: includes short stays, priced by length of stay.'],
   ['yearly', 'Yearly: the displayed price is the yearly price.'],
-  ['both', 'Each listing shows its own price basis (monthly or yearly).'],
+  ['both', 'Short stays show no price (it depends on the dates); yearly listings show the yearly price.'],
 ] as const) {
   check(`${label} period hint has an Arabic translation (no English key leak)`, i18n.includes(`'${key}'`));
 }
