@@ -36,7 +36,7 @@
 -- location_search_candidates_ar. Verified against production by a full dry run of that migration on
 -- 2026-09-03 (applied → all six smokes green → rolled back; 350 rows checked for 28 keys,
 -- NULL-preservation and source-row identity, parity 0, gate holding).
--- md5 of the body below: 246f1b2d991fcc0c9fc4ba82b7defa4f   (2026-11-01 Apartments & Co-living pack, migration 20261101100930; before it: f80b807b6b13a59a40e8d6eb0ccdde88, the 2026-10-26 majlis pack)
+-- md5 of the body below: c3db5daae2427593e63d517161159047   (2026-11-02 Villas & Houses pack, migration 20261102055240; before it: 246f1b2d991fcc0c9fc4ba82b7defa4f; 2026-11-01 Apartments & Co-living pack, migration 20261101100930; before it: f80b807b6b13a59a40e8d6eb0ccdde88, the 2026-10-26 majlis pack)
 -- Re-verify after the migration is applied under the deploy lock.
 -- Amended 2026-10-03 (migration af_every_question_multi_select_unions, owner: «never force the user to
 -- select one thing»): the gate gains p_age_buckets / p_rating_buckets / p_furnished_in, so a search

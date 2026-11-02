@@ -10,7 +10,7 @@
 --   migration's format('           and (not (%L = any(p_amenities)) or %s)', token, pred) wrote it. Rebuilt by
 --   rebuild_af_filter_rpcs(); top_cities_by_deal_ar carries the byte-identical copy. Body below = the previous body
 --   plus exactly those edits, applied to this file with the same replace the migration ran on production:
---   Recorded md5 of pg_get_functiondef: 126242b981111b6879a3f27c162478b7
+--   Recorded md5 of pg_get_functiondef: a0a75c9727a6131321840156e5cbf276   (2026-11-02, migration 20261102055240; before it: 126242b981111b6879a3f27c162478b7)
 --   (length 15,487; the previous text hashed 62539dd9f79949bfbb7842182e72e4f7, 11,546.) NOT YET registered in ops_sql_mirror_expected —
 --   af_eligibility_clause.sql sits in verify-mirror-md5-is-registered.ts UNREGISTERED_MIRROR_BASELINE.
 -- Re-verified 2026-10-26 (migration 20261026011638_majlis_advanced_filter_amenity):
