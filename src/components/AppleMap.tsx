@@ -11,7 +11,7 @@ export function clearPlaceMark() {}
 export async function routeBetween(_a: PlaceSuggestion, _b: PlaceSuggestion): Promise<boolean> { return false; }
 export function clearRoute() {}
 
-export default function AppleMap(_: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void }) {
+export default function AppleMap(_: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void; pins?: unknown; onPinSelect?: (row: unknown) => void }) {
   return <View style={s.frame} />;
 }
 

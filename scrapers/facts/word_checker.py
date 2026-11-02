@@ -112,6 +112,8 @@ _NOT_ALLOWED = r"(?:غير مسموح|ممنوع|ممنوعه|ممنوعين|ل�
 _ALLOWED = r"(?<!غير )(?<!لا )(?<!ما )(?:مسموح|مسموحه|يسمح|نسمح|نقبل|يقبل)"
 _TO = r"(?:لل|ل|ب|بال|ال|وال)?"
 _WHO_MAY_RENT = frozenset({"singles", "families"})
+# …and the «who / what is it for» facts of the 2026-11-01 handoff read «مسموح» / «ممنوع» the same way
+_PERMIT_FACTS = _WHO_MAY_RENT | {"for_families", "for_youth", "for_events", "food_allowed"}
 _BILL = r"(?:كهرباء|كهربا|كهربه|كهرب|ماء|مياه|مويه|فواتير|فاتوره|خدمات|غاز)"   # what a rent may include (bills_included)
 
 FACT_TOKENS: dict[str, list[Any]] = {
@@ -254,6 +256,171 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "outdoor_kitchen": ["re:مطبخ خارجي", "re:مطابخ خارجيه", "outdoor kitchen"],
     "outdoor_diwaniya": ["re:ديوانيه خارجيه", "re:ديوانيات خارجيه", "outdoor diwaniya"],
     "waterfall": ["^شلال$", "^شلالات$", "waterfall"],
+    # ── GROUP A — countryside / short stays / villa extras (owner handoff 2026-11-01, PR feat/af-words-all-groups).
+    # Same contract as every fact above: true only when the ad SAYS it, the shared negation / nearby / prepared
+    # guards apply unchanged, a phrase may feed two facts (precedent: self_checkin + smart_entry). Written on the
+    # normalised text (ة→ه, ى→ي, أإآ→ا; ؤ and ئ stay). ──
+    # «دفعة واحدة» is one payment, an explicit not-split; «دفع شهري» also feeds payment_monthly
+    "split_payments": ["^دفعات$", "^دفعتين$", "^دفعتان$", "re:(?:علي|ع) دفعات", "re:(?:ال)?دفع (?:ال)?شهري",
+                       "re:تقسيط (?:ال)?ايجار", "re:(?:ال)?ايجار (?:بال)?تقسيط", "re:\\d+ دفعات", "instalments", "installments",
+                       ("re:دفعه واحده", False)],
+    "heated_pool": ["re:مسبح (?:مدفا|مدفئ|دافئ|دافي|مسخن|ساخن|حار)", "re:تدفئه (?:ال)?مسبح", "re:مسبح (?:ب|مع )?تدفئه", "heated pool"],
+    "kids_pool": ["re:مسبح (?:لل|ال)?اطفال", "re:مسبح صغير (?:لل|ال)?اطفال", "kids pool", "children s pool"],
+    "water_slide": ["^زحليقه", "^زحليقات", "^زحاليق", "^زحلاقه", "^زحلاقات", "^زحلقه", "re:(?:ال)?العاب مائيه", "water slide"],
+    # the view word is the nearby guard's own («يطل», «اطلاله»): the span must START with it
+    "sea_view": ["re:(?:اطلاله|اطلالات|باطلاله) (?:علي |ع )?(?:ال)?بحر(?:يه)?", "re:(?:يطل|تطل|مطل|مطله) (?:علي |ع )?(?:ال)?بحر",
+                 "re:(?:علي|ع) (?:ال)?بحر(?!\\w)", "re:(?:شاطئ|شاطي) خاص", "re:واجهه بحريه", "sea view", "beachfront", "private beach"],
+    "football_pitch": ["re:ملعب (?:كره|كوره)(?: (?:ال)?قدم)?", "re:ملعب (?:ال)?(?:صابوني|عشب|عشبي|نجيل)", "football pitch", "soccer"],
+    "playstation": ["^بلايستيشن", "^بليستيشن", "بلاي ستيشن", "^سوني$", "^playstation", "^ps[45]$"],
+    "inflatable_games": ["^نطيطه", "^نطيطات", "^نطاطه", "^نطاطات", "re:(?:ال)?العاب هوائيه", "^ترامبولين", "^ترامبلين", "trampoline",
+                         "bouncy castle"],
+    "sound_system": ["re:نظام (?:ال)?صوت(?:ي)?", "^سماعات", "^صوتيات", "^سبيكر", "re:جهاز (?:ال)?صوت", "sound system", "speakers"],
+    # «موقد غاز» is the kitchen stove
+    "fire_pit": ["^موقد", "^حطب$", "re:جلسه (?:ال)?نار", "re:مكان (?:لل|ال)?نار", "re:حفره (?:ال)?نار", "fire pit", "firepit"],
+    "bait_shaar": ["re:بيت (?:ال)?شعر", "re:بيوت (?:ال)?شعر", "re:خيمه (?:ال)?شعر"],
+    "mandi_pit": ["^مندي$", "re:حفره (?:ال)?مندي", "^تنور$", "^مدفن$"],
+    "outdoor_seating": ["re:جلسه (?:ال)?(?:خارجيه|ارضيه|عربيه|حديقه)", "re:جلسات (?:ال)?(?:خارجيه|ارضيه|عربيه)",
+                        "re:جلسه (?:في )?(?:ال)?حديقه", "outdoor seating"],
+    "tent": ["^خيمه", "^خيم$", "^خيام"],
+    "dunes_view": ["re:(?:اطلاله|باطلاله) (?:علي |ع )?(?:ال)?(?:رمال|طعوس|نفود|كثبان)", "^طعوس", "^طعس$", "^نفود", "^كثبان", "^رمال$"],
+    "women_section": ["re:قسم (?:لل|ال)?(?:نساء|حريم|نسائي)", "re:جناح (?:لل|ال)?(?:نساء|حريم|نسائي)", "women s section", "ladies section"],
+    # «جناحين» only as two sections, never two master bedrooms (excluded below); «شقتين» left out — it is a count
+    "two_sections": ["^قسمين$", "^قسمان$", "^جناحين$", "^جناحان$", "re:قسم (?:لل|ال)?رجال و ?قسم (?:لل|ال)?نساء", "two sections"],
+    "events_hall": ["re:(?:صاله|قاعه|صالات|قاعات) (?:ال)?(?:مناسبات|افراح|احتفالات)", "events hall", "wedding hall"],
+    "privacy_screen": ["^ساتر", "^سواتر", "re:خصوصيه (?:تامه|كامله)", "^مستور$", "^مستوره$", "privacy screen"],
+    "trees": ["^اشجار", "^مشجره", "^مشجر$", "^مزروعه", "^مزروع$"],
+    "for_families": ["^للعوائل", "^للعائلات", "re:عوائل فقط", "^عائلي$", "^عائليه$", "for families",
+                     (rf"re:{_NOT_ALLOWED} {_TO}(?:عوائل|عائلات)", False), (rf"re:{_ALLOWED} {_TO}(?:عوائل|عائلات)", True)],
+    "for_youth": ["^للشباب", "^شباب$", "^للعزاب", "for youth",
+                  (rf"re:{_NOT_ALLOWED} {_TO}(?:شباب|عزاب)(?:ي|يه)?", False), (rf"re:{_ALLOWED} {_TO}(?:شباب|عزاب)(?:ي|يه)?", True)],
+    "for_events": ["^مناسبات", "^للمناسبات", "^حفلات", "^للحفلات", "^تخرج$", "re:عيد ميلاد", "re:اعياد ميلاد", "for events",
+                   (rf"re:{_NOT_ALLOWED} {_TO}(?:مناسبات|حفلات)", False), (rf"re:{_ALLOWED} {_TO}(?:مناسبات|حفلات)", True)],
+    "for_newlyweds": ["^عرسان", "^للعرسان", "^للعرايس", "re:شهر (?:ال)?عسل", "honeymoon", "newlyweds"],
+    # a bare «بقي» also means «remaining» («بقي شقة واحدة») — only next to دباب / بانشي
+    "quad_bikes": ["^دباب", "^دبابات", "^بانشي", "re:(?:دباب|دبابات|بانشي) (?:و)?بقي", "re:بقي (?:و)?(?:دباب|دبابات|بانشي)", "quad bike", "atv"],
+    "horses_stable": ["^خيل$", "^خيول$", "^اسطبل", "^اصطبل", "re:ركوب (?:ال)?خيل", "horse riding", "stable"],
+    # «جمال» alone is beauty — only «ركوب الجمال»
+    "camels": ["^ابل$", "^هجن$", "re:ركوب (?:ال)?(?:جمال|ابل|هجن)", "camels"],
+    "toilets_on_site": ["re:دورات (?:ال)?مياه", "re:دوره (?:ال)?مياه", "^حمامات", "^حمام$", "toilets"],
+    "lighting": ["^اناره", "^اضاءه", "^انارات", "lighting"],
+    "artesian_well": ["re:(?:بئر|بير) ارتوازي", "^ارتوازي", "re:ابار ارتوازيه", "artesian"],
+    "solar_power": ["re:طاقه شمسيه", "re:الواح شمسيه", "re:خلايا شمسيه", "solar"],
+    "palms": ["^نخيل$", "^نخل$", "^نخله$", "^نخلات$", "re:\\d+ نخله", "palm trees", "palms"],
+    "fruit_trees": ["re:اشجار مثمره", "^ليمون$", "^زيتون$", "^برتقال$", "^عنب$", "^رمان$", "^تين$", "^مانجو$", "^حمضيات$",
+                    "fruit trees"],
+    "fodder_crops": ["^برسيم", "^اعلاف$", "^قمح$", "^شعير$", "^خضار$", "^محاصيل$", "fodder", "crops"],
+    "greenhouses": ["re:بيوت محميه", "re:بيت محمي", "^صوبه", "^صوب$", "re:صوب زراعيه", "greenhouse"],
+    # a bare «تعمل» / «إنتاج» is any machine or any company — only the farm's own producing words
+    "producing_farm": ["^منتجه$", "^شغاله$", "re:مزرعه (?:منتجه|شغاله|تعمل)", "re:انتاج (?:ال)?(?:تمور|نخيل|اعلاف|خضار|محاصيل|زيتون)",
+                       "producing farm"],
+    "animal_pens": ["^حظيره", "^حظائر", "re:حوش (?:ال)?(?:غنم|اغنام|ماشيه|مواشي)", "^شبوك", "^شبك$", "^زريبه", "^زرايب"],
+    "poultry": ["^دواجن", "^دجاج$", "re:مزرعه دواجن", "poultry"],
+    # the ad says there IS a house / villa on the property; a bare «سكن» is anyone's housing («سكن عمال», «سكن عوائل»)
+    "farm_house": ["re:(?:فيها|بها|فيه|به|يوجد|توجد|مع|تحتوي علي|تشمل|وبها|وفيها) (?:ال)?(?:فيلا|فله|بيت|منزل|استراحه)",
+                   "re:(?:فيلا|فله|بيت|منزل) داخل (?:ال)?مزرعه", "re:مزرعه (?:ب|مع )(?:فيلا|فله|بيت|منزل)"],
+    "farm_rest_house": ["re:استراحه داخل", "re:(?:فيها|بها|يوجد|توجد|مع|وبها|وفيها) (?:ال)?استراحه", "^استراحه$"],
+    "workers_housing": ["re:سكن (?:لل|ال)?عمال", "re:غرف(?:ه)? (?:لل|ال)?(?:عمال|عامل)", "workers housing", "labour housing"],
+    "fence": ["^مسوره", "^مسور$", "^سور$", "^شبوك", "re:مسور(?:ه)? بالكامل", "fenced"],
+    "main_road": ["re:(?:علي|ع) (?:ال)?(?:طريق|خط|دائري)(?!\\w)", "re:طريق (?:ال)?(?:ملك|امير)(?!\\w)", "re:شارع (?:رئيسي|تجاري|عام)",
+                  "re:شارعين تجاريين", "main road", "main street"],
+    "good_soil": ["re:صالحه للزراعه", "re:تربه (?:خصبه|صالحه)", "re:ارض خصبه", "fertile"],
+    # ── GROUP B — residential land (owner handoff 2026-11-01) ──
+    "three_streets": ["re:(?:ثلاث|ثلاثه|3) شوارع", "three streets"],
+    # a bare «جاهزة» is any unit («جاهزة للسكن», «جاهزة للإفراغ») — only the land's own readiness
+    "ready_to_build": ["re:جاهزه للبناء", "^مستويه$", "re:منسوب جاهز", "re:(?:ارض|الارض|قطعه|القطعه) جاهزه", "ready to build"],
+    "raised_plot": ["re:(?:ارض|الارض|قطعه|القطعه) مرتفعه", "re:منسوب(?:ها)? مرتفع", "^مرتفعه$", "elevated plot"],
+    "residential_commercial": ["re:سكني(?:ه)? و?تجاري(?:ه)?", "re:تجاري(?:ه)? و?سكني(?:ه)?", "residential commercial"],
+    "all_services": ["re:(?:جميع|كامل|كافه|كل) (?:ال)?خدمات", "^مخدومه", "^مخدوم$", "re:(?:ال)?خدمات (?:متوفره|متوفر|واصله|مكتمله)",
+                     "re:(?:متوفر|متوفره|مكتمل|مكتمله) (?:بها |فيها )?(?:جميع |كل |كافه )?(?:ال)?خدمات", "all services"],
+    "asphalt": ["^مسفلت", "^مسفلته", "^سفلته", "^اسفلت", "asphalt", "paved"],
+    "street_lights": ["re:اناره (?:ال)?شوارع", "re:اناره (?:ال)?شارع", "^ارصفه", "^رصيف$", "re:اناره و ?ارصفه", "street lights", "pavements"],
+    # a bare «معتمد» is also an office / agent («مكتب معتمد») — excluded below
+    "approved_plan": ["re:مخطط (?:معتمد|رسمي)", "^معتمد$", "^معتمده$", "approved plan"],
+    # «تفويض من المالك» is an agent's authorisation — excluded below
+    "direct_owner": ["re:من (?:ال)?مالك(?: مباشره)?", "re:(?:ال)?مالك مباشره", "re:بدون (?:عموله|وسيط|وسطاء|سعي)", "direct from owner",
+                     "no commission"],
+    "inside_project": ["re:(?:داخل|ضمن) (?:ال)?(?:مخطط|مشروع)", "inside project"],
+    # what MAY be built (the permit guard's own words): the span carries them, so the guard reads nothing before it
+    "floors_allowed": ["re:عدد (?:ال)?ادوار (?:ال)?مسموح", "re:نظام (?:ال)?بناء", "re:نسبه (?:ال)?بناء", "^ارتداد", "^ارتدادات",
+                       "re:(?:مسموح|يسمح) (?:ب|بال)?(?:بناء )?(?:\d+ )?(?:ادوار|دورين|دور|طوابق)", "floors allowed"],
+    "grant_land": ["^منحه$", "re:ارض منحه", "re:منحه ملكيه", "grant land"],
+    # the VALUE of a services field, never across the next label: aqar's «لا يوجد خدمات العقار: كهرباء, مياه» HAS services
+    "no_services": ["re:(?:ارض|الارض|قطعه) خام", "^خام$", "re:(?:بدون|لا يوجد|لا توجد|لايوجد|لاتوجد|من غير) خدمات(?! (?:ال)?(?:عقار|ارض|قطعه))",
+                    "re:(?:ال)?خدمات(?: (?:ال)?(?:عقار|ارض|قطعه))? (?:لا يوجد|لا توجد|لايوجد|لاتوجد|غير متوفره|غير متوفر|غير موجوده)",
+                    "re:(?:بدون|لا يوجد|لا توجد|لايوجد|لاتوجد|من غير) (?:كهرباء|كهربا|كهربه|ماء|مياه|مويه)", "re:غير مخدومه", "no services",
+                    "raw land"],
+    # ── GROUP C — commercial (owner handoff 2026-11-01). own_toilet is NOT registered: own_bathroom above already
+    # reads «حمام خاص» / «دورة مياه خاصة». food_allowed (may it be a restaurant) and restaurant_cafe (it holds one)
+    # share the bare words on purpose; offices_inside and private_office overlap on «مكاتب إدارية». ──
+    "mezzanine": ["^ميزانين", "^ميزنين", "^ميزان$", "mezzanine"],
+    "pantry": ["^بوفيه", "re:مطبخ تحضيري", "^بانتري", "^بنتري", "pantry"],
+    "glass_front": ["re:واجه(?:ه|ات) (?:ال)?(?:زجاج|زجاجيه)", "^زجاج$", "^زجاجيه$", "glass front", "glass facade"],
+    # «الواجهة: شمالية» is the plot's facing — excluded below
+    "frontage": ["^واجهه", "^واجهتين", "^واجهتان", "^واجهات", "frontage"],
+    "in_mall": ["^مول$", "re:مجمع تجاري", "^سنتر$", "^بلازا", "re:مركز تجاري", "re:داخل (?:ال)?مول", "in mall", "shopping centre",
+                "shopping center"],
+    "in_tower": ["^برج$", "re:داخل (?:ال)?برج", "in tower"],
+    # «رقم رخصة فال» / «رقم الترخيص» is the REGA ad licence on every ad; «رخصة بناء» is a permit — excluded below
+    "license": ["re:سجل تجاري", "^رخصه$", "re:رخصه بلدي", "^ترخيص$", "^بلدي$", "commercial register", "licensed"],
+    "food_allowed": ["re:(?<!لا )(?<!ما )(?:يصلح|تصلح|يناسب|تناسب|مناسب|مناسبه) (?:ل|ك|لل)?(?:مطعم|كافيه|مقهي|كوفي|مطاعم|كافيهات)",
+                     "^مطعم$", "^كافيه$", "^مقهي$", "^مطاعم$", "^كافيهات$",
+                     (rf"re:{_NOT_ALLOWED} {_TO}(?:مطعم|كافيه|مقهي|مطاعم|كافيهات)", False),
+                     (rf"re:{_ALLOWED} {_TO}(?:مطعم|كافيه|مقهي|مطاعم|كافيهات)", True)],
+    "takeover": ["^تقبيل", "^للتقبيل", "^خلو$", "takeover"],
+    "first_tenant": ["re:اول (?:ساكن|مستاجر)", "re:(?:جديد|جديده)? ?لم (?:يسكن|تسكن)", "re:لم (?:يستخدم|تستخدم|يسكن|تسكن)", "first tenant",
+                     "never occupied"],
+    "internet": ["^انترنت", "^الياف$", "^فايبر", "^نت$", "internet", "fibre", "fiber"],
+    "civil_defense": ["re:(?:ال)?دفاع (?:ال)?مدني", "re:(?:ال)?انذار (?:ال)?حريق", "^طفايات", "re:طفاي(?:ه|ات) (?:ال)?حريق", "civil defense",
+                      "civil defence"],
+    "high_ceiling": ["re:(?:سقف|اسقف) (?:عالي|عاليه|مرتفع|مرتفعه)", "re:ارتفاع (?:ال)?(?:سقف|اسقف)", "re:ارتفاع عالي", "high ceiling"],
+    "hangar": ["^هنجر", "^هناجر", "^هنقر", "^هنقار", "hangar"],
+    # «عازل للصوت» is soundproof — excluded below
+    "insulated_panel": ["re:(?:ساندوتش|ساندويتش|ساندوش|سندوتش|سندويتش) (?:بانل|بنل)", "^بانل$", "^معزول", "^عازل$", "sandwich panel",
+                        "insulated panel"],
+    # «تكييف وتبريد» is the AC — excluded below
+    "cold_storage": ["^مبرد$", "^مبرده$", "^تبريد$", "^ثلاجات", "^مجمد", "re:غرف(?:ه)? (?:ال)?تبريد", "cold storage", "cold room"],
+    "concrete_floor": ["re:ارضي(?:ه|ات) (?:ال)?(?:خرسانه|خرسانيه|ايبوكسي|ابوكسي|اسمنتيه|اسمنت|سمنت)", "^ايبوكسي", "^ابوكسي", "epoxy",
+                       "concrete floor"],
+    "loading_dock": ["re:رصيف (?:لل|ال)?تحميل", "re:منص(?:ه|ات) (?:ال)?تحميل", "loading dock", "loading bay"],
+    "big_gate": ["re:بوابه كبيره", "re:بوابات كبيره", "^بوابه", "^بوابات", "big gate", "large gate"],
+    "truck_access": ["re:دخول (?:ال)?(?:شاحنات|تريلات|سطحات)", "^تريلات", "^تريلا$", "^سطحات", "^شاحنات", "truck access", "trucks"],
+    "crane": ["^رافعه", "^رافعات", "^ونش", "^اوناش", "^كرين", "crane"],
+    "racks": ["^ارفف", "^رفوف", "re:رفوف (?:ال)?تخزين", "racks", "shelving"],
+    "office_inside": ["re:مكتب (?:اداري )?داخل", "re:(?:فيه|فيها|به|بها|يوجد|توجد|مع|وبه|وبها) مكتب", "re:مكاتب داخليه", "office inside"],
+    "heavy_power": ["re:(?:3|ثلاث|ثلاثه) فاز", "re:ثري فيز", "re:محول (?:ال)?(?:كهرباء|كهربائي|كهربا)", "re:قوه كهربائيه", "^محول$",
+                    "3 phase", "three phase"],
+    "industrial_area": ["re:الصناعيه", "re:(?:ال)?مدينه (?:ال)?صناعيه", "re:منطقه صناعيه", "industrial area", "industrial city"],
+    "car_service": ["re:مغسله (?:ال)?سيارات", "^بنشر", "re:صيانه (?:ال)?سيارات", "^تشحيم", "^سمكره", "re:ورشه (?:ال)?سيارات", "^ورشه$",
+                    "car service"],
+    "meeting_room": ["re:(?:قاعه|غرفه|قاعات|غرف) (?:ال)?اجتماعات", "meeting room"],
+    "reception": ["^استقبال", "^ريسبشن", "^رسبشن", "reception"],
+    "coworking": ["re:مساح(?:ه|ات) (?:ال)?عمل(?: مشتركه)?", "re:مكاتب مشتركه", "^كوركنج", "^كوركينج", "coworking", "co working"],
+    "private_office": ["re:مكتب (?:خاص|اداري)", "re:مكاتب (?:خاصه|اداريه)", "private office"],
+    "central_ac": ["re:(?:تكييف|تكيف|مكيف|مكيفات) (?:مركزي|مركزيه)", "central ac", "central air"],
+    # contents of a building: a holding word or a count before the plural
+    "shops_inside": ["re:(?:فيه|فيها|به|بها|يوجد|توجد|يحتوي|تحتوي|تضم|يضم|مكون من|مكونه من|يتكون من|تتكون من|وبها|وفيها|عدد) (?:علي )?(?:\d+ )?(?:ال)?(?:محلات|معارض|محلين|محلان|معرضين)",
+                     "re:\d+ (?:محلات|معارض|محل|معرض)", "re:محلات تجاريه", "shops inside"],
+    "offices_inside": ["re:(?:فيه|فيها|به|بها|يوجد|توجد|يحتوي|تحتوي|تضم|يضم|مكون من|مكونه من|يتكون من|تتكون من|وبها|وفيها|عدد) (?:علي )?(?:\d+ )?(?:ال)?(?:مكاتب|مكتبين)",
+                      "re:\d+ (?:مكاتب|مكتب)", "re:مكاتب اداريه", "offices inside"],
+    "apartments_inside": ["re:(?:فيه|فيها|به|بها|يوجد|توجد|يحتوي|تحتوي|تضم|يضم|مكون من|مكونه من|يتكون من|تتكون من|وبها|وفيها|عدد) (?:علي )?(?:\d+ )?(?:ال)?(?:شقق|شقتين|شقتان)",
+                          "re:\d+ (?:شقق|شقه)", "apartments inside"],
+    "staff_housing_inside": ["re:سكن (?:لل|ال)?(?:عمال|موظفين|عزاب)", "staff housing"],
+    "restaurant_cafe": ["^مطعم$", "^كافيه$", "^مقهي$", "^مطاعم$", "^كافيهات$", "restaurant", "cafe"],
+    # «حمام ومغسلة» is the basin, «مغسلة ملابس» the laundry — excluded below
+    "car_wash": ["re:مغسله (?:ال)?سيارات", "^مغسله$", "car wash"],
+    "market": ["^بقاله", "^ماركت", "^تموينات", "re:سوبر ماركت", "^سوبرماركت", "re:ميني ماركت", "supermarket", "grocery"],
+    # «المؤجر والمستأجر» are the contract's parties, not an income — excluded below; «مستثمر» left out (an invitation)
+    "earning_income": ["^مؤجر$", "^مؤجره$", "^موجر$", "^موجره$", "^ماجر$", "^ماجره$", "^دخل$", "^عائد$", "re:عائد سنوي", "re:دخل (?:سنوي|شهري)",
+                       "rental income", "rented out"],
+    "stars_mentioned": ["re:(?:خمس|اربع|ثلاث|سبع|\d) نجوم", "^نجوم$", "^نجمه$", "re:\d stars?", "star hotel"],
+    # «جناح خادمة» / «جناح نساء» / «جناحين نوم» are the villa's — excluded below; «عدد الغرف» left out (every aqar form)
+    "rooms_suites": ["re:غرف و ?اجنحه", "^اجنحه", "^جناح$", "rooms and suites", "suites"],
+    "oil_change": ["re:تغيير (?:ال)?(?:زيت|زيوت)", "^تشحيم", "^بنشر", "oil change"],
+    "pumps": ["^مضخات", "^مضخه", "^طرمبات", "^طرمبه", "pumps"],
+    "mosque": ["^مسجد", "^مصلي$", "^جامع$", "mosque", "prayer room"],
+    # a bare «أدوار» is the floors COUNT — only what may be built
+    "building_rules": ["re:نسبه (?:ال)?بناء", "^ارتداد", "^ارتدادات", "re:نظام (?:ال)?بناء", "re:عدد (?:ال)?ادوار (?:ال)?مسموح",
+                       "re:(?:مسموح|يسمح) (?:ب|بال)?(?:بناء )?(?:\d+ )?(?:ادوار|دورين|دور|طوابق)", "building rules"],
 }
 for _k, _src in _INHERITED.items():
     FACT_TOKENS[_k] = list(N._AMENITY_TOKENS[_src]) + FACT_TOKENS[_k]
@@ -272,7 +439,9 @@ _LIST_WORDS = frozenset(_n(w) for w in (
     # the apartment chips a negator may reach across (owner 2026-10-31): «بدون واي فاي وكاميرات وثلاجه»
     "واي", "فاي", "وايفاي", "نت", "انترنت", "كاميرات", "ثلاجه", "جاكوزي", "ساونا", "حارس", "حراسه", "انتركوم", "غساله",
     # the villa facts (owner 2026-11-01): «بدون مسبح وشلال وملعب»
-    "شلال", "شلالات", "ملعب", "ديوانيه"))
+    "شلال", "شلالات", "ملعب", "ديوانيه",
+    # group A (owner handoff 2026-11-01): «بدون مسبح وخيمة ونطيطة»
+    "خيمه", "نطيطه", "زحليقه", "سماعات", "بلايستيشن", "دباب", "اناره", "سور", "نخيل", "مشب", "اشجار"))
 
 # ── guards ────────────────────────────────────────────────────────────────────────────────────────────────
 # PREPARED / POSSIBLE: the thing is not there yet — no row (the scrapers' _PREPARED_ONLY + «possible» words).
@@ -292,7 +461,7 @@ _PARTIAL_BEFORE = tuple(_n(w) for w in N._PARTIAL_BEFORE)
 
 # Negators that TOUCH the token. One word («غير», «بدون») or two («لا يوجد», «لا نقبل»).
 _NEG1 = frozenset(_n(w) for w in ("غير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "no", "without", "not",
-                                   "non"))
+                                   "non", "ليس", "ليست"))      # «ليست منحة» (owner handoff 2026-11-01)
 _NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتوفر", "لا تتوفر", "ما فيه", "ما في", "لا يشمل",
                                    "لا تشمل", "عدم وجود", "لا نقبل", "لا يقبل", "من غير", "ما يوجد", "is not"))
 # …and AFTER it: «مطبخ غير راكب», «مفروشة: لا», «الضمانات ومدتها: لا يوجد», «المطابخ: 0».
@@ -343,6 +512,44 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     # bench-v2: «مدخل مكيّف», «مداخل مكيفة», «ممرات مكيفة» — the building's lobby, not the unit's AC
     "air_conditioner": (("مدخل", "مداخل", "ممر", "لوبي", "ردهه", "بهو", "مصلي"), ()),
     "furnished": (("محل", "معرض", "مستودع", "محلات", "معارض"), ()),
+    # ── group A (owner handoff 2026-11-01) ──
+    "fire_pit": ((), ("غاز", "الغاز", "كهربائي", "كهربائيه", "مطبخ", "المطبخ")),       # «موقد غاز» is the kitchen stove
+    "playstation": (("شاشه", "شاشات", "تلفزيون", "تلفاز", "تلفزيونات"), ()),            # «شاشة سوني» is a TV brand
+    "mandi_pit": (("مطعم", "مطاعم", "محل"), ()),
+    "tent": ((), ()),
+    "two_sections": ((), ("نوم", "ماستر", "رئيسيه", "رئيسيين", "رئيسيتين")),              # «جناحين نوم» are bedrooms
+    "for_youth": (("شارع", "حي", "طريق", "مركز", "نادي", "مخطط"), ()),                    # «شارع الشباب» is an address
+    "toilets_on_site": ((), ("سباحه", "بخار", "مغربي", "تركي", "شمسي", "شمس", "زاجل")),   # «حمام سباحة» is the pool
+    "lighting": ((), ("طبيعيه", "طبيعي")),                                              # «إضاءة طبيعية» is daylight
+    "palms": (("حي", "شارع", "طريق", "مخطط", "مجمع", "مركز", "برج", "فندق", "مول", "واحه"), ()),   # «حي النخيل»
+    "fruit_trees": (("حي", "شارع", "طريق", "مخطط", "مجمع", "عصير", "محل"), ()),
+    "fodder_crops": (("سوق", "محل", "بقاله", "مطعم"), ()),                               # «سوق الخضار» is a market
+    "poultry": (("مطعم", "مطاعم", "محل", "بروست"), ()),
+    "farm_house": ((), ("شعر", "الشعر", "درج", "الدرج", "عمال", "العمال", "موظفين")),       # «مع بيت شعر», «بيت الدرج»
+    "farm_rest_house": ((), ("للايجار", "للبيع", "يوميه", "يومي", "للتقبيل", "للتاجير")),  # the listing's own type
+    "dunes_view": (("حي", "شارع", "طريق", "مخطط", "مجمع"), ()),                           # «حي الرمال», «حي النفود»
+    "horses_stable": (("حي", "شارع", "طريق", "مخطط"), ()),
+    "main_road": ((), ("الصحيح", "صحيح")),
+    # ── group B (owner handoff 2026-11-01) ──
+    "raised_plot": (("سعر", "اسعار", "قيمه", "ايجار", "اسقف", "سقف", "ارتفاع", "نسبه", "طلب"), ()),   # a high price / ceiling
+    "all_services": ((), ("قريبه", "قريب", "بالقرب", "المجاوره", "مجاوره", "حولها", "حوله")),       # «جميع الخدمات قريبة»
+    "street_lights": ((), ("تحميل", "للتحميل", "تنزيل")),                                        # «رصيف تحميل» is a dock
+    "approved_plan": (("مكتب", "مسوق", "وسيط", "مقاول", "مهندس", "مقيم", "مثمن", "وكيل"), ()),
+    "direct_owner": (("تفويض", "توكيل", "وكاله", "بتفويض", "مفوض", "مفوضين", "وكيل", "موكل"), ()),
+    "no_services": (("مواد", "بترول", "نفط"), ()),                                                # «مواد خام»
+    # ── group C (owner handoff 2026-11-01) ──
+    "frontage": (("اتجاه", "الاتجاه"), ("شماليه", "جنوبيه", "شرقيه", "غربيه", "شمال", "جنوب", "شرق", "غرب", "بحريه", "حجر")),
+    "in_tower": ((), ("كهرباء", "الكهرباء", "مياه", "المياه", "اتصالات", "الاتصالات", "مراقبه")),     # «برج كهرباء» is a pylon
+    "license": (("رقم", "برقم"), ("بناء", "البناء", "فال", "اعلان", "الاعلان", "هدم", "حفر", "ترميم", "تسوير", "الهيئه", "هيئه")),
+    "insulated_panel": ((), ("صوت", "للصوت", "الصوت", "صوتي", "صوتيا")),                             # «عازل للصوت» is soundproof
+    "cold_storage": (("تكييف", "تكيف", "مكيف", "مكيفات", "نظام", "انظمه"), ()),                     # «نظام تبريد» is the AC
+    "car_wash": (("حمام", "دوره", "بانيو", "جناح", "مرحاض"), ("ملابس", "يد", "ايدي", "رخام", "وشطاف", "شطاف")),
+    "earning_income": (("بين", "حقوق", "التزامات", "توقيع"), ("والمستاجر", "المستاجر", "ومستاجر")),  # the contract's parties
+    "rooms_suites": ((), ("خادمه", "خدامه", "شغاله", "نساء", "حريم", "نسائي", "ماستر", "رئيسي", "نوم", "سائق", "رجال", "الرجال",
+                          "خاص", "ضيوف", "للضيوف")),
+    "mosque": (("شارع", "طريق", "حي", "مخطط", "دوار", "ميدان"), ()),                                 # «شارع المسجد» is an address
+    "market": (("شارع", "طريق", "حي"), ()),
+    "reception": (("صاله", "غرفه", "مجلس", "صالة"), ()),                                           # «صالة استقبال» is a living room
 }
 # Facts that only count with a context word near them (or as a bare list item) — «واصل كهرباء»,
 # «خدمات العقار: كهرباء، مياه»; never a bare «مياه» inside a sentence (it is a bathroom, a well, a sea …).
@@ -360,7 +567,8 @@ _UTILITY = tuple(_n(w) for w in ("كهرب", "مياه", "ماء", "مويه", "
                                  "sanitation", "fibre", "fiber", "telephone", "phone"))
 # Public amenities a neighbourhood also has: «مسجد وحديقة قريبة من العمارة», «حديقة … مقابل العمارة»,
 # and the items of a «خدمات قريبة: مسجد - حديقة» list — the nearby word may come AFTER, or a clause before.
-_PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking", "nursery", "kids_play_area", "sports_court"})
+_PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking", "nursery", "kids_play_area", "sports_court",
+                           "football_pitch", "events_hall", "mosque", "market", "in_mall", "restaurant_cafe", "food_allowed"})
 _NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "بجوار", "مقابل"))
 _METER_FACTS = frozenset({"separate_water_meter", "separate_electricity_meter"})
 _DIGITS = "0123456789"
@@ -484,6 +692,12 @@ def _negated_after(nxt: list[str], fact: str) -> int:
     return 0
 
 
+# A DISTRICT NAME IS NOT A FACT (🔬 2026-11-02): «حي الخزان» read water_tank = yes, «حي الحديقة» garden, «حي المستودعات»
+# storage, «حي الشرفة» balcony — ~100 ads on 9+ sites, every one in that district. The word right before the token
+# says it is a place: «حي» with its glued prepositions. (Jeddah's «مشرفة» is the glued case, N._inside_a_name.)
+_DISTRICT_WORDS = frozenset(_n(w) for w in ("حي", "بحي", "وحي", "لحي", "فحي", "وبحي", "بالحي", "الحي"))
+
+
 def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: int,
            cue_in: bool = False, near_in: bool = False) -> tuple[Optional[bool], int, int]:
     """The outcome of ONE token hit: (True|False|None, quote start, quote end) in the normalised clause.
@@ -493,6 +707,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     nxt = t[we:].split()
     head = t[ws:s]                                   # the glued part of the word before a loose hit
     if fact == "balcony" and N._inside_a_name(t, s, t[s:e]):
+        return None, s, e
+    if prev and prev[-1] in _DISTRICT_WORDS:         # «حي الخزان», «بحي الحديقة»: the ad's district, not a fact (🔬 11-02)
         return None, s, e
     if fact == "majlis" and nxt[:1] and nxt[0] in ("طعام", "الطعام"):   # «مجلس طعام» is the dining_majlis fact
         return None, s, e
@@ -549,7 +765,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e
     if forced is not None:
         return forced, ws, we
-    if fact in _WHO_MAY_RENT and any(_strip_wa(w).startswith("ممنوع") for w in gp[-3:]):
+    if fact in _PERMIT_FACTS and any(_strip_wa(w).startswith("ممنوع") for w in gp[-3:]):
         return False, ws, we                         # «ممنوع العزاب»: the bare word's own no (the forced regex agrees)
     if _billing_not_supply(fact, prev, nxt):
         return None, s, e
@@ -1031,6 +1247,11 @@ def selftest() -> None:
         ("مكيف سبليت", {"air_conditioner": True}, ()),
         ("غرفة خادمة مع دورة مياه", {"maid_room": True}, ("water_supply",)),
         ("حي المشرفة", {}, ("balcony",)),
+        ("ارض للبيع حي الخزان مدينة تربة", {}, ("water_tank",)),
+        ("فيلا بحي الحديقة بالمدينة المنورة", {}, ("garden",)),
+        ("شقة للايجار في حي المستودعات", {}, ("storage",)),
+        ("شقة في حي الشرفة", {}, ("balcony",)),
+        ("فيلا مع حديقة خاصة وخزان ماء", {"garden": True, "water_tank": True}, ()),
         ("شقة كبيرة", {}, ("well",)),
         # ── the 28 apartment chips (owner 2026-10-31): one yes each, the old guards still hold ──
         ("شقة بنظام دخول ذاتي", {"self_checkin": True}, ()),
@@ -1133,6 +1354,360 @@ def selftest() -> None:
         ("بدون شلال", {"waterfall": False}, ()),
         ("بئر ماء", {"well": True}, ()),
         ("بدون بئر", {"well": False}, ()),
+        # ── GROUP A (owner handoff 2026-11-01): two yeses (a spelling variant among them), one no / near-miss each ──
+        ("الإيجار على دفعات", {"split_payments": True}, ()),
+        ("دفعتين سنوياً", {"split_payments": True}, ()),
+        ("الدفع شهري", {"split_payments": True, "payment_monthly": True}, ()),
+        ("الإيجار دفعة واحدة", {"split_payments": False}, ()),
+        ("مسبح مدفأ", {"heated_pool": True, "pool": True}, ()),
+        ("مسبح دافي للشتاء", {"heated_pool": True}, ()),
+        ("مسبح بدون تدفئة", {}, ("heated_pool",)),
+        ("مسبح أطفال ومسبح كبير", {"kids_pool": True, "pool": True}, ()),
+        ("مسبح للأطفال", {"kids_pool": True}, ()),
+        ("بدون مسبح للأطفال", {"kids_pool": False}, ()),
+        ("زحليقة مائية", {"water_slide": True}, ()),
+        ("زحاليق مائيه والعاب مائية", {"water_slide": True}, ()),
+        ("بدون زحليقه", {"water_slide": False}, ()),
+        ("إطلالة بحرية مباشرة", {"sea_view": True}, ()),
+        ("شاليه على البحر مع شاطئ خاص", {"sea_view": True}, ()),
+        ("قريب من البحر", {}, ("sea_view",)),
+        ("يبعد 5 دقائق عن البحر", {}, ("sea_view",)),
+        ("ملعب كرة قدم", {"football_pitch": True, "sports_court": True}, ()),
+        ("ملعب صابوني", {"football_pitch": True}, ()),
+        ("قريب من ملعب كرة", {}, ("football_pitch",)),
+        ("بلايستيشن 5", {"playstation": True}, ()),
+        ("بلاي ستيشن وسوني", {"playstation": True}, ()),
+        ("شاشة سوني", {}, ("playstation",)),
+        ("نطيطة للأطفال", {"inflatable_games": True}, ()),
+        ("ألعاب هوائية وترامبولين", {"inflatable_games": True}, ()),
+        ("بدون نطيطه", {"inflatable_games": False}, ()),
+        ("نظام صوتي متكامل", {"sound_system": True}, ()),
+        ("سماعات وسبيكر", {"sound_system": True}, ()),
+        ("لا يوجد سماعات", {"sound_system": False}, ()),
+        ("جلسة نار وحطب", {"fire_pit": True}, ()),
+        ("موقد خارجي", {"fire_pit": True}, ()),
+        ("موقد غاز في المطبخ", {}, ("fire_pit",)),
+        ("بيت شعر كبير", {"bait_shaar": True}, ()),
+        ("خيمة شعر", {"bait_shaar": True, "tent": True}, ()),
+        ("بدون بيت شعر", {"bait_shaar": False}, ()),
+        ("حفرة مندي", {"mandi_pit": True}, ()),
+        ("مندي وتنور", {"mandi_pit": True}, ()),
+        ("مطعم مندي قريب", {}, ("mandi_pit",)),
+        ("جلسة خارجية", {"outdoor_seating": True}, ()),
+        ("جلسات أرضية وجلسه عربية", {"outdoor_seating": True}, ()),
+        ("بدون جلسة خارجية", {"outdoor_seating": False}, ()),
+        ("خيمة كبيرة", {"tent": True}, ()),
+        ("خيام للضيوف", {"tent": True}, ()),
+        ("لا توجد خيمه", {"tent": False}, ()),
+        ("إطلالة على الرمال", {"dunes_view": True}, ()),
+        ("طعوس ونفود", {"dunes_view": True}, ()),
+        ("حي الرمال", {}, ("dunes_view",)),
+        ("قسم نساء مستقل", {"women_section": True}, ()),
+        ("جناح للنساء", {"women_section": True}, ()),
+        ("بدون قسم نساء", {"women_section": False}, ()),
+        ("قسمين منفصلين", {"two_sections": True}, ()),
+        ("قسم رجال وقسم نساء", {"two_sections": True, "women_section": True}, ()),
+        ("جناحين نوم ماستر", {}, ("two_sections",)),
+        ("صالة مناسبات", {"events_hall": True, "for_events": True}, ()),
+        ("قاعة أفراح", {"events_hall": True}, ()),
+        ("قريب من قاعة مناسبات", {}, ("events_hall", "for_events")),
+        ("سواتر على كامل الحدود", {"privacy_screen": True}, ()),
+        ("خصوصية تامة ومستورة", {"privacy_screen": True}, ()),
+        ("بدون ساتر", {"privacy_screen": False}, ()),
+        ("أشجار كثيرة", {"trees": True}, ()),
+        ("مزرعة مشجرة", {"trees": True}, ()),
+        ("مزروعة نخيل", {"trees": True, "palms": True}, ()),
+        ("بدون أشجار", {"trees": False}, ()),
+        ("للعوائل فقط", {"for_families": True, "families": True}, ()),
+        ("شاليه عائلي", {"for_families": True}, ()),
+        ("غير مسموح للعوائل", {"for_families": False}, ()),
+        ("للشباب فقط", {"for_youth": True}, ()),
+        ("مناسب للعزاب", {"for_youth": True, "singles": True}, ()),
+        ("ممنوع الشباب", {"for_youth": False}, ()),
+        ("شارع الشباب", {}, ("for_youth",)),
+        ("للمناسبات والحفلات", {"for_events": True}, ()),
+        ("حفلات تخرج وعيد ميلاد", {"for_events": True}, ()),
+        ("لا نقبل المناسبات", {"for_events": False}, ()),
+        ("للعرسان", {"for_newlyweds": True}, ()),
+        ("مناسب لشهر العسل", {"for_newlyweds": True}, ()),
+        ("بدون عرسان", {"for_newlyweds": False}, ()),
+        ("دباب وبانشي", {"quad_bikes": True}, ()),
+        ("دبابات للتأجير", {"quad_bikes": True}, ()),
+        ("بقي شقة واحدة", {}, ("quad_bikes",)),
+        ("اسطبل خيل", {"horses_stable": True}, ()),
+        ("ركوب الخيل", {"horses_stable": True}, ()),
+        ("خيول للركوب", {"horses_stable": True}, ()),
+        ("مزرعة الخيليين", {}, ("horses_stable",)),
+        ("إبل وهجن", {"camels": True}, ()),
+        ("ركوب الجمال", {"camels": True}, ()),
+        ("مكان جمال", {}, ("camels",)),
+        ("دورات مياه للرجال والنساء", {"toilets_on_site": True}, ("water_supply",)),
+        ("حمامات خارجية", {"toilets_on_site": True}, ()),
+        ("حمام سباحة خاص", {}, ("toilets_on_site",)),
+        ("إنارة كاملة", {"lighting": True}, ()),
+        ("انارة واضاءة ليلية", {"lighting": True}, ()),
+        ("إضاءة طبيعية", {}, ("lighting",)),
+        ("بئر ارتوازي", {"artesian_well": True, "well": True}, ()),
+        ("بير ارتوازي عميق", {"artesian_well": True}, ()),
+        ("بدون بئر ارتوازي", {"artesian_well": False}, ()),
+        ("طاقة شمسية", {"solar_power": True}, ()),
+        ("ألواح شمسيه", {"solar_power": True}, ()),
+        ("بدون طاقة شمسية", {"solar_power": False}, ()),
+        ("نخيل منتج", {"palms": True}, ()),
+        ("50 نخلة", {"palms": True}, ()),
+        ("حي النخيل", {}, ("palms",)),
+        ("أشجار مثمرة", {"fruit_trees": True, "trees": True}, ()),
+        ("ليمون وزيتون", {"fruit_trees": True}, ()),
+        ("حي الزيتون", {}, ("fruit_trees",)),
+        ("مزروعة برسيم", {"fodder_crops": True, "trees": True}, ()),
+        ("أعلاف وقمح", {"fodder_crops": True}, ()),
+        ("سوق الخضار", {}, ("fodder_crops",)),
+        ("بيوت محمية", {"greenhouses": True}, ()),
+        ("صوب زراعية", {"greenhouses": True}, ()),
+        ("بدون بيوت محميه", {"greenhouses": False}, ()),
+        ("مزرعة منتجة", {"producing_farm": True}, ()),
+        ("شغالة وإنتاج تمور", {"producing_farm": True}, ()),
+        ("مكيفات تعمل", {}, ("producing_farm",)),
+        ("حظيرة غنم", {"animal_pens": True}, ()),
+        ("حوش غنم وشبوك", {"animal_pens": True, "fence": True, "yard": True}, ()),
+        ("بدون حظيره", {"animal_pens": False}, ()),
+        ("مزرعة دواجن", {"poultry": True}, ()),
+        ("دجاج بلدي", {"poultry": True}, ()),
+        ("مطعم دجاج", {}, ("poultry",)),
+        ("فيها فيلا", {"farm_house": True}, ()),
+        ("بيت داخل المزرعة", {"farm_house": True}, ()),
+        ("مع بيت شعر", {"bait_shaar": True}, ("farm_house",)),
+        ("سكن عمال", {"workers_housing": True}, ("farm_house",)),
+        ("فيها استراحة", {"farm_rest_house": True, "farm_house": True}, ()),
+        ("استراحة داخل المزرعة", {"farm_rest_house": True}, ()),
+        ("استراحة للإيجار اليومي", {}, ("farm_rest_house",)),
+        ("غرف عمال", {"workers_housing": True}, ()),
+        ("سكن للعمال", {"workers_housing": True}, ()),
+        ("بدون سكن عمال", {"workers_housing": False}, ()),
+        ("مسورة بالكامل", {"fence": True}, ()),
+        ("مسوّرة وسور", {"fence": True}, ()),
+        ("بدون سور", {"fence": False}, ()),
+        ("على طريق رئيسي", {"main_road": True}, ()),
+        ("على شارع تجاري", {"main_road": True}, ()),
+        ("على طريق الملك فهد", {"main_road": True}, ()),
+        ("قريب من الطريق الدائري", {}, ("main_road",)),
+        ("صالحة للزراعة", {"good_soil": True}, ()),
+        ("تربة خصبة", {"good_soil": True}, ()),
+        ("غير صالحه للزراعة", {"good_soil": False}, ()),
+        ("أرض زاوية", {"corner_plot": True}, ()),
+        # ── GROUP B (owner handoff 2026-11-01): residential land ──
+        ("أرض على ثلاث شوارع", {"three_streets": True, "corner_plot": True}, ()),
+        ("3 شوارع", {"three_streets": True}, ()),
+        ("على شارعين", {"corner_plot": True}, ("three_streets",)),
+        ("أرض جاهزة للبناء", {"ready_to_build": True}, ()),
+        ("مستوية ومنسوب جاهز", {"ready_to_build": True}, ()),
+        ("شقة جاهزة للسكن", {}, ("ready_to_build",)),
+        ("غير جاهزه للبناء", {"ready_to_build": False}, ()),
+        ("أرض مرتفعة", {"raised_plot": True}, ()),
+        ("منسوب مرتفع عن الشارع", {"raised_plot": True}, ()),
+        ("أسقف مرتفعة", {}, ("raised_plot",)),
+        ("سعر مرتفع", {}, ("raised_plot",)),
+        ("أرض سكني تجاري", {"residential_commercial": True}, ()),
+        ("سكنية تجارية", {"residential_commercial": True}, ()),
+        ("أرض سكنية", {}, ("residential_commercial",)),
+        ("جميع الخدمات متوفرة", {"all_services": True}, ()),
+        ("أرض مخدومة", {"all_services": True}, ()),
+        ("كامل الخدمات", {"all_services": True}, ()),
+        ("جميع الخدمات قريبة", {}, ("all_services",)),
+        ("غير مخدومة", {"all_services": False, "no_services": True}, ()),
+        ("شوارع مسفلتة", {"asphalt": True}, ()),
+        ("سفلتة وإنارة وأرصفة", {"asphalt": True, "street_lights": True, "lighting": True}, ()),
+        ("بدون سفلتة", {"asphalt": False}, ()),
+        ("إنارة الشوارع", {"street_lights": True}, ()),
+        ("رصيف وانارة", {"street_lights": True}, ()),
+        ("رصيف تحميل", {}, ("street_lights",)),
+        ("مخطط معتمد", {"approved_plan": True}, ()),
+        ("مخطط رسمي معتمد", {"approved_plan": True}, ()),
+        ("مكتب معتمد", {}, ("approved_plan",)),
+        ("البيع من المالك مباشرة", {"direct_owner": True}, ()),
+        ("بدون عمولة", {"direct_owner": True}, ()),
+        ("بدون وسيط", {"direct_owner": True}, ()),
+        ("تفويض من المالك", {}, ("direct_owner",)),
+        ("بدون عمولة ومطبخ راكب", {"direct_owner": True, "kitchen": True}, ()),
+        ("داخل مخطط", {"inside_project": True}, ()),
+        ("ضمن مشروع", {"inside_project": True}, ()),
+        ("خارج المخطط", {}, ("inside_project",)),
+        ("نظام البناء: سكني 3 ادوار", {"floors_allowed": True}, ("floors",)),
+        ("مسموح 4 أدوار", {"floors_allowed": True}, ("floors",)),
+        ("نسبة البناء 60%", {"floors_allowed": True}, ()),
+        ("ارتداد 3 متر", {"floors_allowed": True}, ()),
+        ("عمارة 3 أدوار", {"floors": 3.0}, ("floors_allowed",)),
+        ("أرض منحة", {"grant_land": True}, ()),
+        ("منحة ملكية", {"grant_land": True}, ()),
+        ("ليست منحه", {"grant_land": False}, ()),
+        ("أرض خام", {"no_services": True}, ()),
+        ("بدون خدمات", {"no_services": True}, ()),
+        ("الخدمات: لا يوجد", {"no_services": True}, ()),
+        ("خدمات العقار: لا يوجد", {"no_services": True}, ()),
+        ("بدون كهرباء", {"no_services": True, "electricity": False}, ()),
+        ("لا يوجد كهرباء", {"no_services": True, "electricity": False}, ()),
+        ("بدون مياه", {"no_services": True}, ()),
+        ("استخدامات العقار: لا يوجد خدمات العقار: كهرباء, مياه", {"electricity": True, "water_supply": True}, ("no_services",)),
+        ("مواد خام", {}, ("no_services",)),
+        ("جميع الخدمات", {"all_services": True}, ("no_services",)),
+        # ── GROUP C (owner handoff 2026-11-01): commercial ──
+        ("محل مع ميزانين", {"mezzanine": True}, ()),
+        ("ميزان كامل", {"mezzanine": True}, ()),
+        ("بدون ميزانين", {"mezzanine": False}, ()),
+        ("مكتب مع بوفيه", {"pantry": True}, ()),
+        ("مطبخ تحضيري وبانتري", {"pantry": True}, ()),
+        ("لا يوجد بوفيه", {"pantry": False}, ()),
+        ("واجهة زجاجية", {"glass_front": True, "frontage": True}, ()),
+        ("واجهات زجاج", {"glass_front": True}, ()),
+        ("بدون زجاج", {"glass_front": False}, ()),
+        ("محل واجهتين", {"frontage": True}, ()),
+        ("واجهات على الشارع", {"frontage": True}, ()),
+        ("الواجهة: شمالية", {}, ("frontage",)),
+        ("محل داخل مول", {"in_mall": True}, ()),
+        ("مجمع تجاري", {"in_mall": True}, ()),
+        ("بلازا", {"in_mall": True}, ()),
+        ("قريب من مول", {}, ("in_mall",)),
+        ("مكتب داخل برج", {"in_tower": True}, ()),
+        ("برج تجاري", {"in_tower": True}, ()),
+        ("برج كهرباء", {}, ("in_tower",)),
+        ("سجل تجاري ساري", {"license": True}, ()),
+        ("رخصة بلدي", {"license": True}, ()),
+        ("ترخيص جاهز", {"license": True}, ()),
+        ("رقم رخصة فال: 1200", {}, ("license",)),
+        ("رقم الترخيص: 7200012345", {}, ("license",)),
+        ("رخصة بناء", {}, ("license",)),
+        ("بدون رخصه", {"license": False}, ()),
+        ("يصلح مطعم", {"food_allowed": True}, ()),
+        ("مناسب لكافيه", {"food_allowed": True}, ()),
+        ("مسموح مطعم", {"food_allowed": True}, ()),
+        ("لا يصلح مطعم", {}, ("food_allowed",)),
+        ("غير مسموح مطاعم", {"food_allowed": False}, ()),
+        ("قريب من مطعم", {}, ("food_allowed", "restaurant_cafe")),
+        ("للتقبيل", {"takeover": True}, ()),
+        ("تقبيل محل", {"takeover": True}, ()),
+        ("خلو 50 ألف", {"takeover": True}, ()),
+        ("بدون خلو", {"takeover": False}, ()),
+        ("أول ساكن", {"first_tenant": True}, ()),
+        ("جديد لم يسكن", {"first_tenant": True}, ()),
+        ("لم يستخدم", {"first_tenant": True}, ()),
+        ("ساكن سابق", {}, ("first_tenant",)),
+        ("إنترنت وألياف", {"internet": True, "wifi": True}, ()),
+        ("فايبر سريع", {"internet": True}, ()),
+        ("بدون انترنت", {"internet": False}, ()),
+        ("مطابق للدفاع المدني", {"civil_defense": True}, ()),
+        ("إنذار حريق وطفايات", {"civil_defense": True, "fire_system": True}, ()),
+        ("بدون دفاع مدني", {"civil_defense": False}, ()),
+        ("سقف عالي", {"high_ceiling": True}, ()),
+        ("ارتفاع السقف 6 متر", {"high_ceiling": True}, ()),
+        ("أسقف مرتفعه", {"high_ceiling": True}, ("raised_plot",)),
+        ("سقف منخفض", {}, ("high_ceiling",)),
+        ("هنجر مساحة 500", {"hangar": True}, ()),
+        ("هناجر وهنقر", {"hangar": True}, ()),
+        ("بدون هنجر", {"hangar": False}, ()),
+        ("ساندوتش بانل", {"insulated_panel": True}, ()),
+        ("ساندويتش بنل معزول", {"insulated_panel": True}, ()),
+        ("عازل للصوت", {"soundproof": True}, ("insulated_panel",)),
+        ("مستودع مبرد", {"cold_storage": True}, ("storage",)),
+        ("غرف تبريد وثلاجات", {"cold_storage": True}, ()),
+        ("نظام تبريد مركزي", {}, ("cold_storage",)),
+        ("أرضية إيبوكسي", {"concrete_floor": True}, ()),
+        ("ارضية خرسانة", {"concrete_floor": True}, ()),
+        ("أرضية رخام", {}, ("concrete_floor",)),
+        ("رصيف تحميل", {"loading_dock": True}, ()),
+        ("منصة تحميل وتنزيل", {"loading_dock": True}, ()),
+        ("بدون رصيف تحميل", {"loading_dock": False}, ()),
+        ("بوابة كبيرة", {"big_gate": True}, ()),
+        ("بوابات للشاحنات", {"big_gate": True}, ()),
+        ("بدون بوابه", {"big_gate": False}, ()),
+        ("دخول الشاحنات", {"truck_access": True}, ()),
+        ("مدخل تريلات وسطحات", {"truck_access": True}, ()),
+        ("لا يسمح بدخول الشاحنات", {}, ("truck_access",)),
+        ("رافعة 5 طن", {"crane": True}, ()),
+        ("ونش وكرين", {"crane": True}, ()),
+        ("بدون رافعه", {"crane": False}, ()),
+        ("رفوف تخزين", {"racks": True}, ()),
+        ("أرفف حديد", {"racks": True}, ()),
+        ("بدون رفوف", {"racks": False}, ()),
+        ("مكتب داخل المستودع", {"office_inside": True, "storage": True}, ()),
+        ("فيه مكتب إداري", {"office_inside": True, "private_office": True}, ()),
+        ("بدون مكتب", {}, ("office_inside",)),
+        ("كهرباء 3 فاز", {"heavy_power": True}, ()),
+        ("محول كهرباء خاص", {"heavy_power": True}, ()),
+        ("ثلاث فاز", {"heavy_power": True}, ()),
+        ("بدون محول", {"heavy_power": False}, ()),
+        ("مستودع في الصناعية", {"industrial_area": True}, ()),
+        ("المدينة الصناعية الثانية", {"industrial_area": True}, ()),
+        ("قريب من الصناعية", {}, ("industrial_area",)),
+        ("مغسلة سيارات وبنشر", {"car_service": True, "car_wash": True, "oil_change": True}, ()),
+        ("ورشة سيارات وتشحيم", {"car_service": True}, ()),
+        ("قريب من مغسلة سيارات", {}, ("car_service", "car_wash")),
+        ("قاعة اجتماعات", {"meeting_room": True}, ()),
+        ("غرفة اجتماعات مجهزة", {"meeting_room": True}, ()),
+        ("بدون قاعة اجتماعات", {"meeting_room": False}, ()),
+        ("استقبال ومكاتب", {"reception": True}, ()),
+        ("ريسبشن", {}, ()),
+        ("مكتب مع ريسبشن", {"reception": True}, ()),
+        ("صالة استقبال", {}, ("reception",)),
+        ("مساحة عمل مشتركة", {"coworking": True}, ()),
+        ("مكاتب مشتركة وكوركنج", {"coworking": True}, ()),
+        ("مكاتب خاصة", {"private_office": True}, ("coworking",)),
+        ("مكتب خاص", {"private_office": True}, ()),
+        ("مكاتب إدارية", {"private_office": True, "offices_inside": True}, ()),
+        ("بدون مكتب خاص", {"private_office": False}, ()),
+        ("تكييف مركزي", {"central_ac": True, "air_conditioner": True}, ()),
+        ("مكيفات مركزية", {"central_ac": True}, ()),
+        ("مركزي", {}, ("central_ac",)),
+        ("مكنسة مركزية", {"central_vacuum": True}, ("central_ac",)),
+        ("عمارة فيها محلات تجارية", {"shops_inside": True}, ()),
+        ("يوجد 4 معارض", {"shops_inside": True, "shops_count": 4.0}, ()),
+        ("محل للإيجار", {}, ("shops_inside",)),
+        ("مبنى يحتوي على مكاتب", {"offices_inside": True}, ()),
+        ("عدد المكاتب 10", {"offices_inside": True}, ()),
+        ("مكتب للإيجار", {}, ("offices_inside",)),
+        ("عمارة فيها 8 شقق", {"apartments_inside": True, "apartments_count": 8.0}, ()),
+        ("تتكون من شقتين", {"apartments_inside": True, "apartments_count": 2.0}, ()),
+        ("شقة للإيجار", {}, ("apartments_inside",)),
+        ("سكن عمال", {"staff_housing_inside": True, "workers_housing": True}, ()),
+        ("سكن موظفين", {"staff_housing_inside": True}, ()),
+        ("بدون سكن عزاب", {"staff_housing_inside": False}, ()),
+        ("فيه مطعم وكافيه", {"restaurant_cafe": True, "food_allowed": True}, ()),
+        ("مقهى في الدور الأرضي", {"restaurant_cafe": True}, ()),
+        ("بجوار مطعم", {}, ("restaurant_cafe",)),
+        ("مغسلة", {}, ()),
+        ("مغسلة سيارات", {"car_wash": True}, ()),
+        ("يوجد مغسله", {"car_wash": True}, ()),
+        ("جناح بحمام ومغسلة", {}, ("car_wash",)),
+        ("مغسلة ملابس", {}, ("car_wash",)),
+        ("بقالة في العمارة", {"market": True}, ()),
+        ("سوبر ماركت وتموينات", {"market": True}, ()),
+        ("قريب من بقالة", {}, ("market",)),
+        ("عمارة مؤجرة بالكامل", {"earning_income": True}, ()),
+        ("دخل سنوي 200 ألف", {"earning_income": True}, ()),
+        ("العائد 8%", {"earning_income": True}, ()),
+        ("عقد بين المؤجر والمستأجر", {}, ("earning_income",)),
+        ("غير مؤجره", {"earning_income": False}, ()),
+        ("فندق خمس نجوم", {"stars_mentioned": True}, ()),
+        ("تصنيف 4 نجوم", {"stars_mentioned": True}, ()),
+        ("قريب من فندق 5 نجوم", {}, ("stars_mentioned",)),
+        ("غرف وأجنحة فندقية", {"rooms_suites": True}, ()),
+        ("أجنحة مفروشة", {"rooms_suites": True}, ()),
+        ("جناح خادمة", {"maid_room": True}, ("rooms_suites",)),
+        ("جناح نساء", {"women_section": True}, ("rooms_suites",)),
+        ("تغيير زيت", {"oil_change": True}, ()),
+        ("تشحيم وتغيير زيوت", {"oil_change": True}, ()),
+        ("بدون بنشر", {"oil_change": False}, ()),
+        ("مضخات مياه", {"pumps": True}, ("water_supply",)),
+        ("طرمبة ومضخة", {"pumps": True}, ()),
+        ("بدون مضخات", {"pumps": False}, ()),
+        ("مسجد داخل المجمع", {"mosque": True}, ()),
+        ("مصلى للرجال والنساء", {"mosque": True}, ()),
+        ("قريب من المسجد", {}, ("mosque",)),
+        ("مسجد وحديقة قريبه من العمارة", {}, ("mosque", "garden")),
+        ("شارع المسجد", {}, ("mosque",)),
+        ("نسبة البناء 60%", {"building_rules": True}, ()),
+        ("ارتداد أمامي 6 متر", {"building_rules": True}, ()),
+        ("نظام البناء تجاري", {"building_rules": True}, ()),
+        ("عمارة 4 أدوار", {"floors": 4.0}, ("building_rules",)),
         ("عدد الشقق 12", {"apartments_count": 12.0}, ()),
         ("عمارة فيها محلين", {"shops_count": 2.0}, ()),
     ]
