@@ -14,7 +14,10 @@ CATALOG = ["حي الرابية", "حي الهدا", "حي الدانة"]
 @pytest.fixture(autouse=True)
 def _catalog(monkeypatch):
     monkeypatch.setattr(L, "_load", lambda: None)
-    monkeypatch.setattr(A, "to_catalog", lambda city, region_hint=None: (HOFUF, 5) if city == "الهفوف" else (None, None))
+    # Two catalogue towns are called «الهفوف» (12 in الشرقية, 501 in الرياض): without the region it is ambiguous
+    # and to_catalog answers None — the 08:03 production crawl folded nothing (2026-11-02).
+    monkeypatch.setattr(A, "to_catalog",
+                        lambda city, region_hint=None: (HOFUF, 5) if city == "الهفوف" and region_hint == 5 else (None, None))
     monkeypatch.setattr(L, "_DISTRICT_BY_CITY", {HOFUF: {L.norm_district_tok(d) for d in CATALOG}})
     monkeypatch.setattr(L, "_DISTRICT_AR_BY_NORM", {L.norm_district_tok(d): d for d in CATALOG})
     monkeypatch.setattr(L, "_DISTRICT_AR_BY_CITY", {(HOFUF, L.norm_district_tok(d)): d for d in CATALOG})
