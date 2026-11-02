@@ -220,11 +220,19 @@ export function bathSyncMerged(sql: string): { written: boolean; compared: boole
     compared: /c_new constant text := 'or s3\.bathrooms is distinct from public\.af_rule_b_num\(v\.bathrooms::smallint, tf\.bathrooms\)';/.test(sql),
   };
 }
-const BATH = latestDefining('af_rule_b_num(v.bathrooms::smallint, tf.bathrooms)');
+const BATH = latestDefining("w_new constant text := 'v.area_m2, v.bedrooms, public.af_rule_b_num(v.bathrooms::smallint, tf.bathrooms),';");
+// A whole building never takes bathrooms from prose (owner 2026-11-02 sample: per-flat counts on 6-, 8-, 14-flat buildings).
+const BLDG = latestDefining('then null else tf.bathrooms end');
+export const bathSkipsBuildings = (sql: string): boolean =>
+  /old_txt constant text := 'public\.af_rule_b_num\(v\.bathrooms::smallint, tf\.bathrooms\)';/.test(sql)
+  && /new_txt constant text := 'public\.af_rule_b_num\(v\.bathrooms::smallint, case when v\.property_type in \(''Building'', ''Residential Building'', ''Commercial Building''\) then null else tf\.bathrooms end\)';/.test(sql)
+  && /<> 2 then/.test(sql);
 const bathSync = bathSyncMerged(BATH);
 check('the numeric allow-list holds bathrooms (the count the ad states, backlog 1168)', NUM_SQL.includes('bathrooms'));
 check('sync_search_listings_ar WRITES af_rule_b_num for bathrooms (text fills a blank box only)', bathSync.written);
 check('sync_search_listings_ar COMPARES af_rule_b_num for bathrooms (no hourly flip, no missed change)', bathSync.compared);
+check('a building (Building / Residential Building / Commercial Building) never takes its bathrooms from prose — value AND diff', bathSkipsBuildings(BLDG));
+mustCatch('a sync that lets a building take a per-flat prose count is caught', !bathSkipsBuildings(BLDG.replace("then null else tf.bathrooms end", "then tf.bathrooms else tf.bathrooms end")));
 check('the CHECK bounds bathrooms to 1..20', /when 'bathrooms' then 1 end\)[\s\S]*?when 'bathrooms' then 20 end\)/.test(NUM));
 mustCatch('a sync that writes the bathrooms box but not the text is caught',
   !bathSyncMerged(BATH.replace("public.af_rule_b_num(v.bathrooms::smallint, tf.bathrooms),';", "v.bathrooms,';")).written);
