@@ -59,9 +59,19 @@ export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform'>, 
 /** ZOOM → WHAT TO ASK FOR. From about city zoom inward (a view under ~0.12° ≈ 13 km tall) the map asks for exact
  *  points; wider views ask for count cells sized so the screen holds ~30 columns of bubbles, which is how 424,000
  *  pins stay a few hundred rows whatever the view. 0 = exact points. */
+/** Most rows one exact-point read returns. A view holding more would show a PARTIAL set of pins — never allowed. */
+export const PIN_LIMIT = 3000;
+
+/** A fine bubble grid for a view whose exact-point read hit PIN_LIMIT (dense downtown): ~14 rows, every listing counted. */
+export function fineCellForSpan(latitudeDelta: number): number {
+  return Math.max(0.002, latitudeDelta / 14);
+}
+
 export function cellForSpan(latitudeDelta: number): number {
   if (latitudeDelta <= 0.12) return 0;
-  return Math.max(0.01, latitudeDelta / 30);
+  // ~7 bubble rows across the visible height, so bubbles stay apart and readable. Measured live 2026-11-02 with
+  // /30: the country view drew hundreds of overlapping «1» bubbles and buried the big counts under them.
+  return Math.max(0.01, latitudeDelta / 7);
 }
 
 /** The visible rectangle padded by a fifth on every side, so a small pan does not show an empty strip before the

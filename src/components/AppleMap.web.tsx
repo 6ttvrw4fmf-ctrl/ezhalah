@@ -32,7 +32,7 @@ import { Image as XImage } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapPins, cellForSpan, paddedBox, pinColor, pinHead, bubbleText, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, pinColor, pinHead, bubbleText, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
@@ -388,6 +388,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const [routeOn, setRouteOn] = useState(false);
   useEffect(() => { live.onRoute = setRouteOn; return () => { if (live.onRoute === setRouteOn) live.onRoute = undefined; }; }, []);
   const [failed, setFailed] = useState(false);
+  // Bumped once the MapKit map object exists: the pin layer below mounts before MapKit has loaded, and an effect that
+  // returned early then must run again (measured live 2026-11-02: a fresh /map load drew no pin or bubble until the
+  // deal changed, because nothing re-ran the layer once the map was there).
+  const [mapReady, setMapReady] = useState(0);
   // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
   // with labels (hybrid), and muted. Driving / transit / traffic exist only in Apple's own apps, not on the web.
   const [layersOpen, setLayersOpen] = useState(false);
@@ -435,6 +439,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       });
       mapRef.current = map;
       live.map = map;
+      setMapReady((n) => n + 1);
 
       // The 13 regions: boundaries + names, and click-to-zoom. Drawn QUIETLY so they blend into Apple's map rather
       // than sit on top of it (owner 2026-10-30: «blending in with Apple Maps, I don't want it very bright»): thin,
@@ -557,12 +562,23 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const my = ++seq;
       const { center, span } = m.region;
       const cell = cellForSpan(span.latitudeDelta);
-      const rows = await fetchMapPins(paddedBox(center, span), cell, pins);
+      let rows = await fetchMapPins(paddedBox(center, span), cell, pins);
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
+      // DENSE VIEW: the exact-point read hit its cap, so pins would silently show a PART of the listings (downtown
+      // Riyadh holds thousands in one city-zoom view). Never a partial set — read the same view again as a fine bubble
+      // grid, where every listing is counted, and draw bubbles until the user zooms closer.
+      let drawCell = cell;
+      if (cell === 0 && rows.length >= PIN_LIMIT) {
+        drawCell = fineCellForSpan(span.latitudeDelta);
+        rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
+        if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
+      }
+      // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
+      rows.sort((a, b) => a.n - b.n);
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
       clear();
-      mine = rows.map((row) => new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, cell), {
-        data: { pin: row, cell }, calloutEnabled: false, anchorOffset: cell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -8),
+      mine = rows.map((row) => new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell), {
+        data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -8),
       }));
       for (const a of mine) m.addAnnotation(a);
     };
@@ -584,7 +600,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (mapRef.current === m) clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinsKey, failed]);
+  }, [pinsKey, failed, mapReady]);
 
   // Full screen ⇄ compact: MapKit sizes its canvas on window resize; nudge it once the box has changed.
   useEffect(() => {
