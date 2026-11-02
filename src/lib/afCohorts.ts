@@ -65,7 +65,34 @@ const APARTMENT_BUY_CARDS: CardLists = {
   safety: ['cameras', 'guard', 'smart_entry', 'smart_home', 'intercom', 'fire_system', 'ev_charger'],
   build: ['warranty', 'water_tank', 'central_gas', 'separate_meters', 'central_vacuum', 'pool', 'gym'],
 };
+// ── «Villas & Houses» (owner approved 2026-11-02, docs/ops/ADVANCED_FILTER_VILLAS_GROUP.md) ─────────────────
+// GROUP-level lists: Villa and Duplex (تاون هاوس rides Duplex, بيت rides Villa) share ONE pair of lists, so the
+// group box with no type picked intersects to the full lists. Every chip here already had its word-reader fact,
+// its cnt_<token> and its p_amenities arm; the counts the owner approved (villa Buy 62,621 / Rent 11,753 ads):
+//   Buy  🔑 comfort kitchen 39k · majlis 31k · dining majlis 19k · maid room 20k · driver room 10k · elevator 10k · car entrance 19k
+//        🏠 space   roof 17k · laundry room 16k · annex 13k · yard 12k · storage 10k · two entrances 3k · pool 3k
+//        🧱 build   separate meters 17k · warranty 9k · sanitation 29k · insulation 1.5k · grill 2.7k · garden 3.2k · basement 0.9k
+//   Rent 🔑 comfort kitchen 7.3k · AC 4k · majlis 5.3k · maid room 4.5k · car entrance 3.6k · furnished 1.5k · parking 2.1k
+//        🏠 space   roof 3.1k · dining majlis 3.2k · laundry room 2.7k · yard 2.7k · storage 1.7k · driver room 1.7k · annex 1.4k
+//        🏡 extras  pool · garden · grill · balcony · garage · fiber · elevator (0.5k–0.9k each)
+//        🛡️ safety  separate meters 3.1k · guard · cameras · smart entry · kids play area · gym · own bathroom
+// Questions: Buy age → bathrooms → street width → direction → comfort → space → build (no installments: 0 ads);
+// Rent installments (4.5k ads) → bathrooms → age → comfort → space → extras → safety. A chip with 0 ads hides itself.
+const VILLA_BUY_CARDS: CardLists = {
+  comfort: ['kitchen', 'majlis', 'dining_majlis', 'maid_room', 'driver_room', 'elevator', 'car_entrance'],
+  space: ['roof', 'laundry_room', 'annex', 'yard', 'storage', 'two_entrances', 'pool'],
+  build: ['separate_meters', 'warranty', 'sanitation', 'insulation', 'grill', 'garden', 'basement'],
+};
+const VILLA_RENT_CARDS: CardLists = {
+  comfort: ['kitchen', 'ac', 'majlis', 'maid_room', 'car_entrance', 'furnished', 'parking'],
+  space: ['roof', 'dining_majlis', 'laundry_room', 'yard', 'storage', 'driver_room', 'annex'],
+  extras: ['pool', 'garden', 'grill', 'balcony', 'garage', 'optical_fibers', 'elevator'],
+  safety: ['separate_meters', 'guard', 'cameras', 'smart_entry', 'kids_play_area', 'gym', 'own_bathroom'],
+};
+const VILLA_CARDS: Partial<Record<CohortDeal, CardLists>> = { Buy: VILLA_BUY_CARDS, RentAnnual: VILLA_RENT_CARDS, RentMonthly: SHORT_STAYS_CARDS };
 export const COHORT_CARDS: Record<string, Partial<Record<CohortDeal, CardLists>>> = {
+  Villa: VILLA_CARDS,
+  Duplex: VILLA_CARDS, // shares the villa lists (owner 2026-11-02): 850 Buy / 76 Rent ads, chips self-hide at 0
   Apartment: {
     RentAnnual: {
       comfort: ['kitchen', 'ac', 'parking', 'elevator', 'furnished', 'private_entrance', 'bills_included'],
@@ -293,11 +320,23 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   // plus the villa staples. Buy: NO rnpl (yes=0), NO furnished (yes below floor), and AC is
   // deliberately absent from the amenity data on Buy (aqar dropped it from بيع forms — chip
   // gates itself out). بيت rides the same search with no interview (n=3–51); تاون هاوس moved to Duplex (owner 2026-10-12).
+  // 2026-11-02 (owner approved the group lists): the CARDS replace the generic amenities question, Buy drops
+  // rnpl/furnished/street-width-less orders — Buy: age → bathrooms → street width → direction → comfort → space →
+  // build; Rent: installments → bathrooms → age → comfort → space → extras → safety. `amenities`/`furnished` stay
+  // listed for the typed chat sentence, exactly as the Apartment row does. Duplex (below) shares these lists.
   Villa: {
-    RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction'],
-    Buy: ['property_age', 'amenities', 'bathrooms', 'street_width', 'direction'],
+    RentAnnual: ['rnpl', 'bathrooms', 'property_age', 'comfort', 'space', 'extras', 'safety', 'amenities', 'furnished'],
+    Buy: ['property_age', 'bathrooms', 'street_width', 'direction', 'comfort', 'space', 'build', 'amenities'],
     // Monthly 2026-08-18: n=362, 245 rated; bathrooms 92% known; parking 57% (elevator 5% self-gates).
-    RentMonthly: ['rating', 'bathrooms', 'amenities'],
+    // The short-stays cards ride here like the Apartment row, so a 'both'-periods scope still intersects to cards.
+    RentMonthly: ['rating', 'bathrooms', 'amenities', 'comfort', 'space', 'fun'],
+  },
+  // Duplex: the villa lists, shared (owner 2026-11-02) — the «Villas & Houses» box with no type picked is Villa ∩
+  // Duplex, and the owner wants that box to open the full villa interview. Its own counts are small (850 Buy /
+  // 76 Rent, rnpl 0), so chips and questions below the usefulness gates hide themselves per scope.
+  Duplex: {
+    RentAnnual: ['rnpl', 'bathrooms', 'property_age', 'comfort', 'space', 'extras', 'safety', 'amenities', 'furnished'],
+    Buy: ['property_age', 'bathrooms', 'street_width', 'direction', 'comfort', 'space', 'build', 'amenities'],
   },
   // Commercial + rural + land cohorts (2026-08-16 overnight profiling, fresh-band designed).
   // AC is fresh-DEAD on commercial (aqar form change) and is deliberately enabled NOWHERE here
@@ -340,9 +379,6 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   // Logistics» is capped at 1 by Warehouse ∩ Workshop no matter what Factory carries, and «Villas &
   // Houses» needs a SECOND supported Duplex field it does not have. See
   // scripts/verify-af-group-cohort-coverage.ts for the pinned per-group matrix.
-  Duplex: {
-    Buy: ['bathrooms'],
-  },
   Factory: {
     RentAnnual: ['street_width'],
     Buy: ['street_width'],

@@ -3,8 +3,8 @@
 **Canonical record of the owner's locked chip lists for the «Apartments & Co-living» group** (Apartment, Floor,
 Room, Studio, Residential building) of «🎯 Refine with AI» (the renamed Advanced Filter), copied from the owner's
 handoff of 2026-10-31. The lists below are LOCKED: changing a chip, a question or its order is a product decision
-(`docs/ops/AGENT_AUTHORITY.md` RED list). Villas & houses, chalets / rest houses / camps, land and commercial are
-NOT locked and are not built. Standing rules this group obeys without restating them: MATCH FIRST (AGENTS.md),
+(`docs/ops/AGENT_AUTHORITY.md` RED list). Villas & houses got their own approved group lists on 2026-11-02
+(`docs/ops/ADVANCED_FILTER_VILLAS_GROUP.md`); chalets / rest houses / camps, land and commercial are NOT locked and are not built. Standing rules this group obeys without restating them: MATCH FIRST (AGENTS.md),
 «a chip exists only where its COUNT path exists», UNKNOWN never becomes NO, Gathern + Aqar Monthly show no price.
 
 ## THE CONTRACT — what the user must get (owner 2026-10-31, binding on every part below)
