@@ -378,7 +378,7 @@ def town_suffix_folded(hood: Optional[str]) -> Optional[str]:
     m = _TOWN_SUFFIX.match(hood or "")
     if not m or "مخطط" in m.group("base"):
         return hood
-    hofuf, _ = to_catalog("الهفوف")
+    hofuf, _ = to_catalog("الهفوف", region_hint=5)   # الشرقية: a second «الهفوف» (501) sits in region 1
     return catalog_district(hofuf, m.group("base")) or hood
 
 
