@@ -68,6 +68,9 @@ export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform'>, 
  *  pins stay a few hundred rows whatever the view. 0 = exact points. */
 /** Most rows one exact-point read returns. A view holding more would show a PARTIAL set of pins — never allowed. */
 export const PIN_LIMIT = 3000;
+/** Most pins a view SHOWS as price heads (owner 2026-11-02: «when I zoom in I start seeing so many things»): a view
+ *  holding more keeps the fine dots until the user zooms closer — readable, and far lighter on a phone. */
+export const PIN_SHOW_MAX = 400;
 
 /** A fine bubble grid for a view whose exact-point read hit PIN_LIMIT (dense downtown): ~14 rows, every listing counted. */
 /** THE GRID LADDER: every grid request uses one of these cell sizes, so the unfiltered grid can be PRECOMPUTED

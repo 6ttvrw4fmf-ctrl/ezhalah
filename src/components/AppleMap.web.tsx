@@ -32,7 +32,7 @@ import { Image as XImage } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
@@ -587,13 +587,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const my = ++seq;
       const { center, span } = m.region;
       const cell = cellForSpan(span.latitudeDelta);
-      let rows = await fetchMapPins(paddedBox(center, span), cell, pins);
+      // Exact points are read with a small cap: one row over PIN_SHOW_MAX is enough to know the view is too dense.
+      let rows = await fetchMapPins(paddedBox(center, span), cell, pins, cell === 0 ? PIN_SHOW_MAX + 1 : PIN_LIMIT);
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
       // DENSE VIEW: the exact-point read hit its cap, so pins would silently show a PART of the listings (downtown
       // Riyadh holds thousands in one city-zoom view). Never a partial set — read the same view again as a fine bubble
       // grid, where every listing is counted, and draw bubbles until the user zooms closer.
       let drawCell = cell;
-      if (cell === 0 && rows.length >= PIN_LIMIT) {
+      if (cell === 0 && rows.length > PIN_SHOW_MAX) {
         drawCell = fineCellForSpan(span.latitudeDelta);
         rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
         if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
