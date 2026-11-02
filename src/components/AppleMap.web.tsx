@@ -32,7 +32,7 @@ import { Image as XImage } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, pinColor, pinHead, bubbleText, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
@@ -556,16 +556,18 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(row.lat, row.lng), new mk.CoordinateSpan(cell * 2.2, cell * 2.2)), true);
       } else onPinSelectRef.current?.(row);
     };
-    // SMALL heads (owner 2026-11-02: «the pin is so so big»): 11 px text, a slim pill, a 26 px bubble.
+    // SMALL heads (owner 2026-11-02: «the pin is so so big»): 11 px text, a slim pill. ZOOMED OUT, A CELL IS A DOT
+    // (owner 2026-11-02, Zillow: «pins don't show the price unless you zoom in»): a 14 px deal-coloured dot, no number;
+    // the count of what is in view sits in the pill at the bottom of the map instead.
     const element = (row: PinRow, cell: number) => {
       const el = document.createElement('div');
-      const color = cell > 0 ? '#5B4A6B' : pinColor(row);
+      const color = cell > 0 ? dotColor(row) : pinColor(row);
       el.setAttribute('data-testid', cell > 0 ? 'map-bubble' : 'map-pin');
       el.style.cssText = `font:600 11px/1 -apple-system,system-ui,sans-serif;color:#fff;background:${color};border:1.5px solid #fff;cursor:pointer;touch-action:none;` +
         (cell > 0
-          ? 'border-radius:999px;min-width:26px;height:26px;padding:0 7px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.35)'
+          ? 'border-radius:50%;width:14px;height:14px;box-shadow:0 1px 3px rgba(0,0,0,.4)'
           : 'border-radius:10px;padding:4px 7px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);position:relative');
-      el.textContent = cell > 0 ? bubbleText(row.n, loc) : pinHead(row, loc);
+      el.textContent = cell > 0 ? '' : pinHead(row, loc);
       if (cell === 0) {
         const tip = document.createElement('div');
         tip.style.cssText = `position:absolute;left:50%;bottom:-5px;width:0;height:0;margin-left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid ${color}`;
@@ -829,8 +831,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           <Text style={s.groundSoon}>{t('Coming soon')}</Text>
         </View>
       ) : null}
-      {hasShape && !drawing && pinCount !== null ? (
-        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') })}</Text></View>
+      {/* Zillow's «Only N matching results»: what the view (or the drawn boundary) holds, since the dots carry no number. */}
+      {!drawing && pinCount !== null ? (
+        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{t(hasShape ? '{n} listings inside the boundary' : '{n} listings here', { n: pinCount.toLocaleString('en-US') })}</Text></View>
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
