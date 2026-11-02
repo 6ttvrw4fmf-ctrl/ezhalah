@@ -107,6 +107,10 @@ _NEXT = re.compile(r'<link rel="next" href="([^"]+)"')
 _LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 _STYLE = re.compile(r"<(style|script)\b.*?</\1>", re.S | re.I)
 _TYPE_TEXT = re.compile(r'نوع العقار:\s*</span>\s*<span[^>]*>(.*?)</span>', re.S)
+# The ad page's own «تفاصيل العقار» box: <span class="property-detail-label">المساحة</span> <span …>230 م<sup>2</sup></span>.
+# Sale duplexes leave the index table's «المساحة» cell out (backlog 1183: AK2440/2438/2432, area_m2 NULL) while
+# their own page labels it here — a labelled field, so it is read from here, never from the title's «| 230 م²».
+_DETAIL_AREA = re.compile(r'property-detail-label">\s*المساحة\s*</span>\s*<span[^>]*>(.*?)</span>', re.S)
 # ONLY the map box's own node — some pages carry a second maps?q= pair on an unrelated action button.
 _COORDS = re.compile(r'id="box-map"[^>]*data-map-url="[^"]*maps\?q=(-?[\d.]+),(-?[\d.]+)')
 # A plot ad with NO map box still publishes its subdivision's location as the «لوكيشن المخطط» button
@@ -261,6 +265,7 @@ def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
         return {"http_status": status}
     clean = _STYLE.sub(" ", body)          # or the CSS block naming .detail-order-adtext matches first
     tt = _TYPE_TEXT.findall(clean)
+    da = _DETAIL_AREA.findall(clean)
     co = _COORDS.findall(clean)
     if not co:
         sm = _SCHEME.search(clean)
@@ -276,6 +281,7 @@ def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
         "http_status": 200,
         "ld": _listing_node(body),          # NOT `clean` — _STYLE strips the JSON-LD <script> too
         "type_text": _text(tt[0]) if tt else None,
+        "area_text": _text(da[0]) if da else None,
         "lat": float(co[0][0]) if co else None,
         "lng": float(co[0][1]) if co else None,
         "ad_text": ad[0] if ad else None,
@@ -528,7 +534,7 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
         "active": True,
         "property_type": property_type,
         "transaction_type": transaction_type,
-        "area_m2": _leading_int(specs.get("المساحة")),
+        "area_m2": _leading_int(specs.get("المساحة")) or _leading_int(detail.get("area_text")),
         "bedrooms": N.to_int(specs.get("غرف النوم")),
         "reception_rooms_majlis": N.to_int(specs.get("المجلس")),
         "street_width_m": _street_width(specs.get("الشارع")),
@@ -562,7 +568,8 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
                            ("id", "landno", "hood", "ptype", "deal", "status", "specs",
                             "price_text", "title_text", "last_updated", "index_image")},
             "json_ld": ld or None,
-            "detail": {"type_text": detail.get("type_text"), "lat": detail.get("lat"),
+            "detail": {"type_text": detail.get("type_text"), "area_text": detail.get("area_text"),
+                       "lat": detail.get("lat"),
                        "lng": detail.get("lng"), "ad_text": detail.get("ad_text"),
                        "price_card": detail.get("price_card"),
                        "http_status": detail.get("http_status")},
