@@ -102,7 +102,10 @@ NEW_BOOL = ("majlis", "roof", "warranty", "water_tank", "well", "annex", "two_en
             "self_checkin", "wifi", "bills_included", "jacuzzi", "smart_tv", "billiards", "cleaning_service",
             "soundproof", "cameras", "guard", "smart_entry", "smart_home", "central_gas", "sauna", "kids_play_area",
             "nursery", "free_maintenance", "intercom", "fire_system", "ev_charger", "central_vacuum", "insulation",
-            "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families")
+            "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families",
+            # the villa facts (owner 2026-11-01) — read by the word checker, saved like corner_plot until their chips' migration
+            # adds them to text_facts_af_columns() (well already rides NEW_BOOL above)
+            "women_majlis", "irrigation", "sports_court", "outdoor_kitchen", "outdoor_diwaniya", "waterfall")
 BOOL_FACTS = frozenset(EXISTING_BOOL + NEW_BOOL)
 NUM_FACTS = frozenset(("street_width_m", "floors", "apartments_count", "shops_count", "property_age_years"))
 TEXT_FACTS = frozenset(("boundaries",))
