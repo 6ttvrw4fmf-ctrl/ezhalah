@@ -164,6 +164,9 @@ check('AppleMap.web.tsx: autocomplete ranks around the map\'s region (a chain li
 const row = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
 check('MapDealRow.tsx: a pick BLURS the field so the phone keyboard closes (owner 2026-11-02)', /inputRef\.current\?\.blur\(\); onPick\(p\);/.test(row) && /ref=\{inputRef\}/.test(row));
 check('AppleMap.web.tsx: a short compact box (keyboard up) hides draw, zoom and layers, keeps ⤢ and ↶', /const boxPx = e\.nativeEvent\.layout\.height; setShort\(boxPx < 280\);/.test(web) && /const roomy = full \|\| !short;/.test(web) && (web.match(/roomy && !failed && !drawing/g) ?? []).length === 2 && /\{roomy \? <View style=\{s\.topRight\}/.test(web));
+const mascot = readFileSync(join(root, 'assets/images/soil-mascot.svg'), 'utf8');
+check('soil-mascot.svg has no white backing rectangle and frames the figure tightly (owner 2026-11-02: «white box, looks square»)', !/<rect/.test(mascot) && /viewBox="0 0 167 192"/.test(mascot));
+check('AppleMap.web.tsx: the ground mascot is portrait-sized so it fills its round button', /groundMascot: \{ width: 30, height: 34 \}/.test(web));
 check('AppleMap.web.tsx: the mark follows the kind (pin for a landmark, outline for an area)', /isAreaKind\(p\.kind\)/.test(web));
 check('AppleMap.web.tsx: the view is wider than the outline, so the outline is seen', /region\.span\.latitudeDelta \* 1\.3, region\.span\.longitudeDelta \* 1\.3/.test(web));
 // PICKING A ROW MUST FLY (seen live 2026-11-01): Search.search() accepts only Apple's own SearchAutocompleteResult
