@@ -279,12 +279,19 @@ curl_jar() { if [ -n "$CANARY_JAR" ]; then curl -b "$CANARY_JAR" -c "$CANARY_JAR
 # filename hash on a split build. The artifact proof is then: a __common chunk the alias HTML references is byte-authentic
 # (its name IS its md5) AND the served entry is a real script that references that chunk (deploy-target-guard.sh).
 split_entry_is_authentic() {
-  local entry="$1" html="$2" chunk body hash ok=0
+  local entry="$1" html="$2" chunk body hash link="" ok=0
+  # (a) the entry names a ROUTE chunk the alias HTML also references (agent-/_layout-…; __common is loaded by the HTML,
+  #     never named by the entry): a real script, tied to this build, not an error page
+  for chunk in $(grep -oE '_expo/static/js/web/[A-Za-z0-9_]+-[a-f0-9]{32}\.js' "$html" 2>/dev/null | grep -vE '/(entry|__common)-' | sort -u); do
+    hash="$(dtg_chunk_hash "$chunk")"
+    if dtg_entry_is_real_js "$entry" "$hash"; then link="$hash"; break; fi
+  done
+  [ -n "$link" ] || return 1
+  # (b) the shared chunk the HTML references is byte-authentic (its name IS its md5)
   body="$(mktemp)"
   for chunk in $(grep -oE '_expo/static/js/web/__common-[a-f0-9]+\.js' "$html" 2>/dev/null | sort -u); do
     curl_jar -s -o "$body" -H 'Accept-Encoding: identity' -H 'Cache-Control: no-cache' "$DTG_CANONICAL_URL/$chunk?_=$(date +%s%N)${CANARY_Q}" || true
-    hash="$(dtg_chunk_hash "$chunk")"
-    if dtg_chunk_is_authentic "$body" "$chunk" && dtg_entry_is_real_js "$entry" "$hash"; then ok=1; break; fi
+    if dtg_chunk_is_authentic "$body" "$chunk"; then ok=1; break; fi
   done
   rm -f "$body"
   [ "$ok" = 1 ]
