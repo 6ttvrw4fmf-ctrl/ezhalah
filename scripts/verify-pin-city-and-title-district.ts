@@ -39,6 +39,10 @@ const DISTRICT: Rule[] = [
   ['X is never the city the title names after «مدينة»', /position\(' مدينه ' \|\| regexp_replace\(d\.district_norm, '\^ال', ''\)/],
   ['exactly ONE district per title', /where \(select count\(\*\) from _hit h2 where h2\.source_table = h\.source_table and h2\.listing_id = h\.listing_id\) = 1/],
   ['served through the title arm AFTER every other arm, never over them', /'title'\s+from public\.listing_title_district t[\s\S]*?on conflict \(source_table, listing_id\) do nothing;/],
+  ['a title district replaces only a source district that DISPLAYS as nothing (the town-name case), never one that shows',
+    /and public\.loc_display_district_ar\(coalesce\(s\.city_id, v1\.city_id\), v1\.district_ar\) is null/],
+  ['…and overrides an earlier recovery only when that one displays as nothing', /_drt\.district_ar\) is null;/],
+  ['the location view serves a title recovery ahead of a hidden source value', /ELSE CASE WHEN \(dr\.basis = ''title''::text\) THEN dr\.district_ar/],
   ['the decider runs hourly', /cron\.schedule\('title-district'/],
   ['its detector is on the roster', /needle \|\| E'\\n    ''mon_detect_title_district_unserved'','\)/],
 ];
