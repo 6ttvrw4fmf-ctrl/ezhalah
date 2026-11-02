@@ -755,7 +755,7 @@ const s = StyleSheet.create({
     position: 'absolute', right: 60, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
-  groundMascot: { width: 34, height: 30 },
+  groundMascot: { width: 30, height: 34 }, // portrait, like the figure; fills the 40 px circle (owner 2026-11-02: no white box)
   groundTitle: { fontFamily: font.family.bold, fontSize: 13.5, color: colors.ink, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4 },
   groundHint: { fontFamily: font.family.medium, fontSize: 12, color: colors.muted },
   groundRow: { paddingVertical: 7, opacity: 0.55 },
