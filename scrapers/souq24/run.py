@@ -498,7 +498,9 @@ def harvest_ids(s: cc.Session) -> tuple[set[int], int, bool]:
     failed = 0
     ran_out = threading.Event()
 
-    def one(u: str) -> None:
+    retry: list[str] = []
+
+    def one(u: str, last_try: bool = False) -> None:
         nonlocal visited, failed
         if ran_out.is_set():
             return
@@ -508,6 +510,13 @@ def harvest_ids(s: cc.Session) -> tuple[set[int], int, bool]:
         try:
             resp = s.get(u, timeout=_HARVEST_PAGE_TIMEOUT_S)
         except Exception as e:
+            if not last_try:
+                # ONE transient timeout used to make the whole harvest incomplete (11-01 run 92838:
+                # transport_Timeout=1 → prune withheld → enumeration_incomplete P1 alert 12223). The
+                # page is asked once more after the pool; only a page that fails BOTH reads counts.
+                with lock:
+                    retry.append(u)
+                return
             with lock:
                 failed += 1
             _record_fetch_failure(f"transport_{type(e).__name__}")
@@ -530,6 +539,14 @@ def harvest_ids(s: cc.Session) -> tuple[set[int], int, bool]:
 
     with ThreadPoolExecutor(max_workers=_HARVEST_WORKERS) as ex:
         list(ex.map(one, pages))
+    for u in list(retry):                 # second read, serial, still inside the budget
+        if ran_out.is_set():
+            # never re-asked: still an unread page, so still incomplete
+            failed += 1
+            continue
+        one(u, last_try=True)
+    if retry:
+        print(f"  harvest: re-asked {len(retry)} page(s) that failed in transport", flush=True)
 
     if not ids and failed == 0 and visited == len(pages):
         # Every page answered 200 and none of them raised, yet nothing was extracted — a
