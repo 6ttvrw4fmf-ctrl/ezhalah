@@ -6,7 +6,9 @@
 --   check (A) is self-consistency (the file's md5 against its own body) and check (B) compares the
 --   mirror's date to the newest migration touching the object, and BOTH were 2026-08-10, so a
 --   same-day drift passes every assertion. Re-derived from pg_get_functiondef, not hand-patched.
--- Verified byte-exact; md5 of everything below this header block: 3347a572f90a29a1ab2de739f987975b
+-- Refreshed 2026-11-02 (⚡, migration 20261102051729): head also stops at «إعلانات مشابهة» — on a soft-closed ad (no
+--   «تفاصيل الإعلان») the whole page was the head and the first similar-ad card's price became this ad's price.
+-- Verified byte-exact; md5 of everything below this header block: 1e56fc64a63888e3aa74a147558108f7
 --   equals md5(pg_get_functiondef) in production, 7,234 bytes both sides, checked 2026-08-11.
 CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
  RETURNS jsonb
@@ -20,7 +22,7 @@ begin
   if txt is null then return '{}'::jsonb; end if;
   txt := translate(txt, '٠١٢٣٤٥٦٧٨٩', '0123456789');
   region := substring(txt from 'تفاصيل الإعلان(.*)');  -- NULL (not txt) when the structured block is absent
-  head   := split_part(txt, 'تفاصيل الإعلان', 1);
+  head   := split_part(split_part(txt, 'تفاصيل الإعلان', 1), 'إعلانات مشابهة', 1);  -- never another ad's card (2026-11-02)
   -- Per-meter RATES are not totals (2026-08-03): remove rate-qualified price expressions from the
   -- head before scanning, so «سعر المتر 4100 ريال» / «8000 ريال للمتر» can never become price_total.
   head := regexp_replace(head, '(?:سعر\s*)?المتر[\s:]{0,6}\d[\d,]*(?:\.\d+)?\s*(?:§|ريال|﷼)', ' ', 'g');

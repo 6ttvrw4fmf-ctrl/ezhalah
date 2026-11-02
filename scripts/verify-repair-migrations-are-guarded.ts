@@ -115,6 +115,12 @@ const WAIVED: Record<string, string> = {
     'changes no listing row: the one UPDATE (DA417737) runs inside the proof sub-blocks that always roll back, and the ' +
     'migration fails if a bridge row survives; the bridge edit itself is pinned by verify-dealapp-town-placed-by-own-pin.ts ' +
     'and the scraper half by test_dealapp_own_pin_town_2026_10_18.py',
+  // ⚡ 2026-11-02. aqar closed-ad price repair (32 rows priced from another ad's «إعلانات مشابهة» card → NULL).
+  '20261102051729_aqar_parse_never_reads_similar_ad_price.sql':
+    'watched by its companion 20261102053242_mon_detect_aqar_price_over_authoritative_absent.sql, which creates ' +
+    'mon_detect_aqar_price_over_authoritative_absent() (P1) over the same predicate and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted neighbour price is caught). The function ' +
+    'half is pinned by verify-aqar-parse-ignores-similar-ads.ts',
   // 2026-10-18. ksaaqar `neighborhood` repair (data half of #7511), applied before its detector existed.
   '20261018125140_ksaaqar_neighborhood_holds_only_a_stated_district.sql':
     'watched by its companion 20261018131230_mon_detect_ksaaqar_neighborhood_unstated.sql, which creates ' +
