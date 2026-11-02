@@ -797,6 +797,34 @@ def dwelleo_room_lines(url: str, fetch=None) -> list[str]:
     return out
 
 
+def wahadat_unit_lines(body: str, url: str, ad_number: str | None) -> list[str]:
+    """wahadat's own figures for THIS unit, from the unitsData payload its project page ships (🆕 2026-11-02).
+
+    Every unit of a project links to that project's page (scrapers/wahadat/run.py: no per-unit page exists), and the
+    visible page prints only spans («111 - 136 م²») and the instalment calculator («القسط السنوي» / «القسط الشهري»),
+    whose ريال figures read as a stated price: 8 of 10 sampled units scored a price MISMATCH on 2026-11-02 (score run
+    41394865647, 22783632 stored 842,622) with no unit price printed at all. The unit's own record in the page payload
+    states price and area; [] when the unit is not in it (sold / reserved / renamed: unknown, never wrong)."""
+    if "wahadat.sa" not in (url or "") or not ad_number or not body:
+        return []
+    try:
+        from scrapers.wahadat import run as wahadat
+        _, units = wahadat.parse_project(body, url)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[str] = []
+    for u in units:
+        if f"{wahadat.PREFIX}{wahadat.unit_uid(u)}" != ad_number:
+            continue
+        price, area = u.get("price"), u.get("area")
+        if isinstance(price, (int, float)) and not isinstance(price, bool) and price > 0:
+            out.append(f"السعر {int(price) if price == int(price) else price} ريال")
+        if isinstance(area, (int, float)) and not isinstance(area, bool) and area > 0:
+            out.append(f"المساحة {int(area) if area == int(area) else area} م²")
+        break
+    return out
+
+
 def nufouth_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
     """A nufouth ad read from its own record (backlog #683, 2026-10-23). The share link
     («/latest-offers?ads-N4175=1») opens the ad in a JS modal filled from get_property_data; the static HTML is
@@ -1053,6 +1081,7 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
+        raw_body = body
         body = scope_to_its_ad(url, body)
         page = page_evidence(body)
         if (platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page)
@@ -1066,6 +1095,11 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         if "tuba.com.sa" in url:
             extra = (tuba or tuba_rega_lines)(url)
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
+        if "wahadat.sa" in url:
+            ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
+                         or [{}])[0].get("ad_number")
+            page = {**page, "evidence_lines": wahadat_unit_lines(raw_body, url, ad_number)
+                    + list(page.get("evidence_lines") or [])}
         if "dwelleo.sa" in url:
             extra = (dwelleo or dwelleo_room_lines)(url)
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
