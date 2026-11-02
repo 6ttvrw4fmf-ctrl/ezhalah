@@ -460,24 +460,31 @@ AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", 
 AF_NUM_COLUMNS = ("street_width_m", "apartments_count", "shops_count", "bathrooms")
 
 
+# The ad's own place names, by column set: 237 of 305 listing tables carry district_ar/city_ar, all 305 carry
+# neighborhood/city (measured 2026-11-02). abaad 13214542: district_ar «حي الخزان», neighborhood «الخزان», city_ar «بيشة».
+_PLACE_COLUMN_SETS = (("district_ar", "city_ar", "neighborhood", "city"), ("neighborhood", "city"))
+
+
 def place_names_for(client, table: str, ids: list[int], tries: int = 3, sleep=time.sleep) -> dict[int, tuple[str, ...]]:
-    """{listing id: (district_ar, city_ar)} for one page — the ad's OWN place names, which the checker blanks before
-    reading (backlog 1188: «دور-بيشة-الخزان» read water_tank from district «الخزان»). One light read per page, not a
-    change to text_facts_todo. A table with no such column (42703) has no names to give → {}; any other failure is
-    raised after `tries`, never read as «no names» (a failed fetch is not an empty answer)."""
+    """{listing id: (its own place names…)} for one page — district / neighborhood / city, which the checker blanks
+    before reading (backlog 1188: «دور-بيشة-الخزان» read water_tank from district «الخزان»). One light read per page,
+    not a change to text_facts_todo. A table missing the Arabic columns (42703) falls back to neighborhood/city; any
+    other failure is raised after `tries`, never read as «no names» (a failed fetch is not an empty answer)."""
     if not ids:
         return {}
-    for attempt in range(1, tries + 1):
-        try:
-            rows = client.table(table).select("id,district_ar,city_ar").in_("id", ids).execute().data or []
-            return {int(x["id"]): tuple(n for n in (x.get("district_ar"), x.get("city_ar")) if n) for x in rows}
-        except Exception as e:
-            if "42703" in str(e):
-                return {}
-            if attempt == tries:
-                raise
-            print(f"  ! {table} place names retry {attempt}: {str(e)[:120]}")
-            sleep(5 * attempt)
+    for cols in _PLACE_COLUMN_SETS:
+        for attempt in range(1, tries + 1):
+            try:
+                rows = client.table(table).select("id," + ",".join(cols)).in_("id", ids).execute().data or []
+                return {int(x["id"]): tuple(dict.fromkeys(n for c in cols if (n := (x.get(c) or "").strip())))
+                        for x in rows}
+            except Exception as e:
+                if "42703" in str(e):
+                    break                      # this table lacks a column in the set → the next, smaller set
+                if attempt == tries:
+                    raise
+                print(f"  ! {table} place names retry {attempt}: {str(e)[:120]}")
+                sleep(5 * attempt)
     return {}
 
 
@@ -687,10 +694,23 @@ def selftest() -> None:
         def __init__(self, result): self.result = result
         def table(self, _t): return _Q(self.result)
 
-    got = place_names_for(_C([{"id": 13214542, "district_ar": "الخزان", "city_ar": "بيشة"}, {"id": 2, "district_ar": None, "city_ar": "تربة"}]),
+    got = place_names_for(_C([{"id": 13214542, "district_ar": "حي الخزان", "city_ar": "بيشة", "neighborhood": "الخزان", "city": "Bisha"},
+                              {"id": 2, "district_ar": None, "city_ar": "تربة", "neighborhood": None, "city": None}]),
                           "abaad_residential_listings", [13214542, 2])
-    assert got == {13214542: ("الخزان", "بيشة"), 2: ("تربة",)}, got
-    assert place_names_for(_C(RuntimeError("42703 column district_ar does not exist")), "x_listings", [1]) == {}
+    assert got == {13214542: ("حي الخزان", "بيشة", "الخزان", "Bisha"), 2: ("تربة",)}, got
+    # the real abaad row, names as stored, through the whole overlay
+    assert "water_tank" not in overlay_row("abaad_residential_listings", slug, "t", got[13214542])[0]["facts"]
+
+    class _OnlyBasic(_C):      # a table without district_ar/city_ar (68 of 305): the neighborhood/city set answers
+        def table(self, _t):
+            outer = self
+            class _Q2(_Q):
+                def select(self, cols):
+                    self.result = RuntimeError("42703 column district_ar does not exist") if "district_ar" in cols else outer.result
+                    return self
+            return _Q2(None)
+    assert place_names_for(_OnlyBasic([{"id": 5, "neighborhood": "الريان", "city": None}]), "erapulse_commercial_listings", [5]) == {5: ("الريان",)}
+    assert place_names_for(_C(RuntimeError("42703 column neighborhood does not exist")), "x_listings", [1]) == {}
     try:
         place_names_for(_C(RuntimeError("57014 statement timeout")), "x_listings", [1], sleep=lambda _s: None)
         raise AssertionError("a failed place-name read was swallowed as «no names»")

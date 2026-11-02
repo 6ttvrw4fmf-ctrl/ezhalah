@@ -937,7 +937,8 @@ def _blank_place_names(t: str, names: tuple[str, ...]) -> str:
     The listing already KNOWS its place, so its own names are removed as whole words: no stem list, no guessing.
     Only the exact normalised name goes («الخزان»); a bare «خزان ماء» in the same ad is still read."""
     for name in names:
-        nn = norm(name or "").strip()
+        # stored names carry their kind word — abaad's district_ar is «حي الخزان», the slug says «الخزان»
+        nn = re.sub(r"^(?:حي|مدينه|مدينة|محافظه|محافظة)\s+", "", norm(name or "").strip())
         if len(nn) >= 3:
             t = re.sub(r"(?<!\S)" + re.escape(nn) + r"(?!\S)", lambda m: " " * len(m.group(0)), t)
     return t
@@ -1803,6 +1804,7 @@ def selftest() -> None:
     slug = clean_text("دور-بيشة-الخزان", "دور للبيع")
     assert facts_of(slug).get("water_tank") is True, "premise: without its place names the slug reads water_tank"
     assert "water_tank" not in facts_of(slug, ("الخزان", "بيشة")), facts_of(slug, ("الخزان", "بيشة"))
+    assert "water_tank" not in facts_of(slug, ("حي الخزان", "بيشة")), "abaad stores district_ar «حي الخزان»"
     assert "garden" not in facts_of(clean_text("فيلا-الرياض-الحديقة", "فيلا للبيع"), ("الحديقة", "الرياض"))
     both = facts_of(clean_text("دور-بيشة-الخزان", "دور للبيع مع خزان ماء"), ("الخزان", "بيشة"))
     assert both.get("water_tank") is True, both          # a real «خزان ماء» in the same ad is still read
