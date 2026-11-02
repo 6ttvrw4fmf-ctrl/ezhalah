@@ -254,7 +254,7 @@ check('the primary reads Continue · {count} results with the live count, for ev
 // (scripts/verify-af-how-it-works-note.ts). Count-honesty checks remain independent of this wording.
 check('availability is explained naturally (one short line + a How-it-works link, no unknown-count phrasing)',
   /Counts come from the ads' own words/.test(cardSrc)
-  && /openModal('af-how')/.test(cardSrc)
+  && /openModal\('af-how'\)/.test(cardSrc)
   && /af-source-note/.test(cardSrc)
   && !/Age unknown for \{count\}/.test(cardSrc));
 // §2: the opening state is its own calm card — count, invitation, soft supporting line, opt-in
