@@ -1,4 +1,5 @@
 // AppleMap (native) — no shipped native app (src/theme/tokens.ts), and MapKit JS is web-only. The web build resolves
+import type { PinRow } from '@/lib/mapPins';
 // AppleMap.web.tsx instead; this file only keeps the import valid on iOS/Android.
 import { StyleSheet, View } from 'react-native';
 import { colors } from '@/theme/tokens';
@@ -11,10 +12,11 @@ export function clearPlaceMark() {}
 export async function routeBetween(_a: PlaceSuggestion, _b: PlaceSuggestion): Promise<boolean> { return false; }
 export function clearRoute() {}
 
-export default function AppleMap(_: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void; pins?: unknown; onPinSelect?: (row: unknown) => void }) {
+export default function AppleMap(_: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void; pins?: unknown; onPinSelect?: (row: PinRow) => void }) {
   return <View style={s.frame} />;
 }
 
 const s = StyleSheet.create({
   frame: { flex: 1, borderRadius: 16, backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
 });
+export async function countPinsInView(_f: unknown): Promise<number | null> { return null; }
