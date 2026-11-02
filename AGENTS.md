@@ -685,7 +685,7 @@ So, the moment `apply_migration` returns:
 1. branch `mirror/<version>` from `origin/main`, add ONLY `supabase/migrations/<version>_<name>.sql`,
    byte-exact (`ops_migration_sql(<version>)` returns what production executed);
 2. open the PR with **«mirror» in the title** (`--head mirror/<version> --base main`).
-`engineer-automerge.yml` (every 15 min) merges a mirror-only PR through `safe-pr-merge.ts` once every
+`engineer-automerge.yml` (every 5 min) merges a mirror-only PR through `safe-pr-merge.ts` once every
 required check — including byte-parity against production — is green (owner, 2026-10-19). Your feature
 PR may carry the same file too; identical content does not conflict. GitHub's merge queue (owner,
 2026-10-22) keeps the required checks from restarting every time `main` moves; the three required-check

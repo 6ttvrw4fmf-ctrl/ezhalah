@@ -2,11 +2,13 @@
 # This file only DISPATCHES deploy-frontend.yml, so the deploy lock, the preflight and the 10% canary (it rolls back
 # by itself when a guardian journey regresses) all still decide. It runs once for a given main commit, so a failed
 # deploy is not retried until something new lands, and it stops and goes red after 3 failed deploys in a row.
+# 2026-11-02: every 20 min (was hourly), and it asks the schema-drift gate BEFORE dispatching, so an unmirrored
+# migration means «wait for the mirror robot», never a wasted, breaker-tripping deploy run.
 name: Auto-deploy merged app fixes
 
 on:
   schedule:
-    - cron: '40 * * * *'
+    - cron: '*/20 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -47,6 +49,15 @@ jobs:
           [ -n "$good" ] || { echo "::error::no successful deploy in the last 30 runs"; exit 1; }
           changed=$(git diff --name-only "$good" "$head" -- src public assets api middleware.ts app.json babel.config.js metro.config.js package.json package-lock.json vercel.json)
           [ -n "$changed" ] || { echo "No app files changed since $good."; exit 0; }
+          # DRIFT IS A WAIT, NOT A FAILURE (2026-11-02). A deploy dispatched onto an unmirrored migration is
+          # refused by safe-deploy.sh before touching production — correct, but it still cost a 10-minute run,
+          # read as a failure, and three in a row tripped the breaker below (7 of 16 recent deploy failures
+          # were exactly this). So ask the SAME gate first (scripts/schema-drift-gate.sh, read-only RPC); on
+          # drift, leave it to the auto-mirror robot (migration-auto-mirror.yml) and come back next pass.
+          ANON="${EXPO_PUBLIC_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhbm5hcmJrd2N5bXJvdHp3ZGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDgxMDAsImV4cCI6MjA5NTk4NDEwMH0.Z-GhSpan6otYWkc8sU43Dw5PT5T_VBUMr0IDZShCQw0}"
+          if ! scripts/schema-drift-gate.sh pre "$ANON"; then
+            echo "production schema drift — waiting for the auto-mirror robot instead of burning a deploy run; next pass."; exit 0
+          fi
           if [ "$(jq '[limit(3; .[])] | all(.conclusion == "failure")' <<<"$runs")" = true ]; then
             echo "::error::the last 3 deploys failed — not dispatching a 4th."; exit 1
           fi

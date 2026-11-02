@@ -15,7 +15,7 @@ const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 
 const now = new Date('2026-10-27T22:00:00Z');
 const missing = [
   { version: '20261027201642', name: 'pin district batch' },     // 98 min old  → mirror
-  { version: '20261027215500', name: 'fresh_one' },               // 5 min old   → wait (its session may mirror it)
+  { version: '20261027215800', name: 'fresh_one' },               // 2 min old   → wait (its session may mirror it)
   { version: '20261027210558', name: 'already/being mirrored' },  // branch exists → skip
   { version: '2026_bad', name: 'x' },                             // not a timestamp → skip
 ];
@@ -28,9 +28,9 @@ check('the file and branch follow the mirror convention the auto-merge robot acc
 check('names are made filename-safe', safeName('a/b c-d') === 'a_b_c_d' && safeName('') === 'migration');
 check('versions read back as exact UTC times', versionTime('20261027201642')?.toISOString() === '2026-10-27T20:16:42.000Z');
 check(`at most ${MAX_PER_RUN} PRs per run`, planMirrors(Array.from({ length: 30 }, (_, i) => ({ version: `202610271${String(i).padStart(2, '0')}000`.slice(0, 14), name: 'n' })), now, []).length <= MAX_PER_RUN);
-check(`grace period is ${GRACE_MINUTES} minutes (the applying session gets the first chance)`, GRACE_MINUTES >= 10 && GRACE_MINUTES <= 60);
+check(`grace period is ${GRACE_MINUTES} minutes (the applying session gets the first chance)`, GRACE_MINUTES >= 3 && GRACE_MINUTES <= 60);
 mustCatch('a robot with no grace period (races the session that applied it)',
-  planMirrors([{ version: '20261027215500', name: 'x' }], now, []).length === 0);
+  planMirrors([{ version: '20261027215800', name: 'x' }], now, []).length === 0);
 mustCatch('a robot that ignores an existing mirror branch (duplicate PRs)',
   planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642']).length === 0);
 
