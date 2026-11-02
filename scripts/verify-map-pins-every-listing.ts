@@ -60,7 +60,8 @@ check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and dr
 check('AppleMap.web.tsx reloads on region-change-end and drops a late answer', /addEventListener\('region-change-end', onRegion\)/.test(web) && /if \(my !== seq \|\| rows === 'unknown'/.test(web));
 check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('clear();\n      mine = rows.map'));
 check('a bubble tap zooms in; a pin tap hands the row up', /d\.cell && d\.cell > 0/.test(web) && /onPinSelectRef\.current\?\.\(d\.pin\)/.test(web));
-check('the map screen feeds the deal button into the pins', /<MapDealRow deals=\{deals\} onDeals=\{setDeals\} \/>/.test(screen) && /pins=\{\{ deals \}\}/.test(screen));
+// (M.MapDealRow since 2026-11-02: the deal row and the MapKit glue load as their own chunk on the map screen — ALWAYS FAST)
+check('the map screen feeds the deal button into the pins', /<M\.MapDealRow deals=\{deals\} onDeals=\{setDeals\} \/>/.test(screen) && /pins=\{\{ deals \}\}/.test(screen));
 check('a committed migration creates map_pins_ar with the price and the filter arguments', readdirSync(join(root, 'supabase/migrations')).some((f) => { const t = readFileSync(join(root, 'supabase/migrations', f), 'utf8'); return /create function public\.map_pins_ar\(/.test(t) && /p_price_min numeric/.test(t) && /price numeric, platform text/.test(t); }));
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-map-pins-every-listing: all checks passed');
