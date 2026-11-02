@@ -30,6 +30,13 @@ export function pinColor(row: Pick<PinRow, 'n' | 'deal'>): string {
   return row.n > 1 ? GOLD : PIN_COLOR[row.deal] ?? GOLD;
 }
 
+/** ZOOMED OUT, A CELL IS A SMALL DOT (owner 2026-11-02, Zillow: «pins … don't show the price unless you zoom in»): the
+ *  deal's colour, a neutral dark when the cell mixes deals; never gold (a cell is not a shared spot) and no number. */
+export const MIXED_DOT = '#5B4A6B';
+export function dotColor(row: Pick<PinRow, 'deal'>): string {
+  return row.deal === 'mixed' ? MIXED_DOT : PIN_COLOR[row.deal] ?? MIXED_DOT;
+}
+
 /** STAY-LENGTH PLATFORMS SHOW NO PRICE (the standing Gathern / Aqar Monthly rule, src/lib/listingDisplay.ts). Kept as
  *  the same test, by platform slug, so the pin never prints a figure the card would not. */
 export const isStayLengthPlatform = (platform: string | null | undefined): boolean => /gathern|aqarmonthly|aqar\s*monthly/i.test(platform || '');

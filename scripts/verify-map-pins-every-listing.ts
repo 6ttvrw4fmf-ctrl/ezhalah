@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pinFilterOf, isNarrowed, EMPTY_MAP_FILTER } from '../src/lib/mapFilter.ts';
-import { pinColor, pinHead, shortMoney, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
+import { pinColor, dotColor, MIXED_DOT, pinHead, shortMoney, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
 let failed = 0;
@@ -107,7 +107,7 @@ mustCatch('a fine grid coarser than the normal grid (the fallback would not reso
 check('PIN_LIMIT is the cap the data module sends by default', PIN_LIMIT === 3000 && /limit = 3000\)/.test(readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8')));
 check('AppleMap.web.tsx reloads on region-change-end and drops a late answer', /addEventListener\('region-change-end', onRegion\)/.test(web) && /if \(my !== seq \|\| rows === 'unknown'/.test(web));
 check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('clear();\n      mine = rows.map'));
-check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape && !drawing && pinCount !== null/.test(web));
+check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape \? '\{n\} listings inside the boundary'/.test(web));
 check('a bubble tap zooms in; a pin tap hands the row up (one shared pick)', /const pick = \(row: PinRow, cell: number\) => \{[\s\S]{0,400}?if \(cell > 0\) \{[\s\S]{0,300}?\} else onPinSelectRef\.current\?\.\(row\);/.test(web));
 // TOUCH: on a phone MapKit's `select` never fired for a tap on a custom annotation (owner 2026-11-02: «when I click it
 // doesn't show»). The head element carries its own pointerdown/pointerup tap (≤ 10 px of movement), and MapKit's
@@ -117,8 +117,15 @@ check('the head element handles its own tap (pointerdown → pointerup within 10
 check('MapKit select is deduped against the element tap and routes to the same pick', /if \(Date\.now\(\) - lastPick < 600\) return;[\s\S]{0,80}?pick\(d\.pin, d\.cell \?\? 0\);/.test(web));
 mustCatch('a pin that only MapKit select can pick (touch would open nothing)', /el\.addEventListener\('pointerup'/.test(web));
 // SMALL HEADS (owner 2026-11-02: «the pin is so so big»): 11 px text, slim pill, 26 px bubble.
-check('pin heads are small: 11 px text, 4 px vertical padding, 26 px bubbles', /font:600 11px\/1/.test(web) && /padding:4px 7px/.test(web) && /min-width:26px;height:26px/.test(web));
+check('pin heads are small: 11 px text, 4 px vertical padding', /font:600 11px\/1/.test(web) && /padding:4px 7px/.test(web));
 mustCatch('the big 12 px / 34 px heads', !/font:600 12px/.test(web) && !/height:34px/.test(web));
+// ZOOMED OUT = DOTS, NO NUMBER (owner 2026-11-02, Zillow: «pins don't show the price unless you zoom in»): a 14 px
+// deal-coloured dot per cell (mixed deals → neutral dark, never gold), empty text; the count lives in the bottom pill,
+// which now shows for every view, not only a drawn boundary.
+check('a zoomed-out cell is a 14 px dot with no text, coloured by dotColor', /cell > 0 \? dotColor\(row\) : pinColor\(row\)/.test(web) && /border-radius:50%;width:14px;height:14px/.test(web) && /el\.textContent = cell > 0 \? '' : pinHead\(row, loc\)/.test(web));
+check('dotColor is the deal colour, neutral for a mixed cell, never gold', dotColor({ deal: 'buy' }) === PIN_COLOR.buy && dotColor({ deal: 'rent' }) === PIN_COLOR.rent && dotColor({ deal: 'mixed' }) === MIXED_DOT && dotColor({ deal: 'mixed' }) !== GOLD);
+mustCatch('a numbered bubble when zoomed out (the Zillow rule)', !/bubbleText\(row\.n, loc\)/.test(web));
+check('the count pill shows for every view («{n} listings here») and for a drawn boundary', /!drawing && pinCount !== null \?/.test(web) && /hasShape \? '\{n\} listings inside the boundary' : '\{n\} listings here'/.test(web) && /'\{n\} listings here': '\{n\} إعلان في هذه المنطقة'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
 // (M.MapDealRow / M.countPinsInView since 2026-11-02: the deal row and the MapKit glue load as their own chunk — ALWAYS FAST)
 check('the map screen feeds the deal button into the pins and clears the sheet on a deal change', /<M\.MapDealRow deals=\{deals\} onDeals=\{\(d\) => \{ setDeals\(d\); setPinRow\(null\); \}\} onFilter=/.test(screen) && /pins=\{\{ deals, \.\.\.pinFilterOf\(mapFilter\) \}\}/.test(screen));
 check('the Filter button opens the centered filter card; Apply feeds the pins and counts in view', /onFilter=\{\(\) => setFilterOpen\(true\)\} filterOn=\{isNarrowed\(mapFilter\)\}/.test(screen) && /<MapFilterCard value=\{mapFilter\}/.test(screen) && /countPins=\{\(f\) => M\.countPinsInView\(\{ deals, \.\.\.pinFilterOf\(f\) \}\)\}/.test(screen));
