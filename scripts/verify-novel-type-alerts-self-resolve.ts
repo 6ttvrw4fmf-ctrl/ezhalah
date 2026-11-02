@@ -45,8 +45,10 @@ if (p.length) { console.error(`❌ ${newest}:\n  - ${p.join('\n  - ')}`); fail++
 // mutation proofs — the predicate must catch both regressions
 const noResolve = sql.replace(/update\s+public\.novel_type_alerts\s+a\s+set\s+resolved\s*=\s*true[\s\S]*?;/i, '');
 const otherPredicate = sql.replace(/from\s+_novel_ar\s+y/i, 'from public.search_listings_ar y');
-for (const [name, mutant] of [['resolve deleted', noResolve], ['resolve off another predicate', otherPredicate]] as const) {
-  if (problems(mutant).length === 0) { console.error(`❌ mutation "${name}" was NOT caught`); fail++; }
-}
+const mustCatch = (what: string, mutant: string) => {
+  if (problems(mutant).length === 0) { console.error(`❌ mutation "${what}" was NOT caught`); fail++; }
+};
+mustCatch('resolve deleted', noResolve);
+mustCatch('resolve off another predicate', otherPredicate);
 if (fail) process.exit(1);
 console.log(`✅ novel-type alerts self-resolve on the raising predicate (${newest}); 2 mutations caught`);
