@@ -6,6 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Reveal } from '@/components/ui';
 import { LoadingDots } from '@/components/CardReveal';
 import { useI18n } from '@/i18n';
+import { useApp } from '@/store';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { grouped } from '@/data/search';
 import { buildAfSummaryItems } from '@/lib/afSummary';
@@ -291,6 +292,7 @@ export default function AdvancedQuestionCard({
   liveCount, initialKeys, onConfirm, onSkip, hideSkip, onBack, onClose, pills,
 }: AdvancedQuestionCardProps) {
   const { t, isRTL } = useI18n();
+  const { openModal } = useApp(); // «كيف يشتغل؟» → the How-it-works reader (InfoModal 'af-how')
   const [sel, setSel] = useState<string[]>(initialKeys ?? []);
   const [count, setCount] = useState<number | null>(null);
   // «متابعة» NEVER FEELS STUCK (owner 2026-10-03: «when a user clicks المتابعة, it feels a bit stuck»).
@@ -451,10 +453,24 @@ export default function AdvancedQuestionCard({
         <Reanimated.View style={enterA}>
           <Text style={s.qt} testID="af-question-title">{t(titleKey)}</Text>
           {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
+          {/* THE NOTE IS ONE SHORT LINE + «كيف يشتغل؟» (owner 2026-11-01: «we want it shorter and include
+              something like how it works where the user can click and read»). The link opens the full
+              text (src/data/afHowItWorks.ts) in the Terms reader's own popup host — InfoModal, modal
+              'af-how' — white card, eagle, ✕ top-right, no emoji. The long sentence it replaces lives on
+              in that text's sections 1 and 3. */}
           <View testID="af-source-note" style={[s.sourceNote, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
             <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
             <Text style={[s.note, { textAlign: isRTL ? 'right' : 'left' }]}>
-              {t('Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing.')}
+              {t("Counts come from the ads' own words")}
+              {' · '}
+              <Text
+                testID="af-how-it-works-link"
+                accessibilityRole="link"
+                onPress={() => openModal('af-how')}
+                style={s.noteLink}
+              >
+                {t('How it works?')}
+              </Text>
             </Text>
           </View>
           {/* R7.1.3 — the unknown-count caption. UNKNOWN STAYS VISIBLE: these listings are still
@@ -641,6 +657,8 @@ const s = StyleSheet.create({
 
   sourceNote: { direction: 'ltr', marginTop: 10, gap: 7, alignItems: 'flex-start', padding: 10, borderRadius: 12, backgroundColor: colors.segTrack },
   note: { flex: 1, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 17 },
+  // «كيف يشتغل؟» — a link inside the note, in the brand ink so it reads as tappable (owner 2026-11-01).
+  noteLink: { fontFamily: font.family.semibold, color: colors.primary, textDecorationLine: 'underline' },
 
   // PINNED footer (defect 2026-08-23). It used to be the last child INSIDE the body ScrollView, so a
   // question with many options pushed «متابعة / رجوع / تخطي / عرض النتائج» past the bottom of the
