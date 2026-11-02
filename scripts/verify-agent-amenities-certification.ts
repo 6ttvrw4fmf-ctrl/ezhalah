@@ -34,7 +34,10 @@ check("villa-only tokens are NOT certified for Apartment",
   !aptAnnual.includes("car_entrance") && !aptAnnual.includes("sanitation"),
   `got ${JSON.stringify(aptAnnual)}`);
 const villa = certifiedAmenityKeys(Q({ type: "Villa" }));
-check("Villa certifies its own car_entrance/sanitation", villa.includes("car_entrance") && villa.includes("sanitation"));
+// 2026-11-02: Villa certifies EXACTLY its cards' chips (owner lists 2026-11-01) — car entrance and sewage sit on the
+// Buy «build, safety & papers» card; the rent comfort card carries car_entrance too.
+const villaBuy = certifiedAmenityKeys(Q({ type: "Villa", deal: "Buy", rentPeriod: undefined }));
+check("Villa/Buy certifies its own car_entrance/sanitation", villaBuy.includes("car_entrance") && villaBuy.includes("sanitation"));
 // Office certifies amenities for RentAnnual but NOT for Buy — verified by executing the real gate,
 // not assumed. The commercial side renders EXACTLY its COHORT_CHIPS utilities and no residential token.
 const office = certifiedAmenityKeys(Q({ type: "Office", category: "Commercial", deal: "Rent", rentPeriod: "annual" }));
@@ -57,8 +60,17 @@ const RICH_TOKENS = [
 // 2026-10-31: Apartment/RentAnnual certifies EXACTLY the chips of the owner's cards (cardPlan — pinned by
 // verify-af-apartments-group-cards.ts), so the rich-set sweep is held on Villa/RentAnnual, the residential base
 // cohort that still carries all eight (separate_*_meter ride the Apartment cards as the derived «separate_meters»).
+// 2026-11-02: Villa carries cards too (owner lists 2026-11-01), so no residential cohort returns the generic base any
+// more. Each rich token must still be certified on SOME residential card cohort — the two meters ride every card as the
+// derived «separate_meters» (EITHER meter), garden on the villa cards as «garden_yard» (EITHER) and on Apartment as itself.
+const residentialCards = [
+  certifiedAmenityKeys(Q({ type: "Apartment" })), villa, certifiedAmenityKeys(Q({ type: "Floor" })),
+  certifiedAmenityKeys(Q({ type: "Apartment", deal: "Buy", rentPeriod: undefined })), villaBuy,
+];
+const RIDES_AS: Record<string, string> = { separate_electricity_meter: "separate_meters", separate_water_meter: "separate_meters" };
 for (const tok of RICH_TOKENS) {
-  check(`Villa/RentAnnual (the residential base) certifies "${tok}"`, villa.includes(tok), `got ${JSON.stringify(villa)}`);
+  check(`some residential card cohort certifies "${tok}" (or its derived carrier)`,
+    residentialCards.some((keys) => keys.includes(tok) || keys.includes(RIDES_AS[tok] ?? "")), `got villa=${JSON.stringify(villa)}`);
   check(`"${tok}" is NOT certified for Office (residential-only token)`, !office.includes(tok));
 }
 check('Apartment/RentAnnual certifies the gym-bug tokens its cards carry (gym, pool, garden, balcony, optical_fibers) and the derived separate_meters',
