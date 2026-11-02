@@ -1169,14 +1169,19 @@ try {
       // owner rule (see agent.tsx's gate: `!filterOrigin || busy || revealing`) — so a same-instant
       // zero-count would be coincidental timing, not proof of the actually-settled state this
       // assertion is about.
-      let composerEls = -1;
+      // 2026-10-13 (owner: «remove the lock») SUPERSEDES the no-composer rule above: a finished search KEEPS the
+      // chat box, open and unlocked, and the next message simply starts the next search (agent.tsx:
+      // `!filterOrigin || completed` renders the composer; the lock label is gone). This branch was first exercised
+      // on 2026-11-02, when the villa bathrooms ladder (3+ … 6+ on Duplex/Buy) took the fixture under the stop line.
+      let composerBox = 0, lockedEls = 0;
       for (const deadline = Date.now() + 90_000; Date.now() < deadline; ) {
-        composerEls = await page.locator('textarea:visible, [aria-label*="أُغلقت هذه المحادثة"]:visible').count();
-        if (composerEls === 0) break;
+        composerBox = await page.locator('textarea:visible').count();
+        lockedEls = await page.locator('[aria-label*="أُغلقت هذه المحادثة"]:visible').count();
+        if (composerBox >= 1) break;
         await page.waitForTimeout(1_000);
       }
-      check(`[J] ≤ ${INTERVIEW_STOP_AT}, Filter-origin → once the reveal settles, there is NO composer at all (not even a locked one)`,
-        composerEls === 0, `composerEls=${composerEls}`);
+      check(`[J] ≤ ${INTERVIEW_STOP_AT}, Filter-origin → once the reveal settles, the chat box is back, OPEN and never locked (owner 2026-10-13)`,
+        composerBox >= 1 && lockedEls === 0, `composer=${composerBox} locked=${lockedEls}`);
     } else if (Number.isFinite(jFinal)) {
       console.log(`NOTE  [J] landed at ${jFinal} (> ${INTERVIEW_STOP_AT}) — completion assertions not owed; the interview is right to continue`);
     }
