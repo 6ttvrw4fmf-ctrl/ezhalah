@@ -800,7 +800,7 @@ _CORNER = re.compile(r"(?:(?<= )|^)(?:وال|ال|و|ب|علي )?(?:زاويه|�
                      r"اربع شوارع|اربعه شوارع|[2-4] شوارع|corner)(?!\w)")
 _N_STREETS = re.compile(r"يحدها ([2-9]) شارع")
 
-_WORD_NUM = {"واحد": 1, "دورين": 2, "دوران": 2, "طابقين": 2, "شقتين": 2, "شقتان": 2, "محلين": 2, "محلان": 2,
+_WORD_NUM = {"واحد": 1, "واحده": 1, "دورتين": 2, "دورتان": 2, "دورتا": 2, "دورتي": 2, "حمامين": 2, "حمامان": 2, "دورين": 2, "دوران": 2, "طابقين": 2, "شقتين": 2, "شقتان": 2, "محلين": 2, "محلان": 2,
              "ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6, "سبع": 7,
              "سبعه": 7, "ثمان": 8, "ثماني": 8, "ثمانيه": 8, "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10}
 _EN_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
@@ -824,6 +824,18 @@ _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"(?:مكون|مكونه|تتكون|يتكون|تضم|يضم|تحتوي|يحتوي)(?: من)? (\d{1,3}) ?(?:شقق|شقه|وحدات|وحده)(?!\w)"),
         re.compile(r"(?:مكون|مكونه|تتكون|يتكون|تضم|يضم|تحتوي|يحتوي)(?: من)? (شقتين|شقتان)(?!\w)"),
     ),
+    # BATHROOMS (backlog 1168, owner 2026-11-02: every ad in «الشقق والسكن المشترك» states it, we must carry it).
+    # Proven on the sites' own pages: aqar 6863619 «ثلاث دورات مياه», muhaysini 6040 «دورتا مياه (2)», dealapp 586613
+    # «دورتين مياه». A pool («حمام سباحه»), an outside toilet and a per-unit count are skipped below (_BATH_SKIP_AFTER).
+    "bathrooms": (
+        re.compile(r"عدد (?:ال)?(?:حمامات|دورات (?:ال)?مياه) ?(\d{1,2})(?!\w)"),
+        re.compile(r"(?:(?<= )|^)و?(\d{1,2}) ?(?:دورات|دوره) (?:ال)?مياه(?!\w)"),
+        re.compile(r"(?:(?<= )|^)و?(\d{1,2}) ?(?:حمامات|حمام)(?!\w)"),
+        re.compile(rf"(?:(?<= )|^)و?{_NUMW} (?:دورات (?:ال)?مياه|حمامات)(?!\w)"),
+        re.compile(r"(?:(?<= )|^)(?:ال|و|وال|ب)?(دورتين|دورتان|دورتا|دورتي|دورين|دوران) (?:ال)?مياه(?!\w)"),
+        re.compile(r"(?:(?<= )|^)(?:ال|و|وال|ب)?(حمامين|حمامان)(?!\w)"),
+        re.compile(r"(?:(?<= )|^)(?:دوره (?:ال)?مياه|حمام) (واحد|واحده)(?!\w)"),
+    ),
     "shops_count": (
         re.compile(r"عدد (?:ال)?(?:محلات|معارض|فتحات)(?: (?:ال)?تجاريه)? ?(\d{1,3})(?!\w)"),
         re.compile(r"(?:(?<= )|^)(\d{1,3}) ?(?:محلات|معارض|فتحات)(?!\w)"),
@@ -832,7 +844,10 @@ _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"(?:(?<= )|^)(?:عدد )?(محلين|محلان)(?!\w)"),
     ),
 }
-_COUNT_RANGE = {"floors": (1, 60), "apartments_count": (2, 500), "shops_count": (1, 300)}
+_COUNT_RANGE = {"floors": (1, 60), "apartments_count": (2, 500), "shops_count": (1, 300), "bathrooms": (1, 20)}
+# a pool, an outside / annex toilet, or a per-unit / per-room count is not the home's bathroom count
+_BATH_SKIP_AFTER = ("سباح", "خارج", "بالخارج", "ملحق", "بالملحق", "بالحوش", "بالسطح", "للسائق", "السائق", "بكل", "لكل",
+                    "في كل", "كل شقه", "كل غرفه", "مشترك")
 # a per-floor count or an availability count is not the building's count
 _COUNT_SKIP_AFTER = ("كل دور", "بكل دور", "لكل دور", "في الدور", "بالدور", "متاح", "متوفر", "للايجار", "للبيع",
                      "شاغر", "مؤجر", "ماجر", "مستاجر", "ونصف")
@@ -898,6 +913,10 @@ def _num_hits(fact: str, t: str, ci: int) -> list[Hit]:
             before = t[max(0, m.start() - 30):m.start()].split()[-5:]
             if any(after.lstrip().startswith(x) for x in _COUNT_SKIP_AFTER):
                 continue
+            if fact == "bathrooms" and any(after.lstrip().startswith(x) for x in _BATH_SKIP_AFTER):
+                continue
+            if fact == "bathrooms" and any(_strip_wa(w) in ("كل", "لكل", "بكل") for w in before[-3:]):
+                continue                      # «كل شقه 2 دورات مياه»: a per-unit count, not the home's
             if any(w in _NEAR_WORDS for w in before):
                 continue
             if any(_strip_wa(w).startswith(x) for w in before for x in ("نظام", "رخص", "تصريح", "يسمح", "مسموح", "حتي")):
@@ -995,7 +1014,7 @@ def check(text: str) -> list[dict[str, Any]]:
         if len(by_val) == 1:                       # both a yes and a no → the ad has not stated it
             v, (ci, s, e) = next(iter(by_val.items()))
             emit(fact, v, quote_of(ci, s, e))
-    for fact in ("floors", "apartments_count", "shops_count", "property_age_years"):
+    for fact in ("floors", "apartments_count", "shops_count", "bathrooms", "property_age_years"):
         hits = num_hits.get(fact, [])
         if len({h.value for h in hits}) == 1:      # several different counts → none, never a pick
             emit(fact, float(hits[0].value), quote_of(hits[0].clause, hits[0].s, hits[0].e))
@@ -1110,6 +1129,18 @@ def selftest() -> None:
         ("عداد الماء مشترك", {"separate_water_meter": False}, ()),
         ("شارع ٢٥", {}, ("street_width_m",)),
         ("شارع 25 م", {"street_width_m": 25.0}, ()),
+        # bathrooms (backlog 1168): the count the ad states, never a pool, an outside toilet or a per-unit count
+        ("ثلاث غرف نوم وثلاث دورات مياه", {"bathrooms": 3.0}, ()),
+        ("دورتا مياه (2)", {"bathrooms": 2.0}, ()),
+        ("صالة ودورتين مياه ومطبخ", {"bathrooms": 2.0}, ()),
+        ("عدد دورات المياه: 4", {"bathrooms": 4.0}, ()),
+        ("غرفتين و2 حمام", {"bathrooms": 2.0}, ()),
+        ("دورة مياه واحدة", {"bathrooms": 1.0}, ()),
+        ("مسبح و حمام سباحة", {}, ("bathrooms",)),
+        ("دورة مياه خارجية", {}, ("bathrooms",)),
+        ("3 دورات مياه بكل شقة", {}, ("bathrooms",)),
+        ("عمارة 8 شقق كل شقة 2 دورات مياه", {}, ("bathrooms",)),
+        ("الدور الاول 3 دورات مياه والارضي دورتين مياه", {}, ("bathrooms",)),
         ("عرض الشارع: 15", {"street_width_m": 15.0}, ()),
         ("زاوية على شارع 20م شرقي", {}, ("street_width_m",)),
         ("شارع 15 م شمالي، شارع 20 م غربي", {}, ("street_width_m",)),
