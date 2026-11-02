@@ -36,14 +36,14 @@ mustCatch('a shared spot printing a price instead of its count', !/ألف|ملي
 // Zoom → cell: exact points from city zoom inward, cells sized to ~7 rows wider out (measured live 2026-11-02: /30 drew
 // hundreds of overlapping «1» bubbles over the country), never below 0.01°.
 check('city zoom and closer asks for exact points (cell 0)', cellForSpan(0.12) === 0 && cellForSpan(0.03) === 0);
-check('a region view asks for ~span/7 snapped DOWN to the ladder; the country view (17°) → 2.4°; a floor of 0.01°', cellForSpan(0.7) === 0.075 && cellForSpan(17) === 2.4 && cellForSpan(0.14) === 0.02 && cellForSpan(0.121) === 0.01 && cellForSpan(100) === 2.4);
+check('a region view asks for ~span/16 snapped DOWN to the ladder (dense dots); the country view (17°) → 0.6°; a floor of 0.01°', cellForSpan(0.7) === 0.04 && cellForSpan(17) === 0.6 && cellForSpan(0.14) === 0.01 && cellForSpan(0.121) === 0.01 && cellForSpan(100) === 2.4);
 // THE LADDER IS THE CONTRACT WITH map_grid_ar: a cell size off the ladder would miss the precomputed grid and fall back
 // to the 2.5 s live scan. Every grid request must land on a ladder value, and the ladder must match the migration.
 check('every grid cell the client can ask for is on the ladder', [0.13, 0.5, 1, 3, 17, 40].every((d) => (CELL_LADDER as readonly number[]).includes(cellForSpan(d)) && (CELL_LADDER as readonly number[]).includes(fineCellForSpan(d))));
 mustCatch('a cell size off the ladder (span/7 unsnapped: 17/7 = 2.43)', !(CELL_LADDER as readonly number[]).includes(17 / 7) && cellForSpan(17) !== 17 / 7);
 check('the ladder in the migration is the ladder the client uses', (() => { const dir = join(root, 'supabase/migrations'); const f = readdirSync(dir).filter((x) => /map_grid_precomputed/.test(x)).sort().pop(); if (!f) return false; const sql = readFileSync(join(dir, f), 'utf8'); return sql.includes(`array[${CELL_LADDER.join(',')}]`); })());
 mustCatch('exact points requested for the whole country (424k rows)', cellForSpan(17) > 0);
-mustCatch('a bubble grid finer than ~12 rows (the overlapping-bubbles defect of 2026-11-02)', cellForSpan(17) >= 17 / 12);
+mustCatch('a country grid finer than 0.3° (thousands of dots would choke a phone)', cellForSpan(17) >= 0.3);
 check('the padded box is a fifth wider on every side and clamped to the globe', (() => { const b = paddedBox({ latitude: 24.7, longitude: 46.7 }, { latitudeDelta: 1, longitudeDelta: 2 }); return Math.abs(b.n - 25.4) < 1e-9 && Math.abs(b.s - 24.0) < 1e-9 && Math.abs(b.e - 48.1) < 1e-9 && Math.abs(b.w - 45.3) < 1e-9 && paddedBox({ latitude: 89.9, longitude: 0 }, { latitudeDelta: 1, longitudeDelta: 1 }).n === 90; })());
 check('bubble text shortens thousands', bubbleText(12400, 'ar') === '12 ألف' && bubbleText(840, 'en') === '840');
 
@@ -107,7 +107,7 @@ mustCatch('a region select that fires while the outline is invisible', !/if \(!r
 check('AppleMap.web.tsx falls back to a fine bubble grid when the exact read hit its cap, and draws with that cell',
   /if \(cell === 0 && rows\.length > PIN_SHOW_MAX\) \{\n\s*drawCell = fineCellForSpan\(span\.latitudeDelta\);\n\s*rows = await fetchMapPins\(paddedBox\(center, span\), drawCell, pins\);/.test(web)
   && /element\(row, drawCell\)/.test(web) && /data: \{ pin: row, cell: drawCell \}/.test(web) && /anchorOffset: drawCell > 0/.test(web));
-check('the fine grid is ~14 rows on the ladder, floor 0.01°, and finer than the normal grid', fineCellForSpan(0.14) === 0.01 && fineCellForSpan(0.001) === 0.01 && fineCellForSpan(1) === 0.04 && fineCellForSpan(1) < cellForSpan(1));
+check('the fine grid is ~14 rows on the ladder, floor 0.01°, and finer than the normal grid', fineCellForSpan(0.14) === 0.01 && fineCellForSpan(0.001) === 0.01 && fineCellForSpan(1) === 0.02 && fineCellForSpan(1) < cellForSpan(1));
 mustCatch('a fine grid coarser than the normal grid (the fallback would not resolve a dense view)', fineCellForSpan(0.5) < cellForSpan(0.5));
 check('PIN_LIMIT is the cap the data module sends by default', PIN_LIMIT === 3000 && /limit = 3000\)/.test(readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8')));
 // A VIEW SHOWS AT MOST PIN_SHOW_MAX PRICE HEADS (owner 2026-11-02: «when I zoom in I start seeing so many things»): a

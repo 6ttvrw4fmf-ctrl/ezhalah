@@ -84,14 +84,16 @@ export function ladderCell(x: number): number {
 }
 
 export function fineCellForSpan(latitudeDelta: number): number {
-  return ladderCell(latitudeDelta / 14);
+  return ladderCell(latitudeDelta / 32);
 }
 
 export function cellForSpan(latitudeDelta: number): number {
   if (latitudeDelta <= 0.12) return 0;
   // ~7 dot rows across the visible height, snapped to the ladder. Measured live 2026-11-02 with /30: the country view
   // drew hundreds of overlapping «1» bubbles and buried the big counts under them.
-  return ladderCell(latitudeDelta / 7);
+  // DENSE dots (owner 2026-11-02: «why don't you show everything»): ~16 dot rows across the view — hundreds of small
+  // dots over the country, like Zillow — every one still on the precomputed ladder, so the read stays instant.
+  return ladderCell(latitudeDelta / 16);
 }
 
 /** The visible rectangle padded by a fifth on every side, so a small pan does not show an empty strip before the
