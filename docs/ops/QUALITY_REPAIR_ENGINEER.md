@@ -490,3 +490,14 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   re-categorised ad. 🆕 10-31: a key that existed only in our capture cost a 20-minute crawl. Rule: one live read of the
   record (the page or the current payload) before the first write; measure the live effect within minutes; undo in the
   same run. (Third night of this family → ⚡'s rulebook carries it as a rule since #9910.)
+- **④ When a REQUIRED live check goes red on unrelated PRs at once, our own robots are the first suspect — read the
+  load before the code.** 🔧 11-02 15:00 UTC: from 14:02 every PR's «built app runs» smoke failed journey I (final =
+  start, «count went up»); main's diff since the last green run was map files only and the search RPC answered in
+  698 ms when called directly. The cause was `af-live-truth-check.yml` starting its three production sweeps side by
+  side after a deploy at 14:00:17 (6 RPC walkers, knee 3, evening peak): search mean 257–1,147 → 2,228–7,242 ms,
+  nine robots asleep in `robot_gate()`, eleven PRs stalled. Its own 2026-09-04 comment had PROVEN the knee and still
+  shipped the parallel shape. Rule: first `select to_char(sampled_at,'HH24:MI'), delta_mean_ms from
+  ops_search_latency_sample order by 1 desc limit 10` and the in-progress workflow list; then cancel the fan-out and
+  re-run the smokes ONE at a time; and a rule that lives in a YAML comment is not a rule — put the shape under a
+  barrier (`verify-live-sweeps-run-one-at-a-time.ts`, PR #9979). A cancelled sweep job can keep walking production
+  for minutes after the cancel; re-issue it and watch `pg_stat_activity` until the waiters are gone.
