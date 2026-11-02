@@ -119,8 +119,11 @@ jobs:
 
       # Now that this runs unattended on a schedule, a red run has to reach a human. One open P1 per
       # workflow file, self-healing on the next green run. `always()` so a failing run still gets here.
+      # 🔧 2026-11-02: only a run of MAIN speaks for production. A pull-request branch's red run raised the
+      # same «production is not protected» P1 (15 raises in 24 h, 50 in 7 days, backlog 891) and the next
+      # green run of ANY branch resolved it — so the alert flapped and said nothing about main.
       - name: Bridge this run's result to alert_event
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
