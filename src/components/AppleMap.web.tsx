@@ -322,7 +322,7 @@ export function flyToPlace(p: PlaceSuggestion) {
     // same brand tone as the region outlines. One mark at a time.
     clearPlaceMark();
     if (!c) return;
-    const style = (fillOpacity: number, lineWidth: number) => new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.85, lineWidth, fillColor: lightColors.primary, fillOpacity });
+    const style = (fillOpacity: number, lineWidth: number, strokeOpacity = 0.85) => new mk.Style({ strokeColor: lightColors.primary, strokeOpacity, lineWidth, fillColor: lightColors.primary, fillOpacity });
     const landmark = p.kind ? !isAreaKind(p.kind) && p.kind !== 'street' : !!(place && place.pointOfInterestCategory);
     // THE REAL BOUNDARY ON EVERY PICK (owner 2026-11-01: «create a boundary around it, don't make just a square»,
     // then «whenever you choose something … anything»): the place's actual shape from place_shapes (OpenStreetMap) —
@@ -357,7 +357,7 @@ export function flyToPlace(p: PlaceSuggestion) {
     placeShapeAt(c.latitude, c.longitude, kind, (place ? place.name : undefined) ?? p.name).then((shape) => {
       if (live.markSeq !== seq) return;
       if (!shape || shape === 'unknown') return fallback();
-      live.mark.shapes = shape.rings.map((poly) => new mk.PolygonOverlay(poly.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng))), { style: style(kind === 'place' ? 0.14 : 0.08, 2), enabled: false }));
+      live.mark.shapes = shape.rings.map((poly) => new mk.PolygonOverlay(poly.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng))), { style: kind === 'place' ? style(0, 1.5, 0.6) : style(0.08, 2), enabled: false }));
       for (const o of live.mark.shapes) m.addOverlay(o);
       const { n, s: s0, e, w } = shape.bbox;
       const floor = kind === 'place' ? 0.004 : 0.01;
