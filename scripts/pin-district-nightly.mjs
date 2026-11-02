@@ -56,15 +56,6 @@ async function accessToken() {
 }
 
 // 1. candidates: served, blank district, has a pin (the service key reads the same public index)
-const cands = [];
-for (let from = 0; cands.length < MAX; from += 1000) {
-  const r = await fetch(`${SB}/rest/v1/search_listings_ar?select=source_table,listing_id,city_id,latitude,longitude&production_ready=eq.true&district_ar=is.null&latitude=not.is.null&longitude=not.is.null&city_id=not.is.null&order=last_updated.desc,source_table,listing_id`,
-    { headers: { ...sbHeaders, Range: `${from}-${from + 999}` } });
-  if (!r.ok && r.status !== 206) throw new Error(`candidates ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  const rows = await r.json();
-  cands.push(...rows);
-  if (rows.length < 1000) break;
-}
 // skip ads that already have a pin row (held edge homes would otherwise be re-asked every night)
 const have = new Set();
 for (let from = 0; ; from += 1000) {
@@ -74,8 +65,45 @@ for (let from = 0; ; from += 1000) {
   for (const x of rows) have.add(`${x.source_table}:${x.listing_id}`);
   if (rows.length < 1000) break;
 }
-const todo = cands.filter((c) => !have.has(`${c.source_table}:${c.listing_id}`)).slice(0, MAX);
-console.log(`blank ads with a pin ${cands.length} · already have a pin row ${have.size} · asking Apple for ${todo.length} (cap ${MAX}) · ${RUN_ID}${DRY ? " · DRY RUN" : ""}`);
+// …and ads whose SITE names a district (rule 1: the site's district wins, the pin never overrules it). The loader
+// refuses those (site_names_its_own_district) and writes no row for them, so without this filter the same ads were
+// asked again every night: 2026-11-02 01:17 asked 50, all 50 site-named, switched on 0, while 1,797 served ads with
+// a pin and no site district were never reached (🆕 backlog 1098). Same two sources pin_district_load reads.
+async function siteNamed(rows) {
+  const out = new Set();
+  const bySt = new Map();
+  for (const c of rows) (bySt.get(c.source_table) ?? bySt.set(c.source_table, []).get(c.source_table)).push(c.listing_id);
+  for (const [st, ids] of bySt) {
+    for (let i = 0; i < ids.length; i += 150) {
+      const inList = ids.slice(i, i + 150).join(",");
+      for (const q of [`listing_native_location_v2?select=listing_id&source_table=eq.${st}&listing_id=in.(${inList})&district_ar=not.is.null`,
+                       `listing_source_district_ar?select=listing_id&source_table=eq.${st}&listing_id=in.(${inList})`]) {
+        const r = await fetch(`${SB}/rest/v1/${q}`, { headers: sbHeaders });
+        if (!r.ok) throw new Error(`site-named ${r.status}: ${(await r.text()).slice(0, 200)}`); // fail closed: never ask blind
+        for (const x of await r.json()) out.add(`${st}:${x.listing_id}`);
+      }
+    }
+  }
+  return out;
+}
+const todo = [];
+let seen = 0, skippedHave = 0, skippedSite = 0;
+for (let from = 0; todo.length < MAX; from += 1000) {
+  const r = await fetch(`${SB}/rest/v1/search_listings_ar?select=source_table,listing_id,city_id,latitude,longitude&production_ready=eq.true&district_ar=is.null&latitude=not.is.null&longitude=not.is.null&city_id=not.is.null&order=last_updated.desc,source_table,listing_id`,
+    { headers: { ...sbHeaders, Range: `${from}-${from + 999}` } });
+  if (!r.ok && r.status !== 206) throw new Error(`candidates ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const rows = await r.json();
+  seen += rows.length;
+  const fresh = rows.filter((c) => !have.has(`${c.source_table}:${c.listing_id}`));
+  skippedHave += rows.length - fresh.length;
+  const named = await siteNamed(fresh);
+  for (const c of fresh) {
+    if (named.has(`${c.source_table}:${c.listing_id}`)) { skippedSite++; continue; }
+    if (todo.length < MAX) todo.push(c);
+  }
+  if (rows.length < 1000) break;
+}
+console.log(`blank ads with a pin ${seen} (read) · already have a pin row ${skippedHave} · site names its own district ${skippedSite} · asking Apple for ${todo.length} (cap ${MAX}) · ${RUN_ID}${DRY ? " · DRY RUN" : ""}`);
 
 // 2. Apple, one answer per 5-dp spot
 let tok = await accessToken(), tokAt = Date.now(), calls = 0, got429 = 0;
