@@ -70,15 +70,25 @@ export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform'>, 
 export const PIN_LIMIT = 3000;
 
 /** A fine bubble grid for a view whose exact-point read hit PIN_LIMIT (dense downtown): ~14 rows, every listing counted. */
+/** THE GRID LADDER: every grid request uses one of these cell sizes, so the unfiltered grid can be PRECOMPUTED
+ *  (map_grid_ar, refreshed hourly) and served in milliseconds — measured live 2026-11-02, the country view's live
+ *  grid read took 2.5 s per zoom-out (owner: «it feels slow … zoom out must show a span of all»). */
+export const CELL_LADDER = [2.4, 1.2, 0.6, 0.3, 0.15, 0.075, 0.04, 0.02, 0.01] as const;
+/** The largest ladder cell not above `x`; the finest cell when none is. */
+export function ladderCell(x: number): number {
+  for (const c of CELL_LADDER) if (c <= x) return c;
+  return CELL_LADDER[CELL_LADDER.length - 1];
+}
+
 export function fineCellForSpan(latitudeDelta: number): number {
-  return Math.max(0.002, latitudeDelta / 14);
+  return ladderCell(latitudeDelta / 14);
 }
 
 export function cellForSpan(latitudeDelta: number): number {
   if (latitudeDelta <= 0.12) return 0;
-  // ~7 bubble rows across the visible height, so bubbles stay apart and readable. Measured live 2026-11-02 with
-  // /30: the country view drew hundreds of overlapping «1» bubbles and buried the big counts under them.
-  return Math.max(0.01, latitudeDelta / 7);
+  // ~7 dot rows across the visible height, snapped to the ladder. Measured live 2026-11-02 with /30: the country view
+  // drew hundreds of overlapping «1» bubbles and buried the big counts under them.
+  return ladderCell(latitudeDelta / 7);
 }
 
 /** The visible rectangle padded by a fifth on every side, so a small pan does not show an empty strip before the
