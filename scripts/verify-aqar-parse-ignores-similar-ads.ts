@@ -12,6 +12,7 @@
 // trigger's per_meter guard is replayed in filename order; the LAST writer must carry both fixes.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { replayFunction } from './lib/rpcReplay.ts';
 
 const DIR = 'supabase/migrations';
 const OLD_HEAD = "head   := split_part(txt, 'تفاصيل الإعلان', 1);";
@@ -44,6 +45,12 @@ const files: F[] = readdirSync(DIR).filter(n => n.endsWith('.sql'))
   .map(name => ({ name, text: readFileSync(join(DIR, name), 'utf8') }));
 
 let fail = 0;
+// The body Postgres would hold after replaying every committed migration (full bodies AND needle edits).
+const played = replayFunction(DIR, 'aqar_parse');
+const code = (played.body ?? '').replace(/--.*$/gm, '');
+if (played.unresolved.length || !/head\s*:=\s*split_part\(\s*split_part\(txt,\s*'تفاصيل الإعلان',\s*1\),\s*'إعلانات مشابهة',\s*1\)/.test(code)) {
+  console.error(`✗ replayed aqar_parse does not cut head at «إعلانات مشابهة» (unresolved: ${played.unresolved.join(', ') || 'none'})`); fail++;
+} else console.log('✓ replayed aqar_parse body cuts head at «إعلانات مشابهة»');
 const real = problems(files);
 for (const p of real) { console.error(`✗ ${p}`); fail++; }
 if (!real.length) console.log('✓ aqar_parse stops at «إعلانات مشابهة» and trg_aqar_parse keeps the authoritative «no price»');
