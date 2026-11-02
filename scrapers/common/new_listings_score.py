@@ -251,9 +251,13 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
 
 # «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
 SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
-# The four plain facades in English, as a REGA licence block prints them; a compound facade stays Arabic-only.
+# The facades in English, as a REGA licence block prints them. A compound one too: haraj 22820527 prints
+# «واجهة العقار: South west» and we store «جنوب غرب» (re-score 41406084400, 2026-11-02, scored MISMATCH).
 FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
              "شمال": r"\bnorth(?:ern)?\b", "جنوب": r"\bsouth(?:ern)?\b"}
+for _ar, _en in (("شمال شرق", "north[\\s-]*east"), ("شمال غرب", "north[\\s-]*west"),
+                 ("جنوب شرق", "south[\\s-]*east"), ("جنوب غرب", "south[\\s-]*west")):
+    FACADE_EN[_ar] = FACADE_EN[_ar + "ي"] = r"\b" + _en + r"(?:ern)?\b"
 
 
 _UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
