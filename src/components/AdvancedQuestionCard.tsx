@@ -576,6 +576,16 @@ export default function AdvancedQuestionCard({
             </Pressable>
           )}
         </View>
+        {/* SKIP NOTE (owner 2026-11-02): one quiet line under the footer telling the user what Skip
+            buys them. True by construction: every answer shrinks the eligible pool, and a later
+            question is only asked when it still narrows that pool meaningfully
+            (MEANINGFUL_NARROWING_FRACTION, advancedFilters.ts) — so skipping keeps the pool wide and
+            MORE questions and options survive. Section 6 of src/data/afHowItWorks.ts says the same. */}
+        {hideSkip ? null : (
+          <Text testID="af-skip-note" style={[s.skipNote, { textAlign: isRTL ? 'right' : 'left' }]}>
+            {t('Skip and you get more questions and options')}
+          </Text>
+        )}
       </Reanimated.View>
     </Shell>
   );
@@ -687,4 +697,5 @@ const s = StyleSheet.create({
   secondaryBtnPress: { backgroundColor: colors.segTrack, borderColor: colors.pickLine, transform: [{ scale: 0.98 }] },
   secondaryBtnFocus: { borderColor: colors.primary },
   secondaryTxt: { fontFamily: font.family.semibold, fontSize: 14, color: colors.ink },
+  skipNote: { fontFamily: font.family.regular, fontSize: 12, lineHeight: 18, color: colors.muted, paddingHorizontal: space.card, paddingBottom: 10, marginTop: -4 },
 });

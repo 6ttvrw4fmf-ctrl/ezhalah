@@ -40,7 +40,6 @@ scripts/verify-adjudication-is-never-undone.ts                 | 3
 scripts/verify-advanced-filter-contract.ts                     | 2
 scripts/verify-af-back-navigation.ts                           | 2
 scripts/verify-af-card-evidence.ts                             | 1
-scripts/verify-af-footer-buttons.ts                            | 1
 scripts/verify-af-full-surface-catalog.ts                      | 3
 scripts/verify-af-multiselect-combining-semantics.ts           | 1
 scripts/verify-af-probe-failure-not-a-verdict.ts               | 1
