@@ -379,13 +379,15 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
 // Furnished preference — single-select (تفضلها مفروشة؟), Rent-only like the furnished chip. TRUE
 // tri-state: «مفروشة» = confirmed furnished, «غير مفروشة» = confirmed unfurnished (explicit source
 // no — cnt_unfurnished counts furnished IS FALSE), Skip = no preference (unknowns stay eligible).
+// Not asked where a card already carries the «furnished» chip: the apartments comfort card, Office «ready to work», the
+// retail box «space» (2026-11-02); the typed sentence stays certified through cohortAllows.
 const FURNISHED_QUESTION: AdvancedQuestion = {
   id: 'furnished',
   titleKey: 'Do you prefer it furnished?',
   selection: 'single',
   // Where the comfort card carries «furnished» as a chip (owner 2026-10-31: «Furnished is a chip here, not its own
   // question»), the separate question is not asked; the typed «مفروشة» keeps its certification through cohortAllows.
-  eligibility: (q) => cohortAllows(q, 'furnished') && !cardKeys(q, 'comfort').includes('furnished'),
+  eligibility: (q) => cohortAllows(q, 'furnished') && !['comfort', 'ready', 'cspace'].some((id) => cardKeys(q, id).includes('furnished')),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
       { key: 'yes', labelKey: 'Furnished',   count: (c) => c.cnt_furnished },
