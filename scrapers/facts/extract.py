@@ -28,6 +28,7 @@ THE RULES THIS CODE ENFORCES (not just asks the model for):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import math
@@ -96,7 +97,33 @@ EXISTING_BOOL = (
 )
 NEW_BOOL = ("majlis", "roof", "warranty", "water_tank", "well", "annex", "two_entrances", "yard",
             "electronic_deed", "grill", "basement", "storage", "garage",
-            "corner_plot")   # corner / on two streets (owner 2026-10-26) — saved, no filter column yet
+            "corner_plot",   # corner / on two streets (owner 2026-10-26) — saved, no filter column yet
+            # the 28 apartment chips (owner 2026-10-31 handoff) — read by the word checker, served by the AF overlay
+            "self_checkin", "wifi", "bills_included", "jacuzzi", "smart_tv", "billiards", "cleaning_service",
+            "soundproof", "cameras", "guard", "smart_entry", "smart_home", "central_gas", "sauna", "kids_play_area",
+            "nursery", "free_maintenance", "intercom", "fire_system", "ev_charger", "central_vacuum", "insulation",
+            "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families",
+            # the villa facts (owner 2026-11-01) — read by the word checker, saved like corner_plot until their chips' migration
+            # adds them to text_facts_af_columns() (well already rides NEW_BOOL above)
+            "women_majlis", "irrigation", "sports_court", "outdoor_kitchen", "outdoor_diwaniya", "waterfall",
+            # GROUP A — countryside / short stays / villa extras (owner handoff 2026-11-01): read by the word checker,
+            # saved like corner_plot until the chips' migration adds them to text_facts_af_columns()
+            "split_payments", "heated_pool", "kids_pool", "water_slide", "sea_view", "football_pitch", "playstation",
+            "inflatable_games", "sound_system", "fire_pit", "bait_shaar", "mandi_pit", "outdoor_seating", "tent", "dunes_view",
+            "women_section", "two_sections", "events_hall", "privacy_screen", "trees", "for_families", "for_youth", "for_events",
+            "for_newlyweds", "quad_bikes", "horses_stable", "camels", "toilets_on_site", "lighting", "artesian_well",
+            "solar_power", "palms", "fruit_trees", "fodder_crops", "greenhouses", "producing_farm", "animal_pens", "poultry",
+            "farm_house", "farm_rest_house", "workers_housing", "fence", "main_road", "good_soil",
+            # GROUP B — residential land (owner handoff 2026-11-01)
+            "three_streets", "ready_to_build", "raised_plot", "residential_commercial", "all_services", "asphalt",
+            "street_lights", "approved_plan", "direct_owner", "inside_project", "floors_allowed", "grant_land", "no_services",
+            # GROUP C — commercial (owner handoff 2026-11-01); own_toilet rides the existing own_bathroom
+            "mezzanine", "pantry", "glass_front", "frontage", "in_mall", "in_tower", "license", "food_allowed", "takeover",
+            "first_tenant", "internet", "civil_defense", "high_ceiling", "hangar", "insulated_panel", "cold_storage",
+            "concrete_floor", "loading_dock", "big_gate", "truck_access", "crane", "racks", "office_inside", "heavy_power",
+            "industrial_area", "car_service", "meeting_room", "reception", "coworking", "private_office", "central_ac",
+            "shops_inside", "offices_inside", "apartments_inside", "staff_housing_inside", "restaurant_cafe", "car_wash",
+            "market", "earning_income", "stars_mentioned", "rooms_suites", "oil_change", "pumps", "mosque", "building_rules")
 BOOL_FACTS = frozenset(EXISTING_BOOL + NEW_BOOL)
 NUM_FACTS = frozenset(("street_width_m", "floors", "apartments_count", "shops_count", "property_age_years"))
 TEXT_FACTS = frozenset(("boundaries",))
@@ -179,14 +206,30 @@ def strip_html(s: str) -> str:
     return html.unescape(s)
 
 
+def text_hash(title: Optional[str], description: Optional[str]) -> str:
+    """md5 of the RAW title + newline + description the reader was given — the same bytes as
+    public.facts_text_hash(title, description) (migration 20261031080211). Every listing_facts row carries it,
+    so an ad whose text ARRIVES or CHANGES after it was read no longer counts as read: 2,119 ads of 13 small
+    sites were "read" from the title alone before their descriptions were crawled (2026-10-31) and the backlog
+    skipped them for good. Raw, not sanitised: the hash must be computable in SQL from the stored columns."""
+    return hashlib.md5(((title or "") + "\n" + (description or "")).encode("utf-8")).hexdigest()
+
+
 def sanitize(title: Optional[str], description: Optional[str]) -> str:
     """Title + description with contact data, URLs, kunyas and contact clauses removed, then the fleet
     PII redactor (phones in every shape/digit set, emails, labelled advertiser names)."""
     raw = "\n".join(strip_html(x) for x in (title or "", description or "") if x)
     raw = _URL_RE.sub(" ", raw)
     raw = _KUNYA_RE.sub(" ", raw)
+    # A contact clause is cut from its first contact word to the clause's end — never the whole clause.
+    # Small sites (ksaaqar, akariyoun, sanadak, manzo…) publish the ad as ONE sentence with no punctuation
+    # («3 غرف ومجلس ومسبح للاستفسار أبو أحمد»); dropping the clause dropped the whole ad (measured 2026-10-31:
+    # ~100 ads read as <30 chars and were never sent to the model).
     parts = _CLAUSE_SPLIT_RE.split(raw)
-    kept = [p for p in parts if not _CONTACT_CLAUSE_RE.search(p)]
+    kept = []
+    for p in parts:
+        m = _CONTACT_CLAUSE_RE.search(p)
+        kept.append(p if not m else p[:m.start()])
     raw = "".join(kept)
     out = redact_pii(raw) or ""
     out = out.replace("[redacted]", " ")
@@ -654,7 +697,8 @@ def run(args: argparse.Namespace) -> int:
                 seen.add(row["fact"])
                 rows.append({"run_id": args.run_id, "platform": r["_platform"], "table_name": r["_table"],
                              "listing_key": str(r["ad_number"]), "listing_url": r.get("listing_url"),
-                             "model": resp.get("model"), "source_value": source_value(row["fact"], r), **row})
+                             "model": resp.get("model"), "source_value": source_value(row["fact"], r),
+                             "text_hash": text_hash(r.get("title"), r.get("text")), **row})
             if ad_id not in parsed:
                 tot["ads_missing_in_reply"] += 1
                 if not fallback and args.fallback_model:
@@ -671,7 +715,8 @@ def run(args: argparse.Namespace) -> int:
                 rows.append({"run_id": args.run_id, "platform": r["_platform"], "table_name": r["_table"],
                              "listing_key": str(r["ad_number"]), "listing_url": r.get("listing_url"),
                              "model": resp.get("model"), "fact": "_none", "value_bool": True, "value_num": None,
-                             "value_text": None, "quote": "", "source_value": None})
+                             "value_text": None, "quote": "", "source_value": None,
+                             "text_hash": text_hash(r.get("title"), r.get("text"))})
         stored = store(rows) - sum(1 for r in rows if r["fact"] == "_none")   # facts stored, markers excluded
         tot["ads"] += len(batch) - len([r for r in batch if (r["_platform"], str(r["ad_number"])) in queued])
         if fallback:

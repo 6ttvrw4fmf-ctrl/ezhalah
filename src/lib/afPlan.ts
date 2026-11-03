@@ -34,7 +34,7 @@
 // of grepping for it — the same reason afCohorts/afRanking/afSteps were extracted.
 import type { SearchQuery } from '@/data/search';
 import { groupsFor, groupsMembers, groupsOf, pruneTypesToGroups, type Macro } from '../data/propertyTypes.ts';
-import { effectiveGroups, effectiveTypes } from './searchDefaults.ts';
+import { effectiveGroups, effectiveTypes, isShortStaysScope } from './searchDefaults.ts';
 
 export const SCOPE_GROUP_ID = 'property_group';
 export const SCOPE_TYPE_ID = 'property_type';
@@ -57,6 +57,9 @@ export const isScopeQuestionId = (id: string): boolean =>
 // … Start directly with the certified Villa advanced questions"). A GROUP pick resolves only its own
 // tier and the TYPE tier is still asked, scoped to that group.
 export function unresolvedScopeTiers(q: SearchQuery): ScopeTier[] {
+  // Short stays (owner 2026-10-31): «The user picked Short stays, that's enough» — neither tier is
+  // asked; the pool is one cohort (afCohorts.ts SHORT_STAYS_QUESTIONS).
+  if (isShortStaysScope(q)) return [];
   if (effectiveTypes(q).length) return [];
   return effectiveGroups(q).length ? [SCOPE_TYPE_ID] : [SCOPE_GROUP_ID, SCOPE_TYPE_ID];
 }

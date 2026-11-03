@@ -161,7 +161,7 @@ export type SearchQuery = {
   // price ≥ min, max → price ≤ max, both → between. Raw digit strings. HARD filter (no closest-above).
   priceMin?: string | null;
   priceMax?: string | null;
-  // Property-age advanced-filter answer («خلّنا نحدد الطلب أكثر» → عمر العقار). Absent → no age filter
+  // Property-age advanced-filter answer («🎯 دقّق مع الذكاء الاصطناعي» → عمر العقار). Absent → no age filter
   // (the default; broadens rather than dead-ends, same as every other optional field here).
   // isNewConstruction=true is جديد — a distinct concept from a numeric property_age, not "age 0".
   // ageMin/ageMax cover the 5 numeric buckets (أقل من سنة = 0..0, … , ١٠+ سنوات = 10..null). The UI
@@ -263,9 +263,10 @@ const verbText = (q: SearchQuery) => {
   if (q.deal === 'Rent') {
     // Reflect the Monthly / Yearly the user selected in the filter's rent-period toggle. Absent
     // (agent free-text path never sets it) → plain "to rent". (owner UI request 2026-07-18.)
-    if (q.rentPeriod === 'monthly') return t('to rent monthly');
+    // NO MONTHLY POOL — IT IS SHORT STAYS (owner 2026-11-02: «We don't have monthly we have short term only»).
+    if (q.rentPeriod === 'monthly') return t('for a short stay');
     if (q.rentPeriod === 'annual') return t('to rent yearly');
-    if (q.rentPeriod === 'both') return t('to rent monthly or yearly');
+    if (q.rentPeriod === 'both') return t('for a short stay or yearly rent');
     return t('to rent');
   }
   return t('to buy');

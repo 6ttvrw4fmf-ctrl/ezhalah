@@ -32,6 +32,7 @@
 // question without a def here, and on any AF_PREDICATE_FIELDS member not owned by exactly one def.
 import type { SearchQuery } from '@/data/search';
 import { AF_PREDICATE_FIELDS, RNPL_TOKENS } from './searchDefaults.ts';
+import { CHIP_DEFS } from './afChips.ts';
 
 type AfField = (typeof AF_PREDICATE_FIELDS)[number];
 export type T = (en: string, vars?: Record<string, string | number>) => string;
@@ -62,6 +63,155 @@ export const AMENITY_COL: Record<string, string> = {
   balcony: 'balcony', laundry_room: 'laundry_room', optical_fibers: 'optical_fibers',
   separate_electricity_meter: 'separate_electricity_meter', separate_water_meter: 'separate_water_meter',
   majlis: 'majlis',
+  // Apartments & Co-living group (owner handoff 2026-10-31, migration 20261101100930): 39 text-fact booleans,
+  // column name = token. The 6 derived tokens (separate_meters, apts4/8/12/20, has_shops) have no column of
+  // their own — DERIVED_TOKEN_HOLDS below.
+  roof: 'roof',
+  two_entrances: 'two_entrances',
+  // Villas & Houses (owner lists 2026-11-01): seven text facts, column name = token.
+  women_majlis: 'women_majlis', outdoor_kitchen: 'outdoor_kitchen', outdoor_diwaniya: 'outdoor_diwaniya',
+  waterfall: 'waterfall', well: 'well', irrigation: 'irrigation', sports_court: 'sports_court',
+  // countryside, land, commercial (migrations 2026-11-02): column name = token
+  split_payments: 'split_payments',
+  heated_pool: 'heated_pool',
+  kids_pool: 'kids_pool',
+  water_slide: 'water_slide',
+  sea_view: 'sea_view',
+  football_pitch: 'football_pitch',
+  playstation: 'playstation',
+  inflatable_games: 'inflatable_games',
+  sound_system: 'sound_system',
+  fire_pit: 'fire_pit',
+  bait_shaar: 'bait_shaar',
+  mandi_pit: 'mandi_pit',
+  outdoor_seating: 'outdoor_seating',
+  tent: 'tent',
+  dunes_view: 'dunes_view',
+  women_section: 'women_section',
+  two_sections: 'two_sections',
+  events_hall: 'events_hall',
+  privacy_screen: 'privacy_screen',
+  trees: 'trees',
+  for_families: 'for_families',
+  for_youth: 'for_youth',
+  for_events: 'for_events',
+  for_newlyweds: 'for_newlyweds',
+  quad_bikes: 'quad_bikes',
+  horses_stable: 'horses_stable',
+  camels: 'camels',
+  toilets_on_site: 'toilets_on_site',
+  lighting: 'lighting',
+  artesian_well: 'artesian_well',
+  solar_power: 'solar_power',
+  palms: 'palms',
+  fruit_trees: 'fruit_trees',
+  fodder_crops: 'fodder_crops',
+  greenhouses: 'greenhouses',
+  producing_farm: 'producing_farm',
+  animal_pens: 'animal_pens',
+  poultry: 'poultry',
+  farm_house: 'farm_house',
+  farm_rest_house: 'farm_rest_house',
+  workers_housing: 'workers_housing',
+  fence: 'fence',
+  main_road: 'main_road',
+  good_soil: 'good_soil',
+  corner_plot: 'corner_plot',
+  three_streets: 'three_streets',
+  ready_to_build: 'ready_to_build',
+  raised_plot: 'raised_plot',
+  residential_commercial: 'residential_commercial',
+  all_services: 'all_services',
+  asphalt: 'asphalt',
+  street_lights: 'street_lights',
+  approved_plan: 'approved_plan',
+  direct_owner: 'direct_owner',
+  inside_project: 'inside_project',
+  floors_allowed: 'floors_allowed',
+  grant_land: 'grant_land',
+  no_services: 'no_services',
+  mezzanine: 'mezzanine',
+  pantry: 'pantry',
+  glass_front: 'glass_front',
+  frontage: 'frontage',
+  in_mall: 'in_mall',
+  in_tower: 'in_tower',
+  license: 'license',
+  food_allowed: 'food_allowed',
+  takeover: 'takeover',
+  first_tenant: 'first_tenant',
+  internet: 'internet',
+  civil_defense: 'civil_defense',
+  high_ceiling: 'high_ceiling',
+  hangar: 'hangar',
+  insulated_panel: 'insulated_panel',
+  cold_storage: 'cold_storage',
+  concrete_floor: 'concrete_floor',
+  loading_dock: 'loading_dock',
+  big_gate: 'big_gate',
+  truck_access: 'truck_access',
+  crane: 'crane',
+  racks: 'racks',
+  office_inside: 'office_inside',
+  heavy_power: 'heavy_power',
+  industrial_area: 'industrial_area',
+  car_service: 'car_service',
+  meeting_room: 'meeting_room',
+  reception: 'reception',
+  coworking: 'coworking',
+  private_office: 'private_office',
+  central_ac: 'central_ac',
+  shops_inside: 'shops_inside',
+  offices_inside: 'offices_inside',
+  apartments_inside: 'apartments_inside',
+  staff_housing_inside: 'staff_housing_inside',
+  restaurant_cafe: 'restaurant_cafe',
+  car_wash: 'car_wash',
+  market: 'market',
+  earning_income: 'earning_income',
+  stars_mentioned: 'stars_mentioned',
+  rooms_suites: 'rooms_suites',
+  oil_change: 'oil_change',
+  pumps: 'pumps',
+  mosque: 'mosque',
+  building_rules: 'building_rules',
+  annex: 'annex',
+  yard: 'yard',
+  garage: 'garage',
+  grill: 'grill',
+  storage: 'storage',
+  water_tank: 'water_tank',
+  warranty: 'warranty',
+  electronic_deed: 'electronic_deed',
+  basement: 'basement',
+  self_checkin: 'self_checkin',
+  wifi: 'wifi',
+  bills_included: 'bills_included',
+  jacuzzi: 'jacuzzi',
+  smart_tv: 'smart_tv',
+  billiards: 'billiards',
+  cleaning_service: 'cleaning_service',
+  soundproof: 'soundproof',
+  cameras: 'cameras',
+  guard: 'guard',
+  smart_entry: 'smart_entry',
+  smart_home: 'smart_home',
+  central_gas: 'central_gas',
+  sauna: 'sauna',
+  kids_play_area: 'kids_play_area',
+  nursery: 'nursery',
+  free_maintenance: 'free_maintenance',
+  intercom: 'intercom',
+  fire_system: 'fire_system',
+  ev_charger: 'ev_charger',
+  central_vacuum: 'central_vacuum',
+  insulation: 'insulation',
+  dining_majlis: 'dining_majlis',
+  own_bathroom: 'own_bathroom',
+  fridge: 'fridge',
+  whole_floor: 'whole_floor',
+  singles: 'singles',
+  families: 'families',
 };
 // Amenity token → the AF chip's OWN labelKey (advancedFilters.ts AMENITIES_QUESTION defs) — one voice
 // for the chip and its evidence (owner decision 6). The barrier asserts each pair equals the def.
@@ -82,7 +232,103 @@ export const AMENITY_LABEL: Record<string, string> = {
   laundry_room: 'Laundry room', optical_fibers: 'Optical fibers', majlis: 'Majlis room',
   separate_electricity_meter: 'Separate electricity meter',
   separate_water_meter: 'Separate water meter',
+  // Apartments & Co-living group — each equals CHIP_DEFS[token].labelKey (src/lib/afChips.ts) verbatim.
+  roof: 'Private roof',
+  two_entrances: 'Two entrances',
+  annex: 'Annex',
+  yard: 'Yard',
+  garage: 'Garage',
+  grill: 'Grill',
+  storage: 'Storage room',
+  water_tank: 'Private water tank',
+  warranty: 'Warranty',
+  electronic_deed: 'Electronic deed',
+  basement: 'Basement',
+  self_checkin: 'Self check-in',
+  wifi: 'Wi-Fi',
+  bills_included: 'Bills included',
+  jacuzzi: 'Jacuzzi',
+  smart_tv: 'Smart TV / cinema room',
+  billiards: 'Billiards table',
+  cleaning_service: 'Cleaning service',
+  soundproof: 'Soundproof',
+  cameras: 'Cameras',
+  guard: 'Guard',
+  smart_entry: 'Smart entry',
+  smart_home: 'Smart home',
+  central_gas: 'Central gas',
+  sauna: 'Sauna',
+  kids_play_area: "Kids' play area",
+  nursery: 'Nursery',
+  free_maintenance: 'Free maintenance',
+  intercom: 'Intercom',
+  fire_system: 'Fire system',
+  ev_charger: 'EV charger',
+  central_vacuum: 'Central vacuum',
+  insulation: 'Heat & water insulation',
+  dining_majlis: 'Dining majlis',
+  own_bathroom: 'Own bathroom',
+  fridge: 'Fridge',
+  whole_floor: 'Whole floor',
+  singles: 'Singles',
+  families: 'Families',
+  // the derived tokens (no column; DERIVED_TOKEN_HOLDS decides)
+  separate_meters: 'Separate meters', apts4: '4+ apartments', apts8: '8+ apartments', apts12: '12+ apartments',
+  apts20: '20+ apartments', has_shops: 'Has shops',
+  // Villas & Houses (owner lists 2026-11-01)
+  women_majlis: "Women's majlis", outdoor_kitchen: 'Outdoor kitchen', outdoor_diwaniya: 'Outdoor diwaniya',
+  waterfall: 'Waterfall', well: 'Well', irrigation: 'Garden irrigation', sports_court: 'Sports court',
+  garden_yard: 'Garden & yard', jacuzzi_sauna: 'Jacuzzi & sauna', cameras_smart_home: 'Cameras & smart home',
+  water_tank_well: 'Water tank & well', smart_home_entry: 'Smart home & entry',
+  // countryside, land, commercial (owner lists 2026-11-01)
 };
+// the countryside / land / commercial chips (2026-11-02) read their label from the one chip table — same i18n key, declared once
+for (const [k, d] of Object.entries(CHIP_DEFS)) if (!(k in AMENITY_LABEL)) AMENITY_LABEL[k] = d.labelKey;
+// DERIVED TOKENS (migration 20261101100930): a p_amenities slug whose SQL predicate reads a column that is NOT
+// the token's own name. `reads` names the columns; `holds` re-runs the predicate on the row and answers null
+// when any of them is null (UNKNOWN stays UNKNOWN — rule 1 above), so a listing whose source said nothing
+// about its meters or its apartment count earns no chip. Same text as the migration's pred:
+//   separate_meters = (s.separate_electricity_meter or s.separate_water_meter)
+//   apts4/8/12/20   = s.apartments_count >= 4 / 8 / 12 / 20
+//   has_shops       = s.shops_count >= 1
+export type DerivedToken = { reads: readonly string[]; holds: (canon: AfCanon) => boolean | null };
+const numOrNull = (v: unknown): number | null => (typeof v === 'number' ? v : null);
+const atLeast = (col: string, n: number): DerivedToken => ({
+  reads: [col],
+  holds: (r) => { const v = numOrNull(r[col]); return v == null ? null : v >= n; },
+});
+const either = (a: string, b: string): DerivedToken => ({
+  reads: [a, b],
+  holds: (r) => (r[a] === true || r[b] === true) ? true : (r[a] == null || r[b] == null) ? null : false,
+});
+export const DERIVED_TOKEN: Record<string, DerivedToken> = {
+  separate_meters: {
+    reads: ['separate_electricity_meter', 'separate_water_meter'],
+    holds: (r) => (r.separate_electricity_meter == null || r.separate_water_meter == null) ? null
+      : r.separate_electricity_meter === true || r.separate_water_meter === true,
+  },
+  apts4: atLeast('apartments_count', 4), apts8: atLeast('apartments_count', 8),
+  apts12: atLeast('apartments_count', 12), apts20: atLeast('apartments_count', 20),
+  has_shops: atLeast('shops_count', 1),
+  // Villas & Houses merged chips (owner 2026-11-01: «merged chips match if EITHER fact is true»). Positive-only text
+  // facts: one TRUE decides; neither true and one unknown stays UNKNOWN; both known-false is false.
+  garden_yard: either('garden', 'yard'), jacuzzi_sauna: either('jacuzzi', 'sauna'),
+  cameras_smart_home: either('cameras', 'smart_home'), water_tank_well: either('water_tank', 'well'),
+  smart_home_entry: either('smart_home', 'smart_entry'),
+  camels_horses: either('camels', 'horses_stable'),
+  palm_fruit_trees: either('palms', 'fruit_trees'),
+  pool_gym: either('pool', 'gym'),
+};
+/** token → true/false when the row can answer, null when a column it needs is null (unknown). */
+export const DERIVED_TOKEN_HOLDS: Record<string, (canon: AfCanon) => boolean | null> = Object.fromEntries(
+  Object.entries(DERIVED_TOKEN).map(([k, d]) => [k, d.holds]),
+);
+/** The canonical columns a token's predicate reads — its own column, or the derived token's inputs. */
+export const amenityReads = (token: string): string[] =>
+  DERIVED_TOKEN[token] ? [...DERIVED_TOKEN[token].reads] : [AMENITY_COL[token] ?? `__unknown_amenity__${token}`];
+/** The token's predicate on a row where no read is null (afEvidence() null-guards first). */
+export const amenityHolds = (token: string, row: AfCanon): boolean =>
+  DERIVED_TOKEN[token] ? DERIVED_TOKEN[token].holds(row) === true : row[AMENITY_COL[token]] === true;
 // Canonical direction value (after normalisation) → the AF option labelKey (DIRECTION_DEFS).
 export const DIRECTION_LABEL: Record<string, string> = {
   'شمال': 'North', 'جنوب': 'South', 'شرق': 'East', 'غرب': 'West',
@@ -152,10 +398,13 @@ function ratingRungOk(key: string, r: Record<string, unknown>): boolean {
 export const AF_EVIDENCE: Record<string, EvidenceDef> = {
   rnpl: {
     fields: ['amenities'],
-    active: (q) => (q.amenities?.some((x) => RNPL_TOKENS.includes(x)) ? ['rnpl'] : null),
-    reads: () => ['rent_now_pay_later'],
-    ok: (_k, r) => r.rent_now_pay_later === true,
-    chips: (_k, _r, t) => [t('Offers installments')],
+    // Two chips since 2026-11-01 (owner): the site's installment box («rnpl») and the ad's own words about monthly /
+    // split payments («split_payments», a text fact). Each key reads its own column and speaks its own chip.
+    active: (q) => { const k = (q.amenities ?? []).filter((x) => RNPL_TOKENS.includes(x)).map((x) => (x === 'rent_now_pay_later' ? 'rnpl' : x)); return k.length ? [...new Set(k)] : null; },
+    reads: (k) => k.map((x) => (x === 'split_payments' ? 'split_payments' : 'rent_now_pay_later')),
+    ok: (k, r) => k.some((x) => (x === 'split_payments' ? r.split_payments === true : r.rent_now_pay_later === true)),
+    chips: (k, r, t) => k.filter((x) => (x === 'split_payments' ? r.split_payments === true : r.rent_now_pay_later === true))
+      .map((x) => (x === 'split_payments' ? t('Monthly / split payments') : t('Offers installments'))),
   },
   property_age: {
     fields: ['ageMin', 'ageMax', 'isNewConstruction', 'ageBuckets'],
@@ -167,8 +416,9 @@ export const AF_EVIDENCE: Record<string, EvidenceDef> = {
   amenities: {
     fields: ['amenities'],
     active: (q) => { const k = (q.amenities ?? []).filter((x) => !RNPL_TOKENS.includes(x)); return k.length ? k : null; },
-    reads: (k) => k.map((x) => AMENITY_COL[x] ?? `__unknown_amenity__${x}`),
-    ok: (k, r) => k.every((x) => r[AMENITY_COL[x]] === true),           // AND — every token must hold
+    // A derived token reads the columns its predicate needs (amenityReads); a column token reads its own.
+    reads: (k) => [...new Set(k.flatMap(amenityReads))],
+    ok: (k, r) => k.every((x) => amenityHolds(x, r)),                    // AND — every token must hold
     // R12A.5 is enforced STATICALLY by scripts/verify-af-card-evidence.ts (T5), which fails CI if any
     // token in AMENITY_COL lacks a label — so in shipped code this lookup never misses. The `?? null`
     // is the fail-SAFE, not the rule: a module-scope throw here would crash the whole results screen

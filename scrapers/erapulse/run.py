@@ -57,6 +57,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.common.named_city import single_named_city  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 SITE = "https://erapulse.sa"
@@ -239,11 +240,11 @@ def parse_location(
         region = {"القصيم": "Qassim"}.get(rr) or N.region_for_city(N.map_city(rr) or "")
 
     # No explicit "مدينة" — try to recognise a Qassim city anywhere in the string.
+    # Whole words only: the old `word in loc` read «الرس» out of «المدارس» (backlog 1205 follow-up).
     if not city:
-        for word, eng in QASSIM_CITY_WORDS.items():
-            if word in loc:
-                city = eng
-                break
+        named = single_named_city([loc], QASSIM_CITY_WORDS)
+        if named:
+            city = named[0]
     # Still no city but we know this neighborhood from a full-address row in the same crawl.
     if not city and neighborhood and hood_city:
         city = hood_city.get(neighborhood)
@@ -384,12 +385,23 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
     # ── PDPL-safe text ──
     title = _redact(p.get("title")) or None
     description = _redact(p.get("description"))
+    # No city in the location → the ONE Qassim city the ad's own title/description names («بحي الصفاء – بريدة»,
+    # «صالة تجارية شمال بريدة»), never the page's «في بريدة» heading, which can be the agency's home town
+    # (backlog 1205: its only addressLocality is the RealEstateAgent's office).
+    city_source = None
+    if not city:
+        named = single_named_city([p.get("title"), p.get("description")])
+        if named:
+            city, city_source = named[0], "title_or_description"
+            if region is None or region == "Qassim":
+                region = N.region_for_city(city) or "Qassim"
 
     # ── extra amenity / spec flags into additional_info (no dedicated columns) ──
     info: dict[str, Any] = {
         # Owner 2026-10-20: the API item's own latitude/longitude (strings, e.g. "26.3533274","43.9774966").
         **pin_dict(p.get("latitude"), p.get("longitude")),
         "source_id": str(p.get("id")),
+        **({"city_source": city_source} if city_source else {}),
         "ref_number": ref,
         "subtype": subtype or None,
         "usage": usage or None,

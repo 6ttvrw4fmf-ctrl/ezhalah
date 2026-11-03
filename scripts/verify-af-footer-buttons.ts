@@ -107,7 +107,10 @@ check('the intro card has no «عرض النتائج» decline link either — �
   !/onShowResults/.test(cardSrc) && !/t\('Show results'\)/.test(cardSrc));
 check('the footer row itself holds exactly the two secondary controls',
   (() => {
-    const row = cardSrc.slice(cardSrc.indexOf('s.footRow'), cardSrc.indexOf('</Reanimated.View>', cardSrc.indexOf('s.footRow')));
+    // The ROW ends at its own closing tag (it nests only Pressables, never a View). It used to be read
+    // up to </Reanimated.View>, which since 2026-11-02 also covers the «af-skip-note» caption under it.
+    const start = cardSrc.indexOf('s.footRow');
+    const row = cardSrc.slice(start, cardSrc.indexOf('</View>', start));
     return (row.match(/testID="af-/g) ?? []).length === 2
       && /testID="af-back"/.test(row) && /testID="af-skip"/.test(row);
   })());

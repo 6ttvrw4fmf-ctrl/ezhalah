@@ -151,7 +151,7 @@ check('the monthly-only sources stay OUT of Buy and of an annual Rent search',
 // remote.ts must still route every period branch through it.
 const { cardFetchPeriodOr } = await import('../src/lib/rentPool.ts');
 check("candidate-level period filter has an explicit 'both' branch",
-  cardFetchPeriodOr('both', 'aqar_residential_listings') === 'rent_period.in.(monthly,annual),price_annual.is.null'
+  cardFetchPeriodOr('both', 'aqar_residential_listings') === 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null'
   && cardFetchPeriodOr('both', 'gathern_residential_listings') === null
   && /const clause = cardFetchPeriodOr\(q\.rentPeriod, tbl\);\s*\n\s*if \(clause\) req = req\.or\(clause\);/.test(remote),
   "mixed platforms must still require a PUBLISHED monthly|annual period for a priced row — a null one is neither");
@@ -249,7 +249,7 @@ check("the old boolean-scoped 'both → null' Trending gap is gone",
 for (const [label, key] of [
   ['monthly', 'Monthly: includes short stays, priced by length of stay.'],
   ['yearly', 'Yearly: the displayed price is the yearly price.'],
-  ['both', 'Each listing shows its own price basis (monthly or yearly).'],
+  ['both', 'Short stays show no price (it depends on the dates); yearly listings show the yearly price.'],
 ] as const) {
   check(`${label} period hint has an Arabic translation (no English key leak)`, i18n.includes(`'${key}'`));
 }
@@ -263,7 +263,7 @@ check("period hints never assert a contract/lease length (owner 2026-08-14)",
 
 check('the Monthly note is the OWNER wording (2026-10-24, supersedes 2026-08-18 «الأسعار معروضة بالشهر»): short stays included, priced by length of stay — price basis only, never a lease-term claim',
   /'شهري: يشمل الإقامات القصيرة، وأسعارها حسب مدة الإقامة\.'/.test(i18n));
-check("'Both' and the both-verb are translated", /'Both':\s*'كلاهما'/.test(i18n) && /'to rent monthly or yearly':/.test(i18n));
+check("'Both' and the both-verb are translated", /'Both':\s*'كلاهما'/.test(i18n) && /'for a short stay or yearly rent':/.test(i18n));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MUTATION PROOFS (2026-09-14, routine #10 / R1 — ops_incident #129). Each re-introduces a real,

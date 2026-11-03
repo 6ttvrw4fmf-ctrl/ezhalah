@@ -163,7 +163,7 @@ const q = (o: Partial<SearchQuery>): SearchQuery => ({ ...emptyQuery(), ...o } a
   const base = q({ type: 'Apartment', category: 'Residential', deal: 'Rent', rentPeriod: 'annual', location: 'الرياض' });
   const sample: Record<string, string> = {
     property_age: '3_5', street_width: '20', direction: 'شمال', bathrooms: '3',
-    rating: '9.5', rnpl: 'rnpl', unit_subtype: 'شقة', furnished: 'yes',
+    rating: '9.5', rnpl: 'rnpl', unit_subtype: 'شقة', furnished: 'yes', apartments: 'apts8', shops: 'has_shops',
   };
   for (const id of GENERIC_INTENT_IDS) {
     const key = AF_INTENTS[id].canonicalize(sample[id] ?? '');

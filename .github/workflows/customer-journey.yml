@@ -22,6 +22,10 @@ on:
         description: 'random listings when no list is given (max 8)'
         required: false
         default: '5'
+      absent:
+        description: 'comma-separated listing ids a lifecycle run hid; each must be missing from the same search (FAIL if seen)'
+        required: false
+        default: ''
       phone:
         description: 'full mobile emulation'
         type: boolean
@@ -58,6 +62,7 @@ jobs:
           LISTINGS: ${{ github.event.inputs.listings }}
           SAMPLE: ${{ github.event.inputs.sample || '5' }}
           PHONE: ${{ github.event.inputs.phone }}
+          ABSENT: ${{ github.event.inputs.absent }}
           JOURNEY_OUT_DIR: ${{ runner.temp }}/customer-journey
         run: |
           args=(--mode "$MODE")
@@ -69,6 +74,7 @@ jobs:
             args+=(--sample "$SAMPLE")
           fi
           if [ "$PHONE" = "true" ]; then args+=(--phone); fi
+          if [ -n "$ABSENT" ]; then args+=(--absent "$ABSENT"); fi
           node e2e/engineers/customer-journey.mjs "${args[@]}"
       - uses: actions/upload-artifact@v4
         if: always()

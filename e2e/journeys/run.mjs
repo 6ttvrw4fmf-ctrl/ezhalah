@@ -1774,9 +1774,17 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
     await sleep(50);
   }
   await sleep(700);
+  // READ THE DOM TWO WAYS (🔧 2026-10-24, backlog 799). The refusal line is a conditionally rendered
+  // <Text>, so its presence in the DOM IS the sentence on screen; `innerText` alone has read "" for
+  // rendered text on a phone list in webkit/firefox (e2e #8455), which would file a shown sentence as
+  // a silent control. Both reads are reported so a miss names the layer that missed.
   const body = await bodyText(page);
-  const saidDevice = body.includes(RA_DEVICE_VERDICT);
-  const saidPreparing = body.includes(RA_STILL_PREPARING);
+  const dom = await page.evaluate(() => document.body.textContent || '').catch(() => '');
+  const saidDevice = body.includes(RA_DEVICE_VERDICT) || dom.includes(RA_DEVICE_VERDICT);
+  const saidPreparing = body.includes(RA_STILL_PREPARING) || dom.includes(RA_STILL_PREPARING);
+  const seenVia = (saidDevice || saidPreparing)
+    ? (body.includes(RA_DEVICE_VERDICT) || body.includes(RA_STILL_PREPARING) ? 'innerText' : 'textContent only')
+    : 'neither innerText nor textContent';
 
   const after = await page.evaluate((stopLabel) => ({
     stop: document.querySelectorAll(`[aria-label="${stopLabel}"]`).length,
@@ -1790,7 +1798,7 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
     + `engine reported ${voices.n} voice(s), ${voices.ar} Arabic BEFORE the tap and `
     + `${after.n}/${after.ar} after; speaking seen during the tap: `
     + `${sawSpeaking.ever ? `YES at +${sawSpeaking.atMs}ms` : 'NO (24 samples over 1.2s)'}; `
-    + `at +700ms speaking=${after.speaking}, stop-control=${after.stop}`;
+    + `at +700ms speaking=${after.speaking}, stop-control=${after.stop}; refusal sentence seen via ${seenVia}`;
 
   // A tap that SPOKE is not a refusal, so there is nothing for this journey to judge. Not a pass
   // either — the refusal path was never exercised (PART 9.5: a run that asserted nothing is a skip).

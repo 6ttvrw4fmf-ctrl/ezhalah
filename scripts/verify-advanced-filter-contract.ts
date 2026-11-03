@@ -63,12 +63,16 @@ check('the orchestrator re-ranks after every answer and tracks asked questions (
 // scoreQuestion, and scoreQuestion still returns null on every gate.
 check('installments is ask-first via a TIER applied in the sort, never by bypassing the gates',
   /ASK_FIRST_TIER/.test(advSrc)
-  && /askTier\(b\.question\.id\) - askTier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
+  // 2026-10-31: `tier` is askTier everywhere but short stays, where it is the owner's fixed order (shortStaysAskTier);
+  // 2026-11-01: and the Apartments & Co-living scopes (hasCards), where it is the owner's numbered order (groupAskTier).
+  // 2026-11-02: short stays outside the apartments pool (Villa, Chalet, Rest house, Camp, the countryside box) use the group order (shortStaysAskTierFor).
+  && /const tier = isShortStaysScope\(q\) \? shortStaysAskTierFor\(q\) : hasCards\(q\) \? groupAskTierFor\(q\) : askTier;/.test(advSrc)
+  && /tier\(b\.question\.id\) - tier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
   && !/ASK_FIRST_TIER|askTier/.test(advSrc.slice(advSrc.indexOf('export function scoreQuestion'), advSrc.indexOf('export type RankedQuestion'))));
 // NARROWING GATE — UPDATED 2026-08-25 (owner decision of that date; it supersedes the 2026-08-22
 // `count < N` wording this check used to pin, which had itself superseded the 2026-08-11 8%-90%
 // band). The gate now includes an option only when answering it can actually move the set —
-// `optionNarrowsMeaningfully(count, N)`: removes ≥10% of the scope, or lands at/under the target.
+// `optionNarrowsMeaningfully(count, N)`: removes ≥2.5% of the scope (10% until 2026-11-01), or lands at/under the target.
 // The owner's case: at N=100 an option matching 100 or 98 listings is not worth a tap. It is
 // ONE-SIDED — a SMALL slice (8 of 100) is still an excellent question and is never dropped, which is
 // what the 2026-08-22 rule was protecting. scripts/verify-af-narrowing-gate.ts mutation-proves the
@@ -86,8 +90,11 @@ check('scoreQuestion gates on scope size and the shared narrowing predicate, not
   && !/o\.count <= 0\.9 \* N/.test(advSrc));
 // The installment answer means ONLY "source-confirmed supported". No invented payment frequency.
 check('the installment question stays a single binary source-confirmed chip (no invented frequencies)',
-  /RNPL_QUESTION[\s\S]{0,600}labelKey: 'Offers installments'/.test(advSrc)
-  && !/دفعتين|٤ دفعات|١٢ دفعة/.test(advSrc));
+  // 2026-11-01 (owner): a SECOND chip, the ad's own words about monthly / split payments — still source-confirmed
+  // (text fact split_payments), still no invented frequencies.
+  /RNPL_QUESTION[\s\S]{0,900}labelKey: 'Offers installments'/.test(advSrc)
+  && /RNPL_QUESTION[\s\S]{0,900}key: 'split_payments'/.test(advSrc)
+  && !/٤ دفعات|١٢ دفعة/.test(advSrc));
 // COHORT CONFIG (owner 2026-08-15): eligibility is data — COHORT_QUESTIONS maps each single type ×
 // deal to its source-justified question list; cohortAllows() is the ONLY eligibility gate for the
 // config-driven questions. The old per-question hardcoded gates are superseded, but their
@@ -106,13 +113,16 @@ check('furnished question is one tap, cohort-gated, true tri-state via furnished
 // The DB half of the same contract is the af_registry_monthly_uncertified P1 guard.
 const cohortBlock = cohortSrc.slice(cohortSrc.indexOf('export const COHORT_QUESTIONS'), cohortSrc.indexOf('export function scopeCleanTypes'));
 const monthlyLists = [...cohortBlock.matchAll(/RentMonthly:\s*\[([^\]]*)\]/g)].map((m) => m[1]);
-const MONTHLY_ALLOWED = ['rating', 'unit_subtype', 'amenities', 'bathrooms'];
-check('COHORT_QUESTIONS exists, Monthly keys exist ONLY for the certified cohorts (شقة/غرفة/فيلا)',
+// 2026-10-31 / 11-01: the short-stays cards (comfort · space · fun) are Monthly-certified too, and Studio gained a
+// Monthly lists: Apartment, Room, Studio (the pool) + Villa, Chalet, Rest House, Camp (owner 2026-11-01 short-stay lists).
+const MONTHLY_ALLOWED = ['rating', 'unit_subtype', 'amenities', 'bathrooms', 'comfort', 'space', 'fun', 'outdoors', 'who', 'water', 'games', 'camp_life'];
+check('COHORT_QUESTIONS exists, Monthly keys exist ONLY for the certified cohorts (شقة/غرفة/استديو/فيلا/شاليه/استراحة/مخيم)',
   /export const COHORT_QUESTIONS/.test(cohortSrc)
-  && monthlyLists.length === 3
-  && /Apartment:\s*\{[\s\S]{0,900}RentMonthly:/.test(cohortBlock)
-  && /Room:\s*\{[\s\S]{0,400}RentMonthly:/.test(cohortBlock)
-  && /Villa:\s*\{[\s\S]{0,700}RentMonthly:/.test(cohortBlock));
+  && monthlyLists.length === 7
+  && /Apartment:\s*\{[\s\S]{0,1400}RentMonthly:/.test(cohortBlock)
+  && /Room:\s*\{[\s\S]{0,500}RentMonthly:/.test(cohortBlock)
+  && /Studio:\s*\{[\s\S]{0,600}RentMonthly:/.test(cohortBlock)
+  && /Villa:\s*\{[\s\S]{0,800}RentMonthly:/.test(cohortBlock));
 check('every Monthly question list draws ONLY from the Monthly-certified set (no Annual copy-paste)',
   monthlyLists.length > 0 && monthlyLists.every((l) =>
     [...l.matchAll(/'([^']+)'/g)].every((m) => MONTHLY_ALLOWED.includes(m[1]))));
@@ -180,14 +190,15 @@ check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
   && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
-  && /export function cohortAllows[\s\S]{0,1300}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
+  && /export function cohortAllows[\s\S]{0,2600}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
 
 // Mixed period ('both', owner 2026-08-19): cohortAllows must require BOTH RentAnnual and RentMonthly
 // membership — union would let a period-specific question fire against the other period's rows.
 // Full behavioral coverage lives in scripts/verify-mixed-period-af-gating.ts (mutation-tested); this
 // is a lighter structural check that the contract-level pool still routes 'both' through that gate.
 check("cohortAllows has an explicit 'both' branch (intersection of RentAnnual and RentMonthly), never aliasing to Annual",
-  /q\.rentPeriod === 'both'\) return \(cfg\.RentAnnual \?\? \[\]\)\.includes\(id\) && \(cfg\.RentMonthly \?\? \[\]\)\.includes\(id\)/.test(cohortSrc));
+  // 2026-10-31: a block — a group type without a monthly cohort reads its Annual list first (afCohorts.ts), then the intersection
+  /q\.rentPeriod === 'both'\) \{[\s\S]{0,400}?return \(cfg\.RentAnnual \?\? \[\]\)\.includes\(id\) && \(cfg\.RentMonthly \?\? \[\]\)\.includes\(id\)/.test(cohortSrc));
 check('Furnished chip is cohort-gated — never offered where the cohort config withholds it',
   /cohortAllows\(q, 'furnished'\)\)\s*defs\.push\(\{\s*key:\s*'furnished'/.test(advSrc));
 
@@ -241,9 +252,13 @@ check('the primary reads Continue · {count} results with the live count, for ev
   /Continue · \{count\} results/.test(cardSrc));
 // §11: one tiny plain-language availability line; the technical unknown-count phrasing is gone.
 // Owner-approved 2026-10-01: one notice above the choices explains published-source limits.
-// Count-honesty checks remain independent of this presentation-only wording.
-check('availability is explained naturally (no database language, no unknown-count phrasing)',
-  /Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing/.test(cardSrc)
+// SHORTENED 2026-11-01 (owner: «we want it shorter and include something like how it works where the user
+// can click and read»): the notice is one line — «الأرقام من كلام الإعلانات نفسها · كيف يشتغل؟» — and the
+// link opens the How-it-works reader (InfoModal 'af-how'); the full wording moved into src/data/afHowItWorks.ts
+// (scripts/verify-af-how-it-works-note.ts). Count-honesty checks remain independent of this wording.
+check('availability is explained naturally (one short line + a How-it-works link, no unknown-count phrasing)',
+  /Counts come from the ads' own words/.test(cardSrc)
+  && /openModal\('af-how'\)/.test(cardSrc)
   && /af-source-note/.test(cardSrc)
   && !/Age unknown for \{count\}/.test(cardSrc));
 // §2: the opening state is its own calm card — count, invitation, soft supporting line, opt-in
@@ -261,7 +276,7 @@ check('a live narrowing count chip renders in the card bar and motion respects r
 // ── Brand image: card-owned registry + one shared slot; questions supply only a string TOKEN ─────
 check('brand images are card-owned: registry in the card, single shared slot, token-only config',
   /BRAND_IMAGES/.test(cardSrc) && /brandStrip/.test(cardSrc)
-  && !/require\(/.test(advSrc) && /brandImage: 'ejari-rnpl'/.test(advSrc));
+  && !/require\(/.test(advSrc) && /brandImage: 'rnpl-partners'/.test(advSrc));
 
 // ── Select-then-confirm interaction for ALL ──────────────────────────────────────────────────────
 check('every question is select-then-confirm: rows select, the footer commits',

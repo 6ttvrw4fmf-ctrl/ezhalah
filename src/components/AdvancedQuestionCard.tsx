@@ -6,6 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Reveal } from '@/components/ui';
 import { LoadingDots } from '@/components/CardReveal';
 import { useI18n } from '@/i18n';
+import { useApp } from '@/store';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { grouped } from '@/data/search';
 import { buildAfSummaryItems } from '@/lib/afSummary';
@@ -91,7 +92,7 @@ function Shell({ children, onClose, countChip, pills }: {
         <View style={[s.bar, isRTL && { flexDirection: 'row-reverse', justifyContent: 'flex-end' }]}>
           <View style={s.titleWrap}>
             <View style={s.brandMark}><Ionicons name="sparkles" size={18} color={colors.primary} /></View>
-            <Text style={s.barTitle} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>
+            <Text style={s.barTitle} numberOfLines={1}>{t('🎯 Refine with AI')}</Text>
           </View>
           <View style={s.barSide}>
             {countChip != null ? <View testID="af-count-chip"><AnimatedCount value={countChip} /></View> : null}
@@ -177,7 +178,9 @@ export function AdvancedIntroCard({ total, onBegin, onClose, pills }: {
 // the card alone maps token → image and owns the one shared slot + styling it renders in. RN requires
 // static require() calls, which is also why the mapping must live here and not in question config.
 const BRAND_IMAGES: Record<string, ReturnType<typeof require>> = {
-  'ejari-rnpl': require('../../assets/images/ejari-rnpl.png'),
+  // 5 instalment partners in one strip (owner 2026-11-01): EJARI · رايز · tamam · tabby · tamara.
+  // Five equal white chips on a transparent PNG, so the black wordmarks stay readable in dark mode.
+  'rnpl-partners': require('../../assets/images/rnpl-partners.png'),
 };
 
 export type AdvancedQuestionCardProps = {
@@ -289,6 +292,7 @@ export default function AdvancedQuestionCard({
   liveCount, initialKeys, onConfirm, onSkip, hideSkip, onBack, onClose, pills,
 }: AdvancedQuestionCardProps) {
   const { t, isRTL } = useI18n();
+  const { openModal } = useApp(); // «كيف يشتغل؟» → the How-it-works reader (InfoModal 'af-how')
   const [sel, setSel] = useState<string[]>(initialKeys ?? []);
   const [count, setCount] = useState<number | null>(null);
   // «متابعة» NEVER FEELS STUCK (owner 2026-10-03: «when a user clicks المتابعة, it feels a bit stuck»).
@@ -449,10 +453,24 @@ export default function AdvancedQuestionCard({
         <Reanimated.View style={enterA}>
           <Text style={s.qt} testID="af-question-title">{t(titleKey)}</Text>
           {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
+          {/* THE NOTE IS ONE SHORT LINE + «كيف يشتغل؟» (owner 2026-11-01: «we want it shorter and include
+              something like how it works where the user can click and read»). The link opens the full
+              text (src/data/afHowItWorks.ts) in the Terms reader's own popup host — InfoModal, modal
+              'af-how' — white card, eagle, ✕ top-right, no emoji. The long sentence it replaces lives on
+              in that text's sections 1 and 3. */}
           <View testID="af-source-note" style={[s.sourceNote, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
             <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
             <Text style={[s.note, { textAlign: isRTL ? 'right' : 'left' }]}>
-              {t('Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing.')}
+              {t("Counts come from the ads' own words")}
+              {' · '}
+              <Text
+                testID="af-how-it-works-link"
+                accessibilityRole="link"
+                onPress={() => openModal('af-how')}
+                style={s.noteLink}
+              >
+                {t('How it works?')}
+              </Text>
             </Text>
           </View>
           {/* R7.1.3 — the unknown-count caption. UNKNOWN STAYS VISIBLE: these listings are still
@@ -474,6 +492,12 @@ export default function AdvancedQuestionCard({
           {brandImage && BRAND_IMAGES[brandImage] ? (
             <View style={s.brandStrip}>
               <Image source={BRAND_IMAGES[brandImage]} style={s.brandImg} contentFit="contain" />
+              {/* PAYMENT DISCLAIMER (owner 2026-11-02): the strip says these providers EXIST, never that this ad or
+                  Ezhalah guarantees a method or a provider — the user confirms with the lister. One quiet line,
+                  under the logos, on every question that shows them (the «💳» question of every rent list). */}
+              <Text testID="af-payment-note" style={[s.paymentNote, { textAlign: isRTL ? 'right' : 'left' }]}>
+                {t('Ezhalah does not guarantee the payment method or the provider. Confirm with the lister directly.')}
+              </Text>
             </View>
           ) : null}
           <View style={s.list}>
@@ -558,6 +582,16 @@ export default function AdvancedQuestionCard({
             </Pressable>
           )}
         </View>
+        {/* SKIP NOTE (owner 2026-11-02): one quiet line under the footer telling the user what Skip
+            buys them. True by construction: every answer shrinks the eligible pool, and a later
+            question is only asked when it still narrows that pool meaningfully
+            (MEANINGFUL_NARROWING_FRACTION, advancedFilters.ts) — so skipping keeps the pool wide and
+            MORE questions and options survive. Section 6 of src/data/afHowItWorks.ts says the same. */}
+        {hideSkip ? null : (
+          <Text testID="af-skip-note" style={[s.skipNote, { textAlign: isRTL ? 'right' : 'left' }]}>
+            {t('Skip and you get more questions and options')}
+          </Text>
+        )}
       </Reanimated.View>
     </Shell>
   );
@@ -613,13 +647,10 @@ const s = StyleSheet.create({
   unknownNote: { fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, opacity: 0.85, paddingHorizontal: 2, paddingTop: 3 },
 
   // Shared brand-image slot — one fixed position (under the subtitle, above the options) and one
-  // style for ANY question that names a brandImage token. The PNG carries its own branding; the
-  // strip is a neutral token-only frame.
-  brandStrip: {
-    marginTop: 10, alignItems: 'center', justifyContent: 'center', paddingVertical: 8,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field,
-  },
-  brandImg: { width: 150, height: 46 },
+  // style for ANY question that names a brandImage token. The PNG carries its own chips, so the
+  // strip adds no second frame around them (owner 2026-11-01).
+  brandStrip: { marginTop: 10, alignItems: 'center', justifyContent: 'center' },
+  brandImg: { width: '100%', aspectRatio: 1008 / 120 },
 
   // Options: soft rounded stand-alone rows with breathing room (no dense bordered table) — the
   // Claude-question feel. Selection fills the row with the brand tint + primary border.
@@ -642,6 +673,8 @@ const s = StyleSheet.create({
 
   sourceNote: { direction: 'ltr', marginTop: 10, gap: 7, alignItems: 'flex-start', padding: 10, borderRadius: 12, backgroundColor: colors.segTrack },
   note: { flex: 1, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 17 },
+  // «كيف يشتغل؟» — a link inside the note, in the brand ink so it reads as tappable (owner 2026-11-01).
+  noteLink: { fontFamily: font.family.semibold, color: colors.primary, textDecorationLine: 'underline' },
 
   // PINNED footer (defect 2026-08-23). It used to be the last child INSIDE the body ScrollView, so a
   // question with many options pushed «متابعة / رجوع / تخطي / عرض النتائج» past the bottom of the
@@ -670,4 +703,6 @@ const s = StyleSheet.create({
   secondaryBtnPress: { backgroundColor: colors.segTrack, borderColor: colors.pickLine, transform: [{ scale: 0.98 }] },
   secondaryBtnFocus: { borderColor: colors.primary },
   secondaryTxt: { fontFamily: font.family.semibold, fontSize: 14, color: colors.ink },
+  paymentNote: { fontFamily: font.family.regular, fontSize: 12, lineHeight: 18, color: colors.muted, marginTop: 6, alignSelf: 'stretch' },
+  skipNote: { fontFamily: font.family.regular, fontSize: 12, lineHeight: 18, color: colors.muted, paddingHorizontal: space.card, paddingBottom: 10, marginTop: -4 },
 });

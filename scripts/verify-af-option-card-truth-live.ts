@@ -683,7 +683,7 @@ const runBaselineSearch = async (): Promise<Search | null> => {
   // Buy/Rent are two at-least-one toggles with «شراء» pre-selected; «سنوي» is pre-selected and
   // adding «شهري» first gives BOTH, then dropping «سنوي» leaves monthly-only.
   if (DEAL === 'rent') { await tap('إيجار'); await tap('شراء'); }
-  if (DEAL === 'rent-monthly') { await tap('إيجار'); await tap('شراء'); await tap('شهري'); await tap('سنوي'); }
+  if (DEAL === 'rent-monthly') { await tap('إيجار'); await tap('شراء'); await tap('إقامات قصيرة'); await tap('سنوي'); } // label since 2026-10-25; sends شهري
   for (let attempt = 1; attempt <= 3; attempt++) {
     await page.click('[data-testid="city-input"]');
     await page.fill('[data-testid="city-input"]', '');
@@ -853,7 +853,7 @@ try {
   const opened = await openAF();
   if (!opened) {
     if ((baseline.total ?? 0) <= INTERVIEW_STOP_AT) skip('2. the AF offer is present', `baseline total ${baseline.total} ≤ ${INTERVIEW_STOP_AT} — R11.1 hides the offer; choose a wider scope`);
-    else check('2. the AF offer «خلّنا نحدد الطلب أكثر» is present on a scope of ' + baseline.total, false, 'no offer rendered in 16s');
+    else check('2. the AF offer «🎯 دقّق مع الذكاء الاصطناعي» is present on a scope of ' + baseline.total, false, 'no offer rendered in 16s');
     throw new Error('AF did not open — the card assertions cannot run');
   }
   const seenQ: string[] = [];

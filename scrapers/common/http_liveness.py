@@ -228,3 +228,62 @@ def stored_listing_url(tables: tuple[str, ...]) -> Callable[[str], Optional[str]
                 return r.data[0].get("listing_url") or None
         return None
     return url_for
+
+
+# ── OWNER-APPROVED REMOVAL STATUS (owner decision 2026-11-03) ────────────────────────────────────────
+# The law above stays universal: decide() and read_is_unbelievable() never read a 403 or a 5xx as a death.
+# The owner approved ONE narrow exception, per site and per status, for sites measured to answer a REMOVED
+# ad with an error while their live ads answer 200 (asked: «hide them … only if the same check opens a live
+# ad from that site fine, and the error repeats on 2 checks» → «Yes, hide them»). Measured 2026-11-03:
+#   alshawaf / bossbih (Drupal): an UNPUBLISHED node answers 403 twice; a deleted one 404; live 200.
+#   aqaratikom (nawait.sa /api/v1/ad/<uuid>): a removed ad answers 500 twice; a made-up uuid 404; live 200.
+# A site joins this table only with the owner's approval. Nothing else may call a 403/5xx a death.
+OWNER_APPROVED_REMOVAL_STATUS: dict[str, int] = {"alshawaf": 403, "bossbih": 403, "aqaratikom": 500}
+
+
+def removal_by_owner_approved_status(
+        platform: str,
+        fetch: Callable[[str], tuple[Optional[int], str, bool]],
+        url: str,
+        control_url: Optional[str],
+        control_signal: Signal,
+        pause: float = 1.5) -> Optional[Verdict]:
+    """GONE only when ALL hold: the site is in OWNER_APPROVED_REMOVAL_STATUS; the ad's own URL answers that
+    exact status on two reads, neither redirected; and in the SAME check a live control ad of the same site
+    reads LIVE through the site's own signal. Anything else returns None (the caller keeps UNKNOWN)."""
+    code = OWNER_APPROVED_REMOVAL_STATUS.get(platform)
+    if code is None or not url or not control_url or control_url == url:
+        return None
+    reads = []
+    for i in range(2):
+        st, _body, moved = fetch(url)
+        if st != code or moved:
+            return None
+        reads.append(st)
+        if i == 0:
+            time.sleep(pause)
+    cst, cbody, cmoved = fetch(control_url)
+    if decide(cst, cbody, cmoved, control_signal) != ("live", f"source still serves this listing (HTTP {cst})"):
+        return None
+    return ("gone", f"owner rule 2026-11-03: HTTP {code} on two reads while live control {control_url} "
+                    f"answered live (HTTP {cst})")
+
+
+def live_control_url(tables: tuple[str, ...], exclude: str = "",
+                     max_age_hours: int = 72) -> Optional[str]:
+    """The stored URL of an ad of the same site that a direct read proved ALIVE recently (the control).
+    A failed lookup is None, which keeps the row UNKNOWN — never a removal without a control."""
+    from datetime import datetime, timedelta, timezone
+    from scrapers.common import db
+    since = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+    for tbl in tables:
+        try:
+            r = (db.sb().table(tbl).select("ad_number,listing_url").eq("active", True)
+                 .gte("last_verified_alive_at", since).order("last_verified_alive_at", desc=True)
+                 .limit(5).execute())
+        except Exception:  # noqa: BLE001
+            return None
+        for row in r.data or []:
+            if row.get("listing_url") and row.get("ad_number") != exclude:
+                return row["listing_url"]
+    return None

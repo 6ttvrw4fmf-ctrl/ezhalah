@@ -904,7 +904,7 @@ try {
     // any click. Only the recorded timeout evidence below permits an UNKNOWN skip.
     const ctaBack = await page.evaluate(() =>
       Array.from(document.querySelectorAll('div,span,button,a,[role="button"]'))
-        .some((e) => (e.innerText || '').trim().includes('خلّنا نحدد الطلب أكثر') && e.getBoundingClientRect().width > 0));
+        .some((e) => (e.innerText || '').trim().includes('🎯 دقّق مع الذكاء الاصطناعي') && e.getBoundingClientRect().width > 0));
     // UNKNOWN IS NOT A DEFECT (owner 2026-08-26, PR #1152). AF now distinguishes "the sources say
     // there is nothing useful to ask" from "the probes never answered". On the SECOND verdict the
     // product deliberately declines to open and offers NOTHING in place of AF — that is the correct,
@@ -1059,16 +1059,24 @@ try {
   const jStart = await waitForCount(45000);
   check(`[J] 1-question scope (Duplex/Buy/الهفوف) lands with a real start count ABOVE the ${INTERVIEW_STOP_AT} stop line`, Number.isFinite(jStart) && jStart > INTERVIEW_STOP_AT, `start=${jStart}`);
 
+  // 2026-11-02: Duplex/Buy follows the owner's Villas & Houses list (age, bathrooms, street width, facing, three cards),
+  // so opening the interview probes ~8 questions before the card can show — a 7-second window read a busy CI as "never
+  // opened" (3 of 5 runs that day). Tap, then poll for up to 40 s the way Journey I does; re-tap only every 5 s.
   let jOpened = false;
-  for (let i = 0; i < 6 && !jOpened; i++) {
-    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
-    await page.waitForTimeout(1200);
+  const jOpenDeadline = Date.now() + 40000;
+  let jLastTap = 0;
+  while (!jOpened && Date.now() < jOpenDeadline) {
+    if (Date.now() - jLastTap >= 5000) { await tap('🎯 دقّق مع الذكاء الاصطناعي').catch(() => {}); jLastTap = Date.now(); }
+    await page.waitForTimeout(500);
     jOpened = await afPresent();
   }
-  check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened);
+  check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened,
+    `af-card never appeared within 40s of the first tap — see the JOURNEY I note: a probe-timeout artefact under load reads as a declined plan`);
 
   let jTitles = [];
   let jAnswered = null;                 // the option testid actually clicked, or null if none was offered
+  let jNextTitle = null;                // the question that replaced the first one (the interview continued above the stop line)
+  let jChipCount = null;                // the live count chip on that next question
   if (jOpened) {
     // Same render race Journey I already guards against: af-card can mount a beat before its
     // question TITLE/options actually paint (real network round trip via rankQuestions), and CI's
@@ -1091,14 +1099,20 @@ try {
       await page.locator('[data-testid="af-confirm"]:visible').first().click({ timeout: 8000 });
       jAnswered = snap.options[0];
     }
+    // 2026-11-02: Duplex/Buy follows the villa list, so after the first answer the interview is RIGHT to continue with a
+    // DIFFERENT question while the count stays above the 25 stop line (owner 2026-10-13); it closes only at or below it.
+    // What must never happen is the SAME question coming back, or the card hanging with no next question.
     let waited = 0;
     while (waited < 45000) {
       await page.waitForTimeout(500); waited += 500;
       if (!(await afPresent())) break;
+      const t = (await afSnapshot()).title;
+      if (t && t !== snap.title) { jNextTitle = t; jChipCount = (await afSnapshot()).count; break; }
     }
   }
   const jFinalOpen = await afPresent();
-  check('[J] after answering the single question, the interview closes CLEANLY (no second question)', !jFinalOpen);
+  check('[J] after answering the first question the interview closes CLEANLY or moves to a DIFFERENT question (never the same one again, never a hang)',
+    !jFinalOpen || (jNextTitle != null && jNextTitle !== jTitles[0]), `open=${jFinalOpen} first=${JSON.stringify(jTitles[0])} next=${JSON.stringify(jNextTitle)}`);
   // Same staleness trap Journey I already documents: af-card unmounting is NOT "the new count
   // landed" — finishGuided's mining transition holds the OLD pre-AF results on screen underneath for
   // a guaranteed minimum beat first. Give that floor time, then require two reads a second apart to
@@ -1129,9 +1143,11 @@ try {
       + 'latency symptom Journey I skips for. A REAL regression looks different: options ARE offered, '
       + 'one is committed, and the count still does not move — which the check below still enforces.');
   } else {
-    check('[J] the closed interview lands on a genuinely narrowed, non-null result',
-      !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart,
-      `answered=${jAnswered ?? '(none)'} start=${jStart} final=${jFinal}`);
+    // closed → the landed count narrowed; still open on the NEXT question → that question's live chip narrowed
+    const jNarrowedTo = jFinalOpen ? jChipCount : jFinal;
+    check('[J] the answer genuinely narrowed the set (landed count when closed, the next question\'s live chip when it continued) — never back at the start',
+      Number.isFinite(jNarrowedTo) && jNarrowedTo < jStart,
+      `answered=${jAnswered ?? '(none)'} start=${jStart} final=${jFinal} open=${jFinalOpen} next-chip=${jChipCount}`);
     // THE STOP-LINE RULE, END TO END (owner 2026-09-04; rendering restyled 2026-09-05; the line
     // itself moved 50 → 25 on 2026-09-20): a round that lands at or below it FINISHES the chat — every remaining listing is revealed with no «عرض المزيد», and the
     // composer LOCKS in place (owner request 2026-09-05: no replacement card): the same box goes
@@ -1169,14 +1185,19 @@ try {
       // owner rule (see agent.tsx's gate: `!filterOrigin || busy || revealing`) — so a same-instant
       // zero-count would be coincidental timing, not proof of the actually-settled state this
       // assertion is about.
-      let composerEls = -1;
+      // 2026-10-13 (owner: «remove the lock») SUPERSEDES the no-composer rule above: a finished search KEEPS the
+      // chat box, open and unlocked, and the next message simply starts the next search (agent.tsx:
+      // `!filterOrigin || completed` renders the composer; the lock label is gone). This branch was first exercised
+      // on 2026-11-02, when the villa bathrooms ladder (3+ … 6+ on Duplex/Buy) took the fixture under the stop line.
+      let composerBox = 0, lockedEls = 0;
       for (const deadline = Date.now() + 90_000; Date.now() < deadline; ) {
-        composerEls = await page.locator('textarea:visible, [aria-label*="أُغلقت هذه المحادثة"]:visible').count();
-        if (composerEls === 0) break;
+        composerBox = await page.locator('textarea:visible').count();
+        lockedEls = await page.locator('[aria-label*="أُغلقت هذه المحادثة"]:visible').count();
+        if (composerBox >= 1) break;
         await page.waitForTimeout(1_000);
       }
-      check(`[J] ≤ ${INTERVIEW_STOP_AT}, Filter-origin → once the reveal settles, there is NO composer at all (not even a locked one)`,
-        composerEls === 0, `composerEls=${composerEls}`);
+      check(`[J] ≤ ${INTERVIEW_STOP_AT}, Filter-origin → once the reveal settles, the chat box is back, OPEN and never locked (owner 2026-10-13)`,
+        composerBox >= 1 && lockedEls === 0, `composer=${composerBox} locked=${lockedEls}`);
     } else if (Number.isFinite(jFinal)) {
       console.log(`NOTE  [J] landed at ${jFinal} (> ${INTERVIEW_STOP_AT}) — completion assertions not owed; the interview is right to continue`);
     }
@@ -1190,17 +1211,20 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
   await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
+  // 2026-11-02: Factory earned the owner's commercial lists (street width, building, location & safety on both deals), so the
+  // 0-question scope is now the «مرافق خدمية» box (Service Facilities: a filter-only grouping with no cohort — the one type
+  // scripts/verify-af-group-cohort-coverage.ts still holds at the uncertified baseline, beside Staff Housing).
   await tap('تجاري');
-  await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
-  await tap('مصنع'); await page.waitForTimeout(300);
+  await tap('المباني والمرافق'); await page.waitForTimeout(300);
+  await tap('مرافق خدمية'); await page.waitForTimeout(300);
   await tap('إيجار'); await page.waitForTimeout(300); // Buy is on by default; add Rent → combined
   await pickCity('الرياض');
   await tap('بحث');
   const jZeroStart = await waitForCount(45000);
-  check('[J0] 0-question scope (Factory/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
+  check('[J0] 0-question scope (Service Facilities/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
   let jZeroOpened = false;
   for (let i = 0; i < 4 && !jZeroOpened; i++) {
-    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await tap('🎯 دقّق مع الذكاء الاصطناعي').catch(() => {});
     await page.waitForTimeout(1200);
     jZeroOpened = await afPresent();
   }

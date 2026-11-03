@@ -115,6 +115,31 @@ check('empty body (truncated CDN read) → REFUSED',
 check('unparseable bundle name → REFUSED (never assume authenticity)',
   authVerdict(goodFile, 'index.html') === 'REFUSE');
 
+// ── route splitting (2026-11-02): the shared chunk carries the artifact proof; the entry must be a real script ──
+const chunkName = `_expo/static/js/web/__common-${md5(bytes)}.js`;
+const chunkVerdict = (file: string, name: string) =>
+  dtg(`dtg_chunk_is_authentic "${file}" "${name}" && echo OK || echo REFUSE`);
+check('a split chunk whose md5 IS its filename hash → AUTHENTIC', chunkVerdict(goodFile, chunkName) === 'OK');
+check('a tampered split chunk under the right filename → REFUSED', chunkVerdict(badFile, chunkName) === 'REFUSE');
+check('an empty split chunk → REFUSED', chunkVerdict(emptyFile, chunkName) === 'REFUSE');
+check('a chunk name without a 32-hex hash → REFUSED', chunkVerdict(goodFile, '_expo/static/js/web/__common.js') === 'REFUSE');
+const chunkHash = md5(bytes);
+const realEntry = path.join(bundleDir, 'entry-real.js');
+writeFileSync(realEntry, `var e=1;${'x'.repeat(70000)}/* ${chunkHash} */`);
+const htmlEntry = path.join(bundleDir, 'entry-html.js');
+writeFileSync(htmlEntry, `<!DOCTYPE html>${'x'.repeat(70000)} ${chunkHash}`);
+const shortEntry = path.join(bundleDir, 'entry-short.js');
+writeFileSync(shortEntry, `var e=1; ${chunkHash}`);
+const strangerEntry = path.join(bundleDir, 'entry-stranger.js');
+writeFileSync(strangerEntry, `var e=1;${'x'.repeat(70000)}`);
+const entryVerdict = (file: string, hash: string) =>
+  dtg(`dtg_entry_is_real_js "${file}" "${hash}" && echo OK || echo REFUSE`);
+check('a real entry script that references the authenticated chunk → OK', entryVerdict(realEntry, chunkHash) === 'OK');
+check('an HTML error page under the entry name → REFUSED', entryVerdict(htmlEntry, chunkHash) === 'REFUSE');
+check('a truncated entry (under 64 KB) → REFUSED', entryVerdict(shortEntry, chunkHash) === 'REFUSE');
+check('an entry that never references the chunk (another build) → REFUSED', entryVerdict(strangerEntry, chunkHash) === 'REFUSE');
+check('an empty hash → REFUSED', entryVerdict(realEntry, '') === 'REFUSE');
+
 // ── drift guards: the shipping scripts must USE the shared library, not a private copy ──────
 // A COMMENT IS NOT A CODE PATH: every shape assertion below reads the script with its `#` comments
 // stripped, and asserts on the CODE. Un-stripped, the long rationale comments in safe-deploy.sh

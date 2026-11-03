@@ -22,7 +22,10 @@ const all: Mig[] = readdirSync(dir)
 
 /** Problems with the migration set: the latest v2 redefinition must keep the Gathern district resolver. */
 function problems(migs: Mig[]): string[] {
-  const redefines = migs.filter(({ sql }) => /listing_native_location_v2/.test(sql) && /create or replace view/i.test(sql));
+  // A PATCH-IN-PLACE (the view rebuilt from its own live pg_get_viewdef with one expression replaced, 2026-11-02
+  // backlog 1166) keeps every arm the live view has, resolver included — it is not a copy that can be stale.
+  const redefines = migs.filter(({ sql }) => /listing_native_location_v2/.test(sql) && /create or replace view/i.test(sql)
+    && !/pg_get_viewdef\('public\.listing_native_location_v2'::regclass\)/.test(sql));
   if (redefines.length === 0) return ['no migration (re)defines listing_native_location_v2 — the barrier lost its subject'];
   const latest = redefines[redefines.length - 1];
   return /resolve_district_ar/.test(latest.sql) ? [] : [
@@ -38,7 +41,11 @@ check('the latest listing_native_location_v2 redefinition keeps the Gathern dist
 // Mutation: without the 2026-10-04 fix the latest redefinition is the stale 0927 copy, which must go RED.
 // Every v2 (re)definition from the fix on is dropped, so the latest left is the stale 0927 copy (2026-10-18: a later
 // patch-in-place migration would otherwise stay "latest" and keep this proof green for the wrong reason).
-const isV2Redef = (m: Mig) => /listing_native_location_v2/.test(m.sql) && /create or replace view/i.test(m.sql);
+const isV2Redef = (m: Mig) => /listing_native_location_v2/.test(m.sql) && /create or replace view/i.test(m.sql)
+  && !/pg_get_viewdef\('public\.listing_native_location_v2'::regclass\)/.test(m.sql);
+// The patch-in-place exemption must not swallow a real stale copy: a full copy that merely MENTIONS the function in a
+// comment is still a copy and still red.
+mustCatch('a stale copy that only mentions pg_get_viewdef in prose', problems([...all, { f: '99999999999998_stale_copy.sql', sql: "-- built from pg_get_viewdef(listing_native_location_v2)\ncreate or replace view public.listing_native_location_v2 as select NULL::text AS district_ar" }]));
 mustCatch('a stale full redefinition (the 2026-10-04 fix removed)', problems(all.filter((m) => !(isV2Redef(m) && m.f >= '20261004073216'))));
 // The REAL latest redefinition, with the resolver stripped, must go red too.
 const latestRedef = all.filter(isV2Redef).at(-1);

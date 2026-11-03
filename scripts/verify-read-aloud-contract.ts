@@ -162,20 +162,21 @@ check('agent.tsx builds the closing note from the SAME moreNoteText the visible 
 // `resultsActionsRowVisible` and still carries the interview phase — so the pattern tolerates that
 // one conjunct and nothing else.
 check('the spoken available-actions sentence names only button(s) that are ACTUALLY on screen (gated by the same showActionsRow used for the visible buttons row, incl. the Advanced-Filter-open hide)', /const showActionsRow = (?:!afReceipt\[m\.id\] && )?resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(agent) && /const spokenActionsNote = !showActionsRow \? ''/.test(agent) && /\{showActionsRow \? \(/.test(agent));
-check('the spoken action label(s) are the exact SAME t(\'Load more\')/t(\'Let’s narrow it down\') strings the visible buttons render — never a separately-worded copy', /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('Let’s narrow it down'\)\]\.filter\(Boolean\) as string\[\];/.test(agent));
+check('the spoken action label(s) are the exact SAME t(\'Load more\')/t(\'🎯 Refine with AI\') strings the visible buttons render — never a separately-worded copy', /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('🎯 Refine with AI'\)\]\.filter\(Boolean\) as string\[\];/.test(agent));
 // No raw/internal fields anywhere in the card-speech builder: id, source_url, free-text
 // description/title, or a raw JSON dump. Platform name IS spoken (owner request, 2026-08-22) but only
 // via the shared listingPlatformAr() display helper, never a raw listing.source read in this file.
 const NO_INTERNAL_FIELDS = /listing\.id\b|listing\.source_url|listing\.source\b|listing\.description|listing\.title|JSON\.stringify/;
 check('cardSpeech() never touches a raw id/URL/source/description/title field or serializes raw JSON (platform name comes only from listingPlatformAr)', !NO_INTERNAL_FIELDS.test(readAloudScript));
-check('card facts come from the SAME Arabic display helpers ResultCard.tsx itself uses (one derivation, spoken can never disagree with shown)', /listingTypeAr\(listing\)/.test(readAloudScript) && /listingLocationAr\(listing\)/.test(readAloudScript) && /listingPriceAr\(listing\)/.test(readAloudScript) && /export function listingTypeAr/.test(listingDisplay) && /export function listingPriceAr/.test(listingDisplay));
+// 2026-11-03: the spoken headline names the type the user searched — the same listingSearchedTypeAr() the card headline uses.
+check('card facts come from the SAME Arabic display helpers ResultCard.tsx itself uses (one derivation, spoken can never disagree with shown)', /listingSearchedTypeAr\(listing\)/.test(readAloudScript) && /listingLocationAr\(listing\)/.test(readAloudScript) && /listingPriceAr\(listing\)/.test(readAloudScript) && /export function listingSearchedTypeAr/.test(listingDisplay) && /export function listingPriceAr/.test(listingDisplay));
 
 // ── PLATFORM NAME (owner request, 2026-08-22): speak which platform hosts each card, using the exact
 //    SAME 'Hosted on {name}' i18n key and sourceName() mapping ResultCard.tsx's visible "مستضاف على X"
 //    badge uses — moved to listingDisplay.ts as the ONE shared mapping so the spoken platform can
 //    never drift from what the card shows. ──────────────────────────────────────────────────────────
 const resultCard = rd('src/components/ResultCard.tsx');
-check('every card speaks its platform name last, via the shared listingPlatformAr() helper', /sentences\.push\(listingPlatformAr\(listing\)\);/.test(readAloudScript) && /import \{ listingTypeAr, listingLocationAr, listingPriceAr, listingPlatformAr \} from '\.\/listingDisplay';/.test(readAloudScript));
+check('every card speaks its platform name last, via the shared listingPlatformAr() helper', /sentences\.push\(listingPlatformAr\(listing\)\);/.test(readAloudScript) && /import \{ listingSearchedTypeAr, listingLocationAr, listingPriceAr, listingPlatformAr \} from '\.\/listingDisplay';/.test(readAloudScript));
 check('listingPlatformAr() reuses the SAME \'Hosted on {name}\' i18n key the visible card badge renders — cannot say a different platform than what is shown', /export function listingPlatformAr[\s\S]{0,120}?translate\('ar', 'Hosted on \{name\}', \{ name: translate\('ar', sourceName\(listing\.source\)\) \}\)/.test(listingDisplay));
 check('sourceName() (the platform-slug-to-label mapping) lives in ONE place, listingDisplay.ts — ResultCard.tsx imports it rather than keeping its own copy', /export function sourceName\(source: string\): string \{/.test(listingDisplay) && /import \{ sourceName \} from '@\/lib\/listingDisplay';/.test(resultCard) && !/^function sourceName/m.test(resultCard));
 

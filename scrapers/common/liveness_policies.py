@@ -272,8 +272,9 @@ POLICIES: dict[str, _P] = {
         "strip of OTHER compounds beneath it, and 62 of the 129 compounds in the sitemap are in "
         "that state right now. A policy keyed on 404 would never retire anything here. So, read on "
         "the row's stored listing_url: 200 WITH that sentence is GONE; 200 carrying THIS unit's own "
-        "data-cin-contact-unit card is LIVE; a listed page without it (not yet measured), a 404, any "
-        "401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN. Wired into "
+        "data-cin-contact-unit card is LIVE; a page turned DIRECTORY entry (cin-directory-compound block, "
+        "no «Units» section, no unit card — measured 2026-11-03 on 4 compounds) is GONE for every unit; "
+        "a listed page without this unit, a 404, any 401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN. Wired into "
         "prune_unseen 2026-09-28, complete crawls only.",
         "Rows are UNITS, not compounds, so one delisted compound retires every unit that belonged "
         "to it — which is correct: the units went with it."),
@@ -344,7 +345,7 @@ POLICIES: dict[str, _P] = {
         "the node's own /<nid> url: HTTP 404 (Drupal's themed 404 — the status decides, never "
         "whether the page parsed). A 200 carrying data-history-node-id=<nid> is LIVE unless its "
         "own title/description carries RETIRED_TOKENS (retired in place). Any 401/403/429/5xx, a "
-        "transport failure and a 200 for another node are UNKNOWN.",
+        "transport failure and a 200 for another node are UNKNOWN. A 403 is UNKNOWN unless the owner rule of 2026-11-03 holds: two 403s on the node while a recently proven-live node of this site reads LIVE in the same check → GONE (an UNPUBLISHED node).",
         "Measured: the office deletes nodes — 30 of 30 sampled from the 5,295 nids in the live "
         "range the catalogue no longer carries answered 404; 15 of 15 live controls read LIVE."),
     "alshawaf": _P(
@@ -352,7 +353,7 @@ POLICIES: dict[str, _P] = {
         "the node's own /<nid> url: HTTP 404 (Drupal's themed 404). A 200 that passes "
         "parse_detail's own proof (article node id AND the node block's wa.me link both name this "
         "nid) is LIVE unless its own h1/«العقار» line says مزاد / تم البيع… (closed in place). "
-        "Any 401/403/429/5xx, a transport failure and an unproven 200 are UNKNOWN.",
+        "Any 401/403/429/5xx, a transport failure and an unproven 200 are UNKNOWN. A 403 is UNKNOWN unless the owner rule of 2026-11-03 holds: two 403s on the node while a recently proven-live node of this site reads LIVE in the same check → GONE (an UNPUBLISHED node).",
         "Measured: 31 of 31 sampled from the 4,569 nids in the live range the catalogue no longer "
         "carries answered 404; 15 of 15 live controls read LIVE."),
     "ialqarawi": _P(
@@ -1008,7 +1009,9 @@ POLICIES: dict[str, _P] = {
         _pol("wahadat", 3, 168), CRAWL_PRESENCE_ONLY,
         "the unit's OWN status in its project's record, read every run (2026-10-07): a unit the "
         "source states as sold or reserved, in a project whose is_active is true, is gone and "
-        "takes a strike; a unit that merely drops out of the list, or whose project is unread, is "
+        "takes a strike; so does every unit of a project whose own page now answers the source's «المشروع "
+        "غير موجود» page (200, same as a bogus slug — measured 2026-11-03 on قسورة-02 and دام-101) in a run "
+        "that read a real project; a unit that merely drops out of the list, or whose project is unread, is "
         "UNKNOWN and is never hidden (absence only selects candidates). prune_unseen's 3-strike, "
         "coverage and collapse guards still apply.",
         "Not CANDIDATE_PLUS_DIRECT even though a project page can be re-fetched: the unit-level "
@@ -1191,11 +1194,24 @@ POLICIES: dict[str, _P] = {
         "the crawl's OWN seen-set over the site's own list pages /ar/ads?page=N (24 per page, a declared "
         "totalCount). run.py suppresses prune_unseen unless the walk reached the declared total.",
         "No oracle is written yet, so this does not claim a direct check."),
+    "aqaratikom": _P(
+        _pol("aqaratikom", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the ad's OWN record in the API the crawl reads, GET nawait.sa/api/v1/ad/<uuid> (the listing "
+        "page is a login-walled shell, identical for live and removed ads): 404 is GONE; 200 for this "
+        "uuid with is_sold true is GONE, otherwise LIVE; a 500 is UNKNOWN unless the owner rule of "
+        "2026-11-03 holds — two 500s while a recently proven-live ad's record reads LIVE in the same "
+        "check → GONE. Any other answer is UNKNOWN.",
+        "Measured 2026-11-03 from a browser: live → 200 data.id=uuid; made-up uuid → 404; the ads the "
+        "crawl stopped seeing → 500 on every read. Oracle: scrapers/aqaratikom/run.py::_verify_gone."),
     "ashab": _P(
         _pol("ashab", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's own list /properties?page=N (447 ads, 51 pages) and "
-        "each building's unit cards. run.py suppresses prune_unseen unless every page was readable.",
-        "No oracle is written yet, so this does not claim a direct check."),
+        "each building's unit cards. run.py suppresses prune_unseen unless every page was readable. "
+        "Each at-grace row then gets a DIRECT read of its own page: 404, or its own badge «مباع»/«مؤجر»/"
+        "«محجوز», is GONE; a unit page whose PARENT ad answers 404 is GONE; badge «متاح» under a live "
+        "parent is LIVE; any 401/403/429/5xx or unreadable page is UNKNOWN.",
+        "Oracle written 2026-11-03 (scrapers/ashab/run.py::_verify_gone): ASB490139 sat on the list as "
+        "«محجوز» and ASB523764-U179x lived on as unit pages of the deleted ad /properties/1211 (404)."),
     "manafe": _P(
         _pol("manafe", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over /manafemar/project/1…N (the index links only 40; the walk is checked "
@@ -1211,6 +1227,14 @@ POLICIES: dict[str, _P] = {
         "the crawl's OWN seen-set over the site's own list /properties («البيع المباشر», 31). "
         "run.py suppresses prune_unseen unless every detail page was readable.",
         "No oracle is written yet, so this does not claim a direct check."),
+    "azdad": _P(
+        _pol("azdad", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the site's own API asked per ad (run.read_api): no row while this run's catalogue is non-empty, "
+        "or status «مباع», is GONE; «متاح» is live; anything else UNKNOWN. A removed ad's page answers 200 "
+        "«غير موجود», so the page status is never used. Absence only nominates; prune_unseen asks this "
+        "oracle at grace (2026-10-31) and strike_read_gone asks it when the prune is refused, each gone "
+        "answer gated on a seen «متاح» control reading live.",
+        "Tier not yet raised: the registry reseed that moves it to CANDIDATE_PLUS_DIRECT is a held apply."),
     "ryadah": _P(
         _pol("ryadah", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the WP REST property posts (Arabic only). "
@@ -1416,8 +1440,8 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abralosol", "abwbna", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj", "aqaratikom",
-            "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
+            "abralosol", "abwbna", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj",
+            "arkaan", "awal", "bahadhabab", "erapulse",
             "jurash",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal",

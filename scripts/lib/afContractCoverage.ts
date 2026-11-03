@@ -144,7 +144,7 @@ const S5: Entry[] = [
 
 // ── §6 ROUNDS ────────────────────────────────────────────────────────────────────────────────────
 const S6: Entry[] = [
-  { rule: 'R6.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-round-size'], evidence: 'AF_ROUND_MAX_QUESTIONS=4' },
+  { rule: 'R6.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-round-size'], evidence: 'AF_ROUND_MAX_QUESTIONS=7' },
   { rule: 'R6.1.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-size'], evidence: 'a 1-question round is valid' },
   { rule: 'R6.1.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-size'], evidence: 'scope steps do not count' },
   { rule: 'R6.1.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-size', 'verify-af-salience-orders-only'], evidence: '2026-09-03 §7: the selection is now asserted directly, not just the absence of a slice — a 6-question pool enumerated WORST-FIRST must yield the top-4 by (real askTier, score), no outscored question dropped, a 2-question pool asks 2. NOT L: advancedFilters.ts/agent.tsx are not standalone-importable by a plain Node runner, so §7 executes the real askTier but assembles the round itself; §7.1 pins the modelled comparator and the count-only cap to the production expressions. Mutation: truncating in pool order, or dropping the tier key from the real comparator, turns it red' },

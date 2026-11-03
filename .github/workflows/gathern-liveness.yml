@@ -139,6 +139,14 @@ jobs:
           # worse than one that fails, because the log reads like the work happened.
           APPLY_FLAG: ${{ (inputs.apply && github.ref == 'refs/heads/main') && '--apply' || '' }}
         run: |
+          # ── --proxy-fallback (2026-11-01, Lifecycle) ──
+          # Built 2026-10-24 (#8508) and never passed here, so it never ran: served units the direct
+          # egress leaves with NO verdict (home landing under both fingerprints, a dropped read) went on
+          # reading «transient» every hour — GTH246249 36 times in 3 days, last alive 10-28, still on
+          # screen. It re-reads ONLY those units through the residential proxy and takes ONLY a 200
+          # (restorative); a proxy-side 404 stays no verdict, so it can never strike or hide. ~5-19
+          # units an hour (the run notes' transient=), far under rule 8's 20% proxy line.
+          # Ignored on a --proxy run (everything already goes through the proxy).
           # ── HOLD RELEASED 2026-08-17 by the owner (DIE run #26). History kept deliberately. ──
           # Until 2026-08-16 the auto cap silently resolved to its 150 floor because the denominator
           # was read with head=True (.count = 0 on supabase==2.10.0). Run #24 fixed that and then
@@ -168,6 +176,7 @@ jobs:
             --canaries ${{ inputs.canaries || '10' }} \
             ${{ inputs.kill_cap && format('--kill-cap {0}', inputs.kill_cap) || '' }} \
             ${{ (github.event_name != 'schedule' && inputs.recheck_dead) && '--recheck-dead' || '' }} \
+            --proxy-fallback \
             $PROXY_FLAG $APPLY_FLAG
 
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────

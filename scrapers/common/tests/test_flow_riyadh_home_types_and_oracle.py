@@ -109,26 +109,39 @@ def _row(fp, prop_slug="riyadh-granada", by_fid=URL_BY_FID):
 
 # 1 ── price ─────────────────────────────────────────────────────────────────────────────────────
 def test_starting_price_is_stored_exactly_annual_only_from_the_year_word():
+    # The page prints ONE «From SAR N / yr»: the furnished figure on a furnishedAvailable home (backlog 1182)
     row, cat = _row(FP_2BR)
-    assert row["price_annual"] == 152000 and row["rent_period"] == "annual"
+    assert row["price_annual"] == 176000 and row["rent_period"] == "annual"
     assert row["additional_info"]["furnished_starting_price"] == 176000
-    assert row["additional_info"]["price_high"] == 176000 and row["additional_info"]["lease_duration"] == "P12M"
+    assert row["additional_info"]["unfurnished_starting_price"] == 152000
+    assert row["additional_info"]["price_high"] == 204000 and row["additional_info"]["lease_duration"] == "P12M"
     assert "price_total" not in row and row["transaction_type"] == "Rent"
     assert cat == "residential" and row["property_type"] == "Apartment"
     assert row["title"] == "Flow Granada – 2 Bedroom" and row["city_ar"] == "الرياض" and row["district_ar"] == "حي غرناطة"
     assert row["neighborhood"] == "Granada" and row["bedrooms"] == 2 and row["bathrooms"] == 3 and row["area_m2"] == 107
 
 
+def test_the_printed_figure_is_the_furnished_one_only_when_the_home_offers_it():
+    # Najm 3 Bedroom, riyadh-narjis (backlog 1182, measured 2026-11-02): page prints «SAR 154,800», JSON 153,800 / 154,800
+    najm = {**FP_2BR, "title": "Najm 3 Bedroom", "startingAtPrice": 153800, "startingAtFurnishedPrice": 154800}
+    assert R.price_from_floorplan(najm)[:2] == (154800, "annual")
+    # a home that does not offer furnished prints its base figure
+    assert R.price_from_floorplan({**najm, "furnishedAvailable": False})[0] == 153800
+    assert "unfurnished_starting_price" not in R.price_from_floorplan({**najm, "furnishedAvailable": False})[2]
+    # no furnished figure at all → the base one, never None
+    assert R.price_from_floorplan({**najm, "startingAtFurnishedPrice": None})[0] == 153800
+
+
 def test_other_intervals_are_never_parked_as_annual():
     # FP_2BR's verbatim price block with ONE key changed — the shape a future source edit would take.
-    assert R.price_from_floorplan({**FP_2BR, "startingAtPriceInterval": "month"})[:2] == (152000 * 12, "monthly")
+    assert R.price_from_floorplan({**FP_2BR, "startingAtPriceInterval": "month"})[:2] == (176000 * 12, "monthly")
     nightly = R.price_from_floorplan({**FP_2BR, "startingAtPriceInterval": "night"})
-    assert nightly[:2] == (None, None) and nightly[2]["starting_price_raw"]["price"] == 152000
+    assert nightly[:2] == (None, None) and nightly[2]["starting_price_raw"]["price"] == 176000
     usd = R.price_from_floorplan({**FP_2BR, "startingAtCurrency": "USD"})
     assert usd[:2] == (None, None) and usd[2]["starting_price_raw"]["currency"] == "USD"
-    assert R.price_from_floorplan({**FP_2BR, "startingAtPrice": None}) == (None, None, {})
+    assert R.price_from_floorplan({**FP_2BR, "startingAtPrice": None, "startingAtFurnishedPrice": None}) == (None, None, {})
     wadi = R.price_from_floorplan(FP_WADI)
-    assert wadi[0] == 163000 and "price_high" not in wadi[2]
+    assert wadi[0] == 189000
 
 
 # 2/3 ── furnished tri-state, fractional counts ───────────────────────────────────────────────────
@@ -149,7 +162,7 @@ def test_half_bathroom_and_fractional_area_keep_the_exact_figure():
     assert wadi["photo_urls"] is None and "new_construction" not in wadi["additional_info"]
     b2, _ = _row(FP_B2, "riyadh-olaya")
     assert b2["area_m2"] == 89 and b2["additional_info"]["area_exact"] == "89.84" and b2["bathrooms"] == 2
-    assert b2["district_ar"] == "حي العليا" and b2["price_annual"] == 226999
+    assert b2["district_ar"] == "حي العليا" and b2["price_annual"] == 227000
 
 
 # 4 ── skips ─────────────────────────────────────────────────────────────────────────────────────

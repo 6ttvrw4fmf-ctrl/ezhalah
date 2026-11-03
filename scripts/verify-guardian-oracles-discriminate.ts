@@ -395,5 +395,32 @@ console.log('\n§3 no guardian journey asserts on raw RPC traffic');
     src.includes('ctx.resultsSearches.length'));
 }
 
+// ═══ §4 · the card's location, on BOTH cards (backlog 839, incident #965) ═══════════════════════
+// The laptop photo-first card (ResultCard.tsx `row === 'roomy'`, owner 2026-10-11) prints no country
+// line, so the old country-line-only check failed every desktop card from 2026-10-11 although each
+// showed «حي النرجس, الرياض». The samples are the cards' real innerText (incident #965 evidence and a
+// phone card), executed against the journey's own predicate.
+console.log('\n§4 the result card location reads both card shapes');
+{
+  const { cardLocationProblem } = await import('../e2e/guardian/journeys.mjs');
+  const LAPTOP = '#1\nفيلا للبيع\nsa.aqar.fm\nر.س 2,800,000\nر.س 2,850,000\nخصم 2٪\nاضغط هنا 👆\nللتأكد من التوفر والتفاصيل\nحي النرجس, الرياض\nفيلا\n\n4\nغرف\n\n5\nحمامات\n\n241 م²\nالمساحة\nأضيف 01/09/2026\nمستضاف على عقار';
+  const LAPTOP_NO_DISTRICT = LAPTOP.replace('حي النرجس, الرياض', 'الرياض');
+  const PHONE = 'فيلا للبيع\nsa.aqar.fm\nحي النرجس, الرياض\nر.س 2,800,000\nالرياض, المملكة العربية السعودية';
+  check('a laptop card «حي النرجس, الرياض» has a location', cardLocationProblem(LAPTOP, 'الرياض') === null);
+  check('a laptop card with no district («الرياض») has a location', cardLocationProblem(LAPTOP_NO_DISTRICT, 'الرياض') === null);
+  check('a phone card «الرياض, المملكة العربية السعودية» has a location', cardLocationProblem(PHONE, 'الرياض') === null);
+  mustCatch('a laptop card that prints «الموقع غير محدد» instead of the city',
+    cardLocationProblem(LAPTOP.replace('حي النرجس, الرياض', 'حي النرجس, الموقع غير محدد'), 'الرياض') !== null);
+  mustCatch('a laptop card filed under another city than the one searched',
+    cardLocationProblem(LAPTOP.replace('حي النرجس, الرياض', 'حي النرجس, جدة'), 'الرياض') !== null);
+  mustCatch('a laptop card with no location line at all',
+    cardLocationProblem(LAPTOP.replace('حي النرجس, الرياض\n', ''), 'الرياض') !== null);
+  mustCatch('a phone card whose country line names no city',
+    cardLocationProblem(PHONE.replace('الرياض, المملكة', '\nالمملكة').replace('حي النرجس, الرياض\n', ''), 'الرياض') !== null);
+  const src = readFileSync(join(ROOT, 'e2e/guardian/journeys.mjs'), 'utf8');
+  check('G5 asserts through cardLocationProblem, against the city it searched',
+    src.includes('cardLocationProblem(t, SEARCH_CITY)') && src.includes('searchAsGuest(page, { city: SEARCH_CITY })'));
+}
+
 if (failed) { console.error(`\nverify-guardian-oracles-discriminate: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-guardian-oracles-discriminate: the guardian suite files P1s only on what production actually did.');

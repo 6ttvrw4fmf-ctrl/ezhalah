@@ -26,6 +26,7 @@ import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup } from '@/lib/authPopupBehavior';
 import { attachCardDrag, clampOffsetOnScreen } from '@/lib/cardDrag';
 import { getLegalDocs, hasLegalDocs } from '@/data/legal';
+import { getAfHowItWorks } from '@/data/afHowItWorks';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const IN = { duration: 240, easing: Easing.bezier(0.22, 1, 0.36, 1) };
@@ -61,10 +62,15 @@ const TOP_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP;
 const SUPPORT_MAX_W = 540;
 const ABOUT_MAX_W = 760;
 const LEGAL_MAX_W = 640;
+// «كيف يشتغل؟» opens at the Advanced Filter QUESTION CARD's own width and height, not the Terms reader's
+// (owner 2026-11-02: «i dont like how its very big … make it the same size»). 380 = AdvancedQuestionCard
+// `card.maxWidth`; the text scrolls inside, the box never grows past the card's footprint.
+const AF_HOW_MAX_W = 380;
+const AF_HOW_MAX_H = 640;
 const ABOUT_MAX_H = 700;
 
 const EAGLE = require('../../assets/images/logo-cloud-green-static.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
-type Kind = 'support' | 'about' | 'legal';
+type Kind = 'support' | 'about' | 'legal' | 'afhow';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
 // blurred, dimmed page. Mounted at the app root (Shell) so it overlays every screen and works in
@@ -73,7 +79,9 @@ type Kind = 'support' | 'about' | 'legal';
 export default function InfoModal() {
   const { modal, closeModal } = useApp();
   if (!modal) return null;
-  const kind: Kind = modal === 'privacy' ? 'legal' : modal;
+  // 'af-how' is «كيف يشتغل دقّق مع الذكاء الاصطناعي؟» (owner 2026-11-01): the Advanced Filter card's note, read in
+  // this same host as the Terms reader — white card, eagle, ✕ top-right in both languages.
+  const kind: Kind = modal === 'privacy' ? 'legal' : modal === 'af-how' ? 'afhow' : modal;
   return <Sheet kind={kind} legalTab={modal === 'privacy' ? 'privacy' : 'terms'} onClose={closeModal} />;
 }
 
@@ -139,14 +147,14 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   // moves the card and still leaves the × under the prompt (ops_incident #670 — see centredDialogBox).
   const dialogBox = centredDialogBox(height, 16, insets, promptInsets, 48);
   const availH = dialogBox.availHeight;
-  const maxH = Math.min(availH, about ? ABOUT_MAX_H : 720);
-  const maxW = about ? ABOUT_MAX_W : kind === 'legal' ? LEGAL_MAX_W : SUPPORT_MAX_W;
+  const maxH = Math.min(availH, about ? ABOUT_MAX_H : kind === 'afhow' ? AF_HOW_MAX_H : 720);
+  const maxW = about ? ABOUT_MAX_W : kind === 'afhow' ? AF_HOW_MAX_W : kind === 'legal' ? LEGAL_MAX_W : SUPPORT_MAX_W;
 
   return (
     <View
       style={[
         s.overlay,
-        kind === 'legal' && s.overlayTop,
+        (kind === 'legal' || kind === 'afhow') && s.overlayTop,
         // ── A FIXED OVERLAY IS INVISIBLE TO THE ROOT'S RESERVED BAND (ops_incident #670) ─────────
         // `_layout.tsx` reserves a top-docked auth prompt's height as the app root's paddingTop,
         // and that correctly moves everything laid out INSIDE it. This overlay is not: it resolves
@@ -202,6 +210,7 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
           <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
             {kind === 'support' ? <SupportBody t={t} />
               : kind === 'about' ? <AboutBody t={t} reduced={reduced} gripRef={gripRef} drag={drag} />
+              : kind === 'afhow' ? <HowItWorksBody t={t} />
               : <LegalBody t={t} initial={legalTab} />}
           </ScrollView>
         </Animated.View>
@@ -503,6 +512,37 @@ function AboutBody({ t, reduced, gripRef, drag }: {
   );
 }
 
+// ————————————————————————————— «كيف يشتغل دقّق مع الذكاء الاصطناعي؟» ————————————————————————————————
+// The Advanced Filter card's note, opened from its «كيف يشتغل؟» link (owner 2026-11-01). Same reading
+// dialog as the Terms: the eagle lockup, then the owner's six sections (src/data/afHowItWorks.ts),
+// rendered with the legal reader's own styles so the two popups look like one family. No tabs, no
+// emoji, no contact address.
+function HowItWorksBody({ t }: { t: Tr }) {
+  const { locale, isRTL } = useI18n();
+  const docs = getAfHowItWorks(locale);
+  return (
+    <View testID="af-how-it-works">
+      <View style={s.head}>
+        <View style={s.legalLockup}>
+          <XImage source={EAGLE} style={s.afHowEagle} contentFit="contain" />
+          <Text style={[s.h, s.legalTitle, s.afHowTitle, !isRTL && s.textLtr]}>{t('How Refine with AI works')}</Text>
+        </View>
+      </View>
+      <View style={s.bodyPad}>
+        {docs.map((p, i) => {
+          const [heading, ...paragraphs] = p.split('\n\n');
+          return (
+            <View key={i}>
+              <Text accessibilityRole="header" style={[s.legalSectionTitle, !isRTL && s.textLtr]}>{heading}</Text>
+              {paragraphs.map((paragraph, j) => <Text key={j} style={[s.legalP, !isRTL && s.textLtr]}>{paragraph}</Text>)}
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 // ————————————————————————————————— «الشروط والخصوصية» ——————————————————————————————————————
 // A reading dialog with two tabs. The TEXT is the owner's (src/data/legal.ts) — nothing here is
 // invented, and the dialog is unreachable until both documents exist (hasLegalDocs gates the
@@ -630,6 +670,8 @@ const s = StyleSheet.create({
   // cancelled back to 0 on this specific usage so the clearance is never reserved twice.
   legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
   legalEagle: { width: 44, height: 44 }, // big and sharp enough to read as our logo (owner 2026-10-25; was 20 px)
+  afHowEagle: { width: 34, height: 34 },
+  afHowTitle: { fontSize: 18, lineHeight: 26 }, // the question card's title scale, not the Terms reader's 22
   legalTitle: { paddingRight: 0, flexShrink: 1 },
 
   // ——— «تواصل مع الدعم» form (owner 2026-09-02; spacing/inputs 2026-09-03) ———

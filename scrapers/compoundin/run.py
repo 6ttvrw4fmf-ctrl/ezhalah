@@ -232,6 +232,18 @@ def is_delisted(page_html: str) -> bool:
     return bool(m and _DELISTED_RE.search(m.group(1)))
 
 
+def is_directory_only(page_html: str) -> bool:
+    """A compound whose units were all withdrawn: CompoundIn keeps the page (HTTP 200, same h1) but
+    renders it as a DIRECTORY entry — `cin-directory-compound` block with its map, «About / Location /
+    Compounds near …» — and no «Units» section and no unit card at all. Measured live 2026-11-03:
+    aqua-compound, retal-residence, florentina-compound and soul are in that state (0 unit cards, no
+    `cin-property-units`), while listed compounds (azure-al-reem 10 units, dur-alhada 3) carry the
+    `cin-property-units` section and no directory block. All three conditions must hold."""
+    return ("cin-directory-compound" in page_html
+            and "cin-property-units" not in page_html
+            and "cin-unit-card" not in page_html)
+
+
 def compound_location(page_html: str) -> tuple[Optional[str], Optional[str]]:
     """(city_en, district_en), each read from a place the source uses for that field only.
 
@@ -393,8 +405,10 @@ def photos(page_html: str) -> Optional[list[str]]:
 # shared law. A delisted compound answers HTTP 200 with «This compound is no longer listed» in its
 # <h1> (CIN703/CIN704, ayanna-olaya-compound, 2026-09-28: gone from the sitemap, page delisted, rows
 # still active since 09-22) → GONE for every unit it had. A listed page carrying this unit's own
-# `data-cin-contact-unit` card → LIVE. Anything else — including a listed page without this unit,
-# which has not been measured — is no opinion, so the row holds.
+# `data-cin-contact-unit` card → LIVE. A page turned into a directory entry (no «Units» section, no
+# unit card, `cin-directory-compound` block — see is_directory_only) → GONE for every unit it had.
+# Anything else — including a listed page with a «Units» section that omits this unit — is no
+# opinion, so the row holds.
 _AD_RE = re.compile(rf"^{PREFIX}(\d+)$")
 
 
@@ -403,6 +417,9 @@ def _unit_signal(uid: str):
         if status != 200:
             return None
         if is_delisted(body):
+            return "gone"
+        if is_directory_only(body) and not _moved:
+            # the page now lists no units at all: every unit it had went with them (2026-11-03)
             return "gone"
         return "live" if any(c["uid"] == uid for c in unit_cards(body)) else None
     return signal

@@ -6,6 +6,9 @@
 # nobody was at that laptop. This workflow gives the same script a home that the owner (and the
 # engineering routines) can reach from anywhere.
 #
+# 2026-11-01 (owner, «fully automate those engineers»): auto-deploy-merged-fixes.yml dispatches this workflow when
+# app files changed on main. Every guard below and the 10% canary still decide; this file stays dispatch-only.
+#
 # WHAT IT IS NOT. It is NOT auto-deploy-on-push, and it must never become that. docs/DEPLOY_SAFETY.md
 # records why this repo deliberately does not use Vercel's Git integration: a deploy must be a
 # deliberate act, taken against a known-good main, holding the deploy lock. `workflow_dispatch` keeps

@@ -217,11 +217,25 @@ def unit_uid(u: dict) -> str:
 OFF_MARKET_STATUSES = ("sold", "reserved")
 
 
+# A project the source has REMOVED answers HTTP 200 with its own «not found» page: <title>«المشروع غير
+# موجود | وحدات», body «404 الصفحة غير موجودة» — byte-for-byte the page a made-up slug gets. Measured
+# live 2026-11-03: قسورة-02 and دام-101 (their units at 12 strikes, served since 10-21) answer it, while a
+# listed project (ريزي-33-النرجس) answers its own name. Its units went with it: off market. Read only
+# from a page that did NOT parse as a project, and only in a run that read at least one real project.
+_PROJECT_NOT_FOUND = re.compile(r"<title>\s*المشروع غير موجود")
+
+
+def project_not_found(page_html: str) -> bool:
+    return bool(_PROJECT_NOT_FOUND.search(page_html or ""))
+
+
 def off_market_oracle(off_market: dict[str, str]):
     """verify_gone for prune_unseen: gone only for units this run read as sold/reserved."""
     def verify_gone(ad_number: str):
         st = off_market.get(ad_number)
         if st:
+            if st == "project_not_found":
+                return "gone", "its project page answers the source's own «المشروع غير موجود» (removed)"
             return "gone", f"the unit's own record in its project page states status={st}"
         return "unknown", "not read as sold/reserved this run (absence is never a death)"
     return verify_gone
@@ -277,6 +291,16 @@ def struck_unlisted_projects(sitemap_urls: list[str]) -> list[str]:
     return sorted(out - listed)
 
 
+def project_description(proj: dict[str, Any]) -> Optional[str]:
+    """The project's own about text, tags stripped, PII redacted; None when the page has none."""
+    raw = proj.get("about_ar")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = normalize.html_block_lines(raw) if "<" in raw else raw
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    return redact_pii(text) or None
+
+
 def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[str, Any], str]:
     """(row, category) for ONE unit already proven `status == available` and type-resolved."""
     category = normalize.category_for_type(ptype).lower()
@@ -325,6 +349,12 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
         # The PROJECT's own gallery (see _main_project). Units carry no images of their own on
         # this source, so every unit of a project shows that project's photos.
         "photo_urls": proj.get("images") or None,
+        # The project's own «about» text (`about_ar`), whole and verbatim (redacted, PDPL). It was
+        # parsed into `proj` since onboarding and never written: 2026-10-31, 0 of 998 active units
+        # stored a description, so the AI facts reader had nothing to read (backlog 892). Units carry
+        # no text of their own on this source, so every unit of a project carries that project's
+        # text — the same scope as its photos. No text → NULL, never ''.
+        "description": project_description(proj),
     }
     if deal == "Buy":
         row["price_total"] = price
@@ -394,6 +424,7 @@ def main() -> int:
     held: set[str] = set()      # units of a project whose own is_active is not True — see below
     off_market: dict[str, str] = {}   # ad_number -> sold/reserved, read from the unit's own record
     seen_projects = 0
+    removed_projects: set[str] = set()   # project pages that answered the source's own «not found»
     try:
         for u in urls:
             try:
@@ -403,6 +434,8 @@ def main() -> int:
                     continue
                 proj, units = parse_project(r.text, u)
                 if proj is None:
+                    if project_not_found(r.text):
+                        removed_projects.add(u)
                     skipped["project_object_not_found"] = skipped.get("project_object_not_found", 0) + 1
                     continue
             except Exception as e:                      # noqa: BLE001
@@ -472,6 +505,9 @@ def main() -> int:
                 except Exception:                       # noqa: BLE001 — unread stays unknown
                     struck = []
                 off_market.update(read_unlisted_projects(sess, set(urls), struck))
+                if seen_projects:                       # a real project was read: the site serves us
+                    off_market.update({r["ad_number"]: "project_not_found" for r in struck
+                                       if r.get("listing_url") in removed_projects})
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | held, source=SOURCE,
                                     verify_gone=off_market_oracle(off_market))
                 if n < 0:

@@ -48,6 +48,20 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-11-02. Two kitchens whose ad says «مطبخ غير راكب» went back to unknown (alert 12326, backlog 1189).
+  '20261102105648_kitchen_not_installed_stays_unknown.sql':
+    'two-row evidence repair (akariyoun 12049465, therc 10283616) to NULL, the value the reader already computes; it is ' +
+    'watched by the standing detector that found it, mon_detect_not_installed_served_as_yes (alert not_installed_served_as_yes), ' +
+    'which re-raises if any stored kitchen yes sits on an ad whose own words say the kitchen is not installed. The applied ' +
+    'file cannot be edited to name it (content parity: this is its byte-exact mirror).',
+  // 2026-10-31. AI facts reader: 13 sites' description text arrived AFTER the AI had read the title alone, so every AI row
+  // written before those crawls is stamped text_hash = 'read-before-text:2026-10-31' and the ad reads as UNREAD again.
+  '20261031080211_ai_facts_reader_rereads_when_the_text_arrives_or_changes.sql':
+    'not a listing-field repair: it re-stamps listing_facts.text_hash so facts_ai_is_read() answers false and the ad is ' +
+    'picked again; nothing a user sees is edited and a re-scrape cannot undo it. The invariant (every new ad with text is ' +
+    'read) is watched by the standing alarm from the day before: ops_ai_facts_unread_new() + mon_detect_text_facts raising ' +
+    'ai_facts_new_ads_unread (20261030061800, P2, fail-closed — scripts/verify-ai-reader-never-skips-silently.ts). The ' +
+    'applied file cannot be edited to name a detector (content parity: this is its byte-exact mirror).',
   // 2026-10-25. Pin districts batch 2 switched on (owner): `applied = true` on listing_pin_district rows, no listing value edited.
   '20261025214336_pin_district_batch_2_switch_on.sql':
     'not a listing-field repair: it flips listing_pin_district.applied, the switch the recovery arm reads; a re-scrape ' +
@@ -107,6 +121,12 @@ const WAIVED: Record<string, string> = {
     'changes no listing row: the one UPDATE (DA417737) runs inside the proof sub-blocks that always roll back, and the ' +
     'migration fails if a bridge row survives; the bridge edit itself is pinned by verify-dealapp-town-placed-by-own-pin.ts ' +
     'and the scraper half by test_dealapp_own_pin_town_2026_10_18.py',
+  // ⚡ 2026-11-02. aqar closed-ad price repair (32 rows priced from another ad's «إعلانات مشابهة» card → NULL).
+  '20261102051729_aqar_parse_never_reads_similar_ad_price.sql':
+    'watched by its companion 20261102053242_mon_detect_aqar_price_over_authoritative_absent.sql, which creates ' +
+    'mon_detect_aqar_price_over_authoritative_absent() (P1) over the same predicate and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted neighbour price is caught). The function ' +
+    'half is pinned by verify-aqar-parse-ignores-similar-ads.ts',
   // 2026-10-18. ksaaqar `neighborhood` repair (data half of #7511), applied before its detector existed.
   '20261018125140_ksaaqar_neighborhood_holds_only_a_stated_district.sql':
     'watched by its companion 20261018131230_mon_detect_ksaaqar_neighborhood_unstated.sql, which creates ' +

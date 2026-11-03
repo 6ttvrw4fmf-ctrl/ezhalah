@@ -1,5 +1,13 @@
 # ♻️ LIFECYCLE ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
 > **🔢 THE SITE COUNT MOVES BY ITSELF (owner, 2026-10-27 — «a new website goes up, the number changes»).** The
 > «نبحث في N منصة» number and the logo strip both come from ONE list, `loader_active_platforms_ar()`: a site
 > counts and shows its logo only while it is active in `platform_registry` AND has at least one
@@ -1184,6 +1192,20 @@ or rewrite another engineer's work, and never start a big change in another engi
   its red run attaches to the head commit and the merge gate refuses ANY non-success check. Push the
   next commit (the lesson line) after the diagnostics, or dispatch them on a scratch branch.
 
+- **2026-11-02 (♻️):** a feed sighting un-hid every own-page «gone» hide on every site. `db._wasalt_batch` reset
+  `missing_count = 0 / active = true` for any row the list still served, so a hide made on the ad's own page
+  lasted until the next crawl (nowaisiry NW4538 hidden 10-31, back 11-01, dead on the 11-02 score; muhaysini
+  MHS42/MHS2213 killed 3/3 every ~3 days since 10-17). `db.page_gone_holds` now keeps a hidden row hidden while
+  its newest probe-ledger reading is GONE and newer than its last alive stamp (#9959). When a hide «does not
+  stick», read the ledger against `last_seen_at` before suspecting the checker.
+- **2026-11-02 (♻️):** a long-lived session is a reader, and it can go blind. Gathern's hourly sweep reads
+  ~1,500 units on one session; gathern sent that session home for a growing set of units, so 178 served units
+  read «transient» for 26+ h while a fresh session read 33 of 43 of them 404 (spot-check 41434405092). The
+  proxy fallback could not help: it only takes a 200. A unit still without a verdict is now re-read once on a
+  fresh session (`liveness.fresh_read`, #9959). When «transient» grows while controls stay 10/10, compare a
+  fresh-session read of the same ids before touching anything else. And a seller's own «(تم البيع)» /
+  «(تم التأجير)» in a 200 title is a removal (haraj, 52 served, #9960).
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
@@ -1404,6 +1426,38 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   open. The page had changed `"@type":"RealEstate"` to `"RealEstateListing"`. Fix: PR 8403. On the second QUARANTINED
   morning, fetch ONE live control page and run the site's `_signal()` on it before anything else.
 
+## Lessons from 2026-10-31 (♻️)
+- **A «0 gone» from a status-only reader on a soft-404 site is blindness, not health.** albukaeri (removed ad = 200
+  empty shell) and superoffice (old office page = redirect to a category) were scored `status-only` every night, and
+  their unseen ads were never struck because `strike_read_gone` kept only «gone» readings: 6 albukaeri ads dead since
+  10-13 and 15 superoffice offices dead since 10-27 stayed on screen. Both sites are now read by their own
+  `run.read_own_page` in `lifecycle_spot_check._reader_for` (so the score and the spot check see what their prune sees),
+  and an own-oracle «live» now stamps and clears the strike (PR #9599). Every night, read the score's `method` column:
+  a site whose crawl has a body-reading oracle must never be `status-only` (azdad is the next one).
+- **A diagnostic on a scratch branch must be a DIFFERENT commit.** Check runs attach to the SHA, not the branch: a red
+  spot check dispatched on a scratch branch that points at the PR's own head blocks the merge gate exactly as if it
+  ran on the PR (10-31). Add an empty-diff-free marker commit to the scratch branch first, or push a new PR commit after.
+- **dealapp's sweep is bound by dealapp's view quota (~9 origin renders a minute ≈ 600 ads per 50-minute run).** A
+  bigger `--limit` cannot raise it; only more runs can. `gh-dealapp-liveness` went 2-hourly → hourly on 10-31
+  (migration 20261031110841) when active rows reached 49,052 at 73.0% in SLA.
+
+## Lessons from 2026-11-01 (♻️)
+- **A sweep that reads one page at a time inherits the source's latency.** aqar's pages went from <0.3 s to ~1.4 s on
+  10-31 (same route, same fingerprints, same shard size; job logs 2.8 reads/s → 0.6–0.8/s), so every residential shard
+  needed ~4 h and was SIGINT-killed at the 120-min cap (9/16 on 10-31, 16/16 on 11-01), leaving half of each shard
+  unread. When shard time doubles with no code change, read the `(N/s)` progress lines before suspecting a merge.
+  The fix is overlap, not more load: `scrapers/aqar/liveness.py::prefetch_pages` reads each 200-row chunk on
+  `AQAR_LIVENESS_READ_WORKERS` threads while `http._throttle` keeps request STARTS 0.3 s apart per host (PR #9794;
+  branch shard 11-01: 514 reads in 2 m 50 s, 3.0/s).
+- **A flag nobody passes is a fix that never ran.** gathern's `--proxy-fallback` (#8508, 10-24) re-reads no-verdict units
+  through the proxy, alive-only, but `gathern-liveness.yml` never passed it, so GTH246249 read «transient» 36 times in
+  three days while shown. When you build an opt-in flag, wire it into the scheduled command in the same PR and pin it
+  with a test that reads the workflow (PR #9794).
+- **«Served with no check > 26 h» on gathern is mostly units mid-strike, not skipped units.** On 11-01, 48 of 62 were
+  read alive ~28 h earlier and took their first 404 at 06:42; strikes 2 and 3 fall due in the KSA evening, when gathern
+  answers our runners 404 on every control (canary-quarantined 15:37 → 03:08, 10-30 and 10-31). Group that count by
+  `missing_count` and the last reading's verdict before calling it a coverage hole.
+
 ## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
 
 1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
@@ -1425,3 +1479,85 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
    An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
    sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
    the type list.
+
+## Lessons from 2026-10-24 and 2026-10-30 (copied by 🔧; the same lesson on two nights)
+
+- **A checker that reads «transient» on the SAME units every pass is a reader bug, not a source outage.** 10-24: an
+  egress that lands on the home page is a reader problem — re-read the same units through the proxy first (15 unread
+  → 11 alive + 4 dead in 3 minutes). 10-30: curl_cffi's chrome124 fingerprint alone was sent to /ar?error=500 on ~90
+  live Gathern units for 2–3 days while safari17_0, a plain client and a real Chromium opened them (#9432: transient
+  90 → 16 on the first sweep). Before building anything, compare the checker's fingerprint with a plain read and a
+  real browser on those exact URLs.
+- **Write every proof row with `push_ok = true` on a PASS.** Your three PASS rows of 10-30 (2257, 2259, 2261) carried
+  `push_ok` NULL and `ops_engineer_fix_rate` read the night as 0 proven of 4 (0%, over_claimed) until 🔧 taught the
+  view to read the notes too (20261030132552). The column is the contract; the notes are the evidence.
+- A liveness sweep that dies mid-run keeps its 2 h lock, so the crash costs the NEXT sweeps too — read the last run's
+  exit before trusting a «lock held» skip, and release a dead holder's lock at once (10-27).
+
+## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
+  06:54, after the slot, and a crawl after :20 cannot be customer-proven before the next hour's :22 sync (run
+  41175323616, daryusuf still Rent at 13:30). 🆕 10-31: two fixes merged whose proofs landed at 09:46 / 17:15, outside
+  the slot — rating 8 → 6 on timing alone. 🔧 10-24 / 10-25 lost the band the same way. Rule: pick the proof listing
+  BEFORE the fix, dispatch the proof crawl or journey before minute 30 and before :20 of the hour, and never choose a
+  job whose only proof lands after your slot (hand it to ♻️ or the automatic liveness instead).
+- **② A clean reading means nothing until you know HOW it was read.** ♻️ 10-30: one fingerprint (chrome124) was sent
+  home on ~90 live Gathern units and read «transient» every hour; ♻️ 10-31: albukaeri, superoffice and azdad were read
+  by HTTP status, their removed pages answer 200, so 23 dead ads sat on screen up to 18 days behind a clean row;
+  🔬 10-31: the score session's own cookies built a «recently viewed» strip on tuba that was read as the ad. Rule: before
+  trusting any robot's verdict print its method / fingerprint / session and compare with a plain read and a real browser
+  on the same URL; every body-reading site gets its own reader.
+- **③ Read one REAL record before coding against a field, and re-read the ad before touching data.** 🆕 10-31:
+  `url_path` existed only in our capture, not in the detail API — a 20-minute crawl read 0 of 952 pages. 🔬 10-30: a
+  «fabricated value» alarm on 12 rows was aqar's own value from a re-categorised ad. 🔧 10-31: 701 «stuck» prices were
+  the owner's own served meter-box rule, and the «absurd» wasalt totals are the seller's own words («سعرها 40500000000
+  ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
+  record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
+  truth.
+
+## 📚 FLEET LESSONS 2026-11-01 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A robot merge fires no push-triggered workflow — dispatch the follow-on yourself, the same minute.** 🔬 10-30: a
+  reader-version bump squashed by the auto-merge bot never ran its reader; 🔬 11-01 again: the word-reader fix #9783 sat
+  unread until `facts-words-reader` was dispatched by hand at 10:39 (run 41298393767). The same shape cost ⚡ its night
+  on 11-01: a queued nightly job checked out the DISPATCH-time commit and overwrote the fixed 06:54 crawl (backlog 1139).
+  Rule: after `engineer-automerge` merges your PR, dispatch the workflow that consumes it and read the RUN's commit SHA —
+  a fix is live only when a run from the FIXED commit is the LAST writer (⚡ 11-01). Seen on two nights → written into
+  🔬's rulebook as a rule.
+- **② Pick the job by where its PROOF lands, not by where the bug is.** ⚡ 11-01: three fixes merged, zero proven —
+  runners were saturated and every proof crawl queued past the slot (rating 4). 🆕 11-01: a migration job chose at
+  minute 70 met `apply_migration`'s confirmation prompt that nobody answers at night (draft #9761, nothing applied).
+  ♻️ 11-01 did it right: proofs dated to a NAMED job and UTC time (aqar-liveness 01:00 11-02; gathern-liveness 12:37/13:37)
+  so they count tomorrow instead of failing tonight. Rule: at minute 10 write, per job, the proof's workflow + the UTC
+  time it can land; a job whose proof needs a runner you cannot get or a prompt nobody can answer is swapped for one
+  whose proof is a CI journey or an RPC replay inside the slot — and a migration goes out as a ready draft PR at minute
+  10, never at minute 70.
+- **③ When a robot's number disagrees with the database, read what the robot TYPED before you read the RPC.** 🔧 11-01:
+  backlog 1141 «Filter total 11 vs DB 1» was the journey typing 11 digits into a 10-digit price box
+  (21,750,000,000 → 2,175,000,000; 11 is exactly the DB count for the band the box kept) — not a search bug. 🔧 11-01
+  also: mirror PR #9791 sat 2 h 40 min «red» because GitHub lists a PR's files against the merge BASE, so a mirror whose
+  file already reached main through another PR reads as a 1-file PR (the robot's empty-mirror rule never fires) and fails
+  a stale-mirror check its stale branch cannot pass. ♻️ 11-01 (1147): the sweep SESSION read a dead Gathern unit as
+  no-verdict 36 times while a fresh session read its 404. Rule: a robot's input, session and diff-base are part of the
+  measurement — print them in the evidence before judging the product with the robot's number.
+
+## 📚 FLEET LESSONS 2026-11-02 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A PR's lane is read from GitHub's MERGE-BASE file list, so a sibling PR landing first strands yours.** 🔬 11-01:
+  mirror #9791 read «red» 2 h 40 min after its file reached main inside #9793. 🔬 11-02: barrier #9949 (its script + the
+  mirror file) sat 3 h 45 min green and clean after mirror #9948 merged first — the robot saw «supabase/ and not a pure
+  mirror» and left it; `git merge origin/main` at 14:02 cleared it in one pass. Rule: ship a mirror and its barrier as
+  ONE PR, or the moment the sibling lands run `git fetch origin main && git merge origin/main && git push` on the other;
+  a PR that is «clean» and still open after 90 min is first a question about its file list against main.
+- **② The measuring tool is the first suspect when a count disagrees.** 🔬 11-02: the Trending check compared the
+  screen with the background warm-up call (96,842 vs 69,773 — both right), and the chip oracle missed the 10-26
+  price-on-request rule (3 P1s on correct chips); 🔧 11-01: the journey typed 11 digits into a 10-digit box, and #9791's
+  «red» was a diff-base illusion. Rule: before touching an RPC, diff the two row sets once (16,189 − 14,089 = exactly
+  the 2,100 no-price rows) and print what the tool typed, captured and compared against.
+- **③ Re-read the LIVE record before writing over data, and ship the batch with its undo ready.** ⚡ 11-02: a repair
+  NULLed 32 aqar prices on a closed-page capture; the live re-read showed 2 were wrong, and ~22 cards read «السعر عند
+  الطلب» for an hour (05:34–06:34 UTC). 🔬 10-30: a «fabricated value» alarm on 12 rows was aqar's own value from a
+  re-categorised ad. 🆕 10-31: a key that existed only in our capture cost a 20-minute crawl. Rule: one live read of the
+  record (the page or the current payload) before the first write; measure the live effect within minutes; undo in the
+  same run. (Third night of this family → ⚡'s rulebook carries it as a rule since #9910.)

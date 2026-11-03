@@ -157,8 +157,14 @@ function CrossfadeTintIcon({ source, p, off, on, size }: {
   const fill = { position: 'absolute' as const, top: 0, left: 0, width: size.width, height: size.height };
   return (
     <View style={[size, { overflow: 'hidden' }]}>
-      <AnimatedImage source={source} resizeMode="contain" style={[fill, { tintColor: off }, offA]} />
-      <AnimatedImage source={source} resizeMode="contain" style={[fill, { tintColor: on }, onA]} />
+      {/* KEYED BY THE TINT (owner bug 2026-11-01: on an iPhone in dark mode the unselected «تجاري», «الفلل والبيوت»,
+          «الاستراحات والريف», «الأراضي السكنية» icons were dark-on-dark, invisible). react-native-web tints through an
+          SVG filter whose id is fixed per Image; when the palette flips (light first paint → dark) only the filter's
+          flood colour changes under the SAME url(#tint-N), and Safari never repaints the image — so an icon drawn
+          before the theme settled kept the light theme's dark ink. A new key per colour mounts a fresh Image with a
+          fresh filter id, which every engine paints. */}
+      <AnimatedImage key={`off-${off}`} source={source} resizeMode="contain" style={[fill, { tintColor: off }, offA]} />
+      <AnimatedImage key={`on-${on}`} source={source} resizeMode="contain" style={[fill, { tintColor: on }, onA]} />
     </View>
   );
 }

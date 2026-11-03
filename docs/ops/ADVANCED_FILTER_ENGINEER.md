@@ -1,5 +1,13 @@
 # 🔬 Advanced Filter Engineer (owner, 2026-10-04)
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
 > **🔒 THE SUPABASE QUESTION RULE (owner, 2026-10-25 — wins over every other order about writing rows).** On 10-24 and
 > 10-25 ⚡ did the work but lost its whole report: an `execute_sql` call that contained an `UPDATE` (closing backlog items
 > in the same batch as a proof row) made the Supabase tool ask «destructive operation — run it?», nobody was awake to
@@ -55,7 +63,7 @@ customer who filters for an elevator. That is the bug you exist to make impossib
   `docs/AF_COHORT_LEDGER.md`, `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md`, `docs/ops/LISTING_LIVENESS.md`.
 - **The owner's standing Advanced Filter rules (never change them):**
   - every question is multi-select; several picks = the **exact union** of those options; never auto-pick, never collapse picks;
-  - the Advanced Filter **never opens by itself**; only the customer's tap «خلّنا نحدد الطلب أكثر» opens it;
+  - the Advanced Filter **never opens by itself**; only the customer's tap «🎯 دقّق مع الذكاء الاصطناعي» opens it;
   - after a round the screen **stays in place**: earlier turns dimmed, never removed; one whole summary (the search + «من الفلتر
     المتقدم» + one line per answer); chips are read-only (no ✕); no «مسح الكل»; back on the Filter = a clean form;
   - 😔 «unknown» lines exist only where a truthful count exists; never a guessed number;
@@ -319,3 +327,100 @@ row; a night is better on findability only when a score row says so.**
   letters, and run a class scan on `search_listings_ar` (the amenity grouped by district) before trusting a reader.
 - 🔧 adds: one proof row PER fix. 759 and 760 shared one row, and it was a branch dry run — by proof rows the night read 3/6,
   not 4/6; the production proof of a scorer fix is the next 08:00 af-score run, with its run id.
+
+## Lessons from 2026-10-26 and 2026-10-27 (copied by 🔧 from your own reports)
+
+- Twice the measuring tool and the parser shared one wrong belief (that opensooq publishes no amenity list). Re-read
+  the raw page with `--around` on the field word before calling a site prose-only, and fix the parser and the tool in
+  the same PR (10-26).
+- Dispatch the word checker for a site right after its branch crawl; the 09:22 sync then serves it inside the slot
+  (10-27). Write the lesson line as «📚 Lesson:» — the fleet reader looks for the marker, and your 10-25/26/27 end rows
+  carried a bare «Lesson:» that it missed.
+- **Write every proof row with `push_ok = true` on a PASS** (and `false` on a FAIL): `ops_engineer_fix_rate` read
+  ♻️'s three real PASS rows of 10-30 as 0 proven because `push_ok` was left NULL. The view now also reads the notes'
+  `"result":"PASS"`, but the column is the contract.
+
+## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
+  06:54, after the slot, and a crawl after :20 cannot be customer-proven before the next hour's :22 sync (run
+  41175323616, daryusuf still Rent at 13:30). 🆕 10-31: two fixes merged whose proofs landed at 09:46 / 17:15, outside
+  the slot — rating 8 → 6 on timing alone. 🔧 10-24 / 10-25 lost the band the same way. Rule: pick the proof listing
+  BEFORE the fix, dispatch the proof crawl or journey before minute 30 and before :20 of the hour, and never choose a
+  job whose only proof lands after your slot (hand it to ♻️ or the automatic liveness instead).
+- **② A clean reading means nothing until you know HOW it was read.** ♻️ 10-30: one fingerprint (chrome124) was sent
+  home on ~90 live Gathern units and read «transient» every hour; ♻️ 10-31: albukaeri, superoffice and azdad were read
+  by HTTP status, their removed pages answer 200, so 23 dead ads sat on screen up to 18 days behind a clean row;
+  🔬 10-31: the score session's own cookies built a «recently viewed» strip on tuba that was read as the ad. Rule: before
+  trusting any robot's verdict print its method / fingerprint / session and compare with a plain read and a real browser
+  on the same URL; every body-reading site gets its own reader.
+- **③ Read one REAL record before coding against a field, and re-read the ad before touching data.** 🆕 10-31:
+  `url_path` existed only in our capture, not in the detail API — a 20-minute crawl read 0 of 952 pages. 🔬 10-30: a
+  «fabricated value» alarm on 12 rows was aqar's own value from a re-categorised ad. 🔧 10-31: 701 «stuck» prices were
+  the owner's own served meter-box rule, and the «absurd» wasalt totals are the seller's own words («سعرها 40500000000
+  ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
+  record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
+  truth.
+
+## 📚 FLEET LESSONS 2026-11-01 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A robot merge fires no push-triggered workflow — dispatch the follow-on yourself, the same minute.** 🔬 10-30: a
+  reader-version bump squashed by the auto-merge bot never ran its reader; 🔬 11-01 again: the word-reader fix #9783 sat
+  unread until `facts-words-reader` was dispatched by hand at 10:39 (run 41298393767). The same shape cost ⚡ its night
+  on 11-01: a queued nightly job checked out the DISPATCH-time commit and overwrote the fixed 06:54 crawl (backlog 1139).
+  Rule: after `engineer-automerge` merges your PR, dispatch the workflow that consumes it and read the RUN's commit SHA —
+  a fix is live only when a run from the FIXED commit is the LAST writer (⚡ 11-01). Seen on two nights → written into
+  🔬's rulebook as a rule.
+- **② Pick the job by where its PROOF lands, not by where the bug is.** ⚡ 11-01: three fixes merged, zero proven —
+  runners were saturated and every proof crawl queued past the slot (rating 4). 🆕 11-01: a migration job chose at
+  minute 70 met `apply_migration`'s confirmation prompt that nobody answers at night (draft #9761, nothing applied).
+  ♻️ 11-01 did it right: proofs dated to a NAMED job and UTC time (aqar-liveness 01:00 11-02; gathern-liveness 12:37/13:37)
+  so they count tomorrow instead of failing tonight. Rule: at minute 10 write, per job, the proof's workflow + the UTC
+  time it can land; a job whose proof needs a runner you cannot get or a prompt nobody can answer is swapped for one
+  whose proof is a CI journey or an RPC replay inside the slot — and a migration goes out as a ready draft PR at minute
+  10, never at minute 70.
+- **③ When a robot's number disagrees with the database, read what the robot TYPED before you read the RPC.** 🔧 11-01:
+  backlog 1141 «Filter total 11 vs DB 1» was the journey typing 11 digits into a 10-digit price box
+  (21,750,000,000 → 2,175,000,000; 11 is exactly the DB count for the band the box kept) — not a search bug. 🔧 11-01
+  also: mirror PR #9791 sat 2 h 40 min «red» because GitHub lists a PR's files against the merge BASE, so a mirror whose
+  file already reached main through another PR reads as a 1-file PR (the robot's empty-mirror rule never fires) and fails
+  a stale-mirror check its stale branch cannot pass. ♻️ 11-01 (1147): the sweep SESSION read a dead Gathern unit as
+  no-verdict 36 times while a fresh session read its 404. Rule: a robot's input, session and diff-base are part of the
+  measurement — print them in the evidence before judging the product with the robot's number.
+
+### Rule from two nights (10-30 and 11-01): after a robot merge, YOU fire the consumer
+
+`engineer-automerge.yml` merges with the Actions token, and a push made by that token starts no push-triggered workflow.
+So a reader-version bump, a word-list change or any fix whose effect needs a follow-on run (facts-words-reader, af-score,
+a sync) is NOT running after the merge — it is waiting for someone to dispatch it. The minute your PR merges, dispatch
+the consumer by hand, record the run id and its commit SHA in the proof row, and date the proof to that run.
+
+## 📚 FLEET LESSONS 2026-11-02 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A PR's lane is read from GitHub's MERGE-BASE file list, so a sibling PR landing first strands yours.** 🔬 11-01:
+  mirror #9791 read «red» 2 h 40 min after its file reached main inside #9793. 🔬 11-02: barrier #9949 (its script + the
+  mirror file) sat 3 h 45 min green and clean after mirror #9948 merged first — the robot saw «supabase/ and not a pure
+  mirror» and left it; `git merge origin/main` at 14:02 cleared it in one pass. Rule: ship a mirror and its barrier as
+  ONE PR, or the moment the sibling lands run `git fetch origin main && git merge origin/main && git push` on the other;
+  a PR that is «clean» and still open after 90 min is first a question about its file list against main.
+- **② The measuring tool is the first suspect when a count disagrees.** 🔬 11-02: the Trending check compared the
+  screen with the background warm-up call (96,842 vs 69,773 — both right), and the chip oracle missed the 10-26
+  price-on-request rule (3 P1s on correct chips); 🔧 11-01: the journey typed 11 digits into a 10-digit box, and #9791's
+  «red» was a diff-base illusion. Rule: before touching an RPC, diff the two row sets once (16,189 − 14,089 = exactly
+  the 2,100 no-price rows) and print what the tool typed, captured and compared against.
+- **③ Re-read the LIVE record before writing over data, and ship the batch with its undo ready.** ⚡ 11-02: a repair
+  NULLed 32 aqar prices on a closed-page capture; the live re-read showed 2 were wrong, and ~22 cards read «السعر عند
+  الطلب» for an hour (05:34–06:34 UTC). 🔬 10-30: a «fabricated value» alarm on 12 rows was aqar's own value from a
+  re-categorised ad. 🆕 10-31: a key that existed only in our capture cost a 20-minute crawl. Rule: one live read of the
+  record (the page or the current payload) before the first write; measure the live effect within minutes; undo in the
+  same run. (Third night of this family → ⚡'s rulebook carries it as a rule since #9910.)
+
+### Rules from two nights (11-01 and 11-02): the mirror and its barrier travel together, and the tool is checked before the product
+
+1. **One PR for a migration's mirror AND its barrier.** Twice (#9791, #9949) a 🔬 PR whose file was already on main through a
+   sibling sat 2–4 hours in the robot's blind spot. If they must be two PRs, merge `origin/main` into the second the moment
+   the first lands, and read the file list the robot reads (`gh pr view --json files`) before calling it «robot-pending».
+2. **Diff the two row sets before touching an RPC.** On 11-02 two of three jobs were the measuring tools (the Trending
+   check's warm-up call, the chip oracle's missing 10-26 rule). The first step of any count mismatch is `ids(A) − ids(B)`
+   and `ids(B) − ids(A)` with a one-line explanation of each difference; the RPC is touched only when the difference is
+   not the tool's own doing.

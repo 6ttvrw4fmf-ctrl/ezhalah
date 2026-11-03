@@ -60,7 +60,7 @@ function withScreenFade(navigate: () => void): void {
   const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   if (!doc?.startViewTransition || reduced) { navigate(); return; }
   const from = window.location.pathname;
-  doc.startViewTransition(() => new Promise<void>((done) => {
+  const transition = doc.startViewTransition(() => new Promise<void>((done) => {
     navigate();
     const t0 = Date.now();
     // Timers, never requestAnimationFrame: the browser pauses frames while this callback runs, so a frame-based wait
@@ -71,6 +71,21 @@ function withScreenFade(navigate: () => void): void {
       : setTimeout(wait, 16);
     wait();
   }));
+  // A transition the browser SKIPS — a second tap before the first finished, the tab hidden, or the pill's
+  // view-transition-name present twice while both screens are mounted — rejects its promises with
+  // «InvalidStateError: Transition was aborted because of invalid state». Nobody awaits them, so the rejection
+  // reached window.onunhandledrejection and Sentry (REACT-NATIVE-F, /map, 2026-10-31). The switch itself already
+  // happened (navigate() ran above; the skip only drops the cross-fade), so the honest handling is to observe the
+  // rejection and do nothing. Guarded by scripts/verify-screen-fade-swallows-aborted-transition.ts.
+  swallowTransitionRejections(transition);
+}
+
+/** Attach a no-op handler to every promise a ViewTransition exposes; a skipped transition rejects all three. */
+function swallowTransitionRejections(transition: unknown): void {
+  const t = transition as { ready?: unknown; finished?: unknown; updateCallbackDone?: unknown } | null | undefined;
+  for (const p of [t?.ready, t?.finished, t?.updateCallbackDone]) {
+    if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {});
+  }
 }
 
 const SEG_W = 106;   // each third — wider than the old 98 for a more generous, premium footprint

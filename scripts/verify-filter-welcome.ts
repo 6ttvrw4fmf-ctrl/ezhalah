@@ -358,7 +358,7 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
     sameNight?.id === 2001 && afterMidnightHeld?.id !== 2001 && afterMidnightPrepared?.id !== 2001);
   // the case is real: 40 minutes old, inside both age limits, so only the day rule stops it
   mustCatch('an age-only rule (40 min old passes the 1 h hold and the 24 h prepare limit)', nextDay.getTime() - fact.at < Math.min(HOLD_MS, PREPARED_MAX_MS));
-  const hookDays = (src: string) => (src.match(/sameRiyadhDay\(/g) ?? []).length >= 3
+  const hookDays = (src: string) => src.includes(' && sameRiyadhDay(pend.at, start)') && src.includes(' && sameRiyadhDay(pending.at, now.getTime())')
     && /if \(!sameRiyadhDay\(r\.line\.at, t\)\) return;/.test(src);
   check('…and the hook checks the day wherever it takes a prepared fact, and again when midnight passes while it waits', hookDays(hookSrc));
   mustCatch('the hook taking a prepared fact by age alone', !hookDays(hookSrc.replace(' && sameRiyadhDay(pend.at, start)', '').replace(' && sameRiyadhDay(pending.at, now.getTime())', '')));
@@ -465,7 +465,7 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
   const factsAlways = (src: string) =>
     src.includes('const isFact = (l: { id: number | null } | null | undefined) => !!l && l.id != null && isInsightLineId(l.id);')
     && src.includes('cache: isFact(cache) ? cache : null,')
-    && /if \(!greet && session\.present && inst && !isFact\(inst\)\) \{[\s\S]{0,400}?fetchWelcomeInsights\(lastLocation, lastDistrict\)/.test(src)
+    && /if \(!greet && session\.present && inst && !isFact\(inst\)\) \{[\s\S]{0,400}?fetchPack\(lastLocation, lastDistrict\)/.test(src)
     && /void Promise\.race\(\[fact, slow\]\)/.test(src) && /setTimeout\(\(\) => r\(null\), FACT_WAIT_MS\)/.test(src)
     && /setShown\(\{ settled: true, id: line\.id, ar: line\.ar, en: line\.en, nameAr, nameEn, greet: greetNowIdx \}\);\s*\}\);\s*return;/.test(src);
   check("facts always: only a fact is held, and a device without one reads today's fact before the headline shows", factsAlways(hookSrc));

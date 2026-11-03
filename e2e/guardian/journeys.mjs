@@ -505,6 +505,25 @@ const CARD_JUNK = [
 // symptom of the raw-vs-canonical bug («سعر المتر ر.س 0» on five live dealapp cards, 2026-07-26).
 const PRICE_ON_REQUEST = 'السعر عند الطلب';
 const ZERO_MONEY = /(?:ر\.س\s*0(?![\d.,])|(?<![\d.,])0\s*(?:ر\.س|ريال\/م²|ريال(?![\p{L}])))/u;
+const COUNTRY_AR = 'المملكة العربية السعودية';
+const SEARCH_CITY = 'الرياض';   // G5 searches this city; every card it renders must name it
+// WHERE A CARD SAYS ITS LOCATION — two cards, two shapes (src/components/ResultCard.tsx).
+//   phone / tablet / the laptop's tight row: «<city>, المملكة العربية السعودية» (the country line);
+//   the laptop photo-first card (row === 'roomy', owner 2026-10-11) has NO country line: its location is
+//   the title line «<district>, <city>» or «<city>».
+// The check used to read only the country line, so from 2026-10-11 every desktop run failed on every
+// card although each one showed «حي النرجس, الرياض» (incident #965, backlog 839). The laptop shape is
+// held to the SEARCHED city, which is stricter than the country line's «any text»: a card printing
+// «الموقع غير محدد» or another city fails. Returns the problem, or null.
+export function cardLocationProblem(text, city) {
+  // Same line only: the old «\s*» crossed a newline, so a price line above a bare country line read as
+  // its «city» (caught by the mutation proof in verify-guardian-oracles-discriminate.ts §4).
+  const country = text.match(new RegExp(`(.*?)[،,]?[^\\S\\n]*${COUNTRY_AR}`, 'u'));
+  if (country) return country[1].trim() ? null : 'no location — the country line names no city';
+  const names = (line) => line === city || line.endsWith(`, ${city}`) || line.endsWith(`، ${city}`);
+  if (text.split('\n').map((l) => l.trim()).some(names)) return null;
+  return `no location — neither a country line nor a location line naming the searched city «${city}»`;
+}
 
 const G5 = {
   id: 'result-card-tells-the-truth',
@@ -513,11 +532,11 @@ const G5 = {
   steps: [
     'Open https://ezhalah-app.vercel.app/, dismiss the sign-in card, pick الرياض and press «بحث».',
     'Read the rendered text of every card-listing-* element.',
-    'For each card assert: a price figure or «السعر عند الطلب»; a visible source domain whose link names the same «سيأخذك إلى <domain>»; a non-empty location before «المملكة العربية السعودية».',
+    'For each card assert: a price figure or «السعر عند الطلب»; a visible source domain whose link names the same «سيأخذك إلى <domain>»; a location: a non-empty city before «المملكة العربية السعودية», or (laptop photo-first card) a location line naming the searched city.',
     'For each card assert no HTML entity, no «[object Object]», no bare «undefined»/«NaN», and no zero-valued money token.',
   ],
   async run(page, ctx) {
-    await searchAsGuest(page);
+    await searchAsGuest(page, { city: SEARCH_CITY });
     const cards = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="card-listing-"]')]
       .map((c) => ({
         id: c.getAttribute('data-testid'),
@@ -543,8 +562,8 @@ const G5 = {
       if (!shownHost) bad.push(`${card.id}: no source attribution — the card shows no source domain`);
       if (!saidHost) bad.push(`${card.id}: no source attribution — the «الضغط على هذا الإعلان سيأخذك إلى <منصة>» link names no domain`);
       if (shownHost && saidHost && shownHost !== saidHost) bad.push(`${card.id}: the card shows ${shownHost} but its link says it goes to ${saidHost}`);
-      const location = t.match(/(.*)،?\s*المملكة العربية السعودية/u) || t.match(/([^\n]+),\s*المملكة العربية السعودية/u);
-      if (!location || !location[1].trim()) bad.push(`${card.id}: no location — the country line names no city`);
+      const where = cardLocationProblem(t, SEARCH_CITY);
+      if (where) bad.push(`${card.id}: ${where}`);
       for (const [re, label] of junk) {
         const m = t.match(re);
         if (m) bad.push(`${card.id}: renders ${label} («${m[0]}») in card text`);

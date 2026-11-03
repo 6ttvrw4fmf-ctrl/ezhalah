@@ -472,7 +472,16 @@ jobs:
       max-parallel: 18
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
+      # A job dispatched from main runs the scraper code of main AS IT IS WHEN THE JOB STARTS, not as it was
+      # when the nightly was dispatched. The 04:22 UTC nightly's 144 jobs can wait hours for a runner
+      # (2026-11-01: 96 still queued at 05:15), and a job pinned to the dispatch-time commit re-crawls a site
+      # with code that predates a fix merged in between: on 2026-10-31 the fixed daryusuf crawl (06a6856,
+      # 06:54 UTC) stored 13109421 as a sale, then the nightly's daryusuf job — queued since 04:22 on ad8e469 —
+      # ran at 07:16 and wrote it back as a 1.48 M yearly RENT. A branch dispatch (a probe) keeps its own
+      # commit. Guard: scripts/verify-small-sources-sync-runs-current-main.ts
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref == 'refs/heads/main' && 'main' || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

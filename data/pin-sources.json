@@ -924,10 +924,10 @@
     },
     "souq24": {
       "pin_source": "ad-page",
-      "floor_pct": 1,
+      "floor_pct": 75,
       "proof_url": "https://24.com.sa/1099/x",
-      "proven_on": "2026-10-30",
-      "note": "CAPTURE GAP (46 ads, 0%): the rendered page prints a Maps link 16.8374,42.6478 (1 ad seen; Jazan). Backlog. Served 0/46 (0.0%) on 2026-10-30 before today's fixes."
+      "proven_on": "2026-11-02",
+      "note": "The ad page's «الحصول على الإتجاه» Maps link (maps/search/?api=1&query=LAT,LNG) is read since #9739; the site's 24.7136 Riyadh-centre fallback is never stored. Served 38/46 (82.6%) on 2026-11-02 after the first crawl on current main (was 0/46 on 2026-10-30)."
     },
     "sqcc": {
       "pin_source": "partial",

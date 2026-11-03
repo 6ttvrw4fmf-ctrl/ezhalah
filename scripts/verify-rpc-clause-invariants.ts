@@ -162,7 +162,12 @@ const REQUIRED: { name: string; marker: RegExp; why: string; where: 'clause' | '
 const FORBIDDEN: { name: string; marker: RegExp; why: string }[] = [
   {
     name: "stale rent-period clause (rent_period_ar + hardcoded platform in ('gathern','aqarmonthly'))",
-    marker: /p_rent_period\s*=\s*'شهري'[\s\S]{0,120}?platform\s+in\s*\(\s*'gathern'\s*,\s*'aqarmonthly'\s*\)/i,
+    // The stale shape is the LEASE-LENGTH bucket: `s.rent_period_ar = 'شهري' or s.platform in (…)`. The owner's
+    // 2026-10-26 clause (20261026071543_unpriced_rent_rows_leave_short_stays) legitimately reads
+    // `p_rent_period = 'شهري' and s.platform in ('gathern','aqarmonthly')` on an UNPRICED row — the short-stays
+    // pool is those two platforms (AGENTS.md) — so the marker must name rent_period_ar, not any platform list
+    // within 120 chars of p_rent_period (the old marker fired on the refreshed mirror, 2026-11-01).
+    marker: /s\.rent_period_ar\s*=\s*'شهري'\s*or\s*s\.platform\s+in\s*\(\s*'gathern'\s*,\s*'aqarmonthly'\s*\)/i,
     why: 'This is the reverted, lease-length-based bucket. Rent period must bucket on payment_monthly.',
   },
   {
@@ -410,6 +415,15 @@ for (const inv of REQUIRED) {
   const ok = inv.marker.test(inv.where === 'clause' ? clauseBody : body);
   check(`effective RPC keeps: ${inv.name}`, ok);
   if (!ok) console.error(`   ↳ WHY IT MATTERS: ${inv.why}\n   ↳ ${effective} re-issues ${RPC} but DROPS this clause. Do not copy an older body — start from the CURRENT live definition (pg_get_functiondef) and change only what you intend.`);
+}
+// The stale marker is proven against the REAL stale body (20260715_property_age_advanced_filter.sql still carries it)
+// and against the owner's 2026-10-26 price-on-request line, which it must NOT fire on.
+{
+  const staleBody = readFileSync(join(MIGRATIONS_DIR, '20260715_property_age_advanced_filter.sql'), 'utf8');
+  const stale = FORBIDDEN[0].marker;
+  check('MUTATION — the stale rent-period marker catches the real 2026-07-15 lease-length bucket', stale.test(staleBody));
+  check("the stale marker does NOT fire on the unpriced short-stays line (p_rent_period = 'شهري' and s.platform in (…), owner 2026-10-26)",
+    !stale.test("or (s.price_annual is null and (p_rent_period in ('سنوي','كلاهما') or (p_rent_period = 'شهري' and s.platform in ('gathern','aqarmonthly'))))"));
 }
 // FORBIDDEN is an ABSENCE claim, so it must hold in BOTH halves — the corpus is right here.
 for (const bad of FORBIDDEN) {

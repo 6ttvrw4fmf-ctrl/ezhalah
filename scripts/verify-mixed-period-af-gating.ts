@@ -46,7 +46,12 @@ const Q = (over: Record<string, unknown>) =>
      priceInput: '', priceBand: null, rentPeriod: 'annual', ...over }) as unknown as SearchQuery;
 
 // ── cohortAllows: the 'both' branch must be an INTERSECTION of both period lists ────────────────────
-const bothBranch = /if\s*\(q\.rentPeriod\s*===\s*'both'\)\s*return\s*\(cfg\.RentAnnual\s*\?\?\s*\[\]\)\.includes\(id\)\s*&&\s*\(cfg\.RentMonthly\s*\?\?\s*\[\]\)\.includes\(id\)/;
+// 2026-10-31: the branch is a block — a GROUP type (COHORT_CARDS) without a monthly cohort has no monthly leg to
+// intersect and reads its RentAnnual list; every other type is the Annual ∩ Monthly intersection, as before.
+const bothBranch = /if\s*\(q\.rentPeriod\s*===\s*'both'\)\s*\{[\s\S]{0,400}?return\s*\(cfg\.RentAnnual\s*\?\?\s*\[\]\)\.includes\(id\)\s*&&\s*\(cfg\.RentMonthly\s*\?\?\s*\[\]\)\.includes\(id\)/;
+check("EXECUTED — a group type without a monthly cohort (Floor) reads its Annual list on 'both' (owner 2026-10-31); a non-group one (Office) still offers nothing",
+  cohortAllows(Q({ rentPeriod: 'both', types: ['Floor'] }), 'bathrooms') === true
+  && cohortAllows(Q({ rentPeriod: 'both', category: 'Commercial', types: ['Office'] }), 'property_age') === false);
 check("EXECUTED — 'both' refuses an Annual-only question (rnpl) and a Monthly-only one (rating)",
   cohortAllows(Q({ rentPeriod: 'both', types: ['Apartment'] }), 'rnpl') === false
   && cohortAllows(Q({ rentPeriod: 'both', types: ['Apartment'] }), 'rating') === false,

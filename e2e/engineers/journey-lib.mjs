@@ -3,8 +3,14 @@
 //   node e2e/engineers/journey-lib.mjs        ← runs the asserts below, exits 0 when sound.
 
 /** URL equality the way full-chain.mjs compares: scheme-normalised, no fragment, no trailing /. */
+// A stored ad URL and the URL the card opened are the SAME ad when they differ only by scheme, a
+// trailing slash, a fragment, or a leading language segment: since #7890 the Arabic app opens the
+// localized form of a source URL (src/lib/localizeAdUrl.ts: gathern.co/view/… → /ar/view/…), so a
+// customer who opened the unit still read FAIL «opened …/ar/view/… ≠ stored …/view/…» (🔧 10-23,
+// backlog 801). One leading /ar/ or /en/ is dropped on BOTH sides; the rest of the path must match.
 export const normUrl = (u) =>
-  String(u || '').split('#')[0].replace(/\/+$/, '').replace(/^http:/, 'https:');
+  String(u || '').split('#')[0].replace(/\/+$/, '').replace(/^http:/, 'https:')
+    .replace(/^(https:\/\/[^/]+)\/(?:ar|en)(?=\/|$)/i, '$1');
 
 /** The main search of a بحث press: page 0 of a real page size. index.tsx also fires one
  *  p_limit:1 count probe per visible district, and those can land AFTER the main search —
@@ -136,6 +142,23 @@ export const priceOf = (row) => {
 export const rangeAround = (v, pct = 0.25) =>
   Number.isFinite(v) && v > 0 ? { min: Math.max(0, Math.floor(v * (1 - pct))), max: Math.ceil(v * (1 + pct)) } : null;
 
+/** The Filter's price boxes keep 10 digits (src/app/index.tsx: `toWholeNumberDigits(v).slice(0, 10)`), so the
+ *  most a customer can type is 9,999,999,999. The robot used to type 11 digits and the box silently kept the
+ *  first ten: 21,750,000,000–36,250,000,000 became 2,175,000,000–3,625,000,000, the page honestly answered that
+ *  band (total 11) and the 29-billion ad read as «not found» (🔧 backlog 1141, run 41279009951). What a customer
+ *  can do with such an ad is leave the upper box EMPTY and type the box's maximum in the lower one — so that is
+ *  what the robot does: a bound that does not fit the box is dropped (max) or pinned to the box's ceiling (min). */
+export const PRICE_BOX_MAX_DIGITS = 10;
+export const PRICE_BOX_CEILING = 10 ** PRICE_BOX_MAX_DIGITS - 1;
+export const clampToPriceBox = (range) => {
+  if (!range) return null;
+  const fits = (n) => n != null && String(Math.trunc(n)).length <= PRICE_BOX_MAX_DIGITS;
+  return {
+    min: range.min == null ? null : (fits(range.min) ? range.min : PRICE_BOX_CEILING),
+    max: range.max == null ? null : (fits(range.max) ? range.max : null),
+  };
+};
+
 /** Spread N picks across platforms, round-robin, preserving each platform's own order. */
 export const pickSpread = (rows, n) => {
   const by = new Map();
@@ -161,6 +184,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const assert = (await import('node:assert')).strict;
   assert.equal(normUrl('http://x.sa/a/#frag'), 'https://x.sa/a');
   assert.equal(normUrl('https://x.sa/a'), normUrl('http://x.sa/a/'));
+  // the localized form the Arabic app opens is the stored ad (backlog 801)
+  assert.equal(normUrl('https://gathern.co/ar/view/175503/unit/245201'), normUrl('https://gathern.co/view/175503/unit/245201'));
+  assert.equal(normUrl('https://aoujestates.com/ar/properties/x'), normUrl('https://aoujestates.com/ar/properties/x'));
+  assert.notEqual(normUrl('https://gathern.co/ar/view/1/unit/2'), normUrl('https://gathern.co/view/1/unit/3'), 'a different unit is a different ad');
+  assert.notEqual(normUrl('https://x.sa/area/1'), normUrl('https://x.sa/1'), 'only a whole /ar/ segment is a language, not a prefix of a word');
   assert.ok(isMainSearch({ p_offset: 0, p_limit: 24 }));
   assert.ok(!isMainSearch({ p_offset: 0, p_limit: 1 }), 'district count probe is not the main search');
   assert.ok(!isMainSearch({ p_offset: 24, p_limit: 24 }), 'page 2 is not the main search');
@@ -190,6 +218,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     'stay-length-priced platforms have no customer-visible price');
   assert.equal(priceOf({ platform: 'aqar', deal_ar: 'بيع', price_total: 100000 }), 100000);
   assert.deepEqual(rangeAround(100, 0.25), { min: 75, max: 125 });
+  // the price box keeps 10 digits: a bound that does not fit is not typed (max) or pinned to the ceiling (min)
+  assert.deepEqual(clampToPriceBox(rangeAround(100, 0.25)), { min: 75, max: 125 }, 'a fitting range is untouched');
+  assert.deepEqual(clampToPriceBox(rangeAround(29_000_000_000)), { min: PRICE_BOX_CEILING, max: null },
+    '29 billion: both bounds have 11 digits → min pinned to 9,999,999,999, max left empty (backlog 1141)');
+  assert.deepEqual(clampToPriceBox({ min: 9_000_000_000, max: 11_000_000_000 }), { min: 9_000_000_000, max: null },
+    'only the max overflows → only the max is dropped');
+  assert.equal(clampToPriceBox(null), null);
+  assert.equal(String(PRICE_BOX_CEILING).length, PRICE_BOX_MAX_DIGITS, 'the ceiling itself fits the box');
+  // mutation: a robot that still typed the raw max would type 11 digits — the box cannot hold them
+  assert.ok(String(rangeAround(29_000_000_000).max).length > PRICE_BOX_MAX_DIGITS, 'the unclamped max really overflows');
   const picked = pickSpread([
     { platform: 'a', listing_id: 1 }, { platform: 'a', listing_id: 2 },
     { platform: 'b', listing_id: 3 }, { platform: 'c', listing_id: 4 },

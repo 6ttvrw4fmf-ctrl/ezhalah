@@ -20,6 +20,7 @@ import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
+import TopBarLanguage from '@/components/TopBarLanguage';
 import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { cityNameEn, regionNameEn, districtNameEn, ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
@@ -398,6 +399,8 @@ export default function Home() {
   // unexpected value here (e.g. from some future code path that bypasses TypeScript's own type)
   // must still fall back to the safe default rather than leaving both buttons unselected.
   const rentPeriod: 'monthly' | 'annual' | 'both' = validRentPeriod(query.rentPeriod) ?? 'annual';
+  // only «إقامات قصيرة» picked (Rent, not شراء+إيجار): the price box is hidden — see the PRICE range block
+  const shortStaysOnly = query.deal === 'Rent' && !query.dealCombined && rentPeriod === 'monthly';
   // Buy+Rent combined multi-select (owner feature 2026-08-20): every Trending/pool call below reads
   // effDeal instead of query.deal directly — null tells top_cities_by_deal_ar/district_options_ar
   // (and every locations.ts pool wrapping them) to scope to the combined Buy ∪ Rent(any period) set,
@@ -1441,6 +1444,8 @@ export default function Home() {
                   <Text style={[s.topSignInText, x.topSignInText]}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
                 </Pressable>
               )}
+              {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
+              <TopBarLanguage />
               {/* Share — a labelled pill, not a bare glyph (owner 2026-09-05). An unlabelled icon in a
                   corner reads as decoration; «مشاركة» beside it states the action, which is what every
                   major platform does with the one control it wants people to use. The label is hidden
@@ -1610,11 +1615,12 @@ export default function Home() {
                     // Owner feedback (2026-08-22): drop the "this means you want both, so you get
                     // both" framing — selecting both buttons is already self-explanatory. Keep only
                     // the one genuinely non-obvious fact: mixed results show mixed price units.
-                    : rentPeriod === 'both' ? 'Each listing shows its own price basis (monthly or yearly).'
+                    // No monthly pool — short stays (owner 2026-11-02): they carry no price; yearly ones show the yearly price.
+                    : rentPeriod === 'both' ? 'Short stays show no price (it depends on the dates); yearly listings show the yearly price.'
                     : 'Yearly: the displayed price is the yearly price.')}
                 </Text>
                 {periodPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
-                  <Text style={[s.rangeNote, x.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.')}</Text>
+                  <Text style={[s.rangeNote, x.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because the price unit changed (short stays ↔ yearly) — please re-enter them.')}</Text>
                 ) : null}
               </Reveal>
             )}
@@ -2226,6 +2232,12 @@ export default function Home() {
                     </>
                   )}
 
+                  {/* NO PRICE BOX FOR SHORT STAYS (owner 2026-11-01: «remove price for short stays»). Their stays are
+                      priced by length (the guest picks dates on the platform) and every card already shows no price
+                      (listingPrice → ''), so a من/إلى budget there filters on a figure the user never sees. Hidden only when
+                      «إقامات قصيرة» is the ONLY period; «سنوي» alone or both keep it. The period toggle already clears
+                      typed bounds when the period changes. */}
+                  {!shortStaysOnly && (<>
                   {/* PRICE range (من / إلى ريال) — always available, independent of beds/area. HARD filter.
                       When شراء+إيجار are BOTH selected (owner feature 2026-08-20), this box is the BUY
                       budget and a SECOND, independent Rent budget box renders right below it — owner
@@ -2256,6 +2268,7 @@ export default function Home() {
                   {priceHint && (
                     <Text style={[s.rangeNote, x.rangeNote, priceHint.warn ? s.rangeNoteWarn : null]}>{priceHint.text}</Text>
                   )}
+                  </>)}
 
                   {query.dealCombined && (
                     <Reveal>
@@ -2454,7 +2467,7 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // Note #4 — mobile brand text next to the hamburger.
-  topBrand: { fontSize: 18, fontWeight: '800', color: colors.ink },
+  topBrand: { fontSize: 22, fontWeight: '800', color: colors.ink }, // same size as الوسيط الذكي's title (owner 2026-10-31: «ezhalah must all be the same size, big»)
   // AI Agent badge + Share icon, grouped and pushed to the far-right edge (marginStart:auto) so they
   // sit together in the top-right corner in BOTH languages. (user request.)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },

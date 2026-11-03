@@ -79,9 +79,9 @@ check('one tap where a second pick would widen; several only where they narrow o
 
 // The chip and the summary item read the rung the user tapped.
 const chipAge = buildAfSummaryItems([{ id: 'property_age', keys: ['upto2'], labels: ['حتى سنتين'] }]);
-check('an «up to» age answer reads as one item — عمر حتى سنتين 🏗️', same(chipAge, ['عمر حتى سنتين 🏗️']), JSON.stringify(chipAge));
+check('an «up to» age answer reads as one item — 🏗️ عمر حتى سنتين', same(chipAge, ['🏗️ عمر حتى سنتين']), JSON.stringify(chipAge));
 const chipNew = buildAfSummaryItems([{ id: 'property_age', keys: ['new'], labels: ['جديد'] }]);
-check('«جديد» keeps its sparkle — عمر جديد ✨', same(chipNew, ['عمر جديد ✨']), JSON.stringify(chipNew));
+check('«جديد» keeps its sparkle — ✨ عمر جديد', same(chipNew, ['✨ عمر جديد']), JSON.stringify(chipNew));
 
 // The database half is in the repo (mirror rule): the clause mirror and the migration carry all three params.
 const mirror = readFileSync(join(ROOT, 'sql/mirrors/af_eligibility_clause.sql'), 'utf8');

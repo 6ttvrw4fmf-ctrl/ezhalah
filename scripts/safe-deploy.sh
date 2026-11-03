@@ -270,6 +270,42 @@ if [ "${EZ_ROLLING_RELEASE:-}" = "1" ]; then
     || echo "   (rolling-release start failed — the alias read below decides whether the canary is serving)"
 fi
 curl_jar() { if [ -n "$CANARY_JAR" ]; then curl -b "$CANARY_JAR" -c "$CANARY_JAR" "$@"; else curl "$@"; fi; }
+# ROUTE SPLITTING (expo export emits per-route chunks since 2026-11-02): the Supabase client lives in the shared
+# __common chunk, not in the entry, so "the served build references supabase.co" is answered by ANY script the
+# alias HTML references. Each chunk is read into a FILE and grepped from the file — never `curl | grep -q`
+# (scripts/verify-deploy-bundle-check-pipeline.ts). Measured 2026-11-02: entry-49dfe9e2 carried 0 occurrences,
+# __common-fc662b4f carried 2, and every deploy of the day was refused here after genuinely shipping.
+# ROUTE SPLITTING, second half (2026-11-02): the entry is rewritten after Expo names it, so md5(entry) never equals its
+# filename hash on a split build. The artifact proof is then: a __common chunk the alias HTML references is byte-authentic
+# (its name IS its md5) AND the served entry is a real script that references that chunk (deploy-target-guard.sh).
+split_entry_is_authentic() {
+  local entry="$1" html="$2" chunk body hash link="" ok=0
+  # (a) the entry names a ROUTE chunk the alias HTML also references (agent-/_layout-…; __common is loaded by the HTML,
+  #     never named by the entry): a real script, tied to this build, not an error page
+  for chunk in $(grep -oE '_expo/static/js/web/[A-Za-z0-9_]+-[a-f0-9]{32}\.js' "$html" 2>/dev/null | grep -vE '/(entry|__common)-' | sort -u); do
+    hash="$(dtg_chunk_hash "$chunk")"
+    if dtg_entry_is_real_js "$entry" "$hash"; then link="$hash"; break; fi
+  done
+  [ -n "$link" ] || return 1
+  # (b) the shared chunk the HTML references is byte-authentic (its name IS its md5)
+  body="$(mktemp)"
+  for chunk in $(grep -oE '_expo/static/js/web/__common-[a-f0-9]+\.js' "$html" 2>/dev/null | sort -u); do
+    curl_jar -s -o "$body" -H 'Accept-Encoding: identity' -H 'Cache-Control: no-cache' "$DTG_CANONICAL_URL/$chunk?_=$(date +%s%N)${CANARY_Q}" || true
+    if dtg_chunk_is_authentic "$body" "$chunk"; then ok=1; break; fi
+  done
+  rm -f "$body"
+  [ "$ok" = 1 ]
+}
+chunks_reference_supabase() {
+  local html="$1" chunk body found=0
+  body="$(mktemp)"
+  for chunk in $(grep -oE '_expo/static/js/web/[A-Za-z0-9_]+-[a-f0-9]+\.js' "$html" 2>/dev/null | sort -u); do
+    curl_jar -s -o "$body" -H 'Accept-Encoding: identity' -H 'Cache-Control: no-cache' "$DTG_CANONICAL_URL/$chunk?_=$(date +%s%N)${CANARY_Q}" || true
+    if grep -q "supabase.co" "$body"; then found=1; break; fi
+  done
+  rm -f "$body"
+  [ "$found" = 1 ]
+}
 echo ""
 echo "Verifying the canonical alias serves the bundle this run emitted (${EMITTED_BUNDLE:-<not named in the build log>}), polling up to 5m..."
 NEW_BUNDLE=""
@@ -310,9 +346,9 @@ while [ "$SECONDS" -lt "$POLL_DEADLINE" ]; do
     # Accept-Encoding: identity — md5 must be taken over the artifact's own bytes, not a re-encoding.
     curl_jar -s -o "$BUNDLE_BODY" -H 'Accept-Encoding: identity' -H 'Cache-Control: no-cache' \
       "$DTG_CANONICAL_URL/$ALIAS_BUNDLE?_=$(date +%s%N)${CANARY_Q}" || true
-    if ! dtg_bundle_is_authentic "$BUNDLE_BODY" "$ALIAS_BUNDLE"; then
+    if ! dtg_bundle_is_authentic "$BUNDLE_BODY" "$ALIAS_BUNDLE" && ! split_entry_is_authentic "$BUNDLE_BODY" "$ALIAS_BODY"; then
       AUTH_FAIL="md5($(wc -c < "$BUNDLE_BODY" 2>/dev/null || echo 0) bytes)=$(dtg_md5 "$BUNDLE_BODY" 2>/dev/null || echo '<none>')"
-    elif ! grep -q "supabase.co" "$BUNDLE_BODY"; then
+    elif ! grep -q "supabase.co" "$BUNDLE_BODY" && ! chunks_reference_supabase "$ALIAS_BODY"; then
       SUPA_FAIL="yes"
     else
       BUNDLE_OK=1

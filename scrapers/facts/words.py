@@ -27,6 +27,7 @@ import random
 import re
 import sys
 import time
+import types
 from collections import Counter, defaultdict
 from typing import Any, Optional
 
@@ -417,26 +418,85 @@ def run(args: argparse.Namespace) -> int:
 
 
 # ── incremental: the nightly reader that feeds the Advanced Filter overlay (Rule B, owner 2026-10-25) ──────
-# The 20 search-index columns an ad's text may answer — public.text_facts_af_columns(), same order. The DB's
+# The 60 search-index columns an ad's text may answer — public.text_facts_af_columns(), same order. The DB's
 # CHECK refuses any other key and any value without its quote, so this list cannot drift silently.
 AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
               "private_entrance", "separate_electricity_meter", "separate_water_meter", "electricity",
               "water_supply", "sanitation", "balcony", "laundry_room", "pool", "gym", "garden", "car_entrance",
-              "optical_fibers", "majlis")   # majlis: the 21st AF amenity (owner 2026-10-26, decision #3)
+              "optical_fibers", "majlis",   # majlis: the 21st AF amenity (owner 2026-10-26, decision #3)
+              # owner 2026-10-31: the 11 stored-only facts promoted to filter chips …
+              "roof", "two_entrances", "annex", "yard", "garage", "grill", "storage", "water_tank", "warranty",
+              "electronic_deed", "basement",
+              # … and the 28 new apartment chips, in the handoff's order
+              "self_checkin", "wifi", "bills_included", "jacuzzi", "smart_tv", "billiards", "cleaning_service",
+              "soundproof", "cameras", "guard", "smart_entry", "smart_home", "central_gas", "sauna", "kids_play_area",
+              "nursery", "free_maintenance", "intercom", "fire_system", "ev_charger", "central_vacuum", "insulation",
+              "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families",
+              # … and the 7 Villas & Houses facts (owner lists 2026-11-01, built 2026-11-02), in the migration's order
+              "women_majlis", "outdoor_kitchen", "outdoor_diwaniya", "waterfall", "well", "irrigation", "sports_court",
+              # … the countryside / land / commercial facts (owner lists 2026-11-01, built 2026-11-02), in the migrations' order
+              "split_payments", "heated_pool", "kids_pool", "water_slide", "sea_view", "football_pitch", "playstation",
+              "inflatable_games", "sound_system", "fire_pit", "bait_shaar", "mandi_pit", "outdoor_seating", "tent",
+              "dunes_view", "women_section", "two_sections", "events_hall", "privacy_screen", "trees", "for_families",
+              "for_youth", "for_events", "for_newlyweds", "quad_bikes", "horses_stable", "camels", "toilets_on_site",
+              "lighting", "artesian_well", "solar_power", "palms", "fruit_trees", "fodder_crops", "greenhouses",
+              "producing_farm", "animal_pens", "poultry", "farm_house", "farm_rest_house", "workers_housing", "fence",
+              "main_road", "good_soil", "corner_plot", "three_streets", "ready_to_build", "raised_plot", "residential_commercial",
+              "all_services", "asphalt", "street_lights", "approved_plan", "direct_owner", "inside_project", "floors_allowed",
+              "grant_land", "no_services", "mezzanine", "pantry", "glass_front", "frontage",
+              "in_mall", "in_tower", "license", "food_allowed", "takeover", "first_tenant", "internet",
+              "civil_defense", "high_ceiling", "hangar", "insulated_panel", "cold_storage", "concrete_floor", "loading_dock",
+              "big_gate", "truck_access", "crane", "racks", "office_inside", "heavy_power", "industrial_area",
+              "car_service", "meeting_room", "reception", "coworking", "private_office", "central_ac", "shops_inside",
+              "offices_inside", "apartments_inside", "staff_housing_inside", "restaurant_cafe", "car_wash", "market", "earning_income",
+              "stars_mentioned", "rooms_suites", "oil_change", "pumps", "mosque", "building_rules")
 # The NUMERIC index columns an ad's text may fill — public.text_facts_af_num_columns(), same order. Rule B for
 # numbers (owner 2026-10-25, handoff decision #1): the number fills a BLANK box only, the site's own number is never
 # replaced. The DB CHECK admits a JSON number 4..150 with its quote; the checker already refuses a corner plot,
-# «يحدها 2 شارع», two widths or two bearings, so one ad hands over at most one width.
-AF_NUM_COLUMNS = ("street_width_m",)
+# «يحدها 2 شارع», two widths or two bearings, so one ad hands over at most one width. apartments_count and shops_count
+# (owner 2026-10-31) ride the same path: the checker's _COUNT_RES readers emit one agreed count per ad, as a number
+# with its quote, exactly like the width.
+# bathrooms (backlog 1168, owner 2026-11-02): the count the ad's own words state («ثلاث دورات مياه»), a blank box only.
+AF_NUM_COLUMNS = ("street_width_m", "apartments_count", "shops_count", "bathrooms")
 
 
-def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+# The ad's own place names, by column set: 237 of 305 listing tables carry district_ar/city_ar, all 305 carry
+# neighborhood/city (measured 2026-11-02). abaad 13214542: district_ar «حي الخزان», neighborhood «الخزان», city_ar «بيشة».
+_PLACE_COLUMN_SETS = (("district_ar", "city_ar", "neighborhood", "city"), ("neighborhood", "city"))
+
+
+def place_names_for(client, table: str, ids: list[int], tries: int = 3, sleep=time.sleep) -> dict[int, tuple[str, ...]]:
+    """{listing id: (its own place names…)} for one page — district / neighborhood / city, which the checker blanks
+    before reading (backlog 1188: «دور-بيشة-الخزان» read water_tank from district «الخزان»). One light read per page,
+    not a change to text_facts_todo. A table missing the Arabic columns (42703) falls back to neighborhood/city; any
+    other failure is raised after `tries`, never read as «no names» (a failed fetch is not an empty answer)."""
+    if not ids:
+        return {}
+    for cols in _PLACE_COLUMN_SETS:
+        for attempt in range(1, tries + 1):
+            try:
+                rows = client.table(table).select("id," + ",".join(cols)).in_("id", ids).execute().data or []
+                return {int(x["id"]): tuple(dict.fromkeys(n for c in cols if (n := (x.get(c) or "").strip())))
+                        for x in rows}
+            except Exception as e:
+                if "42703" in str(e):
+                    break                      # this table lacks a column in the set → the next, smaller set
+                if attempt == tries:
+                    raise
+                print(f"  ! {table} place names retry {attempt}: {str(e)[:120]}")
+                sleep(5 * attempt)
+    return {}
+
+
+def overlay_row(table: str, r: dict[str, Any], run_id: str,
+                place_names: tuple[str, ...] = ()) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """One text_facts_todo row → (its listing_text_facts row, every fact the checker found).
 
-    The overlay row keeps only the 20 AF columns, each {v, q}. An ad with no AF fact (or too little text)
-    still gets a row with facts {} — that row is the memory that this exact text (src_hash) was read."""
+    The overlay row keeps only the AF columns (AF_COLUMNS + AF_NUM_COLUMNS), each {v, q}. An ad with no AF fact (or too little text)
+    still gets a row with facts {} — that row is the memory that this exact text (src_hash) was read.
+    place_names: the ad's own district / city (place_names_for) — blanked by the checker, never read as a fact."""
     text = W.clean_text(r.get("title"), r.get("body"))
-    found = W.check(text) if W.readable(norm(text)) else []
+    found = W.check(text, place_names) if W.readable(norm(text)) else []
     facts = {f["fact"]: {"v": f["value_bool"], "q": f["quote"]}
              for f in found if f["fact"] in AF_COLUMNS and f["value_bool"] is not None and (f["quote"] or "").strip()}
     facts.update({f["fact"]: {"v": f["value_num"], "q": f["quote"]}
@@ -472,6 +532,19 @@ def write_batch(do, tbl: str, sleep=time.sleep, clock=time.monotonic) -> None:
             sleep(30 if timeout else 5 * attempt)
 
 
+def safe_overlay_row(table: str, r: dict[str, Any], run_id: str,
+                     place_names: tuple[str, ...] = ()) -> tuple[Any, Any, str]:
+    """overlay_row for ONE ad, which can never stop the run (2026-11-03: one place-name-only clause raised IndexError
+    and every shard of facts-words died, so not one of ~460k ads was read that night). A failing ad returns
+    (None, None, error): the caller writes nothing for it — its previous overlay row stands (UNKNOWN, never an empty
+    reading) and text_facts_todo hands it out again next run — and the run still ends red, naming the ads."""
+    try:
+        row, found = overlay_row(table, r, run_id, place_names)
+        return row, found, ""
+    except Exception as e:  # noqa: BLE001 — any reader bug on one ad; reported, never swallowed
+        return None, None, f"{type(e).__name__}: {e}"
+
+
 def run_incremental(args: argparse.Namespace) -> int:
     """Read every active ad that was never read, or whose text changed since (the DB decides: text_facts_todo),
     and replace its overlay row. New and changed ads also get their full fact list in listing_facts (history,
@@ -483,6 +556,7 @@ def run_incremental(args: argparse.Namespace) -> int:
     platforms = set(args.platforms.split(",")) - {""} if args.platforms else None
     t_start = time.time()
     stats: Counter = Counter()
+    failed: list[str] = []
     client.rpc("text_facts_reader_version_seen", {"p_version": READER_VERSION}).execute()
     print(f"reader version {READER_VERSION}: ads read by any other version are re-read")
 
@@ -502,8 +576,14 @@ def run_incremental(args: argparse.Namespace) -> int:
             after = int(page[-1]["id"])
             got += len(page)
             cur, hist = [], []
+            names = place_names_for(client, table, [int(r["id"]) for r in page])
             for r in page:
-                row, found = overlay_row(table, r, args.run_id)
+                row, found, err = safe_overlay_row(table, r, args.run_id, names.get(int(r["id"]), ()))
+                if row is None:
+                    stats["ads_failed"] += 1
+                    if len(failed) < 20:
+                        failed.append(f"{table}:{r['id']} {err}")
+                    continue
                 cur.append(row)
                 stats["ads_read"] += 1
                 stats["ads_with_af_fact"] += bool(row["facts"])
@@ -525,12 +605,29 @@ def run_incremental(args: argparse.Namespace) -> int:
     with open(os.path.join(args.out, f"words-incremental-{shard}of{shards}.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=1)
     print(json.dumps(summary, ensure_ascii=False))
+    if failed:
+        # every other ad was read and written; these kept their previous row and are retried next run
+        print(f"::error::{stats['ads_failed']} ad(s) crashed the word reader (kept their previous reading): "
+              + " | ".join(failed))
+        return 1
     return 0
 
 
 def selftest() -> None:
     import numpy as np
     W.selftest()
+    # one ad that crashes the reader is skipped and reported, never fatal to the run
+    _real = W.check
+    try:
+        W.check = lambda *a, **k: [][0]  # noqa: E731 — the 2026-11-03 IndexError shape
+        bad = safe_overlay_row("aqar_residential_listings", dict(id=1, ad_number="A1", src_hash="0" * 32,
+                               title="شقة للايجار", body="يوجد مصعد ومسبح وغرفة سائق"), "facts-words-t")
+    finally:
+        W.check = _real
+    assert bad[0] is None and bad[2].startswith("IndexError"), bad
+    ok = safe_overlay_row("aqar_residential_listings", dict(id=2, ad_number="A2", src_hash="0" * 32,
+                          title="شقة للايجار", body="يوجد مصعد ومسبح وغرفة سائق"), "facts-words-t")
+    assert ok[0] is not None and ok[2] == "", ok
     # the overlay row: AF columns only, each with its quote; silence and non-AF facts never reach it; a
     # too-short text still yields a row (the memory that this text was read).
     row, found = overlay_row("aqar_residential_listings", dict(id=7, ad_number="A7", src_hash="0" * 32,
@@ -546,6 +643,16 @@ def selftest() -> None:
     corner, _ = overlay_row("aqar_residential_listings", dict(id=9, ad_number="A9", src_hash="0" * 32,
                             title="أرض للبيع", body="أرض زاوية على شارع 20م شرقي وشارع 15م شمالي"), "facts-words-t")
     assert "street_width_m" not in corner["facts"], corner
+    # owner 2026-10-31: the two building counts ride the numeric path with their quotes; a promoted stored-only fact
+    # (roof) and a new chip (wifi, bills_included) reach the overlay row like any other AF column
+    bldg, _ = overlay_row("aqar_residential_listings", dict(id=11, ad_number="A11", src_hash="0" * 32,
+                          title="عمارة للبيع", body="عدد الشقق 12، محلين، سطح مستقل، واي فاي، شامل الكهرباء والماء"), "facts-words-t")
+    assert bldg["facts"].get("apartments_count") == {"v": 12.0, "q": "عدد الشقق 12"}, bldg
+    assert bldg["facts"].get("shops_count") == {"v": 2.0, "q": "محلين"}, bldg
+    flat, _ = overlay_row("aqar_residential_listings", dict(id=12, ad_number="A12", src_hash="0" * 32,
+                          title="شقة للإيجار", body="ثلاث غرف نوم وثلاث دورات مياه ومطبخ راكب"), "t")
+    assert flat["facts"].get("bathrooms") == {"v": 3.0, "q": "وثلاث دورات مياه"}, flat
+    assert all(bldg["facts"].get(k, {}).get("v") is True for k in ("roof", "wifi", "bills_included")), bldg
     short, _ = overlay_row("aqar_residential_listings", dict(id=8, ad_number="A8", src_hash="0" * 32,
                            title="", body="مصعد"), "facts-words-t")
     assert short["facts"] == {}, short
@@ -604,6 +711,47 @@ def selftest() -> None:
             raise AssertionError(f"write_batch swallowed {code}")
         except RuntimeError:
             pass
+    # backlog 1188: the page's own place names reach the checker (abaad 13214542 «دور-بيشة-الخزان», district «الخزان»)
+    slug = dict(id=13214542, ad_number="13214542", src_hash="0" * 32, title="دور-بيشة-الخزان", body="دور للبيع")
+    assert overlay_row("abaad_residential_listings", slug, "t")[0]["facts"].get("water_tank", {}).get("v") is True, \
+        "premise: read without its place names, the slug carries water_tank"
+    assert "water_tank" not in overlay_row("abaad_residential_listings", slug, "t", ("الخزان", "بيشة"))[0]["facts"]
+
+    class _Q:
+        def __init__(self, result): self.result = result
+        def select(self, *_a): return self
+        def in_(self, *_a): return self
+        def execute(self):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return types.SimpleNamespace(data=self.result)
+
+    class _C:
+        def __init__(self, result): self.result = result
+        def table(self, _t): return _Q(self.result)
+
+    got = place_names_for(_C([{"id": 13214542, "district_ar": "حي الخزان", "city_ar": "بيشة", "neighborhood": "الخزان", "city": "Bisha"},
+                              {"id": 2, "district_ar": None, "city_ar": "تربة", "neighborhood": None, "city": None}]),
+                          "abaad_residential_listings", [13214542, 2])
+    assert got == {13214542: ("حي الخزان", "بيشة", "الخزان", "Bisha"), 2: ("تربة",)}, got
+    # the real abaad row, names as stored, through the whole overlay
+    assert "water_tank" not in overlay_row("abaad_residential_listings", slug, "t", got[13214542])[0]["facts"]
+
+    class _OnlyBasic(_C):      # a table without district_ar/city_ar (68 of 305): the neighborhood/city set answers
+        def table(self, _t):
+            outer = self
+            class _Q2(_Q):
+                def select(self, cols):
+                    self.result = RuntimeError("42703 column district_ar does not exist") if "district_ar" in cols else outer.result
+                    return self
+            return _Q2(None)
+    assert place_names_for(_OnlyBasic([{"id": 5, "neighborhood": "الريان", "city": None}]), "erapulse_commercial_listings", [5]) == {5: ("الريان",)}
+    assert place_names_for(_C(RuntimeError("42703 column neighborhood does not exist")), "x_listings", [1]) == {}
+    try:
+        place_names_for(_C(RuntimeError("57014 statement timeout")), "x_listings", [1], sleep=lambda _s: None)
+        raise AssertionError("a failed place-name read was swallowed as «no names»")
+    except RuntimeError:
+        pass
     print("words selftest ok")
 
 

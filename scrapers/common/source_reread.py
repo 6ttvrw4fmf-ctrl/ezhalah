@@ -58,6 +58,12 @@ NOT_PRESENT = re.compile(r'<div[^>]*class="[^"]*\bnot_present\b[^"]*"[^>]*>.*?</
 # "https://ksaaqar.com/ad/…"><h5>title</h5></a>`; 12226090 (a Makkah sale) scored «kitchen» from a Jeddah
 # rental's card title «… غرفتين وصالة ومطبخ …» (CI re-read 39021296467, 🔬 2026-10-17, backlog 628).
 RELATED_CARD = re.compile(r'<a href="https://ksaaqar\.com/ad/[^"]*">\s*<h5>.*?</h5>\s*</a>', re.S | re.I)
+# maqrat prints other ads under the ad as result cards, each with its OWN description and a link to its own
+# /Property/Details/<id>: 13605201 (no description of its own) scored «furnished» from ad 72's card sentence
+# «يوجد شقة في نفس المشروع داخليه مؤثثة», and 18862188 scored «kitchen» from four other ads' cards
+# (CI re-read 41292070655, 🔬 2026-11-01, backlog 1123).
+RESULT_CARD_TEXT = re.compile(r'<p class="(?:result-card-description|property-showcase-location)\b[^"]*"[^>]*>.*?</p>',
+                              re.S | re.I)
 
 
 # A spec table renders its label and its value as two elements («عدد غرف النوم» / «1»): split on tags they
@@ -183,6 +189,7 @@ def _number_first_lines(body: str) -> list[str]:
 
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
+    body = RESULT_CARD_TEXT.sub(" ", body or "")   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
     jsonld = []
     for block in JSONLD.findall(body or ""):
         try:
