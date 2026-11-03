@@ -152,6 +152,19 @@ export function orderLike<T extends { sourceTable?: string; id: number }>(row: {
   return [...cards].sort((a, b) => (rank.get(`${a.sourceTable}#${a.id}`) ?? 1e9) - (rank.get(`${b.sourceTable}#${b.id}`) ?? 1e9));
 }
 
+/** IDENTICAL COPIES FOLD INTO ONE CARD (owner 2026-11-02: «some also have duplicates, it's a bit weird» — a Khobar
+ *  off-plan project posted the same villa 12 times on one spot). Cards with the same key — the SAME site, price, area,
+ *  type, title and photo — show once with «and N identical listings»; a different site, price or unit is never folded,
+ *  so no source is merged away and nothing is dropped: the count says exactly how many copies the site published. */
+export function foldDuplicates<T>(cards: T[], keyOf: (c: T) => string): { card: T; copies: number }[] {
+  const out: { card: T; copies: number }[] = []; const at = new Map<string, number>();
+  for (const c of cards) {
+    const k = keyOf(c); const i = at.get(k);
+    if (i === undefined) { at.set(k, out.length); out.push({ card: c, copies: 1 }); } else out[i].copies++;
+  }
+  return out;
+}
+
 /** A drawn overlay's points → a closed GeoJSON polygon ([lng, lat] rings), or null when too small to be an area. */
 export function polygonOf(points: unknown[]): PinFilter['poly'] {
   // MapKit's PolygonOverlay.points is RINGS — [[Coordinate, …]] — even when the overlay was built from a flat list

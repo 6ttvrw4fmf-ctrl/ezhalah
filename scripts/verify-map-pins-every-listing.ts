@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pinFilterOf, isNarrowed, EMPTY_MAP_FILTER } from '../src/lib/mapFilter.ts';
-import { pinColor, dotColor, MIXED_DOT, pinHead, shortMoney, cellForSpan, fineCellForSpan, CELL_LADDER, PIN_LIMIT, PIN_SHOW_MAX, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
+import { pinColor, dotColor, MIXED_DOT, pinHead, shortMoney, cellForSpan, fineCellForSpan, CELL_LADDER, PIN_LIMIT, PIN_SHOW_MAX, foldDuplicates, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
 let failed = 0;
@@ -102,6 +102,16 @@ mustCatch('the clear-all-then-add-all redraw (the flicker on every pan)', !/clea
 check('AppleMap.web.tsx re-runs the pin layer once the map object exists (mapReady bumped where live.map is set, in the deps)',
   /live\.map = map;\n\s*setMapReady\(\(n\) => n \+ 1\);/.test(web) && /\}, \[pinsKey, failed, mapReady\]\);/.test(web) && /if \(!mk \|\| !m \|\| !pinFilter\) return;/.test(web));
 check('AppleMap.web.tsx adds the biggest count last so it sits on top', /rows\.sort\(\(a, b\) => a\.n - b\.n\);\n\s*setPinCount\(/.test(web));
+// IDENTICAL COPIES FOLD INTO ONE CARD (owner 2026-11-02: «some also have duplicates»): same site + price + area + type +
+// title + photo → one card and «and N identical listings»; anything different stays its own card — no source merged away.
+const dupCards = [{ k: 'a', id: 1 }, { k: 'a', id: 2 }, { k: 'b', id: 3 }, { k: 'a', id: 4 }];
+const folded = foldDuplicates(dupCards, (c) => c.k);
+check('foldDuplicates keeps the first of each key, counts the copies, keeps order', folded.length === 2 && folded[0].card.id === 1 && folded[0].copies === 3 && folded[1].card.id === 3 && folded[1].copies === 1);
+mustCatch('a fold that merges different listings (different key folded together)', foldDuplicates(dupCards, (c) => c.k).length !== 1);
+mustCatch('a fold that drops a copy without counting it', folded.reduce((a, f) => a + f.copies, 0) === dupCards.length);
+const sheetSrc = readFileSync(join(root, 'src/components/MapPinSheet.tsx'), 'utf8');
+check('the sheet folds by site + price + area + type + title + photo and says how many identical copies there are', /\[l\.sourceTable, l\.price, l\.area, l\.cleanType \?\? '', l\.title \?\? '', l\.photos\?\.\[0\] \?\? ''\]\.join\('\|'\)/.test(sheetSrc) && /foldDuplicates\(cards, dupKey\)\.map\(/.test(sheetSrc) && /and \{n\} identical listings from the same site/.test(sheetSrc) && /'and \{n\} identical listings from the same site': 'و\{n\} إعلانات مطابقة من الموقع نفسه'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
+check('the sheet shows the head\'s own words (price or count) at once while the cards load', /\$\{t\('Listing'\)\} · \$\{pinHead\(row, isRTL \? 'ar' : 'en'\)\}/.test(sheetSrc));
 // AN INVISIBLE OUTLINE IS NOT CLICKABLE (measured live 2026-11-02, phone: a tap between two pins in central Riyadh flew
 // the map out to the whole region because the faded-out polygon took the tap). The region select bails when fade is 0.
 check('AppleMap.web.tsx ignores a region tap once its outline has faded to nothing', /const r = e\.overlay\?\.data;[\s\S]{0,600}?if \(!r \|\| !map \|\| fade <= 0\) return;/.test(web));

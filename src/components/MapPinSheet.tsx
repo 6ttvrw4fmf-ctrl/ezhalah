@@ -13,7 +13,10 @@ import { openListing } from '@/lib/openListing';
 import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
-import { idsByTable, orderLike, type PinRow } from '@/lib/mapPins';
+import { idsByTable, orderLike, foldDuplicates, pinHead, type PinRow } from '@/lib/mapPins';
+
+/** What makes two cards the same listing posted twice: the same site, price, area, type, title and photo. */
+const dupKey = (l: Listing) => [l.sourceTable, l.price, l.area, l.cleanType ?? '', l.title ?? '', l.photos?.[0] ?? ''].join('|');
 
 export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: () => void }) {
   const { t, isRTL } = useI18n();
@@ -37,9 +40,11 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
+  // The head's own words show at once — the price («650 ألف») or the count — while the cards load (owner 2026-11-02:
+  // «why does it load like this»): never a blank sheet with only a spinner.
   const title = row.n > 1
     ? t('{n} listings at this spot', { n: row.n })
-    : t('Listing');
+    : `${t('Listing')} · ${pinHead(row, isRTL ? 'ar' : 'en')}`;
   return (
     <View style={s.sheet} testID="map-pin-sheet">
       <View style={[s.head, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
@@ -54,9 +59,10 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
         <View style={s.center}><Text style={s.note}>{t('Could not load this listing. Try again.')}</Text></View>
       ) : (
         <ScrollView style={s.list} contentContainerStyle={s.listInner} showsVerticalScrollIndicator>
-          {cards.map((l) => (
+          {foldDuplicates(cards, dupKey).map(({ card: l, copies }) => (
             <View key={`${l.sourceTable}#${l.id}`} style={s.card}>
               <ResultCard listing={l} onOpen={() => { void openListing(l); }} row="tight" />
+              {copies > 1 ? <Text style={s.copies} testID="map-pin-sheet-copies">{t('and {n} identical listings from the same site', { n: copies - 1 })}</Text> : null}
             </View>
           ))}
           {failed && cards.length < (row.ids?.length ?? 0) ? <Text style={s.note}>{t('Some listings could not be loaded.')}</Text> : null}
@@ -74,6 +80,7 @@ const s = StyleSheet.create({
   list: { flexGrow: 0 },
   listInner: { padding: 10, gap: 10 },
   card: { },
+  copies: { color: colors.muted, fontSize: 12, fontWeight: '600', textAlign: 'center', paddingTop: 4 },
   center: { padding: 24, alignItems: 'center' },
   note: { color: colors.muted, fontSize: 13, textAlign: 'center', padding: 8 },
 });
