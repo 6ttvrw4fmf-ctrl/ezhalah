@@ -39,3 +39,18 @@ def test_a_dropdown_of_types_and_districts_is_not_the_ad():
     page = page_evidence(OWN + dropdown)
     assert "تراس" not in _all(page) and "الشرفة" not in _all(page)
     assert "حي الوسام" in page["text_head"]
+
+
+def test_a_button_chip_is_not_the_ad():
+    # sukna unit 711 (2026-11-03): AI prompt chips on every page read as the ad offering instalments.
+    chips = ('<button type="button" class="inline-flex"><svg></svg><span class="whitespace-nowrap">خطة تقسيط ميسّرة'
+             '</span></button>')
+    assert "تقسيط" not in _all(page_evidence(OWN + chips))
+
+
+def test_a_wordpress_menu_link_is_not_the_ad():
+    # aqaralriyadh (2026-11-03): the menu «شقق مفروشة» on every page read as the ad saying furnished.
+    menu = ('<ul><li id="menu-item-244" class="menu-item menu-item-type-taxonomy menu-item-244">'
+            '<a href="https://aqaralriyadh.com/category/x/">شقق مفروشة</a></li></ul>')
+    assert "مفروشة" not in _all(page_evidence(OWN + menu))
+    assert "مفروشة" in page_evidence(OWN + menu + "<p>الشقة مفروشة</p>")["text_head"]

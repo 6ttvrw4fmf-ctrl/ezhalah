@@ -72,6 +72,12 @@ RADIO_OPTION = re.compile(r'<input\b[^>]*\btype=["\']?radio["\']?[^>]*>[^<]{0,80
 # («تراس», «حي الشرفة الشمالية», «مشرفة» …), so the score asked «balcony» of 10 of 10 sampled nofodh ads
 # (ops_af_score 2026-11-03, balcony we_miss 10; page 472243 re-read the same night).
 SELECT_BLOCK = re.compile(r"<select\b[^>]*>.*?</select>", re.S | re.I)
+# …and a BUTTON is a control too: sukna prints AI prompt chips on every unit page («خطة تقسيط ميسّرة», «استثمار بـ 3
+# ملايين ريال»), read as the ad offering instalments (installment_available we_miss 10 of 10; unit 711 re-read).
+BUTTON_BLOCK = re.compile(r"<button\b[^>]*>.*?</button>", re.S | re.I)
+# A WordPress MENU ITEM is the site's navigation, not the ad: aqaralriyadh's menu «شقق مفروشة» on every page read as
+# the ad saying furnished (furnished we_miss 5 of 5, 2026-11-03 re-read). Only the anchor text of a `menu-item` <li>.
+MENU_ITEM_LINK = re.compile(r'(<li\b[^>]*class="[^"]*\bmenu-item\b[^"]*"[^>]*>\s*<a\b[^>]*>)[^<]{0,80}', re.I)
 RESULT_CARD_TEXT = re.compile(r'<p class="(?:result-card-description|property-showcase-location)\b[^"]*"[^>]*>.*?</p>',
                               re.S | re.I)
 
@@ -201,6 +207,7 @@ def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     body = RESULT_CARD_TEXT.sub(" ", body or "")   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
     body = SELECT_BLOCK.sub(" ", RADIO_OPTION.sub(" ", body))   # …nor the site's own search-filter choices
+    body = MENU_ITEM_LINK.sub(r"\1 ", BUTTON_BLOCK.sub(" ", body))  # …nor its buttons and menu links
     jsonld = []
     for block in JSONLD.findall(body or ""):
         try:
