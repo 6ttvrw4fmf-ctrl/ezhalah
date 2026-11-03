@@ -32,6 +32,7 @@ import { Image as XImage } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
+import { fetchMapAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { fetchMapDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
@@ -121,7 +122,8 @@ type MapKit = {
   CircleOverlay: new (center: unknown, radius: number, o?: { style?: unknown; enabled?: boolean }) => unknown;
   Directions: (new (o?: { language?: string }) => { route: (req: { origin: unknown; destination: unknown; transportType?: unknown }, cb: (err: unknown, data: { routes: { polyline: { points: Coord[] }; distance: number }[] }) => void) => number }) & { Transport: { Automobile: unknown } };
   MarkerAnnotation: new (coord: unknown, o?: { title?: string; color?: string; glyphColor?: string; animates?: boolean }) => unknown;
-  Annotation: new (coord: unknown, factory: (coord: unknown, o: { data?: unknown }) => HTMLElement, o?: { data?: unknown; anchorOffset?: unknown; calloutEnabled?: boolean; size?: { width: number; height: number } }) => unknown;
+  Annotation: (new (coord: unknown, factory: (coord: unknown, o: { data?: unknown }) => HTMLElement, o?: { data?: unknown; anchorOffset?: unknown; calloutEnabled?: boolean; size?: { width: number; height: number }; displayPriority?: number; collisionMode?: unknown }) => unknown)
+    & { CollisionMode?: { Rectangle?: unknown } };
   DOMPoint?: unknown;
   Search: new (o: { region?: unknown; language?: string; limitToCountries?: string; includePointsOfInterest?: boolean }) => MKSearch;
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
@@ -625,10 +627,65 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const d = nearestDot(shown, project, e.clientX - rect.left, e.clientY - rect.top);
       if (d) pick({ lat: d.lat, lng: d.lng, n: d.n, deal: d.deal, type_ar: null, platforms: 0, ids: null, price: null, platform: null } as PinRow, cellForSpan(m.region.span.latitudeDelta) || 0.01);
     };
+    // AREA LABELS (owner's father, relayed 2026-11-03: «show only the number of listings in the area at such low zoom,
+    // and place marks only when the user zooms in further»; «at this zoom level show the names of the districts only
+    // and the number of listings»): far out, one label per city; at city zoom, one per district; pins only closer in.
+    // A tap on a label zooms into it. Keyed like the pins, so a pan keeps the labels that stay.
+    const pickArea = (a: AreaRow, level: AreaLevel) => {
+      live.history.push(m.region);
+      const sp = areaZoomSpan(level);
+      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(a.lat, a.lng), new mk.CoordinateSpan(sp, sp)), true);
+    };
+    const areaElement = (a: AreaRow, level: AreaLevel) => {
+      const el = document.createElement('div');
+      el.setAttribute('data-testid', 'map-area');
+      el.style.cssText = 'font:700 12px/1.15 -apple-system,system-ui,sans-serif;color:#24232B;background:rgba(255,255,255,.96);'
+        + 'border:1px solid rgba(36,35,43,.18);border-radius:12px;padding:5px 9px;white-space:nowrap;text-align:center;'
+        + 'box-shadow:0 1px 4px rgba(0,0,0,.28);cursor:pointer;touch-action:none';
+      const name = document.createElement('div'); name.textContent = areaName(a, level);
+      const count = document.createElement('div'); count.textContent = areaCount(a.n, loc);
+      count.style.cssText = `font-weight:800;font-size:11px;color:${PIN_COLOR.buy};margin-top:1px`;
+      el.append(name, count);
+      let down: { x: number; y: number } | null = null;
+      el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      el.addEventListener('pointerup', (e) => {
+        const d = down; down = null;
+        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 10) { e.stopPropagation(); pickArea(a, level); }
+      });
+      return el;
+    };
+    const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
+      const next = new Map<string, AreaRow>();
+      for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
+      for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
+      // NO PILE-UPS: MapKit hides a label that collides with a higher-priority one, and priority follows the count, so
+      // the biggest districts show and a smaller neighbour appears as the user zooms in (Jeddah alone has 107).
+      const maxN = Math.max(1, ...areas.map((a) => a.n));
+      for (const [k, a] of next) {
+        if (keyed.has(k)) continue;
+        const ann = new mk.Annotation(new mk.Coordinate(a.lat, a.lng), () => areaElement(a, level), {
+          calloutEnabled: false, collisionMode: mk.Annotation.CollisionMode?.Rectangle, displayPriority: 250 + Math.round(499 * a.n / maxN),
+        });
+        keyed.set(k, ann); m.addAnnotation(ann);
+      }
+      mine = [...keyed.values()];
+    };
     const load = async () => {
       const my = ++seq;
       const { center, span } = m.region;
       const cell = cellForSpan(span.latitudeDelta);
+      const level = narrowed ? null : areaLevelFor(span.latitudeDelta);
+      if (level) {
+        const areas = await fetchMapAreas(paddedBox(center, span), level, pins.deals);
+        if (my !== seq || mapRef.current !== m) return;
+        if (areas !== 'unknown') {
+          hideCanvas(); shown = [];
+          drawAreas(areas, level);
+          setPinCount(areasTotal(areas));
+          return;
+        }
+        // The labels failed to load: the dots below, never an empty map.
+      }
       if (cell > 0 && !narrowed) {
         const all = await fetchMapDots();
         if (my !== seq || mapRef.current !== m) return;

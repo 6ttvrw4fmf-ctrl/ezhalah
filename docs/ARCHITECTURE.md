@@ -857,6 +857,13 @@ used to end on.
     row, not a UNION of two separate fetches) and that `count(كلاهما) == count(شهري) + count(سنوي)`
     exactly for the same cohort (proven live, see above; standing barrier extends
     `mon_detect_trending_cohort_drift`).
+  - **MAP ZOOM LEVELS: NAMES AND COUNTS FIRST, PINS ONLY CLOSE IN (owner's father, relayed by the owner 2026-11-03 —
+    «show only the number of listings in the area at such low zoom, and place marks only when the user zooms in
+    further»).** Latitude span > 2.5°: one label per city; > 0.06°: one label per district; closer: price pins
+    (src/lib/mapAreas.ts). Labels come precomputed from `map_area_ar` (hourly, median positions, same-site duplicates
+    once) via `map_areas_ar()`; colliding labels hide by count priority. A narrowed view (filter popup or drawn
+    boundary) keeps the live grid. The suspicious-facts robot (`mon_detect_suspicious_listing_facts`, migration
+    `20261103053807`) watches rooms-vs-area, an age stored as bedrooms, and duplicate-heavy platforms twice an hour.
   - A future engineer reading "both periods selected" must never reinterpret it as "show a balanced
     mix" or "prefer one period" — if a change ever needs that behavior, it is a NEW, explicit product
     decision requiring an owner call, not an extension of this rule.
