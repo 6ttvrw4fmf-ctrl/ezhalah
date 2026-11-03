@@ -201,7 +201,7 @@ The Advanced Filter serves the seller's own quoted sentence beside the site's bo
 (docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md, «The seller's sentence — Rule B»). Each morning read
 `select public.ops_text_facts_status();` (≈ 10 s, one call — never hand-run the detector or the sync):
 
-1. **Freshness.** `last_read_at` is from today (the nightly reader, 07:05 UTC) and `ads_read_last_36h` > 0. Older = P1
+1. **Freshness.** `last_read_at` is from the last few hours (the hourly reader at :25 UTC since 2026-11-03; was 07:05 nightly) and `ads_read_last_36h` > 0. Older = P1
    (the `text_facts_reader_stale` alert says the same).
 2. **Conflicts.** `conflicts` = ads whose box is ticked while their own words say no; they are served as unknown. Read
    `select * from ops_text_facts_conflicts order by read_at desc limit 20`: open the ad, and if the box is a scraper
