@@ -676,13 +676,20 @@ def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
     # by the next crawl, and struck units lost their strikes the same way. Only the unit's own page
     # — /view/ itself, or its /ar/view/ address — answering live releases it.
     from scrapers.gathern import liveness as _L  # lazy: liveness imports this module
+    # A unit released here was just read LIVE on its own page — a direct affirmative read, so it is
+    # recorded as one (2026-11-03). It used to be released with no stamp: 6 struck units the crawl
+    # read live at 05:08 stayed «served, no check > 26 h» until the sweep came back to them, and a
+    # fresh CI spot-check read all 6 live (41626783236).
+    by_ad = {r["ad_number"]: r for r in rows}
     for ad in list(held):
         status, body, home = _probe.fetch(url[ad])
         if home:
             if _L._opens_at_ar_view(_oracle_session(), url[ad]):
                 del held[ad]
+                db.mark_direct_alive(by_ad[ad], oracle="gathern.held_strikes.ar_view_opens")
         elif body and _oracle_signal(status, body, False) == "live":
             del held[ad]
+            db.mark_direct_alive(by_ad[ad], oracle="gathern.held_strikes.own_page_live")
     return held
 
 
