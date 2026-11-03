@@ -1458,6 +1458,27 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   answers our runners 404 on every control (canary-quarantined 15:37 → 03:08, 10-30 and 10-31). Group that count by
   `missing_count` and the last reading's verdict before calling it a coverage hole.
 
+## Lessons from 2026-11-03 (♻️)
+- **A probe that compares URLs byte-for-byte reads every Arabic slug as a redirect.** The client sends a raw
+  Arabic slug percent-encoded and reports `r.url` encoded (and servers report uppercase escapes where we store
+  lowercase), so `http_liveness._path_of` said `path_changed` on the ad's OWN page and the site signal gave no
+  opinion: mizlaj MZ29 answered a plain 404 and was «1 unknown (held)» at full strikes, on screen and in the
+  dead-visible sample (nowaisiry and suwar store such links too). Paths are now compared percent-decoded
+  (#10147). When a held-UNKNOWN row's own page reads gone to a second reader, compare the URL the probe asked
+  for with the one it landed on before suspecting the signal.
+- **An adjudication is a claim about the source, and the source can falsify it.** 418 dwelleo ads retracted by
+  the 10-21 fresh start («page no longer exists») came back in dwelleo's catalogue and read 12/12 live on their
+  own page, so `adjudicated_reactivation` sat open on rows that were right to show. Record it in
+  `ops_adjudication_superseded` with the own-page live evidence (never delete the ledger row); the detector
+  skips those and dormant sites, and classifies commercial-side collision rows against their residential twin.
+- **A fleet site whose crawl needs the proxy needs it in the fleet check too.** `fleet_liveness:sakani` read its
+  controls 0/5 «no answer» every run because `fleet-liveness.yml` handed the proxy to ialqarawi only (#10149).
+  A QUARANTINED note that says «timeout / connection error» is transport, not signal: compare with how the
+  crawl reaches the same host.
+- **A multi-unit page is not a duplicate.** `ops_lifecycle_duplicate_stale_copy()` paired rows by url alone, so
+  one removed unit on a project page (nufouth, expattrusted) read as two copies disagreeing; a pair is one
+  listing only when the ad_numbers match or the url carries just those two rows.
+
 ## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
 
 1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
