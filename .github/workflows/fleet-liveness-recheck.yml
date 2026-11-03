@@ -49,6 +49,9 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SHADOW: ${{ inputs.shadow }}
+          # The residential proxy for fleet_liveness.PROXY_SITES only (sakani, ialqarawi): granted per
+          # site inside the one process by site_proxy_env(). Without it every sakani recheck read 0/5.
+          FLEET_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
         run: |
           exec python -m scrapers.common.fleet_liveness --struck-only \
             $([ "$SHADOW" = "true" ] && echo --shadow)
