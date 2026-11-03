@@ -280,3 +280,20 @@ def test_a_page_that_did_not_load_blocks_the_prune(monkeypatch):
     monkeypatch.setattr(R.db, "end_run", lambda run_id, **k: calls.update(k) or True)
     assert R.main() == 0
     assert pruned == [] and "http_404x1" in calls["notes"] and calls["rows_upserted"] == 2
+
+
+FEATURES = ('<div id="pro_features"> <div class="features"> <div class="title_f"> <h2>مميزات مشروع</h2> </div>'
+            '<div class="itemf"><div class="text"> <h4>نظام أمني</h4> <p>كاميرات مراقبة</p> </div></div>'
+            '<div class="itemf"><div class="text"> <h4>مصعد</h4> <p>3 مصاعد</p> </div></div></div></div>')
+
+
+def test_the_projects_own_lift_reaches_every_unit_and_nothing_else_does():
+    # 2026-11-03: every live hasaad project prints «مميزات مشروع» with «مصعد» (FUJI / 3 مصاعد, per project);
+    # elevator stayed NULL on all 12 units (ops_af_score hasaad elevator we_miss 5 of 5).
+    rows, _ = R.map_units(URL_8404, R.parse_project(HEAD_8404 + ITEMS_8404 + FEATURES))
+    assert rows and all(r.get("elevator") is True for r in rows)
+    rows, _ = R.map_units(URL_8404, R.parse_project(HEAD_8404 + ITEMS_8404))
+    assert rows and all("elevator" not in r for r in rows)          # no block: silence, never «no»
+    no_lift = FEATURES.replace("<h4>مصعد</h4> <p>3 مصاعد</p>", "<h4>دش</h4> <p>مركزي</p>")
+    rows, _ = R.map_units(URL_8404, R.parse_project(HEAD_8404 + ITEMS_8404 + no_lift))
+    assert rows and all("elevator" not in r for r in rows)
