@@ -142,10 +142,13 @@ try {
     // HTML — aborting only the FIRST request planted nothing fatal (run 41649183142: the preload failed, the import
     // that followed succeeded, no reload, the fix never had to fire). Every request for the named chunk fails until
     // the main frame navigates a second time (the self-reload); from then on every request goes through.
-    let mainNavs = 0;
-    page.on('framenavigated', (f) => { if (f === page.mainFrame()) mainNavs++; });
+    // A DOCUMENT load, not a frame navigation: expo-router's tab taps are pushState navigations and Playwright reports
+    // those as `framenavigated` too — counting them lifted the abort on the first tap, before the lazy route chunk
+    // was even requested (run 41653288115: map- seen, nothing planted). `load` fires only when a new document loads.
+    let docLoads = 0;
+    page.on('load', () => { docLoads++; });
     await ctx.route((u) => u.href.includes(FAIL_ONCE), (route) => {
-      if (mainNavs >= 2) return route.continue();
+      if (docLoads >= 2) return route.continue();
       if (!failedOnce) { failedOnce = route.request().url(); log(`    · aborting until the tab reloads: ${failedOnce}`); }
       return route.abort('failed');
     });
