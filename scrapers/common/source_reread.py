@@ -68,6 +68,10 @@ RELATED_CARD = re.compile(r'<a href="https://ksaaqar\.com/ad/[^"]*">\s*<h5>.*?</
 # sakan ads and called all 10 a «we miss» (ops_af_score 2026-11-03; page re-read 94863, 🔬). The text that follows a
 # radio input up to the next tag is dropped; a checkbox is kept (some themes print a TICKED feature list that way).
 RADIO_OPTION = re.compile(r'<input\b[^>]*\btype=["\']?radio["\']?[^>]*>[^<]{0,80}', re.I)
+# …and a DROPDOWN is the same control. nofodh prints a <select> of every property type and district on each ad page
+# («تراس», «حي الشرفة الشمالية», «مشرفة» …), so the score asked «balcony» of 10 of 10 sampled nofodh ads
+# (ops_af_score 2026-11-03, balcony we_miss 10; page 472243 re-read the same night).
+SELECT_BLOCK = re.compile(r"<select\b[^>]*>.*?</select>", re.S | re.I)
 RESULT_CARD_TEXT = re.compile(r'<p class="(?:result-card-description|property-showcase-location)\b[^"]*"[^>]*>.*?</p>',
                               re.S | re.I)
 
@@ -196,7 +200,7 @@ def _number_first_lines(body: str) -> list[str]:
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     body = RESULT_CARD_TEXT.sub(" ", body or "")   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
-    body = RADIO_OPTION.sub(" ", body)               # …nor the site's own search-filter choices
+    body = SELECT_BLOCK.sub(" ", RADIO_OPTION.sub(" ", body))   # …nor the site's own search-filter choices
     jsonld = []
     for block in JSONLD.findall(body or ""):
         try:

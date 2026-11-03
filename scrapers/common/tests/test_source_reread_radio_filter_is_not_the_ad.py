@@ -30,3 +30,12 @@ def test_the_ads_own_furnished_words_are_kept():
 def test_a_ticked_checkbox_feature_is_kept():
     ticked = OWN + '<label><input type="checkbox" checked disabled> مصعد</label>'
     assert "مصعد" in _all(page_evidence(ticked))
+
+
+def test_a_dropdown_of_types_and_districts_is_not_the_ad():
+    # nofodh 472243 (2026-11-03): a <select> of every type and district on each ad page read as «balcony».
+    dropdown = ('<select name="type"><option value="1">شقة</option><option value="9">تراس</option></select>'
+                '<select name="district"><option>حي الشرفة الشمالية</option><option>مشرفة</option></select>')
+    page = page_evidence(OWN + dropdown)
+    assert "تراس" not in _all(page) and "الشرفة" not in _all(page)
+    assert "حي الوسام" in page["text_head"]
