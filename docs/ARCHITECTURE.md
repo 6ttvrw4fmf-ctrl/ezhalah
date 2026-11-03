@@ -863,7 +863,11 @@ used to end on.
     (src/lib/mapAreas.ts). Labels come precomputed from `map_area_ar` (hourly, median positions, same-site duplicates
     once) via `map_areas_ar()`; colliding labels hide by count priority. A narrowed view (filter popup or drawn
     boundary) keeps the live grid. The suspicious-facts robot (`mon_detect_suspicious_listing_facts`, migration
-    `20261103053807`) watches rooms-vs-area, an age stored as bedrooms, and duplicate-heavy platforms twice an hour.
+    `20261103053807`) watches rooms-vs-area and an age stored as bedrooms twice an hour; it flags, never edits.
+  - **SAME-SITE COPIES STAY AS PUBLISHED (owner, 2026-11-03 — permanent).** When one site posts the same house several
+    times, each post is its own ad on that site, and the map shows every one («leave it how it is, it's fine, like how
+    we had it»), as the Filter always has. Different sites are separate listings as always. A same-site fold was built
+    and reverted the same morning (migration `20261103054744`); do not reintroduce it without the owner.
   - A future engineer reading "both periods selected" must never reinterpret it as "show a balanced
     mix" or "prefer one period" — if a change ever needs that behavior, it is a NEW, explicit product
     decision requiring an owner call, not an extension of this rule.

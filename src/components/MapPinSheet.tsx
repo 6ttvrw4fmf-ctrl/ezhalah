@@ -13,10 +13,8 @@ import { openListing } from '@/lib/openListing';
 import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
-import { idsByTable, orderLike, foldDuplicates, pinHead, type PinRow } from '@/lib/mapPins';
+import { idsByTable, orderLike, pinHead, type PinRow } from '@/lib/mapPins';
 
-/** What makes two cards the same listing posted twice: the same site, price, area, type, title and photo. */
-const dupKey = (l: Listing) => [l.sourceTable, l.price, l.area, l.cleanType ?? '', l.title ?? '', l.photos?.[0] ?? ''].join('|');
 
 export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: () => void }) {
   const { t, isRTL } = useI18n();
@@ -59,10 +57,11 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
         <View style={s.center}><Text style={s.note}>{t('Could not load this listing. Try again.')}</Text></View>
       ) : (
         <ScrollView style={s.list} contentContainerStyle={s.listInner} showsVerticalScrollIndicator>
-          {foldDuplicates(cards, dupKey).map(({ card: l, copies }) => (
+          {/* Every card the pin holds, as each site published it — a site that posted the same house several times shows
+              every post (owner 2026-11-03: «leave it how it is, it's fine, like how we had it»). */}
+          {cards.map((l) => (
             <View key={`${l.sourceTable}#${l.id}`} style={s.card}>
               <ResultCard listing={l} onOpen={() => { void openListing(l); }} row="tight" />
-              {copies > 1 ? <Text style={s.copies} testID="map-pin-sheet-copies">{t('and {n} identical listings from the same site', { n: copies - 1 })}</Text> : null}
             </View>
           ))}
           {failed && cards.length < (row.ids?.length ?? 0) ? <Text style={s.note}>{t('Some listings could not be loaded.')}</Text> : null}
@@ -80,7 +79,6 @@ const s = StyleSheet.create({
   list: { flexGrow: 0 },
   listInner: { padding: 10, gap: 10 },
   card: { },
-  copies: { color: colors.muted, fontSize: 12, fontWeight: '600', textAlign: 'center', paddingTop: 4 },
   center: { padding: 24, alignItems: 'center' },
   note: { color: colors.muted, fontSize: 13, textAlign: 'center', padding: 8 },
 });
