@@ -80,7 +80,11 @@ jobs:
           # walled (small-sources-sync `proxy: true`) get it, and their session() tries DIRECT first.
           # ialqarawi: its known-live controls read 0/5 in 31 s at 2026-09-29 01:19 — the same fast
           # refusal as the HTTP 202 wall its crawl meets from the runner on alternate days.
-          WASALT_PROXY_URL: ${{ contains(fromJSON('["ialqarawi"]'), matrix.site) && secrets.WASALT_PROXY_URL || '' }}
+          # sakani (2026-11-03): its crawl rides the proxy (small-sources-sync `proxy: true`) because the
+          # runner's address is walled; without it every fleet run since 11-02 read 0/5 controls
+          # («no answer from the source (timeout / connection error)») and 54 served rows at 3-20
+          # strikes were never read. ~2,070 small JSON reads a day (rule 8: far under +20%).
+          WASALT_PROXY_URL: ${{ contains(fromJSON('["ialqarawi","sakani"]'), matrix.site) && secrets.WASALT_PROXY_URL || '' }}
         run: |
           exec python -m scrapers.common.fleet_liveness --site "$SITE" \
             $([ "$SHADOW" = "true" ] && echo --shadow)

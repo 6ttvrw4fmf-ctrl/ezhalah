@@ -1,4 +1,7 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-11-03 (migration 20261102053242_mon_detect_aqar_price_over_authoritative_absent): UNCHANGED.
+--   md5(pg_get_functiondef) in production = 1e56fc64a63888e3aa74a147558108f7, identical to this file. Stamped for
+--   verify-sql-mirrors-not-stale (B2): the 2026-11-02 stamp did not name this later same-day migration.
 -- Refreshed 2026-08-11 for the labeled-total-beats-sub-floor-pick fix (migration 20260811064231).
 --   THIS MIRROR WAS FOUND STALE by senior audit run #10 and is regenerated verbatim here. It had
 --   been missing the ENTIRE «AREA-ARTIFACT GUARD (2026-08-10)» block shipped by migration
