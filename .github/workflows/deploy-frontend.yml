@@ -219,6 +219,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Deploy via the sanctioned guarded entrypoint
+        id: deploy
         if: ${{ !inputs.dry_run }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}              # authenticates the Vercel CLI
@@ -246,7 +247,14 @@ jobs:
         # a safety defect (see the Report step). pipefail keeps the step's exit code from `tee`.
         run: |
           set -o pipefail
-          scripts/safe-deploy.sh 2>&1 | tee /tmp/safe-deploy.log
+          scripts/safe-deploy.sh 2>&1 | tee /tmp/safe-deploy.log; rc=$?
+          # Tell the post-deploy gates whether a bundle actually SHIPPED (the same log lines the Report step reads):
+          # a deploy REFUSED by a pre-deploy gate changed nothing, so there is nothing new to hydrate — yet the gate
+          # ran its 5-viewport browser pass against production after every one of the six refused deploys on
+          # 2026-11-03 (09:26–13:20 UTC, ~3 min each), pure load on real users' search (🔧 11-03). A deploy that
+          # shipped and then failed a later step still reads shipped=yes and is still gated.
+          if grep -qE 'Aliased|^https://ezhalah-[a-z0-9]+-' /tmp/safe-deploy.log; then echo "shipped=yes" >> "$GITHUB_OUTPUT"; else echo "shipped=no" >> "$GITHUB_OUTPUT"; fi
+          exit $rc
 
       # ── Post-deploy hydration gate ───────────────────────────────────────────────────────────────
       # Added 2026-08-15 after the SAME feature was shipped and reverted twice in one night (PR #634 →
@@ -267,7 +275,8 @@ jobs:
       # mismatch, printed FAIL, and the step still passed — which is how a known P0 stayed live: a gate
       # that cannot fail a deploy is decoration, not protection.
       - name: Post-deploy hydration gate (blocking)
-        if: always()
+        # always(): a shipped-then-failed deploy is still gated; a REFUSED deploy (shipped=no) has nothing new to check.
+        if: always() && steps.deploy.outputs.shipped == 'yes'
         run: |
           set -o pipefail
           npx playwright install chromium >/dev/null 2>&1 || true
