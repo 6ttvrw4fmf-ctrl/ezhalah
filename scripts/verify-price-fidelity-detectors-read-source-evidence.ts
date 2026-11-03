@@ -16,7 +16,18 @@ const check = (name: string, ok: boolean) => { console.log(`${ok ? '  ✓' : '  
 
 console.log('verify-price-fidelity-detectors-read-source-evidence: the detectors read what the source and the rule say.');
 
-const fnBody = (s: string) => (s.split('create or replace function public.price_read_from_source_total')[1] ?? '').split('$function$;')[0] ?? '';
+// The function's header (up to its opening dollar tag) and body (to the MATCHING close), read tag-generically;
+// '' when the function or its close is missing, so a reshaped file fails instead of reading the rest as healthy.
+const fnParts = (s: string): { head: string; body: string } => {
+  const start = s.indexOf('create or replace function public.price_read_from_source_total');
+  if (start < 0) return { head: '', body: '' };
+  const rest = s.slice(start);
+  const open = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
+  if (!open) return { head: '', body: '' };
+  const from = open.index + open[0].length;
+  const close = rest.indexOf(open[0], from);
+  return close < 0 ? { head: '', body: '' } : { head: rest.slice(0, open.index), body: rest.slice(from, close) };
+};
 
 // Each guard the predicate needs before it may clear a row. Removing any one would let a parser leak through.
 const guards: [string, RegExp][] = [
@@ -27,12 +38,13 @@ const guards: [string, RegExp][] = [
   ['a field named for area / metre is never a total-price field', /!~\* '\(area\|space\|size\|sqm\|meter\|metre\|مساحة\|متر\)'/],
   ['only a listing table can be read', /'\^\[a-z0-9_\]\+_\(residential\|commercial\)_listings\$'/],
 ];
-const body = fnBody(sql);
+const { head, body } = fnParts(sql);
 for (const [name, rx] of guards) {
   check(name, rx.test(body));
   check(`(mutation) dropping «${name}» is caught`, !rx.test(body.replace(rx, 'true')));
 }
-check('the predicate is costed so the cheap equality predicates run first', /cost 1000/.test(sql.split('$function$')[0] ?? ''));
+check('the predicate is costed so the cheap equality predicates run first', /\bcost 1000\b/.test(head));
+check('(mutation) a body that cannot be delimited reads as empty, never as the rest of the file', fnParts(sql.replace(/\$function\$;/, ';')).body === '');
 
 // The two detectors call it.
 const eqArea = /execute replace\(d, c_old,[\s\S]*?and not public\.price_read_from_source_total\(s\.source_table, s\.listing_id, s\.price_total\)/;
