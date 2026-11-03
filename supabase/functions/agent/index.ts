@@ -1132,15 +1132,24 @@ Deno.serve(async (req: Request) => {
       // the same spend gate and the same 2-attempt bound as an HTTP retry, so nothing routes around
       // the guards and spend stays bounded.
       const EMPTY_REPLY_NUDGE = "\nOUTPUT RULE: the previous attempt returned an empty reply. Output the complete JSON object now — never an empty or whitespace-only reply.";
+      const JSON_ONLY_TURN_RULE = "[Reply with ONLY the complete JSON object described in the system message — no other text.]";
       // The re-ask LEAVES json_object mode. The blank-line reply is that mode's documented defect, and
       // measured 2026-10-18 (backlog 643, 2/2 on the deployed #7310 code) the nudged re-ask in the same
       // mode answered the same 39 blank characters (43 completion tokens, finish_reason stop). Text mode
       // answers; jsonObjectFromReply() cuts the object out of fences or a sentence, and JSON.parse below
       // still decides. The FIRST attempt keeps json_object mode — the cheap, usually-right path.
+      // The rule ALSO closes the LAST user turn (2026-11-03, backlog 1263): appended only to the ~18k-token SYSTEM
+      // prompt, the text-mode re-ask answered plain prose 3/3 on the audit's broad-search probe («أدور لك في جدة إيجار
+      // وبيع، وكم غرفة نوم تحتاجون؟») — no object to cut out, so the customer got a 502. The last turn is where the model
+      // looks for what to do now.
+      const lastIdx = messages.length - 1;
       const { response_format: _jsonMode, ...textModePayload } = JSON.parse(payload);
       const nudgedPayload = JSON.stringify({
         ...textModePayload,
-        messages: [{ ...messages[0], content: String(messages[0].content) + EMPTY_REPLY_NUDGE }, ...messages.slice(1)],
+        messages: messages.map((m: any, i: number) => (
+          i === 0 ? { ...m, content: String(m.content) + EMPTY_REPLY_NUDGE }
+          : i === lastIdx && m.role === "user" ? { ...m, content: String(m.content) + "\n\n" + JSON_ONLY_TURN_RULE }
+          : m)),
       });
       let res: Response | null = null;
       let data: any = null;
@@ -1265,6 +1274,15 @@ Deno.serve(async (req: Request) => {
         });
         return parsed;
       } catch {
+        // PROSE IS A REPLY, NOT A CRASH (2026-11-03, backlog 1263). When even the re-ask answers plain words (no JSON
+        // object anywhere), those words are still the model's answer to the customer. Serve them as a message turn —
+        // the decision ladder downstream still owns kind/search — instead of a 502 error page. Logged distinctly so a
+        // rise is visible (agent health: prose_fallback), never silent.
+        const prose = String(choice?.message?.content ?? "").trim();
+        if (emptyRetried && prose && !prose.includes("{")) {
+          recordHealth("prose_fallback", Date.now() - t0, { ...why, prose_len: prose.length });
+          return { kind: "message", reply: prose, __proseFallback: true };
+        }
         recordHealth("unparseable", Date.now() - t0, why);
         return { __err: json({ error: "unparseable model output", raw, ...why }, 502) };
       }
