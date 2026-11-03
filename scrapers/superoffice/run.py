@@ -71,7 +71,7 @@ from urllib.parse import urljoin, urlparse
 from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, page_pin  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
@@ -203,6 +203,10 @@ def parse_unit_page(page: str) -> dict[str, Any]:
         "address": _text(addr.group(1)) if addr else None,
         "includes": [x for x in (_text(li) for li in re.findall(r"<li[^>]*>(.*?)</li>", inc.group(1), re.S))
                      if x] if inc else [],
+        # MAP PIN (⚡ 2026-11-03, backlog 1197: 0/19 served). The unit page's Google embed («maps/embed?pb=…
+        # !2dLNG!3dLAT») is the BRANCH building the office sits in — measured per branch on 2026-10-30
+        # (as-suwaidi 24.594860,46.695216) — the project-page pattern. A page with no embed → {} (no pin).
+        "pin": page_pin.pin_from_embed(page),
     }
 
 
@@ -294,6 +298,7 @@ def map_unit(unit: dict, page: dict) -> tuple[Optional[tuple[dict, str]], str]:
                         for t in unit.get("termPrices") or [] if isinstance(t, dict)] or None,
         "source_area_sqm_raw": unit.get("areaSqm"),
         "includes_ar": includes or None,
+        **(page.get("pin") or {}),
     }
     row["additional_info"] = redact_capture(strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [], {})}))
     row["source_capture"] = redact_capture(strip_pii_fields({"schema": "superoffice.next.v2", "unit": {
@@ -301,6 +306,23 @@ def map_unit(unit: dict, page: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "page": {k: page.get(k) for k in ("url", "name", "price", "availability", "address")}}))
     db.mark_direct_alive(row, oracle=DIRECT_ALIVE_ORACLE)
     return (row, normalize.category_for_type(ptype).lower()), ""
+
+
+def drop_cross_branch_pins(rows: list[dict]) -> int:
+    """A pair that TWO OR MORE different branches print is not a branch building (a head-office or site-wide
+    map): drop it from every row. Returns how many branches shared the worst pair (0 = nothing dropped)."""
+    branches: dict[tuple, set] = {}
+    for r in rows:
+        ai = r.get("additional_info") or {}
+        if ai.get("latitude") is not None:
+            branches.setdefault((ai["latitude"], ai["longitude"]), set()).add(ai.get("branch_slug"))
+    shared = {k: v for k, v in branches.items() if len(v) >= 2}
+    for r in rows:
+        ai = r.get("additional_info") or {}
+        if (ai.get("latitude"), ai.get("longitude")) in shared:
+            ai.pop("latitude", None)
+            ai.pop("longitude", None)
+    return max((len(v) for v in shared.values()), default=0)
 
 
 # ── Own-page oracle ──────────────────────────────────────────────────────────────────────────────
@@ -436,6 +458,9 @@ def main() -> int:
             row, cat = got
             (com if cat == "commercial" else res).append(row)
             time.sleep(0.3)
+        dropped = drop_cross_branch_pins(res + com)
+        print(f"  pins: {sum(1 for r in res + com if r['additional_info'].get('latitude') is not None)}"
+              f"/{len(res) + len(com)}" + (f" (dropped a pair {dropped} branches share)" if dropped else ""), flush=True)
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)

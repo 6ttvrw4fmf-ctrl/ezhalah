@@ -273,3 +273,27 @@ def test_old_rows_converge_under_the_collapse_cap(monkeypatch):
     n = db.strike_read_gone("t", set(new), R.SOURCE,
                             verify_gone=lambda ad: ("gone", "x") if ad.startswith("SPOold") else ("live", "y"))
     assert n == 0 and struck_runs == [int(0.30 * 52)]
+
+
+# ── MAP PIN (⚡ 2026-11-03, backlog 1197) ─────────────────────────────────────────────────────────
+_EMBED = ('<iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3624.1!2d46.695216!3d24.59486'
+          '!2m3!1f0!2f0!3f0"></iframe>')
+
+
+def test_the_branch_embed_is_the_offices_pin():
+    page = R.parse_unit_page(_fx("unit_H19.html") + _EMBED)
+    assert page["pin"] == {"latitude": 24.59486, "longitude": 46.695216}
+
+
+def test_a_page_without_an_embed_writes_no_pin():
+    assert R.parse_unit_page(_fx("unit_H19.html"))["pin"] == {}
+
+
+def test_a_pair_two_branches_share_is_dropped_and_one_branchs_pair_is_kept():
+    def row(branch, la, lo):
+        return {"additional_info": {"branch_slug": branch, "latitude": la, "longitude": lo}}
+    rows = [row("as-suwaidi", 24.59, 46.69), row("as-suwaidi", 24.59, 46.69),
+            row("al-aarid", 24.88, 46.61), row("al-rawdah", 24.88, 46.61)]
+    assert R.drop_cross_branch_pins(rows) == 2
+    assert rows[0]["additional_info"]["latitude"] == 24.59, "one branch's own building is kept on every office"
+    assert "latitude" not in rows[2]["additional_info"] and "longitude" not in rows[3]["additional_info"]
