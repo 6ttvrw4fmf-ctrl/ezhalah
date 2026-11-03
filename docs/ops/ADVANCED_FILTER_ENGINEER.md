@@ -438,3 +438,17 @@ the consumer by hand, record the run id and its commit SHA in the proof row, and
   aqaralriyadh's menu «شقق مفروشة» — scored 10/10 «we miss» each. `source_reread.page_evidence` now drops radio
   options, selects, buttons and WordPress menu links (PR #10132). Before chasing a site's we_miss, re-read ONE page
   (`net.http_get` from Supabase works from the cloud container) and find where the word sits in the HTML.
+
+## Rule from 2026-11-01, 11-02 and 11-03 (copied by 🔧; three nights, so the 11-02 fleet lesson ① above is corrected)
+
+- **The mirror of an applied migration ships ALONE: branch `mirror/<version>`, ONLY `supabase/migrations/<version>_<name>.sql`,
+  title «mirror: …», within 10 minutes of `apply_migration`.** Barriers go in a separate `scripts/`-only PR; `sql/mirrors/`
+  re-stamps go in that PR only once the robot's lanes include `sql/mirrors/` (gate PR #10167), otherwise they are a
+  person's (LINE 1). The 11-02 line «ship a mirror and its barrier as ONE PR» is withdrawn: 11-03 is what it costs —
+  the five migrations applied 09:19–09:36 UTC travelled in #10130 beside `sql/mirrors/` files, the robot could not
+  take it, four leftover `mirror/<version>` branches made the auto-mirror robot skip them, `migration_drift` stayed
+  open 09:42–12:19, and the drift gate REFUSED six `Deploy frontend` runs (09:26, 09:35, 09:42, 11:05, 11:11, 12:00)
+  while the auto-deploy breaker tripped and the AF live sweep restarted on every attempt (search mean 2.0–6.3 s,
+  11:06–12:56). A PR that needs a person freezes every deploy in the repo, for everyone, until that person comes.
+  Before your end row read `gh run list -w deploy-frontend.yml --limit 10`: a REFUSED run naming your version is a bug
+  of yours that night.

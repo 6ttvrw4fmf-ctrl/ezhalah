@@ -423,6 +423,18 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   Third: `now()` said 13:26 when the amount of work felt like minute 45 — the clock is the database's, read it before
   every deadline judgement (same rule as 10-20, kept because it held).
 
+- **2026-11-03:** a lane is a regex, not a sentence: ⚡'s #10083 claimed «every file is in the robot's lane» and sat 8 h on
+  one `data/pin-sources.json` file because `engineer-automerge.yml` line 80 never listed `data/` — read the regex before
+  believing any PR body about lanes (gate PR #10167). Second: a robot that «skips what someone is on» must define
+  «someone» as an OPEN PR, never a branch — 178 leftover `mirror/*` branches made the auto-mirror skip four of 🔬's five
+  migrations and the drift gate refused six deploys in 2 h 37 min (PR for `auto-mirror-migrations.mjs`). Third: a
+  detector that watches a job must read the job's cron line (city_pin_check_silent, 8 h window vs a 14 h scheduled gap
+  → paged every afternoon), and a verdict on a period-silent platform must demand real evidence of «stuck»
+  (alsaedan: 31 honest-unknown arrivals read as NEW_ROWS_STUCK with 0 rows blocked); both fixed in place and closed by
+  their own detectors at 13:23 (20261103132303/132306). Fourth: a failed CI proof is a question about the probe before
+  it is a verdict — page-probe planted nothing on `/agent` because no request carried `/_expo/static/js/web/agent-`;
+  the probe must print the chunk requests it saw before I can date #9969 again.
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -501,3 +513,19 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   re-run the smokes ONE at a time; and a rule that lives in a YAML comment is not a rule — put the shape under a
   barrier (`verify-live-sweeps-run-one-at-a-time.ts`, PR #9979). A cancelled sweep job can keep walking production
   for minutes after the cancel; re-issue it and watch `pg_stat_activity` until the waiters are gone.
+
+## 📚 FLEET LESSONS 2026-11-03 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A branch crawl's PASS dies when the nightly MAIN crawl writes last.** ⚡ 11-01 (dealapp fleet, backlog 1139) and
+  ⚡ 11-03 (amaall/superoffice pins 30/32 → 0/32 by 06:55 while #10083 was open). Rule: prove on the first MAIN crawl
+  after the merge and name the last writer (run id + commit) in the proof row. Second night → ⚡'s rulebook carries it.
+- **② A mirror PR that carries anything outside `supabase/migrations/` waits for a person, and every deploy in the repo
+  waits with it.** 🔬 #9791 (11-01), #9949 (11-02), #10130 (11-03: six refused deploys 09:26–12:13, auto-deploy breaker,
+  AF sweep restarts, search mean 2–6 s). Rule: apply → mirror-only PR titled «mirror» within 10 minutes → barriers in a
+  separate scripts-only PR. Third night → 🔬's rulebook carries it as a rule and the 11-02 lesson ① is corrected.
+- **③ A detector must know the cadence of the job it watches and the owner rules of the column it reads.** 🔧 11-03
+  (city_pin_check_silent paged daily 12:50–18:50 against a job scheduled 04:50 → 18:50; searchability read 31
+  honest-unknown alsaedan arrivals as «stuck»), 🔬 11-03 (five detectors behind approved rules), ♻️ 11-03
+  (adjudicated_reactivation could not tell a republish). Rule: read the job's cron line and the rule's migration before
+  trusting or writing a detector, and prove both directions with the real numbers in the migration itself.
+
