@@ -288,7 +288,8 @@ jobs:
             - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 90 }
             - { source: razre,         cmd: "python -m scrapers.razre.run --type all", tmo: 20 }
             - { source: reinvest,      cmd: "python -m scrapers.reinvest.run --type all", tmo: 30 }
-            - { source: safa,          cmd: "python -m scrapers.safa.run --type all", tmo: 20 }
+            # safa: proxy + browser ONLY for the maps.app.goo.gl pin hop (⚡ 2026-11-03, backlog 1197; served 0/44 pins).
+            - { source: safa,          cmd: "python -m scrapers.safa.run --type all", tmo: 30, proxy: true, browser: true }
             - { source: sokok,         cmd: "python -m scrapers.sokok.run --type all", tmo: 30 }
             - { source: sukna,         cmd: "python -m scrapers.sukna.run --type all", tmo: 25 }
             - { source: tuba,          cmd: "python -m scrapers.tuba.run --type all", tmo: 60 }

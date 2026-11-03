@@ -13,6 +13,11 @@
  * hermetic half fails the PR if a later migration redefines the candidate function without that
  * check block, or drops the detector's use of it. The mutations at the bottom prove each check fails
  * on the broken shape it guards.
+ *
+ * ⚡ 2026-11-03 (alert 12814, migration 20261103051511): a once-a-day sliced batch (gathern, 12 city slices
+ * 04:43-05:10 UTC) was split by the rolling now()-24h bucket when the sweep fired mid-batch (4,888 of ~16,000
+ * → P1, 8 raises, each self-resolving). The sliced path now counts a label's day back from its OWN latest
+ * run, and the check block carries gathern's exact shape (case __chk_batch), which must stay quiet.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -34,6 +39,10 @@ function problems(cand: string, det: string): string[] {
     && /hits is distinct from array\['__chk_enum', '__chk_single'\]/.test(cand))) {
     out.push('the latest definition carries the both-directions check block (collapse + single-run shortfall must fire)');
   }
+  if (!(/max\(r\.started_at\) over \(partition by r\.platform\)/.test(cand) && /d\.bday = 0/.test(cand)
+    && /'__chk_batch'/.test(cand))) {
+    out.push('the sliced day is anchored at the label\'s own latest run, and the mid-batch case (__chk_batch) is checked');
+  }
   if (!/mon_silent_partial_success_candidates\(\)/.test(det)) out.push('the detector reads its candidates from that function');
   return out;
 }
@@ -53,6 +62,8 @@ function mutation(name: string, brokenCand: string, brokenDet: string = det): vo
 mutation('the per-day path removed', cand.replace(/b\.median_runs\s*>=\s*3/g, 'false'));
 mutation('liveness labels judged again', cand.replace(/not like '%liveness%'/g, "not like '%__none__%'"));
 mutation('the check block assertion dropped', cand.replace(/hits is distinct from array\['__chk_enum', '__chk_single'\]/g, 'hits is null'));
+mutation('the sliced day back on the rolling now() window', cand.replace(/d\.bday = 0/g, 'd.day_ago = 0'));
+mutation('the mid-batch case dropped from the check block', cand.replace(/'__chk_batch'/g, "'__chk_other'"));
 mutation('the detector bypassing the candidate function', cand, det.replace(/mon_silent_partial_success_candidates\(\)/g, 'scrape_runs'));
 
 if (failures) { console.error(`\n✗ ${failures} check(s) failed`); process.exit(1); }
