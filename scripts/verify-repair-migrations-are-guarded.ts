@@ -48,6 +48,13 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-11-03. haraj 18362394: «للبيع 5الف» was the 5,000 m² the post states, stored as a 5,000 SAR price (price_eq_area_or_ppm).
+  '20261103194345_price_eq_area_adjudicated_haraj_sanadak.sql':
+    'one-row evidence repair (haraj 18362394 price → NULL, the value the fixed parser scrapers/haraj/prose.py now computes, ' +
+    'pinned by test_bare_offer_figure_equal_to_the_stated_area_is_not_a_price_2026_11_03) plus one source-real record; it is ' +
+    'watched by the standing detector that found it, mon_detect_price_eq_area_or_ppm (alert price_eq_area_or_ppm, in the ' +
+    'roster), which re-raises if any served Buy price equals its area again without source proof. The applied file cannot ' +
+    'be edited to name it (content parity: this is its byte-exact mirror).',
   // 2026-11-03 (backlog 1261/1263). Four guarded row repairs whose applied files name their detector only in comments
   // (content parity: these are byte-exact mirrors of what production executed, so the SQL cannot be edited to name it).
   '20261103170854_wasalt_archive_never_restores_an_impossible_price.sql':
