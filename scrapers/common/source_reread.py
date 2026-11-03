@@ -430,6 +430,16 @@ def main() -> int:
             item["verdict"] = classify_response(status, body or "",
                                                 dead_marker=PLATFORMS.get(platform, {}).get("dead_marker"))
             item["page"] = page_evidence(body or "")
+            if body:
+                # MAP PIN in the RAW page (⚡ 2026-11-03, backlog 1197): what the shared page_pin reader finds with no
+                # network hop — a Maps link/frame pair, a Google embed centre, a short link, or a JSON lat/lng pair.
+                # One re-read then says which of the four places holds the pin (a rendered-only map prints «none»).
+                from scrapers.common import page_pin
+                jll = re.search(r'"(?:lat|latitude)"\s*:\s*"?(-?\d{1,2}\.\d{3,})"?\s*,\s*"(?:lng|lon|long|longitude)"'
+                                r'\s*:\s*"?(-?\d{1,3}\.\d{3,})', body)
+                print(f"   pin {table}:{rid}: maps-link={page_pin.pin_from_html(body) or 'none'} | "
+                      f"embed={page_pin.pin_from_embed(body) or 'none'} | short={page_pin.short_maps_link(body) or 'none'} | "
+                      f"json-lat/lng={jll.groups() if jll else 'none'}", flush=True)
             if a.around and body:
                 # Searched in the DECODED markup: alsaedan and arkaan write their Arabic as HTML entities, so a raw
                 # search for «موقف» or «ثلاث دورات» found nothing on pages that print it (🔬 2026-10-17).
