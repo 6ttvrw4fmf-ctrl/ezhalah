@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ALL_CLEAN_TYPES } from '../src/data/propertyTypes.ts';
+import { ALL_CLEAN_TYPES, SERVICE_FACILITY_TYPES } from '../src/data/propertyTypes.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let failed = 0;
