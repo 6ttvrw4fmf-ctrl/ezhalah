@@ -50,6 +50,11 @@ const DISTRICT: Rule[] = [
     /from public\.district_recovery dr[\s\S]{0,200}?where dr\.basis = 'title' and s\.production_ready/],
   ['the loss guard never freezes a whole site: it carries the would-be-lost districts forward and refreshes the rest',
     /p_table, v_lost, v_elig\)\);\s+insert into _drt \(source_table, listing_id, district_ar, resolved_at, verbatim, basis\)\s+select o\.source_table/],
+  // 🆕 2026-11-03 (backlog 1222, 20261103074143): a pin-corrected city whose correction found no district served NONE,
+  // throwing away the site's own verbatim district (100 dealapp ads, e.g. 23256894 خليص «حي السلام»). The site's own
+  // district now survives — only VERBATIM, only when it is on the CORRECTED city's list.
+  ["a pin-corrected city keeps the site's own verbatim district when the correction found none — only on that city's list",
+    /WHERE \(\(kd\.city_id = xcc\.city_id\) AND \(kd\.district_norm = COALESCE\(NULLIF\(xcc\.district_norm, ''''::text\), CASE WHEN dr\.verbatim THEN norm_district_tok\(dr\.district_ar\) ELSE NULL::text END\)\)/],
   ['the decider runs hourly', /cron\.schedule\('title-district'/],
   ['its detector is on the roster', /needle \|\| E'\\n    ''mon_detect_title_district_unserved'','\)/],
 ];
