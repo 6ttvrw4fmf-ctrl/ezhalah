@@ -1,0 +1,43 @@
+// THE CARD HEADLINE NAMES THE TYPE THE USER SEARCHED (owner 2026-11-03: «when you display the ad you must show the thing the
+// user selected on the property type»). The headline («… للبيع / للإيجار») speaks the filter type the ad was found by
+// (listing.cleanType → its Arabic label); the source's own wording stays in the type row and the «Property Type» stat
+// (owner 2026-07-06 source-accurate rule). Measured before: a «أرض تجارية» search showed «أرض سكني تجاري للبيع».
+//
+// Two halves, both able to fail:
+//   1. DATA — every clean type a user can pick has an Arabic label, so the headline can never fall back silently to the raw
+//      source word for a type the user did pick (EXECUTED over ALL_CLEAN_TYPES against the real dictionary).
+//   2. WIRING — both headline lines use searchedTypeLabel, and the type row + stat keep the source typeLabel.
+//   node --experimental-strip-types scripts/verify-card-title-shows-searched-type.ts   (in `npm test`)
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ALL_CLEAN_TYPES } from '../src/data/propertyTypes.ts';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+let failed = 0;
+const check = (label: string, ok: boolean, detail = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : `\n      ${detail}`}`);
+  if (!ok) failed++;
+};
+const i18n = readFileSync(join(ROOT, 'src/i18n.tsx'), 'utf8');
+const ar = (key: string) => {
+  const m = i18n.match(new RegExp(`\\n\\s*'${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`));
+  return m ? m[1] : null;
+};
+// The facility sub-types (SERVICE_FACILITY_TYPES) are never picked one by one — the «مرافق خدمية» box gathers them — so
+// their headline keeps the source word by design (arabicOrPlaceholder falls back to typeLabel).
+const PICKABLE = ALL_CLEAN_TYPES.filter((t) => !(SERVICE_FACILITY_TYPES as readonly string[]).includes(t));
+const missing = PICKABLE.filter((t) => !ar(t) || !/[\u0600-\u06FF]/.test(ar(t)!));
+check(`every pickable clean type (${PICKABLE.length}) has an Arabic headline label`, missing.length === 0, `missing: ${missing.join(', ')}`);
+check('the clean-type list is non-trivial (the check above can bite)', ALL_CLEAN_TYPES.length >= 20);
+check('Commercial Land reads «أرض تجارية» (the measured case)', ar('Commercial Land') === 'أرض تجارية', String(ar('Commercial Land')));
+
+const card = readFileSync(join(ROOT, 'src/components/ResultCard.tsx'), 'utf8');
+check('searchedTypeLabel is derived from listing.cleanType', /const searchedTypeLabel = [\s\S]{0,140}listing\.cleanType[\s\S]{0,120}t\(listing\.cleanType\)/.test(card));
+check('the laptop photo strip headline uses searchedTypeLabel', /<Text style=\{card\.lpPhotoFootTx\}>\{searchedTypeLabel\} \{t\(listing\.deal/.test(card));
+check('the compact card headline uses searchedTypeLabel', /<Text style=\{card\.typeLabel\}>\{searchedTypeLabel\} \{t\(listing\.deal/.test(card));
+check('the type row still shows the source wording (typeLabel)', /<Text style=\{card\.lpTypeTx\} numberOfLines=\{1\}>\{typeLabel\}<\/Text>/.test(card));
+check('the «Property Type» stat still shows the source wording (typeLabel)', /<Stat icon="business-outline" big=\{typeLabel\}/.test(card));
+
+console.log(failed === 0 ? '\n✅ the card headline names the searched type; the source wording stays on the card.\n' : `\n❌ ${failed} check(s) failed.\n`);
+process.exit(failed === 0 ? 0 : 1);
