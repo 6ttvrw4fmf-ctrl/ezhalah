@@ -345,6 +345,16 @@ def _own_page_reader(platform: str):
     return read_own
 
 
+# Sites NOT on the daily direct check whose CRAWL hands prune_unseen a measured body-reading oracle
+# (same "module:attr" shape as fleet_liveness.SITES). Without an entry here such a site is scored
+# status-only, and a status read of a site whose pages are an identical SPA shell can only say "live"
+# (2026-11-03: aqaratikom 19 of 19 struck-but-shown ads read «live» by status, spot-check 41627167548,
+# while its crawl's API-record oracle was written that night for exactly those ads).
+CRAWL_ORACLES: dict[str, str] = {
+    "aqaratikom": "scrapers.aqaratikom.run:_verify_gone",
+}
+
+
 def _oracle_reader_for(platform: str, control: dict | None):
     """A site on the daily direct check (fleet_liveness.SITES) is read by the oracle its own scraper
     hands to prune_unseen, keyed by ad_number, or None for any other site.
@@ -354,7 +364,7 @@ def _oracle_reader_for(platform: str, control: dict | None):
     live page (scrapers/sanadak/run.py::_gone_verdict). A status read of such a site can only ever
     say "live", so it cannot double-check a hide; it can only raise a false alarm."""
     from scrapers.common import fleet_liveness as FL
-    spec = FL.SITES.get(platform)
+    spec = FL.SITES.get(platform) or CRAWL_ORACLES.get(platform)
     if spec is None:
         return None
     oracle = FL.oracle_for(spec, control)
