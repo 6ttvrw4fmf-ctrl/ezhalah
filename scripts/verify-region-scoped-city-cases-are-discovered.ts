@@ -20,6 +20,8 @@ const check = (label: string, ok: boolean, extra = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && extra ? `\n      ${extra}` : ''}`);
 };
 
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches: ${label}`, caught);
+
 type Impl = (rows: Record<string, any[] | null>, min?: number) => Discovery;
 const R = (city: string, region: string) => ({ city_ar: city, region_ar: region });
 
@@ -69,7 +71,7 @@ const IGNORES_CITY: Impl = (rows, min) => discoverAmbiguousCityCases(
   Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v === null ? null : v.map((r) => ({ ...r, city_ar: k }))])), min);
 for (const [name, impl] of [['the old hardcoded pairs', HARDCODED], ['a failed fetch treated as no rows', NULL_IS_EMPTY],
   ['no minimum of ambiguous names', NO_MINIMUM], ['rows of another city counted', IGNORES_CITY]] as const) {
-  check(`(mutation) catches: ${name}`, assertions(impl).length > 0);
+  mustCatch(name, assertions(impl).length > 0);
 }
 
 // WIRING — the live check uses the discovery and no longer carries a hardcoded case table.
