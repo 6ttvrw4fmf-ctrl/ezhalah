@@ -16,7 +16,10 @@ import type { Listing } from '@/data/listings';
 import { idsByTable, orderLike, foldDuplicates, pinHead, type PinRow } from '@/lib/mapPins';
 
 /** What makes two cards the same listing posted twice: the same site, price, area, type, title and photo. */
-const dupKey = (l: Listing) => [l.sourceTable, l.price, l.area, l.cleanType ?? '', l.title ?? '', l.photos?.[0] ?? ''].join('|');
+// The SAME key map_pins_ar() folds by (site, deal, price, area, type, bedrooms) — titles and photo URLs are left out on
+// purpose: the Khobar copies differed only in spelling («حي اللؤلؤ، الخبر» / «اللولو، الخبر»). The pin already hands
+// over one id per group (migration 20261103052811); this is the safety net, and a duplicate is never shown twice.
+const dupKey = (l: Listing) => [l.sourceTable, l.price, l.area, l.cleanType ?? '', l.beds].join('|');
 
 export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: () => void }) {
   const { t, isRTL } = useI18n();
@@ -59,10 +62,9 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
         <View style={s.center}><Text style={s.note}>{t('Could not load this listing. Try again.')}</Text></View>
       ) : (
         <ScrollView style={s.list} contentContainerStyle={s.listInner} showsVerticalScrollIndicator>
-          {foldDuplicates(cards, dupKey).map(({ card: l, copies }) => (
+          {foldDuplicates(cards, dupKey).map(({ card: l }) => (
             <View key={`${l.sourceTable}#${l.id}`} style={s.card}>
               <ResultCard listing={l} onOpen={() => { void openListing(l); }} row="tight" />
-              {copies > 1 ? <Text style={s.copies} testID="map-pin-sheet-copies">{t('and {n} identical listings from the same site', { n: copies - 1 })}</Text> : null}
             </View>
           ))}
           {failed && cards.length < (row.ids?.length ?? 0) ? <Text style={s.note}>{t('Some listings could not be loaded.')}</Text> : null}

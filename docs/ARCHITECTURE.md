@@ -848,6 +848,13 @@ used to end on.
     a subsequent click into Riyadh with the identical filter state return exactly 3,420, every time.
     (Implemented via `top_cities_by_deal_ar`/`district_options_ar` taking the same `p_rent_period`
     token, `p_types`, and `p_category` the results RPC uses — see below.)
+  - **SAME-SITE DUPLICATES ARE A BUG; DIFFERENT SITES ARE NOT (owner, 2026-11-03 — permanent).** «Duplicates … must
+    never ever happen»; «having duplicates [from the] same website is a bug, different [websites] isn't». On the MAP
+    (`map_pins_ar`, `map_grid_refresh_ar`, migration `20261103052811`) rows from the same source table on the same
+    coordinates with the same deal, price, area, type and bedrooms are ONE listing — one pin count, one card, one
+    count — applied at read time so every new listing follows it; the source tables are untouched. Measured that
+    day: 425,335 pinned rows, 372,134 distinct (≈53k same-site copies, wasalt the largest). The Filter results still
+    count those copies; extending the rule there is the open follow-up.
   - **No cross-platform deduplication exists anywhere in this codebase, for any search** (documented
     "search-engine-not-marketplace" permanent rule) — the same physical property listed by two
     platforms is two independent rows, both counted, both shown. This is pre-existing and unrelated
