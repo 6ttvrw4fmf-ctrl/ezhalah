@@ -31,7 +31,7 @@ import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own databa
 import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, webkit, firefox, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
-import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
+import { isHydrationNoticePageError, hydrationNoticeNote, isEmbeddedSitePageError, embeddedSiteNote } from '../lib/pageErrors.mjs';
 
 // The production target lock (AGENTS.md): the ONE URL these journeys score. Named rather than
 // inlined so `ledgerRecord` can refuse to mint coverage for anything else.
@@ -964,9 +964,10 @@ export async function stayedAtZero(readCount, { windowMs = 8_000, sleepFn = slee
 }
 
 export function appPageErrors(bag, journey) {
-  const app = [], transport = [], hydration = [];
+  const app = [], transport = [], hydration = [], embedded = [];
   for (const e of bag.pageErrors) {
     if (isTransportPageError(e)) transport.push(e);
+    else if (isEmbeddedSitePageError(e)) embedded.push(e);        // shared ruling — e2e/lib/pageErrors.mjs
     else if (isHydrationNoticePageError(e)) hydration.push(e);   // shared ruling — e2e/lib/pageErrors.mjs
     else app.push(e);
   }
@@ -978,6 +979,7 @@ export function appPageErrors(bag, journey) {
   // indistinguishable from the steady state. Reported here with its count and text for the same
   // reason the transport class is.
   if (hydration.length) note(hydrationNoticeNote(journey, hydration));
+  if (embedded.length) note(embeddedSiteNote(journey, embedded));
   return app;
 }
 // THE RETRY MUST BE A GENUINELY INDEPENDENT SAMPLE, AND AN IMMEDIATE ONE IS NOT (measured 2026-09-18).
