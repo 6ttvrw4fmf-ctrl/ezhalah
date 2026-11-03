@@ -169,8 +169,7 @@ try {
   if (FAIL_ONCE) {
     await page.waitForFunction(() => performance.getEntriesByType('navigation')[0]?.type === 'reload', null, { timeout: 20000 })
       .then(() => { reloaded = true; }).catch(() => {});
-    if (!failedOnce) errors.push(`fail-once: no request matched «${FAIL_ONCE}» — nothing was planted (chunks seen: ${chunksSeen.slice(0, 20).join(', ') || 'none'})`);
-    log(`    · planted ${failedOnce ? 'once' : 'nothing'} · page reloaded itself: ${reloaded}`);
+    log(`    · planted ${failedOnce ? 'once' : 'nothing yet'} · page reloaded itself: ${reloaded}`);
     await page.waitForTimeout(4000); // the reloaded shell mounts
     screenText = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 400)).catch(() => '');
     log(`    · screen: «${screenText.slice(0, 160)}»`);
@@ -190,6 +189,9 @@ try {
     }
   }
   await page.waitForTimeout(SETTLE);
+  // Judged AFTER the taps: a lazy route chunk (map-) is only requested when its tab is tapped (run 41654540323 planted
+  // on the first tap), so «nothing was planted» is only known once every tap has run.
+  if (FAIL_ONCE && !failedOnce) errors.push(`fail-once: no request matched «${FAIL_ONCE}» — nothing was planted (chunks seen: ${chunksSeen.slice(0, 20).join(', ') || 'none'})`);
   const rejections = await page.evaluate(() => window.__probeRejections || []).catch(() => []);
   for (const r of rejections) errors.push(`unhandledrejection: ${String(r).slice(0, 300)}`);
   if (errors.length || missedTaps.length || (STRICT && warnings.length)) {
