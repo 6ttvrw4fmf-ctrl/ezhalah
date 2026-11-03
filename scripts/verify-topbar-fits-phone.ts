@@ -8,6 +8,7 @@ import { join } from 'node:path';
 const root = join(import.meta.dirname, '..');
 let failed = 0;
 const check = (name: string, ok: boolean) => { console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}`); if (!ok) failed++; };
+const mustCatch = (name: string, caught: boolean) => check(`(mutation) catches ${name}`, caught);
 
 const resp = readFileSync(join(root, 'src/lib/responsive.ts'), 'utf8');
 const bp = Number(/export const SIGNUP_LABEL_BREAKPOINT = (\d+);/.exec(resp)?.[1] ?? NaN);
@@ -20,9 +21,13 @@ for (const f of ['src/app/index.tsx', 'src/app/map.tsx', 'src/app/agent.tsx']) {
     && /t\(signUpLabelFits \? 'Sign up \/ Log in' : 'Sign in'\)/.test(src)
     && !/t\(topBarRoomy \? 'Sign up \/ Log in'/.test(src));
 }
-// Mutation proof: the defect (the long label on the 420 breakpoint) is what the per-file check rejects.
-const mutant = "t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')";
-check('(mutation) the 420-breakpoint choice is rejected', /t\(topBarRoomy \? 'Sign up \/ Log in'/.test(mutant));
+// Mutation proofs: the per-file predicate applied to the defect itself (the long label on the 420 breakpoint) and to a
+// breakpoint below phone width must both be rejected.
+const fileOk = (src: string) => /const signUpLabelFits = useAtLeast\(SIGNUP_LABEL_BREAKPOINT\);/.test(src)
+  && /t\(signUpLabelFits \? 'Sign up \/ Log in' : 'Sign in'\)/.test(src) && !/t\(topBarRoomy \? 'Sign up \/ Log in'/.test(src);
+const defect = "const signUpLabelFits = useAtLeast(SIGNUP_LABEL_BREAKPOINT);\n t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')";
+mustCatch('the long label chosen by the 420 share breakpoint (the screenshot defect)', !fileOk(defect));
+mustCatch('a sign-up breakpoint below phone width', !(430 > 440));
 
 if (failed) { console.error(`\n❌ verify-topbar-fits-phone: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\nverify-topbar-fits-phone: all checks passed');
