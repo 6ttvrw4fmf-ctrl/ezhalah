@@ -31,11 +31,18 @@ check(`at most ${MAX_PER_RUN} PRs per run`, planMirrors(Array.from({ length: 30 
 check(`grace period is ${GRACE_MINUTES} minutes (the applying session gets the first chance)`, GRACE_MINUTES >= 10 && GRACE_MINUTES <= 60);
 mustCatch('a robot with no grace period (races the session that applied it)',
   planMirrors([{ version: '20261027215500', name: 'x' }], now, []).length === 0);
+check('a stale mirror/<version> branch with NO open PR does not block the mirror (🔧 2026-11-03: four 🔬 versions sat unmirrored 2 h 37 min)',
+  (() => { const p = planMirrors([{ version: '20261027201642', name: 'x' }], now, [], ['mirror/20261027201642']); return p.length === 1 && p[0].branch === 'mirror/20261027201642-auto'; })());
+check('an OPEN PR on mirror/<version> still claims the version',
+  planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642'], ['mirror/20261027201642']).length === 0);
+mustCatch('a robot that reads a bare branch as a claim (the 11-03 shape)',
+  planMirrors([{ version: '20261027201642', name: 'x' }], now, [], ['mirror/20261027201642']).length !== 0);
 mustCatch('a robot that ignores an existing mirror branch (duplicate PRs)',
   planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642']).length === 0);
 
 const wf = readFileSync(join(root, '.github/workflows/migration-auto-mirror.yml'), 'utf8');
 const script = readFileSync(join(root, 'scripts/auto-mirror-migrations.mjs'), 'utf8');
+check('the script asks GitHub for OPEN PR heads, not only for branches', /gh', \['pr', 'list', '--state', 'open'/.test(script) && /planMirrors\(missing, new Date\(\), openHeads, branches\)/.test(script));
 check('the workflow runs on a schedule and invokes the script', /cron: '/.test(wf) && /node scripts\/auto-mirror-migrations\.mjs/.test(wf));
 check('it opens PRs with the PR token (a GITHUB_TOKEN PR triggers no checks, so it would never merge)', /BASELINE_PR_TOKEN/.test(wf));
 check('a red run reaches a human (failure→alert bridge)', /raise-workflow-alert\.mjs/.test(wf) && /if: always\(\)/.test(wf));
