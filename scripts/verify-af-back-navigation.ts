@@ -271,6 +271,16 @@ check('the guard is set before the async work starts and released in a finally (
 check('presentGuided is AWAITED inside commitGuidedStep — the guard must span its network round trip, not just the synchronous part',
   /await presentGuided\(stepIndex \+ 1, token\);/.test(agentSrc)
   && !/void presentGuided\(stepIndex \+ 1, token\);/.test(agentSrc));
+// 2026-11-03 (web-runtime-smoke [I] on PR 10156: repeats=1, count-increases=1): the guard is released in `finally`
+// a tick BEFORE React renders the next card, so a tap in that gap ran with the OLD render's stepIndex and re-committed
+// the step just answered. A commit must belong to the step on screen, tracked in a ref every `asking` card sets.
+const STALE_STEP = /if \(ageFlow\.stepIndex !== ageFlowShownStepRef\.current\) return;/;
+const askingSites = (src: string) => (src.match(/phase: 'asking', stepIndex/g) ?? []).length;
+const shownSets = (src: string) => (src.match(/ageFlowShownStepRef\.current = stepIndex;\s*\n\s*setAgeFlow\(\{\s*\n\s*phase: 'asking', stepIndex/g) ?? []).length;
+check('commitGuidedStep rejects a tap whose step is no longer the one on screen (stale-render double tap)',
+  STALE_STEP.test(agentSrc));
+check('every «asking» card records the step it shows, right before it renders',
+  askingSites(agentSrc) > 0 && shownSets(agentSrc) === askingSites(agentSrc), `asking=${askingSites(agentSrc)} recorded=${shownSets(agentSrc)}`);
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 // Each assertion is re-run against a deliberately broken variant; a check that no longer fails on
@@ -379,6 +389,10 @@ mustCatch('the guard release reverting to an early-return path that skips the fi
 mustCatch('presentGuided reverting to fire-and-forget (guard would release before the re-rank finishes)',
   /void presentGuided\(stepIndex \+ 1, token\);/.test(
     mut(agentSrc, 'await presentGuided(stepIndex + 1, token);', 'void presentGuided(stepIndex + 1, token);')));
+mustCatch('the stale-step check being removed (a late tap re-commits the step just answered)',
+  !STALE_STEP.test(mut(agentSrc, /if \(ageFlow\.stepIndex !== ageFlowShownStepRef\.current\) return;[^\n]*\n/, '')));
+mustCatch('one «asking» card no longer recording its step',
+  shownSets(mut(agentSrc, '    ageFlowShownStepRef.current = stepIndex;\n    setAgeFlow({', '    setAgeFlow({')) !== askingSites(agentSrc));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
