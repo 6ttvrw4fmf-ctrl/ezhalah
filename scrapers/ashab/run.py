@@ -66,6 +66,7 @@ from scrapers.common.arabic_location import find_district_in_text, norm_district
 
 _DISTRICT_SPELLING = {(11, norm_district_tok("المريدسية")): "حي المريديسية"}
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://ashab.sa/"
@@ -369,6 +370,76 @@ def _known_active() -> set[str]:
     return out
 
 
+# ── removal oracle (2026-11-03) ───────────────────────────────────────────────────────────────────
+# Absence from the list only SELECTS candidates; each row's OWN page decides, under the shared law
+# (a 403/429/5xx/timeout is never a death). Measured live 2026-11-03 on the rows the default
+# 404-only reader held for weeks (118 UNKNOWN reads, missing_count up to 25):
+#   · ASB490139 is still on the list (page 49) but its own page badge reads «محجوز». The crawl refuses
+#     to publish anything not «متاح» (map_page: status_<x>), so the row could never be re-seen and the
+#     404-only reader could never retire it. The page's own closed badge — مباع / مؤجر / محجوز, the
+#     same words alshawaf / bossbih already read as GONE — is GONE here too.
+#   · ASB523764-U1796..1798: the unit pages /properties/1211/unit/179x still answer 200 «متاح», but
+#     their PARENT AD /properties/1211 answers HTTP 404 — the office deleted the ad and the unit route
+#     lingers. A unit is published only as part of its building's ad (main() reads units from the
+#     building page), so its parent ad's own 404 is that ad's removal: GONE.
+#   · A page whose own badge reads «متاح» under a live parent is LIVE (self-heals).
+_CLOSED_BADGES = frozenset({"مباع", "مؤجر", "محجوز"})
+_UNIT_URL = re.compile(r"^(https://ashab\.sa/properties/\d+)/unit/\d+/?$")
+
+
+def _own_signal(status, body, moved):
+    if status == 404:
+        return "gone"
+    if status != 200 or moved:
+        return None
+    badges = parse_page(body)["badges"]
+    st = badges[1] if len(badges) > 1 else ""
+    if st in _CLOSED_BADGES:
+        return "gone"
+    return "live" if st == AVAILABLE else None
+
+
+def _parent_signal(status, body, moved):
+    if status == 404:
+        return "gone"
+    if status == 200 and not moved and parse_page(body)["badges"]:
+        return "live"
+    return None
+
+
+def _session():
+    s, _tried = retry_smarter_session(LIST.format(1), timeout=40)
+    return s
+
+
+_url_of = stored_listing_url(("ashab_residential_listings", "ashab_commercial_listings"))
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    sess = None
+
+    def session():
+        nonlocal sess
+        sess = sess or _session()
+        return sess
+
+    url = _url_of(ad_number)
+    if not url:
+        return "unknown", f"{ad_number!r} has no stored ashab listing_url"
+    verdict, why = LivenessProbe(platform=SLUG, signal=_own_signal, session=session,
+                                 url_for=lambda _a: url).verify_gone(ad_number)
+    m = _UNIT_URL.match(url)
+    if verdict != "live" or not m:
+        return verdict, why
+    pv, pwhy = LivenessProbe(platform=SLUG, signal=_parent_signal, session=session,
+                             url_for=lambda _a: m.group(1)).verify_gone(ad_number)
+    if pv == "gone":
+        return "gone", f"its parent ad {m.group(1)} is removed ({pwhy}); the unit page lingers"
+    if pv == "live":
+        return "live", why
+    return "unknown", f"unit page live but parent ad unreadable — {pwhy}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -470,7 +541,8 @@ def main() -> int:
         complete = unreadable == 0 and len(ids) > 0
         for tbl, rr in (("ashab_residential_listings", res), ("ashab_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
+                                    verify_gone=_verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
