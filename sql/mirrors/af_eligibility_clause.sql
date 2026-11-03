@@ -1,4 +1,6 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-11-03 (migration 20261103091902 af_coverage_cliff_judged_per_deal_side READS the clause, does not change it):
+--   UNCHANGED — production md5 of pg_get_functiondef = 0688e2b44db6a79ac4d505964ec81878, as recorded below.
 -- Re-verified 2026-11-02 (migrations 20261102100954 countryside + residential-land group, 20261102101415 commercial group —
 --   owner lists 2026-11-01): CHANGED — the amenity whitelist gains the 60 countryside tokens (58 boolean text facts
 --   split_payments … no_services + camels_horses, palm_fruit_trees) between ''smart_home_entry'' and ''furnished'', then the

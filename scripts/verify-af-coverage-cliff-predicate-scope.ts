@@ -73,6 +73,9 @@ check('the detector FAILS CLOSED on a shrunken or unreadable predicate surface',
   'monitoring nothing must be loud; a detector that cannot fire reads as a clean bill of health');
 
 // ── 2. the evidence floor exists, with both limbs ────────────────────────────────────────────────
+check('the cliff is judged per deal side (a rent-only field is never expected on a sale ad)',
+  /select source_table, deal_ar,/.test(code) && /group by 1, 2/.test(code) && /'deal_ar', r\.deal_ar/.test(code),
+  '2026-11-03: sakani began publishing sale ads and read as a cliff on price_annual / rent_period_ar');
 check('an absolute prior-evidence floor is declared', /MIN_PRIOR_ROWS\s+constant/.test(code));
 check('a prior-RATE floor is declared', /MIN_PRIOR_PCT\s+constant/.test(code));
 check('the cliff condition requires BOTH limbs on top of the drop to zero',
@@ -152,6 +155,13 @@ const mutations: Mutation[] = [
     name: 'the fail-closed refusal on a broken clause parse is removed',
     apply: (s) => s.replace(/if cols is null or array_length\(cols, 1\) < 20 then[\s\S]*?end if;/, ''),
     predicate: (c) => /array_length\(cols,\s*1\)\s*<\s*20/.test(c) && /raise exception/.test(c),
+  },
+  {
+    // 2026-11-03 (alert 12665): sakani's 59 prior RENT ads carried price_annual / rent_period_ar 59 of 59; its
+    // 1,608 new SALE ads carry neither (correctly). Judged as one platform cohort that read as a 100% -> 0% cliff.
+    name: 'the cliff is judged per platform again, not per (platform, deal side)',
+    apply: (s) => s.replace(/select source_table, deal_ar,/, 'select source_table,').replace(/group by 1, 2/, 'group by 1'),
+    predicate: (c) => /select source_table, deal_ar,/.test(c) && /group by 1, 2/.test(c),
   },
   {
     name: 'the column regex loses its digits, so area_m2 is never monitored',
