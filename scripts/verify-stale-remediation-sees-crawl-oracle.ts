@@ -80,11 +80,11 @@ check('the scrape_runs label paths are still there (cleanup / aqar_cleanup / liv
 
 // MUTATIONS — each must break at least one case above.
 const allPass = (x: ReturnType<typeof cases>) => Object.values(x).every(Boolean);
-const mut = (label: string, sql: string) => check(`(mutation) catches ${label}`, !allPass(cases(parse(sql))));
-mut('the clause removed', newest.replace(/ops_stale_inactivation_probe/g, 'ops_nothing'));
-mut('UNKNOWN admitted as a path', newest.replace(/'GONE','LIVE'/, "'GONE','LIVE','UNKNOWN'"));
-mut('keyed by platform instead of table', newest.replace(/p\.source_table = rec\.tn/, "p.source_table like plat||'%'"));
-mut('no time window', newest.replace(/and p\.probed_at > now\(\) - path_window /, ''));
+const mustCatch = (label: string, sql: string) => check(`(mutation) catches ${label}`, !allPass(cases(parse(sql))));
+mustCatch('the clause removed', newest.replace(/ops_stale_inactivation_probe/g, 'ops_nothing'));
+mustCatch('UNKNOWN admitted as a path', newest.replace(/'GONE','LIVE'/, "'GONE','LIVE','UNKNOWN'"));
+mustCatch('keyed by platform instead of table', newest.replace(/p\.source_table = rec\.tn/, "p.source_table like plat||'%'"));
+mustCatch('no time window', newest.replace(/and p\.probed_at > now\(\) - path_window /, ''));
 
 if (failed) { console.log(`\n${failed} check(s) failed`); process.exit(1); }
 console.log('\nOK: the stale-path detector sees the crawl oracle only when it decided');
