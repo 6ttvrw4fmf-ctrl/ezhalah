@@ -50,7 +50,10 @@ if (!src.includes(fixed)) { console.error('✗ the guarded line moved — re-poi
 const dir = mkdtempSync(join(tmpdir(), 'af-journey-'));
 const mutant = join(dir, 'journey-lib.mjs');
 writeFileSync(mutant, src.replace(fixed, "row.deal_ar === 'إيجار' && row.furnished === true"));
-const caught = problems((await import(mutant)).afTargetsFor as Fn).length > 0;   // an import error fails the run, never counts as caught
-if (!caught) { console.error('✗ mutation proof: the old furnished-on-Monthly line was NOT caught'); process.exit(1); }
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`✗ mutation proof: ${label} was NOT caught`); process.exit(1); }
+};
+// an import error fails the run, never counts as caught
+mustCatch('the old furnished-on-Monthly line', problems((await import(mutant)).afTargetsFor as Fn).length > 0);
 
 console.log('✓ AF journeys target furnished on Annual rent only, as the product asks it (mutation caught)');
