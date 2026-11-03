@@ -1311,6 +1311,12 @@ export default function Agent() {
   // the current results when «🎯 دقّق مع الذكاء الاصطناعي» is tapped in an apartment scope. Answering hands
   // off to the SAME runRefine mechanism used by the pre-existing chip flow (echoes a user bubble,
   // re-runs search, renders a new results turn) — never a separate navigation/route.
+  // THE STEP ON SCREEN, as a ref (🔬 2026-11-03). The guard above is released in `finally`, but React flushes the next
+  // card's render a tick later, so a tap landing in that gap still runs with the OLD render's `ageFlow` (its stepIndex)
+  // and re-commits the step just answered: presentGuided(stepIndex + 1) runs again, the next question is shown a second
+  // time with its pick cleared and the live count goes back up (web-runtime-smoke [I] on PR 10156: repeats=1,
+  // count-increases=1). Every `asking` card sets this before it renders; a commit for any other step is a stale tap.
+  const ageFlowShownStepRef = useRef(-1);
   const [ageFlow, setAgeFlow] = useState<
     | { phase: 'loading' }
     // Opening state (owner 2026-08-16): after an eligible Filter search lands with > 25 results the
@@ -2732,6 +2738,7 @@ export default function Agent() {
       const total = answered ? fresh!.total : st.total;
       ageFlowStepsRef.current = steps.map((x, i) => (i === stepIndex ? { ...x, options, unknownCount, total } : x));
       ageFlowTotalRef.current = total;
+      ageFlowShownStepRef.current = stepIndex;
       setAgeFlow({
         phase: 'asking', stepIndex, question: st.question, options,
         unknownCount, initialKeys: st.keys ?? [],
@@ -2771,6 +2778,7 @@ export default function Agent() {
       }
       ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: res!.unknownCount, total: res!.total, keys: null }];
       ageFlowTotalRef.current = res!.total;
+      ageFlowShownStepRef.current = stepIndex;
       setAgeFlow({
         phase: 'asking', stepIndex, question, options: opts, unknownCount: res!.unknownCount, initialKeys: [],
         // The advanced plan does not exist yet (it cannot be ranked until this answer lands), so the
@@ -2850,6 +2858,7 @@ export default function Agent() {
     const { question, options, unknownCount, total } = plan[0];
     ageFlowStepsRef.current = [...steps, { question, options, unknownCount, total, keys: null }];
     ageFlowTotalRef.current = total; // the narrowed set the user is answering against, always real
+    ageFlowShownStepRef.current = stepIndex;
     setAgeFlow({
       phase: 'asking', stepIndex, question, options, unknownCount, initialKeys: [],
       // Bounded by what is LEFT IN THIS ROUND (review 2026-08-25), not by the whole remaining pool:
@@ -3177,6 +3186,7 @@ export default function Agent() {
   const commitGuidedStep = async (keys: string[], finish = false) => {
     if (ageFlowCommittingRef.current) return; // a previous confirm/skip is still mid-transition — ignore the duplicate tap, don't double-process
     if (ageFlow?.phase !== 'asking') return;
+    if (ageFlow.stepIndex !== ageFlowShownStepRef.current) return; // a stale render's tap for a step no longer on screen
     ageFlowCommittingRef.current = true;
     try {
       const token = ageFlowTokenRef.current;
