@@ -90,3 +90,14 @@ def test_negator_with_attached_conjunction_is_a_no():
     assert got["furnished"] is False and got["air_conditioner"] is True
     assert N.amenities_from_lines("شقة ولا يوجد مصعد")["elevator"] is False
     assert N.amenities_from_lines("مصعد وغيرها")["elevator"] is True      # «وغيرها» (and others) is no negator
+
+
+def test_one_reader_2026_11_03():
+    """Prose answers come from the Advanced Filter's word reader (owner 2026-11-03, «clear them»)."""
+    from scrapers.dealapp.run import af_answers
+    lobby = af_answers({}, "شقة للإيجار مداخل مكيفة وكاميرات مراقبة")
+    assert "air_conditioner" not in lobby
+    flat = af_answers({}, "شقة فيها مكيفات سبليت ومصعد وبلكونة ومطبخ راكب")
+    assert flat.get("air_conditioner") is True and flat.get("elevator") is True
+    assert flat.get("balcony_terrace") is True and flat.get("kitchen") is True
+    assert af_answers({"utilities": "Electricity, Waters"}, "").get("electricity") is True   # structured list kept

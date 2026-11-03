@@ -1089,9 +1089,10 @@ PROSE_AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "pa
 
 def af_answers(aprops: dict, description: Optional[str]) -> dict[str, bool]:
     out: dict[str, bool] = {}
-    for col, val in normalize.amenities_from_lines(description).items():
-        if col in PROSE_AMENITY_COLUMNS:
-            out[col] = val
+    # ONE READER (owner 2026-11-03, «clear them»): the prose answers come from the Advanced Filter's word reader.
+    # The older normalize matcher served ~2,400 yeses the ad's words do not state (e.g. «مداخل مكيفة» as AC).
+    from scrapers.facts import word_checker as W
+    out.update(W.amenity_answers(description, PROSE_AMENITY_COLUMNS, {"balcony": "balcony_terrace"}))
     util = aprops.get("utilities")
     if isinstance(util, str) and util.strip():
         for tok in re.split(r"[,،]", util):
