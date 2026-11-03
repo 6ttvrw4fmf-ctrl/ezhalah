@@ -1475,6 +1475,18 @@ had fallen behind the rules. Each class below now has a mutation-proven barrier;
   6. A chip says only what the ad says · Skip on every question · pick many · a chip at 0 hides itself · source tables
      untouched.
 
+- **SuperOffice respects robots.txt; a catalogue that changed shape on purpose is rebased PER PLATFORM (owner
+  2026-11-03, «Yes, use your picks», decision 4).** superoffice.sa's rebuilt site server-renders 8 private offices per
+  branch; the rest load from `/api/office-listing`, which https://superoffice.sa/robots.txt disallows (`Disallow: /api`;
+  the robots-allowed `/sitemap/units.xml` is empty). We never read it: the robots-allowed set (24 on 2026-11-03) IS the
+  catalogue. `ops_platform_catalogue_rebase` holds one row per such platform — rebase moment, expected run size, reason,
+  https link to the rule, evidence — and `rows_collapse` / `silent_partial_success` judge that platform only from the
+  rebase, holding it to the declared size from its first run (a run under half of it raises, mode
+  `declared_catalogue`). Fleet thresholds are never lowered for one site. The scraper treats a branch window shorter
+  than min(8, totalCount) as truncated (no prune) and re-reads robots.txt each run, only REPORTING if `/api` stops being
+  disallowed — reading it would be a new owner decision. Guards: `scripts/verify-catalogue-rebase-is-scoped-and-still-alarms.ts`,
+  `scrapers/common/tests/test_superoffice_new_site_2026_10_29.py`.
+
 ---
 
 ## 21. Open questions / decisions still pending

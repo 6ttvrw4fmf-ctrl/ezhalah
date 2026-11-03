@@ -75,6 +75,44 @@ def test_collect_units_never_calls_the_robots_disallowed_api(monkeypatch):
     assert not any("/api/" in u for u in seen), "robots.txt: Disallow: /api"
 
 
+# ── owner decision 4 (2026-11-03): the robots-allowed windows ARE the catalogue ─────────────────────
+def test_a_whole_window_is_min_of_window_and_total():
+    lst = R.parse_listing_page(_fx("list_as-suwaidi.html"))
+    assert R.WINDOW == 8 and R.window_is_whole(lst)
+    assert R.window_is_whole({"units": [{"code": "A1"}], "totalCount": 1})      # a branch with one free office
+    assert R.window_is_whole({"units": [], "totalCount": 0})
+    assert not R.window_is_whole({**lst, "units": lst["units"][:5]})            # truncated page
+    assert not R.window_is_whole({"units": lst["units"], "totalCount": None})   # unreadable total
+
+
+def test_a_truncated_window_blocks_pruning_but_keeps_its_offices(monkeypatch):
+    lst = R.parse_listing_page(_fx("list_as-suwaidi.html"))
+    short = {**lst, "units": lst["units"][:3]}
+    monkeypatch.setattr(R, "get", lambda s, url: url)
+    monkeypatch.setattr(R, "parse_listing_page",
+                        lambda url: short if "as-suwaidi" in url else {"units": [], "totalCount": 0})
+    monkeypatch.setattr(R.time, "sleep", lambda *_: None)
+    units, totals, bad = R.collect_units(object(), ["as-suwaidi"])
+    assert len(units) == 3 and totals == {"as-suwaidi": 51}
+    assert bad == 1, "a short window must count as unreadable so main() does not prune"
+
+
+def test_robots_reader_knows_the_api_is_disallowed_and_never_reads_silence_as_permission():
+    live = ("User-Agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api\n\n"
+            "Sitemap: https://superoffice.sa/sitemap/offices.xml\n")   # superoffice.sa/robots.txt, 2026-11-03
+    assert R.robots_disallows_api(live) is True
+    assert R.robots_disallows_api("User-Agent: *\nAllow: /\nDisallow: /admin\n") is False
+    assert R.robots_disallows_api("") is None
+    assert R.robots_disallows_api("<html>502 Bad Gateway</html>") is None
+    assert R.robots_disallows_api("User-Agent: Googlebot\nDisallow: /api\n") is None
+
+
+def test_the_crawl_builds_no_api_url():
+    code = Path(R.__file__).read_text(encoding="utf-8").split('"""', 2)[2]   # past the module docstring
+    for built in ("}/api", "superoffice.sa/api", "/api/office-listing?", "offset="):
+        assert built not in code, f"owner decision 4: never read the robots-disallowed API ({built!r})"
+
+
 def test_ad_number_round_trips_and_old_slugs_are_not_new_ids():
     assert R.ad_number_for("as-suwaidi", "H19") == "SPO-as-suwaidi-H19"
     assert R.split_ad_number("SPO-as-suwaidi-H19") == ("as-suwaidi", "H19")
