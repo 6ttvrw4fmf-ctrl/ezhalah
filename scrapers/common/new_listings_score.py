@@ -246,6 +246,11 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 en = FACADE_EN.get(norm(str(stored.get(col))))
                 if en and any(re.search(kw, x) and re.search(en, x, re.I) for x in lines):
                     out[name] = MATCH
+                # The facade as Arabic adjectives is the same facade: raghdan 23296394 (re-score 41595594386,
+                # 2026-11-03) prints «جنوبية - شرقية» and we store «جنوب شرقي».
+                ar = facade_adjectives(stored.get(col))
+                if out[name] == MISMATCH and ar and any(re.search(kw, x) and re.search(ar, norm(x)) for x in lines):
+                    out[name] = MATCH
     return out
 
 
@@ -258,6 +263,20 @@ FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
 for _ar, _en in (("شمال شرق", "north[\\s-]*east"), ("شمال غرب", "north[\\s-]*west"),
                  ("جنوب شرق", "south[\\s-]*east"), ("جنوب غرب", "south[\\s-]*west")):
     FACADE_EN[_ar] = FACADE_EN[_ar + "ي"] = r"\b" + _en + r"(?:ern)?\b"
+
+
+_FACADE_BASES = ("شمال", "جنوب", "شرق", "غرب")
+
+
+def facade_adjectives(stored) -> Optional[str]:
+    """«جنوب شرقي» → a pattern for «جنوبيه - شرقيه» / «جنوبي شرقي» / «جنوبيه شرقيه» (norm folds ة→ه).
+    Only the four bases, in the stored order; anything else returns None."""
+    words = norm(str(stored or "")).replace("-", " ").split()
+    bases = [w[:-1] if w.endswith("ي") else w for w in words]
+    if not bases or len(bases) > 2 or any(b not in _FACADE_BASES for b in bases):
+        return None
+    return (r"(?<![\u0621-\u064A])" + r"\s*[-–/،,]?\s*(?:و)?".join(b + r"(?:يه|ي)?" for b in bases)
+            + r"(?![\u0621-\u064A])")
 
 
 _UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"

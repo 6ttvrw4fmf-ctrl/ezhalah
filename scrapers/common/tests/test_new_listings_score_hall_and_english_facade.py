@@ -53,3 +53,13 @@ def test_english_number_word_on_the_age_line():
     assert _cmp({"property_age": 9}, body, "property_age") == S.MATCH
     assert _cmp({"property_age": 4}, body, "property_age") == S.MISMATCH
     assert S.EN_NUMBER.search("Someone") is None
+
+
+def test_arabic_adjective_facade_is_the_stored_direction():
+    # raghdan 23296394 (re-score 41595594386, 2026-11-03): page «الواجهة : جنوبية - شرقية», stored «جنوب شرقي».
+    body = "<p>الواجهة : جنوبية - شرقية</p>"
+    assert _cmp({"direction_ar": "جنوب شرقي"}, body, "direction_ar") == S.MATCH
+    assert _cmp({"direction_ar": "جنوب"}, "<p>الواجهة : جنوبية</p>", "direction_ar") == S.MATCH
+    # a different facade is still wrong
+    assert _cmp({"direction_ar": "جنوب شرقي"}, "<p>الواجهة : شمالية - غربية</p>", "direction_ar") == S.MISMATCH
+    assert _cmp({"direction_ar": "شمال شرقي"}, body, "direction_ar") == S.MISMATCH
