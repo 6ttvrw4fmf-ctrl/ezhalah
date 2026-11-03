@@ -72,7 +72,7 @@ import {
 } from './lib/afLiveProbe.ts';
 import {
   judgeOption, judgeUnion, judgeIntersection, judgeZero, judgeUnknownCaption, boundaryReport,
-  optionWouldRender, settleOnOneIndex, UNREADABLE_STAMP, type Pred, type Row,
+  optionWouldRender, settleOnOneIndex, predCols, UNREADABLE_STAMP, type Pred, type Row,
 } from './lib/afSurfaceJudge.ts';
 
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
@@ -392,7 +392,7 @@ async function oracleCount(body: Record<string, unknown>, extraQs = ''): Promise
   );
   return contentRangeTotal(p);
 }
-const strictColsOf = (p: Pred): string[] => (p.kind === 'and' ? [...new Set(p.preds.flatMap(strictColsOf))] : p.kind === 'or' ? [] : [p.col]);
+// The oracle SELECTS predCols() (every column the predicate reads), never the strict ones: see afSurfaceJudge.predCols.
 
 // ── a tiny semaphore ─────────────────────────────────────────────────────────────────────────────
 let inFlight = 0; const waiters: Array<() => void> = [];
@@ -465,7 +465,7 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
       const body = searchBody(base, opt.params);
       const [r, o, a] = await Promise.all([
         rpcIds(body),
-        oracle(body, strictColsOf(opt.pred)),
+        oracle(body, predCols(opt.pred)),
         applied ? rpc('af_eligible_count', countBody(base, opt.params)) : Promise.resolve(null),
       ]);
       if (o.unhandled.length) { skip(label, `oracle declined: ${o.unhandled[0].slice(0, 100)}`); return null; }
@@ -478,7 +478,7 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
           const [c2, r2, o2, a2] = await Promise.all([
             chip == null ? Promise.resolve(null) : chipNow(base, opt),
             rpcIds(body),
-            oracle(body, strictColsOf(opt.pred)),
+            oracle(body, predCols(opt.pred)),
             applied ? rpc('af_eligible_count', countBody(base, opt.params)) : Promise.resolve(null),
           ]);
           if (o2.unhandled.length) return null;
@@ -667,7 +667,7 @@ for (const scope of SCOPES) {
           ? (await rpc('property_age_option_counts_ar', countBody(base, A.opt.params)))?.[0]
           : (await rpc('apartment_guided_counts_ar', countBody(base, A.opt.params)))?.[0];
         const chipB = countsInA && B.opt.col ? Number(countsInA[B.opt.col]) : null;
-        const [r, o] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), strictColsOf(pred))]);
+        const [r, o] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), predCols(pred))]);
         M.andCombos++; M.secondRoundChips++;
         if (o.unhandled.length) { skip(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, o.unhandled[0]); return; }
         const v = judgeOption({ label: 'and', chip: chipB, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
@@ -682,7 +682,7 @@ for (const scope of SCOPES) {
       await withSlot(async () => {
         const params = mergeParams(...firsts.map(([, f]) => f.opt.params));
         const pred: Pred = { kind: 'and', preds: firsts.map(([, f]) => f.opt.pred) };
-        const [r, o, a] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), strictColsOf(pred)), rpc('af_eligible_count', countBody(base, params))]);
+        const [r, o, a] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), predCols(pred)), rpc('af_eligible_count', countBody(base, params))]);
         M.stacked++;
         if (o.unhandled.length) { skip(`${tag} · STACK ×${firsts.length}`, o.unhandled[0]); return; }
         const v = judgeOption({ label: 'stack', chip: null, applied: Number(a), rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });

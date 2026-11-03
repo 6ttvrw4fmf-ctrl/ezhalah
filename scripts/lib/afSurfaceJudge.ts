@@ -67,6 +67,15 @@ export function strictCols(p: Pred): string[] {
   return [p.col];
 }
 
+/** Every column a predicate READS — what an oracle must SELECT so rowSatisfies() can evaluate it. Not strictCols():
+ *  an OR has no strict column, and selecting strictCols() for an OR fetched rows with neither column, so every row
+ *  «failed the predicate on its own column values» (🦅 2026-11-03, run 41655241707: separate_meters, garden_yard,
+ *  jacuzzi_sauna, water_tank_well in جدة — chip = applied = RPC = oracle, 100% «violations»). */
+export function predCols(p: Pred): string[] {
+  if (p.kind === 'and' || p.kind === 'or') return [...new Set(p.preds.flatMap(predCols))];
+  return [p.col];
+}
+
 export type OptionEvidence = {
   label: string;
   chip: number | null;          // null = this option has no count surface (predicate-only case)
