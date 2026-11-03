@@ -1,7 +1,4 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
--- Re-verified 2026-11-03 (migration 20261103204042 rent_period_judged_flag_follows_source_and_unlocated_rows_carry_no_city_ids
---   only NAMES the clause in mon_detect_rent_period_contract's read-surface list, does not change it):
---   UNCHANGED — production md5 of pg_get_functiondef = 0688e2b44db6a79ac4d505964ec81878, as recorded below.
 -- Re-verified 2026-11-03 (migration 20261103091902 af_coverage_cliff_judged_per_deal_side READS the clause, does not change it):
 --   UNCHANGED — production md5 of pg_get_functiondef = 0688e2b44db6a79ac4d505964ec81878, as recorded below.
 -- Re-verified 2026-11-02 (migrations 20261102100954 countryside + residential-land group, 20261102101415 commercial group —
