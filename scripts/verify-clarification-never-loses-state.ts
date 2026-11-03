@@ -136,7 +136,12 @@ const understood = (): any => {
   // code — the same trap this repo keeps hitting from the other direction.
   const edge = readFileSync('supabase/functions/agent/index.ts', 'utf8')
     .split('\n').map((l) => l.split('//')[0]).join('\n');
-  const msgReturns = [...edge.matchAll(/kind:\s*"message"/g)].length;
+  // Count what the edge SENDS (`json({ kind: "message"…`), not the model's own parsed answer inside runModel(): the prose
+  // fallback (2026-11-03) returns the model's words as a model answer, which then reaches the client through the
+  // clarification return below that carries understoodState() like every other — counting it read 4-of-5 on a file
+  // where every send carried state.
+  const msgReturns = [...edge.matchAll(/json\(\{\s*kind:\s*"message"/g)].length;
+  check('the count still sees the clarification sends (a regex that matches nothing passes vacuously)', msgReturns >= 4);
   // An ASIDE (a thanks, advice, a complaint… in the middle of a search) is not a clarification: it sends NO query and says so with
   // `keepState: true`, so the app keeps the search exactly as it was (a query read from «وش أفضل حي في الرياض؟» planted a district
   // «في الرياض؟», live 2026-10-13). It counts as carrying state only in that exact shape: no query beside it.
