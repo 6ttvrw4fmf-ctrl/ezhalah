@@ -45,7 +45,7 @@ check('English lines never carry an Arabic city name', !/[؀-ۿ]/.test(lines[1])
 
 const edge = readFileSync(join(ROOT, 'supabase/functions/agent/index.ts'), 'utf8');
 const wire = windowBetween(edge, 'let replyOut = lead(out.reply);', 'insertBeforeTrailingEmoji(replyOut', 'index.ts');
-const wired = (src: string) => /else if \(replyBreaksSearchRules\(replyOut, text\)\) \{\s*replyOut = searchLineText\(locale === "en", typeof out\.type === "string" \? out\.type : null, location, text, lastBotReply\);/.test(src);
+const wired = (src: string) => /else if \(replyBreaksSearchRules\(replyOut, text\)\) \{\s*replyOut = searchLineText\(locale === "en", (?:typeof out\.type === "string" \? out\.type : null|canonType\(out\.type\)), location, text, lastBotReply\);/.test(src);
 check('every search reply goes through the check and is swapped for the code-written line', wired(wire));
 mustCatch('the check being removed', !wired(wire.replace('else if (replyBreaksSearchRules(replyOut, text))', 'else if (false)')));
 
