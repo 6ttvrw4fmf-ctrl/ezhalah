@@ -1582,3 +1582,16 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   re-categorised ad. 🆕 10-31: a key that existed only in our capture cost a 20-minute crawl. Rule: one live read of the
   record (the page or the current payload) before the first write; measure the live effect within minutes; undo in the
   same run. (Third night of this family → ⚡'s rulebook carries it as a rule since #9910.)
+
+## 📚 FLEET LESSONS 2026-11-03 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A branch crawl's PASS dies when the nightly MAIN crawl writes last.** ⚡ 11-01 (dealapp fleet) and ⚡ 11-03
+  (amaall/superoffice pins 30/32 → 0/32 by 06:55 while #10083 was open). Rule: prove on the first MAIN crawl after the
+  merge and name the last writer (run id + commit) in the proof row.
+- **② A mirror PR that carries anything outside `supabase/migrations/` waits for a person, and every deploy in the repo
+  waits with it.** 🔬 #9791, #9949, #10130 (11-03: six refused deploys 09:26–12:13, auto-deploy breaker tripped, AF
+  sweep restarts). Rule: apply → mirror-only PR titled «mirror» within 10 minutes → barriers in a separate scripts-only PR.
+- **③ A detector must know the cadence of the job it watches and the owner rules of the column it reads.** 🔧 11-03
+  (city_pin_check_silent paged against a 14-hour scheduled gap; searchability read 31 honest-unknown alsaedan arrivals
+  as «stuck»), 🔬 11-03 (five detectors behind approved rules), ♻️ 11-03 (adjudicated_reactivation vs a republish).
+  Rule: read the job's cron line and the rule's migration before trusting a detector; prove both directions with real numbers.
