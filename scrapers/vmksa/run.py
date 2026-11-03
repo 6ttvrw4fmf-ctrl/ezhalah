@@ -51,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 
 BASE = "https://vm-ksa.com"
 SOURCE = "المسوق الافتراضي"
@@ -409,6 +410,45 @@ def fetch_ad(s: cc.Session, ad_id: int) -> tuple[Optional[str], Optional[dict]]:
     return raw, None
 
 
+# ── LIVENESS ORACLE (2026-11-03) ───────────────────────────────────────────────────────────────
+# prune_unseen ran with the default reader, which believes only a 404/410 — and this Next.js site answers
+# a REMOVED ad with HTTP 200 carrying the framework's own notFound() marker. Measured live: /ar/ads/668
+# (gone from the index since 2026-10-11) and a made-up /ar/ads/999999 both answer 200 with
+# {"digest":"NEXT_NOT_FOUND"} and no ad object; live /ar/ads/886 and /892 carry their own ad object and
+# no such marker. A THROTTLED shell (fetch_ad's docstring) has neither the object nor the marker, so it
+# stays UNKNOWN. Removals are believed only while a known-live ad from this run still reads live.
+def _own_signal(ad_id: int):
+    def signal(status, body, moved):
+        if status in (404, 410):
+            return "gone"
+        if status != 200 or moved or not body:
+            return None
+        if main_ad(flight(body), ad_id):
+            return "live"
+        return "gone" if "NEXT_NOT_FOUND" in body else None
+    return signal
+
+
+def _make_verify_gone(control_ad: Optional[str]):
+    s = cc.Session(impersonate=IMPERSONATE)
+
+    def probe(ad_number: str, canary=None) -> tuple[str, str]:
+        m = re.fullmatch(rf"{PREFIX}(\d+)", ad_number or "")
+        if not m:
+            return "unknown", f"{ad_number!r} is not a {SLUG} ad number"
+        ad_id = int(m.group(1))
+        return LivenessProbe(platform=SLUG, signal=_own_signal(ad_id), session=lambda: s,
+                             url_for=lambda _a: f"{BASE}/ar/ads/{ad_id}", canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control_ad:
+            return False, "no ad from this run to use as a positive control"
+        verdict, why = probe(control_ad)
+        return verdict == "live", f"positive control {control_ad}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -472,9 +512,11 @@ def main() -> int:
         # The index is complete only if it reached the site's OWN declared total and every listed
         # ad was readable; otherwise do not prune. No declared total read = not complete.
         complete = unreadable == 0 and not short_index and not a.limit
+        verify_gone = _make_verify_gone((res + com)[0]["ad_number"] if (res or com) else None)
         for tbl, rr in (("vmksa_residential_listings", res), ("vmksa_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
+                                    verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:

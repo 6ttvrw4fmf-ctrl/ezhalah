@@ -67,6 +67,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 BASE = "https://jurash.sa"
 INDEX = f"{BASE}/العقارات"
 WORKERS = int(os.environ.get("JURASH_WORKERS", "5"))
@@ -279,6 +280,13 @@ def _images(body: str) -> list[str]:
     return out[:25]
 
 
+def _sold_or_rented(f: dict[str, str]) -> bool:
+    """The site's OWN availability word: «تم البيع»/«مؤجر»… in [status] or [pt_sold] => 1 (one predicate for
+    the crawl AND the removal check, so the two can never disagree)."""
+    status = (f.get("status") or "").strip()
+    return any(g in status for g in GONE_STATUS) or str(f.get("pt_sold", "0")).strip() == "1"
+
+
 def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     """Return (row, category, gone). gone=True → sold/rented → mark inactive / skip."""
     f = _dump_fields(body)
@@ -304,7 +312,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
 
     # ── transaction type + availability ──
     status = (f.get("status") or "").strip()
-    gone = any(g in status for g in GONE_STATUS) or str(f.get("pt_sold", "0")).strip() == "1"
+    gone = _sold_or_rented(f)
     is_rent = ("إيجار" in status or "ايجار" in status) and "بيع" not in status
 
     title_raw = f.get("tr_title") or ""
@@ -456,6 +464,43 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str],
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────
+# ── LIVENESS ORACLE (2026-11-03) ───────────────────────────────────────────────────────────────
+# A sold ad leaves the index, so the crawl never reads its page again and the sold pin above never fires
+# for it; prune_unseen's default reader believes only 404/410, and a sold jurash page answers 200 — so it
+# stayed active for weeks. Measured live: /property/68 answers 200 with «هذا العقار تم بيعه» and
+# [pt_sold] => 1; live /property/84 and /93 carry [pt_sold] => 0; a made-up id redirects to /error.
+# The ad's OWN page decides, through the same predicate the crawl uses, and only while a known-live ad
+# from this run still reads live (the positive control) — so a broken or blocking site removes nothing.
+def _own_signal(pid: str):
+    def signal(status, body, moved):
+        if status in (404, 410):
+            return "gone"
+        if status != 200 or moved or f"[pt_id] => {pid}" not in (body or ""):
+            return None
+        return "gone" if _sold_or_rented(_dump_fields(body)) else "live"
+    return signal
+
+
+def _make_verify_gone(control_ad: Optional[str]):
+    s = session()
+
+    def probe(ad_number: str, canary=None) -> tuple[str, str]:
+        m = re.fullmatch(r"JR(\d+)", ad_number or "")
+        if not m:
+            return "unknown", f"{ad_number!r} is not a jurash ad number"
+        pid = m.group(1)
+        return LivenessProbe(platform="jurash", signal=_own_signal(pid), session=lambda: s,
+                             url_for=lambda _a: f"{BASE}/property/{pid}", canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control_ad:
+            return False, "no ad from this run to use as a positive control"
+        verdict, why = probe(control_ad)
+        return verdict == "live", f"positive control {control_ad}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -561,9 +606,11 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        verify_gone = _make_verify_gone((res + com)[0]["ad_number"] if (res or com) else None)
         for tbl, rows_seen in (("jurash_residential_listings", res),
                                ("jurash_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Jurash")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Jurash",
+                                verify_gone=verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

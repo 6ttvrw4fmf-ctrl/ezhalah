@@ -157,8 +157,9 @@ def test_the_worklist_is_discovered_from_the_committed_ledger():
     """
     plats = absence_only_platforms()
     assert len(plats) >= 20, plats
-    assert "jurash" in plats and "satel" in plats  # fursaghyr left 09-28, aqaratikom 11-03 (oracle)
-    assert "aqaratikom" not in plats
+    assert "satel" in plats  # fursaghyr left 09-28; aqaratikom, jurash, vmksa, amlakalahsa, mobasher 11-03 (oracle)
+    for gone in ("aqaratikom", "jurash", "vmksa", "amlakalahsa", "mobasher"):
+        assert gone not in plats, gone
     assert all(p and " " not in p and not p.startswith("#") for p in plats)
 
 

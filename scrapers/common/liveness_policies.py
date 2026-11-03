@@ -1096,14 +1096,13 @@ POLICIES: dict[str, _P] = {
     ),
     "vmksa": _P(
         _pol("vmksa", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set over a complete, self-declaring index: every run walks /ar/ads "
-        "pages 1..lastPage exactly as the page's own pagination object declares them "
-        "({total:163,lastPage:11} when measured) and re-reads every ad page. run.py suppresses "
-        "prune_unseen unless every listed ad was readable and the walk reached the declared total.",
-        "Not CANDIDATE_PLUS_DIRECT: an ad page that no longer exists answers 200 with the site's "
-        "generic shell (ad 551, 2026-09-26), so a re-fetch cannot tell 'gone' from 'blipped' without "
-        "a parser-level oracle that is not written yet. The ads carry REGA licence expiry dates "
-        "(«تاريخ انتهاء ترخيص الاعلان»), kept in license_expiry for a future oracle."),
+        "the ad's OWN page /ar/ads/<id>: HTTP 200 carrying the page's own ad object (found by its id) is "
+        "LIVE; HTTP 200 with Next.js's own notFound() marker {\"digest\":\"NEXT_NOT_FOUND\"} and no ad "
+        "object is GONE (404/410 too); a throttled shell with neither, a block, a 5xx and a redirect are "
+        "UNKNOWN, and a removal is believed only while an in-run known-live control still reads live.",
+        "Measured 2026-11-03 from a browser: /ar/ads/668 (gone from the index since 10-11) and a made-up "
+        "/ar/ads/999999 both carry NEXT_NOT_FOUND and no ad object; live /ar/ads/886 and /892 carry their "
+        "ad object and no marker. Oracle: scrapers/vmksa/run.py::_make_verify_gone."),
     "dallali": _P(
         _pol("dallali", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the storefront's complete JSON feed: "
@@ -1121,11 +1120,13 @@ POLICIES: dict[str, _P] = {
         "written yet, so this does not claim a direct check."),
     "mobasher": _P(
         _pol("mobasher", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set over the discovery API's direct-sale feed (status=ACTIVE, "
-        "categoryType=RealEstate), cursor-walked to the end, checked against its own totalItems (28 "
-        "when measured). run.py suppresses prune_unseen unless the walk reached totalItems.",
-        "An oracle is possible — the feed row's own `status` and the listing page — but it is not "
-        "written yet, so this does not claim a direct check."),
+        "the ad's OWN page /ar/direct/realestate/<slug>: its record's \"status\" ACTIVE is LIVE, a closed "
+        "status (SOLD/CLOSED/EXPIRED/…) is GONE; a page with NO record — served under the bare site title «مباشر | "
+        "Mobasher», the page the site serves for a made-up slug — is GONE only while an in-run known-live control renders its "
+        "record through the same session. A block, a 5xx, a redirect or an unreadable record is UNKNOWN.",
+        "Measured 2026-11-03 from a browser: the two struck ads and /ar/direct/realestate/x-1000000000000 "
+        "render the same record-less shell; a live ad carries status ACTIVE next to paymentStatus. "
+        "Oracle: scrapers/mobasher/run.py::_make_verify_gone."),
     "nafithh": _P(
         _pol("nafithh", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the gallery's complete index: /web/gallery/index?page=N (the "
@@ -1194,6 +1195,26 @@ POLICIES: dict[str, _P] = {
         "the crawl's OWN seen-set over the site's own list pages /ar/ads?page=N (24 per page, a declared "
         "totalCount). run.py suppresses prune_unseen unless the walk reached the declared total.",
         "No oracle is written yet, so this does not claim a direct check."),
+    "jurash": _P(
+        _pol("jurash", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the ad's OWN page /property/<id>, read through the SAME structured fields the crawl uses "
+        "(_sold_or_rented: the print_r dump's [status] «تم البيع»/«مؤجر»… or [pt_sold] => 1) — never page "
+        "text, where those words are furniture. Sold/rented is GONE (404/410 too); this id's dump with "
+        "neither is LIVE; another id's page, a redirect, a block and a 5xx are UNKNOWN, and a removal is "
+        "believed only while an in-run known-live control still reads live.",
+        "Measured 2026-11-03 from a browser: /property/68 answers 200 «هذا العقار تم بيعه» with "
+        "[pt_sold] => 1 after leaving the index (so the crawl's sold pin never re-read it); live /84 and "
+        "/93 carry [pt_sold] => 0. Oracle: scrapers/jurash/run.py::_make_verify_gone."),
+    "amlakalahsa": _P(
+        _pol("amlakalahsa", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the ad's OWN WordPress post id, /?p=<id> — never the stored slug, which WordPress redirects to "
+        "the closest-named OTHER post: a 404 with no redirect is GONE; 200 carrying body class "
+        "postid-<id> is LIVE; anything else is UNKNOWN, and a removal is believed only while an in-run "
+        "known-live control still reads live.",
+        "Measured 2026-11-03 from a browser: AMH19625's permalink 301s to a different post (950,000 SAR / "
+        "500 m² instead of 570,000 / 300) while /?p=19625 answers 404 (REST: rest_forbidden, not public); "
+        "live /?p=19774 lands on its permalink with postid-19774. Oracle: "
+        "scrapers/amlakalahsa/run.py::_make_verify_gone."),
     "aqaratikom": _P(
         _pol("aqaratikom", 3, 168), CRAWL_PRESENCE_ONLY,
         "the ad's OWN record in the API the crawl reads, GET nawait.sa/api/v1/ad/<uuid> (the listing "
@@ -1440,9 +1461,8 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abralosol", "abwbna", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj",
+            "abralosol", "abwbna", "alkhaas", "alobid", "amaall", "aouj",
             "arkaan", "awal", "bahadhabab", "erapulse",
-            "jurash",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal",
         )
