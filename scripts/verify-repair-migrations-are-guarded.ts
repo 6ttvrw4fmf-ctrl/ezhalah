@@ -48,6 +48,23 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-11-03 (backlog 1261/1263). Four guarded row repairs whose applied files name their detector only in comments
+  // (content parity: these are byte-exact mirrors of what production executed, so the SQL cannot be edited to name it).
+  '20261103170854_wasalt_archive_never_restores_an_impossible_price.sql':
+    'five wasalt prices put back to what wasalt publishes today (guarded on the stale value), plus the trigger fix that stops a ' +
+    'stale archive restoring them; watched by mon_detect_field_integrity (field_integrity_extreme_magnitude re-raises if the ' +
+    'old > 2,000,000 SAR/m² figure returns) and mon_detect_served_billion_price_unproven (20261103190704) for any > 1B return.',
+  '20261103170936_wasalt_rate_guard_ignores_an_impossible_rate.sql':
+    'the same five rows re-written after wasalt_rate_is_not_the_total() parked their price (guarded on the parked shape), with ' +
+    'the trigger fix; watched by mon_detect_rate_served_as_total and mon_detect_served_total_below_city_floor (both rostered) ' +
+    'and mon_detect_field_integrity.',
+  '20261103171050_wasalt_seven_prices_restored_from_an_impossible_rate.sql':
+    'seven wasalt prices restored from price_per_meter to price_total, each read live from wasalt the same day (guarded on the ' +
+    'parked shape); watched by mon_detect_rate_served_as_total, mon_detect_served_total_below_city_floor and ' +
+    'mon_detect_field_integrity.',
+  '20261103171256_haraj_redundant_thousands_area_repair.sql':
+    'three haraj areas the old parser scaled ×1000 («5000 الاف») set to the seller\'s figure (guarded on the mis-scaled value), ' +
+    'with the parser fixed in #10133; watched by mon_detect_field_integrity (area > 1,000,000 m² on a non-land type re-raises).',
   // 2026-11-02. Two kitchens whose ad says «مطبخ غير راكب» went back to unknown (alert 12326, backlog 1189).
   '20261102105648_kitchen_not_installed_stays_unknown.sql':
     'two-row evidence repair (akariyoun 12049465, therc 10283616) to NULL, the value the reader already computes; it is ' +
