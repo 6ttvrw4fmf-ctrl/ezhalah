@@ -405,6 +405,20 @@ SAME check a recently proven-live ad of the same site reads LIVE through the sit
 (`removal_by_owner_approved_status`, `live_control_url`). No control, a blocked control, a different status
 or a redirect → UNKNOWN. A new site joins the table only with the owner's approval.
 
+### 7.2 Two owner decisions of 2026-11-03 that change NOTHING — written down so nobody "fixes" them
+
+The owner answered «Yes, use your picks» to both recommendations:
+
+- **Absence alone still never hides — even after weeks (maqrat).** Five maqrat ads (MQR6, MQR10115, MQR110,
+  MQR10111, MQR10158) left the site's own complete list 15–30 crawls ago, their licences run to 2026-12 … 2027-10,
+  and a removed maqrat page is byte-identical to a live one (probe 37618176662). They stay SHOWN as UNKNOWN. Do not
+  add an "N crawls missing ⇒ gone" rule for maqrat or any other site; a site with no removal signal stays unknown
+  until it publishes one (maqrat's licence end date already retires ads on the day it passes, PR #10222). The
+  `served_after_source_gone:maqrat_residential_listings` alert describing exactly these rows is expected.
+- **Wasalt liveness keeps its declared 48 h SLA; it is NOT moved to daily** (daily would roughly double metered
+  proxy use). §7 still forbids changing the SLA to clear an alarm, so `liveness_checking_stalled:wasalt` is cleared
+  only by the checker meeting 48 h, never by redeclaring it.
+
 ## 8. Where the pieces live
 
 | what | where |
