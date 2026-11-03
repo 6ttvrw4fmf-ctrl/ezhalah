@@ -27,8 +27,7 @@
 // → «تعذّر تحميل الخريطة» in the same box, not an empty beige rectangle (A FAILED FETCH IS NOT AN EMPTY ANSWER).
 // Regions that fail to load leave the plain map (still usable) and are reported in the console.
 import { useEffect, useRef, useState } from 'react';
-import { Ionicons } from '@expo/vector-icons';
-import { Image as XImage } from 'expo-image';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
@@ -38,9 +37,8 @@ import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PI
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
-// The ground-type button's face (owner 2026-11-02: «replace it with the mascot»): the falconer in the farmer's
-// draped shemagh with a pickaxe — assets/images/soil-mascot.svg, built from insight-falconer-original.png.
-const GROUND_MASCOT = require('../../assets/images/soil-mascot.svg');
+// The soil mascot (assets/images/soil-mascot.svg) wore this button for a day; owner 2026-11-03: «hide the mascot,
+// will add it later, not the priority» — the ground-layers icon is back until the soil layer itself is built.
 const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
 const TOKEN_URL = '/api/mapkit-token';
 const REGIONS_URL = '/ksa-regions.json';
@@ -941,7 +939,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       {/* Ground type, beside the layers button (owner 2026-11-02: «add it beside it»). Same circle, same lift in Arabic. */}
       {!failed && !drawing ? (
         <Pressable style={[s.groundBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => { setGroundOpen((o) => !o); setLayersOpen(false); }} accessibilityRole="button" accessibilityLabel={t('Ground type')} testID="map-ground-btn">
-          <XImage source={GROUND_MASCOT} contentFit="contain" accessible={false} style={s.groundMascot} />
+          <MaterialCommunityIcons name="waves" size={21} color={colors.ink} />
         </Pressable>
       ) : null}
       {groundOpen && !failed && !drawing ? (
