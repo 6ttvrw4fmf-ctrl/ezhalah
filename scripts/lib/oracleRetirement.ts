@@ -75,3 +75,40 @@ export function neverRetiringPlatforms(
 ): string[] {
   return rows.filter((r) => oracleNeverRetires(r, minAsks)).map((r) => r.platform).sort();
 }
+
+// ── WHICH PROBE ROWS ARE THE PLATFORM'S ORACLE ANSWERING (2026-11-03) ──────────────────────────────
+// The same verify_gone callable is invoked by TWO callers, and each labels its rows differently:
+//   the crawl's db.prune_unseen()  → oracle = 'prune_unseen.verify_gone'
+//   scrapers/common/fleet_liveness  → oracle = 'fleet_liveness.<platform>' (its SITES map points at
+//                                      "exactly what it hands to db.prune_unseen()"; it writes GONE rows)
+// Counting only the first read suwar as "asked 43 times, zero affirmative" while the SAME _verify_gone
+// had retired 7 listings through the fleet (own page 404). Any other label — a sold-pin end date, a
+// res/com sibling, a lifecycle spot-check — is not the platform's verify_gone and is never counted.
+// public.mon_oracle_retirement_facts() and public.mon_oracle_never_retires() filter on exactly this.
+export const CRAWL_ORACLE_LABEL = 'prune_unseen.verify_gone';
+export const fleetOracleLabel = (platform: string): string => `fleet_liveness.${platform}`;
+
+/** Platform of a probe row, the way the SQL derives it: split_part(source_table, '_', 1). */
+export const platformOfSourceTable = (sourceTable: string): string => sourceTable.split('_')[0] ?? '';
+
+export function isRetirementOracleLabel(oracle: string, sourceTable: string): boolean {
+  return oracle === CRAWL_ORACLE_LABEL || oracle === fleetOracleLabel(platformOfSourceTable(sourceTable));
+}
+
+export type OracleProbeRow = { source_table: string; oracle: string; verdict: string };
+
+/** asks / affirmative for one platform, from raw probe rows — the `ev` CTE of the SQL. */
+export function oracleAnswerCounts(
+  platform: string,
+  rows: readonly OracleProbeRow[],
+): { asks: number; affirmative: number } {
+  let asks = 0;
+  let affirmative = 0;
+  for (const r of rows) {
+    if (platformOfSourceTable(r.source_table) !== platform) continue;
+    if (!isRetirementOracleLabel(r.oracle, r.source_table)) continue;
+    asks++;
+    if ((AFFIRMATIVE_VERDICTS as readonly string[]).includes(r.verdict)) affirmative++;
+  }
+  return { asks, affirmative };
+}

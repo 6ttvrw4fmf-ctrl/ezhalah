@@ -7,6 +7,8 @@
 // الرياض, البدائع/حائل 7.7 km from البدائع/القصيم, بيش/عسير 0.1 km from بيش/جازان) — the ambiguity was
 // a duplicate row, not a second town. The listings moved with it, the three cases went empty, and
 // the scheduled check failed every run from 2026-10-30 on while the RPC was behaving perfectly.
+// (The 2026-11-02 pin rule moved more minority-side listings the same way; #10206 repointed to three new
+// hardcoded pairs whose minority sides hold 2-4 listings each — one more move and they go empty too.)
 //
 // So the cases are now DERIVED: for each candidate name, the unscoped search's own rows say which
 // regions really hold it today, and every region holding at least one row becomes a case. A
