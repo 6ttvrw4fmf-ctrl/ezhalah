@@ -32,3 +32,13 @@ def test_a_false_flag_is_a_form_default_not_a_no_and_the_phone_is_never_stored()
     (row, _), _ = R.map_property(_d())
     assert row["electricity"] is True and "water_supply" not in row
     assert "559240240" not in str(row)
+
+
+def test_the_kitchen_count_is_the_kitchen_answer():
+    # 2026-11-03: `kitchens: 1` reached additional_info only; kitchen stayed NULL and the AF «مطبخ» search missed the ad.
+    (row, _), _ = R.map_property(_d(kitchens=1))
+    assert row["kitchen"] is True and row["additional_info"]["kitchens"] == 1
+    (row, _), _ = R.map_property(_d(kitchens=0))
+    assert "kitchen" not in row          # a zero / absent count is silence here, never a stated «no»
+    (row, _), _ = R.map_property(_d())
+    assert "kitchen" not in row
