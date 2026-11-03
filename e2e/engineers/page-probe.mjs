@@ -113,6 +113,7 @@ const beforeReload = []; // errors the planted failure caused, kept as evidence,
 let loaded = false;
 let failedOnce = null;
 let reloaded = false;
+let screenText = ''; // what the customer SEES after the planted failure (evidence when nothing reloads)
 let screenshot = null;
 try {
   const ctx = await browser.newContext({
@@ -168,6 +169,8 @@ try {
     if (!failedOnce) errors.push(`fail-once: no request matched «${FAIL_ONCE}» — nothing was planted (chunks seen: ${chunksSeen.slice(0, 20).join(', ') || 'none'})`);
     log(`    · planted ${failedOnce ? 'once' : 'nothing'} · page reloaded itself: ${reloaded}`);
     await page.waitForTimeout(4000); // the reloaded shell mounts
+    screenText = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 400)).catch(() => '');
+    log(`    · screen: «${screenText.slice(0, 160)}»`);
   }
   for (let round = 1; loaded && round <= REPEAT; round++) {
     for (const t of TAPS) {
@@ -198,7 +201,7 @@ try {
 }
 const verdict = verdictFor({ loaded, missedTaps, errors, warnings, strict: STRICT, reloadExpected: !!FAIL_ONCE, reloaded });
 const out = { url: URL_, taps: TAPS, repeat: REPEAT, gapMs: GAP, phone: PHONE, loaded, missedTaps, errors, warnings, screenshot, status: verdict,
-  ...(FAIL_ONCE ? { failOnce: FAIL_ONCE, failedOnce, reloaded, beforeReload, chunksSeen: chunksSeen.slice(0, 40) } : {}) };
+  ...(FAIL_ONCE ? { failOnce: FAIL_ONCE, failedOnce, reloaded, beforeReload, screenText, chunksSeen: chunksSeen.slice(0, 40) } : {}) };
 console.log(JSON.stringify(out));
 log(`SUMMARY page-probe ${verdict} · loaded=${loaded} · taps missed=${missedTaps.length} · errors=${errors.length} · console warnings=${warnings.length}${STRICT ? ' (strict)' : ''}${FAIL_ONCE ? ` · planted=${failedOnce ? 1 : 0} reloaded=${reloaded} errorsBeforeReload=${beforeReload.length}` : ''}`);
 process.exit(verdict === 'PASS' ? 0 : 1);
