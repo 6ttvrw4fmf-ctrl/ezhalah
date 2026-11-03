@@ -391,6 +391,18 @@ scheduled, quarantined by a trust gate, blocked proxy, or a probe rate too low f
 - It does not weaken any existing gate (deploy lock, production target lock, preflight, taxonomy
   gate, source-fidelity rules).
 
+### 7.1 The one owner-approved exception: a site that answers a REMOVED ad with an error (owner, 2026-11-03)
+
+A 403 or a 5xx is still never a death by itself — `decide()` and `read_is_unbelievable()` are unchanged.
+The owner approved one narrow exception («Yes, hide them»), for sites measured to answer a removed ad with
+an error while their live ads answer 200: alshawaf and bossbih (an UNPUBLISHED Drupal node → 403; deleted →
+404) and aqaratikom (`/api/v1/ad/<uuid>` of a removed ad → 500; a made-up uuid → 404). Such an ad is hidden
+only when ALL hold: the site and that exact status are in `OWNER_APPROVED_REMOVAL_STATUS`
+(`scrapers/common/http_liveness.py`); the ad's own URL answers it on two reads, neither redirected; and in the
+SAME check a recently proven-live ad of the same site reads LIVE through the site's own signal
+(`removal_by_owner_approved_status`, `live_control_url`). No control, a blocked control, a different status
+or a redirect → UNKNOWN. A new site joins the table only with the owner's approval.
+
 ## 8. Where the pieces live
 
 | what | where |
