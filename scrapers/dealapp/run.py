@@ -96,6 +96,12 @@ TYPE_MAP_AR = {
     "ارض تجارية": "Commercial Land", "أرض تجارية": "Commercial Land",
     "عمارة تجارية": "Commercial Building", "مجمع تجاري": "Commercial Building",
     "محطة": "Gas Station", "محطة وقود": "Gas Station", "مغسلة": "Shop", "كشك": "Kiosk",
+    # 2026-11-03 (🔧 repair, legacy_novel_type alerts): live Deal types that leaked raw and were served as
+    # «غير معروف». «بلك» (a land block; all 11 live ads are titled «ارض للبيع …»), «ستريب مول» (a strip
+    # mall, the same family as «مجمع تجاري»), and the two clinic words (a medical building is a
+    # مرافق خدمية Health Center, like «مركز صحي»).
+    "بلك": "Residential Land", "ستريب مول": "Commercial Building",
+    "مبنى عيادات": "Health Center", "مجمع طبي": "Health Center",
 }
 COMMERCIAL_TYPES = {
     "Office", "Shop", "Showroom", "Warehouse", "Workshop", "Factory", "Hotel",
