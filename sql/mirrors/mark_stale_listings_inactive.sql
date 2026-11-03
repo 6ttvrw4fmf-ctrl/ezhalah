@@ -1,4 +1,7 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-11-03 (migration 20261102212825_stale_breaker_escape_resolves_on_reset): UNCHANGED.
+--   md5(pg_get_functiondef) in production = 46b864145225e1897ce0ad014c0732e2, identical to this file. Stamped for
+--   verify-sql-mirrors-not-stale (B2): the 2026-11-02 stamp did not name this later same-day migration.
 -- Refreshed 2026-11-02 (re-derived, see below) by the 🔧 Quality & Repair Engineer (2nd daily run) for migration
 --   20261102212825_stale_breaker_escape_resolves_on_reset, which needle-edits this body: exactly one
 --   match of the breaker-reset UPDATE asserted, a mon_resolve_key('stale_breaker_escape', …) line added

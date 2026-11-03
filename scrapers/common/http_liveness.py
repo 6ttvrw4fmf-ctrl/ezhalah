@@ -199,9 +199,17 @@ class LivenessProbe:
 
 
 def _path_of(u: str) -> str:
-    from urllib.parse import urlparse
+    """The URL's path, percent-DECODED, so a request and its landing compare as the same page.
+
+    The HTTP client percent-encodes a raw Arabic slug on the wire and reports the encoded form as
+    `r.url`, so the raw stored URL and its own landing used to differ byte-for-byte and every
+    Arabic-slug probe read as an unresolved redirect (`path_changed`) — UNKNOWN forever. Measured
+    2026-11-03: mizlaj MZ29 (`/guest/listings/فيلا-مع-…-٢٥٠`) answered a direct 404 with no
+    redirect, the crawl's verify_gone held it «1 unknown» at full strikes, and it stayed on screen
+    (served_after_source_gone:mizlaj, alert 12838). A real redirect to another path still differs."""
+    from urllib.parse import unquote, urlparse
     p = urlparse(u)
-    return (p.path or "/").rstrip("/") or "/"
+    return unquote(p.path or "/").rstrip("/") or "/"
 
 
 def stored_listing_url(tables: tuple[str, ...]) -> Callable[[str], Optional[str]]:

@@ -1,4 +1,3 @@
--- APPLIED 2026-10-19 00:53:48 UTC (owner session).
 -- listing_keys_gone (20261018232227) is SECURITY DEFINER and the web app calls it as a visitor reopening a saved chat
 -- (src/lib/deadCards.ts). Under 20261018182626 a definer function keeps public roles only with an allowlist row.
 insert into public.ops_public_secdef_allowlist (proname, grant_to, reason) values
