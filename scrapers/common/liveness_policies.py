@@ -1430,7 +1430,7 @@ POLICIES: dict[str, _P] = {
                       "404 limb: unmeasured here, and an edited WordPress slug 404s a live listing"),
             ("jazwtn", "404/410 on the listing's own URL (29/31 dead rows, 0/40 controls)"),
             ("mizlaj", "404/410 on the listing's own URL"),
-            ("nowaisiry", "404/410 on the listing's own URL"),
+            ("nowaisiry", "404/410 on the listing's own post-id page /?p=<id> with no redirect (never the stored slug, which the office reuses for other ads — NW4349, 2026-11-03); LIVE only on a page naming postid-<id>; removal gated on an in-run live control"),
             ("raghdan", "404 with no listing payload; a 200 carrying RealEstateListing schema is alive"),
             ("sanadak", "a SOFT-404 identified by the listing object for THIS url being absent — the "
                         "row's own stored listing_url is used, because 39 of 1,724 rows store another "
