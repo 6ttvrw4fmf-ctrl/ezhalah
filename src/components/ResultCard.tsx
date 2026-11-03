@@ -14,6 +14,7 @@ import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
+import { listingSearchedTypeAr } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
 import { monthlyLineText } from '@/lib/listingDisplay';
 
@@ -37,7 +38,7 @@ const IS_WEB = Platform.OS === 'web';
 
 // Feature key → (icon, EN label key) — the wrapping amenities row on the listing card.
 // The label is run through t() so it localizes to Arabic. Order matters: most useful features first.
-const AMENITY_BAG_IDS = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'apartments', 'shops']);
+const AMENITY_BAG_IDS = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'outdoors', 'smart', 'papers', 'water', 'games', 'camp_life', 'water_land', 'land_papers', 'power', 'crops', 'animals', 'buildings', 'plot', 'deal_papers', 'land', 'location', 'cspace', 'cservices', 'business', 'office_kind', 'ready', 'building', 'trucks', 'loc_papers', 'inside', 'investment', 'hotel', 'station', 'deal_loc', 'space_papers', 'services_business', 'workshop', 'loc_business', 'building_papers', 'factory', 'loc_safety', 'papers_c', 'apartments', 'shops']);
 export const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: any; label: string }> = [
   { key: 'parking',          icon: 'car-outline',           label: 'Parking' },
   { key: 'maid_room',        icon: 'person-outline',        label: 'Maid Room' },
@@ -199,6 +200,12 @@ export function ResultCard({
     locale,
     TYPE_UNRESOLVED_AR,
   );
+  // THE TITLE SPEAKS THE TYPE THE USER SEARCHED (owner 2026-11-03: «when you display the ad you must show the thing the user
+  // selected on the property type»). The user picks a filter type (أرض تجارية, شاليه…) and the ad is found BY that type, so
+  // the card's headline («… للبيع / للإيجار») names it in the filter's own words. The source's own wording stays on the card
+  // (the type row and the «Property Type» stat keep typeLabel, owner 2026-07-06 source-accurate rule), so nothing the source
+  // said is hidden — e.g. title «أرض تجارية للبيع», type row «أرض سكني تجاري».
+  const searchedTypeLabel = locale === 'en' ? typeLabel : listingSearchedTypeAr(listing);
   // Responsive thumbnail sizing. Goes through useAtLeast so the FIRST client render reproduces the
   // server's answer (no window ⇒ compact); comparing the width inline here was the second half of
   // the React #418 P0 of 2026-08-21 — it differs only in style attributes, but React compares those
@@ -278,7 +285,7 @@ export function ResultCard({
           ) : null}
           {/* THE GOLD STRIP on the laptop photo-first card too (owner 2026-10-17: «for all»). */}
           <GoldSurface tone={tone} style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">
-            <Text style={card.lpPhotoFootTx}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
+            <Text style={card.lpPhotoFootTx}>{searchedTypeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
             {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{sourceHost(listing.source)}</Text> : null}
           </GoldSurface>
         </Pressable>
@@ -439,7 +446,7 @@ export function ResultCard({
             <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
             <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
           </View>
-          <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
+          <Text style={card.typeLabel}>{searchedTypeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
         {/* JUNK_LOCATION_TOKENS guard (2026-07-10 location-data-quality audit): city/district can
             legitimately both be empty here — a scraper's own resolver failed AND remote.ts correctly

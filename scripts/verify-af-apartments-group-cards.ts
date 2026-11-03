@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardPlan, cohortAllows, certifiedAmenityKeys, COHORT_CARDS, CARD_IDS, AMENITY_BAG_QUESTION_IDS, groupAskTier } from '../src/lib/afCohorts.ts';
+import { withAdvancedLines } from '../src/lib/afSummary.ts';
+import { cardPlan, cohortAllows, certifiedAmenityKeys, COHORT_CARDS, CARD_IDS, AMENITY_BAG_QUESTION_IDS, groupAskTier, groupAskTierFor } from '../src/lib/afCohorts.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,8 +54,12 @@ check('Buy → Residential Building: age · street width · direction · apartme
 check('Annual rent → Residential Building: no direction, no furnished question; features · services',
   !cohortAllows(Q({ deal: 'Rent', types: ['Residential Building'] }), 'direction')
   && cardPlan(Q({ deal: 'Rent', types: ['Residential Building'] })).map((c) => c.id).sort().join() === 'features,services');
-check('Villa is untouched (no cards; its own cohort list still asks)', cardPlan(Q({ deal: 'Rent', types: ['Villa'] })).length === 0
-  && cohortAllows(Q({ deal: 'Rent', types: ['Villa'] }), 'bathrooms') && cohortAllows(Q({ deal: 'Rent', types: ['Villa'] }), 'amenities'));
+// (Villa carried no cards when this was written; it got the owner's group lists on 2026-11-02 — verify-af-villas-group-cards.ts.)
+// (Rest House carried no cards when this was written; every residential type got cards on 2026-11-02 — the last list-less
+// cohort is Raw Land under Commercial, which still asks its own street width.)
+check('Raw Land is untouched (no cards; its own cohort list still asks)',
+  cardPlan({ ...Q({ deal: 'Buy', types: ['Raw Land'] }), category: 'Commercial' } as SearchQuery).length === 0
+  && cohortAllows({ ...Q({ deal: 'Buy', types: ['Raw Land'] }), category: 'Commercial' } as SearchQuery, 'street_width'));
 
 console.log('\n§2 the owner\'s worked examples (intersection, never union)\n');
 const aptFloor = cardPlan(Q({ deal: 'Rent', types: ['Apartment', 'Floor'] }));
@@ -99,6 +104,23 @@ check('the ask order is the owner\'s numbering: installments → bathrooms → a
   groupAskTier('rnpl') > groupAskTier('bathrooms') && groupAskTier('bathrooms') > groupAskTier('property_age')
   && groupAskTier('property_age') > groupAskTier('comfort') && groupAskTier('comfort') > groupAskTier('space')
   && groupAskTier('space') > groupAskTier('safety') && groupAskTier('build') > groupAskTier('fun') && groupAskTier('nothing') === 0);
+const buyQ = Q({ deal: 'Buy', types: ['Apartment'] });
+const rentBuyQ = Q({ deal: 'Rent', types: ['Floor'], dealCombined: true });
+check('a Buy-only scope asks AGE before bathrooms (every locked Buy list: age → bathrooms → direction → comfort…)',
+  groupAskTier('property_age', buyQ) > groupAskTier('bathrooms', buyQ) && groupAskTier('bathrooms', buyQ) > groupAskTier('direction', buyQ)
+  && groupAskTier('direction', buyQ) > groupAskTier('comfort', buyQ) && groupAskTier('rnpl', buyQ) > groupAskTier('property_age', buyQ));
+check('a rent or mixed scope keeps bathrooms before age (Floor Rent + Buy: bathrooms · age)',
+  groupAskTier('bathrooms', rentBuyQ) > groupAskTier('property_age', rentBuyQ)
+  && groupAskTier('bathrooms', Q({ deal: 'Rent', types: ['Apartment'] })) > groupAskTier('property_age', Q({ deal: 'Rent', types: ['Apartment'] })));
+{
+  const lines = withAdvancedLines('base', [{ id: 'space', keys: ['majlis'], labels: ['🛋️ مجلس'], line: 'Space' }], (k) => k);
+  check('the yearly «🏠 Space» card prints its OWN summary line («Space»), not the short-stays «Space & safety» that shares its id',
+    /• Space: 🛋️ مجلس/.test(lines) && !/Space & safety/.test(lines), lines);
+  const ss = withAdvancedLines('base', [{ id: 'space', keys: ['majlis'], labels: ['🛋️ مجلس'] }], (k) => k);
+  check('…while a facet without its own line keeps the id\'s default label (short stays: «Space & safety»)', /• Space & safety: /.test(ss), ss);
+}
+check('groupAskTierFor(q) is the same ranking, curried for rankQuestions',
+  groupAskTierFor(buyQ)('property_age') === groupAskTier('property_age', buyQ) && groupAskTierFor(buyQ)('bathrooms') === groupAskTier('bathrooms', buyQ));
 check('every chip in every list is a lower_snake token (a p_amenities slug)', Object.values(COHORT_CARDS).every((deals) =>
   Object.values(deals).every((cards) => Object.values(cards!).every((keys) => keys!.every((k) => /^[a-z_0-9]+$/.test(k))))));
 
@@ -125,20 +147,19 @@ const union = await mutant(["    .map((id) => ({ id, keys: (primary[id] ?? []).f
 mustCatch('UNION instead of intersection (bills included offered on Apartment + Floor)', keysOf(union(Q({ deal: 'Rent', types: ['Apartment', 'Floor'] }))).has('bills_included'));
 const noPool = await mutant(["  if (legs.length === 1) return kept;", "  return kept;"]);
 mustCatch('a mixed scope that never pools its small cards (the owner\'s all-three-deals example breaks)', flat(noPool(three)) !== flat(cardPlan(three)));
-// The real mutant: a leg with NO lists (Villa) is skipped by the intersection instead of certifying nothing — both the
-// guard and the per-chip test must read null as «no constraint» for Villa + Apartment to inherit the apartment chips.
+// The real mutant: a leg with NO lists (Rest House) is skipped by the intersection instead of certifying nothing — both the
+// guard and the per-chip test must read null as «no constraint» for Rest House + Apartment to inherit the apartment chips.
 const anyLeg = await mutant(["  if (unions.some((u) => !u)) return [];", "  "],
   ["unions.every((u) => u!.has(k))", "unions.every((u) => !u || u.has(k))"]);
-mustCatch('a leg with no lists certifying nothing is read as «no constraint» (Villa + Apartment would get apartment chips)',
-  anyLeg(Q({ deal: 'Rent', types: ['Apartment', 'Villa'] })).length > 0);
+mustCatch('a leg with no lists certifying nothing is read as «no constraint» (Rest House + Apartment would get apartment chips)',
+  anyLeg({ ...Q({ deal: 'Buy', types: ['Shop', 'Raw Land'] }), category: 'Commercial' } as SearchQuery).length > 0);
 const monthlyVeto = await mutant(["    .filter((deal) => !COHORT_CARDS[type] || COHORT_QUESTIONS[type]?.[deal])", "    .filter(() => true)"]);
 mustCatch('Floor\'s empty short-stay leg vetoing its Rent ∩ Buy list', monthlyVeto(floorBoth).length === 0);
-const wrongShort = await mutant(["  const types = shortStays ? ['Apartment'] : scopeCleanTypes(q);", "  const types = scopeCleanTypes(q);"]);
+const wrongShort = await mutant(["  if (shortStaysPool(q)) return [{ key: 'short-stays', cards: SHORT_STAYS_CARDS, questions: SHORT_STAYS_QUESTIONS }];", "  if (false as boolean) return [];"]);
 // On «Apartments & Co-living» the monthly-veto rule already skips Floor / Building, so the discriminating box is one
 // whose members have NO cohort at all (Vacation & Rural: Chalet, Camp…) — the real plan is the one pool, the mutant nothing.
-mustCatch('short stays on a group box intersecting its members instead of reading the one pool (Vacation & Rural → nothing)',
-  wrongShort(Q({ deal: 'Rent', rentPeriod: 'monthly', typeGroups: ['Vacation & Rural'] })).length === 0
-  && cardPlan(Q({ deal: 'Rent', rentPeriod: 'monthly', typeGroups: ['Vacation & Rural'] })).length === 3);
+mustCatch('short stays with NO group and no type (the user picked Short stays, that is enough) reading nothing instead of the one pool',
+  wrongShort(Q({ deal: 'Rent', rentPeriod: 'monthly' })).length === 0 && cardPlan(Q({ deal: 'Rent', rentPeriod: 'monthly' })).length > 0);
 
 console.log(failed === 0 ? '\n✅ the Apartments & Co-living cards are the owner\'s lists, combined by intersection.\n' : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);

@@ -53,11 +53,13 @@ for (const [type, cfg] of Object.entries(COHORT_QUESTIONS)) {
 // ── the 5 types this bug named by name (the owner's own reproduction set) ────────────────────────
 console.log('\n── the 5 types this bug named: real COHORT_QUESTIONS data, unreachable before the fix ──');
 const NAMED_FIVE: Array<{ type: string; buy: boolean; rentAnnual: boolean }> = [
-  { type: 'Shop', buy: true, rentAnnual: true },
-  { type: 'Workshop', buy: true, rentAnnual: true },
-  { type: 'Commercial Building', buy: true, rentAnnual: true },
-  { type: 'Farm', buy: true, rentAnnual: false },
-  { type: 'Rest House', buy: true, rentAnnual: true },
+  // 2026-11-02: the owner's locked lists (2026-11-01) for commercial and countryside types carry NO property-age
+  // question — age stays on the dwelling lists (Apartment, Floor, Villa, Duplex, Studio, Residential Building).
+  { type: 'Shop', buy: false, rentAnnual: false },
+  { type: 'Workshop', buy: false, rentAnnual: false },
+  { type: 'Commercial Building', buy: false, rentAnnual: false },
+  { type: 'Farm', buy: false, rentAnnual: false },
+  { type: 'Rest House', buy: false, rentAnnual: false },
 ];
 for (const { type, buy, rentAnnual } of NAMED_FIVE) {
   const macro = CLEAN_MACRO[type] ?? 'Residential';
@@ -72,7 +74,7 @@ check('Villa does NOT fire under Commercial', !age(Q({ types: ['Villa'], categor
 check('Office does NOT fire under Residential', !age(Q({ types: ['Office'], category: 'Residential' })));
 check('Warehouse does NOT fire under Residential (kinds:BOTH — macro match is the only thing stopping it)',
   !age(Q({ types: ['Warehouse'], category: 'Residential' })));
-for (const t of ['Land', 'Chalet', 'Duplex'])
+for (const t of ['Land', 'Chalet', 'Room'])
   check(`${t} (not certified for property_age) never fires`,
     !age(Q({ types: [t], category: 'Residential', deal: 'Buy' }))
     && !age(Q({ types: [t], category: 'Residential', deal: 'Rent', rentPeriod: 'annual' })));
@@ -84,8 +86,8 @@ check('an unknown type never fires', !age(Q({ types: ['NotAType'], category: 'Re
 console.log('\n── multi-type scope: intersection, never union — the same rule cohortAllows enforces everywhere ──');
 check('Apartment+Villa (both certify Buy) fires on Buy',
   age(Q({ types: ['Apartment', 'Villa'], category: 'Residential', deal: 'Buy' })));
-check('Apartment+Duplex (Duplex has no property_age) does NOT fire — one uncertified type empties the set',
-  !age(Q({ types: ['Apartment', 'Duplex'], category: 'Residential', deal: 'Buy' })));
+check('Apartment+Room (Room has no Buy list, hence no property_age) does NOT fire — one uncertified type empties the set',
+  !age(Q({ types: ['Apartment', 'Room'], category: 'Residential', deal: 'Buy' })));
 
 // ── period / combined-deal gate — property_age has never been profiled against Monthly for ANY type,
 // so RentMonthly never lists it; cohortAllows' existing monthly/both/dealCombined branches already

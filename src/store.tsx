@@ -181,8 +181,8 @@ type AppState = {
   setActiveChat: (id: string | null) => void;
   // Support / About Us are shown as in-app popups (centered dialog over a dimmed page) rather than
   // full-screen routes, so they open from the drawer without navigating away.
-  modal: 'support' | 'about' | 'legal' | 'privacy' | null;
-  openModal: (m: 'support' | 'about' | 'legal' | 'privacy') => void;
+  modal: 'support' | 'about' | 'legal' | 'privacy' | 'af-how' | null;
+  openModal: (m: 'support' | 'about' | 'legal' | 'privacy' | 'af-how') => void;
   closeModal: () => void;
   // Sign-in popup (owner 2026-08-15): a true in-place overlay, same pattern as modal/openModal/
   // closeModal above — never a route, so the screen underneath (the Filter page, wherever the user
@@ -330,7 +330,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const historyRef = useRef<HistoryItem[]>([]);
   useEffect(() => { historyRef.current = history; }, [history]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | null>(null);
+  const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | 'af-how' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authNote, setAuthNote] = useState<string | null>(null);
   const [pendingMessage, setPendingMessageState] = useState<string | null>(null);

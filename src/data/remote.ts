@@ -7,6 +7,7 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
+import { honestTotal } from '@/lib/honestTotal';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { normalizeType, queryForSelection, queryForTypes, storedRawTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
@@ -859,10 +860,12 @@ export type GuidedCounts = {
   cnt_bath2: number;
   cnt_bath3: number;
   cnt_bath4: number;
+  cnt_bath5: number; cnt_bath6: number; // villa ladders (owner 2026-11-01: Buy 3+…6+, Rent 2+…5+)
   // Cohort expansion 2026-08-15: direction + street-width counts (ResBldg/Apartment-Buy questions).
   cnt_dir_n: number; cnt_dir_s: number; cnt_dir_e: number; cnt_dir_w: number;
   cnt_dir_ne: number; cnt_dir_nw: number; cnt_dir_se: number; cnt_dir_sw: number;
   cnt_stw15: number; cnt_stw20: number; cnt_stw25: number; cnt_stw30: number;
+  cnt_stw10: number; cnt_stw40: number; cnt_stw60: number; // 20261102101415: the plots / retail ladders
   // Villa cohort 2026-08-16: aqar villa-form chips (مدخل سيارة / صرف صحي).
   cnt_car_entrance: number; cnt_sanitation: number;
   // Commercial expansion 2026-08-16: the utility chips the commercial market actually splits on.
@@ -893,6 +896,29 @@ export type GuidedCounts = {
   cnt_kids_play_area: number; cnt_nursery: number; cnt_free_maintenance: number; cnt_intercom: number; cnt_fire_system: number;
   cnt_ev_charger: number; cnt_central_vacuum: number; cnt_insulation: number; cnt_dining_majlis: number; cnt_own_bathroom: number;
   cnt_fridge: number; cnt_whole_floor: number; cnt_singles: number; cnt_families: number;
+  // Villas & Houses (owner lists 2026-11-01): seven text facts + five merged chips
+  cnt_women_majlis: number; cnt_outdoor_kitchen: number; cnt_outdoor_diwaniya: number; cnt_waterfall: number;
+  cnt_well: number; cnt_irrigation: number; cnt_sports_court: number;
+  cnt_garden_yard: number; cnt_jacuzzi_sauna: number; cnt_cameras_smart_home: number; cnt_water_tank_well: number; cnt_smart_home_entry: number;
+  // countryside, land, commercial (migrations 2026-11-02)
+  cnt_split_payments: number; cnt_heated_pool: number; cnt_kids_pool: number; cnt_water_slide: number; cnt_sea_view: number; cnt_football_pitch: number;
+  cnt_playstation: number; cnt_inflatable_games: number; cnt_sound_system: number; cnt_fire_pit: number; cnt_bait_shaar: number; cnt_mandi_pit: number;
+  cnt_outdoor_seating: number; cnt_tent: number; cnt_dunes_view: number; cnt_women_section: number; cnt_two_sections: number; cnt_events_hall: number;
+  cnt_privacy_screen: number; cnt_trees: number; cnt_for_families: number; cnt_for_youth: number; cnt_for_events: number; cnt_for_newlyweds: number;
+  cnt_quad_bikes: number; cnt_horses_stable: number; cnt_camels: number; cnt_toilets_on_site: number; cnt_lighting: number; cnt_artesian_well: number;
+  cnt_solar_power: number; cnt_palms: number; cnt_fruit_trees: number; cnt_fodder_crops: number; cnt_greenhouses: number; cnt_producing_farm: number;
+  cnt_animal_pens: number; cnt_poultry: number; cnt_farm_house: number; cnt_farm_rest_house: number; cnt_workers_housing: number; cnt_fence: number;
+  cnt_main_road: number; cnt_good_soil: number; cnt_corner_plot: number; cnt_three_streets: number; cnt_ready_to_build: number; cnt_raised_plot: number;
+  cnt_residential_commercial: number; cnt_all_services: number; cnt_asphalt: number; cnt_street_lights: number; cnt_approved_plan: number; cnt_direct_owner: number;
+  cnt_inside_project: number; cnt_floors_allowed: number; cnt_grant_land: number; cnt_no_services: number; cnt_camels_horses: number; cnt_palm_fruit_trees: number;
+  cnt_mezzanine: number; cnt_pantry: number; cnt_glass_front: number; cnt_frontage: number; cnt_in_mall: number;
+  cnt_in_tower: number; cnt_license: number; cnt_food_allowed: number; cnt_takeover: number; cnt_first_tenant: number; cnt_internet: number;
+  cnt_civil_defense: number; cnt_high_ceiling: number; cnt_hangar: number; cnt_insulated_panel: number; cnt_cold_storage: number; cnt_concrete_floor: number;
+  cnt_loading_dock: number; cnt_big_gate: number; cnt_truck_access: number; cnt_crane: number; cnt_racks: number; cnt_office_inside: number;
+  cnt_heavy_power: number; cnt_industrial_area: number; cnt_car_service: number; cnt_meeting_room: number; cnt_reception: number; cnt_coworking: number;
+  cnt_private_office: number; cnt_central_ac: number; cnt_shops_inside: number; cnt_offices_inside: number; cnt_apartments_inside: number; cnt_staff_housing_inside: number;
+  cnt_restaurant_cafe: number; cnt_car_wash: number; cnt_market: number; cnt_earning_income: number; cnt_stars_mentioned: number; cnt_rooms_suites: number;
+  cnt_oil_change: number; cnt_pumps: number; cnt_mosque: number; cnt_building_rules: number; cnt_pool_gym: number;
   cnt_separate_meters: number; cnt_apts4: number; cnt_apts8: number; cnt_apts12: number; cnt_apts20: number; cnt_has_shops: number;
   cnt_apts_unknown: number; cnt_shops_unknown: number;
 };
@@ -1876,6 +1902,10 @@ export async function fetchListingsForQuery(
     const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
   }
+  // The count follows the cards (🔧 1153, 2026-11-01): a row the raw hydration dropped (hidden at source since the
+  // last :22 sync, or index↔raw drift) is still inside the index's total_count — subtract this page's drops so the
+  // number on screen never exceeds the cards a customer can reach. Never adds, never below zero (src/lib/honestTotal.ts).
+  pageTotal = honestTotal(pageTotal, cleanCands.length, ranked.length);
   const USE_RELATION_TABLE = true;
   // multiType → spread across the picked clean types (cleanType diversity key). True for a genuine
   // multi-select AND for a subgroup box like «مرافق خدمية» that expands to 5 member types, so its results

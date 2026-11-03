@@ -1,5 +1,13 @@
 # ♻️ LIFECYCLE ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
 > **🔢 THE SITE COUNT MOVES BY ITSELF (owner, 2026-10-27 — «a new website goes up, the number changes»).** The
 > «نبحث في N منصة» number and the logo strip both come from ONE list, `loader_active_platforms_ar()`: a site
 > counts and shows its logo only while it is active in `platform_registry` AND has at least one
@@ -1184,6 +1192,20 @@ or rewrite another engineer's work, and never start a big change in another engi
   its red run attaches to the head commit and the merge gate refuses ANY non-success check. Push the
   next commit (the lesson line) after the diagnostics, or dispatch them on a scratch branch.
 
+- **2026-11-02 (♻️):** a feed sighting un-hid every own-page «gone» hide on every site. `db._wasalt_batch` reset
+  `missing_count = 0 / active = true` for any row the list still served, so a hide made on the ad's own page
+  lasted until the next crawl (nowaisiry NW4538 hidden 10-31, back 11-01, dead on the 11-02 score; muhaysini
+  MHS42/MHS2213 killed 3/3 every ~3 days since 10-17). `db.page_gone_holds` now keeps a hidden row hidden while
+  its newest probe-ledger reading is GONE and newer than its last alive stamp (#9959). When a hide «does not
+  stick», read the ledger against `last_seen_at` before suspecting the checker.
+- **2026-11-02 (♻️):** a long-lived session is a reader, and it can go blind. Gathern's hourly sweep reads
+  ~1,500 units on one session; gathern sent that session home for a growing set of units, so 178 served units
+  read «transient» for 26+ h while a fresh session read 33 of 43 of them 404 (spot-check 41434405092). The
+  proxy fallback could not help: it only takes a 200. A unit still without a verdict is now re-read once on a
+  fresh session (`liveness.fresh_read`, #9959). When «transient» grows while controls stay 10/10, compare a
+  fresh-session read of the same ids before touching anything else. And a seller's own «(تم البيع)» /
+  «(تم التأجير)» in a 200 title is a removal (haraj, 52 served, #9960).
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
@@ -1519,3 +1541,23 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   a stale-mirror check its stale branch cannot pass. ♻️ 11-01 (1147): the sweep SESSION read a dead Gathern unit as
   no-verdict 36 times while a fresh session read its 404. Rule: a robot's input, session and diff-base are part of the
   measurement — print them in the evidence before judging the product with the robot's number.
+
+## 📚 FLEET LESSONS 2026-11-02 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A PR's lane is read from GitHub's MERGE-BASE file list, so a sibling PR landing first strands yours.** 🔬 11-01:
+  mirror #9791 read «red» 2 h 40 min after its file reached main inside #9793. 🔬 11-02: barrier #9949 (its script + the
+  mirror file) sat 3 h 45 min green and clean after mirror #9948 merged first — the robot saw «supabase/ and not a pure
+  mirror» and left it; `git merge origin/main` at 14:02 cleared it in one pass. Rule: ship a mirror and its barrier as
+  ONE PR, or the moment the sibling lands run `git fetch origin main && git merge origin/main && git push` on the other;
+  a PR that is «clean» and still open after 90 min is first a question about its file list against main.
+- **② The measuring tool is the first suspect when a count disagrees.** 🔬 11-02: the Trending check compared the
+  screen with the background warm-up call (96,842 vs 69,773 — both right), and the chip oracle missed the 10-26
+  price-on-request rule (3 P1s on correct chips); 🔧 11-01: the journey typed 11 digits into a 10-digit box, and #9791's
+  «red» was a diff-base illusion. Rule: before touching an RPC, diff the two row sets once (16,189 − 14,089 = exactly
+  the 2,100 no-price rows) and print what the tool typed, captured and compared against.
+- **③ Re-read the LIVE record before writing over data, and ship the batch with its undo ready.** ⚡ 11-02: a repair
+  NULLed 32 aqar prices on a closed-page capture; the live re-read showed 2 were wrong, and ~22 cards read «السعر عند
+  الطلب» for an hour (05:34–06:34 UTC). 🔬 10-30: a «fabricated value» alarm on 12 rows was aqar's own value from a
+  re-categorised ad. 🆕 10-31: a key that existed only in our capture cost a 20-minute crawl. Rule: one live read of the
+  record (the page or the current payload) before the first write; measure the live effect within minutes; undo in the
+  same run. (Third night of this family → ⚡'s rulebook carries it as a rule since #9910.)

@@ -21,7 +21,7 @@ import { loadWelcomeFacts } from '@/data/welcomeFacts';
 import { sentenceName } from '@/lib/nameSync';
 import {
   pickGreeting, fillGreeting, chooseInsightLine, isInsightLineId, INSIGHT_ID_BASE, SEEN_DAYS, type Seen,
-  GREETINGS, greetingFits,
+  GREETINGS, greetingFits, type InsightPack,
 } from '@/lib/insightWelcome';
 // this tab's line (filterWelcome.ts tabLine): survives Safari's snapshot-and-reload, so a returning tab never swaps
 const readTab = (now: number) => { try { return tabLine(globalThis.sessionStorage?.getItem(TAB_KEY), now); } catch { return null; } };
@@ -61,6 +61,24 @@ const readSeen = (now: number): Seen => {
   } catch { return {}; }
 };
 const writeSeen = (s: Seen) => { try { globalThis.localStorage?.setItem(SEEN_KEY, JSON.stringify(s)); } catch { /* per-device nicety only */ } };
+// TODAY'S FACTS ARE KEPT ON THE DEVICE, so a fact is picked INSTANTLY on every open (owner 2026-11-01: «whenever I close
+// Ezhalah while I'm signed in and then I open it, I don't see any text … then a random [line] … I wanted it to always show
+// this fact»). After a fact's 2 hours the hook used to ask the server while the headline stayed hidden, and a reopened
+// iPhone (session refresh first) often missed the 2.5 s wait, so the plain «even small cities…» line showed. Every pack
+// read is now stored (~35 KB) and a new fact is chosen from it on the spot when it is still today's (Riyadh day).
+export const PACK_KEY = 'ezhalah:welcomeInsight:pack:v1';
+export const readPack = (now: number): InsightPack | null => {
+  try {
+    const v = JSON.parse(globalThis.localStorage?.getItem(PACK_KEY) ?? 'null');
+    const p = v?.pack;
+    return v && Number.isFinite(v.at) && sameRiyadhDay(Number(v.at), now) && p && Array.isArray(p.templates) && Array.isArray(p.insights)
+      && p.templates.length && p.insights.length ? p as InsightPack : null;
+  } catch { return null; }
+};
+const writePack = (pack: InsightPack, at: number) => { try { globalThis.localStorage?.setItem(PACK_KEY, JSON.stringify({ at, pack })); } catch { /* per-device nicety only */ } };
+/** Every read of today's facts goes through here, so the device always keeps the latest pack. */
+const fetchPack = (city: string | null | undefined, district: string | null | undefined) =>
+  fetchWelcomeInsights(city, district).then((pack) => { if (pack) writePack(pack, Date.now()); return pack; });
 /** How long the sign-in welcome stays before the market insight takes its place: until the confetti party is over
  *  (owner 2026-10-27: «the eagle lands … confetti party, then that's it, the message changes, then the facts»). The
  *  falconer's sign-in story starts with the welcome; the confetti starts at RAIN_AT_MS and lasts PARTY_MS. */
@@ -142,7 +160,7 @@ export function useFilterWelcome(
     const pick = (async () => {
       const pend = readKey(NEXT_KEY);
       if (pend && isInsightLineId(pend.id) && start - pend.at < PREPARED_MAX_MS && sameRiyadhDay(pend.at, start)) return { line: pend, fromNext: true };
-      const pack = await fetchWelcomeInsights(lastLocation, lastDistrict);
+      const pack = readPack(start) ?? await fetchPack(lastLocation, lastDistrict);
       if (!pack) return null;
       const seen = readSeen(start);
       const c = chooseInsightLine(pack, seen, start, { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict, city: lastLocation });
@@ -188,16 +206,25 @@ export function useFilterWelcome(
     // A tab that already showed a fact today shows it again — no swap when Safari reloads a sleeping tab (owner 2026-10-28).
     const tabSeen = !greet && session.present && (nameAr || nameEn) ? readTab(now.getTime()) : null;
     const tab = isFact(tabSeen) ? tabSeen : null;
-    const inst = greet ? { ...greet, fromCache: false, promoted: false }
+    let inst = greet ? { ...greet, fromCache: false, promoted: false }
       : tab ? { id: tab.id, ar: tab.ar, en: tab.en, fromCache: true, promoted: false }
       : (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache: isFact(cache) ? cache : null, next, now, name: NAME_SLOT }) : null;
     // No fact on this device yet (the first visit of a day): read today's now. The headline stays hidden meanwhile
     // (`settled` false — it never visibly changes, owner 2026-10-17), for at most FACT_WAIT_MS; the plain line shows
     // only when the read fails or is slow (A FAILED FETCH IS NOT AN EMPTY ANSWER — and never a wait without end).
+    {
+      const stored = !greet && session.present && inst && !isFact(inst) ? readPack(now.getTime()) : null;
+      const seen0 = stored ? readSeen(now.getTime()) : null;
+      const c0 = stored && seen0 ? chooseInsightLine(stored, seen0, now.getTime(), { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict, city: lastLocation }) : null;
+      if (c0 && seen0) {
+        writeSeen({ ...seen0, [c0.key]: now.getTime() });
+        inst = { id: INSIGHT_ID_BASE + c0.templateId, ar: c0.ar, en: c0.en, fromCache: false, promoted: false };
+      }
+    }
     if (!greet && session.present && inst && !isFact(inst)) {
       const greetNowIdx = pickGreeting(now);
       const start = now.getTime();
-      const fact = fetchWelcomeInsights(lastLocation, lastDistrict).then((pack) => {
+      const fact = fetchPack(lastLocation, lastDistrict).then((pack) => {
         if (!pack) return null;
         const seen = readSeen(start);
         const c = chooseInsightLine(pack, seen, start, { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict, city: lastLocation });
@@ -207,7 +234,10 @@ export function useFilterWelcome(
       void Promise.race([fact, slow]).then((r) => {
         if (!alive.current) return;
         const t = Date.now();
-        const line = r ? { id: INSIGHT_ID_BASE + r.c.templateId, at: t, ar: r.c.ar, en: r.c.en } : { id: inst.id, at: t, ar: inst.ar, en: inst.en };
+        // too slow or failed: today's last fact on this device (even past its 2 hours) before the plain line
+        const today = isFact(cache) && cache && sameRiyadhDay(cache.at, t) ? cache : null;
+        const line = r ? { id: INSIGHT_ID_BASE + r.c.templateId, at: t, ar: r.c.ar, en: r.c.en }
+          : today ? { id: today.id, at: t, ar: today.ar, en: today.en } : { id: inst.id, at: t, ar: inst.ar, en: inst.en };
         if (r) writeSeen({ ...r.seen, [r.c.key]: start });
         writeCache(line);
         writeTab(line, greetNowIdx, t);
@@ -254,7 +284,7 @@ export function useFilterWelcome(
     const pending = readKey(NEXT_KEY);
     const pendingOk = !!pending && isInsightLineId(pending.id) && pending.id !== shownId && now.getTime() - pending.at < PREPARED_MAX_MS && sameRiyadhDay(pending.at, now.getTime());
     if (!pendingOk) {
-      fetchWelcomeInsights(lastLocation, lastDistrict).then((pack) => {
+      fetchPack(lastLocation, lastDistrict).then((pack) => {
         if (!live || !pack) return;
         const seen = readSeen(now.getTime());
         const pick = chooseInsightLine(pack, seen, now.getTime(), { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict, city: lastLocation });

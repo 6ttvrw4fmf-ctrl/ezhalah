@@ -226,7 +226,7 @@ free.
 - **«رجوع» on every question** (owner 2026-08-22). It steps back exactly one question and restores
   that question's recorded answer — including restoring a skip AS a skip (open, no predicate).
   From the FIRST question it leaves the interview and hands the pre-AF controls back
-  («🎯 دقّق مع الذكاء» + «عرض المزيد»), which is automatic: that row is gated on `!ageFlow`.
+  («🎯 دقّق مع الذكاء الاصطناعي» + «عرض المزيد»), which is automatic: that row is gated on `!ageFlow`.
 - **The interview is ONE ordered step record** (`ageFlowStepsRef`), and query/asked/labels/facets are
   DERIVED from it by `syncGuidedFromSteps(cursor)` — the query is rebuilt from `baseQ` by re-applying
   the steps *before* the cursor, never un-applied by a per-question inverse. This is what makes "no
@@ -686,7 +686,7 @@ else. `minOptionsFor()` is now uniform (`single === multi === 1`); every other c
 | `INTERVIEW_STOP_AT` | `25` | **frozen, unchanged** |
 | `MIN_USEFUL_QUESTIONS_TO_SHOW` | `1` | **frozen, unchanged** |
 | `MIN_REAL_OPTION_COUNT` | `5` | **frozen, unchanged** (now pinned by a barrier — it was not before) |
-| `AF_ROUND_MAX_QUESTIONS` | `4` | **frozen, unchanged** |
+| `AF_ROUND_MAX_QUESTIONS` | `7` | **raised 4 → 7 (owner 2026-11-01)** |
 | `MIN_OPTIONS_MULTI` | `1` | unchanged |
 | `MIN_OPTIONS_SINGLE` | ~~`2`~~ → `1` | **THIS amendment** |
 
@@ -733,3 +733,41 @@ and extended to pin `MIN_REAL_OPTION_COUNT`, new §3 pins the zero-survivor kill
 `scripts/verify-af-narrowing-gate.ts` (§3's single-select arity assertion inverted in place with the
 dated reason; every other assertion untouched). Both EXECUTE the real pure gate; neither was deleted
 or unwired.
+
+## Amendment 2026-11-01 — EMOJI FIRST in every pill, receipt item and search beat (owner-approved)
+
+**The owner's words:** «some title in the advanced filter the emoji is not after the text its before and some
+are after … keep it after always better or before … what do you recommend» → **before, always.**
+
+**The defect.** The themed-card chips of the Apartments & Co-living group carry their emoji in front («🛗 مصعد»),
+while the older pills put it last («يقبل التقسيط 💳», «عمر جديد ✨», «شمال 🧭», «+٣ حمامات 🚿»). One results line
+showed both shapes: «✓ يقبل التقسيط 💳 · 🛗 مصعد».
+
+**The rule.** Every item `src/lib/afSummary.ts` builds — the pills under the results summary, the round receipt
+(answers and «⏭️ تخطى …» skips), and the search beat — starts with its emoji and the words follow, in Arabic and in
+English: «💳 يقبل التقسيط», «✨ عمر جديد», «🏗️ عمر حتى سنتين», «🧭 شمال أو غرب», «🚿 +٣ حمامات», «🛣️ شارع ٢٠ م»,
+«🏡 شقة», «⏭️ تخطى عمر العقار». The question cards and the property cards already read this way, so a user sees one
+shape everywhere. The summary BULLET lines («• الراحة: 🛗 مصعد») are unchanged: the chip label is printed as the
+user saw it on the card.
+
+**Guard.** `scripts/verify-af-summary-emoji-first.ts` (in `npm test`) executes the real builders over one facet of
+every question id, in both locales, plus a receipt with skips, and fails on any item that does not start with an
+emoji.
+## Amendment 2026-11-01 (b) — the card note is one short line + «كيف يشتغل؟» (owner-approved)
+
+**The owner's words:** «we want it shorter and include something like how it works where the user can click
+and read» · «similar to the terms and policy, the way it pops up, with an x button always on the top right no
+matter the language» · «white with logo» · «no emojis or anything».
+
+**The rule.** Every question card shows one line: «الأرقام من كلام الإعلانات نفسها · كيف يشتغل؟» ("Counts come
+from the ads' own words · How it works?"). «كيف يشتغل؟» opens InfoModal with `modal = 'af-how'`: the Terms &
+Privacy reader's own host (white card, the eagle lockup, ✕ pinned top-right in both languages, above the
+Advanced Filter card), showing the owner's five sections from `src/data/afHowItWorks.ts` — source, the AI's
+role (reads and classifies only), what the number means, limits, the user's responsibility (Ezhalah is an AI
+search engine whose only goal is to send the user to the lister; no payment or commission from any deal;
+information "as is"; Terms and Privacy apply). No emoji anywhere in that text, Arabic and English kept
+section-for-section. The «😔 N إعلان لم يذكر هذه المعلومة» caption under the line is unchanged.
+
+**Guard.** `scripts/verify-af-how-it-works-note.ts` (in `npm test`): executes the text module (five sections,
+heading + paragraph, no emoji, the owner's non-negotiable phrases present in both languages) and pins the
+wiring card → store → InfoModal.

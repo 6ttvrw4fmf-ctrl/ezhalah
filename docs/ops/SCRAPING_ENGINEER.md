@@ -1,5 +1,13 @@
 # ⚡ SCRAPING ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
 > **🔢 THE SITE COUNT MOVES BY ITSELF (owner, 2026-10-27 — «a new website goes up, the number changes»).** The
 > «نبحث في N منصة» number and the logo strip both come from ONE list, `loader_active_platforms_ar()`: a site
 > counts and shows its logo only while it is active in `platform_registry` AND has at least one
@@ -49,6 +57,14 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 > that each open error has an owner). A Sentry error a customer hit is never «noise»: it is either fixed, or written in
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
+> **🔎 A «DOWN» SITE MUST FAIL TWO CHECKS FIRST (owner, 2026-10-25 — backlog 869; Nafithh sat dark 19 days; re-landed by 🔧 2026-11-02 from PR #8790).**
+> nafithh.sa stopped resolving on 10-06 and was treated as down while the same site had moved to nafithh.com (PR #8634).
+> Every night, for every dormant or failing site: (1) **DNS dead** → try `.com` / `.sa` / `.com.sa` / `.net` and the
+> `www.` / `app.` variants, plus the brand's own search result; (2) **our API route answers 404/410 while the homepage
+> answers 200** → the site CHANGED, it did not die (senan, razre): rebuild the route the same night. A site stays «down»
+> only after both checks fail, and the proof row names what was tried. A detector for «homepage 200 but crawl failing ≥ 2
+> nights» is owed (backlog 869).
+
 ## 🎯 NEXT RUN ORDERS — written by ⚡ for itself (owner, 2026-10-12: «give yourself instructions so you do a good job on the next run»)
 
 These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block at the end of every run.
@@ -77,18 +93,34 @@ back to Rent). #9739 makes the `sync` job check out `main` for a main-ref run (g
 dispatched after the merge, never by that nightly. This container cannot open ezhalah.com (proxy refuses it):
 every customer proof is the CI `customer-journey.yml` run.
 
-**Owed → first thing next run (11-01):**
-- **daryusuf 1133/1139:** the 11-01 nightly's daryusuf job (run 41272812432, job 124751175863, commit c1c2445,
-  which HAS the 06a6856 fix) was still queued at 06:20. Read `daryusuf_residential_listings` 13109421/13109370:
-  transaction_type must be Buy with price_total. Then customer-journey.yml with
-  `[{"platform":"daryusuf","source_table":"daryusuf_residential_listings","listing_id":13109421}]` must PASS
-  (بيع · المدينة المنورة · المطار · فيلا · ر.س 1,480,000).
-- **ksaaqar 1134 area:** targeted run `source=souq24,ksaaqar` dispatched 06:18 on d32dffc → 12226358 area_m2
-  must read 2713. Its price 29,000,000,000 is source-verified (ops_price_source_verified, reread 41276260022).
-  The filter-count mismatch on that band is routed to repair (backlog 1141).
-- **souq24 1111 pins:** the same targeted run → pin_coverage_by_platform() souq24 0/46 → most of 46, one card's pin
-  = the page's «الحصول على الإتجاه» link; then raise its floor in data/pin-sources.json. A later nightly souq24
-  job on an OLD commit would rewrite additional_info without the pin: re-read coverage after it, too.
+**NEW (11-02): NEVER NULL A PRICE FROM A CAPTURE'S TEXT — RE-READ THE LIVE PAYLOAD FIRST.** On 11-02 I blanked 32 aqar
+prices because the stored figure appeared only inside «إعلانات مشابهة» in `source_capture`. That capture was taken
+while the ad was CLOSED. A `recover_stubs` run without `--include-price` refreshes the capture but keeps the price,
+so the capture and the price disagreed for an innocent reason. The live re-read (`aqar-stub-recovery.yml`
+`ads=… include_price=true`) showed only 2 of the 32 really were neighbour prices; about 22 were the ads' own and
+were blank for ~1 h. Order: (1) re-enrich the cohort from the live payload, (2) repair only what that read
+contradicts, (3) then the proof. The function fixes (20261102051729: `aqar_parse` head stops at «إعلانات
+مشابهة»; `trg_aqar_parse` never writes over `authoritative_absent`) stand, watched by
+`mon_detect_aqar_price_over_authoritative_absent`.
+
+**NEW (11-02): `scripts/lib/rpcReplay.ts` now reads an inline dollar-quoted needle edit** (`replace(d, $x$…$x$,
+$x$…$x$)`). A needle-edit migration that touches a function a replay barrier pins (aqar_parse) must also refresh
+`sql/mirrors/<fn>.sql` (md5 = production `pg_get_functiondef`) and `ops_sql_mirror_expected` in a companion.
+
+**Owed → first thing next run (11-02):**
+- **1174 souq24 harvest retry** (merged #9899, c97c51b; targeted souq24 run dispatched 06:25 UTC): once merged, the next souq24 crawl's notes must not say «browse harvest
+  incomplete» on a lone transport_Timeout; alert 12223 clears 72 h after 11-01 10:46 (≈ 11-04 10:46 UTC).
+- **1175 alhumaidan freshness** (20261102054212): no alhumaidan row in `scraper_freshness_alerts` after the 06:10
+  and later crons; alert 4194 resolves ~24 h after the last legacy row (≈ 11-03 00:10 UTC).
+- **aqar 22 restored prices:** served after the 11-02 06:22 sync; commercial 296740/14881483 re-read: aqar's payload
+  publishes no price today, so NULL is source truth.
+- Self-clearing, dated: aqar_liveness kills 12320 (#9794 ok 33/33 on 11-02; clears ≈ 11-04 11:38), shomou
+  11912 (≈ 11-02 08:56), manzo 12026 (≈ 11-02 18:43), albukaeri/superoffice/nowaisiry enumeration_incomplete
+  (clean runs since 10-31/11-01).
+- Not a capture bug (leave the alert to adjudication): superoffice 24 rows = 3 branches × the 8-office window
+  robots.txt allows (`Disallow: /api`); the 184 «baseline» is the old site. dealapp enumeration_incomplete:
+  every active row was seen ≤ 5 days ago and 93 % were verified alive ≤ 3 days ago. The shard guard's
+  denominator is the gap, not lost data.
 - Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442.
 
 **CHANGED (10-25): a targeted `small-sources-sync` dispatch (`source=<slug>[,<slug>…]`) now creates ONLY those jobs**
@@ -820,3 +852,23 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   a stale-mirror check its stale branch cannot pass. ♻️ 11-01 (1147): the sweep SESSION read a dead Gathern unit as
   no-verdict 36 times while a fresh session read its 404. Rule: a robot's input, session and diff-base are part of the
   measurement — print them in the evidence before judging the product with the robot's number.
+
+## 📚 FLEET LESSONS 2026-11-02 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A PR's lane is read from GitHub's MERGE-BASE file list, so a sibling PR landing first strands yours.** 🔬 11-01:
+  mirror #9791 read «red» 2 h 40 min after its file reached main inside #9793. 🔬 11-02: barrier #9949 (its script + the
+  mirror file) sat 3 h 45 min green and clean after mirror #9948 merged first — the robot saw «supabase/ and not a pure
+  mirror» and left it; `git merge origin/main` at 14:02 cleared it in one pass. Rule: ship a mirror and its barrier as
+  ONE PR, or the moment the sibling lands run `git fetch origin main && git merge origin/main && git push` on the other;
+  a PR that is «clean» and still open after 90 min is first a question about its file list against main.
+- **② The measuring tool is the first suspect when a count disagrees.** 🔬 11-02: the Trending check compared the
+  screen with the background warm-up call (96,842 vs 69,773 — both right), and the chip oracle missed the 10-26
+  price-on-request rule (3 P1s on correct chips); 🔧 11-01: the journey typed 11 digits into a 10-digit box, and #9791's
+  «red» was a diff-base illusion. Rule: before touching an RPC, diff the two row sets once (16,189 − 14,089 = exactly
+  the 2,100 no-price rows) and print what the tool typed, captured and compared against.
+- **③ Re-read the LIVE record before writing over data, and ship the batch with its undo ready.** ⚡ 11-02: a repair
+  NULLed 32 aqar prices on a closed-page capture; the live re-read showed 2 were wrong, and ~22 cards read «السعر عند
+  الطلب» for an hour (05:34–06:34 UTC). 🔬 10-30: a «fabricated value» alarm on 12 rows was aqar's own value from a
+  re-categorised ad. 🆕 10-31: a key that existed only in our capture cost a 20-minute crawl. Rule: one live read of the
+  record (the page or the current payload) before the first write; measure the live effect within minutes; undo in the
+  same run. (Third night of this family → ⚡'s rulebook carries it as a rule since #9910.)

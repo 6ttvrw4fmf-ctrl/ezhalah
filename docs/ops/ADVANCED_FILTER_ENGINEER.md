@@ -1,5 +1,13 @@
 # 🔬 Advanced Filter Engineer (owner, 2026-10-04)
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
 > **🔒 THE SUPABASE QUESTION RULE (owner, 2026-10-25 — wins over every other order about writing rows).** On 10-24 and
 > 10-25 ⚡ did the work but lost its whole report: an `execute_sql` call that contained an `UPDATE` (closing backlog items
 > in the same batch as a proof row) made the Supabase tool ask «destructive operation — run it?», nobody was awake to
@@ -55,7 +63,7 @@ customer who filters for an elevator. That is the bug you exist to make impossib
   `docs/AF_COHORT_LEDGER.md`, `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md`, `docs/ops/LISTING_LIVENESS.md`.
 - **The owner's standing Advanced Filter rules (never change them):**
   - every question is multi-select; several picks = the **exact union** of those options; never auto-pick, never collapse picks;
-  - the Advanced Filter **never opens by itself**; only the customer's tap «🎯 دقّق مع الذكاء» opens it;
+  - the Advanced Filter **never opens by itself**; only the customer's tap «🎯 دقّق مع الذكاء الاصطناعي» opens it;
   - after a round the screen **stays in place**: earlier turns dimmed, never removed; one whole summary (the search + «من الفلتر
     المتقدم» + one line per answer); chips are read-only (no ✕); no «مسح الكل»; back on the Filter = a clean form;
   - 😔 «unknown» lines exist only where a truthful count exists; never a guessed number;
@@ -386,3 +394,33 @@ row; a night is better on findability only when a score row says so.**
 So a reader-version bump, a word-list change or any fix whose effect needs a follow-on run (facts-words-reader, af-score,
 a sync) is NOT running after the merge — it is waiting for someone to dispatch it. The minute your PR merges, dispatch
 the consumer by hand, record the run id and its commit SHA in the proof row, and date the proof to that run.
+
+## 📚 FLEET LESSONS 2026-11-02 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A PR's lane is read from GitHub's MERGE-BASE file list, so a sibling PR landing first strands yours.** 🔬 11-01:
+  mirror #9791 read «red» 2 h 40 min after its file reached main inside #9793. 🔬 11-02: barrier #9949 (its script + the
+  mirror file) sat 3 h 45 min green and clean after mirror #9948 merged first — the robot saw «supabase/ and not a pure
+  mirror» and left it; `git merge origin/main` at 14:02 cleared it in one pass. Rule: ship a mirror and its barrier as
+  ONE PR, or the moment the sibling lands run `git fetch origin main && git merge origin/main && git push` on the other;
+  a PR that is «clean» and still open after 90 min is first a question about its file list against main.
+- **② The measuring tool is the first suspect when a count disagrees.** 🔬 11-02: the Trending check compared the
+  screen with the background warm-up call (96,842 vs 69,773 — both right), and the chip oracle missed the 10-26
+  price-on-request rule (3 P1s on correct chips); 🔧 11-01: the journey typed 11 digits into a 10-digit box, and #9791's
+  «red» was a diff-base illusion. Rule: before touching an RPC, diff the two row sets once (16,189 − 14,089 = exactly
+  the 2,100 no-price rows) and print what the tool typed, captured and compared against.
+- **③ Re-read the LIVE record before writing over data, and ship the batch with its undo ready.** ⚡ 11-02: a repair
+  NULLed 32 aqar prices on a closed-page capture; the live re-read showed 2 were wrong, and ~22 cards read «السعر عند
+  الطلب» for an hour (05:34–06:34 UTC). 🔬 10-30: a «fabricated value» alarm on 12 rows was aqar's own value from a
+  re-categorised ad. 🆕 10-31: a key that existed only in our capture cost a 20-minute crawl. Rule: one live read of the
+  record (the page or the current payload) before the first write; measure the live effect within minutes; undo in the
+  same run. (Third night of this family → ⚡'s rulebook carries it as a rule since #9910.)
+
+### Rules from two nights (11-01 and 11-02): the mirror and its barrier travel together, and the tool is checked before the product
+
+1. **One PR for a migration's mirror AND its barrier.** Twice (#9791, #9949) a 🔬 PR whose file was already on main through a
+   sibling sat 2–4 hours in the robot's blind spot. If they must be two PRs, merge `origin/main` into the second the moment
+   the first lands, and read the file list the robot reads (`gh pr view --json files`) before calling it «robot-pending».
+2. **Diff the two row sets before touching an RPC.** On 11-02 two of three jobs were the measuring tools (the Trending
+   check's warm-up call, the chip oracle's missing 10-26 rule). The first step of any count mismatch is `ids(A) − ids(B)`
+   and `ids(B) − ids(A)` with a one-line explanation of each difference; the RPC is touched only when the difference is
+   not the tool's own doing.

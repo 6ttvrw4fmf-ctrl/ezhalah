@@ -232,7 +232,7 @@ function persistenceRuntime() {
 assert.match(screen,/const replyT = \(key: string, vars\?: Record<string, string \| number>\) => translate\(rfLang, key, vars\)/,'existing result closing notes stay in the reply language');
 assert(!screen.includes('translate_display'),'language switch never adds paid translation');
 // The buttons under a results turn speak the REPLY's language (owner 2026-10-18: an English reply had
-// «عرض المزيد» / «🎯 دقّق مع الذكاء» under it — «doesn't make sense»).
+// «عرض المزيد» / «🎯 دقّق مع الذكاء الاصطناعي» under it — «doesn't make sense»).
 assert(screen.includes("{replyT('Load more')}") && screen.includes("{replyT('🎯 Refine with AI')}") && !screen.includes("{t('Load more')}") && !screen.includes("{t('🎯 Refine with AI')}"),'results-turn buttons follow the reply language');
 console.log('PASS: message/request/fallback languages are independent of UI; latest titles persist and manual names win.');
 

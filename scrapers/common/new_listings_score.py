@@ -251,9 +251,13 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
 
 # «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
 SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
-# The four plain facades in English, as a REGA licence block prints them; a compound facade stays Arabic-only.
+# The facades in English, as a REGA licence block prints them. A compound one too: haraj 22820527 prints
+# «واجهة العقار: South west» and we store «جنوب غرب» (re-score 41406084400, 2026-11-02, scored MISMATCH).
 FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
              "شمال": r"\bnorth(?:ern)?\b", "جنوب": r"\bsouth(?:ern)?\b"}
+for _ar, _en in (("شمال شرق", "north[\\s-]*east"), ("شمال غرب", "north[\\s-]*west"),
+                 ("جنوب شرق", "south[\\s-]*east"), ("جنوب غرب", "south[\\s-]*west")):
+    FACADE_EN[_ar] = FACADE_EN[_ar + "ي"] = r"\b" + _en + r"(?:ern)?\b"
 
 
 _UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
@@ -294,6 +298,11 @@ WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len,
 
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
+    # A LABEL («keyword:») that ENDS its line, its value cut off, states nothing ON that line: haraj's meta
+    # description is cut off at «…نوع العقار: Apartment سعر الوحدة: 27000 عمر العقار:» (21839193, re-read run
+    # 41288305920, 2026-11-01), and the other field's 27000 before it read as a stated age, scoring our 9 a
+    # MISMATCH. That line is emptied; a label/value neighbour («عمر العقار» / «جديد») still counts.
+    lines = ["" if i in kw_hits and re.search("(?:" + kw + r")\s*[:：]\s*$", x) else x for i, x in enumerate(lines)]
     if not AREA_UNIT.search(kw):
         lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
     page_states = any(re.search(r"\d", lines[i]) for i in kw_hits)
@@ -792,6 +801,34 @@ def dwelleo_room_lines(url: str, fetch=None) -> list[str]:
     return out
 
 
+def wahadat_unit_lines(body: str, url: str, ad_number: str | None) -> list[str]:
+    """wahadat's own figures for THIS unit, from the unitsData payload its project page ships (🆕 2026-11-02).
+
+    Every unit of a project links to that project's page (scrapers/wahadat/run.py: no per-unit page exists), and the
+    visible page prints only spans («111 - 136 م²») and the instalment calculator («القسط السنوي» / «القسط الشهري»),
+    whose ريال figures read as a stated price: 8 of 10 sampled units scored a price MISMATCH on 2026-11-02 (score run
+    41394865647, 22783632 stored 842,622) with no unit price printed at all. The unit's own record in the page payload
+    states price and area; [] when the unit is not in it (sold / reserved / renamed: unknown, never wrong)."""
+    if "wahadat.sa" not in (url or "") or not ad_number or not body:
+        return []
+    try:
+        from scrapers.wahadat import run as wahadat
+        _, units = wahadat.parse_project(body, url)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[str] = []
+    for u in units:
+        if f"{wahadat.PREFIX}{wahadat.unit_uid(u)}" != ad_number:
+            continue
+        price, area = u.get("price"), u.get("area")
+        if isinstance(price, (int, float)) and not isinstance(price, bool) and price > 0:
+            out.append(f"السعر {int(price) if price == int(price) else price} ريال")
+        if isinstance(area, (int, float)) and not isinstance(area, bool) and area > 0:
+            out.append(f"المساحة {int(area) if area == int(area) else area} م²")
+        break
+    return out
+
+
 def nufouth_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
     """A nufouth ad read from its own record (backlog #683, 2026-10-23). The share link
     («/latest-offers?ads-N4175=1») opens the ad in a JS modal filled from get_property_data; the static HTML is
@@ -1048,6 +1085,7 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
+        raw_body = body
         body = scope_to_its_ad(url, body)
         page = page_evidence(body)
         if (platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page)
@@ -1061,6 +1099,11 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         if "tuba.com.sa" in url:
             extra = (tuba or tuba_rega_lines)(url)
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
+        if "wahadat.sa" in url:
+            ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
+                         or [{}])[0].get("ad_number")
+            page = {**page, "evidence_lines": wahadat_unit_lines(raw_body, url, ad_number)
+                    + list(page.get("evidence_lines") or [])}
         if "dwelleo.sa" in url:
             extra = (dwelleo or dwelleo_room_lines)(url)
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}

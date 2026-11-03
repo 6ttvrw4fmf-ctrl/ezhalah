@@ -158,7 +158,7 @@ check('only a round that committed something leaves a receipt at all',
   /if \(carry && roundCommitted\) setAfReceipt/.test(agent),
   'agent.tsx: a skip-everything round changes nothing, so its turn must keep the buttons — a receipt there leaves the user no way back into the interview');
 check('the receipt heading is translated with the owner\'s exact wording',
-  /'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء'/.test(i18n),
+  /'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء الاصطناعي'/.test(i18n),
   'src/i18n.tsx: Arabic is the product language — an untranslated key renders the English source string');
 // The body is NOT translated, by design: buildAfRoundLog writes finished Arabic, exactly as
 // buildAfSummary always did. The label keys it used to sit under are retired, and a retired key left
@@ -215,7 +215,7 @@ check('the retired «اختياراتك» / «تخطيت» label keys are gone',
   // the middle — where it happened. Without these the card could satisfy §5 by dropping the skips.
   const roundLog = buildAfRoundLog(d.askedIds, d.facets);
   check('the ROUND LOG replays all three steps, skip in the middle, in ask order',
-    roundLog === '+٣ حمامات 🚿، تخطى الفرش ⏭️، وعمر ٣-٥ سنوات 🏗️', `log="${roundLog}"`);
+    roundLog === '🚿 +٣ حمامات، ⏭️ تخطى الفرش، و🏗️ عمر ٣-٥ سنوات', `log="${roundLog}"`);
   check('the log names the skipped QUESTION, never the value the user declined',
     roundLog.includes('تخطى الفرش') && !roundLog.includes('مفروشة') && !roundLog.includes('🛋️'), roundLog);
   check('a round that skipped everything produces an EMPTY summary (⇒ no receipt renders)',

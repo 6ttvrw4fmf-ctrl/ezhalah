@@ -75,7 +75,7 @@ const BAG_PROBE: Record<string, string> = { apartments: 'apts8', shops: 'has_sho
 const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   [
-    { header: 'function addAmenities' },
+    { header: 'function addAmenities' }, { header: 'export function bathroomLadder' },
     { header: 'const AGE_LADDER', endsWith: /^\];$/ },
     { header: 'const DIRECTION_DEFS', endsWith: /^\];$/ },
     ...QUESTION_HELPER_SYMBOLS,
@@ -170,10 +170,17 @@ const HAND: Record<string, { row: AfCanon; text: string; not: AfCanon }> = {
   'bathrooms:2': { row: { bathrooms: 3 }, text: '3 حمامات', not: { bathrooms: 1 } },
   'bathrooms:3': { row: { bathrooms: 4 }, text: '4 حمامات', not: { bathrooms: 2 } },
   'bathrooms:4': { row: { bathrooms: 5 }, text: '5 حمامات', not: { bathrooms: 3 } },
+  // the villa ladders (owner 2026-11-01): 5+ and 6+ exist since migration 20261102055240
+  'bathrooms:5': { row: { bathrooms: 6 }, text: '6 حمامات', not: { bathrooms: 4 } },
+  'bathrooms:6': { row: { bathrooms: 7 }, text: '7 حمامات', not: { bathrooms: 5 } },
   'street_width:15': { row: { street_width_m: 18 }, text: 'عرض الشارع 18 م', not: { street_width_m: 12 } },
   'street_width:20': { row: { street_width_m: 25 }, text: 'عرض الشارع 25 م', not: { street_width_m: 15 } },
   'street_width:25': { row: { street_width_m: 25 }, text: 'عرض الشارع 25 م', not: { street_width_m: 20 } },
   'street_width:30': { row: { street_width_m: 40 }, text: 'عرض الشارع 40 م', not: { street_width_m: 29 } },
+  // the plots / retail ladders (owner 2026-11-01, counts since 20261102101415): the same STRICT >= rule
+  'street_width:10': { row: { street_width_m: 12 }, text: 'عرض الشارع 12 م', not: { street_width_m: 8 } },
+  'street_width:40': { row: { street_width_m: 45 }, text: 'عرض الشارع 45 م', not: { street_width_m: 36 } },
+  'street_width:60': { row: { street_width_m: 60 }, text: 'عرض الشارع 60 م', not: { street_width_m: 50 } },
   'property_age:new': { row: { property_age: 0 }, text: 'جديد', not: { property_age: 3 } },
   'property_age:1_2': { row: { property_age: 2 }, text: 'عمر سنتين', not: { property_age: 5 } },
   'property_age:3_5': { row: { property_age: 4 }, text: 'عمر 4 سنوات', not: { property_age: 6 } },
@@ -196,7 +203,9 @@ function expected(id: string, opt: Opt): { row: AfCanon; text: string; not: AfCa
   const hand = HAND[`${id}:${opt.key}`];
   if (hand) return hand;
   switch (id) {
-    case 'rnpl': return { row: { rent_now_pay_later: true }, text: t(opt.labelKey), not: { rent_now_pay_later: false } };
+    case 'rnpl': return opt.key === 'split_payments'
+      ? { row: { split_payments: true }, text: t(opt.labelKey), not: { split_payments: false } }
+      : { row: { rent_now_pay_later: true }, text: t(opt.labelKey), not: { rent_now_pay_later: false } };
     case 'amenities': {
       const col = AMENITY_COL[opt.key];
       if (!col) return null;
@@ -205,7 +214,8 @@ function expected(id: string, opt: Opt): { row: AfCanon; text: string; not: AfCa
     // a bag question's chip: a column token as above, a derived token on the columns its predicate reads;
     // the evidence speaks with the amenities def's label (AMENITY_LABEL), the chip's own voice or the Floor voice
     case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who':
-    case 'features': case 'services': case 'fun': case 'apartments': case 'shops': {
+    case 'features': case 'services': case 'fun': case 'outdoors': case 'smart': case 'papers': case 'apartments': case 'shops':
+    case 'water': case 'games': case 'camp_life': case 'water_land': case 'land_papers': case 'power': case 'crops': case 'animals': case 'buildings': case 'plot': case 'deal_papers': case 'land': case 'location': case 'cspace': case 'cservices': case 'business': case 'office_kind': case 'ready': case 'building': case 'trucks': case 'loc_papers': case 'inside': case 'investment': case 'hotel': case 'station': case 'deal_loc': case 'space_papers': case 'services_business': case 'workshop': case 'loc_business': case 'building_papers': case 'factory': case 'loc_safety': case 'papers_c': {
       const text = t(AMENITY_LABEL[opt.key] ?? '');
       const col = AMENITY_COL[opt.key];
       if (col) return { row: { [col]: true }, text, not: { [col]: false } };
@@ -213,6 +223,10 @@ function expected(id: string, opt: Opt): { row: AfCanon; text: string; not: AfCa
         case 'separate_meters': return { row: { separate_electricity_meter: true, separate_water_meter: false }, text, not: { separate_electricity_meter: false, separate_water_meter: false } };
         case 'has_shops': return { row: { shops_count: 1 }, text, not: { shops_count: 0 } };
         default: {
+          // the villa merged chips (owner 2026-11-01): EITHER fact true ⇒ chip; both known-false ⇒ not
+          const either = DERIVED_TOKEN[opt.key];
+          if (either && either.reads.length === 2 && !/^apts/.test(opt.key))
+            return { row: { [either.reads[0]]: true, [either.reads[1]]: false }, text, not: { [either.reads[0]]: false, [either.reads[1]]: false } };
           const n = /^apts(\d+)$/.exec(opt.key);
           return n ? { row: { apartments_count: Number(n[1]) }, text, not: { apartments_count: Number(n[1]) - 1 } } : null;
         }
@@ -336,12 +350,15 @@ console.log('\n── T2b. multi-value semantics + adjectival direction + AND on
   const rnplLine = clause.split('\n').find((l) => /any\(p_amenities\)[\s\S]*s\.rent_now_pay_later/.test(l)) ?? '';
   const sqlRnplTokens = [...rnplLine.matchAll(/''([a-z_]+)''\s*=\s*any\(p_amenities\)/g)].map((m) => m[1]);
   assert(sqlRnplTokens.length >= 2, `clause exposes ≥2 RNPL tokens (got [${sqlRnplTokens.join(', ')}])`);
+  // each RNPL token proves itself from its OWN column (2026-11-02): «split_payments» is the ad's «دفعات» words
+  // (a text fact), the other two are the site's installment box — the card never shows one as proof of the other.
+  const rnplRow = (tok: string) => (tok === 'split_payments' ? { split_payments: true } : { rent_now_pay_later: true });
   for (const tok of sqlRnplTokens) {
     assert(RNPL_TOKENS.includes(tok), `RNPL_TOKENS covers every RNPL token the RPC filters on: «${tok}» (clause) must be in the shared set`);
     assert(isRnpl(tok), `gate covers every RNPL token the RPC filters on: isRnpl(«${tok}») (else a filtered predicate is uncertified)`);
     const act = afActive({ ...emptyQuery(), amenities: [tok] } as any);
     assert(same(act.map((a) => a.id), ['rnpl']), `evidence renders the RPC's RNPL token «${tok}» via the rnpl def (an R12A.1 hole otherwise)`);
-    assert(afEvidence(act, { rent_now_pay_later: true }, t).length === 1, `evidence: RPC token «${tok}» on an RNPL row → the installment chip`);
+    assert(afEvidence(act, rnplRow(tok), t).length === 1, `evidence: RPC token «${tok}» on an RNPL row → the installment chip`);
   }
   for (const tok of RNPL_TOKENS) {
     assert(isRnpl(tok), `gate: isRnpl accepts the registry token «${tok}»`);
@@ -349,7 +366,7 @@ console.log('\n── T2b. multi-value semantics + adjectival direction + AND on
     const act = afActive({ ...emptyQuery(), amenities: [tok] } as any);
     assert(same(act.map((a) => a.id), ['rnpl']), `evidence: «${tok}» activates ONLY the rnpl def (not amenities)`);
     // and renders the installment chip on a real RNPL row — the exact behaviour that was silent
-    assert(afEvidence(act, { rent_now_pay_later: true }, t).length === 1, `evidence: «${tok}» on an RNPL row → the installment chip`);
+    assert(afEvidence(act, rnplRow(tok), t).length === 1, `evidence: «${tok}» on an RNPL row → the installment chip`);
     // still honours UNKNOWN: a NULL row shows nothing even via the alias
     assert(afEvidence(act, { rent_now_pay_later: null }, t).length === 0, `evidence: «${tok}» on a NULL row → nothing (UNKNOWN stays UNKNOWN)`);
   }
@@ -457,7 +474,7 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
   // R12A.1 — VISIBLE WITHOUT EXPANDING. The 2026-09-02 draft rendered the first AF_CHIP_CAP = 4 and
   // hid the rest behind a «+N» expander. R12A.1 requires an ACTIVE selection to be visible "without
   // expanding, scrolling a sub-panel, or opening the source", and rounds accumulate — five or more
-  // committed answers is ordinary (AF_ROUND_MAX_QUESTIONS is 4 per round, and a single amenities
+  // committed answers is ordinary (AF_ROUND_MAX_QUESTIONS is 7 per round, and a single amenities
   // answer emits one chip PER TOKEN), so a cap of four would hide a field the user explicitly asked
   // for. These three assertions are the rule: map over the WHOLE array, no slice, no expander.
   assert(/\{evidence\.map\(\(c, i\) => \(/.test(strip),
@@ -524,7 +541,7 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
   const mirror = readFileSync(join(ROOT, 'sql/mirrors/af_canon_select.sql'), 'utf8');
   const packed = new Set([...mirror.matchAll(/'([a-z_]+)',\s*s\.[a-z_]+/g)].map((m) => m[1]));
   // 29 (+majlis 2026-10-26) + 41 (the 39 apartment-chip booleans + apartments_count + shops_count, migration 20261101100930)
-  assert(packed.size === 70, `the mirror packs 70 canonical columns (found ${packed.size})`);
+  assert(packed.size === 180, `the mirror packs 180 canonical columns (found ${packed.size})`);
 
   // (a) every column any def declares it reads must be packed
   const q = emptyQuery() as any;

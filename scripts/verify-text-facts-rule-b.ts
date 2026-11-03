@@ -58,6 +58,15 @@ const latestFile = (needle: string): string => {
 const COLS_SRC = latestFile('function public.text_facts_af_columns()') || STORE;
 const VIEW_SRC = latestFile('create or replace view public.listing_text_facts_af as') || STORE;
 const SLICE_SRC = latestFile('function public.text_facts_apply_slice(') || MERGE;
+// Migrations AFTER the applier's last full definition may extend it by REPLACE from a token table (20261102055240
+// builds `public.af_rule_b(r.%1$I, tf.%1$I) as %1$I` per bool token and verifies the rebuilt body merges the last one).
+// Their token rows are part of what production's applier merges, so they are read here too.
+const sliceDefFile = readdirSync(MIG).filter((f) => f.endsWith('.sql')).sort()
+  .filter((f) => readFileSync(join(MIG, f), 'utf8').includes('function public.text_facts_apply_slice(')).pop() ?? '';
+const SLICE_PATCHES = readdirSync(MIG).filter((f) => f.endsWith('.sql') && f > sliceDefFile).sort()
+  .map((f) => readFileSync(join(MIG, f), 'utf8'))
+  .filter((t) => t.includes('text_facts_apply_slice') && /af_rule_b\(r\.%1\$I, tf\.%1\$I\) as %1\$I/.test(t))
+  .flatMap((t) => [...t.matchAll(/\(\d+,'([a-z_]+)','bool'/g)].map((m) => m[1]));
 const SQL_COLS = sqlAfColumns(COLS_SRC);
 const PY_COLS = pyAfColumns(WORDS);
 
@@ -106,7 +115,7 @@ check('sync_search_listings_ar COMPARES af_rule_b for the same 8 (no hourly flip
   GROUP1.every((c) => compared.has(c)), GROUP1.filter((c) => !compared.has(c)).join(','));
 check('sync_listing_rich_attrs merges every text_facts_af_columns() column it has, in the diff and the write',
   /a\.attname = any \(public\.text_facts_af_columns\(\)\)/.test(MERGE) && /\$f\$, merged_list, p_source_table, diff_list\);/.test(MERGE));
-const slice = sliceMerged(SLICE_SRC);
+const slice = new Set([...sliceMerged(SLICE_SRC), ...SLICE_PATCHES]);
 check('the batched switch flip (text_facts_apply_slice) merges every boolean column', SQL_COLS.every((c) => slice.has(c)),
   SQL_COLS.filter((c) => !slice.has(c)).join(','));
 check('both live bodies are md5-guarded in the same step as the edit', (MERGE.match(/moved since this migration was written/g) ?? []).length === 2);
@@ -178,7 +187,10 @@ export function numRuleFillsBlankOnly(sql: string): boolean {
 const STREET = latestDefining('function public.af_rule_b_num(');
 const NUM = latestDefining('function public.text_facts_af_num_columns()');
 const NUM_SQL = sqlAfNumColumns(NUM);
-const RICH_NUM = NUM_SQL.filter((c) => c !== 'street_width_m');
+// street_width_m and bathrooms are columns of the native location row, merged by sync_search_listings_ar; every other
+// numeric key lives on listing_rich_attrs and is merged by sync_listing_rich_attrs.
+const NATIVE_NUM = ['street_width_m', 'bathrooms'];
+const RICH_NUM = NUM_SQL.filter((c) => !NATIVE_NUM.includes(c));
 const NUM_PY = pyAfNumColumns(WORDS);
 console.log('\nRule B for numbers: street width fills a blank box, through the same overlay\n');
 check('a migration defines the numeric allow-list (text_facts_af_num_columns) and it holds street_width_m', NUM_SQL.includes('street_width_m'));
@@ -200,6 +212,32 @@ check('the batched switch flip (text_facts_apply_slice) merges every rich-attrs 
   RICH_NUM.every((c) => new RegExp(`public\\.af_rule_b_num\\(r\\.${c}, tf\\.${c}\\) as ${c}`).test(SLICE_SRC)),
   RICH_NUM.filter((c) => !new RegExp(`public\\.af_rule_b_num\\(r\\.${c}, tf\\.${c}\\) as ${c}`).test(SLICE_SRC)).join(','));
 check('af_rule_b_num fills a BLANK box only — a published number is never replaced', numRuleFillsBlankOnly(STREET));
+// bathrooms (backlog 1168, owner 2026-11-02): the text count fills a blank box through the main sync, value AND diff.
+export function bathSyncMerged(sql: string): { written: boolean; compared: boolean } {
+  return {
+    written: /w_new constant text := 'v\.area_m2, v\.bedrooms, public\.af_rule_b_num\(v\.bathrooms::smallint, tf\.bathrooms\),';/.test(sql)
+      && /execute replace\(replace\(d, w_old, w_new\), c_old, c_new\);/.test(sql),
+    compared: /c_new constant text := 'or s3\.bathrooms is distinct from public\.af_rule_b_num\(v\.bathrooms::smallint, tf\.bathrooms\)';/.test(sql),
+  };
+}
+const BATH = latestDefining("w_new constant text := 'v.area_m2, v.bedrooms, public.af_rule_b_num(v.bathrooms::smallint, tf.bathrooms),';");
+// A whole building never takes bathrooms from prose (owner 2026-11-02 sample: per-flat counts on 6-, 8-, 14-flat buildings).
+const BLDG = latestDefining('then null else tf.bathrooms end');
+export const bathSkipsBuildings = (sql: string): boolean =>
+  /old_txt constant text := 'public\.af_rule_b_num\(v\.bathrooms::smallint, tf\.bathrooms\)';/.test(sql)
+  && /new_txt constant text := 'public\.af_rule_b_num\(v\.bathrooms::smallint, case when v\.property_type in \(''Building'', ''Residential Building'', ''Commercial Building''\) then null else tf\.bathrooms end\)';/.test(sql)
+  && /<> 2 then/.test(sql);
+const bathSync = bathSyncMerged(BATH);
+check('the numeric allow-list holds bathrooms (the count the ad states, backlog 1168)', NUM_SQL.includes('bathrooms'));
+check('sync_search_listings_ar WRITES af_rule_b_num for bathrooms (text fills a blank box only)', bathSync.written);
+check('sync_search_listings_ar COMPARES af_rule_b_num for bathrooms (no hourly flip, no missed change)', bathSync.compared);
+check('a building (Building / Residential Building / Commercial Building) never takes its bathrooms from prose — value AND diff', bathSkipsBuildings(BLDG));
+mustCatch('a sync that lets a building take a per-flat prose count is caught', !bathSkipsBuildings(BLDG.replace("then null else tf.bathrooms end", "then tf.bathrooms else tf.bathrooms end")));
+check('the CHECK bounds bathrooms to 1..20', /when 'bathrooms' then 1 end\)[\s\S]*?when 'bathrooms' then 20 end\)/.test(NUM));
+mustCatch('a sync that writes the bathrooms box but not the text is caught',
+  !bathSyncMerged(BATH.replace("public.af_rule_b_num(v.bathrooms::smallint, tf.bathrooms),';", "v.bathrooms,';")).written);
+mustCatch('a sync that compares the bare box for bathrooms is caught',
+  !bathSyncMerged(BATH.replace("'or s3.bathrooms is distinct from public.af_rule_b_num(v.bathrooms::smallint, tf.bathrooms)'", "'or s3.bathrooms is distinct from v.bathrooms'")).compared);
 check('the nightly reader re-reads, once, every ad read before the switch whose history holds a width (text_facts_todo backlog)',
   /not \(f\.facts \? ''street_width_m''\)[\s\S]*?f\.read_at < \(select kf\.changed_at from public\.ops_feature_flags kf where kf\.name = ''af_text_facts_street_width''\)[\s\S]*?l2\.fact = ''street_width_m'' and l2\.value_num is not null/.test(STREET));
 check('the watcher views keep booleans and numbers apart (ops_text_facts_vs_index filters to the boolean keys)',

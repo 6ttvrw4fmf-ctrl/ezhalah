@@ -192,13 +192,21 @@ _DEFAULT_PIN = ("24.633333", "46.716667")
 
 def own_pin(page_html: str) -> dict:
     """The pin the ad page draws (`<input id="ad_lat" value="21.2817249">` + ad_lon). {} for the map's
-    default centre or when absent."""
+    default centre or when absent.
+
+    SWAPPED HALVES ARE THE SITE'S OWN BUG, NOT A MISSING PIN (2026-11-02, the map-pins investigation): some ads
+    print `ad_lat="46.799907" ad_lon="24.818849"` — a Riyadh pin with the halves exchanged. sa_pin() rightly
+    refuses a latitude of 46.8, and the ad fell to its district border; 2 of 30 pin-less ads sampled live
+    were this case. Inside the Kingdom the two ranges never overlap (lat 16–32.5, lng 34–56), so a pair that
+    is valid ONLY when swapped is unambiguous and is read swapped. Both halves still come from the source;
+    nothing is geocoded or guessed."""
     la, lo = _AD_LAT.search(page_html or ""), _AD_LNG.search(page_html or "")
     if not (la and lo):
         return {}
     if (la.group(1)[:9], lo.group(1)[:9]) == _DEFAULT_PIN:
         return {}
-    return pin_dict(la.group(1), lo.group(1))
+    pin = pin_dict(la.group(1), lo.group(1))
+    return pin or pin_dict(lo.group(1), la.group(1))
 
 
 def own_photos(page_html: str) -> Optional[list[str]]:

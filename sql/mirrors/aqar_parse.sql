@@ -1,7 +1,7 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
--- Re-verified 2026-11-01 (migration 20260811130514_sql_mirror_live_drift_detector): UNCHANGED.
---   md5(pg_get_functiondef) in production = 3347a572f90a29a1ab2de739f987975b, identical to this file. Stamped for
---   verify-sql-mirrors-not-stale (B2): no earlier same-day stamp named a version at or after this migration.
+-- Re-verified 2026-11-03 (migration 20261102053242_mon_detect_aqar_price_over_authoritative_absent): UNCHANGED.
+--   md5(pg_get_functiondef) in production = 1e56fc64a63888e3aa74a147558108f7, identical to this file. Stamped for
+--   verify-sql-mirrors-not-stale (B2): the 2026-11-02 stamp did not name this later same-day migration.
 -- Refreshed 2026-08-11 for the labeled-total-beats-sub-floor-pick fix (migration 20260811064231).
 --   THIS MIRROR WAS FOUND STALE by senior audit run #10 and is regenerated verbatim here. It had
 --   been missing the ENTIRE «AREA-ARTIFACT GUARD (2026-08-10)» block shipped by migration
@@ -9,7 +9,9 @@
 --   check (A) is self-consistency (the file's md5 against its own body) and check (B) compares the
 --   mirror's date to the newest migration touching the object, and BOTH were 2026-08-10, so a
 --   same-day drift passes every assertion. Re-derived from pg_get_functiondef, not hand-patched.
--- Verified byte-exact; md5 of everything below this header block: 3347a572f90a29a1ab2de739f987975b
+-- Refreshed 2026-11-02 (⚡, migration 20261102051729): head also stops at «إعلانات مشابهة» — on a soft-closed ad (no
+--   «تفاصيل الإعلان») the whole page was the head and the first similar-ad card's price became this ad's price.
+-- Verified byte-exact; md5 of everything below this header block: 1e56fc64a63888e3aa74a147558108f7
 --   equals md5(pg_get_functiondef) in production, 7,234 bytes both sides, checked 2026-08-11.
 CREATE OR REPLACE FUNCTION public.aqar_parse(txt text)
  RETURNS jsonb
@@ -23,7 +25,7 @@ begin
   if txt is null then return '{}'::jsonb; end if;
   txt := translate(txt, '٠١٢٣٤٥٦٧٨٩', '0123456789');
   region := substring(txt from 'تفاصيل الإعلان(.*)');  -- NULL (not txt) when the structured block is absent
-  head   := split_part(txt, 'تفاصيل الإعلان', 1);
+  head   := split_part(split_part(txt, 'تفاصيل الإعلان', 1), 'إعلانات مشابهة', 1);  -- never another ad's card (2026-11-02)
   -- Per-meter RATES are not totals (2026-08-03): remove rate-qualified price expressions from the
   -- head before scanning, so «سعر المتر 4100 ريال» / «8000 ريال للمتر» can never become price_total.
   head := regexp_replace(head, '(?:سعر\s*)?المتر[\s:]{0,6}\d[\d,]*(?:\.\d+)?\s*(?:§|ريال|﷼)', ' ', 'g');

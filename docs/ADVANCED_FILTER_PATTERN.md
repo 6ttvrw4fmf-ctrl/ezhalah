@@ -1,4 +1,4 @@
-# Reusable advanced-filter pattern («🎯 دقّق مع الذكاء»)
+# Reusable advanced-filter pattern («🎯 دقّق مع الذكاء الاصطناعي»)
 
 The Property Age (عمر العقار) filter for Apartments is the **reference implementation** for every
 future advanced-filter question. This doc is the playbook: copy it to add a new advanced question
@@ -8,14 +8,14 @@ type. Do not re-derive the mechanics — reuse them.
 ## The flow (fixed, owner-locked)
 
 ```
-normal search → first 10 cards → «عرض المزيد» / «🎯 دقّق مع الذكاء»
-   → (only «🎯 دقّق مع الذكاء», only in an eligible scope)
+normal search → first 10 cards → «عرض المزيد» / «🎯 دقّق مع الذكاء الاصطناعي»
+   → (only «🎯 دقّق مع الذكاء الاصطناعي», only in an eligible scope)
    → loading state → dynamic question card (options + live counts, unknown-count disclosed)
    → user picks ONE strict option → refreshed cards that ALL match that option
 ```
 
 The age question is NOT a home-screen filter. It appears **only after** a search has returned
-cards, and only from the «🎯 دقّق مع الذكاء» button.
+cards, and only from the «🎯 دقّق مع الذكاء الاصطناعي» button.
 
 ## Core principles (permanent)
 
@@ -90,7 +90,7 @@ now executes every number below against the module on every PR.
 | `MIN_OPTIONS_SINGLE` | 1 | A single-select question survives with even ONE real narrowing option — owner correction 2026-08-26, contract R5.4.1, superseding the prototype's `MIN_OPTIONS_TO_SHOW = 2`. |
 | `MIN_OPTIONS_MULTI` | 1 | Same floor for multi-select; `minOptionsFor()` is UNIFORM across both arities. |
 | `MEANINGFUL_NARROWING_FRACTION` | 0.025 | An option must remove ≥ 2.5% of the current set (10% until 2026-11-01), OR land at/under `INTERVIEW_STOP_AT`. The one predicate shared by the offer gate and the ask gate. |
-| `AF_ROUND_MAX_QUESTIONS` | 4 | Count cap per round — never a quality filter; `scoreQuestion()` alone decides WHICH questions get asked. |
+| `AF_ROUND_MAX_QUESTIONS` | 7 | Count cap per round (4 → 7, owner 2026-11-01) — never a quality filter; `scoreQuestion()` alone decides WHICH questions get asked. |
 
 Re-validate the data-grounded numbers (`MIN_REAL_OPTION_COUNT`, `MEANINGFUL_NARROWING_FRACTION`)
 against live distributions before reusing for a *different* advanced field — they were tuned for age

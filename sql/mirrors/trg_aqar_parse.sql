@@ -1,4 +1,7 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-11-03 (migration 20261102053242_mon_detect_aqar_price_over_authoritative_absent): UNCHANGED.
+--   md5(pg_get_functiondef) in production = 875f73fe437078aef9475631feb8bb25, identical to this file. Stamped for
+--   verify-sql-mirrors-not-stale (B2): the 2026-11-02 stamp did not name this later same-day migration.
 -- Refreshed 2026-08-10 (structured-beats-prose P0). TWO lines were inverted:
 --     NEW.furnished    := coalesce(safe_bool(p->>'furnished'), NEW.furnished)   -- prose WON
 --     NEW.floor_number := safe_int(p->>'floor_number')                          -- no coalesce at all
@@ -25,7 +28,9 @@
 --     (the four directions, the diagonals, two/three/four streets); anything else is NULL, never prose.
 -- Re-verified 2026-10-19 (UTC): UNCHANGED. Migration 20261019003500 registers this digest in
 --   ops_sql_mirror_expected (it still held the 2026-08-11 one), so the staleness guard wants a fresh stamp.
--- Verified byte-exact; md5 of everything below this header block: 947fd49be1e4914667714cd5da89a6fb
+-- Refreshed 2026-11-02 (⚡, migration 20261102051729): the Buy total is never written over the scraper's
+--   authoritative «no price» (price_evidence.authoritative_absent). Re-derived from production; md5 below.
+-- Verified byte-exact; md5 of everything below this header block: 875f73fe437078aef9475631feb8bb25
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -61,7 +66,9 @@ begin
   if NEW.transaction_type='Buy' then
     parsed_price := public.safe_bigint(p->>'price');
     if parsed_price is not null
-       and coalesce(NEW.source_capture->'price_evidence'->>'unit', '') <> 'per_meter' then
+       and coalesce(NEW.source_capture->'price_evidence'->>'unit', '') <> 'per_meter'
+       -- the scraper read aqar's payload and it says NO price: prose never supplies one (2026-11-02)
+       and coalesce(NEW.source_capture->'price_evidence'->>'authoritative_absent', '') <> 'true' then
       NEW.price_total := parsed_price;         -- trigger fully owns Buy total (source-parsed)
     end if;
     -- FIDELITY GUARD (2026-07-28, P0): the Python enrich fallback pattern `(\d{6,9})` before a bare

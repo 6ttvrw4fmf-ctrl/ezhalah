@@ -12,12 +12,12 @@ SOURCE SHAPE (measured live 2026-09-24, every number below from a real fetch):
     olaya 2 = 15 floorplans, all status "available". riyadh-science-park is in the sitemap but its
     page is the site's own 404 shell («Oops! Looks like you are a little lost», HTTP 200,
     floorplans null) — the sitemap is not the catalogue; the page is.
-  · PRICE: the page prints «Unfurnished starting at SAR 152,000 / year» and «Furnished starting at
-    SAR 176,000 / year». The JSON states the same: startingAtPrice=152000,
-    startingAtPriceInterval="year", startingAtCurrency="SAR", startingAtFurnishedPrice=176000,
-    minPrice.pricePeriod="P12M". price_annual = startingAtPrice exactly; rent_period = "annual"
+  · PRICE (re-measured 2026-11-02, backlog 1182): the page prints ONE «From SAR 161,000 / yr», and it is
+    startingAtFurnishedPrice on every furnishedAvailable home (it used to print both prices). JSON:
+    startingAtPrice=121000, startingAtFurnishedPrice=161000, startingAtPriceInterval="year",
+    startingAtCurrency="SAR". price_annual = the printed figure exactly (price_from_floorplan); rent_period = "annual"
     ONLY when the interval word is "year" (a "month" interval would be monthly ×12 via
-    annualize_rent; anything else → NULL, figure archived unconverted). The furnished figure and
+    annualize_rent; anything else → NULL, figure archived unconverted). The other figure and
     floorplan.maxPrice (the top of the range) are archived in additional_info, never blended.
     Individual UNITS under floorplan.unitTypes[].units[].prices carry 1–12-month lease ladders
     (P1M 14,000 … P12M 152,000) — those are per-unit lease terms, not the home-type price, and are
@@ -105,8 +105,17 @@ def _num(v: Any) -> tuple[Optional[int], Optional[str]]:
 
 
 def price_from_floorplan(fp: dict) -> tuple[Optional[int], Optional[str], dict[str, Any]]:
-    """(price_annual, rent_period, extra) exactly as the source states it."""
-    price = normalize.to_int(fp.get("startingAtPrice"))
+    """(price_annual, rent_period, extra) — the ONE «From SAR N / yr» figure the page prints.
+
+    Measured 2026-11-02 (backlog 1182) on every home of riyadh-narjis (9) and riyadh-olaya (2): the page prints a single
+    price, and it is startingAtFurnishedPrice on every home marked furnishedAvailable (Najm: prints 154,800,
+    startingAtPrice 153,800; Qamar: prints 161,000, startingAtPrice 121,000). The two-price layout the scraper was
+    written for is gone. So the printed figure is the furnished one when the home offers it, else startingAtPrice;
+    the other figure is archived (unfurnished_starting_price / furnished_starting_price), never blended."""
+    base = normalize.to_int(fp.get("startingAtPrice"))
+    furnished = normalize.to_int(fp.get("startingAtFurnishedPrice"))
+    shows_furnished = bool(fp.get("furnishedAvailable")) and furnished is not None
+    price = furnished if shows_furnished else base
     interval = str(fp.get("startingAtPriceInterval") or "").lower()
     cur = fp.get("startingAtCurrency")
     if price is None:
@@ -115,12 +124,13 @@ def price_from_floorplan(fp: dict) -> tuple[Optional[int], Optional[str], dict[s
         return None, None, {"starting_price_raw": {"price": price, "interval": interval or None,
                                                    "currency": cur}}
     period = _INTERVAL_PERIOD[interval]
-    extra: dict[str, Any] = {}
-    furnished = normalize.to_int(fp.get("startingAtFurnishedPrice"))
+    extra: dict[str, Any] = {"price_interval": interval}
     if furnished is not None:
         extra["furnished_starting_price"] = furnished
-        extra["price_interval"] = interval
-    top = normalize.to_int(((fp.get("floorplan") or {}).get("maxPrice") or {}).get("basePrice"))
+    if shows_furnished and base is not None and base != price:
+        extra["unfurnished_starting_price"] = base
+    mx = (fp.get("floorplan") or {}).get("maxPrice") or {}
+    top = normalize.to_int(mx.get("furnishedPrice") if shows_furnished else mx.get("basePrice"))
     if top is not None and top != price:
         extra["price_high"] = top
     return (price if period == "annual" else normalize.annualize_rent(price, period)), period, extra

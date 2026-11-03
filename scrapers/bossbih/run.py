@@ -135,7 +135,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_ar, to_catalog  # noqa: E402
-from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.http_liveness import (LivenessProbe, live_control_url,  # noqa: E402
+                                           removal_by_owner_approved_status)
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 
@@ -812,8 +813,18 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
     nid = ad_number[len(PREFIX):]
     if not nid.isdigit():
         return "unknown", f"{ad_number!r} is not a {PREFIX}<nid> ad number"
-    return LivenessProbe(platform=PLATFORM, signal=_signal_for(nid), session=session,
-                         url_for=lambda _ad: f"{BASE}/{nid}").verify_gone(ad_number)
+    probe = LivenessProbe(platform=PLATFORM, signal=_signal_for(nid), session=session,
+                          url_for=lambda _ad: f"{BASE}/{nid}")
+    verdict = probe.verify_gone(ad_number)
+    if verdict[0] != "unknown":
+        return verdict
+    # Owner rule 2026-11-03: an UNPUBLISHED node answers 403 (a deleted one 404). Hidden only on two 403s
+    # while a recently proven-live ad of this site reads LIVE in the same check (http_liveness.py).
+    control = live_control_url((RES_TABLE, COM_TABLE), exclude=ad_number)
+    cnid = (control or "").rstrip("/").rsplit("/", 1)[-1]
+    by_status = removal_by_owner_approved_status(
+        PLATFORM, probe.fetch, f"{BASE}/{nid}", control, _signal_for(cnid)) if cnid.isdigit() else None
+    return by_status or verdict
 
 
 def main() -> int:

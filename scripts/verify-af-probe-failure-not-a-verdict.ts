@@ -162,7 +162,9 @@ const mustCatch = (label: string, caught: boolean) => check(`MUTATION ${label}`,
   // 3. But the narrowing assertion itself must SURVIVE — quieting the flake by deleting the rule is
   //    the regression this pairing exists to prevent.
   check('[J] still enforces real narrowing once an option IS answered',
-    /jFinal < jStart/.test(jBlock) && /genuinely narrowed/.test(jBlock));
+    // 2026-11-02: the interview may CONTINUE above the stop line, so the narrowed figure is the landed count when it closed or
+    // the next question's live chip when it went on — either way it is compared against the start.
+    /jNarrowedTo < jStart/.test(jBlock) && /genuinely narrowed/.test(jBlock));
 
   // MUTATION SELF-PROOF: the two failure modes this pairing must catch.
   const unconditional = jBlock.replace(/if \(jOpened && !jAnswered\)/, 'if (false)');

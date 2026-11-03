@@ -1,5 +1,7 @@
 # The AI facts reader — new ads nightly, the backlog once, 30 USD a month (owner, 2026-10-26)
 
+> **Cadence change (2026-11-03, migration 20261103013129):** the free word reader's incremental run (pg_cron `gh-facts-words-nightly`, name kept) now fires every hour at :25 UTC instead of 07:05 nightly, so a new ad's own words reach its chip within about an hour (owner: «whenever we get a new listing the description immediately matches»). One run reads only new / changed ads in ~12 minutes, no paid AI. Where this file says «nightly» about the free reader, read «hourly».
+
 **Owner's words:** «I don't mind us using the AI … make a very good plan … the max budget for the AI backend is
 30 dollars monthly … start now with the more listings.»
 
