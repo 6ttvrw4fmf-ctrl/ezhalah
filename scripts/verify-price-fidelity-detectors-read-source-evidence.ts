@@ -13,6 +13,7 @@ const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '
 const sql = readFileSync(join(root, 'supabase/migrations/20261103193951_price_fidelity_detectors_read_source_evidence.sql'), 'utf8');
 let failed = 0;
 const check = (name: string, ok: boolean) => { console.log(`${ok ? '  ✓' : '  ✗'} ${name}`); if (!ok) failed++; };
+const mutantCaught = (name: string, caught: boolean) => check(`(mutation) ${name}`, caught);
 
 console.log('verify-price-fidelity-detectors-read-source-evidence: the detectors read what the source and the rule say.');
 
@@ -41,22 +42,22 @@ const guards: [string, RegExp][] = [
 const { head, body } = fnParts(sql);
 for (const [name, rx] of guards) {
   check(name, rx.test(body));
-  check(`(mutation) dropping «${name}» is caught`, !rx.test(body.replace(rx, 'true')));
+  mutantCaught(`dropping «${name}» is caught`, !rx.test(body.replace(rx, 'true')));
 }
 check('the predicate is costed so the cheap equality predicates run first', /\bcost 1000\b/.test(head));
-check('(mutation) a body that cannot be delimited reads as empty, never as the rest of the file', fnParts(sql.replace(/\$function\$;/, ';')).body === '');
+mutantCaught('a body that cannot be delimited reads as empty, never as the rest of the file', fnParts(sql.replace(/\$function\$;/, ';')).body === '');
 
 // The two detectors call it.
 const eqArea = /execute replace\(d, c_old,[\s\S]*?and not public\.price_read_from_source_total\(s\.source_table, s\.listing_id, s\.price_total\)/;
 check('mon_detect_price_eq_area_or_ppm consults the source-evidence predicate', eqArea.test(sql));
-check('(mutation) price_eq_area_or_ppm without the predicate is caught', !eqArea.test(sql.replace(/price_read_from_source_total\(s\.source_table, s\.listing_id, s\.price_total\);/, 'true;')));
+mutantCaught('price_eq_area_or_ppm without the predicate is caught', !eqArea.test(sql.replace(/price_read_from_source_total\(s\.source_table, s\.listing_id, s\.price_total\);/, 'true;')));
 const rate = /\|\| E'    and not public\.price_read_from_source_total\(s\.source_table, s\.listing_id, s\.price_total\)\\n'\s*\n\s*\|\| '  group by s\.platform having count\(\*\) > 0'/;
 check('rate_stored_as_total consults the source-evidence predicate', rate.test(sql));
 
 // A price-judged silent-period rent is expected at what the judgment writes (×12), every other row as the rule says.
 const judged = /case when s\.rent_period_judged and a\.rent_period is null'\s*\n\s*\|\| ' and public\.judge_silent_rent_period_ar\(coalesce\(a\.price_annual, a\.price_total\), s\.type_ar\) = ''شهري'''\s*\n\s*\|\| ' then coalesce\(a\.price_annual, a\.price_total\) \* 12'\s*\n\s*\|\| ' else public\.rent_price_annual_ar\(''aqar'', a\.rent_period, a\.price_annual, a\.property_type\) end\)'/;
 check('index_price_differs_from_raw expects a judged silent-period rent at ×12', judged.test(sql));
-check('(mutation) back on rent_price_annual_ar alone for judged rows is caught', !judged.test(sql.replace('s.rent_period_judged and a.rent_period is null', 'false and a.rent_period is null')));
+mutantCaught('back on rent_price_annual_ar alone for judged rows is caught', !judged.test(sql.replace('s.rent_period_judged and a.rent_period is null', 'false and a.rent_period is null')));
 
 // Both patches fail closed when the live body has moved.
 check('both live-body patches are anchored and raise when the anchor is missing', /raise exception 'mon_price_size_fidelity_barrier: anchors not found exactly once'/.test(sql) && /raise exception 'mon_detect_price_eq_area_or_ppm: anchor found % times'/.test(sql));
