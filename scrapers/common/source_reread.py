@@ -62,6 +62,12 @@ RELATED_CARD = re.compile(r'<a href="https://ksaaqar\.com/ad/[^"]*">\s*<h5>.*?</
 # /Property/Details/<id>: 13605201 (no description of its own) scored «furnished» from ad 72's card sentence
 # «يوجد شقة في نفس المشروع داخليه مؤثثة», and 18862188 scored «kitchen» from four other ads' cards
 # (CI re-read 41292070655, 🔬 2026-11-01, backlog 1123).
+# A RADIO BUTTON's option label is the site's own search control, never the ad. sakan prints its «filters-popup»
+# on every ad page: «حالة التأثيث» then `<input type="radio" name="property_furnishing_status" …>مؤثث`, «شبه مؤثث»,
+# «غير مؤثث». Read as lines that became «the page says مؤثث», so the score asked «furnished» of 10 of 10 sampled
+# sakan ads and called all 10 a «we miss» (ops_af_score 2026-11-03; page re-read 94863, 🔬). The text that follows a
+# radio input up to the next tag is dropped; a checkbox is kept (some themes print a TICKED feature list that way).
+RADIO_OPTION = re.compile(r'<input\b[^>]*\btype=["\']?radio["\']?[^>]*>[^<]{0,80}', re.I)
 RESULT_CARD_TEXT = re.compile(r'<p class="(?:result-card-description|property-showcase-location)\b[^"]*"[^>]*>.*?</p>',
                               re.S | re.I)
 
@@ -190,6 +196,7 @@ def _number_first_lines(body: str) -> list[str]:
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     body = RESULT_CARD_TEXT.sub(" ", body or "")   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
+    body = RADIO_OPTION.sub(" ", body)               # …nor the site's own search-filter choices
     jsonld = []
     for block in JSONLD.findall(body or ""):
         try:
