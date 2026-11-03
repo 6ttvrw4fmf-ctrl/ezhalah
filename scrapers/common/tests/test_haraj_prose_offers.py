@@ -151,3 +151,15 @@ def test_unresolved_city_or_request_is_never_stored(catalog):
 def test_phones_are_never_stored(catalog):
     row, *_ = post("شقة للايجار الايجار 2500 شهري", "للتواصل 0551234567 ابو محمد")
     assert "0551234567" not in (row["description"] or "") and row["price_annual"] == 2500 * 12
+
+
+def test_area_redundant_plural_thousands_is_not_multiplied_2026_11_03():
+    # «5000 الاف متر» is 5,000 m² in the seller's words; the parser stored 5,000,000 (Haraj 19008644 and two more).
+    from scrapers.haraj.prose import area_of
+    assert area_of("حوش للايجار مساحه 5000 الاف متر بصك سكني", "")["area"] == 5000
+    assert area_of("استراحة للبيع مساحة 8000 الاف القرين", "")["area"] == 8000
+    assert area_of("استراحه", "المساحه 3000 الاف مفصوله رجال ونساء")["area"] == 3000
+    # the measured scale words still scale
+    assert area_of("ارض مساحه 96 الف متر", "")["area"] == 96000
+    assert area_of("ارض مساحه 5 الاف متر", "")["area"] == 5000
+    assert area_of("مزرعة مساحه 1500 الف متر", "")["area"] == 1500000
