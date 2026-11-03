@@ -63,5 +63,24 @@ check('EXECUTED: «أرض سكني تجاري» found as Commercial Land → hea
 check('EXECUTED: a facility sub-type (Bank) keeps the source word', listingSearchedTypeAr(stub('فرع بنك', 'Bank')) === 'فرع بنك');
 check('EXECUTED: no cleanType → the source word', listingSearchedTypeAr(stub('شقة')) === 'شقة');
 
+// MUTATION PROOFS — the real helper body, broken one way at a time in a temp copy, must FAIL the executed checks above.
+const { readFileSync: rf, writeFileSync: wf, mkdtempSync } = await import('node:fs');
+const { tmpdir } = await import('node:os');
+const DISPLAY_SRC = rf(join(ROOT, 'src/lib/listingDisplay.ts'), 'utf8');
+const mustCatch = (what: string, caught: boolean) => check(`(mutation) catches ${what}`, caught);
+async function mutantHelper(from: string, to: string) {
+  if (!DISPLAY_SRC.includes(from)) throw new Error(`mutation anchor missing: ${from.slice(0, 60)}`);
+  const f = join(mkdtempSync(join(tmpdir(), 'card-type-')), 'listingDisplay.ts');
+  wf(f, DISPLAY_SRC.replace(from, to));
+  const l = await liftSymbols(f, [{ header: 'export function listingTypeAr(' }, { header: 'export function listingSearchedTypeAr(' }], ['listingSearchedTypeAr'], prelude);
+  return l.listingSearchedTypeAr as (x: never) => string;
+}
+const keepsSourceWord = await mutantHelper("  const ct = listing.cleanType;\n", "  const ct = undefined as string | undefined; void listing.cleanType;\n");
+mustCatch('a headline that keeps the source word («أرض سكني تجاري» instead of «أرض تجارية»)',
+  keepsSourceWord(stub('أرض سكني تجاري', 'Commercial Land')) !== 'أرض تجارية');
+const noFacilityGuard = await mutantHelper("if (ct && !(SERVICE_FACILITY_TYPES as readonly string[]).includes(ct)) {", "if (ct) {");
+mustCatch('a facility sub-type losing its source word (the «مرافق خدمية» rule)',
+  noFacilityGuard(stub('فرع بنك', 'Bank')) !== 'فرع بنك');
+
 console.log(failed === 0 ? '\n✅ the card headline names the searched type; the source wording stays on the card.\n' : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);
