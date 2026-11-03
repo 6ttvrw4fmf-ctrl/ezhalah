@@ -48,6 +48,14 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-11-03. haraj 18362394 price 5000 → NULL (our parse: «للبيع 5الف» was the 5,000 m² area); sanadak 14741450 recorded
+  // source-real in ops_price_eq_area_verified.
+  '20261103194345_price_eq_area_adjudicated_haraj_sanadak.sql':
+    'one-row evidence repair to NULL plus one source-real record; the parser that wrote the 5000 is fixed in PR #10217 ' +
+    'change (scrapers/haraj/prose.py, test_haraj_prose_offers.py), so a re-scrape writes NULL too. The class is watched by ' +
+    'the rostered detector that found it, mon_detect_price_eq_area_or_ppm (alert price_eq_area_or_ppm), which re-raises ' +
+    'on any price equal to the area that ops_price_eq_area_verified does not vouch for. The applied file cannot be edited ' +
+    'to name it (content parity: this is its byte-exact mirror).',
   // 2026-11-02. Two kitchens whose ad says «مطبخ غير راكب» went back to unknown (alert 12326, backlog 1189).
   '20261102105648_kitchen_not_installed_stays_unknown.sql':
     'two-row evidence repair (akariyoun 12049465, therc 10283616) to NULL, the value the reader already computes; it is ' +
