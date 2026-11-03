@@ -16,7 +16,7 @@ import type { Listing } from '@/data/listings';
 import { idsByTable, orderLike, foldDuplicates, pinHead, type PinRow } from '@/lib/mapPins';
 
 /** What makes two cards the same listing posted twice: the same site, price, area, type, title and photo. */
-const dupKey = (l: Listing) => [l.sourceTable, l.price, l.area, l.propertyType, l.title ?? '', l.photos?.[0] ?? ''].join('|');
+const dupKey = (l: Listing) => [l.sourceTable, l.price, l.area, l.cleanType ?? '', l.title ?? '', l.photos?.[0] ?? ''].join('|');
 
 export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: () => void }) {
   const { t, isRTL } = useI18n();
