@@ -409,7 +409,21 @@ def photos(page_html: str) -> Optional[list[str]]:
 # unit card, `cin-directory-compound` block — see is_directory_only) → GONE for every unit it had.
 # Anything else — including a listed page with a «Units» section that omits this unit — is no
 # opinion, so the row holds.
+#
+# A UNIT THE PAGE ITSELF MARKS «Not available» (2026-11-03). The page keeps a withdrawn unit's card
+# (`<article … id="unit-<uid>">`) but gives it the ribbon «Not available» and drops its «Inquire Now»
+# button — so the crawl, which keys a card by that button's data-cin-contact-unit, skips it and the row
+# was struck 24 crawls while its own card said it was off the market. Measured live on dur-alhada:
+# CIN810's card carries the ribbon and no button; 809, 811 and 812 (live) carry the button and no
+# ribbon. That card → GONE. A card with the ribbon is never read as LIVE, button or not.
 _AD_RE = re.compile(rf"^{PREFIX}(\d+)$")
+_UNIT_ARTICLE_RE = re.compile(r'<article\b[^>]*\bid="unit-(\d+)"[^>]*>(.*?)</article>', re.S)
+_NOT_AVAILABLE_RE = re.compile(r'cin-unit-card__ribbon">\s*Not available\s*<', re.I)
+
+
+def unit_marked_not_available(page_html: str, uid: str) -> bool:
+    return any(u == uid and _NOT_AVAILABLE_RE.search(card)
+               for u, card in _UNIT_ARTICLE_RE.findall(page_html))
 
 
 def _unit_signal(uid: str):
@@ -421,6 +435,10 @@ def _unit_signal(uid: str):
         if is_directory_only(body) and not _moved:
             # the page now lists no units at all: every unit it had went with them (2026-11-03)
             return "gone"
+        if not _moved and unit_marked_not_available(body, uid):
+            return "gone"
+        if unit_marked_not_available(body, uid):
+            return None
         return "live" if any(c["uid"] == uid for c in unit_cards(body)) else None
     return signal
 
