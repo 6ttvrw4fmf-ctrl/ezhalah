@@ -441,6 +441,9 @@ def _zero_count(kw: str) -> str:
 
 def unprepared(x: str, kw: str) -> str:
     x = re.sub(_zero_count(kw), " ", x)
+    # «مصعد مؤسس», «مؤسس مصعد» — the lift is PREPARED, the same unknown as «تأسيس مصعد» (haraj 18784258, suwar 11747618:
+    # both asked «elevator» by the 2026-11-03 score, both correctly NULL in the index).
+    x = re.sub(r"(?:" + kw + r")\w*\s+(?:مؤسس|موسس)\w*|(?:مؤسس|موسس)\w*\s+(?:" + kw + r")\w*", " ", x)
     return re.sub(_not_installed(kw), " ", re.sub(PREPARED + "(?:" + kw + ")", " ", x))
 
 

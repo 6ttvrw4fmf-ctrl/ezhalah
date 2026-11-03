@@ -31,3 +31,10 @@ def test_a_zero_count_chip_is_not_a_yes():
     # abaad 13214734 (2026-11-03): the chip «<strong>0</strong> مطبخ» — zero kitchens — was asked «kitchen».
     assert not _yes("مطبخ 0", "kitchen") and not _yes("0 مطبخ", "kitchen") and not _yes("مطبخ: 0", "kitchen")
     assert _yes("1 مطبخ", "kitchen") and _yes("مطبخ 10", "kitchen") is True
+
+
+def test_a_prepared_lift_is_not_a_yes():
+    # haraj 18784258 «🔹 مصعد مؤسس 🔹», suwar 11747618 «•مؤسس مصعد •مدخلين» (2026-11-03): both correctly NULL.
+    assert not _yes("سطح ملحوظات 🔹 مصعد مؤسس 🔹 واجهه شمالية", "elevator")
+    assert not _yes("•مميزات •مؤسس مصعد •مدخلين", "elevator")
+    assert _yes("مصعد حديث", "elevator")
