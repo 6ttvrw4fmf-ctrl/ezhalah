@@ -2,6 +2,11 @@
 
 > **Cadence change (2026-11-03, migration 20261103013129):** the free word reader's incremental run (pg_cron `gh-facts-words-nightly`, name kept) now fires every hour at :01 UTC instead of 07:05 nightly (it was :25 for its first day; migration 20261103101143 moved it to :01 so each ~12-minute run ends before the :22 search sync — at :25 every read missed that hour's sync and waited for the next, up to about two hours), so a new ad's own words reach its chip within about an hour (owner: «whenever we get a new listing the description immediately matches»). One run reads only new / changed ads in ~12 minutes, no paid AI. Where this file says «nightly» about the free reader, read «hourly».
 
+> **Owner decision — the grill chip (2026-11-03): «grill is grill, microwave isn't a grill».** A «شواية» / «شواء» counts for
+> the grill chip wherever the ad names it, including a kitchen appliance («فرن شواية», «مطبخ … فرن - شواية - ميكرويف»).
+> A microwave is never a grill (the reader has no microwave token for it). Do not add an «oven nearby» exclusion to the
+> grill fact — it was proposed (PR #10269) and closed on this decision.
+
 > **Precision audit (2026-11-03, owner: «make sure everything I select appears like matches»).** Chip *counts* were
 > exact (17,004 chips × 78 groups = a plain count of the index, 0 differences); some chip *matches* were not. The free
 > reader answered yes for look-alike words: «بنت» (a name, «بنت هاوس») as Wi-Fi/internet, «ونشتري» as a crane, a bare
