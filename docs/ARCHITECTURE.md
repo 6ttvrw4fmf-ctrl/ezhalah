@@ -1067,6 +1067,41 @@ covered by a dedicated barrier. See migration `20260810145200_extend_readside_gu
 PR #425 for the fix; PRs #409/#410/#406 remain open awaiting owner review (migration-touching, per the
 migration-drift-guard rule in `AGENTS.md`).
 
+### 19.x How detectors went wrong — the 2026-11-03 alarm sweep (owner: «we never want those same bugs appearing»)
+
+78 P1 alarms were open; a team sweep fixed or disproved 24 at the root. Most were not data bugs but DETECTORS that
+had fallen behind the rules. Each class below now has a mutation-proven barrier; apply the rule to every NEW detector.
+
+1. **A detector must judge served data by EVERY owner rule the data follows — not by an older formula.** Four
+   detectors flagged correct rows because they predated the silent-period judgment (owner 2026-09-28) and the pool
+   rule (2026-10-25): cheap-yearly (856 rows, `20261103191243`), price fidelity (`20261103193951`), rent-period
+   inferred-when-silent and rent-period contract (`20261103204042`). A row with `rent_period_judged = true` is
+   correct at ×12. Barriers: `verify-cheap-yearly-is-monthly.ts`, `verify-price-fidelity-detectors-read-source-evidence.ts`,
+   `verify-rent-period-judged-flag-follows-source.ts`.
+2. **Evidence recognised by a LABEL must accept every caller that writes it.** The crawl's `prune_unseen(verify_gone)`
+   and `fleet_liveness.<platform>` write the same verdicts under different labels; two detectors read only one and
+   reported "no re-check path" / "oracle never retires" on sites that had real GONE verdicts (`20261103193846`,
+   `20261103194015`). Barriers: `verify-stale-remediation-sees-crawl-oracle.ts`, `verify-oracle-retirement-reads-every-caller.ts`.
+3. **A list "kept in sync by a comment" is drift waiting to happen — derive it or check it.** The deletion-audit
+   workflow matrix listed 4 sites while the deletion engine had 9. Barrier: `verify-deletion-audit-covers-every-deleter.ts`.
+4. **A status code alone is not a reading.** Gathern answers HTTP 404 both for a removed unit (body «الصفحة غير موجودة»)
+   and, to some probes, for a live one; only the body decides. Barrier: `scrapers/common/tests/test_gathern_bare_404_is_not_a_reading.py`.
+5. **A share/coverage alarm must leave out rows nobody can fix** (a source that publishes no location; inactive rows;
+   a snapshot that names the same place plus its parent) — or it can never clear (`20261103194247`, `20261103194322`).
+   Barrier: `verify-crawl-health-detectors-judge-what-users-see.ts`.
+6. **Every key a detector raises needs a path that closes it, on every arm**, and a detector must not skip its raise
+   when the alert is already open (`mon_raise` dedups; skipping it stops re-affirmation) (`20261103214028`).
+   Barriers: `verify-zero-new-stall-closes-false-keys.ts`, `verify-detectors-reaffirm-open-alerts.ts`,
+   `verify-cron-attendance-follows-schedule-change.ts`.
+7. **A flag computed on INSERT must also travel on ON CONFLICT.** The sync dropped `rent_period_judged` on update, so it
+   went stale both ways (`20261103204042`).
+8. **A parser anchored on one page field breaks silently when the site removes it** (wahadat's `absolute_url`, PR
+   #10223: every crawl stored nothing for a day). `silent_partial_success` caught it; anchor on something the page
+   cannot drop (its own slug) and test against a live page.
+9. **"Absence never hides" (2026-10-05) needs each site's own LIVE and GONE signal**, or a struck row stays shown and
+   unprovable forever. The fix is per site, validated on a known-live and a known-removed page (compoundin ribbon,
+   maqrat licence end date, wahadat «المشروع غير موجود»), never a looser kill rule.
+
 ---
 
 ## 20. Permanent rules (the non-negotiables)
