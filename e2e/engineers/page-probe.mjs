@@ -137,10 +137,15 @@ try {
     // The stale-tab shape: the FIRST request for the named chunk fails (as a renamed chunk does after a deploy);
     // every later request goes through. The fix must reload the page once; what it threw before the reload is
     // evidence, and the verdict is read from the page AFTER its reload.
+    // A deploy RENAMES the chunk, so an old tab's every request for it 404s until the tab reloads and gets the new
+    // HTML — aborting only the FIRST request planted nothing fatal (run 41649183142: the preload failed, the import
+    // that followed succeeded, no reload, the fix never had to fire). Every request for the named chunk fails until
+    // the main frame navigates a second time (the self-reload); from then on every request goes through.
+    let mainNavs = 0;
+    page.on('framenavigated', (f) => { if (f === page.mainFrame()) mainNavs++; });
     await ctx.route((u) => u.href.includes(FAIL_ONCE), (route) => {
-      if (failedOnce) return route.continue();
-      failedOnce = route.request().url();
-      log(`    · aborting once: ${failedOnce}`);
+      if (mainNavs >= 2) return route.continue();
+      if (!failedOnce) { failedOnce = route.request().url(); log(`    · aborting until the tab reloads: ${failedOnce}`); }
       return route.abort('failed');
     });
     let loads = 0;
