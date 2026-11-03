@@ -117,6 +117,12 @@ if (trg) {
     /src::numeric\s*>=\s*NEW\.price_total::numeric\s*\*\s*10/i.test(squashed),
     'the >=10x directional condition is missing or was widened');
 
+  // 4b. A STALE archive whose own per-metre rate is physically impossible (> 2,000,000 SAR/m², the fleet bound
+  //     mon_detect_field_integrity uses) may not veto a corrected price (2026-11-03: WST5893701 and four more were
+  //     reverted to a typo wasalt had since fixed). Dropping this clause re-opens that revert.
+  ok('a stale archive with an impossible per-metre rate never vetoes a corrected price',
+    /NOT\s*\(\s*rate\s*~\s*'\^\\d\+\(\\\.\\d\+\)\?\$'\s*AND\s*rate::numeric\s*>\s*2000000\s*\)/i.test(squashed),
+    'the impossible-rate exclusion (20261103170854) is gone from the winning trigger body');
   // 5. The half this trigger already had must survive any future rebuild of the other half.
   //
   // WEAK-BARRIER REPAIR (2026-09-11, routine #10, R1 sweep). The trigger legitimately assigns
