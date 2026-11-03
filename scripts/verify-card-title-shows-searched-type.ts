@@ -33,11 +33,35 @@ check('the clean-type list is non-trivial (the check above can bite)', ALL_CLEAN
 check('Commercial Land reads «أرض تجارية» (the measured case)', ar('Commercial Land') === 'أرض تجارية', String(ar('Commercial Land')));
 
 const card = readFileSync(join(ROOT, 'src/components/ResultCard.tsx'), 'utf8');
-check('searchedTypeLabel is derived from listing.cleanType', /const searchedTypeLabel = [\s\S]{0,140}listing\.cleanType[\s\S]{0,120}t\(listing\.cleanType\)/.test(card));
+check('searchedTypeLabel comes from the one shared helper', /const searchedTypeLabel = locale === 'en' \? typeLabel : listingSearchedTypeAr\(listing\);/.test(card));
+const preview = readFileSync(join(ROOT, 'src/components/ListingPreview.tsx'), 'utf8');
+check('the ad page top line names the searched type and shows the source word when it differs',
+  /testID="listing-preview-searched-type">\{locale === 'ar' \? listingSearchedTypeAr\(l\) : typeLabel\}/.test(preview) && /testID="listing-preview-source-type">\(\{typeLabel\}\)/.test(preview));
+const aloud = readFileSync(join(ROOT, 'src/lib/readAloudScript.ts'), 'utf8');
+check('read-aloud says the searched type', /const headline = `\$\{listingSearchedTypeAr\(listing\)\} في/.test(aloud));
 check('the laptop photo strip headline uses searchedTypeLabel', /<Text style=\{card\.lpPhotoFootTx\}>\{searchedTypeLabel\} \{t\(listing\.deal/.test(card));
 check('the compact card headline uses searchedTypeLabel', /<Text style=\{card\.typeLabel\}>\{searchedTypeLabel\} \{t\(listing\.deal/.test(card));
 check('the type row still shows the source wording (typeLabel)', /<Text style=\{card\.lpTypeTx\} numberOfLines=\{1\}>\{typeLabel\}<\/Text>/.test(card));
 check('the «Property Type» stat still shows the source wording (typeLabel)', /<Stat icon="business-outline" big=\{typeLabel\}/.test(card));
+
+// EXECUTED against the REAL helper bodies (liftSymbols — listingDisplay.ts imports through the @/ alias Node cannot resolve);
+// the prelude hands them the real Arabic dictionary, the real facility list and the real placeholder.
+const { liftSymbols } = await import('./lib/liftSymbols.ts');
+const AR_DICT = (await liftSymbols('src/i18n.tsx', [{ header: 'const AR:' }], ['AR'])).AR as Record<string, string>;
+const prelude = `type Listing = any;
+const AR = ${JSON.stringify(AR_DICT)};
+const translate = (_l: string, k: string) => AR[k] ?? k;
+const arabicOrPlaceholder = (text: string, locale: string, ph: string) => (!text ? text : locale !== 'ar' ? text : /[\u0600-\u06FF]/.test(text) ? text : ph);
+const SERVICE_FACILITY_TYPES = ${JSON.stringify(SERVICE_FACILITY_TYPES)};
+const TYPE_UNRESOLVED_AR = '—';`;
+const lifted = await liftSymbols('src/lib/listingDisplay.ts', [{ header: 'export function listingTypeAr(' }, { header: 'export function listingSearchedTypeAr(' }], ['listingTypeAr', 'listingSearchedTypeAr'], prelude);
+const listingSearchedTypeAr = lifted.listingSearchedTypeAr as (l: never) => string;
+const listingTypeAr = lifted.listingTypeAr as (l: never) => string;
+const stub = (type: string, cleanType?: string) => ({ type, cleanType } as never);
+check('EXECUTED: «أرض سكني تجاري» found as Commercial Land → headline «أرض تجارية», source word kept by listingTypeAr',
+  listingSearchedTypeAr(stub('أرض سكني تجاري', 'Commercial Land')) === 'أرض تجارية' && listingTypeAr(stub('أرض سكني تجاري', 'Commercial Land')) === 'أرض سكني تجاري');
+check('EXECUTED: a facility sub-type (Bank) keeps the source word', listingSearchedTypeAr(stub('فرع بنك', 'Bank')) === 'فرع بنك');
+check('EXECUTED: no cleanType → the source word', listingSearchedTypeAr(stub('شقة')) === 'شقة');
 
 console.log(failed === 0 ? '\n✅ the card headline names the searched type; the source wording stays on the card.\n' : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);

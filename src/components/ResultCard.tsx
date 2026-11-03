@@ -14,6 +14,7 @@ import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
+import { listingSearchedTypeAr } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
 import { monthlyLineText } from '@/lib/listingDisplay';
 
@@ -204,9 +205,7 @@ export function ResultCard({
   // the card's headline («… للبيع / للإيجار») names it in the filter's own words. The source's own wording stays on the card
   // (the type row and the «Property Type» stat keep typeLabel, owner 2026-07-06 source-accurate rule), so nothing the source
   // said is hidden — e.g. title «أرض تجارية للبيع», type row «أرض سكني تجاري».
-  const searchedTypeLabel = locale === 'en' || !listing.cleanType
-    ? typeLabel
-    : arabicOrPlaceholder(t(listing.cleanType), locale, typeLabel);
+  const searchedTypeLabel = locale === 'en' ? typeLabel : listingSearchedTypeAr(listing);
   // Responsive thumbnail sizing. Goes through useAtLeast so the FIRST client render reproduces the
   // server's answer (no window ⇒ compact); comparing the width inline here was the second half of
   // the React #418 P0 of 2026-08-21 — it differs only in style attributes, but React compares those
