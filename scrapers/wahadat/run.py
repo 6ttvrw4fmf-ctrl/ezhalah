@@ -148,17 +148,31 @@ def _main_project(raw: str, slug: str) -> Optional[dict]:
     i = raw.find('"slug":"' + slug + '"')
     if i < 0:
         return None
-    ids = list(re.finditer(r"/project/api/projects/([0-9a-f\-]{36})/", raw[:i]))
-    if not ids:
-        return None
-    uuid = ids[-1].group(1)
     dec = json.JSONDecoder()
-    for m in re.finditer(r'\{"id":"' + re.escape(uuid) + '"', raw):
+    ids = list(re.finditer(r"/project/api/projects/([0-9a-f\-]{36})/", raw[:i]))
+    if ids:
+        uuid = ids[-1].group(1)
+        for m in re.finditer(r'\{"id":"' + re.escape(uuid) + '"', raw):
+            try:
+                obj, _ = dec.raw_decode(raw, m.start())
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and obj.get("slug") == slug:
+                return obj
+        return None
+    # The page stopped carrying absolute_url (measured 2026-11-03: 0 occurrences on every project
+    # page, so all 120 pages read «project_object_not_found» and three crawls stored nothing). The
+    # page's own object still opens `{"id":"<uuid>"` BEFORE its slug and encloses it, so walk the
+    # object starts that precede the slug, nearest first, and accept only an object that ENCLOSES
+    # that slug and whose OWN slug is the page's — a related project or a nested owner/type object
+    # can never match it.
+    starts = list(re.finditer(r'\{"id":"[0-9a-f\-]{36}"', raw[:i]))
+    for m in reversed(starts[-200:]):
         try:
-            obj, _ = dec.raw_decode(raw, m.start())
+            obj, end = dec.raw_decode(raw, m.start())
         except ValueError:
             continue
-        if isinstance(obj, dict) and obj.get("slug") == slug:
+        if end > i and isinstance(obj, dict) and obj.get("slug") == slug:
             return obj
     return None
 
