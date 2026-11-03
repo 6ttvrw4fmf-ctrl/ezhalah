@@ -1009,7 +1009,9 @@ POLICIES: dict[str, _P] = {
         _pol("wahadat", 3, 168), CRAWL_PRESENCE_ONLY,
         "the unit's OWN status in its project's record, read every run (2026-10-07): a unit the "
         "source states as sold or reserved, in a project whose is_active is true, is gone and "
-        "takes a strike; a unit that merely drops out of the list, or whose project is unread, is "
+        "takes a strike; so does every unit of a project whose own page now answers the source's «المشروع "
+        "غير موجود» page (200, same as a bogus slug — measured 2026-11-03 on قسورة-02 and دام-101) in a run "
+        "that read a real project; a unit that merely drops out of the list, or whose project is unread, is "
         "UNKNOWN and is never hidden (absence only selects candidates). prune_unseen's 3-strike, "
         "coverage and collapse guards still apply.",
         "Not CANDIDATE_PLUS_DIRECT even though a project page can be re-fetched: the unit-level "
