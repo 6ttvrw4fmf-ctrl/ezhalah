@@ -272,8 +272,9 @@ POLICIES: dict[str, _P] = {
         "strip of OTHER compounds beneath it, and 62 of the 129 compounds in the sitemap are in "
         "that state right now. A policy keyed on 404 would never retire anything here. So, read on "
         "the row's stored listing_url: 200 WITH that sentence is GONE; 200 carrying THIS unit's own "
-        "data-cin-contact-unit card is LIVE; a listed page without it (not yet measured), a 404, any "
-        "401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN. Wired into "
+        "data-cin-contact-unit card is LIVE; a page turned DIRECTORY entry (cin-directory-compound block, "
+        "no «Units» section, no unit card — measured 2026-11-03 on 4 compounds) is GONE for every unit; "
+        "a listed page without this unit, a 404, any 401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN. Wired into "
         "prune_unseen 2026-09-28, complete crawls only.",
         "Rows are UNITS, not compounds, so one delisted compound retires every unit that belonged "
         "to it — which is correct: the units went with it."),
@@ -1194,8 +1195,12 @@ POLICIES: dict[str, _P] = {
     "ashab": _P(
         _pol("ashab", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's own list /properties?page=N (447 ads, 51 pages) and "
-        "each building's unit cards. run.py suppresses prune_unseen unless every page was readable.",
-        "No oracle is written yet, so this does not claim a direct check."),
+        "each building's unit cards. run.py suppresses prune_unseen unless every page was readable. "
+        "Each at-grace row then gets a DIRECT read of its own page: 404, or its own badge «مباع»/«مؤجر»/"
+        "«محجوز», is GONE; a unit page whose PARENT ad answers 404 is GONE; badge «متاح» under a live "
+        "parent is LIVE; any 401/403/429/5xx or unreadable page is UNKNOWN.",
+        "Oracle written 2026-11-03 (scrapers/ashab/run.py::_verify_gone): ASB490139 sat on the list as "
+        "«محجوز» and ASB523764-U179x lived on as unit pages of the deleted ad /properties/1211 (404)."),
     "manafe": _P(
         _pol("manafe", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over /manafemar/project/1…N (the index links only 40; the walk is checked "
