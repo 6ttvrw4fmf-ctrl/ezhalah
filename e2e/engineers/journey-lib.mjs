@@ -52,7 +52,10 @@ export const afTargetsFor = (row, max = 2) => {
     const col = AMENITY_TOKEN_COLUMN[token] ?? UTILITY_COLUMN[token];
     if (row[col] === true) t.push({ kind: 'amenity', token });
   }
-  if (row.deal_ar === 'إيجار' && row.furnished === true) t.push({ kind: 'furnished' });
+  // The furnished QUESTION exists on annual rent only: src/lib/afCohorts.ts COHORT_QUESTIONS lists no
+  // `furnished` under RentMonthly (fresh-dead there, 100% true on Gathern), so a «إقامات قصيرة» journey
+  // that targets it can only end UNKNOWN «interview never offered a question» (🦅 backlog 811).
+  if (row.deal_ar === 'إيجار' && row.rent_period_ar !== 'شهري' && row.furnished === true) t.push({ kind: 'furnished' });
   return t.slice(0, max);
 };
 
