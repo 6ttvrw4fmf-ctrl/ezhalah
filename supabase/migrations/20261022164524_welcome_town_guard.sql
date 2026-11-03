@@ -183,7 +183,6 @@ begin
 end
 $function$;
 
-
 do $proof$
 declare r int; bad int;
 begin
