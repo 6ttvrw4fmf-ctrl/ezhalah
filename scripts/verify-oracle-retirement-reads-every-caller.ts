@@ -31,6 +31,7 @@ const check = (label: string, ok: boolean, why = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : `\n      ${why}`}`);
   if (!ok) failed++;
 };
+const mustCatch = (what: string, caught: boolean) => check("mutant killed: " + what, caught);
 const rows = (n: number, r: OracleProbeRow): OracleProbeRow[] => Array.from({ length: n }, () => ({ ...r }));
 
 // Production, 2026-11-03 19:3x UTC (ops_stale_inactivation_probe grouped by oracle/verdict).
@@ -67,11 +68,11 @@ const oldCounts = (platform: string, probe: OracleProbeRow[]) => {
   const own = probe.filter((r) => r.source_table.split('_')[0] === platform && r.oracle === CRAWL_ORACLE_LABEL);
   return { asks: own.length, affirmative: own.filter((r) => (AFFIRMATIVE_VERDICTS as readonly string[]).includes(r.verdict)).length };
 };
-check('mutant killed: the crawl-only label rule flags suwar (the 2026-11-03 false alarm)',
+mustCatch('the crawl-only label rule flags suwar (the 2026-11-03 false alarm)',
   oracleNeverRetires({ platform: 'suwar', strategy: 'DIRECT_REVISIT', active: 67, ...oldCounts('suwar', SUWAR) }));
 // Mutant 2: "any GONE from any label" would clear sakani on its sold-pin rows — that rule is too wide.
 const anyLabel = SAKANI.filter((r) => r.source_table.startsWith('sakani_'));
-check('mutant killed: counting every label would wrongly clear sakani',
+mustCatch('counting every label would wrongly clear sakani',
   !oracleNeverRetires({ platform: 'sakani', strategy: 'CANDIDATE_PLUS_DIRECT', active: 100, asks: anyLabel.length,
     affirmative: anyLabel.filter((r) => r.verdict === 'GONE' || r.verdict === 'LIVE').length }));
 

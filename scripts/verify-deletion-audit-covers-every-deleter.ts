@@ -29,6 +29,7 @@ const check = (label: string, ok: boolean, why = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : `\n      ${why}`}`);
   if (!ok) failed++;
 };
+const mustCatch = (what: string, caught: boolean) => check("mutant killed: " + what, caught);
 
 /** Platforms the deleter registers: the top-level keys of `PLATFORMS: dict[str, dict] = { ... }`. */
 export function deleterPlatforms(py: string): string[] {
@@ -73,15 +74,15 @@ check('verify-deletions.yml samples every platform the deleter registers', now.l
 const OLD = WF
   .replace(/platform:\s*\$\{\{\s*fromJSON\(needs\.plan\.outputs\.platforms\)\s*\}\}/, 'platform: [aqar, wasalt, gathern, aqarcity]');
 const old = auditCoverageProblems(OLD, platforms);
-check('mutant killed: the old typed four-site matrix is caught, naming what it misses',
+mustCatch('the old typed four-site matrix is caught, naming what it misses',
   old.some((p) => p.includes('misses') && p.includes('raghdan')), old.join(' | '));
 // MUTATION 2: a full typed list is still refused — it is a list someone must remember.
 const FULL = WF.replace(/platform:\s*\$\{\{\s*fromJSON\(needs\.plan\.outputs\.platforms\)\s*\}\}/,
   `platform: [${platforms.join(', ')}]`);
-check('mutant killed: even a complete typed list is refused (it drifts)', auditCoverageProblems(FULL, platforms).length > 0);
+mustCatch('even a complete typed list is refused (it drifts)', auditCoverageProblems(FULL, platforms).length > 0);
 // MUTATION 3: a plan job that reads something else.
 const WRONG = WF.replace('from scrapers.common.cleanup import PLATFORMS', 'from scrapers.common.liveness_policies import FLEET_DAILY_DIRECT as PLATFORMS');
-check('mutant killed: a plan job reading a different registry is caught', auditCoverageProblems(WRONG, platforms).length > 0);
+mustCatch('a plan job reading a different registry is caught', auditCoverageProblems(WRONG, platforms).length > 0);
 
 console.log(failed === 0 ? '\nOK' : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);
