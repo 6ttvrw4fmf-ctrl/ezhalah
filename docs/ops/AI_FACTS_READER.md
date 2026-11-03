@@ -14,6 +14,21 @@
 > any quote that is not the fact's own word, and fix the catalogue in `scrapers/facts/word_checker.py` with the real
 > sentence as a selftest line. The selftest now gates every scrapers PR
 > (`scrapers/common/tests/test_word_checker_selftest.py`, run by common-location-tests.yml).
+>
+> **Round 2 + the evidence-phrase barrier (2026-11-03 evening, PR #10211, migration 20261103213947).** Three reviewers
+> read real sentences for all ~180 chips; ~40 more look-alike classes were fixed (e.g. «صالة عائلية» a room → for families,
+> «مغسلة» a basin → car wash, «كافية» enough → cafe, «ارتداد» a setback → floors, the ad's own «في شارع X,» address,
+> landmarks «خلف شبيلي مول», «تصلح سكن عمال» a possible use, refusals «يمنع سكن العزاب»). Wasalt's elevator/AC/private
+> entrance now come from this same reader (one reader). After the 8-shard re-read, all 17,004 chip counts again equal the
+> index, and a live walk (Riyadh short-stay rest houses → «عوائل» 17 = DB 17; Gathern unit 26129 «مخصص ل عوائل فقط») matched
+> the source. **The barrier:** `ops_af_evidence_phrase` lists the phrases that may turn a chip on (1,759 trusted, 57
+> rejected). `mon_detect_af_evidence_phrases()` (daily, on the roster) raises **P1 `af_rejected_evidence_served`** if a
+> rejected phrase serves any ad again, and **P2 `af_new_evidence_phrase`** when an unreviewed phrase reaches 25 served ads.
+> To clear the P2: read 5 real sentences, insert the phrase as trusted, or as rejected AND fix the reader. Never trust a
+> rejected phrase to silence the P1.
+> **Still open (owner decision):** some scrapers fill elevator / AC / maid room from the ad text with the older
+> `normalize.prose_amenities` (dealapp, rakez, aqar non-villa maid/driver …) and Rule B serves those as the site's field;
+> the code switch is easy but the stored yeses do not self-heal, so clearing them is a bulk data change for the owner.
 
 **Owner's words:** «I don't mind us using the AI … make a very good plan … the max budget for the AI backend is
 30 dollars monthly … start now with the more listings.»
