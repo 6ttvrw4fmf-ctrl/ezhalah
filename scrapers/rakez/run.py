@@ -637,8 +637,8 @@ _PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room",
 def prose_answers(description: Optional[str]) -> dict[str, bool]:
     # ONE READER (owner 2026-11-03): the description is read by the Advanced Filter's word reader. The project spec
     # list below (project_answers) is rakez's own structured data and keeps its own reading.
-    from scrapers.facts import word_checker as W
-    return W.amenity_answers(normalize.html_block_lines(description) if description else description, _PROSE_COLS)
+    from scrapers.facts.one_reader import amenity_answers
+    return amenity_answers(normalize.html_block_lines(description) if description else description, _PROSE_COLS)
 
 
 # The project's `feature` terms are its build spec, shared by every unit (195 of 195 projects carry one list,

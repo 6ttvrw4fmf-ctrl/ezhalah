@@ -1146,18 +1146,6 @@ def quote_of_t(c: str, t: str, idx: list[int], s: int, e: int) -> str:
     return c[idx[s]: idx[e - 1] + 1].strip() if e > s else ""
 
 
-def amenity_answers(text: Optional[str], columns, rename: Optional[dict[str, str]] = None) -> dict[str, bool]:
-    """ONE READER (2026-11-03): the yes / no a scraper stores for an amenity column it reads from the ad's prose
-    (dealapp, rakez, wasalt — no structured field on the site) comes from THIS reader, the same one that reads every
-    ad for the Advanced Filter, never from the older, looser normalize.prose_amenities. `rename` maps a reader key to
-    the table's column name (balcony → balcony_terrace)."""
-    if not text or not str(text).strip():
-        return {}
-    rename = rename or {}
-    said = {rename.get(k, k): v for k, v in facts_of(clean_text(None, str(text))).items() if isinstance(v, bool)}
-    return {c: v for c, v in said.items() if c in columns}
-
-
 def facts_of(text: str, place_names: tuple[str, ...] = ()) -> dict[str, Any]:
     """{fact: value} — a convenience view of check() for tests and the finder."""
     return {r["fact"]: next(r[k] for k in ("value_bool", "value_num", "value_text") if r[k] is not None)
