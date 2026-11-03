@@ -562,15 +562,22 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     // SMALL heads (owner 2026-11-02: «the pin is so so big»): 11 px text, a slim pill. ZOOMED OUT, A CELL IS A DOT
     // (owner 2026-11-02, Zillow: «pins don't show the price unless you zoom in»): a 14 px deal-coloured dot, no number;
     // the count of what is in view sits in the pill at the bottom of the map instead.
-    const element = (row: PinRow, cell: number) => {
+    // `counted`: the close-in crowded fallback, where a bubble holds many listings at street zoom — it shows its count.
+    // Zoomed-out dots stay plain (owner 2026-11-02, Zillow).
+    const element = (row: PinRow, cell: number, counted = false) => {
       const el = document.createElement('div');
       const color = cell > 0 ? dotColor(row) : pinColor(row);
       el.setAttribute('data-testid', cell > 0 ? 'map-bubble' : 'map-pin');
       el.style.cssText = `font:600 11px/1 -apple-system,system-ui,sans-serif;color:#fff;background:${color};border:1.5px solid #fff;cursor:pointer;touch-action:none;` +
         (cell > 0
-          ? 'border-radius:50%;width:14px;height:14px;box-shadow:0 1px 3px rgba(0,0,0,.4)'
+          ? (counted && row.n > 1
+            // A close-in bubble holding many listings says how many (measured live 2026-11-03: a tap on «النعيم» showed
+            // 5,399 listings as three blank dots, which read as an almost empty map).
+            ? 'border-radius:12px;min-width:16px;padding:4px 7px;text-align:center;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.4)'
+            : 'border-radius:50%;width:14px;height:14px;box-shadow:0 1px 3px rgba(0,0,0,.4)')
           : 'border-radius:10px;padding:4px 7px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);position:relative');
       el.textContent = cell > 0 ? '' : pinHead(row, loc);
+      if (counted && cell > 0 && row.n > 1) el.textContent = areaCount(row.n, loc);
       if (cell === 0) {
         const tip = document.createElement('div');
         tip.style.cssText = `position:absolute;left:50%;bottom:-5px;width:0;height:0;margin-left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid ${color}`;
@@ -730,7 +737,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       for (const [k, a] of keyed) if (!next.has(k)) { m.removeAnnotation(a); keyed.delete(k); }
       for (const [k, row] of next) {
         if (keyed.has(k)) continue;
-        const a = new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell), {
+        const a = new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell, cell === 0 && drawCell > 0), {
           data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -6),
         });
         keyed.set(k, a); m.addAnnotation(a);
