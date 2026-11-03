@@ -1068,7 +1068,10 @@ POLICIES: dict[str, _P] = {
         "wp-json post status: a 404 the API itself attributes to rest_post_invalid_id (post deleted "
         "at source), or HTTP 200 carrying a status of trash/draft/pending/private/expired. A 404 "
         "WITHOUT that code, any 401/403/408/429/5xx, an unparseable body, an id mismatch and an "
-        "unrecognised status are all UNKNOWN and hold the strike without deactivating.",
+        "unrecognised status are all UNKNOWN and hold the strike without deactivating. A REST 401 "
+        "rest_forbidden (post no longer public) is decided by the post's OWN id page /?p=<id>: a 404 "
+        "with no redirect is GONE, anything else UNKNOWN (never the stored slug, which WordPress "
+        "redirects to the closest-named other post — SWR19940, measured 2026-11-03).",
         "Absence from the crawl only SELECTS candidates; scrapers/suwar/run.py::_verify_gone gives "
         "each at-grace row a DIRECT confirm before prune_unseen may deactivate it. "
         "Control-validated live 2026-09-14 against this platform's real retirement behaviour: it "
