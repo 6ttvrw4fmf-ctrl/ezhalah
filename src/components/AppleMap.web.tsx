@@ -407,11 +407,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const [groundOpen, setGroundOpen] = useState(false);
   // Satellite with labels by default (owner 2026-10-31: «keep the default satellite»).
   const [mapType, setMapType] = useState<'standard' | 'hybrid' | 'muted'>('hybrid');
+  // THE MAP'S POP-UP CARDS CLOSE WHEN THE USER DOES SOMETHING ELSE (owner 2026-11-03: «if the user selects something
+  // else it goes away — I clicked the satellite photo and the ground-type card stayed»). Layers and ground type are one
+  // family of cards: opening one closes the other, choosing a map style closes both, and so does touching or moving the
+  // map, a pin, a zoom button, the draw button or the full-screen button.
+  const closePanels = () => { setLayersOpen(false); setGroundOpen(false); };
   const applyMapType = (k: 'standard' | 'hybrid' | 'muted') => {
     const mk = mapkitOf();
     const m = mapRef.current;
     if (mk && m) m.mapType = k === 'hybrid' ? mk.Map.MapTypes.Hybrid : k === 'muted' ? mk.Map.MapTypes.MutedStandard : mk.Map.MapTypes.Standard;
     setMapType(k);
+    closePanels();
   };
 
   useEffect(() => {
@@ -557,6 +563,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     let lastPick = 0;
     const pick = (row: PinRow, cell: number) => {
       lastPick = Date.now();
+      closePanels();
       if (cell > 0) {
         live.history.push(m.region);
         // Always IN (measured live 2026-11-03: a street-zoom bubble's fixed 2.2-cell span was wider than the view it sat
@@ -772,6 +779,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     // Held on the element it was added to: on unmount the map effect above destroys the map (nulling `element`)
     // BEFORE this cleanup runs (src/lib/mapSurface.ts; measured 11-03, an uncaught TypeError on a fast tab switch).
     const offCanvasTap = onSurface(m, 'click', onCanvasTap);
+    const offPanelsClose = onSurface(m, 'pointerdown', closePanels);
+    m.addEventListener('region-change-start', closePanels);
     void load();
     return () => {
       seq++; if (timer) clearTimeout(timer);
@@ -779,6 +788,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       m.removeEventListener('region-change-start', hideCanvas as unknown as (e: unknown) => void);
       m.removeEventListener('select', onSelect as unknown as (e: unknown) => void);
       offCanvasTap();
+      offPanelsClose();
+      m.removeEventListener('region-change-start', closePanels as unknown as (e: unknown) => void);
       canvas.remove();
       if (mapRef.current === m) clear();
     };
@@ -798,6 +809,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // Design only for now: nothing searches inside the shape yet.
   // + / − (owner 2026-10-31: «click to zoom»): halve or double the visible span around the same centre.
   const zoomBy = (f: number) => {
+    closePanels();
     const mk = mapkitOf(); const m = mapRef.current;
     if (!mk || !m) return;
     const { center, span } = m.region;
@@ -814,7 +826,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const m = mapRef.current;
     if (m) { m.isScrollEnabled = on; m.isZoomEnabled = on; m.isRotationEnabled = on; }
   };
-  const startDrawing = () => { setSketch(null); setDrawing(true); gestures(false); };
+  const startDrawing = () => { closePanels(); setSketch(null); setDrawing(true); gestures(false); };
   const cancelDrawing = () => {
     const m = mapRef.current;
     if (m && sketchRef.current) m.removeOverlay(sketchRef.current);
@@ -906,7 +918,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {onExpand && !failed && !drawing ? (
-        <Pressable style={s.closeBtn} onPress={onExpand} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+        <Pressable style={s.closeBtn} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
@@ -959,7 +971,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       {/* Layers, far bottom-right (owner 2026-10-31: «far down right»). In English Apple's mark is bottom-LEFT and the
           corner is free; in Arabic the mark sits bottom-RIGHT, inside the map image, so the button lifts above it. */}
       {roomy && !failed && !drawing ? (
-        <Pressable style={[s.layersBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => setLayersOpen((o) => !o)} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
+        <Pressable style={[s.layersBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => { setLayersOpen((o) => !o); setGroundOpen(false); }} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
           <Ionicons name="layers-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
