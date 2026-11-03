@@ -78,3 +78,10 @@ def test_a_big_decimal_area_rounds_to_the_stored_whole_number():
     body = "<p>▪️ مساحة الأرض: 1247.5 م²</p>"
     assert _cmp({"area_m2": 1248}, body, "area") == S.MATCH
     assert _cmp({"area_m2": 1300}, body, "area") == S.MISMATCH
+
+
+def test_a_dual_year_is_age_two():
+    # haraj 23236759 (branch re-score 41596198038, 2026-11-03): «عمر العقار: سنتين», stored 2.
+    body = "<p>نوع العقار: إستراحة عمر العقار: سنتين مساحة العقار: 5001</p>"
+    assert _cmp({"property_age": 2}, body, "property_age") == S.MATCH
+    assert _cmp({"property_age": 5}, body, "property_age") == S.MISMATCH

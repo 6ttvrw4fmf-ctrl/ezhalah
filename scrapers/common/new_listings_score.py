@@ -299,7 +299,8 @@ AREA_UNIT = re.compile(r"م²|م2|متر مربع|m²")
 ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
 # Arabic states TWO with the dual, not the digit: bossbih 17388816 prints «غرفتين» for its 2 bedrooms
 # (2026-10-12: stored 2, scored MISMATCH). A dual on the keyword's own line states the figure 2.
-DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان)(?![\u0621-\u064A])")
+DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان|سنتين|سنتان|عامين|عامان)(?![\u0621-\u064A])")
+# «سنتين» is a two-year-old building: haraj 23236759 «عمر العقار: سنتين», stored 2 (branch re-score 41596198038, 2026-11-03).
 
 
 # Three to ten are written as words too, on a source's own structured cell: aljassim's room cell reads «أربع غرف»
