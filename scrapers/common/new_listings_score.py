@@ -425,8 +425,16 @@ def _inside_a_printed_range(stored, lines: list[str]) -> bool:
 PREPARED = r"تاسيس\s*"
 
 
+# «المطبخ غير مركب», «مصعد غير راكب» — the fixture is NOT installed: the ad states no yes (the owner's four outcomes,
+# 2026-10-25; the shared reader serves it unknown). bahadhabab 10777803 «ومطبخ المطبخ غير مركب» was asked «kitchen» by
+# the 2026-11-03 score and counted a findability miss on a correctly-NULL kitchen. Up to three plain words may stand
+# between the fixture and its verdict; a comma or full stop ends it («مطبخ، مكيفات غير راكبة» keeps the kitchen).
+def _not_installed(kw: str) -> str:
+    return r"(?:" + kw + r")\w*(?:[^\S\n]+[^\s،,.؛;]+){0,3}?[^\S\n]+غير\s+(?:راكب|مركب)\w*"
+
+
 def unprepared(x: str, kw: str) -> str:
-    return re.sub(PREPARED + "(?:" + kw + ")", " ", x)
+    return re.sub(_not_installed(kw), " ", re.sub(PREPARED + "(?:" + kw + ")", " ", x))
 
 
 def _cmp_bool(stored, lines: list[str], kw: str) -> str:
