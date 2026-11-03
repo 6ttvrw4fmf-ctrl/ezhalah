@@ -84,3 +84,29 @@ def test_main_stamps_seen_rows_with_this_reader_after_the_prune():
     src = inspect.getsource(NW.main)
     assert "db.stamp_seen_alive(tbl, {r[\"ad_number\"] for r in rows_seen}, verify_seen, source=SOURCE)" in src
     assert src.index("db.prune_unseen(") < src.index("db.stamp_seen_alive(")
+
+
+# ── prune asks the post by its own id (2026-11-03) ──────────────────────────────────────────────
+def test_prune_reads_the_own_id_page_not_a_reused_slug(monkeypatch):
+    from scrapers.common import http_liveness as HL
+    monkeypatch.setattr(HL.time, "sleep", lambda *_: None)
+    pages = {"https://alnowaisiry.com/?p=4349": (404, "<body class='error404'>", False),
+             "https://alnowaisiry.com/?p=4513": (200, "<body class='lands-template postid-4513'>", True)}
+    monkeypatch.setattr(HL.LivenessProbe, "fetch", lambda self, url: pages[url])
+    assert NW._make_prune_verify("NW4513")("NW4349")[0] == "gone"
+    assert NW._make_prune_verify("NW4513")("NW4513")[0] == "live"
+
+
+def test_prune_removes_nothing_without_a_live_control_or_on_a_redirected_404(monkeypatch):
+    from scrapers.common import http_liveness as HL
+    monkeypatch.setattr(HL.time, "sleep", lambda *_: None)
+    pages = {"https://alnowaisiry.com/?p=4349": (404, "x", False),
+             "https://alnowaisiry.com/?p=4513": (403, "blocked", False)}
+    monkeypatch.setattr(HL.LivenessProbe, "fetch", lambda self, url: pages[url])
+    assert NW._make_prune_verify("NW4513")("NW4349")[0] == "unknown"
+    assert NW._make_prune_verify(None)("NW4349")[0] == "unknown"
+    pages["https://alnowaisiry.com/?p=4513"] = (200, "postid-4513", True)
+    pages["https://alnowaisiry.com/?p=4349"] = (404, "x", True)
+    assert NW._make_prune_verify("NW4513")("NW4349")[0] == "unknown"
+    pages["https://alnowaisiry.com/?p=4349"] = (200, "<body class='postid-4513'>", True)   # another post
+    assert NW._make_prune_verify("NW4513")("NW4349")[0] == "unknown"

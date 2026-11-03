@@ -21,7 +21,6 @@ class _R:
 @pytest.fixture
 def rest_401(monkeypatch):
     monkeypatch.setattr(S, "cc", types.SimpleNamespace(get=lambda *a, **k: _R(401, {"code": "rest_forbidden"})))
-    monkeypatch.setattr(S, "_stored_url", lambda ad: "https://suwar.sa/property/x/")
     monkeypatch.setattr(HL.time, "sleep", lambda s: None)
 
 
@@ -41,8 +40,17 @@ def test_a_401_whose_own_page_is_anything_else_stays_unknown(rest_401, monkeypat
     assert S._verify_gone("SWR19940")[0] == "unknown"
 
 
-def test_a_401_with_no_stored_url_stays_unknown(rest_401, monkeypatch):
-    monkeypatch.setattr(S, "_stored_url", lambda ad: None)
+def test_a_401_asks_for_the_post_by_its_own_id_never_its_slug(rest_401, monkeypatch):
+    # 2026-11-03: the stored slug 301'd to «…-2/», ANOTHER post of project 839, so it read "moved"
+    # for weeks. /?p=19940 answers 404 with no redirect; a live id redirects to its own permalink.
+    asked = []
+    monkeypatch.setattr(HL.LivenessProbe, "fetch", lambda self, url: (asked.append(url), (404, "x", False))[1])
+    assert S._verify_gone("SWR19940")[0] == "gone"
+    assert asked and all(u == "https://suwar.sa/?p=19940" for u in asked)
+
+
+def test_a_404_reached_through_a_redirect_is_not_this_post(rest_401, monkeypatch):
+    _page(monkeypatch, 404, moved=True)
     assert S._verify_gone("SWR19940")[0] == "unknown"
 
 
