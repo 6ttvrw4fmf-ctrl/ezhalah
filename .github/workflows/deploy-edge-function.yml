@@ -245,9 +245,12 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
+          # --yes (2026-11-03): the Supabase CLI now asks «Confirmation required: Deploy 1 Function … production»
+          # and, with no terminal, refuses («Re-run with --yes to confirm. Nothing was changed.» — run 41706414396).
+          # This workflow's own gate is the confirm=DEPLOY input checked above; --yes only answers the CLI's prompt.
           npx --yes supabase@latest functions deploy "${{ inputs.function }}" \
             --project-ref aannarbkwcymrotzwdbo \
-            --no-verify-jwt
+            --no-verify-jwt --yes
 
       # ── POST-DEPLOY BOOT SMOKE TEST (blocking) ──────────────────────────────────────────────────
       # A SUCCESSFUL DEPLOY IS NOT A WORKING FUNCTION. Added 2026-08-29 after this exact sequence:
@@ -367,7 +370,7 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes supabase@latest functions delete "${{ inputs.delete_function }}" \
-            --project-ref aannarbkwcymrotzwdbo
+            --project-ref aannarbkwcymrotzwdbo --yes   # same non-interactive prompt as deploy; this job's own gates above still apply
 
       - name: Report
         if: ${{ !inputs.dry_run && inputs.action != 'delete' }}

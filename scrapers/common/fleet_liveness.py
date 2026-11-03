@@ -46,7 +46,9 @@ under the cap and confirmed gone by a second transport (lifecycle-spot-check.yml
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib
+import os
 import math
 import sys
 import time
@@ -269,6 +271,17 @@ def _update(client, table: str, ids: list, patch: dict) -> None:
         _execute(client.table(table).update(patch).in_("id", ids[i:i + 200]), what=f"{table}.update")
 
 
+def run_label(site: str, struck_only: bool = False) -> str:
+    """The run label. The struck-only RECHECK (fleet-liveness-recheck.yml, 14:17 + 20:47 UTC, 1-9 min,
+    0-363 rows) is a different job from the daily full pass (07:17 UTC, up to 5 h 22 min, ~15,000 rows) and
+    gets its OWN label (AGENTS.md: «a liveness job needs its OWN run label»). Sharing one made the full
+    pass's baseline the recheck's few minutes: mon_detect_run_duration_explosion read every in-flight morning
+    pass as a stall and fleet_liveness:muhaysini / :haraj opened 7 times in 7 days each (🦅 2026-11-03).
+    The suffix keeps every reader that must see it working: `^fleet_liveness:` (rows-collapse exclusion,
+    lifecycle_report), `(^|:)<site>([_:]|$)` (stale-remediation), `%liveness%` (silent-partial-success)."""
+    return f"fleet_liveness:{site}:recheck" if struck_only else f"fleet_liveness:{site}"
+
+
 def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
     spec = SITES[site]
     shadow = shadow or site not in APPLY
@@ -278,7 +291,7 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
     policy = policy_for(site)
     now = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
-    run_id = begin_run(f"fleet_liveness:{site}")
+    run_id = begin_run(run_label(site, struck_only))
     st = {"site": site, "shadow": shadow, "active": 0, "probed": 0, ALIVE: 0, DEAD: 0, UNKNOWN: 0,
           "verified": 0, "struck": 0, "hidden": 0, "would_hide": [], "quarantined": None, "covered": 0.0,
           "fresh": 0}
@@ -434,6 +447,34 @@ def plan_sites(spec: str) -> list[str]:
     return names
 
 
+# Sites whose CRAWL already rides the Saudi residential proxy because the runner's address is walled
+# (small-sources-sync `proxy: true`); their session() tries DIRECT first. ONE list, read by both the
+# daily run and the recheck (2026-11-03): the proxy used to be granted in fleet-liveness.yml's own env
+# by a typed site list, and fleet-liveness-recheck.yml -- which runs every site in one process -- never
+# got it, so every sakani recheck read its controls 0/5 («no answer from the source») and its struck
+# rows were never re-read. The secret is FLEET_PROXY_URL; it reaches a site's module as
+# WASALT_PROXY_URL only while THAT site runs (that secret is metered: never inherited silently).
+PROXY_SITES: frozenset[str] = frozenset({"ialqarawi", "sakani"})
+
+
+@contextlib.contextmanager
+def site_proxy_env(site: str):
+    """WASALT_PROXY_URL = FLEET_PROXY_URL for a PROXY_SITES site, and unset for every other site."""
+    before = os.environ.get("WASALT_PROXY_URL")
+    purl = (os.environ.get("FLEET_PROXY_URL") or "").strip()
+    if site in PROXY_SITES and purl:
+        os.environ["WASALT_PROXY_URL"] = purl
+    else:
+        os.environ.pop("WASALT_PROXY_URL", None)
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop("WASALT_PROXY_URL", None)
+        else:
+            os.environ["WASALT_PROXY_URL"] = before
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Daily DIRECT liveness for every site with a measured oracle")
     ap.add_argument("--site", action="append", choices=sorted(SITES), help="default: every site")
@@ -459,7 +500,8 @@ def main() -> int:
         sites = recheck_order(sb(), sites)
     for site in sites:
         try:
-            run_site(site, shadow=a.shadow, struck_only=a.struck_only)
+            with site_proxy_env(site):
+                run_site(site, shadow=a.shadow, struck_only=a.struck_only)
         except Exception as e:  # noqa: BLE001 — one site failing never stops the rest
             print(f"✗ {site}: {e}", flush=True)
             failed += 1

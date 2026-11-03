@@ -173,3 +173,15 @@ def test_the_plural_lifts_reaches_the_backfill_candidates():
     E.prose_backfill(db, "wasalt_residential_listings", page=5)
     assert any("مصاعد" in s for s in seen), seen
     assert db.writes == [(1, {"elevator": True})]
+
+
+def test_one_reader_lobby_ac_and_reserved_shaft_are_not_the_unit_2026_11_03():
+    """Wasalt's three prose columns use the Advanced Filter's word reader (one reader). Real wasalt sentences the
+    older reader answered yes to: an air-conditioned LOBBY, copper pipes laid for AC, a shaft reserved for a lift."""
+    def said(desc):
+        return E.prose_amenities({"propertyInfo": {"description": desc}})
+    assert "air_conditioner" not in said("🔹 كاميرات مراقبة<br> 🔹 مداخل مكيفة<br> 🔹 أسقف مرتفعة")
+    assert "air_conditioner" not in said("مصعد راكب - تمديد نحاس للمكيفات - قريب من محطة الميترو")
+    assert "elevator" not in said("📍 دورين | 📍 عدادين كهرباء | 📍 مكان مخصص للمصعد")
+    assert said("الشقة فيها مكيفات سبليت ومصعد").get("air_conditioner") is True
+    assert said("الشقة فيها مكيفات سبليت ومصعد").get("elevator") is True

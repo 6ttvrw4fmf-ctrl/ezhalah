@@ -1317,7 +1317,9 @@ POLICIES: dict[str, _P] = {
         "Measured 2026-10-07 (oracle-feasibility-probe 37618176662): a hidden ad's details page still "
         "answers 200 like a live one, with no marker between them, so NO death signal exists and "
         "prune_unseen's verify_gone answers UNKNOWN for every row: absence counts strikes and hides "
-        "nothing. The ads carry REGA licence expiry dates (license_expiry) for a future oracle."),
+        "nothing. 2026-11-03: the one statement it does publish, the ad's own REGA licence end date "
+        "(license_expiry), retires an at-grace ad once that date has passed (run.licence_end_oracle, the "
+        "fleet default db._published_end_passed); any other at-grace ad stays UNKNOWN and shown."),
     "macsaib": _P(
         _pol("macsaib", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over Taearif's complete, self-declaring JSON feed: "

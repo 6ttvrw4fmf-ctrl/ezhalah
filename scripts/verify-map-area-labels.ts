@@ -5,7 +5,7 @@
 // shape: un-narrowed views read the labels first, a failed read falls back to the dots, labels are keyed and tappable.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
+import { areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -31,6 +31,14 @@ check('a label just off the screen edge does not count as on screen', inView({ l
 check('a bubble tap always zooms in: never wider than a third of the view', bubbleTapSpan(0.01, 0.015) === 0.005 && Math.abs(bubbleTapSpan(0.01, 0.3) - 0.022) < 1e-9 && bubbleTapSpan(0.075, 0.6) <= 0.2);
 mustCatch('a bubble tap that zooms OUT (2.2 cells wider than the view)', bubbleTapSpan(0.01, 0.015) < 0.015);
 check('a district tap zooms well past district level (0.015°), not onto a crowded neighbour view', areaZoomSpan('district') <= 0.02);
+// THE LABELS FEED (owner 2026-11-03: «I want it to feel smooth»): every label once, filtered on the phone.
+const feedRows = parseAreasFeed([[true, 'جدة', '', 21.5, 39.2, 100, 20, 0], [false, 'جدة', 'النعيم', 21.6, 39.14, 30, 5, 2], [false, 'جدة', 'الصفا', 21.58, 39.21, 0, 7, 0], ['bad'], [false, '', 'x', 1, 1, 1, 1, 1]]);
+check('the feed keeps only well-formed rows', feedRows.length === 3);
+check('a city view lists cities only, counted for the chosen deals', JSON.stringify(areasFromFeed(feedRows, 'city', ['buy'], { s: 20, n: 23, w: 38, e: 40 })) === JSON.stringify([{ city: 'جدة', district: '', lat: 21.5, lng: 39.2, n: 100 }]));
+check('a district view counts the chosen deals, drops a district with none, biggest first', JSON.stringify(areasFromFeed(feedRows, 'district', ['buy', 'short'], { s: 20, n: 23, w: 38, e: 40 }).map((a) => [a.district, a.n])) === JSON.stringify([['النعيم', 32]]));
+check('a label outside the box is left out', areasFromFeed(feedRows, 'district', ['buy', 'rent', 'short'], { s: 21.59, n: 23, w: 38, e: 40 }).length === 1);
+mustCatch('a district counted with a deal the user did not choose', areasFromFeed(feedRows, 'district', ['buy'], { s: 20, n: 23, w: 38, e: 40 })[0].n === 30);
+check('fetchMapAreas answers from the feed and keeps the RPC as the fallback', /const local = await fetchAreasFeed\(\);\n\s*if \(local\) return areasFromFeed\(local, level, deals, box, 400\);/.test(readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8')) && /if \(!rows\.length\) return null;/.test(readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8')));
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const data = readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8');
 check('an un-narrowed view reads the labels for its level first', /const level = narrowed \? null : areaLevelFor\(span\.latitudeDelta\);/.test(web) && /const areas = await fetchMapAreas\(paddedBox\(center, span\), level, pins\.deals\);/.test(web));

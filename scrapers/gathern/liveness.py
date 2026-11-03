@@ -282,12 +282,27 @@ def probe(s, url: str, retries: int = 3, home_status: int = 0) -> int:
             if home_status == HOME_LANDED:
                 return 200 if _opens_at_ar_view(s, url) else home_status
             return _ar_view_status(s, url) or home_status
+        if r.status_code in (404, 410) and not _is_not_found_page(r):
+            # A BARE 404 IS NOT THE UNIT'S OWN NOT-FOUND PAGE (2026-11-03). gathern's removal answer
+            # is a 404 whose server-rendered body says «الصفحة غير موجودة» (measured that day on
+            # unit 145583, and on the 8 rows retired at 19:02). Unit 10218 (row 21137745) read 404
+            # at 00:06 while it was live in a real browser and in the feed five hours later, and
+            # ~10-30% of the sweep's 404s on served rows were followed by a 200 within days. A 404
+            # without that page is no reading of the unit: re-read its /ar/view/ address, where only
+            # a named 200 (alive) or the not-found page (404/410) is taken; anything else is 0.
+            return _ar_view_status(s, url)
         return r.status_code
     return 0
 
 
 _VIEW = re.compile(r"^(https://gathern\.co)/view/(\d+)/unit/(\d+)/?$")
 _NOT_FOUND = ("الصفحة غير موجودة", "page not found")
+
+
+def _is_not_found_page(r) -> bool:
+    """True when a response body is gathern's own not-found page (the only shape of a removal)."""
+    body = getattr(r, "text", "") or ""
+    return any(n in body for n in _NOT_FOUND)
 
 
 def _ar_view_status(s, url: str) -> int:

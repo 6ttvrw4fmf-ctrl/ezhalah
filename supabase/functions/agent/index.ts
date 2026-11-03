@@ -513,6 +513,28 @@ const COMMERCIAL_TYPES = [
 ];
 const TYPES = [...RESIDENTIAL_TYPES, ...COMMERCIAL_TYPES];
 
+// THE MODEL SOMETIMES NAMES THE TYPE IN ARABIC («شقة», «فيلا») although the contract below says "ONE canonical English
+// type". Measured live 2026-11-03 (audit-invariants.yml, backlog 1263): «شقة للإيجار السنوي في الرياض» → type «شقة»,
+// «فيلا للبيع في جدة» → type «فيلا». The app already folds these (src/data/agent.ts typeFromAgent, after offices were
+// shown for an apartment ask on 2026-10-13), but every OTHER reader of this response got the raw word. The edge now
+// keeps its own contract: an Arabic type word maps to the same canonical type the app maps it to (AR_TYPE in
+// src/data/agent.ts, mirrored here word for word for the canonical TYPES); anything else passes through untouched.
+const AR_TYPE_CANON: Record<string, string> = {
+  "شقة": "Apartment", "شقه": "Apartment", "فيلا": "Villa", "فلة": "Villa", "دور": "Floor", "بيت": "Villa",
+  "منزل": "Villa", "غرفة": "Room", "غرفه": "Room", "عمارة": "Building", "عماره": "Building",
+  "استراحة": "Rest House", "استراحه": "Rest House", "شاليه": "Chalet", "مكتب": "Office",
+  "مستودع": "Warehouse", "محل": "Shop", "معرض": "Showroom", "مصنع": "Factory", "ورشة": "Workshop",
+  "مزرعة": "Farm", "مزرعه": "Farm", "مخيم": "Camp", "كشك": "Shop", "محطة": "Gas Station", "مكاتب مشتركة": "Office",
+  "أرض زراعية": "Agriculture Plot", "ارض زراعية": "Agriculture Plot",
+  "أرض": "Residential Land", "ارض": "Residential Land",
+};
+export function canonType(t: unknown): string | null {
+  if (typeof t !== "string" || !t.trim()) return null;
+  const s = t.trim();
+  if (TYPES.includes(s)) return s;
+  return AR_TYPE_CANON[s] ?? AR_TYPE_CANON[s.replace(/^ال/, "")] ?? s;
+}
+
 const SYSTEM = `You are Ezhalah (Arabic: ازهله) — a warm, friendly, fast Saudi real-estate search assistant. You help people find properties in Saudi Arabia and nothing else. You feel like a knowledgeable Saudi friend, not a corporate bot. You are NOT a legal, financial, investment, or market advisor.
 
 BRAND NAME: write it as "Ezhalah" in English and "إزهله" in Arabic. NEVER translate its meaning (never "facilitate", "ease", "simplify"). The brand is ALWAYS spelled "إزهله" (with hamza) in Arabic in any reply you give.
@@ -1451,7 +1473,7 @@ Deno.serve(async (req: Request) => {
         locationStateValidated,
         geographicScope: out.geographicScope ?? prevQuery?.geographicScope,
         excludedPlatforms: Array.isArray(out.excludedPlatforms) ? out.excludedPlatforms : [],
-        type: typeof out.type === "string" && out.type ? out.type : null,
+        type: canonType(out.type),
         detail: typeof out.detail === "string" && out.detail ? out.detail : null,
         price,
         priceOriginal: priceOriginal || undefined,
@@ -1516,7 +1538,7 @@ Deno.serve(async (req: Request) => {
           if (distinct.length >= 2) {
             if (alreadyAsked) {
               location = distinct[0].city;
-              anyCityReply = searchLineText(locale === "en", typeof out.type === "string" ? out.type : null, location, text, lastBotReply);
+              anyCityReply = searchLineText(locale === "en", canonType(out.type), location, text, lastBotReply);
             } else ambiguityReply = severalCitiesQuestion(distinct.map((a) => a.city), text, lastBotReply, locale === "en");
           }
         }
@@ -1721,7 +1743,7 @@ Deno.serve(async (req: Request) => {
       if (anyCityReply) replyOut = anyCityReply;
       else if (notMeasured) replyOut = notMeasured;
       else if (replyBreaksSearchRules(replyOut, text)) {
-        replyOut = searchLineText(locale === "en", typeof out.type === "string" ? out.type : null, location, text, lastBotReply);
+        replyOut = searchLineText(locale === "en", canonType(out.type), location, text, lastBotReply);
       }
       // «١٠٠٠ متر» in the reply IS the 1000 in `detail` — compare digits the same way, or the note repeats the size
       // («… أرض ١٠٠٠ متر … 🏡 (1000 م²)», found live 2026-10-11).
@@ -1881,7 +1903,7 @@ Deno.serve(async (req: Request) => {
           districtPin,
           districts: validatedDistricts,
           locationStateValidated,
-          type: typeof out.type === "string" && out.type ? out.type : null,
+          type: canonType(out.type),
           detail: typeof out.detail === "string" && out.detail ? out.detail : null,
           // A complete new request starts fresh: the app keeps nothing from the previous search, and a budget read from an EARLIER
           // message is not this one's (see isFreshRequest, live 2026-10-13).
