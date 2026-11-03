@@ -133,7 +133,7 @@ mustCatch('a view that draws thousands of overlapping heads (the cap gone)', PIN
 check('AppleMap.web.tsx reloads on region-change-end and drops a late answer', /addEventListener\('region-change-end', onRegion\)/.test(web) && /if \(my !== seq \|\| rows === 'unknown'/.test(web));
 check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('const keyOf = (r: PinRow)'));
 check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape \? '\{n\} listings inside the boundary'/.test(web));
-check('a bubble tap zooms in; a pin tap hands the row up (one shared pick)', /const pick = \(row: PinRow, cell: number\) => \{[\s\S]{0,400}?if \(cell > 0\) \{[\s\S]{0,300}?\} else onPinSelectRef\.current\?\.\(row\);/.test(web));
+check('a bubble tap zooms in; a pin tap hands the row up (one shared pick)', /const pick = \(row: PinRow, cell: number\) => \{[\s\S]{0,400}?if \(cell > 0\) \{[\s\S]{0,700}?\} else onPinSelectRef\.current\?\.\(row\);/.test(web));
 // TOUCH: on a phone MapKit's `select` never fired for a tap on a custom annotation (owner 2026-11-02: «when I click it
 // doesn't show»). The head element carries its own pointerdown/pointerup tap (≤ 10 px of movement), and MapKit's
 // mouse `select` is deduped against it by time.

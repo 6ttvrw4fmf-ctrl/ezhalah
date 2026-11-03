@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { fetchMapDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
@@ -556,7 +556,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       lastPick = Date.now();
       if (cell > 0) {
         live.history.push(m.region);
-        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(row.lat, row.lng), new mk.CoordinateSpan(cell * 2.2, cell * 2.2)), true);
+        // Always IN (measured live 2026-11-03: a street-zoom bubble's fixed 2.2-cell span was wider than the view it sat
+        // in, so a tap zoomed OUT and flipped back to district names): at most a third of the current view.
+        const sp = bubbleTapSpan(cell, m.region.span.latitudeDelta);
+        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(row.lat, row.lng), new mk.CoordinateSpan(sp, sp)), true);
       } else onPinSelectRef.current?.(row);
     };
     // SMALL heads (owner 2026-11-02: «the pin is so so big»): 11 px text, a slim pill. ZOOMED OUT, A CELL IS A DOT
@@ -716,7 +719,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (!narrowed) {
           const areas = await fetchMapAreas(paddedBox(center, span), 'district', pins.deals);
           if (my !== seq || mapRef.current !== m) return;
-          if (areas !== 'unknown' && denseShowsDistricts(areas.length)) {
+          if (areas !== 'unknown' && denseShowsDistricts(areas.filter((a) => inView(a, center, span)).length, span.latitudeDelta)) {
             drawAreas(areas, 'district');
             setPinCount(areasTotal(areas));
             return;
