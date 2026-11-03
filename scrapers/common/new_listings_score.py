@@ -99,7 +99,10 @@ def norm_district(s: str) -> str:
 NORMAL_FIELDS = ("region", "city", "district", "deal", "type", "rent_period", "price", "area", "bedrooms")
 
 AGE_KW = r"عمر العقار"
-NEW_BUILDING = re.compile(AGE_KW + r"\s*[:：]?\s*جديد")
+# A new building is written «جديد», or in haraj's REGA block «New» / «اقل من سنة» (2026-11-03 score: haraj 23236720
+# «عمر العقار: New», 23215277 «عمر العقار: اقل من سنة», both stored 0 by parse.py / normalize, scored MISMATCH).
+NEW_WORDS = r"(?:جديد|new(?![a-z])|less than (?:a |one )?year|اقل من سنه)"
+NEW_BUILDING = re.compile(AGE_KW + r"\s*[:：]?\s*" + NEW_WORDS, re.I)
 
 FIELDS: list[tuple[str, str, str, str]] = [
     ("region", "word", "region_ar", ""),
@@ -331,6 +334,13 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     if float(stored) >= 1000:
         if pat.search(whole):
             return MATCH
+        # The integer-area rule below holds for a big plot too: jurash 23304862 (2026-11-03 score) prints «مساحة
+        # الأرض: 1247.5 م²» and we store 1248; only the under-1,000 branch knew it, so the night scored it wrong.
+        if "مساحه" in kw and float(stored) == int(float(stored)):
+            near = " | ".join(lines[j] for i in kw_hits for j in (i - 1, i, i + 1) if 0 <= j < len(lines))
+            if any(int(float(m.group(1).replace(",", ".")) + 0.5) == int(float(stored))
+                   for m in re.finditer(r"(?<![\d.,])(\d+[.,]\d+)(?![\d])", near)):
+                return MATCH
     else:
         # A small figure counts only next to its keyword: on the keyword's own line, or on a
         # neighbouring line that is NOTHING BUT the value («غرف النوم» / «4», «م²» / «240»).
@@ -375,7 +385,7 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         if worded:
             return MATCH if float(stored) in worded else MISMATCH
         if kw == AGE_KW and (NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)) or any(
-                i + 1 < len(lines) and re.match(r"^\s*جديد\s*$", lines[i + 1]) for i in kw_hits)):
+                i + 1 < len(lines) and re.match(r"^\s*" + NEW_WORDS + r"\s*$", lines[i + 1], re.I) for i in kw_hits)):
             return MATCH if float(stored) == 0 else MISMATCH
         page_states = page_states or any(
             0 <= j < len(lines) and re.match(r"^\s*[\d,.٬]+" + _UNIT_TAIL + r"$", lines[j])

@@ -63,3 +63,18 @@ def test_arabic_adjective_facade_is_the_stored_direction():
     # a different facade is still wrong
     assert _cmp({"direction_ar": "جنوب شرقي"}, "<p>الواجهة : شمالية - غربية</p>", "direction_ar") == S.MISMATCH
     assert _cmp({"direction_ar": "شمال شرقي"}, body, "direction_ar") == S.MISMATCH
+
+
+def test_haraj_new_building_words_are_age_zero():
+    # haraj 23236720 «عمر العقار: New», 23215277 «عمر العقار: اقل من سنة» (2026-11-03 score), both stored 0.
+    assert _cmp({"property_age": 0}, "<p>نوع العقار: Floor عمر العقار: New مساحة العقار: 326.48</p>", "property_age") == S.MATCH
+    assert _cmp({"property_age": 0}, "<p>نوع العقار: عمارة عمر العقار: اقل من سنة مساحة العقار: 350</p>", "property_age") == S.MATCH
+    # a stated new building never vouches for an old one
+    assert _cmp({"property_age": 7}, "<p>عمر العقار: New</p>", "property_age") == S.MISMATCH
+
+
+def test_a_big_decimal_area_rounds_to_the_stored_whole_number():
+    # jurash 23304862 (2026-11-03 score): «مساحة الأرض: 1247.5 م²», stored 1248 (integer column, backlog 123).
+    body = "<p>▪️ مساحة الأرض: 1247.5 م²</p>"
+    assert _cmp({"area_m2": 1248}, body, "area") == S.MATCH
+    assert _cmp({"area_m2": 1300}, body, "area") == S.MISMATCH
