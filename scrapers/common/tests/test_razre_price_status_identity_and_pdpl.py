@@ -280,3 +280,20 @@ def test_an_unreadable_project_page_keeps_the_prune_off():
                   "https://www.razre.sa/projects/raz-elevate/": _Resp(503, "")})
     _, _, skipped, complete = R.crawl(s)
     assert complete is False and skipped.get("page_503") == 1
+
+
+def test_the_projects_own_lift_and_parking_reach_every_unit_and_nothing_else_does():
+    # 2026-11-03: raz-55's LD lists «مصعد» (and on the live page «مواقف سيارات»); elevator stayed NULL on all
+    # 18 active units, so the AF elevator answer never found them (ops_af_score razre elevator we_miss 5 of 5).
+    _, out = mapped()
+    rows = [r for r, _, why in out if r]
+    assert rows and all(r.get("elevator") is True for r in rows)
+    assert all("parking" not in r for r in rows)          # the fixture's list does not name parking: silence
+    ld = copy.deepcopy(LD)
+    cx = next(n for n in ld[0]["@graph"] if n.get("@type") == "ApartmentComplex")
+    cx["amenityFeature"] = [{"@type": "LocationFeatureSpecification", "name": "مواقف سيارات", "value": True},
+                            {"@type": "LocationFeatureSpecification", "name": "منزل ذكي", "value": True},
+                            {"@type": "LocationFeatureSpecification", "name": "مصعد", "value": False}]
+    _, out = mapped(page_html(ld=ld))
+    rows = [r for r, _, why in out if r]
+    assert all(r.get("parking") is True and "elevator" not in r for r in rows)
