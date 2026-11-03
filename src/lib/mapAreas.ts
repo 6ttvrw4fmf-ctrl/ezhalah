@@ -56,3 +56,38 @@ export function bubbleTapSpan(cell: number, latitudeDelta: number): number {
 
 /** The labels' total — the count pill's number. */
 export const areasTotal = (rows: AreaRow[]): number => rows.reduce((a, r) => a + r.n, 0);
+
+// ── THE LABELS FEED, FILTERED ON THE PHONE (owner 2026-11-03: «I want it to feel smooth»). Measured: each zoom waited
+//    ~300-420 ms for the network although map_areas_ar() ran in 1 ms; map_areas_feed_ar() hands over every label once
+//    ([is_city, city, district, lat, lng, n_buy, n_rent, n_short]) and these rules pick the ones in view.
+export type AreaFeedRow = { isCity: boolean; city: string; district: string; lat: number; lng: number; buy: number; rent: number; short: number };
+
+/** The feed's rows → labels. Anything that is not a well-formed row is dropped, never invented. */
+export function parseAreasFeed(raw: unknown): AreaFeedRow[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AreaFeedRow[] = [];
+  for (const r of raw) {
+    if (!Array.isArray(r) || r.length < 8) continue;
+    const [isCity, city, district, lat, lng, b, re, sh] = r as unknown[];
+    if (typeof city !== 'string' || !city || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) continue;
+    out.push({ isCity: isCity === true, city, district: typeof district === 'string' ? district : '', lat: Number(lat), lng: Number(lng),
+      buy: Number(b) || 0, rent: Number(re) || 0, short: Number(sh) || 0 });
+  }
+  return out;
+}
+
+/** The labels of one level inside a box, counted for the chosen deals, biggest first — what map_areas_ar() returned. */
+export function areasFromFeed(feed: AreaFeedRow[], level: AreaLevel, deals: string[], box: { s: number; w: number; n: number; e: number }, limit = 400): AreaRow[] {
+  const want = { buy: deals.includes('buy'), rent: deals.includes('rent'), short: deals.includes('short') };
+  const out: AreaRow[] = [];
+  for (const a of feed) {
+    if (a.isCity !== (level === 'city')) continue;
+    if (a.lat < box.s || a.lat > box.n || a.lng < box.w || a.lng > box.e) continue;
+    const n = (want.buy ? a.buy : 0) + (want.rent ? a.rent : 0) + (want.short ? a.short : 0);
+    if (n > 0) out.push({ city: a.city, district: level === 'city' ? '' : a.district, lat: a.lat, lng: a.lng, n });
+  }
+  return out.sort((x, y) => y.n - x.n).slice(0, limit);
+}
+
+/** A close view estimated (from the dots feed) to hold more listings than this skips the exact read: it is crowded. */
+export const CROWD_ESTIMATE = 1500;

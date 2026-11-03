@@ -31,8 +31,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/data/mapAreas';
-import { fetchMapDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
@@ -546,6 +546,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     if (!mk || !m || !pinFilter) return;
     const pins = pinFilter;
     let seq = 0; let timer: ReturnType<typeof setTimeout> | null = null; let mine: unknown[] = [];
+    // Both one-time feeds start downloading as the map opens, so the first zooms already answer on the phone.
+    void fetchAreasFeed(); void fetchMapDots();
     const keyed = new Map<string, unknown>();   // the annotations on the map, by what they show — a pan keeps what stays
     const loc = localeRef.current === 'ar' ? 'ar' : 'en';
     // What a tap does: a bubble zooms into its cell, a pin hands its row up (the card sheet). Called from the element's
@@ -706,14 +708,19 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         // The feed failed (or the projection could not be calibrated): the live grid path below, never an empty map.
       }
       hideCanvas(); shown = [];
+      // SMOOTH (owner 2026-11-03: «I want it to feel smooth»): a close view the dots feed (already on the phone) says holds
+      // more than CROWD_ESTIMATE listings is crowded without asking the network; only a view that may fit as pins reads.
+      const dots = cell === 0 && !narrowed ? await fetchMapDots() : 'unknown';
+      if (my !== seq || mapRef.current !== m) return;
+      const crowdedByDots = dots !== 'unknown' && dotsTotal(dotsInView(dots, pins.deals, { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 })) > CROWD_ESTIMATE;
       // Exact points are read with a small cap: one row over PIN_SHOW_MAX is enough to know the view is too dense.
-      let rows = await fetchMapPins(paddedBox(center, span), cell, pins, cell === 0 ? PIN_SHOW_MAX + 1 : PIN_LIMIT);
+      let rows: PinRow[] | 'unknown' = crowdedByDots ? [] : await fetchMapPins(paddedBox(center, span), cell, pins, cell === 0 ? PIN_SHOW_MAX + 1 : PIN_LIMIT);
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
       // DENSE VIEW: the exact-point read hit its cap, so pins would silently show a PART of the listings (downtown
       // Riyadh holds thousands in one city-zoom view). Never a partial set — read the same view again as a fine bubble
       // grid, where every listing is counted, and draw bubbles until the user zooms closer.
       let drawCell = cell;
-      if (cell === 0 && rows.length > PIN_SHOW_MAX) {
+      if (cell === 0 && (crowdedByDots || rows.length > PIN_SHOW_MAX)) {
         // Too crowded for price pins (owner's father, 2026-11-03: «at this zoom level show the names of the districts
         // only and the number of listings»): district names while two or more districts share the view; once one
         // district fills the screen, the fine count grid until the user zooms closer.
@@ -727,8 +734,13 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           }
         }
         drawCell = fineCellForSpan(span.latitudeDelta);
-        rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
-        if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
+        if (dots !== 'unknown' && drawCell === 0.01) {
+          // The bubbles from the dots feed itself (it is the same 0.01° grid) — no second network read.
+          rows = bubblesFromDots(dotsInView(dots, pins.deals, paddedBox(center, span))).map((b) => ({ ...b, type_ar: null, platforms: 0, ids: null, price: null, platform: null }) as PinRow);
+        } else {
+          rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
+          if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
+        }
       }
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
@@ -748,7 +760,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       }
       mine = [...keyed.values()];
     };
-    const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 220); };
+    const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 120); };
     const onSelect = (e: { annotation?: { data?: { pin?: PinRow; cell?: number } } }) => {
       const d = e.annotation?.data; if (!d?.pin) return;
       if (Date.now() - lastPick < 600) return;   // the element's own tap handler already picked it

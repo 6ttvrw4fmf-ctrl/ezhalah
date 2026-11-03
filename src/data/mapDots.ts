@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
 import { parseDots, type MapDot } from '@/lib/mapDots';
 
-export { dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, mercY, parseDots, type MapDot } from '@/lib/mapDots';
+export { bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, mercY, parseDots, type MapDot } from '@/lib/mapDots';
 
 let cache: MapDot[] | null = null;
 let inflight: Promise<MapDot[] | 'unknown'> | null = null;
