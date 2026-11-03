@@ -13,6 +13,7 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { windowBetween } from './lib/sourceWindow.ts';
 
 const MIGRATIONS = join(new URL('..', import.meta.url).pathname, 'supabase/migrations');
 const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort();
@@ -23,13 +24,18 @@ const def = hits.length ? readFileSync(join(MIGRATIONS, hits[hits.length - 1]), 
 function problems(sql: string): string[] {
   const out: string[] = [];
   if (!sql) return ['a committed migration defines mon_detect_dealapp_shard_coverage()'];
-  const missing = sql.slice(sql.indexOf('into v_missing'), sql.indexOf('into v_blocked'));
+  let missing: string, blocked: string;
+  try {
+    missing = windowBetween(sql, 'into v_missing', 'into v_blocked', 'dealapp_shard_coverage');
+    blocked = windowBetween(sql, 'into v_blocked', 'v_cov :=', 'dealapp_shard_coverage');
+  } catch (e) {
+    return [`the missing-shard and blocked-run queries are where this check expects them (${(e as Error).message})`];
+  }
   const m = /r\.started_at > now\(\) - interval '(\d+) hours'\s+and r\.ok/.exec(missing);
   if (!m || Number(m[1]) < 26) {
     out.push('a shard is covered by an ok run within one daily cycle plus the longest shard (≥ 26 h), not a bare 24 h');
   }
   if (m && Number(m[1]) > 48) out.push('the window stays under two days, so a shard that misses a day is still caught');
-  const blocked = sql.slice(sql.indexOf('into v_blocked'), sql.indexOf('v_cov :='));
   if (!/finished_at is not null/.test(blocked)) out.push('a run still in flight is not counted as a blocked zero-row run');
   return out;
 }
