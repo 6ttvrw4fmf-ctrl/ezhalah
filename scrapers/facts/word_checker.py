@@ -690,6 +690,11 @@ def _negated_after(nxt: list[str], fact: str) -> int:
     """How many words after the token belong to a post-negation («غير راكب», «لا», «لا يوجد», «0»), else 0."""
     for skip in (0, 1):                      # one descriptor may sit between: «مطبخ عربي غير راكب», «الضمانات ومدتها لا يوجد»
         w = nxt[skip:]
+        # A «و»-joined FIXTURE co-subject shares the «غير راكب» verdict (🔬 2026-11-03, manzo 21173178 «المكيفات والمطبخ:
+        # غير راكبة» served the ACs as yes): only for the not-installed facts, only «غير راكب/مركب», only one «و» word.
+        if (skip and nxt and fact in _POST_NOT_FACT and nxt[0].startswith("و") and _strip_wa(nxt[0].rstrip(":")) in _LIST_WORDS
+                and len(w) >= 2 and w[0] == "غير" and _starts(w[1], tuple(_n(x) for x in _POST_NOT_FACT[fact]))):
+            return skip + 2
         if skip and (not nxt or _strip_wa(nxt[0]) in _LIST_WORDS or nxt[0].isdigit() or nxt[0] in _FORM_LABELS):
             break
         if len(w) >= 2 and w[0] == "غير" and _starts(w[1], _POST_NOT + tuple(_n(x) for x in _POST_NOT_FACT.get(fact, ()))):
@@ -1146,6 +1151,11 @@ def selftest() -> None:
         ("شقة بصالة انيقة وغرفة نوم", {}, ("furnished",)),
         ("مفروش: لا (غير مفروش)", {"furnished": False}, ()),
         ("مطبخ غير راكب", {"kitchen": False}, ()),
+        # 🔬 2026-11-03 manzo 21173178: a «و»-joined fixture shares the verdict, both ways round; a comma list does not
+        ("المكيفات والمطبخ: غير راكبة", {"kitchen": False, "air_conditioner": False}, ()),
+        ("المطبخ والمكيفات غير راكبة", {"kitchen": False, "air_conditioner": False}, ()),
+        ("مطبخ، مكيفات غير راكبة", {"kitchen": True, "air_conditioner": False}, ()),
+        ("مكيفات ومطبخ راكب", {"kitchen": True, "air_conditioner": True}, ()),
         ("مطبخ (SPLIT) (غير راكب)", {"kitchen": False}, ()),
         ("مطبخ راكب ومكيفات راكبة", {"kitchen": True, "air_conditioner": True}, ()),
         ("بدون مكيفات ومطبخ", {"air_conditioner": False, "kitchen": False}, ()),
