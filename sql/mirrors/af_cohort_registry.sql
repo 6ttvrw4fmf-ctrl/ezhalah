@@ -1,4 +1,6 @@
 -- MIRROR of the LIVE production TABLE public.af_cohort_registry. NOT a migration — this file is
+-- Re-verified 2026-11-03 (migration 20261103091914 af_registry_monthly_certified_set_follows_reviewed_certifications READS
+--   the table, does not change it): UNCHANGED — production ROWS md5 8f80664ae6ea0f6e8f371d63813804d8, 78 rows, as recorded below.
 -- Re-verified 2026-11-02 (migration 20261102101415_commercial_group_advanced_filter_chips): CHANGED — ELEVEN rows added
 --   (owner lists 2026-11-01): استراحة / شاليه / مخيم on إيجار شهري, شاليه on بيع, شاليه / مزرعة / أرض زراعية / فندق /
 --   أرض تجارية / أرض صناعية / دوبلكس on إيجار سنوي.
