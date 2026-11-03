@@ -32,6 +32,7 @@
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { postgrestFetch } from './lib/postgrestRetry.ts';
+import { CANDIDATE_CITY_NAMES, discoverAmbiguousCityCases } from './lib/ambiguousCityCases.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
@@ -49,24 +50,6 @@ const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': '
 function scopeOf(rows: any[]): string[] {
   return [...new Set(rows.map((r) => r.source_table).filter(Boolean))] as string[];
 }
-
-type Case = { city: string; regionId: number; regionAr: string; label: string };
-
-// Measured live on 2026-08-26. Every one is a REAL ambiguous Saudi city name — the same name
-// carrying listings in more than one region.
-// REPOINTED 2026-11-03 (backlog 1263): the pin rule of 2026-11-02 (backlog 1166 — the map pin's governorate decides the city)
-// moved every listing out of the Madinah «القويعية», the Hail «البدائع» and the Asir «بيش», so those three cases returned an
-// EMPTY corpus (total_count -1) and proved nothing — the check's own instruction for that case. These are the names live in
-// TWO regions that day (search_listings_ar, measured): الشيحية حائل 11 / القصيم 4, الذيبية القصيم 9 / الرياض 2,
-// الشقيق عسير 3 / جازان 2. Both sides of each name are pinned, exactly as before.
-const CASES: Case[] = [
-  { city: 'الشيحية', regionId: 8,  regionAr: 'منطقة حائل',   label: 'hail+shihiyah' },
-  { city: 'الشيحية', regionId: 4,  regionAr: 'منطقة القصيم', label: 'qassim+shihiyah' },
-  { city: 'الذيبية', regionId: 4,  regionAr: 'منطقة القصيم', label: 'qassim+dhibiyah' },
-  { city: 'الذيبية', regionId: 1,  regionAr: 'منطقة الرياض', label: 'riyadh+dhibiyah' },
-  { city: 'الشقيق',  regionId: 6,  regionAr: 'منطقة عسير',   label: 'asir+shuqaiq' },
-  { city: 'الشقيق',  regionId: 10, regionAr: 'منطقة جازان',  label: 'jazan+shuqaiq' },
-];
 
 let failures = 0;
 const ok = (m: string) => console.log(`  ok   ${m}`);
@@ -97,6 +80,18 @@ async function oracle(city: string, regionId: number | null, tables: string[]): 
 }
 
 console.log('verify-region-scoped-city-live');
+
+// §0 the cases are DISCOVERED from today's rows (scripts/lib/ambiguousCityCases.ts) — six hardcoded
+// pairs went stale when the 2026-10-26 catalog cleanup retired three duplicate minority cities.
+const unscoped: Record<string, any[] | null> = {};
+for (const name of CANDIDATE_CITY_NAMES) {
+  try { unscoped[name] = await search(name, null); }
+  catch (e) { unscoped[name] = null; console.error(`  note unscoped ${name}: ${String(e).slice(0, 160)}`); }
+}
+const discovery = discoverAmbiguousCityCases(unscoped);
+for (const p of discovery.problems) bad(`§0 ${p}`);
+ok(`§0 ${discovery.ambiguousNames.length} live ambiguous name(s): ${discovery.ambiguousNames.join('، ')} → ${discovery.cases.length} region+city cases`);
+const CASES = discovery.cases;
 
 for (const c of CASES) {
   let rows: any[];
@@ -133,22 +128,27 @@ for (const c of CASES) {
            'the QA oracle disagrees with production — it would raise false failures or mask real ones');
 }
 
-// §3 with NO region selected the answer is the UNION, not a silently-picked region.
-{
-  const city = 'الشيحية';
+// §3 with NO region selected the answer is the UNION of every region holding the name, not a
+// silently-picked region — on each discovered ambiguous name.
+for (const city of discovery.ambiguousNames) {
   try {
-    const all = await search(city, null);
+    const all = unscoped[city] ?? [];
     const allTotal = Number(all?.[0]?.total_count ?? -1);
-    const r1 = Number((await search(city, 8))?.[0]?.total_count ?? -1);
-    const r3 = Number((await search(city, 4))?.[0]?.total_count ?? -1);
-    if (allTotal === r1 + r3) ok(`§3 no-region ${city} = union of its regions (${r1} + ${r3} = ${allTotal})`);
-    else bad(`§3 no-region ${city}: ${allTotal} != ${r1} + ${r3}`,
+    const parts: number[] = [];
+    for (const c of CASES.filter((x) => x.city === city)) {
+      parts.push(Number((await search(city, c.regionId))?.[0]?.total_count ?? -1));
+    }
+    const sum = parts.reduce((a, b) => a + b, 0);
+    if (allTotal > 0 && allTotal === sum) ok(`§3 no-region ${city} = union of its regions (${parts.join(' + ')} = ${allTotal})`);
+    else bad(`§3 no-region ${city}: ${allTotal} != ${parts.join(' + ')}`,
              'an unscoped city question must return every region, never one guessed region');
 
-    const nAll = await oracle(city, null, scopeOf(all));
-    if (nAll === allTotal) ok(`§3 oracle agrees on the unscoped union (${nAll})`);
-    else bad(`§3 oracle unscoped ${nAll} vs RPC ${allTotal}`);
-  } catch (e) { bad('§3 union case failed', String(e)); }
+    if (all.length === allTotal) {
+      const nAll = await oracle(city, null, scopeOf(all));
+      if (nAll === allTotal) ok(`§3 oracle agrees on the unscoped union of ${city} (${nAll})`);
+      else bad(`§3 oracle unscoped ${city} ${nAll} vs RPC ${allTotal}`);
+    }
+  } catch (e) { bad(`§3 union case ${city} failed`, String(e)); }
 }
 
 // §4 self-check: the oracle's table scope is load-bearing. If a future edit lets p_tables default,
