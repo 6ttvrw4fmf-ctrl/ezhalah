@@ -1,4 +1,3 @@
--- APPLIED 2026-10-18 23:22:27 UTC (owner session). Proven: a dead haraj key returned, a live one not, a malformed/hostile key ignored.
 -- Owner 2026-10-18: a reopened history chat shows its cards as they were; a card whose listing was REMOVED at
 -- its source since is shaded «انتهى الإعلان» (src/components/DeadCardShade.tsx), never hidden. The app sends
 -- the cards' «source_table:id» keys; this answers which rows are now active = false. Only listing tables
