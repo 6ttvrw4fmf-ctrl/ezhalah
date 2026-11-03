@@ -5,7 +5,7 @@
 // shape: un-narrowed views read the labels first, a failed read falls back to the dots, labels are keyed and tappable.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
+import { areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -24,11 +24,15 @@ check('a tap on a city opens at district level, a tap on a district opens at pin
 mustCatch('a district tap that lands still on labels (the user taps forever)', areaLevelFor(areaZoomSpan('district')) === null);
 check('the count pill is the labels\' total', areasTotal([{ city: 'a', district: '', lat: 1, lng: 1, n: 3 }, { city: 'b', district: '', lat: 1, lng: 1, n: 4 }]) === 7);
 
+check('a crowded close-in view shows district names while 2+ districts share it, the count grid once one fills it', denseShowsDistricts(5) && denseShowsDistricts(2) && !denseShowsDistricts(1) && !denseShowsDistricts(0));
+mustCatch('blue dots on a crowded multi-district view (the view the owner\'s father asked to replace)', denseShowsDistricts(3));
+check('a district tap zooms well past district level (0.015°), not onto a crowded neighbour view', areaZoomSpan('district') <= 0.02);
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const data = readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8');
 check('an un-narrowed view reads the labels for its level first', /const level = narrowed \? null : areaLevelFor\(span\.latitudeDelta\);/.test(web) && /const areas = await fetchMapAreas\(paddedBox\(center, span\), level, pins\.deals\);/.test(web));
 check('labels are drawn keyed, counted in the pill, and a failed read falls back to the dots', /drawAreas\(areas, level\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web) && /if \(areas !== 'unknown'\) \{/.test(web) && /next\.set\(`A\|\$\{level\}\|\$\{a\.city\}\|\$\{a\.district\}\|\$\{a\.n\}`, a\)/.test(web));
 check('labels never pile up: MapKit collision hides the smaller neighbour, priority follows the count', /collisionMode: mk\.Annotation\.CollisionMode\?\.Rectangle, displayPriority: 250 \+ Math\.round\(499 \* a\.n \/ maxN\)/.test(web));
+check('the crowded exact-point read shows district names before falling back to the fine grid', /if \(areas !== 'unknown' && denseShowsDistricts\(areas\.length\)\) \{\n\s*drawAreas\(areas, 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web));
 check('a tap on a label zooms into it', /if \(d && Math\.hypot\(e\.clientX - d\.x, e\.clientY - d\.y\) < 10\) \{ e\.stopPropagation\(\); pickArea\(a, level\); \}/.test(web));
 check('the labels come through the bounded RPC and a failed read is unknown', /boundedRpc<AreaRow\[\]>\(supabase\.rpc\('map_areas_ar'/.test(data) && /if \(error \|\| !Array\.isArray\(data\)\) return 'unknown';/.test(data));
 check('src/lib/mapAreas.ts is import-free (the barrier executes it in Node)', !/^import /m.test(readFileSync(join(root, 'src/lib/mapAreas.ts'), 'utf8')));

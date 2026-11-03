@@ -34,8 +34,12 @@ export function areaName(a: Pick<AreaRow, 'city' | 'district'>, level: AreaLevel
 
 /** Where a tap on a label takes the map: a city opens at district level, a district opens at pin level. */
 export function areaZoomSpan(level: AreaLevel): number {
-  return level === 'city' ? 0.4 : 0.045;
+  return level === 'city' ? 0.4 : 0.015;
 }
+
+/** A view too crowded for price pins shows district names while two or more districts share it; once one district
+ *  fills the screen, names would only repeat that one district, so the fine count grid takes over. */
+export const denseShowsDistricts = (labelsInView: number): boolean => labelsInView >= 2;
 
 /** The labels' total — the count pill's number. */
 export const areasTotal = (rows: AreaRow[]): number => rows.reduce((a, r) => a + r.n, 0);
