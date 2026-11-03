@@ -680,6 +680,35 @@ def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Option
             return [word, word[1:]]
         return [word]
 
+    def _match(window: list[str]) -> Optional[str]:
+        for first in _forms(window[0]):
+            n = norm_district_tok(" ".join([first, *window[1:]]))
+            if n not in known:
+                n = _squeezed_key(city_id, n)
+            if n and n in known:
+                return _DISTRICT_AR_BY_NORM.get(n)
+        return None
+
+    # THE TEXT'S OWN «حي X» WINS (2026-11-03). The window scan below prefers the LONGEST name anywhere in
+    # the text, so a landmark outranked the district the ad states: ksaaqar 12226649 «فيلا … في حي العارض شمال
+    # ريحانه غرب الملك عبد العزيز» stored «حي الملك عبدالعزيز» (a road used as a direction) instead of العارض.
+    # A catalogued district right after «حي» / «بحي» / «وحي» / «الحي» is what the ad itself says; when
+    # exactly ONE distinct such district is named it is returned. Two different ones are a conflict: the
+    # previous scan decides, unchanged.
+    named: list[str] = []
+    for i, w in enumerate(words):
+        if w in ("حي", "بحي", "وحي", "الحي", "لحي", "فحي"):
+            for size in (3, 2, 1):
+                window = words[i + 1:i + 1 + size]
+                if len(window) < size or _PLAN_WORD in window:
+                    continue
+                hit = _match(window)
+                if hit:
+                    named.append(hit)
+                    break
+    if len(set(named)) == 1:
+        return named[0]
+
     for size in (3, 2, 1):
         for i in range(len(words) - size + 1):
             window = words[i:i + size]
