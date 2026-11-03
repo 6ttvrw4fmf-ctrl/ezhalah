@@ -129,6 +129,10 @@ try {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`pageerror: ${String(e?.message || e).slice(0, 300)}`));
   page.on('console', (m) => { if (m.type() === 'error') warnings.push(`console.error: ${m.text().slice(0, 300)}`); });
+  // Every script chunk the page asked for, by file name — so a --fail-once that planted nothing says what it COULD have
+  // matched instead of leaving the next run to guess the chunk's name (🔧 11-03: run 41643230975 planted nothing on /agent).
+  const chunksSeen = [];
+  page.on('request', (r) => { const u = r.url(); if (u.includes('/_expo/static/js/web/')) chunksSeen.push(u.split('/').pop().split('?')[0].slice(0, 80)); });
   if (FAIL_ONCE) {
     // The stale-tab shape: the FIRST request for the named chunk fails (as a renamed chunk does after a deploy);
     // every later request goes through. The fix must reload the page once; what it threw before the reload is
@@ -156,7 +160,7 @@ try {
   if (FAIL_ONCE) {
     await page.waitForFunction(() => performance.getEntriesByType('navigation')[0]?.type === 'reload', null, { timeout: 20000 })
       .then(() => { reloaded = true; }).catch(() => {});
-    if (!failedOnce) errors.push(`fail-once: no request matched «${FAIL_ONCE}» — nothing was planted`);
+    if (!failedOnce) errors.push(`fail-once: no request matched «${FAIL_ONCE}» — nothing was planted (chunks seen: ${chunksSeen.slice(0, 20).join(', ') || 'none'})`);
     log(`    · planted ${failedOnce ? 'once' : 'nothing'} · page reloaded itself: ${reloaded}`);
     await page.waitForTimeout(4000); // the reloaded shell mounts
   }
@@ -189,7 +193,7 @@ try {
 }
 const verdict = verdictFor({ loaded, missedTaps, errors, warnings, strict: STRICT, reloadExpected: !!FAIL_ONCE, reloaded });
 const out = { url: URL_, taps: TAPS, repeat: REPEAT, gapMs: GAP, phone: PHONE, loaded, missedTaps, errors, warnings, screenshot, status: verdict,
-  ...(FAIL_ONCE ? { failOnce: FAIL_ONCE, failedOnce, reloaded, beforeReload } : {}) };
+  ...(FAIL_ONCE ? { failOnce: FAIL_ONCE, failedOnce, reloaded, beforeReload, chunksSeen: chunksSeen.slice(0, 40) } : {}) };
 console.log(JSON.stringify(out));
 log(`SUMMARY page-probe ${verdict} · loaded=${loaded} · taps missed=${missedTaps.length} · errors=${errors.length} · console warnings=${warnings.length}${STRICT ? ' (strict)' : ''}${FAIL_ONCE ? ` · planted=${failedOnce ? 1 : 0} reloaded=${reloaded} errorsBeforeReload=${beforeReload.length}` : ''}`);
 process.exit(verdict === 'PASS' ? 0 : 1);
