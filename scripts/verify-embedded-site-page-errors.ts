@@ -69,5 +69,29 @@ const walk = (dir: string) => {
 for (const d of ['src', 'api', 'public']) { try { walk(join(ROOT, d)); } catch { /* absent dir */ } }
 check(`Ezhalah's own code never loads Google Maps nor names InvalidValueError (${offenders.join(', ') || 'none'})`, offenders.length === 0);
 
+// 4. MUTATION PROOF — mutate the REAL classifier source, load the mutant, and show the checks above would fail.
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
+const REAL = readFileSync(join(ROOT, 'e2e/lib/pageErrors.mjs'), 'utf8');
+const NOT_EXCUSED = ['Error: InvalidValueError: thrown by our code would still need a real name', 'TypeError: initMap is not a function'];
+async function mutation(label: string, mutate: (s: string) => string): Promise<void> {
+  const mutated = mutate(REAL);
+  if (mutated === REAL) { check(`MUTATION anchor found: ${label}`, false); return; }
+  const dir = mkdtempSync(join(tmpdir(), 'embedded-mut-'));
+  const file = join(dir, 'pageErrors.mjs');
+  writeFileSync(file, mutated);
+  const m = await import(pathToFileURL(file).href);
+  const caught = NOT_EXCUSED.some((e) => m.isEmbeddedSitePageError(e))
+    || !m.isEmbeddedSitePageError('Uncaught (in promise) InvalidValueError: initMap is not a function');
+  check(`(mutation) catches: ${label}`, caught);
+}
+await mutation('the start anchor dropped, so «Error: InvalidValueError …» from our own code is excused', (s) =>
+  s.replace('/^(?:Uncaught (?:\\(in promise\\) )?)?InvalidValueError: /', '/InvalidValueError: /'));
+await mutation('the class name loosened to any error', (s) =>
+  s.replace("if (err && typeof err === 'object' && err.name === 'InvalidValueError') return true;", 'return true;'));
+await mutation('the classifier switched off (measured error counted again)', (s) =>
+  s.replace("if (err && typeof err === 'object' && err.name === 'InvalidValueError') return true;", 'return false;'));
+
 if (failed) { console.error(`\n❌ verify-embedded-site-page-errors: ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✅ verify-embedded-site-page-errors: only an embedded site\'s Google Maps error is excused, and it is reported.');

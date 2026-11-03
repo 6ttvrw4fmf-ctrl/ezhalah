@@ -36,5 +36,31 @@ check('a build missing ad-slow-hint is NOT shipped', r.shipped === null && r.fil
 r = await shippedInstantShowTab('https://x', async () => '');
 check('an unreadable site reads 0 files (a failure, not a pass)', r.files === 0 && r.shipped === null);
 
+// MUTATION PROOF — mutate the REAL reader, load it, and show the measured-shape check above would fail.
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const REAL = readFileSync(join(import.meta.dirname, '..', 'e2e/lib/shippedBundle.mjs'), 'utf8');
+const MEASURED = site({
+  '/': html,
+  [`/_expo/static/js/web/${H('__expo-metro-runtime')}`]: 'runtime',
+  [`/_expo/static/js/web/${H('entry')}`]: `routes: "${H('agent')}"`,
+  [`/_expo/static/js/web/${H('agent')}`]: 'testID:"ad-load-bar" testID:"ad-slow-hint"',
+});
+async function mutation(label: string, mutate: (s: string) => string): Promise<void> {
+  const mutated = mutate(REAL);
+  if (mutated === REAL) { check(`MUTATION anchor found: ${label}`, false); return; }
+  const dir = mkdtempSync(join(tmpdir(), 'bundle-mut-'));
+  const file = join(dir, 'shippedBundle.mjs');
+  writeFileSync(file, mutated);
+  const m = await import(pathToFileURL(file).href);
+  const res = await m.shippedInstantShowTab('https://x', MEASURED);
+  check(`(mutation) catches: ${label}`, res.shipped !== H('agent'));
+}
+await mutation('reading only the first <script> (THE ORIGINAL DEFECT)', (s) => s.replace('const queue = [...first];', 'const queue = first.slice(0, 1);'));
+await mutation('never following the route chunks a script references', (s) => s.replace('if (!seen.has(p)) { seen.add(p); queue.push(p); }', 'void p;'));
+await mutation('accepting a script with only one of the two testIDs', (s) => s.replace("js.includes('ad-load-bar') && js.includes('ad-slow-hint')", "js.includes('nothing-ships-this')"));
+
 if (failed) { console.error(`\n❌ verify-shipped-bundle-reader: ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✅ verify-shipped-bundle-reader: the speed robot reads the whole split build.');
