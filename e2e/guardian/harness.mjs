@@ -35,7 +35,7 @@ export const VIEWPORTS = [
 ];
 
 /** The property-search RPC. Journeys count these to prove "no search fired" / "no duplicate". */
-import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
+import { isHydrationNoticePageError, hydrationNoticeNote, isEmbeddedSitePageError, embeddedSiteNote } from '../lib/pageErrors.mjs';
 import { resultsFoundCount, settledSource, zeroRendered } from '../lib/resultsSentence.mjs';
 import { pickCityOptionIndex } from '../live-sweep/cityOption.mjs';
 
@@ -143,6 +143,7 @@ export async function withPage(viewport, fn) {
   const resultsSearches = [];
   const pageErrors = [];
   const hydrationNotices = [];
+  const embeddedSiteErrors = [];
   page.on('request', (r) => {
     if (!r.url().includes(SEARCH_RPC)) return;
     let body;
@@ -154,13 +155,15 @@ export async function withPage(viewport, fn) {
   });
   page.on('pageerror', (e) => {
     const m = String(e).slice(0, 240);
-    (isHydrationNoticePageError(m) ? hydrationNotices : pageErrors).push(m);
+    if (isEmbeddedSitePageError(e) || isEmbeddedSitePageError(m)) embeddedSiteErrors.push(m);
+    else (isHydrationNoticePageError(m) ? hydrationNotices : pageErrors).push(m);
   });
   try {
     return await fn(page, { searches, resultsSearches, pageErrors, hydrationNotices, viewport });
   } finally {
     // Never silent: the count and text are printed even though no journey fails on them.
     if (hydrationNotices.length) console.log(`  note    ${hydrationNoticeNote('guardian', hydrationNotices)}`);
+    if (embeddedSiteErrors.length) console.log(`  note    ${embeddedSiteNote('guardian', embeddedSiteErrors)}`);
     await browser.close().catch(() => {});
   }
 }
