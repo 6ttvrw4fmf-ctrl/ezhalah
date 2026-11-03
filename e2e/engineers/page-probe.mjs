@@ -107,6 +107,7 @@ const browser = await chromium.launch({
 });
 const errors = [];
 const warnings = [];
+const chunksSeen = []; // every /_expo/static/js/web/ chunk the page asked for, by file name (🔧 11-03)
 const missedTaps = [];
 const beforeReload = []; // errors the planted failure caused, kept as evidence, not as the verdict
 let loaded = false;
@@ -131,7 +132,6 @@ try {
   page.on('console', (m) => { if (m.type() === 'error') warnings.push(`console.error: ${m.text().slice(0, 300)}`); });
   // Every script chunk the page asked for, by file name — so a --fail-once that planted nothing says what it COULD have
   // matched instead of leaving the next run to guess the chunk's name (🔧 11-03: run 41643230975 planted nothing on /agent).
-  const chunksSeen = [];
   page.on('request', (r) => { const u = r.url(); if (u.includes('/_expo/static/js/web/')) chunksSeen.push(u.split('/').pop().split('?')[0].slice(0, 80)); });
   if (FAIL_ONCE) {
     // The stale-tab shape: the FIRST request for the named chunk fails (as a renamed chunk does after a deploy);
