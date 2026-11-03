@@ -485,12 +485,15 @@ export function cardKeys(q: SearchQuery, id: string): string[] {
 // The owner's numbered order for the group's lists (2026-10-31): installments → bathrooms → age → street width →
 // facing → apartments → shops → the cards, comfort first, fun last. A tier only reorders questions that already
 // cleared the usefulness gates; it never forces one (afRanking.ts). Scopes without cards keep askTier().
+// Office (owner list 2026-11-01): office kind → ready to work → ⚙️ building → 📍 location → business; the Buildings &
+// Facilities box: what's inside → 💰 investment → 📍 location. So `building`, `inside` and `investment` sit before
+// `location` (measured live 2026-11-03: both scopes asked location too early). The retail lists keep location → space.
 const GROUP_ASK_ORDER = ['rnpl', 'bathrooms', 'property_age', 'street_width', 'direction', 'apartments', 'shops', 'who',
-  'office_kind', 'ready', 'location', 'plot', 'water', 'games', 'camp_life', 'comfort', 'space', 'cspace', 'outdoors', 'water_land',
-  'power', 'crops', 'animals', 'buildings', 'building', 'trucks', 'factory', 'workshop', 'inside', 'hotel', 'station', 'extras',
-  'safety', 'smart', 'perks', 'build', 'papers', 'land', 'services', 'cservices', 'services_business', 'business', 'loc_papers',
-  'loc_business', 'loc_safety', 'building_papers', 'space_papers', 'land_papers', 'deal_papers', 'deal_loc', 'investment',
-  'papers_c', 'features', 'fun'] as const;
+  'office_kind', 'ready', 'building', 'inside', 'investment', 'location', 'plot', 'water', 'games', 'camp_life', 'comfort',
+  'space', 'cspace', 'outdoors', 'water_land', 'power', 'crops', 'animals', 'buildings', 'trucks', 'factory', 'workshop',
+  'hotel', 'station', 'extras', 'safety', 'smart', 'perks', 'build', 'papers', 'land', 'services', 'cservices',
+  'services_business', 'business', 'loc_papers', 'loc_business', 'loc_safety', 'building_papers', 'space_papers',
+  'land_papers', 'deal_papers', 'deal_loc', 'papers_c', 'features', 'fun'] as const;
 // Every locked Buy list (Apartment, Floor, Building) opens with age, then bathrooms (owner 2026-10-31 / 2026-11-01).
 // A Buy-only scope asks in that order; a rent or mixed scope (Rent + Buy on a Floor: bathrooms · age) keeps the rent order.
 const BUY_ASK_ORDER: readonly string[] = ['rnpl', 'property_age', 'bathrooms', ...GROUP_ASK_ORDER.filter((id) => !['rnpl', 'bathrooms', 'property_age'].includes(id))];

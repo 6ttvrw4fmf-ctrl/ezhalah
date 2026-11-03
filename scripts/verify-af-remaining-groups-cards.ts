@@ -99,6 +99,19 @@ check('plots box 15/20/30/40/60 · retail 15/20/30/40 · countryside 15/20/30 ·
 check('a mixed scope offers the rungs EVERY leg offers (Shop + Warehouse → 15/20/30)',
   real.streetWidthRungs(C('Retail & Workspace', { types: ['Shop', 'Warehouse'], deal: 'Rent' })).join() === '15,20,30');
 
+console.log('\n§4c commercial lists ask in the owner\'s order\n');
+{
+  const office = real.groupAskTierFor(officeRent);
+  check('Office rent: office kind → ready to work → building → location → business',
+    office('office_kind') > office('ready') && office('ready') > office('building') && office('building') > office('location') && office('location') > office('business'));
+  const boxBuy = C('Commercial Buildings & Facilities', { deal: 'Buy' });
+  const box = real.groupAskTierFor(boxBuy);
+  check('Buildings & Facilities box buy: what\'s inside → investment → location', box('inside') > box('investment') && box('investment') > box('location'));
+  const retail = real.groupAskTierFor(retailBoxRent);
+  check('…while the retail box keeps location → space → services → business',
+    retail('location') > retail('cspace') && retail('cspace') > retail('cservices') && retail('cservices') > retail('business'));
+}
+
 console.log('\n§5 mutation proofs\n');
 const SRC = readFileSync(join(ROOT, 'src/lib/afCohorts.ts'), 'utf8');
 const abs = (rel: string) => JSON.stringify(pathToFileURL(join(ROOT, 'src/lib', rel)).href);
