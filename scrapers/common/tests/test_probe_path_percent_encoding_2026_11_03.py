@@ -59,3 +59,10 @@ def test_arabic_slug_redirected_home_stays_unknown():
         session=lambda: _Sess(_Resp(404, "https://mizlaj.com.sa/", body)),
         url_for=lambda ad: RAW, attempts=1, backoff=0)
     assert probe.verify_gone("MZ29")[0] == "unknown"
+
+
+def test_lowercase_and_uppercase_percent_escapes_are_the_same_path():
+    # nowaisiry / suwar store the link with lowercase escapes; servers report uppercase.
+    stored = "https://alnowaisiry.com/lands/%f0%9f%8c%b1-%d9%84%d9%84%d8%a8%d9%8a%d8%b9/"
+    landed = "https://alnowaisiry.com/lands/%F0%9F%8C%B1-%D9%84%D9%84%D8%A8%D9%8A%D8%B9/"
+    assert http_liveness._path_of(stored) == http_liveness._path_of(landed)
