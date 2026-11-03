@@ -1560,7 +1560,9 @@ for _p, _sig in (
                   "for every listed ad (crawler audit 2026-10-02: a removed ad's page answers "
                   "404/410). 200 on that url whose <article> carries a node id is LIVE; a block, a "
                   "5xx, a redirect and any other 200 are UNKNOWN, and a removal is believed only "
-                  "while an in-run known-live control still reads live (2026-10-07)"),
+                  "while an in-run known-live control still reads live (2026-10-07). Owner rule "
+                  "2026-11-03: a removed ad answers 403 with the site's own «لايمكن فتح هذة الصفحة» page "
+                  "(made-up nid 404, live 200); two such reads while the control reads live are GONE"),
 ):
     POLICIES[_p] = _P(POLICIES[_p]["policy"], POLICIES[_p]["strategy"], _sig,
                       "Removal is confirmed on the ad's own url at prune time (2026-10-02); the full "

@@ -143,3 +143,34 @@ def test_mobasher_no_removal_without_a_live_control(monkeypatch):
     monkeypatch.setattr(hl.LivenessProbe, "fetch",
                         lambda self, url: (200, LIVE if url == ctrl else SHELL, False))
     assert mobasher._make_verify_gone(object(), ctrl)("MBSx")[0] == "gone"
+
+
+# ── abralosol (owner «Yes, hide them», 2026-11-03) ──────────────────────────────────────────────
+def test_abralosol_403_with_its_own_cannot_open_page_is_gone_only_with_a_live_control(monkeypatch):
+    from scrapers.abralosol import run as abr
+    monkeypatch.setattr(hl.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(abr, "_session", lambda: object())
+    cannot = "<h1>لايمكن فتح هذة الصفحة</h1> يرجى العودة للصفحة الرئيسية للبحث"
+    live = '<article class="node" data-history-node-id="8175">x</article>'
+    pages = {"https://abralosol.com/8047": (403, cannot, False),
+             "https://abralosol.com/8175": (200, live, False)}
+    monkeypatch.setattr(hl.LivenessProbe, "fetch", lambda self, url: pages[url])
+    assert abr._make_verify_gone({"ad_number": "ABR8175"})("ABR8047")[0] == "gone"
+    # the control is blocked → nothing is removed
+    pages["https://abralosol.com/8175"] = (403, "blocked", False)
+    assert abr._make_verify_gone({"ad_number": "ABR8175"})("ABR8047")[0] == "unknown"
+    # a 403 WITHOUT the site's own text (a WAF) is never a removal, even with a live control
+    pages["https://abralosol.com/8175"] = (200, live, False)
+    pages["https://abralosol.com/8047"] = (403, "Access denied", False)
+    assert abr._make_verify_gone({"ad_number": "ABR8175"})("ABR8047")[0] == "unknown"
+    # no control row this run → nothing is removed
+    pages["https://abralosol.com/8047"] = (403, cannot, False)
+    assert abr._make_verify_gone(None)("ABR8047")[0] == "unknown"
+
+
+def test_body_must_is_optional_and_strict():
+    import re
+    seq = iter([(403, "x", False), (403, "x", False), (200, "ok", False)])
+    got = hl.removal_by_owner_approved_status("abralosol", lambda u: next(seq), "u", "c",
+                                              lambda st, b, m: "live", pause=0, body_must=re.compile("لايمكن"))
+    assert got is None
