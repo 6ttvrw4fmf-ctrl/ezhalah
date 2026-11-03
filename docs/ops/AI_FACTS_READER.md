@@ -2,6 +2,19 @@
 
 > **Cadence change (2026-11-03, migration 20261103013129):** the free word reader's incremental run (pg_cron `gh-facts-words-nightly`, name kept) now fires every hour at :25 UTC instead of 07:05 nightly, so a new ad's own words reach its chip within about an hour (owner: «whenever we get a new listing the description immediately matches»). One run reads only new / changed ads in ~12 minutes, no paid AI. Where this file says «nightly» about the free reader, read «hourly».
 
+> **Precision audit (2026-11-03, owner: «make sure everything I select appears like matches»).** Chip *counts* were
+> exact (17,004 chips × 78 groups = a plain count of the index, 0 differences); some chip *matches* were not. The free
+> reader answered yes for look-alike words: «بنت» (a name, «بنت هاوس») as Wi-Fi/internet, «ونشتري» as a crane, a bare
+> «الرمال» (the district) as a dunes view, «غرفة شغالة» as a producing farm, «أبواب مرتفعة» as a raised plot,
+> «للشبابيك» as for-youth, «يسعدنا استقبال عروضكم» as reception, «صاحب / تاريخ انتهاء الترخيص» (the REGA ad licence)
+> as a licence, a bare «معتمد» as an approved plan, «واجهة العقار: Eastern» as frontage, a bearing («جنوب طريق
+> الملك») as on a main road, and near words it lacked («بقرب», «قربها», «مقابلة», «دقيقتين»). «عدا / باستثناء» and a
+> 🚫/❌ mark now read as no. Proof was old-vs-new on ~2,000 real active ads: only wrong yeses turned off, no new yes.
+> **How to re-run it:** list each key's top quotes from `listing_text_facts` (v = true), read the sentence around
+> any quote that is not the fact's own word, and fix the catalogue in `scrapers/facts/word_checker.py` with the real
+> sentence as a selftest line. The selftest now gates every scrapers PR
+> (`scrapers/common/tests/test_word_checker_selftest.py`, run by common-location-tests.yml).
+
 **Owner's words:** «I don't mind us using the AI … make a very good plan … the max budget for the AI backend is
 30 dollars monthly … start now with the more listings.»
 
