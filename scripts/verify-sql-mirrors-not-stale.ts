@@ -44,6 +44,20 @@
 // count".) Nothing the rule was built for is lost: a regexp_replace needle-edit names the object
 // inside an executed string literal, and a CREATE/ALTER/DROP names it in executed DDL. Only prose
 // stops counting. Mutation-proven at the bottom of this file.
+// …AND A DATE CANNOT ORDER TWO THINGS ON ONE DAY (2026-09-27). (B) compared a stamp DATE with a
+// migration DATE, so a migration landing later on the stamp's own day was invisible. On 2026-09-26
+// listing_native_location_v1.sql was refreshed for wave 2 (stamped 2026-09-26, vouching for
+// 20260926042615), then five same-day wirings rebuilt the view — wahadat 20260926094922,
+// squares_rawaf 20260926182020, vmksa_macsaib 20260926212517, maqrat 20260926231034, batch4
+// 20260926235957 — and every one of them passed (B) because "2026-09-26 >= 2026-09-26". The mirror
+// and ops_sql_mirror_expected sat on the wave-2 digest until PR #4779 (migration 20260927015240).
+//
+// So (B2): when the newest touching migration falls ON the mirror's newest stamp day, a stamp dated
+// that day must name, ON ITS OWN LINE, a real migration version (YYYYMMDDHHMMSS) at or after it —
+// "I re-verified production after THIS migration". Prose elsewhere in the header vouches for
+// nothing, and a version with no migration file vouches for nothing. (B) is unchanged; (B2) only
+// adds a failure on the one day (B) cannot see into. Mutation-proven at the bottom of this file,
+// including a replay of the real 2026-09-26 header against the real tree.
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { stripSqlComments } from './lib/repairClassifier.ts';
@@ -74,6 +88,26 @@ const migrations = readdirSync(MIGRATIONS_DIR)
     raw: readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8'),
     body: stripSqlComments(readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8')),
   }));
+
+// Every real migration version, so a stamp cannot vouch for a typo'd or future one.
+const known = new Set(migrations.map((m) => m.file.slice(0, 14)));
+
+// (B2) The newest real migration version that a stamp dated `day` names on its own line, or null.
+const vouchedVersion = (header: string, day: string): string | null =>
+  [...header.matchAll(/(?:Refreshed|Re-verified)\s+(\d{4})-(\d{2})-(\d{2})[^\n]*/g)]
+    .filter((m) => `${m[1]}${m[2]}${m[3]}` === day)
+    .flatMap((m) => m[0].match(/(?<!\d)\d{14}(?!\d)/g) ?? [])
+    .filter((v) => known.has(v))
+    .sort()
+    .at(-1) ?? null;
+
+// (B2) null = covered. Only decides the same-day case; a different day is (B)'s call, either way.
+const sameDayGap = (header: string, mirrorDate: string, touchingFiles: string[]) => {
+  const newest = [...touchingFiles].sort().at(-1)!;
+  if (newest.slice(0, 8) !== mirrorDate) return null;
+  const vouched = vouchedVersion(header, mirrorDate);
+  return vouched !== null && vouched >= newest.slice(0, 14) ? null : { newest, vouched };
+};
 
 for (const file of mirrors) {
   const objectName = file.replace(/\.sql$/, '');
@@ -121,6 +155,15 @@ for (const file of mirrors) {
       mirrorDate >= newest,
       `mirror ${fmt(mirrorDate)} vs ${newestFile} (${fmt(newest)})`,
     );
+    const gap = sameDayGap(header, mirrorDate, touching.map((m) => m.file));
+    check(
+      `    same-day: its ${fmt(mirrorDate)} stamp names a migration version at/after the newest touching it`,
+      gap === null,
+      gap
+        ? `newest ${gap.newest} vs stamp vouches for ${gap.vouched ?? 'no real version'} — re-verify `
+          + 'against production, then write that migration version ON the Re-verified line'
+        : '',
+    );
   } else if (dates.length > 0) {
     console.log(`    (no migration mentions ${objectName} — date check not applicable)`);
   }
@@ -149,6 +192,42 @@ check('    …and the RAW text of that same migration DOES mention it — so the
   /\baqar_parse\b/.test(`-- see public.${OBJ} for where the parse happens\nupdate public.af_field_registry set ui_exposed = true;`));
 check('    a migration that mentions nothing at all does not count',
   !touches(OBJ, 'update public.af_field_registry set ui_exposed = true;'));
+
+// ── MUTATION PROOFS for (B2) "a date cannot order two things on one day" (2026-09-27) ───────────
+// EXECUTED against the real sameDayGap()/vouchedVersion() and the real migration tree above.
+console.log('\n  mutation proof — (B2) a same-day later migration touching the object goes RED\n');
+const DAY = '20260926';
+const STAMPED = '-- Re-verified 2026-09-26 (migration 20260926053800_sql_mirror_expected_catches_up_to_the_wave2_four_arms): CHANGED.';
+const WAVE2 = ['20260926042615_wave2_four_wiring_into_search.sql', '20260926053800_sql_mirror_expected_catches_up_to_the_wave2_four_arms.sql'];
+const WAHADAT = '20260926094922_wahadat_wiring_into_search.sql';
+
+check('    control: a stamp naming the newest same-day migration is covered',
+  sameDayGap(STAMPED, DAY, WAVE2) === null);
+check('    a LATER same-day migration touching the object goes RED (the 2026-09-26 wahadat shape)',
+  sameDayGap(STAMPED, DAY, [...WAVE2, WAHADAT])?.newest === WAHADAT);
+check('    a version written only in header PROSE (not on the stamp line) vouches for nothing',
+  sameDayGap(`-- Re-verified 2026-09-26: CHANGED.\n--   see ${WAHADAT}`, DAY, [...WAVE2, WAHADAT]) !== null);
+check('    a stamped version with no migration file vouches for nothing',
+  sameDayGap('-- Re-verified 2026-09-26 (migration 20260926999999_typo): CHANGED.', DAY, [...WAVE2, WAHADAT]) !== null);
+check('    a stamp dated a LATER day is left to (B) — (B2) does not second-guess it',
+  sameDayGap('-- Re-verified 2026-09-27: UNCHANGED.', '20260927', [...WAVE2, WAHADAT]) === null);
+{
+  // Replay: the real pre-#4779 stamp line against the real migrations touching the view through
+  // batch4 — the exact state that sat green for a day.
+  const v1 = 'listing_native_location_v1';
+  const replay = migrations
+    .filter((m) => m.file.slice(0, 14) <= '20260926235957' && new RegExp(`\\b${v1}\\b`).test(m.body))
+    .map((m) => m.file);
+  const gap = sameDayGap(
+    '-- Re-verified 2026-09-26 (migrations 20260926042615_wave2_four_wiring_into_search and\n'
+      + '-- 20260926043530_wave2_four_join_listing_location_index — the second touches a DIFFERENT object,',
+    DAY,
+    replay,
+  );
+  check('    REPLAY of the real 2026-09-26 header vs the real tree goes RED on batch4 20260926235957',
+    gap?.newest.startsWith('20260926235957') === true && gap.vouched === '20260926042615',
+    gap ? `newest=${gap.newest.slice(0, 14)} vouched=${gap.vouched}` : 'covered?!');
+}
 
 console.log('');
 if (failures > 0) {
