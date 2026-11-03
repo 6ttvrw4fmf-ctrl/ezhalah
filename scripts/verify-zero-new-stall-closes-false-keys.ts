@@ -25,6 +25,8 @@ const check = (name: string, cond: boolean, detail = '') => {
   console.log(`  ${cond ? '✓' : '❌'} ${name}${!cond && detail ? ` — ${detail}` : ''}`);
   if (!cond) failures++;
 };
+// A mutation proof: `caught` is whether the check FAILED on the mutated (pre-fix / synthetic) input.
+const mustCatch = (name: string, caught: boolean) => check(`mutation: ${name}`, caught);
 
 type Shape = { collectsLive: boolean; sweeps: boolean };
 function shapeOf(files: string[]): Shape | null {
@@ -76,7 +78,7 @@ const patchIdx = files.findLastIndex((f) => readFileSync(join(MIG, f), 'utf8').i
 check('the fixing patch is committed', patchIdx >= 0);
 if (patchIdx >= 0) {
   const before = shapeOf(files.slice(0, patchIdx));
-  check('mutation: the pre-fix detector leaves the aqaralsaudia key open', Boolean(before) && run(before!, open0, scenario).has('zero_new_stall:aqaralsaudia'));
+  mustCatch('the pre-fix detector leaves the aqaralsaudia key open', Boolean(before) && run(before!, open0, scenario).has('zero_new_stall:aqaralsaudia'));
 }
 
 if (failures) {

@@ -26,6 +26,8 @@ const check = (name: string, cond: boolean, detail = '') => {
   console.log(`  ${cond ? '✓' : '❌'} ${name}${!cond && detail ? ` — ${detail}` : ''}`);
   if (!cond) failures++;
 };
+// A mutation proof: `caught` is whether the check FAILED on the mutated (pre-fix / synthetic) input.
+const mustCatch = (name: string, caught: boolean) => check(`mutation: ${name}`, caught);
 
 // The live text of section 8 as of a file list: the last file that defines mon_detect_text_facts or
 // patches its section 8 decides. For a patch the replacement (the text after the last anchor) is what runs.
@@ -68,7 +70,7 @@ check('the detector raises when the index is missing OR invalid',
 const patchIdx = files.findLastIndex((f) => readFileSync(join(MIG, f), 'utf8').includes("pg_get_functiondef('public.mon_detect_text_facts()'"));
 if (patchIdx >= 0) {
   const before = section8Calls(files.slice(0, patchIdx));
-  check('mutation: the pre-fix tree is caught calling it twice', before === 2, `pre-fix count ${before}`);
+  mustCatch('the pre-fix tree is caught calling it twice', before === 2, `pre-fix count ${before}`);
 }
 
 if (failures) {

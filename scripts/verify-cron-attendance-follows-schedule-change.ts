@@ -57,6 +57,8 @@ const check = (name: string, cond: boolean, detail = '') => {
   console.log(`  ${cond ? '✓' : '❌'} ${name}${!cond && detail ? ` — ${detail}` : ''}`);
   if (!cond) failures++;
 };
+// A mutation proof: `caught` is whether the check FAILED on the mutated (pre-fix / synthetic) input.
+const mustCatch = (name: string, caught: boolean) => check(`mutation: ${name}`, caught);
 
 // The job-188 day: daily at ~-38h, then hourly :25 from -20h to -12h, then hourly :01 from -10.5h on.
 const rescheduledRuns = [38, ...Array.from({ length: 9 }, (_, i) => 20 - i), ...Array.from({ length: 11 }, (_, i) => 10.4 - i)];
@@ -92,14 +94,14 @@ const OLD = files.find((f) => f.startsWith('20260923233458'));
 check('the pre-fix definition is still in the tree (mutation source)', Boolean(OLD));
 if (OLD) {
   const r = judge(readFileSync(join(MIG, OLD), 'utf8'));
-  check('mutation: the pre-fix limb 5 is caught raising on the rescheduled job', r.parsed && r.falseAlarm);
-  check('mutation: the pre-fix limb 5 still catches a real drop (the check is not one-sided)', r.parsed && !r.missesRealDrop);
+  mustCatch('the pre-fix limb 5 is caught raising on the rescheduled job', r.parsed && r.falseAlarm);
+  mustCatch('the pre-fix limb 5 still catches a real drop (the check is not one-sided)', r.parsed && !r.missesRealDrop);
 }
 // Mutation: honouring the change only in the ACTUAL window is not enough (it shrinks the numerator
 // while the denominator still expects 24 runs).
 {
   const other: Windows = { expectedHonoursChange: false, actualHonoursChange: true };
-  check('mutation: honouring the change only in the actual window raises on the rescheduled job',
+  mustCatch('honouring the change only in the actual window raises on the rescheduled job',
     limb5Raises(other, 9 * 24, 10.6, rescheduledRuns));
 }
 

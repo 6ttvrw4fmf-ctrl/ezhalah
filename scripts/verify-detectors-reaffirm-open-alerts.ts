@@ -65,6 +65,8 @@ const check = (name: string, cond: boolean, detail = '') => {
   console.log(`  ${cond ? '✓' : '❌'} ${name}${!cond && detail ? ` — ${detail}` : ''}`);
   if (!cond) failures++;
 };
+// A mutation proof: `caught` is whether the check FAILED on the mutated (pre-fix / synthetic) input.
+const mustCatch = (name: string, caught: boolean) => check(`mutation: ${name}`, caught);
 
 console.log('verify-detectors-reaffirm-open-alerts: no detector skips mon_raise() while its own alert is open.');
 
@@ -78,7 +80,7 @@ const patchIdx = files.findLastIndex((f) => isGuardStrippingPatch(readFileSync(j
 check('the guard-stripping patch is committed', patchIdx >= 0);
 if (patchIdx >= 0) {
   const before = guardedOf(lastWord(files.slice(0, patchIdx)));
-  check('mutation: the pre-fix tree is caught (the seven detectors alert_reaffirmation named)',
+  mustCatch('the pre-fix tree is caught (the seven detectors alert_reaffirmation named)',
     ['mon_detect_pin_coverage_below_floor', 'mon_detect_place_list_leaks', 'mon_detect_district_guards_missing']
       .every((n) => before.includes(n)), `caught: ${before.join(', ') || 'nothing'}`);
 }
@@ -87,7 +89,7 @@ if (patchIdx >= 0) {
 {
   const m = lastWord(files);
   m.set('mon_detect_pin_coverage_below_floor', { name: 'mon_detect_pin_coverage_below_floor', file: 'synthetic', guarded: true });
-  check('mutation: a later definition that re-adds the guard is caught', guardedOf(m).includes('mon_detect_pin_coverage_below_floor'));
+  mustCatch('a later definition that re-adds the guard is caught', guardedOf(m).includes('mon_detect_pin_coverage_below_floor'));
 }
 
 if (failures) {
