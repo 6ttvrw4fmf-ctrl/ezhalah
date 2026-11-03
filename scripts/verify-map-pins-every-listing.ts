@@ -122,7 +122,7 @@ mustCatch('a region select that fires while the outline is invisible', !/if \(!r
 // counted), and the bubbles are drawn with THAT cell (element, data and anchor all follow drawCell).
 check('AppleMap.web.tsx falls back to a fine bubble grid when the exact read hit its cap (after district names, when 2+ districts share the view), and draws with that cell',
   /if \(cell === 0 && rows\.length > PIN_SHOW_MAX\) \{[\s\S]{0,900}?\n\s*drawCell = fineCellForSpan\(span\.latitudeDelta\);\n\s*rows = await fetchMapPins\(paddedBox\(center, span\), drawCell, pins\);/.test(web)
-  && /element\(row, drawCell\)/.test(web) && /data: \{ pin: row, cell: drawCell \}/.test(web) && /anchorOffset: drawCell > 0/.test(web));
+  && /element\(row, drawCell(, [^)]*)?\)/.test(web) && /data: \{ pin: row, cell: drawCell \}/.test(web) && /anchorOffset: drawCell > 0/.test(web));
 check('the fine grid is ~14 rows on the ladder, floor 0.01°, and finer than the normal grid', fineCellForSpan(0.14) === 0.01 && fineCellForSpan(0.001) === 0.01 && fineCellForSpan(1) === 0.02 && fineCellForSpan(1) < cellForSpan(1));
 mustCatch('a fine grid coarser than the normal grid (the fallback would not resolve a dense view)', fineCellForSpan(0.5) < cellForSpan(0.5));
 check('PIN_LIMIT is the cap the data module sends by default', PIN_LIMIT === 3000 && /limit = 3000\)/.test(readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8')));
