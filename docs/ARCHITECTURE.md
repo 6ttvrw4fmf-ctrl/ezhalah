@@ -1398,6 +1398,12 @@ migration-drift-guard rule in `AGENTS.md`).
   🌳 outdoors · ✨ extras & smart. Merged chips (garden & yard, jacuzzi & sauna, cameras & smart home, tank & well,
   smart home & entry) match when EITHER fact is true (migration 20261102055240). `docs/ops/ADVANCED_FILTER_VILLAS_GROUP.md`.
 
+- **The result card's headline names the type the user searched (owner 2026-11-03):** «when you display the ad you must show
+  the thing the user selected on the property type». The headline («… للبيع / للإيجار», photo strip and compact card) speaks
+  `listing.cleanType` in the filter's own words (e.g. «أرض تجارية للبيع»); the type row and the «Property Type» stat keep the
+  source's own wording («أرض سكني تجاري»), so the 2026-07-06 source-accurate card rule still holds. Facility sub-types under
+  «مرافق خدمية» keep the source word. Guard: `scripts/verify-card-title-shows-searched-type.ts`.
+
 - **Every remaining group of «🎯 Refine with AI» has owner-LOCKED chip lists too (handoff 2026-11-01, built 2026-11-02):**
   «الاستراحات والريف» (Rest house, Chalet, Camp, Farm, Agricultural land — the group box with no type has its OWN short-stay /
   annual / buy lists, each type its own), Residential land, and the whole Commercial side (Retail & Workspace = Office / Shop /
