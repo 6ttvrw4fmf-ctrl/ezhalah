@@ -99,7 +99,10 @@ def norm_district(s: str) -> str:
 NORMAL_FIELDS = ("region", "city", "district", "deal", "type", "rent_period", "price", "area", "bedrooms")
 
 AGE_KW = r"عمر العقار"
-NEW_BUILDING = re.compile(AGE_KW + r"\s*[:：]?\s*جديد")
+# A new building is written «جديد», or in haraj's REGA block «New» / «اقل من سنة» (2026-11-03 score: haraj 23236720
+# «عمر العقار: New», 23215277 «عمر العقار: اقل من سنة», both stored 0 by parse.py / normalize, scored MISMATCH).
+NEW_WORDS = r"(?:جديد|new(?![a-z])|less than (?:a |one )?year|اقل من سنه)"
+NEW_BUILDING = re.compile(AGE_KW + r"\s*[:：]?\s*" + NEW_WORDS, re.I)
 
 FIELDS: list[tuple[str, str, str, str]] = [
     ("region", "word", "region_ar", ""),
@@ -246,6 +249,11 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 en = FACADE_EN.get(norm(str(stored.get(col))))
                 if en and any(re.search(kw, x) and re.search(en, x, re.I) for x in lines):
                     out[name] = MATCH
+                # The facade as Arabic adjectives is the same facade: raghdan 23296394 (re-score 41595594386,
+                # 2026-11-03) prints «جنوبية - شرقية» and we store «جنوب شرقي».
+                ar = facade_adjectives(stored.get(col))
+                if out[name] == MISMATCH and ar and any(re.search(kw, x) and re.search(ar, norm(x)) for x in lines):
+                    out[name] = MATCH
     return out
 
 
@@ -258,6 +266,20 @@ FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
 for _ar, _en in (("شمال شرق", "north[\\s-]*east"), ("شمال غرب", "north[\\s-]*west"),
                  ("جنوب شرق", "south[\\s-]*east"), ("جنوب غرب", "south[\\s-]*west")):
     FACADE_EN[_ar] = FACADE_EN[_ar + "ي"] = r"\b" + _en + r"(?:ern)?\b"
+
+
+_FACADE_BASES = ("شمال", "جنوب", "شرق", "غرب")
+
+
+def facade_adjectives(stored) -> Optional[str]:
+    """«جنوب شرقي» → a pattern for «جنوبيه - شرقيه» / «جنوبي شرقي» / «جنوبيه شرقيه» (norm folds ة→ه).
+    Only the four bases, in the stored order; anything else returns None."""
+    words = norm(str(stored or "")).replace("-", " ").split()
+    bases = [w[:-1] if w.endswith("ي") else w for w in words]
+    if not bases or len(bases) > 2 or any(b not in _FACADE_BASES for b in bases):
+        return None
+    return (r"(?<![\u0621-\u064A])" + r"\s*[-–/،,]?\s*(?:و)?".join(b + r"(?:يه|ي)?" for b in bases)
+            + r"(?![\u0621-\u064A])")
 
 
 _UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
@@ -277,7 +299,8 @@ AREA_UNIT = re.compile(r"م²|م2|متر مربع|m²")
 ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
 # Arabic states TWO with the dual, not the digit: bossbih 17388816 prints «غرفتين» for its 2 bedrooms
 # (2026-10-12: stored 2, scored MISMATCH). A dual on the keyword's own line states the figure 2.
-DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان)(?![\u0621-\u064A])")
+DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان|سنتين|سنتان|عامين|عامان)(?![\u0621-\u064A])")
+# «سنتين» is a two-year-old building: haraj 23236759 «عمر العقار: سنتين», stored 2 (branch re-score 41596198038, 2026-11-03).
 
 
 # Three to ten are written as words too, on a source's own structured cell: aljassim's room cell reads «أربع غرف»
@@ -312,6 +335,13 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     if float(stored) >= 1000:
         if pat.search(whole):
             return MATCH
+        # The integer-area rule below holds for a big plot too: jurash 23304862 (2026-11-03 score) prints «مساحة
+        # الأرض: 1247.5 م²» and we store 1248; only the under-1,000 branch knew it, so the night scored it wrong.
+        if "مساحه" in kw and float(stored) == int(float(stored)):
+            near = " | ".join(lines[j] for i in kw_hits for j in (i - 1, i, i + 1) if 0 <= j < len(lines))
+            if any(int(float(m.group(1).replace(",", ".")) + 0.5) == int(float(stored))
+                   for m in re.finditer(r"(?<![\d.,])(\d+[.,]\d+)(?![\d])", near)):
+                return MATCH
     else:
         # A small figure counts only next to its keyword: on the keyword's own line, or on a
         # neighbouring line that is NOTHING BUT the value («غرف النوم» / «4», «م²» / «240»).
@@ -356,7 +386,7 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         if worded:
             return MATCH if float(stored) in worded else MISMATCH
         if kw == AGE_KW and (NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)) or any(
-                i + 1 < len(lines) and re.match(r"^\s*جديد\s*$", lines[i + 1]) for i in kw_hits)):
+                i + 1 < len(lines) and re.match(r"^\s*" + NEW_WORDS + r"\s*$", lines[i + 1], re.I) for i in kw_hits)):
             return MATCH if float(stored) == 0 else MISMATCH
         page_states = page_states or any(
             0 <= j < len(lines) and re.match(r"^\s*[\d,.٬]+" + _UNIT_TAIL + r"$", lines[j])
@@ -1050,8 +1080,13 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         except Exception:  # noqa: BLE001 — a table without those columns still gives its URL
             raw = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0]
         url = raw.get("listing_url")
-        if raw.get("rent_period") is not None:
-            stored = {**stored, "source_rent_period": raw["rent_period"], "source_price_annual": raw.get("price_annual")}
+        # The source's own figure is read even when the source states NO period: a silent rent is labelled and
+        # served ×12 by the index (judge_silent_rent_period_ar, owner 2026-10-31), so the index's 12,000 is not
+        # what the page prints. raghdan 23296514 / 23296518 (2026-11-03 score): source 1,000 / 500, period NULL,
+        # served سنوي 12,000 / 6,000 → read as wrong and capped the night at 5.
+        if raw.get("rent_period") is not None or raw.get("price_annual") is not None:
+            stored = {**stored, "source_rent_period": raw.get("rent_period"),
+                      "source_price_annual": raw.get("price_annual")}
         key = f"{table}:{rid}"
         if not url:
             row["sampled"] += 1
