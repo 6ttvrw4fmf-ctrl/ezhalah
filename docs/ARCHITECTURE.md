@@ -805,6 +805,13 @@ used to end on.
   half-hourly roster — repairs first, P1 only for rows the trigger could not label, borderline count in
   its payload. The «never "no period filter"» rules below are unchanged: a NULL that survives is the
   borderline or a price-on-request row, and those still enter no single-period pool.
+  **The flag follows the source on every sync (2026-11-03, `20261103204042`):** the sync's ON CONFLICT hands
+  over `rent_period_judged=excluded.rent_period_judged` (its INSERT pass's verdict) and the trigger keeps a
+  handed-over TRUE only when `rent_period_judgment_holds()` backs it — before that, 1,939 stated rows kept
+  judged=true and 8 silent rows kept false. Every rent-period detector excludes a judged row through that
+  ONE predicate (never by trusting the flag alone); `mon_detect_rent_period_inferred_when_source_silent`'s
+  limb `judged_flag_on_stated_period` watches the flag the other way. Guard:
+  `scripts/verify-rent-period-judged-flag-follows-source.ts`.
 - `query.rentPeriod` ∈ `{'monthly','annual','both'}`, default `annual`; the control shows only for Rent.
 - **`'both'` (owner feature 2026-08-14) = the UNION OF TWO KNOWN PERIODS, never "no period filter".**
   `p_rent_period IS NULL` already meant "don't filter", and that also admits the rent rows whose source
