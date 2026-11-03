@@ -65,5 +65,12 @@ check('the SQL half is behind the cheap_yearly_is_monthly flag and skips stay-le
   /ops_feature_flags k where k\.name = 'cheap_yearly_is_monthly' and k\.enabled/.test(fn) && /p_platform in \('gathern','aqarmonthly'\) then p_price_annual/.test(fn) && /p_rent_period is distinct from 'annual' then p_price_annual/.test(fn));
 check('the migration rosters mon_detect_cheap_yearly_rent_served and re-points the sync', /mon_detect_cheap_yearly_rent_served/.test(sql) && /mon_run_all_detectors/.test(sql) && /public\.rent_price_annual_ar\(v\.platform, v\.rent_period, v\.price_annual, v\.property_type\)/.test(sql));
 
+// a silent period judged from the price (enforce_rent_period_judgment, owner 2026-09-28) is served ×12 and flagged
+// rent_period_judged; the detector must expect THAT for such a row, or it reads every correct one as off the rule
+// (856 false P1 rows, 2026-10-31 → 11-03)
+const judgedRx = /s\.rent_period_judged and v\.platform not in \(''gathern'', ''aqarmonthly''\) and v\.rent_period is null and public\.judge_silent_rent_period_ar\(coalesce\(v\.price_annual, v\.price_total\), s\.type_ar\) = ''شهري'' then coalesce\(v\.price_annual, v\.price_total\) \* 12/;
+check('the detector expects a price-judged silent-period row at ×12, not the published figure', judgedRx.test(sql));
+mutantCaught('detector back on rent_price_annual_ar alone for judged rows', !judgedRx.test(sql.replace(/s\.rent_period_judged and v\.platform not in/g, 'false and v.platform not in')));
+
 if (failed) { console.log(`\n❌ verify-cheap-yearly-is-monthly: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-cheap-yearly-is-monthly: the rule, finalize() and the DB mirror all agree.');
