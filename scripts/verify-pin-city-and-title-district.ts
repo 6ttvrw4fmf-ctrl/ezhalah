@@ -46,6 +46,10 @@ const DISTRICT: Rule[] = [
   ['a title district replaces a NAMED source district only when that is another town of the region (never a real neighbourhood)',
     /create or replace function public\.district_is_other_town[\s\S]*?c\.region_id = \(select c0\.region_id from public\.loc_catalog_city c0 where c0\.city_id = p_city_id\)/],
   ['…and the hourly arm uses that test, not a bare «off the list»', /or public\.district_is_other_town\(coalesce\(s\.city_id, v1\.city_id\), v1\.district_ar\)\)/],
+  ['a removed title decision heals: ads served with a basis-\'title\' recovery are re-judged every run',
+    /from public\.district_recovery dr[\s\S]{0,200}?where dr\.basis = 'title' and s\.production_ready/],
+  ['the loss guard never freezes a whole site: it carries the would-be-lost districts forward and refreshes the rest',
+    /p_table, v_lost, v_elig\)\);\s+insert into _drt \(source_table, listing_id, district_ar, resolved_at, verbatim, basis\)\s+select o\.source_table/],
   ['the decider runs hourly', /cron\.schedule\('title-district'/],
   ['its detector is on the roster', /needle \|\| E'\\n    ''mon_detect_title_district_unserved'','\)/],
 ];
