@@ -43,7 +43,7 @@ furnished question. Dropped from the cards because almost every villa has them: 
 `water_tank_well`, `smart_home_entry`: derived predicate tokens, no column of their own). **New words** the free
 reader learned (PR #9904): مجلس نساء / مجلس حريم · مطبخ خارجي · ديوانية خارجية · شلال · بئر / بير · نظام ري / ري
 آلي / ري بالتنقيط · ملعب تنس / اسكواش / كرة سلة / كرة قدم (never «ملعب أطفال», never a nearby pitch). Their chips
-show counts as the hourly reader (:25 UTC, since 2026-11-03) reads the ads; a chip at 0 hides itself.
+show counts as the hourly reader (:01 UTC, since 2026-11-03) reads the ads; a chip at 0 hides itself.
 
 **Duplex** (850 Buy / 76 Rent ads, 0 accept installments) shares both lists verbatim. A chip with 0 ads in the user's
 scope hides itself; a question below the usefulness gates (`MEANINGFUL_NARROWING_FRACTION`, `MIN_TOTAL_TO_SHOW`) is
