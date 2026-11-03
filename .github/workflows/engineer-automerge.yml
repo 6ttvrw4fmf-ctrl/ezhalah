@@ -78,8 +78,12 @@ jobs:
             # widen its own door. Package files and supabase/ (other than a mirror) stay with a person.
             # data/ (pin-sources.json, catalog aliases) is a scraper declaration the engineers own with the parser: ⚡'s
             # #10083 sat green for 8 h on 2026-11-03 because its one data/ file read as «outside» (🔧 11-03).
+            # sql/mirrors/ holds read-only copies of live DB objects with a verified-md5 stamp; verify-sql-mirrors-not-stale
+            # forces the stamp to travel WITH a migration's mirror file, so a mirror PR touching a mirrored function could
+            # never be robot-mergeable and the drift gate refused every deploy until a person merged it (🔬 #10130: six
+            # refused deploys, 09:26–12:13 UTC 2026-11-03; #9791 and #9949 before it). A stamp changes nothing in production.
             outside=$(printf '%s\n' "$files" \
-              | grep -vE '^(scrapers|scripts|e2e|docs|src|public|data|\.github/workflows)/' \
+              | grep -vE '^(scrapers|scripts|e2e|docs|src|public|data|sql/mirrors|\.github/workflows)/' \
               ; printf '%s\n' "$files" \
               | grep -E '^(\.github/workflows/engineer-automerge\.yml|scripts/safe-pr-merge\.ts|scripts/lib/gateFetch\.mjs|scripts/lib/robotPass\.mjs)$' \
               ; true)
