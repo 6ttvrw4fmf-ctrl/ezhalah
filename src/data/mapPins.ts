@@ -9,11 +9,26 @@ import { pinsFrom, rpcArgs, type PinFilter, type PinRow } from '@/lib/mapPins';
 export { cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, bubbleText, polygonOf, idsByTable, orderLike, type PinFilter, type PinRow } from '@/lib/mapPins';
 
 /** The pins (or count cells) for one view. 'unknown' when the fetch failed — the caller keeps what it has. */
+// RECENT VIEWS ARE REMEMBERED (owner 2026-11-03: «I want it to feel smooth»): a pan or zoom back to a view read in the
+// last two minutes answers from memory, no network wait. Only successful reads are kept.
+const CACHE_MS = 120_000;
+const CACHE_MAX = 40;
+const recent = new Map<string, { at: number; rows: PinRow[] }>();
+
 export async function fetchMapPins(box: { s: number; w: number; n: number; e: number }, cell: number, filter: PinFilter, limit = 3000): Promise<PinRow[] | 'unknown'> {
   if (!supabase) return 'unknown';
+  const args = rpcArgs(box, cell, filter, limit);
+  const key = JSON.stringify(args);
+  const hit = recent.get(key);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.rows;
   try {
-    const result = await boundedRpc<PinRow[]>(supabase.rpc('map_pins_ar', rpcArgs(box, cell, filter, limit)));
-    return pinsFrom(result);
+    const result = await boundedRpc<PinRow[]>(supabase.rpc('map_pins_ar', args));
+    const rows = pinsFrom(result);
+    if (rows !== 'unknown') {
+      recent.delete(key); recent.set(key, { at: Date.now(), rows });
+      if (recent.size > CACHE_MAX) recent.delete(recent.keys().next().value as string);
+    }
+    return rows;
   } catch {
     return 'unknown';
   }
