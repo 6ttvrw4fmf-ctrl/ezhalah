@@ -345,7 +345,7 @@ POLICIES: dict[str, _P] = {
         "the node's own /<nid> url: HTTP 404 (Drupal's themed 404 — the status decides, never "
         "whether the page parsed). A 200 carrying data-history-node-id=<nid> is LIVE unless its "
         "own title/description carries RETIRED_TOKENS (retired in place). Any 401/403/429/5xx, a "
-        "transport failure and a 200 for another node are UNKNOWN.",
+        "transport failure and a 200 for another node are UNKNOWN. A 403 is UNKNOWN unless the owner rule of 2026-11-03 holds: two 403s on the node while a recently proven-live node of this site reads LIVE in the same check → GONE (an UNPUBLISHED node).",
         "Measured: the office deletes nodes — 30 of 30 sampled from the 5,295 nids in the live "
         "range the catalogue no longer carries answered 404; 15 of 15 live controls read LIVE."),
     "alshawaf": _P(
@@ -353,7 +353,7 @@ POLICIES: dict[str, _P] = {
         "the node's own /<nid> url: HTTP 404 (Drupal's themed 404). A 200 that passes "
         "parse_detail's own proof (article node id AND the node block's wa.me link both name this "
         "nid) is LIVE unless its own h1/«العقار» line says مزاد / تم البيع… (closed in place). "
-        "Any 401/403/429/5xx, a transport failure and an unproven 200 are UNKNOWN.",
+        "Any 401/403/429/5xx, a transport failure and an unproven 200 are UNKNOWN. A 403 is UNKNOWN unless the owner rule of 2026-11-03 holds: two 403s on the node while a recently proven-live node of this site reads LIVE in the same check → GONE (an UNPUBLISHED node).",
         "Measured: 31 of 31 sampled from the 4,569 nids in the live range the catalogue no longer "
         "carries answered 404; 15 of 15 live controls read LIVE."),
     "ialqarawi": _P(
@@ -1194,6 +1194,15 @@ POLICIES: dict[str, _P] = {
         "the crawl's OWN seen-set over the site's own list pages /ar/ads?page=N (24 per page, a declared "
         "totalCount). run.py suppresses prune_unseen unless the walk reached the declared total.",
         "No oracle is written yet, so this does not claim a direct check."),
+    "aqaratikom": _P(
+        _pol("aqaratikom", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the ad's OWN record in the API the crawl reads, GET nawait.sa/api/v1/ad/<uuid> (the listing "
+        "page is a login-walled shell, identical for live and removed ads): 404 is GONE; 200 for this "
+        "uuid with is_sold true is GONE, otherwise LIVE; a 500 is UNKNOWN unless the owner rule of "
+        "2026-11-03 holds — two 500s while a recently proven-live ad's record reads LIVE in the same "
+        "check → GONE. Any other answer is UNKNOWN.",
+        "Measured 2026-11-03 from a browser: live → 200 data.id=uuid; made-up uuid → 404; the ads the "
+        "crawl stopped seeing → 500 on every read. Oracle: scrapers/aqaratikom/run.py::_verify_gone."),
     "ashab": _P(
         _pol("ashab", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's own list /properties?page=N (447 ads, 51 pages) and "
@@ -1431,7 +1440,7 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abralosol", "abwbna", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj", "aqaratikom",
+            "abralosol", "abwbna", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj",
             "arkaan", "awal", "bahadhabab", "erapulse",
             "jurash",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
