@@ -39,7 +39,20 @@ export function areaZoomSpan(level: AreaLevel): number {
 
 /** A view too crowded for price pins shows district names while two or more districts share it; once one district
  *  fills the screen, names would only repeat that one district, so the fine count grid takes over. */
-export const denseShowsDistricts = (labelsInView: number): boolean => labelsInView >= 2;
+export const denseShowsDistricts = (labelsInView: number, latitudeDelta: number): boolean =>
+  labelsInView >= 2 && latitudeDelta > DENSE_DISTRICTS_ABOVE;
+/** Inside a district (a tap lands at 0.015°) names never come back — only the counted bubbles and the pins. */
+export const DENSE_DISTRICTS_ABOVE = 0.02;
+
+/** A label whose position is on screen (the padded read box also holds labels just off the edge). */
+export function inView(a: Pick<AreaRow, 'lat' | 'lng'>, center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): boolean {
+  return Math.abs(a.lat - center.latitude) <= span.latitudeDelta / 2 && Math.abs(a.lng - center.longitude) <= span.longitudeDelta / 2;
+}
+
+/** A tap on a grid bubble always zooms IN: the bubble's own neighbourhood, never wider than a third of the view. */
+export function bubbleTapSpan(cell: number, latitudeDelta: number): number {
+  return Math.min(cell * 2.2, latitudeDelta / 3);
+}
 
 /** The labels' total — the count pill's number. */
 export const areasTotal = (rows: AreaRow[]): number => rows.reduce((a, r) => a + r.n, 0);
