@@ -33,7 +33,7 @@ stage working and must add each NEW chip to stages 2, 3 and 4.
    the site's own table (`<site>_residential_listings.description`; wasalt keeps it in
    `ar_data->'propertyInfo'->>'description'`). PRICE = SOURCE, PERIOD = SOURCE, text = source. A site whose new
    ads suddenly have no description is a broken scraper (`new_listing_field_drop` alarm).
-2. **Free word reader (every hour at :25 UTC since 2026-11-03 — was 07:05 nightly; `facts-words.yml`, pg_cron `gh-facts-words-nightly`, name kept).** `scrapers/facts/words.py`
+2. **Free word reader (every hour at :01 UTC since 2026-11-03 — was 07:05 nightly; `facts-words.yml`, pg_cron `gh-facts-words-nightly`, name kept).** `scrapers/facts/words.py`
    reads every active ad never read or whose text changed (`text_facts_todo`, by `src_hash`) and writes one row
    per fact into `listing_text_facts` with the ad's own words as proof. **This is the ONLY writer of filter
    values.** Every new chip = a new fact here, with its Arabic/English phrases AND selftest phrases
