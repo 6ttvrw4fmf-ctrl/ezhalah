@@ -100,18 +100,34 @@ class Q:
             return R(data=SCENARIO.get("alert_event_rows", []), count=None)
         if self.t==TABLE:
             if self._count:
-                # two count queries per table: eligible, then total rows
-                if not hasattr(self,"_seen"):
-                    Q._ncount = getattr(Q,"_ncount",0)+1
+                # the only listing-table count left is the platform's total rows (fraction guard);
+                # the eligible population is measured by deletion_clock_eligible_count (see RPC).
                 if SCENARIO.get("no_count"):
                     return R(data=[], count=None)   # broken/absent Content-Range
-                return R(data=[{"id":1}], count=(SCENARIO["eligible"] if Q._ncount%2==1 else SCENARIO["platform_rows"]))
-            n = min(SCENARIO["eligible"], self._limit or SCENARIO["eligible"])
-            return R(data=_rows(n), count=None)
+                return R(data=[{"id":1}], count=SCENARIO["platform_rows"])
+            if self.op=="select":
+                raise AssertionError("candidate rows read from the listing table, not deletion_clock_candidates")
+            return R(data=[], count=None)
         return R(data=[], count=None)
+
+class RPC:
+    # The deletion clock's ONE predicate lives in SQL (deletion_clock_eligible_sql, owner decision 2,
+    # 2026-11-03); the engine reaches it only through these two RPCs.
+    def __init__(self, name, p): self.name=name; self.p=p
+    def execute(self):
+        R = types.SimpleNamespace
+        if self.name=="deletion_clock_eligible_count":
+            if SCENARIO.get("no_count"):
+                return R(data=None, count=None)    # an unanswered count
+            return R(data=SCENARIO["eligible"], count=None)
+        if self.name=="deletion_clock_candidates":
+            n = min(SCENARIO["eligible"], self.p["p_limit"])
+            return R(data=_rows(n), count=None)
+        raise AssertionError("unexpected rpc " + self.name)
 
 class SB:
     def table(self, name): return Q(name)
+    def rpc(self, name, p): return RPC(name, p)
 
 from scrapers.common import cleanup, db
 db.sb = lambda: SB()
@@ -267,7 +283,8 @@ check('the unclamped count feeds the gate (count="exact")', /count="exact"/.test
 check('an absent count raises instead of defaulting to 0', /unmeasured population/.test(src));
 check('the cap-saturating `max_delete_per_run + 1` measurement never returns',
       !/max_delete_per_run"\] \+ 1/.test(src));
-check('the work-set SELECT is capped by max_delete_per_run', /\.limit\(pol\["max_delete_per_run"\]\)/.test(src));
+check('the work-set SELECT is capped by max_delete_per_run',
+      /_eligible_rows\(client, t, pol, cutoff, pol\["max_delete_per_run"\]\)/.test(src));
 check('require_source_recheck is still honoured', /require_source_recheck/.test(src));
 check('the platform-health precondition function still exists', /_platform_health_ok/.test(src));
 check('the health check runs before eligible_total is ever measured',
