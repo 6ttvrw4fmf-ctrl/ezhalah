@@ -326,6 +326,23 @@ def test_score_site_reads_the_source_tables_period():
     assert row["fields"]["price"][MATCH] == 1 and row["fields"]["price"].get(MISMATCH, 0) == 0
 
 
+def test_score_site_reads_the_sources_figure_when_the_source_states_no_period():
+    # raghdan 23296518 (2026-11-03): source price_annual 500, rent_period NULL; the index judges the silent rent
+    # and serves سنوي 6,000 (judge_silent_rent_period_ar ×12). The page prints 500: that is a match.
+    stored = {"source_table": "fake_commercial_listings", "listing_id": 9, "platform": "fakesite",
+              "deal_ar": "إيجار", "rent_period_ar": "سنوي", "type_ar": "مكتب", "price_annual": 6000}
+    html = "<html><body><p>مكتب للإيجار</p><p>السعر 500 ريال</p></body></html>"
+    for src_price, want in ((500, MATCH), (700, MISMATCH)):
+        client = FakeClient({
+            "search_listings_ar": [stored],
+            "fake_commercial_listings": [{"id": 9, "listing_url": "https://example.test/9",
+                                          "rent_period": None, "price_annual": src_price}],
+        })
+        row = score_site(client, "fakesite", [("fake_commercial_listings", 9)],
+                         night="2026-11-03", pace=0, probe=lambda url: (200, html))
+        assert row["fields"]["price"].get(want, 0) == 1, (src_price, row["fields"]["price"])
+
+
 def test_latin_k_after_the_figure_is_thousands():
     # tuba 21078156 (2026-10-27): page «SAR 990k», we store 990000
     assert compare_listing({"price_total": 990000}, page("السعر :", "SAR 990k"))["price"] == MATCH
