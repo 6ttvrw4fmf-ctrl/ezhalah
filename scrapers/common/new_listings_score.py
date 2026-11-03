@@ -425,8 +425,26 @@ def _inside_a_printed_range(stored, lines: list[str]) -> bool:
 PREPARED = r"تاسيس\s*"
 
 
+# «المطبخ غير مركب», «مصعد غير راكب» — the fixture is NOT installed: the ad states no yes (the owner's four outcomes,
+# 2026-10-25; the shared reader serves it unknown). bahadhabab 10777803 «ومطبخ المطبخ غير مركب» was asked «kitchen» by
+# the 2026-11-03 score and counted a findability miss on a correctly-NULL kitchen. Up to three plain words may stand
+# between the fixture and its verdict; a comma or full stop ends it («مطبخ، مكيفات غير راكبة» keeps the kitchen).
+def _not_installed(kw: str) -> str:
+    return r"(?:" + kw + r")\w*(?:[^\S\n]+[^\s،,.؛;]+){0,3}?[^\S\n]+غير\s+(?:راكب|مركب)\w*"
+
+
+# A COUNT of zero is not the fixture: abaad prints a chip «<strong>0</strong> مطبخ» (13214734, 2026-11-03 page re-read),
+# which the reader joins as «مطبخ 0» or «0 مطبخ». The score asked «kitchen» of that villa and counted a miss.
+def _zero_count(kw: str) -> str:
+    return r"(?<![\d٠-٩.,])[0٠]\s*(?:" + kw + r")\w*|(?:" + kw + r")\w*\s*:?\s*[0٠](?![\d٠-٩.,])"
+
+
 def unprepared(x: str, kw: str) -> str:
-    return re.sub(PREPARED + "(?:" + kw + ")", " ", x)
+    x = re.sub(_zero_count(kw), " ", x)
+    # «مصعد مؤسس», «مؤسس مصعد» — the lift is PREPARED, the same unknown as «تأسيس مصعد» (haraj 18784258, suwar 11747618:
+    # both asked «elevator» by the 2026-11-03 score, both correctly NULL in the index).
+    x = re.sub(r"(?:" + kw + r")\w*\s+(?:مؤسس|موسس)\w*|(?:مؤسس|موسس)\w*\s+(?:" + kw + r")\w*", " ", x)
+    return re.sub(_not_installed(kw), " ", re.sub(PREPARED + "(?:" + kw + ")", " ", x))
 
 
 def _cmp_bool(stored, lines: list[str], kw: str) -> str:
