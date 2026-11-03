@@ -571,6 +571,10 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "smart_tv": (("فوكس", "vox", "ريل"), ("فوكس", "vox", "ريل")),                          # «سينما فوكس» is a cinema nearby
     "smart_home": (("بوابه", "بوابات", "دخول", "الدخول", "مدخل", "قفل"), ()),              # «بوابات بنظام ذكي»
     "singles": (("يمنع", "نؤجر", "اؤجر", "استقبل", "نستقبل", "نعتذر"), ()),                       # the positive word inside a refusal («يمنع سكن العزاب»)
+    # an oven's grill setting is a kitchen appliance, not a barbecue (owner 2026-11-03: «what about the grill thing»):
+    # «فرن شواية بلت إن», «مطبخ راكب بالأجهزه ( فرن - شواية - ميكرويف )», «فرن شواء وطهي»
+    "grill": (("فرن", "وفرن", "بفرن", "ميكرويف", "مايكرويف", "ميكروويف", "طباخ", "موقد"),
+              ("ميكرويف", "مايكرويف", "ميكروويف", "وطهي", "بلت", "built", "كهربائي", "كهربائيه", "وميكرويف")),
     "office_inside": (("التواصل", "تواصل", "اتصل", "بالتواصل", "تواصلوا", "راسل"), ()),
     "for_events": (("قاعه", "صاله", "قاعات", "صالات", "لاقامه"), ()),
     "industrial_area": (("الجبيل", "جبيل", "ينبع", "شارع"), ()),
@@ -601,6 +605,9 @@ _UTILITY = tuple(_n(w) for w in ("كهرب", "مياه", "ماء", "مويه", "
 # and the items of a «خدمات قريبة: مسجد - حديقة» list — the nearby word may come AFTER, or a clause before.
 _PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking", "nursery", "kids_play_area", "sports_court",
                            "football_pitch", "events_hall", "mosque", "market", "in_mall", "restaurant_cafe", "food_allowed"})
+# A grill named in a kitchen-appliance list is the oven's grill setting, not a barbecue (owner 2026-11-03): a dash- or
+# dot-separated list splits the clause, so the guard reads the surrounding text, not just the two words beside it.
+_KITCHEN_APPLIANCE = re.compile(r"(?:مايكرويف|ميكرويف|ميكروويف|مايكروويف|(?<!\w)(?:و|ب)?فرن(?!\w)|(?<!\w)افران(?!\w))")
 _NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "بجوار", "مقابل"))
 # A PUBLIC PLACE named after «خلف / أمام / جنبها / ومقابلها / ظهيرة / 4 كيلو» is a landmark, not part of the unit
 # («خلف شبيلي مول», «تتوفر جنبها … سوبرماركت», «ومقابلها مسجد», 2026-11-03 audit round 2). These words are too common to
@@ -1004,6 +1011,8 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     num_hits: dict[str, list[Hit]] = {}
     cue_in = near_in = False
     void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
+    # a grill beside an oven / microwave (same clause or the next one over) is the oven's grill (owner 2026-11-03)
+    kitchen = [bool(_KITCHEN_APPLIANCE.search(t)) for (_o, _c, t, _i) in clauses]
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
         # a clause that was ONLY the ad's own place name is blanks now (_blank_place_names) — nothing to read, and
         # words[0] below would crash the whole run (2026-11-03: every shard of facts-words died on «… مياه وكهرباء، بيشة»)
@@ -1015,6 +1024,8 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             for rx, forced in pats:
                 for m in rx.finditer(t):
                     v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in)
+                    if fact == "grill" and any(kitchen[j] for j in (ci - 1, ci, ci + 1) if 0 <= j < len(kitchen)):
+                        continue
                     if v is not None:
                         bool_hits.setdefault(fact, {}).setdefault(v, (ci, qs, qe))
         # what this clause hands to the next one: a cue (or a cued utility list going on), a «nearby» heading
@@ -1863,6 +1874,13 @@ def selftest() -> None:
         ("بوابات حديثة بنظام ذكي", {}, ("smart_home",)),
         ("مباشر مع المالك نورة الحوشاني", {}, ("yard",)),
         ("رصيف للتنزيل والتحميل", {}, ("street_lights",)),
+        ("المطبخ: فرن سطحي إيطالي من إلبا، فرن شواية بلت إن، مايكرويف من سامسونج", {}, ("grill",)),
+        ("مطبخ راكب بالأجهزه ( فرن - شواية - ميكرويف ) - مكيفات راكبة", {}, ("grill",)),
+        ("مطبخ مميز راكب احدث الاجهزة ثلاجة فرن شواء وطهي مايكرويف", {}, ("grill",)),
+        ("المطبخ والأجهزة: - 6 مكيفات سبليت. - ميكروويف. - شواية. - موقد سيراميكي", {}, ("grill",)),
+        ("حوش خارجي مزروع مع منطقة شواء مجهزة للعزائم", {"grill": True}, ()),
+        ("مجلس مع مشب بالحوش", {"grill": True}, ()),
+        ("شاليه بركن شواء و مسبح", {"grill": True}, ()),
         ("تتوفر جنبها جميع الخدمات ( سوبرماركت - مسجد )", {}, ("market",)),
         ("فلل للبيع خلف حدائق ومسجد", {}, ("mosque",)),
         ("يتوفر تقرير فحص تربة هندسي معتمد وجاهز", {}, ("approved_plan",)),
