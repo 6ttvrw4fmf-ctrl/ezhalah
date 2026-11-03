@@ -236,6 +236,44 @@ def verify_seen(ad_number: str):
 
 
 
+# ── Prune asks the post by its OWN id (2026-11-03) ──────────────────────────────────────────────
+# The stored slug is not this ad's address for good: the office reuses slugs. NW4349 (200,000 SAR,
+# 10,001 m², missing 13 crawls) — its stored URL now answers 200 for post 4513 (250,000 SAR, 14,582 m²,
+# a different ad we hold as NW4513), so _probe read "200, no opinion" → UNKNOWN for weeks while the card
+# opened someone else's land. Measured: /?p=4349 → 404 with no redirect (REST lands/4349 → 401
+# rest_forbidden, not public); live /?p=4513 → its permalink with postid-4513; made-up /?p=99999999 → 404.
+# GONE is still only a 404/410 on the ad's own path; LIVE needs a page naming THIS post id; a removal is
+# believed only while a known-live ad from this run still reads live through the same reader.
+def _own_id_signal_for(pid: str):
+    marker = re.compile(rf"\bpostid-{re.escape(pid)}\b")
+
+    def _sig(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+        if status in (404, 410) and not path_changed:
+            return "gone"
+        if status == 200 and marker.search(body or ""):
+            return "live"
+        return None
+    return _sig
+
+
+def _make_prune_verify(control_ad: Optional[str]):
+    def probe(ad_number: str, canary=None):
+        pid = str(ad_number or "")[2:]
+        if not str(ad_number or "").startswith("NW") or not pid.isdigit():
+            return "unknown", f"{ad_number!r} is not an NW<post id> ad number"
+        return http_liveness.LivenessProbe(
+            platform="nowaisiry", signal=_own_id_signal_for(pid), session=_oracle_session,
+            url_for=lambda _a: f"{BASE}/?p={pid}", canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control_ad:
+            return False, "no ad from this run to use as a positive control"
+        verdict, why = probe(control_ad)
+        return verdict == "live", f"positive control {control_ad}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def _clean(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", ihtml.unescape(s or ""))).strip()
 
@@ -548,10 +586,11 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        prune_verify = _make_prune_verify((res + com)[0]["ad_number"] if (res or com) else None)
         for tbl, rows_seen in (("nowaisiry_residential_listings", res),
                                ("nowaisiry_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
-                                verify_gone=_probe.verify_gone)
+                                verify_gone=prune_verify)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

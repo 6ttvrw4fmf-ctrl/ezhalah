@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
 import type { AreaLevel, AreaRow } from '@/lib/mapAreas';
 
-export { areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, type AreaLevel, type AreaRow } from '@/lib/mapAreas';
+export { areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, type AreaLevel, type AreaRow } from '@/lib/mapAreas';
 
 export async function fetchMapAreas(box: { s: number; w: number; n: number; e: number }, level: AreaLevel, deals: string[]): Promise<AreaRow[] | 'unknown'> {
   if (!supabase) return 'unknown';

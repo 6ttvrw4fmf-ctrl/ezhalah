@@ -30,6 +30,19 @@ def test_sadiqeltajer_a_dropped_ad_keeps_its_page_and_code_and_is_still_gone():
     assert SQ._signal(200, "<html>غير موجود</html>", False) == "gone"      # the never-existed shell
 
 
+def test_sadiqeltajer_the_red_rejected_box_is_a_closure_2026_11_03():
+    # SDQ8857/8797/8563: full page and code, no call button, <p class="listing-status … alert-danger">مرفوض</p>.
+    box = '<p class="listing-status p-2 mb-0 alert alert-danger">مرفوض</p>'
+    page = _sq(call=False).replace("<h2>", box + "<h2>")
+    assert SQ._signal(200, page, False) == "gone"
+    empty = '<p class="listing-status p-2 mb-0 alert alert-danger">\n   </p>'
+    assert SQ._signal(200, _sq(call=False).replace("<h2>", empty + "<h2>"), False) is None
+    odd = '<p class="listing-status p-2 mb-0 alert alert-danger">قيد المراجعة</p>'
+    assert SQ._signal(200, _sq(call=False).replace("<h2>", odd + "<h2>"), False) is None
+    assert SQ._signal(200, _sq(call=True).replace("<h2>", box + "<h2>"), False) is None   # still offered
+    assert SQ._signal(200, _sq(call=False) + box, False) is None                          # a neighbour's box
+
+
 def test_sadiqeltajer_an_offered_ad_is_live_and_a_neighbours_card_cannot_change_that():
     assert SQ._signal(200, _sq(), False) == "live"
     assert SQ._signal(200, _sq(neighbour="<span>غير متاح</span>"), False) == "live"

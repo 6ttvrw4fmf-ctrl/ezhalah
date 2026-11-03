@@ -248,7 +248,10 @@ def area_of(title: str, body: str) -> dict:
                 v = float(num.replace(",", ""))
             except ValueError:
                 continue
-            if m.group(2):
+            # «96 الف» is 96,000 m² — but the PLURAL «الاف» after a number already written in thousands is the
+            # colloquial redundancy «5000 الاف متر» = 5,000 m² (Haraj 19008644 / 20813689 / 20837877 were stored as
+            # 5,000,000 / 8,000,000 / 3,000,000 m², 2026-11-03). Only the plural after >= 1000 is left unscaled.
+            if m.group(2) and not (m.group(2) == "الاف" and v >= 1000):
                 v *= 1000
             if 10 <= v <= 10_000_000:
                 vals.setdefault(v, t[m.start():m.end()].strip())

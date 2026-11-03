@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { fetchMapDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
@@ -703,6 +703,18 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // grid, where every listing is counted, and draw bubbles until the user zooms closer.
       let drawCell = cell;
       if (cell === 0 && rows.length > PIN_SHOW_MAX) {
+        // Too crowded for price pins (owner's father, 2026-11-03: «at this zoom level show the names of the districts
+        // only and the number of listings»): district names while two or more districts share the view; once one
+        // district fills the screen, the fine count grid until the user zooms closer.
+        if (!narrowed) {
+          const areas = await fetchMapAreas(paddedBox(center, span), 'district', pins.deals);
+          if (my !== seq || mapRef.current !== m) return;
+          if (areas !== 'unknown' && denseShowsDistricts(areas.length)) {
+            drawAreas(areas, 'district');
+            setPinCount(areasTotal(areas));
+            return;
+          }
+        }
         drawCell = fineCellForSpan(span.latitudeDelta);
         rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
         if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;

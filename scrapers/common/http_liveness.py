@@ -237,8 +237,11 @@ def stored_listing_url(tables: tuple[str, ...]) -> Callable[[str], Optional[str]
 # ad from that site fine, and the error repeats on 2 checks» → «Yes, hide them»). Measured 2026-11-03:
 #   alshawaf / bossbih (Drupal): an UNPUBLISHED node answers 403 twice; a deleted one 404; live 200.
 #   aqaratikom (nawait.sa /api/v1/ad/<uuid>): a removed ad answers 500 twice; a made-up uuid 404; live 200.
+#   abralosol (owner «Yes, hide them» for this site, 2026-11-03): a removed ad's /{nid} answers 403 with the
+#   site's own page «لايمكن فتح هذة الصفحة»; a made-up nid 404; live 200 — its caller also requires that text.
 # A site joins this table only with the owner's approval. Nothing else may call a 403/5xx a death.
-OWNER_APPROVED_REMOVAL_STATUS: dict[str, int] = {"alshawaf": 403, "bossbih": 403, "aqaratikom": 500}
+OWNER_APPROVED_REMOVAL_STATUS: dict[str, int] = {"alshawaf": 403, "bossbih": 403, "aqaratikom": 500,
+                                                  "abralosol": 403}
 
 
 def removal_by_owner_approved_status(
@@ -247,17 +250,19 @@ def removal_by_owner_approved_status(
         url: str,
         control_url: Optional[str],
         control_signal: Signal,
-        pause: float = 1.5) -> Optional[Verdict]:
+        pause: float = 1.5,
+        body_must: Optional[Any] = None) -> Optional[Verdict]:
     """GONE only when ALL hold: the site is in OWNER_APPROVED_REMOVAL_STATUS; the ad's own URL answers that
-    exact status on two reads, neither redirected; and in the SAME check a live control ad of the same site
-    reads LIVE through the site's own signal. Anything else returns None (the caller keeps UNKNOWN)."""
+    exact status on two reads, neither redirected (and, when `body_must` is given, both bodies match it); and
+    in the SAME check a live control ad of the same site reads LIVE through the site's own signal. Anything
+    else returns None (the caller keeps UNKNOWN)."""
     code = OWNER_APPROVED_REMOVAL_STATUS.get(platform)
     if code is None or not url or not control_url or control_url == url:
         return None
     reads = []
     for i in range(2):
-        st, _body, moved = fetch(url)
-        if st != code or moved:
+        st, body, moved = fetch(url)
+        if st != code or moved or (body_must is not None and not body_must.search(body or "")):
             return None
         reads.append(st)
         if i == 0:

@@ -396,7 +396,9 @@ scheduled, quarantined by a trust gate, blocked proxy, or a probe rate too low f
 A 403 or a 5xx is still never a death by itself — `decide()` and `read_is_unbelievable()` are unchanged.
 The owner approved one narrow exception («Yes, hide them»), for sites measured to answer a removed ad with
 an error while their live ads answer 200: alshawaf and bossbih (an UNPUBLISHED Drupal node → 403; deleted →
-404) and aqaratikom (`/api/v1/ad/<uuid>` of a removed ad → 500; a made-up uuid → 404). Such an ad is hidden
+404) and aqaratikom (`/api/v1/ad/<uuid>` of a removed ad → 500; a made-up uuid → 404); and abralosol (owner yes
+for this site, 2026-11-03: a removed `/{nid}` → 403 carrying the site's own «لايمكن فتح هذة الصفحة» page, which
+its caller also requires — `body_must`). Such an ad is hidden
 only when ALL hold: the site and that exact status are in `OWNER_APPROVED_REMOVAL_STATUS`
 (`scrapers/common/http_liveness.py`); the ad's own URL answers it on two reads, neither redirected; and in the
 SAME check a recently proven-live ad of the same site reads LIVE through the site's own signal

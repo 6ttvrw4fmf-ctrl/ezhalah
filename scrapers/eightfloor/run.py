@@ -145,6 +145,11 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
         row["elevator"] = True
     if _pos(d.get("parking_spots")):
         row["parking"] = True
+    # The API's own kitchen COUNT (`kitchens`, 1 on both live ads 2026-11-03) is the site's structured statement; it was
+    # stored in additional_info only, so kitchen stayed NULL and an Advanced Filter «مطبخ» search never found these ads
+    # (ops_af_score eightfloor findability 0 of 2 for 4 nights, kitchen we_miss 2). True-only, like the counts above.
+    if _pos(d.get("kitchens")):
+        row["kitchen"] = True
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     row["price_evidence"] = normalize.price_evidence(
         field="rent_price_annually" if deal == "Rent" else "selling_price",

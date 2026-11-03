@@ -16,6 +16,7 @@
 // handled the same way: its own SAMEORIGIN header is not the ad page's, and a frame it blocks is excluded.
 import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, devices } from '@playwright/test';
+import { shippedInstantShowTab } from '../lib/shippedBundle.mjs';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const SB = process.env.SUPABASE_URL;
@@ -187,12 +188,15 @@ try {
     else ok(`${site.host}: median ${med} ms to show the ad inside Ezhalah (budget ${BUDGET_MS} ms)`);
   }
   // 3. the live bundle still ships the instant-show tab
-  const html = await fetch(`${BASE}/?cb=${Date.now()}`).then((r) => r.text());
-  const js = /\/_expo\/static\/js\/web\/[^"]+\.js/.exec(html)?.[0];
-  const bundle = js ? await fetch(BASE + js).then((r) => r.text()) : '';
-  if (!bundle) fail('could not read the production bundle');
-  else if (!bundle.includes('ad-load-bar') || !bundle.includes('ad-slow-hint')) fail('production no longer ships the instant-show tab (ad-load-bar / ad-slow-hint missing)');
-  else ok('production ships the instant-show tab (no blank loading cover)');
+  // The web build is SPLIT (ALWAYS FAST, owner 2026-10-27): the page's first <script> is the 3.8 KB metro runtime,
+  // and AdViewer rides in the agent route's chunk (src/app/agent.tsx imports it). Reading only the first script
+  // made this step fail on every run since the split (run 41567582462) while production shipped the tab. So it
+  // reads every script the home page loads AND every route chunk those reference, and passes only if one of them
+  // carries both testIDs. Nothing readable at all is still a failure, never a pass.
+  const { files, shipped } = await shippedInstantShowTab(BASE);
+  if (!files) fail('could not read the production bundle');
+  else if (!shipped) fail(`production no longer ships the instant-show tab (ad-load-bar / ad-slow-hint missing in all ${files} shipped scripts)`);
+  else ok(`production ships the instant-show tab (no blank loading cover) — found in ${shipped}`);
 } finally { await browser.close(); }
 
 // THE SLOW WATCH LIST (owner 2026-10-21: «some ads r slowly … make a GitHub monitors them»). The budget above is

@@ -656,6 +656,11 @@ INCOMPLETE: list[str] = []
 # page, live or not: furniture.) A slug that never existed answers 200 with a 3,892-byte shell that
 # says «غير موجود» and has no ad code. Anything else, including 404 and every block, is UNKNOWN.
 _UNAVAILABLE = "غير متاح"
+# Measured 2026-11-03: the office now writes the closure into a red status box in the SAME contact slot —
+# <p class="listing-status … alert-danger">مرفوض</p> («rejected») — on 3 of 3 ads dropped from the sitemap
+# for 40+ crawls (SDQ8857, SDQ8797, SDQ8563), and on 0 of 3 live ads (whose listing-status boxes are empty).
+# Only the measured words count; an empty or unfamiliar box stays UNKNOWN.
+_CLOSED_BOX = re.compile(r'class="listing-status[^"]*alert-danger[^"]*"[^>]*>\s*(?:مرفوض|غير متاح)\s*<')
 _CALL_BUTTON = "call-btn"
 _NOT_FOUND = "غير موجود"
 RES_TABLE, COM_TABLE = "sadiqeltajer_residential_listings", "sadiqeltajer_commercial_listings"
@@ -669,9 +674,10 @@ def _signal(status, body, moved) -> Optional[str]:
     own = body[:i] if i > 0 else body
     offered = _CALL_BUTTON in own
     has_code = bool(ad_code(own_section(body) or ""))
-    if offered and has_code and _UNAVAILABLE not in own:
+    closed_box = bool(_CLOSED_BOX.search(own))
+    if offered and has_code and _UNAVAILABLE not in own and not closed_box:
         return "live"
-    if not offered and (_UNAVAILABLE in own or (_NOT_FOUND in own and not has_code)):
+    if not offered and (_UNAVAILABLE in own or closed_box or (_NOT_FOUND in own and not has_code)):
         return "gone"
     return None
 

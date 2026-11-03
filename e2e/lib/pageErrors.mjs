@@ -60,3 +60,31 @@ export const hydrationNoticeNote = (journey, errors) =>
   + `on this static export and NOT counted as a product defect; a genuine hydration regression is `
   + `caught by scripts/verify-live-hydration.mjs, the blocking post-deploy gate (see `
   + `e2e/lib/pageErrors.mjs): ${errors.join(' | ').slice(0, 300)}`;
+
+// ── AN EMBEDDED SOURCE SITE'S GOOGLE MAPS ERROR IS NOT AN EZHALAH EXCEPTION (2026-11-03) ──────────
+//
+// On a phone, a result card opens the SOURCE site's own page inside Ezhalah's ad viewer (a real
+// cross-site iframe, src/components/AdViewer.tsx). Some of those pages load Google Maps with
+// `callback=initMap` and never define it, and Google's loader throws «InvalidValueError: initMap is not a
+// function» inside THEIR frame. Playwright reports it as a page error of our page, so guardian failed
+// `back-preserves-results [mobile]` on it (run 41590614252) while every product assertion passed — and
+// desktop, where the card opens a separate tab the journey closes, passed the same journey.
+//
+// Narrow by construction, and mutation-proven in scripts/verify-embedded-site-page-errors.ts:
+//   · ONLY Google Maps' own error class `InvalidValueError` — Ezhalah never loads Google Maps (it uses
+//     Apple MapKit) and never names that class; that barrier FAILS the moment src/ does either, because
+//     then this excuse would be hiding our own error.
+//   · Any other error — TypeError, ReferenceError, a React error — stays an app defect.
+//   · It is a NOTE, never a silent drop: both suites print the count and the text.
+export const EMBEDDED_GOOGLE_MAPS_ERROR_RE = /^(?:Uncaught (?:\(in promise\) )?)?InvalidValueError: /;
+
+/** Accepts an Error (name + message) or the string a harness captured. */
+export const isEmbeddedSitePageError = (err) => {
+  if (err && typeof err === 'object' && err.name === 'InvalidValueError') return true;
+  return EMBEDDED_GOOGLE_MAPS_ERROR_RE.test(String(err && err.message ? err.message : err).trim());
+};
+
+export const embeddedSiteNote = (journey, errors) =>
+  `${journey}: ${errors.length} EMBEDDED-SITE page error(s) — Google Maps' InvalidValueError thrown inside a source `
+  + `site's own page in the ad viewer, NOT counted as a product defect (e2e/lib/pageErrors.mjs): `
+  + `${errors.join(' | ').slice(0, 300)}`;

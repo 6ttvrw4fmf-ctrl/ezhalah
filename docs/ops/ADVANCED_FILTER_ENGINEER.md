@@ -424,3 +424,17 @@ the consumer by hand, record the run id and its commit SHA in the proof row, and
    check's warm-up call, the chip oracle's missing 10-26 rule). The first step of any count mismatch is `ids(A) − ids(B)`
    and `ids(B) − ids(A)` with a one-line explanation of each difference; the RPC is touched only when the difference is
    not the tool's own doing.
+
+## Lesson from 2026-11-03 (🔬, written the same night)
+
+- **Five of the night's alerts were detectors that had not learned an approved rule.** The coverage cliff judged a
+  platform as one cohort (sakani's new SALE ads «lost» their annual rent), the Monthly freeze guard did not know the
+  11-01/11-02 certifications, the mapping-integrity arm compared the index with the box after Rule B, the filter
+  parity check counted a 5,000-row page, and the sadiqeltajer checker read only the room list after backlog 794. Rule:
+  when an owner rule or a certification lands, grep the `mon_*` detectors that read the same column or table in the
+  SAME change; a detector that predates the rule will page on correct data and bury the real signal.
+- **The capture score reads the raw page; only findability filters the template.** Search controls printed on every
+  ad page — sakan's radio «مؤثث / غير مؤثث», nofodh's `<select>` of every district, sukna's prompt `<button>` chips,
+  aqaralriyadh's menu «شقق مفروشة» — scored 10/10 «we miss» each. `source_reread.page_evidence` now drops radio
+  options, selects, buttons and WordPress menu links (PR #10132). Before chasing a site's we_miss, re-read ONE page
+  (`net.http_get` from Supabase works from the cloud container) and find where the word sits in the HTML.
