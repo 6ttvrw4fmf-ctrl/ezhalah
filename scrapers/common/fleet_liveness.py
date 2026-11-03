@@ -271,6 +271,17 @@ def _update(client, table: str, ids: list, patch: dict) -> None:
         _execute(client.table(table).update(patch).in_("id", ids[i:i + 200]), what=f"{table}.update")
 
 
+def run_label(site: str, struck_only: bool = False) -> str:
+    """The run label. The struck-only RECHECK (fleet-liveness-recheck.yml, 14:17 + 20:47 UTC, 1-9 min,
+    0-363 rows) is a different job from the daily full pass (07:17 UTC, up to 5 h 22 min, ~15,000 rows) and
+    gets its OWN label (AGENTS.md: «a liveness job needs its OWN run label»). Sharing one made the full
+    pass's baseline the recheck's few minutes: mon_detect_run_duration_explosion read every in-flight morning
+    pass as a stall and fleet_liveness:muhaysini / :haraj opened 7 times in 7 days each (🦅 2026-11-03).
+    The suffix keeps every reader that must see it working: `^fleet_liveness:` (rows-collapse exclusion,
+    lifecycle_report), `(^|:)<site>([_:]|$)` (stale-remediation), `%liveness%` (silent-partial-success)."""
+    return f"fleet_liveness:{site}:recheck" if struck_only else f"fleet_liveness:{site}"
+
+
 def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
     spec = SITES[site]
     shadow = shadow or site not in APPLY
@@ -280,7 +291,7 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
     policy = policy_for(site)
     now = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
-    run_id = begin_run(f"fleet_liveness:{site}")
+    run_id = begin_run(run_label(site, struck_only))
     st = {"site": site, "shadow": shadow, "active": 0, "probed": 0, ALIVE: 0, DEAD: 0, UNKNOWN: 0,
           "verified": 0, "struck": 0, "hidden": 0, "would_hide": [], "quarantined": None, "covered": 0.0,
           "fresh": 0}
