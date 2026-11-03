@@ -19,7 +19,10 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
-export const GRACE_MINUTES = 20;
+// 20 → 5 (2026-11-02): the robot writes the SAME bytes the engineer would, and it skips a version whose
+// mirror/<version> branch already exists, so a shorter wait costs nothing — while every minute of it
+// is a minute safe-deploy.sh refuses EVERY session.
+export const GRACE_MINUTES = 5;
 export const MAX_PER_RUN = 10;
 
 /** «20261027201642» → Date (UTC); null when the version is not a 14-digit timestamp. */

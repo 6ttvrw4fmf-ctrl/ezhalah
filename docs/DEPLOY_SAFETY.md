@@ -37,6 +37,9 @@ Before running any production deploy, confirm ALL of the following:
    regressed — do not consider the deploy complete.
 6. **No dirty-tree Vercel deploy** — you are deploying from `main` at a commit that matches
    `origin/main` exactly, not from a local branch with uncommitted or unpushed changes.
+   Since 2026-11-02 `safe-deploy.sh` first catches up by itself: a clean checkout that is merely BEHIND
+   `origin/main` (a PR merged while the gates were running) is fast-forwarded and every gate re-runs from
+   the top, once. Diverged or dirty still refuses.
 
 **Use `scripts/safe-deploy.sh` instead of running `vercel --prod` directly** — it enforces checks
 1, 2, and 6 automatically and refuses to deploy if they fail.

@@ -9,6 +9,8 @@
 # completely clean. This is the ONLY way this repo should be deployed to production from now on —
 # never run `vercel --prod` directly.
 set -euo pipefail
+SAFE_DEPLOY_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+SAFE_DEPLOY_ARGS=("$@")
 
 # Secret handshake (docs/ops/SCRAPE_GUARD.md): our own calls to the database carry x-ezhalah-gate when the job
 # provides EZ_GATE_SECRET, so they keep working once the bare public key is refused. Empty-safe under set -u.
@@ -22,6 +24,29 @@ cd "$(git rev-parse --show-toplevel)"
 # same predicates are re-checked by preflight-verify.sh and exercised by the permanent regression
 # test scripts/verify-deploy-target-guard.ts, so this guard can never silently drift.
 . scripts/deploy-target-guard.sh
+
+# ── MAIN MOVED WHILE WE WERE CHECKING (2026-11-02). deploy-frontend.yml checks out main and then spends
+# minutes on npm ci, preflight and `npm run verify`; whenever a PR merged meanwhile, HEAD sat one commit
+# BEHIND origin/main and the exact-match gates refused a perfectly good deploy (3 of the 10 refusals
+# sampled that day; auto-deploy then had to wait for its next hourly pass). Catching up is exactly what
+# the next dispatch would do, so: when the tree is clean and HEAD is an ANCESTOR of origin/main,
+# fast-forward and start this script over ONCE from the top, so every gate runs against the commit
+# that is actually deployed. A diverged HEAD, a dirty tree, or a second move during the re-run still
+# refuse exactly as before — this closes a race, it does not loosen a gate.
+catch_up_with_origin_main() {
+  git fetch origin main --quiet
+  local head remote; head="$(git rev-parse HEAD)"; remote="$(git rev-parse origin/main)"
+  [ "$head" = "$remote" ] && return 0
+  if [ -z "${EZ_SAFE_DEPLOY_CAUGHT_UP:-}" ] && [ -z "$(git status --short)" ] \
+     && git merge-base --is-ancestor "$head" "$remote" 2>/dev/null; then
+    echo "main moved while we were checking (${head:0:7} → ${remote:0:7}); fast-forwarding and re-running every gate from the top."
+    git merge --ff-only --quiet origin/main
+    if [ -n "${1:-}" ]; then scripts/deploy-lock.sh release "$1" >/dev/null 2>&1 || true; fi
+    EZ_SAFE_DEPLOY_CAUGHT_UP=1 exec "$SAFE_DEPLOY_SELF" ${SAFE_DEPLOY_ARGS[@]+"${SAFE_DEPLOY_ARGS[@]}"}
+  fi
+  return 0   # diverged, dirty, or already restarted once: the exact-match gate below refuses as before
+}
+catch_up_with_origin_main ""
 
 # ── DEPLOY LOCK (added 2026-07-16, see docs/DEPLOY_SAFETY.md "Deployment lock" — after a
 # 2026-07-15 P0 where two concurrent Claude sessions each independently deployed/rolled back
@@ -100,7 +125,7 @@ if [ -n "$DIRTY" ]; then
   exit 1
 fi
 
-git fetch origin main --quiet
+catch_up_with_origin_main "${HOLDER:-}"
 LOCAL="$(git rev-parse HEAD)"
 REMOTE="$(git rev-parse origin/main)"
 if [ "$LOCAL" != "$REMOTE" ]; then
