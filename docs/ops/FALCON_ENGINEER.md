@@ -326,6 +326,16 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    row with the engineer who owns it, and a lowered floor is a finding, never a fix.
    `docs/ops/reports/PIN_CAPTURE_FLEET_2026-10-30.md` is the baseline.
 
+28. A positive control weaker than the walk it guards withholds every prune, silently (11-03): sakani's in-run
+   control read the DETAIL route with 2 quick attempts while the walk around it retried 4 times and renegotiated,
+   so a half-time Cloudflare 403 withheld the prune every night and 58 dropped ads stayed in search for weeks
+   (`served_after_source_gone` open since 09-29) while `scrape_runs.notes` read only «pruned=0». For every
+   «served after source gone» row, read the crawl job's own log for «prune withheld», and give the oracle the
+   walk's retries (PR 10226). A withheld prune must be written to the run row, never only printed.
+29. The Supabase connector's `apply_migration` can ask a confirmation question an unattended run cannot answer
+   (11-03 20:12 UTC): from then on the run cannot apply SQL. Write every database fix as a reviewed file under
+   `docs/ops/pending-sql/` in its own PR and put it in LINE 1, rather than leaving it in the transcript.
+
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,
   the quick searches show 0 missing / extra / duplicates / count mismatches, ≥ 99 of 100 real listings were found in each
