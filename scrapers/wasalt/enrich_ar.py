@@ -163,10 +163,16 @@ def prose_amenities(d: Any) -> dict[str, bool]:
     desc = (d.get("propertyInfo") or {}).get("description")
     if not isinstance(desc, str) or not desc.strip():
         return {}
+    # ONE READER (2026-11-03 audit): these three columns are read by the SAME word reader that reads every ad's text
+    # for the Advanced Filter (scrapers/facts/word_checker.py), not by the older, looser normalize.prose_amenities.
+    # Measured that day: wasalt's own reader said yes where the word reader stayed silent on 154 AC ads («مداخل مكيفة»
+    # = air-conditioned LOBBIES, «تمديد نحاس للمكيفات» = pipes only), 14 elevators («مكان مخصص للمصعد» = a reserved
+    # shaft) and 8 private entrances — and Rule B served those as the «site's own field», though wasalt publishes none.
     # Imported here, not at module top: the enrich barriers stub `scrapers.common` with only `db`.
     from scrapers.common import normalize
+    from scrapers.facts import word_checker as W
     lines = _statement_lines(normalize.html_block_lines(desc.replace(_LITERAL_NL, "\n")))
-    found = normalize.prose_amenities(lines)
+    found = {k: v for k, v in W.facts_of(W.clean_text(None, lines)).items() if isinstance(v, bool)}
     # An ad that ANYWHERE calls the fixture prepared-only or not installed has not stated YES, whatever another
     # line implies («مدخل مرورا بالمصعد» beside «مؤسس مصعد», 526753): unknown, never YES.
     for col, rx in _NOT_INSTALLED.items():
