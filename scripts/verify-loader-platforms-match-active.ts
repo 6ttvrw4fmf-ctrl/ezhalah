@@ -232,10 +232,23 @@ const liveButHidden = [...liveCanon].filter((n) => {
 }).sort();
 if (excused.length) console.log(`  ⓘ live but not advertised (excused): ${excused.join('; ')}`);
 
+// ── 4b. WHAT THE USER SEES IS THE CATALOG MINUS THE SITES WITH NO LISTINGS (owner 2026-10-27, #9051).
+// «Hidden listings → hidden logo → the count drops»: since 10-27 the strip is PLATFORM_META minus
+// hiddenFromVisibleSlugs(loader_active_platforms_ar()), read once per session by loaderActivePlatforms.ts.
+// A catalog entry with zero listings is therefore HIDDEN AT RUNTIME by construction — keeping it in the
+// catalog is what lets its logo come back by itself when its site does. Comparing the raw catalog to the
+// live set (the pre-10-27 shape) went red on every run after #9051 (run 41593789828: Al Humaidan, Moftah,
+// Sadin, آل متعب, سنام, سنان — every one already hidden from users). The honest-claim question is about
+// the SHOWN roster, so that is what is asserted, through the SHIPPED functions.
+if (advertisedButDead.length) console.log(`  ⓘ in the catalog with zero listings, hidden from the strip at runtime: ${advertisedButDead.join(', ')}`);
+(globalThis as { require?: unknown }).require ??= (p: string) => p;
+const loaderMod = await import('../src/data/loaderPlatforms.ts');
+const shownNow = new Set(loaderMod.pickLoaderPlatforms(undefined, 0, loaderMod.hiddenFromVisibleSlugs(raws as string[])).map((p: { name: string }) => p.name));
+const shownButDead = [...shownNow].filter((n) => !liveCanon.has(n)).sort();
 check(
-  `PLATFORM_META advertises no dead platforms (rows=0 in search_listings_ar)`,
-  advertisedButDead.length === 0,
-  advertisedButDead.length ? `dead in catalog: ${advertisedButDead.join(', ')}` : '',
+  `the strip users see advertises no platform with zero listings (catalog minus hiddenFromVisibleSlugs(live))`,
+  shownButDead.length === 0,
+  shownButDead.length ? `shown with zero listings: ${shownButDead.join(', ')}` : '',
 );
 check(
   `PLATFORM_META hides no live platforms (rows>0 with no logo entry)`,
@@ -243,8 +256,8 @@ check(
   liveButHidden.length ? `live but hidden: ${liveButHidden.join(', ')}` : '',
 );
 check(
-  `PLATFORM_META set equals the production active set, allowing ${brandOnlyShown.length} brand-only entr${brandOnlyShown.length === 1 ? 'y' : 'ies'} (size ${catalog.size} vs ${liveCanon.size})`,
-  advertisedButDead.length === 0 && liveButHidden.length === 0,
+  `the shown strip equals the production active set (shown ${shownNow.size} vs live ${liveCanon.size}, ${excused.length} excused)`,
+  shownButDead.length === 0 && liveButHidden.length === 0,
 );
 
 // ── 5. Defensive shape checks on the parsed source — no duplicates, non-empty.
@@ -271,10 +284,11 @@ const runtimeSrc = readFileSync(
   'utf8',
 );
 check(
-  'loaderActivePlatforms.ts reads the down-site statuses from loader_platform_status_ar',
+  'loaderActivePlatforms.ts hides every site with no listings (loader_active_platforms_ar → hiddenFromVisibleSlugs, owner 2026-10-27)',
   /export function loadHiddenPlatformNames\(/.test(runtimeSrc) &&
-    /supabase\.rpc\(\s*['"]loader_platform_status_ar['"]/.test(runtimeSrc),
-  'without it a website down on its side keeps its logo in the strip',
+    /supabase\.rpc\(\s*['"]loader_active_platforms_ar['"]/.test(runtimeSrc) &&
+    /hiddenFromVisibleSlugs\(/.test(runtimeSrc),
+  'without it a site with no listings (down, or all ads hidden) keeps its logo in the strip',
 );
 
 // ── 6b. A DOWN SITE LEAVES THE STRIP, AND COMES BACK BY ITSELF (owner rule 2026-09-26).
