@@ -532,6 +532,25 @@ def write_batch(do, tbl: str, sleep=time.sleep, clock=time.monotonic) -> None:
             sleep(30 if timeout else 5 * attempt)
 
 
+def fetch_todo(do, table: str, sleep=time.sleep, tries: int = 3):
+    """One text_facts_todo page, retried. Measured 2026-11-03 11:02 UTC: the hourly run died outright when ONE table's
+    to-do query hit the API's 8 s statement timeout (wasalt_residential takes ~5 s with nothing to read, because every
+    active row's text hash is recomputed) — every table after it went unread for the hour. A timeout is retried; if a
+    table still cannot answer, None is returned: the caller skips THAT table, keeps reading the rest, and the run ends
+    failed with the table named (a failed fetch is never read as «nothing to do»)."""
+    for attempt in range(1, tries + 1):
+        try:
+            return do().data or []
+        except Exception as e:
+            transient = any(c in str(e) for c in _TIMEOUT_CODES) or "timed out" in str(e).lower()
+            if attempt >= tries or not transient:
+                print(f"  ! {table} to-do query failed after {attempt} attempt(s): {str(e)[:120]}")
+                return None
+            print(f"  ! {table} to-do query retry {attempt}: {str(e)[:120]}")
+            sleep(20 * attempt)
+    return None
+
+
 def safe_overlay_row(table: str, r: dict[str, Any], run_id: str,
                      place_names: tuple[str, ...] = ()) -> tuple[Any, Any, str]:
     """overlay_row for ONE ad, which can never stop the run (2026-11-03: one place-name-only clause raised IndexError
@@ -557,6 +576,7 @@ def run_incremental(args: argparse.Namespace) -> int:
     t_start = time.time()
     stats: Counter = Counter()
     failed: list[str] = []
+    failed_tables: list[str] = []
     client.rpc("text_facts_reader_version_seen", {"p_version": READER_VERSION}).execute()
     print(f"reader version {READER_VERSION}: ads read by any other version are re-read")
 
@@ -568,9 +588,12 @@ def run_incremental(args: argparse.Namespace) -> int:
     for table in all_tables(platforms):
         after, got = 0, 0
         while not args.limit or got < args.limit:
-            page = client.rpc("text_facts_todo", {"p_table": table, "p_after": after, "p_limit": PAGE,
-                                                 "p_shard": shard, "p_shards": shards,
-                                                 "p_reader_version": READER_VERSION}).execute().data or []
+            page = fetch_todo(lambda: client.rpc("text_facts_todo", {
+                "p_table": table, "p_after": after, "p_limit": PAGE, "p_shard": shard, "p_shards": shards,
+                "p_reader_version": READER_VERSION}).execute(), table)
+            if page is None:
+                failed_tables.append(table)
+                break
             if not page:
                 break
             after = int(page[-1]["id"])
@@ -605,6 +628,10 @@ def run_incremental(args: argparse.Namespace) -> int:
     with open(os.path.join(args.out, f"words-incremental-{shard}of{shards}.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=1)
     print(json.dumps(summary, ensure_ascii=False))
+    if failed_tables:
+        print(f"::error::{len(failed_tables)} table(s) could not list their unread ads (every other table was read; "
+              f"these are retried next run): " + ", ".join(failed_tables))
+        return 1
     if failed:
         # every other ad was read and written; these kept their previous row and are retried next run
         print(f"::error::{stats['ads_failed']} ad(s) crashed the word reader (kept their previous reading): "
@@ -616,6 +643,23 @@ def run_incremental(args: argparse.Namespace) -> int:
 def selftest() -> None:
     import numpy as np
     W.selftest()
+    # a to-do query that times out is retried, and one that never answers skips only its table (2026-11-03)
+    class _R:
+        def __init__(self, d): self.data = d
+    calls = {"n": 0}
+    def _flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise Exception("{'code': '57014', 'message': 'canceling statement due to statement timeout'}")
+        return _R([{"id": 1}])
+    assert fetch_todo(_flaky, "t", sleep=lambda s: None) == [{"id": 1}] and calls["n"] == 3
+    def _dead():
+        raise Exception("{'code': '57014', 'message': 'canceling statement due to statement timeout'}")
+    assert fetch_todo(_dead, "t", sleep=lambda s: None) is None          # failed ≠ «nothing to read»
+    assert fetch_todo(lambda: _R([]), "t", sleep=lambda s: None) == []   # a real empty page stays empty
+    def _bad():
+        raise Exception("PGRST202 no such function")
+    assert fetch_todo(_bad, "t", sleep=lambda s: None) is None           # a non-transient error is not retried
     # one ad that crashes the reader is skipped and reported, never fatal to the run
     _real = W.check
     try:
