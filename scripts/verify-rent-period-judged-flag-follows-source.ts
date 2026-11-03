@@ -30,6 +30,8 @@ const check = (label: string, ok: boolean, extra = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && extra ? `\n      ${extra}` : ''}`);
 };
 
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches: ${label}`, caught);
+
 type Mig = { file: string; sql: string };
 const migrations: Mig[] = readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort()
   .map((file) => ({ file, sql: readFileSync(join(migDir, file), 'utf8') }));
@@ -107,7 +109,7 @@ const MUTANTS: Array<[string, string]> = [
    `create or replace function public.rent_period_judgment_holds(a boolean) returns boolean as $$ select true $$;`],
 ];
 for (const [name, sql] of MUTANTS) {
-  check(`(mutation) catches: ${name}`, evaluate([...migrations, { file: '99999999999999_mutant.sql', sql }]).length > 0);
+  mustCatch(name, evaluate([...migrations, { file: '99999999999999_mutant.sql', sql }]).length > 0);
 }
 
 if (failed) { console.error(`\nverify-rent-period-judged-flag-follows-source: ${failed} FAILED`); process.exit(1); }
