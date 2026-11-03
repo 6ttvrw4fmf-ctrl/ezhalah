@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import sys
@@ -193,6 +194,58 @@ def _backoff(s: cc.Session, attempt: int) -> cc.Session:
         s = _rotate_session()
     time.sleep(1.2 * (attempt + 1))
     return s
+
+
+# ── removal oracle (2026-11-03) ───────────────────────────────────────────────────────────────────
+# The listing page is a login-walled SPA shell, identical for live and removed ads (ledger 2026-09-06),
+# so the oracle reads the ad's own record in the API the crawl already uses: GET {BASE}/ad/<uuid>.
+# Measured 2026-11-03 from a browser: live → 200 with data.id = uuid; a made-up uuid → 404; the ads the
+# crawl stopped seeing (f05fcfbf…, 31020304…) → 500 «Server Error», every time.
+#   404 → GONE (the law's own death); 200 for THIS uuid with is_sold true → GONE (the source says sold);
+#   200 for this uuid otherwise → LIVE; 500 on two reads with a live control → GONE (owner rule
+#   2026-11-03, http_liveness.removal_by_owner_approved_status); anything else → UNKNOWN.
+_UUID_RE = re.compile(r"/real-estate/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+_TABLES = ("aqaratikom_residential_listings", "aqaratikom_commercial_listings")
+
+
+def _record_signal(uuid: str):
+    def signal(status, body, _moved):
+        if status == 404:
+            return "gone"
+        if status != 200:
+            return None
+        try:
+            d = (json.loads(body) or {}).get("data") or {}
+        except ValueError:
+            return None
+        if d.get("id") != uuid:
+            return None
+        return "gone" if d.get("is_sold") is True else "live"
+    return signal
+
+
+def _uuid_of(url: Optional[str]) -> Optional[str]:
+    m = _UUID_RE.search(url or "")
+    return m.group(1) if m else None
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    from scrapers.common.http_liveness import (LivenessProbe, live_control_url,
+                                               removal_by_owner_approved_status, stored_listing_url)
+    uuid = _uuid_of(stored_listing_url(_TABLES)(ad_number))
+    if not uuid:
+        return "unknown", f"{ad_number!r} has no stored nawait.sa/real-estate/<uuid> link"
+    api = f"{BASE}/ad/{uuid}"
+    probe = LivenessProbe(platform="aqaratikom", signal=_record_signal(uuid), session=_build_session,
+                          url_for=lambda _a: api)
+    verdict = probe.verify_gone(ad_number)
+    if verdict[0] != "unknown":
+        return verdict
+    cuuid = _uuid_of(live_control_url(_TABLES, exclude=ad_number))
+    if not cuuid:
+        return verdict
+    return removal_by_owner_approved_status("aqaratikom", probe.fetch, api, f"{BASE}/ad/{cuuid}",
+                                            _record_signal(cuuid)) or verdict
 
 
 def _int(v: Any) -> Optional[int]:
@@ -877,7 +930,8 @@ def main() -> int:
 
         for tbl, rows_seen in (("aqaratikom_residential_listings", res),
                                ("aqaratikom_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqaratikom")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqaratikom",
+                                verify_gone=_verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
