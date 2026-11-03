@@ -46,7 +46,7 @@ from typing import Any, Optional
 from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, page_pin  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
@@ -122,6 +122,9 @@ def parse_page(pid: str, page: str) -> dict[str, Any]:
     floor = re.search(r'"الدور (-?\d+)"', blob)
     fal = re.search(r"رخصة فال للوساطة والتسويق:\s*(\d{10})", page)
     return {
+        # MAP PIN (⚡ 2026-11-03, backlog 1197): the ad page's own Maps link, else its maps.app.goo.gl link (resolved
+        # through the job's proxy/browser hop). A pair many ads share is dropped in main() (drop_shared_pins).
+        "pin": page_pin.pin_from_page(page),
         "id": pid, "ld": ld,
         "images": json.loads(imgs.group(1)) if imgs else [],
         "name": json.loads(name.group(1)) if name else None,
@@ -221,6 +224,7 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
         "price_options_text": options.group(0).strip() if options else None,
         "details": d.get("details") or None,
         "fal_licence": d.get("fal"),   # the office's FAL licence (a key with «brokerage» is stripped as PII)
+        **(d.get("pin") or {}),
     }
     row["additional_info"] = redact_capture(strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [], {})}))
     row["source_capture"] = redact_capture(strip_pii_fields({"schema": "tawia.jsonld.v1", "listing": ld, "type_label": label,
@@ -275,6 +279,9 @@ def main() -> int:
                        "area_m2", "bedrooms", "floor_number", "city_id", "district_ar")}, ensure_ascii=False)[:260])
             return 0
 
+        shared = page_pin.drop_shared_pins(res + com)
+        print(f"  pins: {sum(1 for r in res + com if r['additional_info'].get('latitude') is not None)}/{len(res) + len(com)}"
+              + (f" (dropped a pair {shared} ads share)" if shared else ""), flush=True)
         db.upsert_tawia_residential_batch(res)
         db.upsert_tawia_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
