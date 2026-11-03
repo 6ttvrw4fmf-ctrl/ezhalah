@@ -296,6 +296,33 @@ def no_removal_signal(ad_number: str):
                        "pages indistinguishable); absence never hides")
 
 
+# ── THE AD'S OWN LICENCE END DATE IS THE SOURCE'S STATEMENT (2026-11-03) ───────────────────────────
+# The one source statement maqrat DOES publish is each ad's REGA licence end date, which the crawl
+# stores in license_expiry. Measured 2026-11-03: of the 11 ads held at 9-30 strikes, six (MQR36, MQR51,
+# MQR52, MQR78, MQR87, MQR81) left the site's complete list ON their licence end date
+# (last_seen_at = license_expiry, to the day). That is the fleet default every 404-only site already
+# gets (db.own_page_status_oracle → _published_end_passed, owner's 09-28 ad-end-date law); maqrat's own
+# withholding oracle above predates that rule and so never applied it. Only at full strikes, only a
+# date the source printed and that has passed (Saudi day): no date, an unreadable one or a future one
+# stays UNKNOWN and the ad stays shown.
+def licence_end_oracle(table: str, lookup=None):
+    def row_of(ad_number: str) -> Optional[dict]:
+        if lookup is not None:
+            return lookup(ad_number)
+        try:
+            r = db.sb().table(table).select("license_expiry").eq("ad_number", ad_number).limit(1).execute()
+            return (r.data or [None])[0]
+        except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN, never a kill
+            return None
+
+    def verify_gone(ad_number: str):
+        ended = db._published_end_passed(row_of(ad_number))
+        if ended:
+            return "gone", f"maqrat: the ad's own published licence end date {ended} has passed"
+        return no_removal_signal(ad_number)
+    return verify_gone
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -351,7 +378,7 @@ def main() -> int:
         for tbl, rr in (("maqrat_residential_listings", res), ("maqrat_commercial_listings", com)):
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
-                                    verify_gone=no_removal_signal)
+                                    verify_gone=licence_end_oracle(tbl))
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
