@@ -433,7 +433,14 @@ def _not_installed(kw: str) -> str:
     return r"(?:" + kw + r")\w*(?:[^\S\n]+[^\s،,.؛;]+){0,3}?[^\S\n]+غير\s+(?:راكب|مركب)\w*"
 
 
+# A COUNT of zero is not the fixture: abaad prints a chip «<strong>0</strong> مطبخ» (13214734, 2026-11-03 page re-read),
+# which the reader joins as «مطبخ 0» or «0 مطبخ». The score asked «kitchen» of that villa and counted a miss.
+def _zero_count(kw: str) -> str:
+    return r"(?<![\d٠-٩.,])[0٠]\s*(?:" + kw + r")\w*|(?:" + kw + r")\w*\s*:?\s*[0٠](?![\d٠-٩.,])"
+
+
 def unprepared(x: str, kw: str) -> str:
+    x = re.sub(_zero_count(kw), " ", x)
     return re.sub(_not_installed(kw), " ", re.sub(PREPARED + "(?:" + kw + ")", " ", x))
 
 

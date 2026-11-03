@@ -25,3 +25,9 @@ def test_an_installed_or_listed_fixture_stays_a_yes():
 def test_the_capture_score_counts_it_page_silent():
     kw = a.BOOL_KW["kitchen"]
     assert n._cmp_bool(None, [a.norm("ومطبخ المطبخ غير مركب")], kw) == n.PAGE_SILENT
+
+
+def test_a_zero_count_chip_is_not_a_yes():
+    # abaad 13214734 (2026-11-03): the chip «<strong>0</strong> مطبخ» — zero kitchens — was asked «kitchen».
+    assert not _yes("مطبخ 0", "kitchen") and not _yes("0 مطبخ", "kitchen") and not _yes("مطبخ: 0", "kitchen")
+    assert _yes("1 مطبخ", "kitchen") and _yes("مطبخ 10", "kitchen") is True
