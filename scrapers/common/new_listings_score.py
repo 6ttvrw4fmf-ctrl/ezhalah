@@ -1050,8 +1050,13 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         except Exception:  # noqa: BLE001 — a table without those columns still gives its URL
             raw = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0]
         url = raw.get("listing_url")
-        if raw.get("rent_period") is not None:
-            stored = {**stored, "source_rent_period": raw["rent_period"], "source_price_annual": raw.get("price_annual")}
+        # The source's own figure is read even when the source states NO period: a silent rent is labelled and
+        # served ×12 by the index (judge_silent_rent_period_ar, owner 2026-10-31), so the index's 12,000 is not
+        # what the page prints. raghdan 23296514 / 23296518 (2026-11-03 score): source 1,000 / 500, period NULL,
+        # served سنوي 12,000 / 6,000 → read as wrong and capped the night at 5.
+        if raw.get("rent_period") is not None or raw.get("price_annual") is not None:
+            stored = {**stored, "source_rent_period": raw.get("rent_period"),
+                      "source_price_annual": raw.get("price_annual")}
         key = f"{table}:{rid}"
         if not url:
             row["sampled"] += 1
