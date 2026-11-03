@@ -42,7 +42,9 @@ def test_own_page_200_is_alive(monkeypatch):
 
 def test_real_404_is_kept(monkeypatch):
     _no_wait(monkeypatch)
-    assert gl.probe(_S(404, UNIT), UNIT) == 404
+    s = _S(404, UNIT)
+    s.r.text = "<html>الصفحة غير موجودة</html>"   # gathern's own not-found page (2026-11-03)
+    assert gl.probe(s, UNIT) == 404
 
 
 # ── 2026-10-08: the crawl's prune oracle and the sweep's controls learn the same thing ───────────
