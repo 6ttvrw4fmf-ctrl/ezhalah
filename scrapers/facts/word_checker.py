@@ -959,7 +959,9 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     cue_in = near_in = False
     void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
-        if not t or ci in void:
+        # a clause that was ONLY the ad's own place name is blanks now (_blank_place_names) — nothing to read, and
+        # words[0] below would crash the whole run (2026-11-03: every shard of facts-words died on «… مياه وكهرباء، بيشة»)
+        if not t.strip() or ci in void:
             continue
         words = t.split()
         n_words = len(words)
@@ -1806,6 +1808,9 @@ def selftest() -> None:
     assert "water_tank" not in facts_of(slug, ("الخزان", "بيشة")), facts_of(slug, ("الخزان", "بيشة"))
     assert "water_tank" not in facts_of(slug, ("حي الخزان", "بيشة")), "abaad stores district_ar «حي الخزان»"
     assert "garden" not in facts_of(clean_text("فيلا-الرياض-الحديقة", "فيلا للبيع"), ("الحديقة", "الرياض"))
+    # a clause that is only the place name, right after a cued utility list, must not crash the reader
+    for only_place in ("يتوفر مياه وكهرباء\nالخزان\nدورة مياه", "يوجد كهرباء ومياه، بيشة، 2 دورة مياه"):
+        assert facts_of(only_place, ("الخزان", "بيشة")).get("bathrooms") in (None, 1, 2), only_place
     both = facts_of(clean_text("دور-بيشة-الخزان", "دور للبيع مع خزان ماء"), ("الخزان", "بيشة"))
     assert both.get("water_tank") is True, both          # a real «خزان ماء» in the same ad is still read
     assert facts_of(slug, ("",)) == facts_of(slug) and facts_of(slug, ("ال",)) == facts_of(slug)   # empty / too-short names: no-op
