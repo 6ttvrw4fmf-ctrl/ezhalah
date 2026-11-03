@@ -36,6 +36,7 @@ import { fetchMapDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestD
 import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
+import { onSurface } from '@/lib/mapSurface';
 
 // The soil mascot (assets/images/soil-mascot.svg) wore this button for a day; owner 2026-11-03: «hide the mascot,
 // will add it later, not the priority» — the ground-layers icon is back until the soil layer itself is built.
@@ -756,14 +757,16 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     m.addEventListener('region-change-end', onRegion);
     m.addEventListener('region-change-start', hideCanvas);
     m.addEventListener('select', onSelect);
-    m.element.addEventListener('click', onCanvasTap);
+    // Held on the element it was added to: on unmount the map effect above destroys the map (nulling `element`)
+    // BEFORE this cleanup runs (src/lib/mapSurface.ts; measured 11-03, an uncaught TypeError on a fast tab switch).
+    const offCanvasTap = onSurface(m, 'click', onCanvasTap);
     void load();
     return () => {
       seq++; if (timer) clearTimeout(timer);
       m.removeEventListener('region-change-end', onRegion as unknown as (e: unknown) => void);
       m.removeEventListener('region-change-start', hideCanvas as unknown as (e: unknown) => void);
       m.removeEventListener('select', onSelect as unknown as (e: unknown) => void);
-      m.element.removeEventListener('click', onCanvasTap);
+      offCanvasTap();
       canvas.remove();
       if (mapRef.current === m) clear();
     };
