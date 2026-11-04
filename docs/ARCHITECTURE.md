@@ -1671,6 +1671,11 @@ new detector needing a longer history must raise the retention in the same chang
 8. Language: **Arabic-first primary** (RTL), English secondary/latent — matches §1.
 9. PDPL retention: **keep search history/account data until the user deletes their account**, purge on
    deletion.
+10. Launch order (owner, 2026-11-04): **website first** (ezhalah.com). The iPhone/Android store apps
+   come only after the website's front-end bugs are near zero, and only if the app will not bring new
+   bugs (owner: «I'll only consider app if I'll not face bugs»). About 40 of 183 `src/` files carry
+   web-only branches (`window`/`document`, iframes, sign-in pop-ups) that need native versions first.
+   No App Store / Play setup exists yet (no `eas.json`, no bundle id). Don't start store work unasked.
 
 Also still genuinely open: Tokyo vs. Saudi hosting region for PDPL residency (see §2 — Supabase has no
 KSA region; recommendation delivered was "don't migrate," awaiting owner call).
