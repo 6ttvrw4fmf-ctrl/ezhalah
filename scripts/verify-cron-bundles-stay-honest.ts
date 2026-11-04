@@ -57,9 +57,15 @@ const runnerMig = newest(/create or replace function public\.ops_run_cron_bundle
 check('a migration defines public.ops_run_cron_bundle', !!runnerMig);
 const runnerSql = runnerMig ? stripComments(runnerMig.sql) : '';
 const body = (() => {
+  // Tag-generic: read whatever dollar tag opens the body and return '' when it never closes (a
+  // missing body must read as a failure, never widen to the rest of the file).
   const i = runnerSql.search(/create or replace function public\.ops_run_cron_bundle\(/i);
-  const j = runnerSql.indexOf('$function$;', i);
-  return i >= 0 && j > i ? runnerSql.slice(i, j) : '';
+  if (i < 0) return '';
+  const open = /\bas\s+(\$([A-Za-z_][A-Za-z0-9_]*)?\$)/i.exec(runnerSql.slice(i));
+  if (!open) return '';
+  const start = i + open.index + open[0].length;
+  const end = runnerSql.indexOf(open[1], start);
+  return end > start ? runnerSql.slice(start, end) : '';
 })();
 export function runnerProblems(src: string): string[] {
   const p: string[] = [];
