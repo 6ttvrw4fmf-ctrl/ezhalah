@@ -33,6 +33,12 @@ export type Listing = {
   // True when `price` is OUR per-metre x area arithmetic, not a figure the advertiser published.
   // The card MUST label it; nothing may present it as source-published. (owner rule 2026-09-03)
   priceIsDerived?: boolean;
+  // A SALE row's total as the card read it (the platform figure, or the meter-box correction) — the input the index's
+  // land per-metre verdict is recognised against (src/lib/landPerMeterTotal.ts). Never displayed by itself.
+  salePriceTotal?: number | null;
+  // Set when the index read the ad's «total» as a PER-METRE price (owner 2026-11-04): the seller's own figure, which the
+  // card keeps visible («الإعلان كتب 1,700 ريال في خانة السعر») under the «≈» total.
+  typedTotalAsPerMeter?: number | null;
   area: number; // m²
   beds: number; // 0 = not a dwelling
   source: string; // platform name
