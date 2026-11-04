@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, ".")
 
 from scrapers.common import normalize as N  # noqa: E402
+from scrapers.common import db  # noqa: E402
 from scrapers.dealapp.run import af_answers  # noqa: E402
 
 
@@ -77,10 +78,11 @@ def test_map_listing_carries_the_answers():
     html = f'<html><body><script id="ng-state" type="application/json">{json.dumps(state)}</script></body></html>'
     row, _cat, _sold = map_listing(html, "557924")
     assert row is not None
-    assert "furnished" not in row            # the ad is silent on furnishing → no key, never False
+    # the ad is silent on furnishing → NULL is WRITTEN (sentinel), never False and never a dropped key (2026-11-04)
+    assert row["furnished"] is db.AUTHORITATIVE_NULL
     assert row["kitchen"] is True and row["elevator"] is False
     assert row["electricity"] is True and row["water_supply"] is True
-    assert "sanitation" not in row
+    assert "sanitation" not in row           # an unlisted utility stays unknown: no key, nothing written
 
 
 def test_negator_with_attached_conjunction_is_a_no():
@@ -101,3 +103,37 @@ def test_one_reader_2026_11_03():
     assert flat.get("air_conditioner") is True and flat.get("elevator") is True
     assert flat.get("balcony_terrace") is True and flat.get("kitchen") is True
     assert af_answers({"utilities": "Electricity, Waters"}, "").get("electricity") is True   # structured list kept
+
+
+def _page(description: str, ptype: str = "شقة") -> str:
+    import json
+    schema = {"@type": "RealEstateListing", "name": "فيلا للبيع", "description": description,
+              "offers": {"price": 900000, "priceCurrency": "SAR", "availability": "https://schema.org/InStock"},
+              "itemOffered": {"additionalProperty": [{"name": "propertyType", "value": ptype}],
+                              "address": {}, "geo": {}}}
+    state = {"schemaMarkupScripts": {"real-estate-listing-1": json.dumps(schema)}}
+    return f'<html><body><script id="ng-state" type="application/json">{json.dumps(state)}</script></body></html>'
+
+
+def test_floor_covering_is_not_furnished_2026_11_04():
+    """dealapp 438767 / 598307 / 493432, verbatim clauses: a turf roof, a carpeted room, a grassed yard. The word
+    reader skipped the floor-covering guard when the word carried its proclitic («بنجيل», «بالموكيت», «بالعشب»)."""
+    for text in ("غرفة سائق بمدخل خارجي * سطح مفروش بنجيل صناعي * ديوانية خلفية",
+                 "غرفة النوم مفروشة بالموكيت ويوجد سرير",
+                 "حوش كبير مفروش بالعشب ومظلل جزء منه"):
+        assert "furnished" not in af_answers({}, text), text
+    assert af_answers({}, "شقة مفروشة بالكامل")["furnished"] is True
+
+
+def test_a_yes_the_reader_now_refuses_is_cleared_on_the_next_crawl():
+    """The stored yes must not outlive the reading that produced it: silence is sent as AUTHORITATIVE_NULL so
+    db._unknown_must_not_overwrite_known writes the NULL instead of dropping the key (and keeping the old yes)."""
+    from scrapers.dealapp.run import map_listing
+    row, _cat, _sold = map_listing(_page("فيلا دورين سطح مفروش بنجيل صناعي"), "438767")
+    assert row is not None and row["furnished"] is db.AUTHORITATIVE_NULL
+    probe = dict(row)
+    db._unknown_must_not_overwrite_known(probe)
+    assert "furnished" in probe and probe["furnished"] is None       # the NULL reaches PostgREST
+    # no description read → nothing written (a failed read never erases)
+    row2, _c, _s = map_listing(_page(""), "438768")
+    assert row2 is not None and "furnished" not in row2 and "elevator" not in row2

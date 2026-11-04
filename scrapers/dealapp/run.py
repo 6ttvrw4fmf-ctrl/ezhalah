@@ -1296,6 +1296,14 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "additional_info": info,
         **af_answers(aprops, _redact(schema.get("description"))),
     }
+    # SILENCE → NULL, WRITTEN (2026-11-04). dealapp has no structured amenity field: the ad's prose is the whole
+    # source for these columns, and this page's prose was read in full. A column it no longer states is NULL, so the
+    # sentinel is sent; a plain None would be DROPPED by db._unknown_must_not_overwrite_known and a yes the reader
+    # has since learned to refuse (floor covering «سطح مفروش بنجيل», partly furnished) would stay served forever —
+    # dealapp 438767 / 598307 / 493432 kept furnished = yes this way. No description read → nothing is written.
+    if (schema.get("description") or "").strip():
+        for col in PROSE_AMENITY_COLUMNS:
+            row.setdefault(col, db.AUTHORITATIVE_NULL)
     if category == "commercial":
         row.pop("furnished", None)
     return row, category, sold

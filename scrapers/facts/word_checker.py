@@ -809,7 +809,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if any(_strip_wa(w) in ("رخصه", "تصريح", "يسمح", "مسموح") for w in gp[-5:]) and "اعلان" not in g5 and "فال" not in g5 \
             or "نظام البناء" in g5:
         return None, s, e
-    if fact == "furnished" and (any(_starts(w, _PARTIAL) for w in n2) or any(_starts(w, _PARTIAL_BEFORE) for w in prev[-1:])):
+    # A floor covering usually comes with its proclitic: «سطح مفروش بنجيل», «مفروشة بالموكيت», «حوش مفروش بالعشب»
+    # (dealapp 438767 / 598307 / 493432 served furnished = yes, 2026-11-04) — so the word is read bare too.
+    if fact == "furnished" and (any(_starts(w, _PARTIAL) or _starts(_bare(w), _PARTIAL) for w in n2)
+                                or any(_starts(w, _PARTIAL_BEFORE) for w in prev[-1:])):
         return None, s, e
     p5 = gp[-5:]
     if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
@@ -1211,6 +1214,10 @@ def selftest() -> None:
         ("لا يوجد مصعد", {"elevator": False}, ()),
         ("ولا يوجد مصعد في المبنى", {"elevator": False}, ()),
         ("مفروشة: لا", {"furnished": False}, ()),
+        ("سطح مفروش بنجيل صناعي", {}, ("furnished",)),            # dealapp 438767: a turf roof, not furniture
+        ("غرفة النوم مفروشة بالموكيت", {}, ("furnished",)),        # dealapp 598307: carpeted
+        ("حوش كبير مفروش بالعشب ومظلل", {}, ("furnished",)),       # dealapp 493432: a grassed yard
+        ("شقة مفروشة بالكامل", {"furnished": True}, ()),
         # silent-ads teacher pass 2026-10-26: the furniture named by its kind
         ("شقة بأثاث مودرن ومريح", {"furnished": True}, ()),
         ("استديو مريح بتأثيث فندقي للإيجار اليومي", {"furnished": True}, ()),
