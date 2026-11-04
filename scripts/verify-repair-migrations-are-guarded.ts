@@ -48,6 +48,11 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-11-03 owner session. Hid 371 billion-plus prices; the owner reversed it 20 minutes later (PRICE = SOURCE).
+  '20261103230546_hide_billion_price_typos.sql':
+    'undone by 20261103232309_revert_hide_billion_price_typos.sql the same hour (owner: «dont hide, show me» — a source\'s ' +
+    'own number is never hidden); the revert restored enforce_price_size_sanity and dropped the helper, and the next ' +
+    'sync re-served every row (339 of 339 over 1 B SAR live at 23:37 UTC). Nothing of this repair remains to decay.',
   // 2026-11-03. haraj 18362394: «للبيع 5الف» was the 5,000 m² the post states, stored as a 5,000 SAR price (price_eq_area_or_ppm).
   '20261103194345_price_eq_area_adjudicated_haraj_sanadak.sql':
     'one-row evidence repair (haraj 18362394 price → NULL, the value the fixed parser scrapers/haraj/prose.py now computes, ' +
