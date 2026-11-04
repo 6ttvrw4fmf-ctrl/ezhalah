@@ -48,6 +48,13 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-11-03, owner decision 5: aqar maid/driver room exist only on the Villa form.
+  '20261103233906_aqar_non_villa_maid_driver_room_null.sql':
+    'owner-approved NULL of maid_room/driver_room on aqar non-Villa rows (258 residential + 9 commercial, every value logged ' +
+    'to ops_amenity_defabrication_evidence first); watched by the standing detector that found it, ' +
+    'mon_detect_fabricated_unpublished_amenity (alert fabricated_unpublished_amenity, in the roster), which re-raises on any ' +
+    'non-Villa value (probe #18/#19 cohort), and the writer is fixed (_villa_form_only in scrapers/aqar/enrich_residential.py, ' +
+    'test_aqar_maid_driver_villa_form_only.py). The applied file cannot be edited to name it (content parity: byte-exact mirror).',
   // 2026-11-03. haraj 18362394: «للبيع 5الف» was the 5,000 m² the post states, stored as a 5,000 SAR price (price_eq_area_or_ppm).
   '20261103194345_price_eq_area_adjudicated_haraj_sanadak.sql':
     'one-row evidence repair (haraj 18362394 price → NULL, the value the fixed parser scrapers/haraj/prose.py now computes, ' +

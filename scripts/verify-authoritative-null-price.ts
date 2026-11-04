@@ -242,10 +242,25 @@ export function sentinelGateProblems(enrich: string): string[] {
   const lines = enrich.split('\n');
   const assignments: string[] = [];
   const guarded: string[] = [];
+  // 2026-11-03 (owner decision 5): ONE non-price use is settled by the ad FORM, not by a read —
+  // maid_room/driver_room exist only on aqar's Villa form, so `_villa_form_only()` clears them on every
+  // other form. It is recognised only in its exact shape: the line `features[col] = AUTHORITATIVE_NULL`
+  // directly under `for col in _VILLA_FORM_ONLY_COLUMNS:`, directly under `if property_type != "Villa":`,
+  // with the tuple naming no price/area/rent column. Any other shape, a price column in the tuple, or a
+  // widened gate is still an ungated sentinel (mutation proofs at the bottom).
+  const villaTuple = enrich.match(/^_VILLA_FORM_ONLY_COLUMNS\s*=\s*\(([^)]*)\)/m);
+  const villaCols = villaTuple ? [...villaTuple[1].matchAll(/"(\w+)"/g)].map((m) => m[1]) : [];
+  const villaColsSafe = villaCols.length > 0 && villaCols.every((c) => !/price|area|rent|per_meter/.test(c));
+  const isVillaFormClear = (i: number) =>
+    villaColsSafe
+    && /^\s*features\[col\]\s*=\s*AUTHORITATIVE_NULL\s*$/.test(lines[i])
+    && /^\s*for col in _VILLA_FORM_ONLY_COLUMNS:\s*$/.test(lines[i - 1] ?? '')
+    && /^\s*if property_type != "Villa":\s*$/.test(lines[i - 2] ?? '');
   lines.forEach((l, i) => {
     if (l.trimStart().startsWith('#') || !l.includes('AUTHORITATIVE_NULL')) return;
     if (/^\s*from\s+scrapers\.common\.db\s+import\b/.test(l)) return;
     assignments.push(l);
+    if (isVillaFormClear(i)) { guarded.push(l); return; }
     const joined = `${l} ${lines[i + 1] ?? ''}`.replace(/\s+/g, ' ');
     const m = joined.match(/AUTHORITATIVE_NULL if (.*?) else /);
     if (m && isSourceSettled(m[1], flags)) guarded.push(l);
@@ -331,6 +346,14 @@ mustCatch('a gate OR-ing a source-settled flag with a made-up one',
 
 mustCatch('the old blind spot: a gate that starts with the flag but ORs on anything (`authoritative_no_price or True`)',
   sentinelGateProblems(enrich.replace(gatedLine, gatedLine.replace(/if authoritative_no_price and/, 'if authoritative_no_price or True and'))).length > 0);
+
+const villaLine = '            features[col] = AUTHORITATIVE_NULL';
+mustCatch('the Villa-form clear (decision 5) widened to EVERY form (a Villa\'s published maid/driver would be blanked)',
+  sentinelGateProblems(enrich.replace('    if property_type != "Villa":\n', '    if True:\n')).length > 0);
+mustCatch('…or a PRICE column smuggled into the Villa-form-only tuple',
+  sentinelGateProblems(enrich.replace(/^_VILLA_FORM_ONLY_COLUMNS\s*=\s*\(/m, '_VILLA_FORM_ONLY_COLUMNS = ("price_total", ')).length > 0);
+mustCatch('…or the same assignment shape lifted out of the Villa-form loop (a bare features[col] sentinel elsewhere)',
+  sentinelGateProblems(enrich.replace(gatedLine, `${gatedLine}\n${villaLine}`)).length > 0);
 
 mustCatch('…while a COMMENT mentioning AUTHORITATIVE_NULL is still prose, not an ungated assignment (the predicate is not over-broad)',
   sentinelGateProblems(`${enrich}\n        # AUTHORITATIVE_NULL must never be written on a read failure\n`).length === 0);
