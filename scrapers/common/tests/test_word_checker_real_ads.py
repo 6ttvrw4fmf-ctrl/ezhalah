@@ -89,3 +89,9 @@ def test_lock_catches_a_distance_read_as_the_ads_own(monkeypatch):
     monkeypatch.setattr(W, "_DISTANCE_TO", _re.compile(r"(?!x)x"))
     monkeypatch.setattr(W, "_DISTANCE_AFTER", ())
     assert _changed_facts(_diffs(_rows())) & {"mosque", "garden", "all_services"}
+
+
+def test_lock_catches_a_public_place_near_or_area_read_as_the_ads_own(monkeypatch):
+    monkeypatch.setattr(W, "_PURE_PUBLIC_FACTS", frozenset())
+    monkeypatch.setattr(W, "_OWN_CUES", tuple(W._OWN_CUES) + tuple(W._n(w) for w in ("من", "عن", "و", "في", "علي")))
+    assert _changed_facts(_diffs(_rows())) & {"mosque", "market", "garden"}
