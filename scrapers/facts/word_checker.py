@@ -53,6 +53,8 @@ def clean_text(title: Optional[str], description: Optional[str]) -> str:
     and a line break is a clause break here — «الشقة غير مؤثثة\\nمطبخ» must not read kitchen = no).
     HTML blocks (wasalt) become lines first."""
     desc = _STREET_ADDRESS.sub(" ، ", description or "")
+    if (o := _OTHER_OFFERS.search(desc)):   # the broker's list of OTHER ads closes the ad: nothing after it is this unit's
+        desc = desc[:o.start()]
     title = _STREET_ADDRESS.sub(" ، ", title or "")
     if "<" in desc and ">" in desc:
         desc = N.html_block_lines(desc)
@@ -72,6 +74,10 @@ _MARK_EMOJI = re.compile(r"[\u2705\u2714\u2611]\uFE0F?")   # only inside a ✅/�
 # The street the ad is ON is an address, never a feature (2026-11-03 audit round 2: aqar titles «… للبيع في شارع بير قحطان,
 # حي …» read as a well, «في شارع الحمام» as toilets, «في شارع الشلال» as a waterfall). «في شارع X,» up to the comma goes.
 _STREET_ADDRESS = re.compile(r"في شارع [^,،|\n]{1,60}[,،]")
+# A broker's footer listing OTHER offers (🔬 2026-11-04 elevator precision sample: dealapp 7058934 «🌟 أفضل 5 عروض حصرية
+# لدينا (حتى الآن): 🔥 تاون هاوس علوي بمصعد | مخطط رسن طيبة | 280 م …» served lift = yes on a ground-floor unit). The
+# heading sits after the ad's own text (9 active dealapp ads, ~83% of the way in), so the description ends there.
+_OTHER_OFFERS = re.compile(r"(?:أفضل|افضل)\s+[0-9٠-٩]+\s+عروض|عروض(?:نا)?\s+(?:أخرى|اخرى|حصرية|حصريه)\s+(?:لدينا|متوفرة|متوفره)")
 _NO_EMOJI = re.compile(r"[\U0001F6AB\u274C\u26D4\u2716\u274E]\uFE0F?(?!\s*(?:بدون|بلا|لا|غير|ما|مافي|مافيه|ممنوع|يمنع|ليس|no)(?!\w))")
 # (…unless the ad already wrote the no itself: «🚫 بدون سعي» is one no, not two)
 _COLON_NO = re.compile(r"(:[\s*]*لا)(?=\s+(?!(?:يوجد|توجد|يتوفر|تتوفر|غير)(?!\w))\S)")
@@ -1340,6 +1346,7 @@ def selftest() -> None:
         ("قريب من الخدمات مسجد ومدارس", {}, ("mosque",)),
         ("تكيف مركزي _مجلس - تفتح علي مرفق ومسجد - موسسة مصعد • غرفه سائق", {}, ("elevator",)),
         ("تكيف مركزى - دبل هيت - موسس مصعد - مسبح", {}, ("elevator",)),
+        ("دور أرضي ملك مجلس ومطبخ 🌟 أفضل 5 عروض حصرية لدينا (حتى الآن): 🔥 تاون هاوس علوي بمصعد | مخطط رسن طيبة", {"kitchen": True}, ("elevator",)),
         ("Recreation center , restaurant, café, library", {"restaurant_cafe": True}, ()),
         ("قريب من الخدمات\nمسبح خاص\nموقف خاص", {"pool": True, "parking": True}, ()),
         # a distance points at its place with «من / عن»; the next bullet's own features stay (🔬 2026-11-04)
