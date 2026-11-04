@@ -119,7 +119,12 @@ REMOVAL ORACLE (measured 2026-09-23 through the DETAIL route)
     20000, 20100), and the bogus 99999999.
   · live id     → HTTP 200 status "published" / publish true: 24858 (rent) and 24798 (sale).
   · hidden id   → HTTP 403 text/plain (20250): an existing unit the API will not show. Under the
-    shared law a 403 is about OUR access and can never kill.
+    shared law a 403 is about OUR access and can never kill — EXCEPT by the owner rule of 2026-11-04
+    (OWNER_APPROVED_REMOVAL_STATUS, LISTING_LIVENESS.md §7.1): measured that day from a laptop, four
+    struck units (23412, 23438, 22775, 20252) answered 403 text/plain with a BLANK body, a made-up id
+    404 {"message":"not found"}; a Cloudflare challenge is a 403 text/html «Just a moment…» page.
+    So a unit is removed only when its own DETAIL URL answers a blank-bodied 403 on two reads, neither
+    redirected, AND a recently proven-live sakani unit reads LIVE through this oracle in the same check.
   verify_gone: 404 not-found → gone; 200 whose status left "published" / publish false → gone; 200
   whose licence says a purpose other than rent → gone (it is no longer a rental); 200 published rent
   → live; anything else → no opinion → UNKNOWN. Pruning runs only after a complete, unlimited
@@ -163,7 +168,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import http, db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
-from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.http_liveness import (LivenessProbe, live_control_url,  # noqa: E402
+                                           removal_by_owner_approved_status)
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
 BASE = "https://sakani.sa"
@@ -693,26 +699,106 @@ def _attrs_verdict(a: dict, purpose: str = "rent") -> Optional[str]:
     return "live"
 
 
+# THE ORACLE GETS THE WALK'S OWN RESILIENCE (🦅 2026-11-03). The walk retries a challenged read 4 times
+# with a growing pause and renegotiates a fresh session when the route walls; the oracle used to make 2
+# quick attempts (1.2 s, 2.4 s) and give up. Measured: on 10-30 18:24 and 11-02 09:43 the first in-run
+# control (SKI25390, SKI25369, both live) answered «HTTP 403 is about our access» and the prune was
+# withheld — every night, silently — so 54 residential + 4 commercial rows the site's own catalogue had
+# dropped for 3–20 crawls (oldest last seen 09-26) stayed in search. An ACCESS answer (403/429/503, no
+# answer) is still never a verdict: it now earns the walk's retries and, bounded per run, a fresh session.
+# A 200/404 verdict is untouched, so this can never manufacture a death — it only lets the oracle read.
+ORACLE_ATTEMPTS = 4
+ORACLE_RENEGOTIATIONS = 3          # fresh sessions per run, shared by every probe
+_ACCESS_WHY = re.compile(r"about our access|no answer from the source|HTTP 5\d\d")
+_oracle_renewed = 0
+
+
+def _probe_once(ad_number: str, uid: str, purpose: str) -> tuple[str, str]:
+    return LivenessProbe(platform="sakani",
+                         signal=lambda st, b, mv: _signal(st, b, mv, purpose),
+                         session=_oracle_session,
+                         url_for=lambda _a: f"{DETAIL}{uid}",
+                         attempts=ORACLE_ATTEMPTS, backoff=PAUSE * 4).verify_gone(ad_number)
+
+
+# OWNER RULE 2026-11-04 («Yes, use your picks», decision 1): a REMOVED sakani unit answers HTTP 403 with
+# a BLANK text/plain body; a Cloudflare challenge is a 403 with an HTML «Just a moment…» page. Only the
+# blank shape may count, and only through removal_by_owner_approved_status (two reads, no redirect, a
+# live control of this site reading LIVE in the same check). Anything else stays UNKNOWN.
+_REMOVED_403_BODY = re.compile(r"\A\s*\Z")
+_UNIT_ID = re.compile(r"/market-unit/(\d+)/?$")
+
+
+def _control_live(_status, body, moved) -> Optional[str]:
+    """The control only has to prove the site is serving live units to US right now: a published record
+    of either purpose reads LIVE. Anything else is None (no control → no removal)."""
+    sig = _signal(_status, body, moved, "rent")
+    return "live" if sig == "live" or _signal(_status, body, moved, "sale") == "live" else None
+
+
+def _removed_by_owner_rule(ad_number: str, uid: str) -> Optional[tuple[str, str]]:
+    probe = LivenessProbe(platform="sakani", signal=_control_live, session=_oracle_session,
+                          url_for=lambda _a: None)
+    # Cheapest proof first: a challenge page (the common 403) is never the removed shape, so it costs
+    # no control lookup and no further reads.
+    st, body, moved = probe.fetch(f"{DETAIL}{uid}")
+    if st != 403 or moved or not _REMOVED_403_BODY.search(body or ""):
+        return None
+    control = live_control_url(("sakani_residential_listings", "sakani_commercial_listings"),
+                               exclude=ad_number)
+    cm = _UNIT_ID.search(control or "")
+    if not cm or cm.group(1) == uid:
+        return None
+    return removal_by_owner_approved_status("sakani", probe.fetch, f"{DETAIL}{uid}",
+                                            f"{DETAIL}{cm.group(1)}", _control_live,
+                                            pause=PAUSE, body_must=_REMOVED_403_BODY)
+
+
 def _verify_gone(ad_number: str) -> tuple[str, str]:
+    global _oracle_sess, _oracle_renewed
     m = _AD_RE.match(ad_number)
     if not m:
         return "unknown", f"{ad_number!r} is not a {PREFIX}/{SALE_PREFIX}<id> ad number"
     purpose = _PURPOSE_OF[m.group(1)]
-    return LivenessProbe(platform="sakani",
-                         signal=lambda st, b, mv: _signal(st, b, mv, purpose),
-                         session=_oracle_session,
-                         url_for=lambda _a: f"{DETAIL}{m.group(2)}").verify_gone(ad_number)
+    verdict, why = _probe_once(ad_number, m.group(2), purpose)
+    while True:
+        if verdict == "unknown" and "HTTP 403" in (why or ""):
+            by_status = _removed_by_owner_rule(ad_number, m.group(2))
+            if by_status:
+                return by_status
+        if not (verdict == "unknown" and _ACCESS_WHY.search(why or "")
+                and _oracle_renewed < ORACLE_RENEGOTIATIONS):
+            break
+        _oracle_renewed += 1
+        print(f"   ↻ oracle read of {ad_number} drew an access answer — cool-down, fresh session "
+              f"{_oracle_renewed}/{ORACLE_RENEGOTIATIONS}", flush=True)
+        time.sleep(PAUSE * 20)
+        try:
+            _oracle_sess = session()
+        except Exception as e:  # noqa: BLE001 — a failed negotiation is about our access, never a verdict
+            return "unknown", f"fresh session failed ({type(e).__name__}) after: {why}"
+        verdict, why = _probe_once(ad_number, m.group(2), purpose)
+    return verdict, why
+
+
+_control_why = ""                 # why the last control withheld the prune — written into the run notes
 
 
 def _controls_live(ad_numbers: list[str]) -> bool:
     """In-run positive control: three units parsed live THIS run must answer LIVE through the same
-    oracle, else the transport is not trusted to testify about anyone's absence. Fails closed."""
+    oracle, else the transport is not trusted to testify about anyone's absence. Fails closed.
+    A withheld prune is RECORDED (scrape_runs.notes), never only printed: on 10-30 and 11-02 it was
+    stdout-only and the run row read «pruned=0» as if nothing had been missing."""
+    global _control_why
+    _control_why = ""
     if len(ad_numbers) < 3:
+        _control_why = f"prune withheld: only {len(ad_numbers)} control unit(s)"
         return False
     for ad in ad_numbers[:3]:
         verdict, why = _verify_gone(ad)
         if verdict != "live":
             print(f"  ⚠ oracle control {ad} answered {verdict} ({why}) — prune withheld", flush=True)
+            _control_why = f"prune withheld: control {ad} {verdict} ({why[:80]})"
             return False
         time.sleep(PAUSE)
     return True
@@ -860,8 +946,9 @@ def main() -> int:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:
                     pruned += n
+        withheld = f" | {_control_why}" if _control_why else ""
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
-                             notes=f"pruned={pruned} {notes}"[:300],
+                             notes=f"pruned={pruned}{withheld} {notes}"[:300],
                              degraded=detail_misses * 5 > seen,      # >20 % index-only rows
                              check_tables=["sakani_residential_listings",
                                            "sakani_commercial_listings"])

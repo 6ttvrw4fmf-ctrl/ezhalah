@@ -42,6 +42,13 @@
 #             lies. Verify first that six different PropertyIds yield six DIFFERENT licences.
 # alnokhba  — deprecated 2026-07-14: alnokhba-services.com lapsed into a domain-parking page
 #             (HTTP 200 shell, no listings); 7 straight daily runs of rows_seen=0.
+# almuteb   — retired 2026-11-04 (owner «Yes, use your picks», decision 2). almuteb.sa has not
+#             resolved since 2026-10-23: every crawl since 2026-10-24 04:39 UTC failed with curl(6)
+#             «Could not resolve host»; re-measured 2026-11-04 almuteb.sa and www.almuteb.sa are
+#             NXDOMAIN at 8.8.8.8 and 1.1.1.1, and whois.nic.net.sa lists its name servers as
+#             NS1/NS2.DNS-PARKING.COM. platform_registry status dormant → retired; its 11 rows are
+#             KEPT, hidden (active=false) and registered in ops_adjudicated_retraction with that DNS
+#             evidence. Un-retiring is an owner decision and needs the domain to serve its catalogue.
 # muktamel  — NOT RETIRED; delisted 2026-09-19. This is a CORRECTION of stale bookkeeping, not an
 #             un-retirement: muktamel had already stopped being paused, and only this file still
 #             said otherwise. Entry kept, like jazwtn's and awal's, so the history is readable.
@@ -97,3 +104,4 @@
 toor
 alnokhba
 deal
+almuteb

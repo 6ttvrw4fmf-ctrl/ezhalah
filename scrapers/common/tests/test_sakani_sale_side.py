@@ -105,7 +105,7 @@ def test_verify_gone_reads_the_purpose_from_the_ad_number(monkeypatch):
     got = {}
 
     class _Probe:
-        def __init__(self, platform, signal, session, url_for):
+        def __init__(self, platform, signal, session, url_for, **_kw):
             got["url"] = url_for("x")
             got["sig"] = signal(200, _detail_body(DETAIL_24798_SALE), False)
 

@@ -25,12 +25,16 @@ type MapModules = {
   MapSearchBar: typeof import('@/components/MapDealRow').MapSearchBar;
   MapRouteFields: typeof import('@/components/MapDealRow').MapRouteFields;
 };
+// Kept for the whole visit: a second (or warmed) visit to the map renders the map at once, with no blank first frame.
+let loadedMods: MapModules | null = null;
 function useMapModules(): MapModules | null {
-  const [mods, setMods] = useState<MapModules | null>(null);
+  const [mods, setMods] = useState<MapModules | null>(loadedMods);
   useEffect(() => {
+    if (loadedMods) return;
     let on = true;
     Promise.all([import('@/components/AppleMap'), import('@/components/MapDealRow')]).then(([a, d]) => {
-      if (on) setMods({ AppleMap: a.default, countPinsInView: a.countPinsInView, MapDealRow: d.default, MapSearchBar: d.MapSearchBar, MapRouteFields: d.MapRouteFields });
+      loadedMods = { AppleMap: a.default, countPinsInView: a.countPinsInView, MapDealRow: d.default, MapSearchBar: d.MapSearchBar, MapRouteFields: d.MapRouteFields };
+      if (on) setMods(loadedMods);
     });
     return () => { on = false; };
   }, []);

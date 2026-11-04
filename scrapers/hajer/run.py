@@ -34,6 +34,7 @@ Usage:  python -m scrapers.hajer.run [--limit-test] [--type residential|commerci
 from __future__ import annotations
 
 import argparse
+import copy
 import html as ihtml
 import os
 import re
@@ -173,7 +174,47 @@ def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[st
     return None                          # not this listing's page: hold at UNKNOWN
 
 
-_probe = http_liveness.LivenessProbe(
+_POSTID_RE = re.compile(r'<body[^>]*\bclass="[^"]*\bpostid-(\d+)\b')
+
+
+def _signal_for(ad_number: str, base=None):
+    """`_signal`, but a LIVE answer must name THIS ad (2026-11-04).
+
+    The stored URL is the WordPress permalink of a POST, and one post was held under two ad numbers
+    (see map_listing: HJ1168 from the page's own «رقم الإعلان», HJ1512 from a degraded read that fell
+    back to the post id). `_signal` reads "live" from ANY single-property page, so the phantom HJ1512
+    was stamped alive (2026-11-03 07:26) by HJ1168's page and could never age out — the same shape as
+    nowaisiry NW4349 (scrapers/nowaisiry/run.py `_own_id_signal_for`). So a live read now needs the
+    page's own «رقم الإعلان» to be this ad's number, or — only when the page publishes none — its post
+    id, which is exactly the identity map_listing assigns. Anything else is no opinion (UNKNOWN, never
+    a kill). GONE is unchanged: it is read from the badge on the page this row's own URL serves."""
+    base = base or _signal
+    want = str(ad_number or "")[2:] if str(ad_number or "").startswith("HJ") else ""
+
+    def _sig(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+        verdict = base(status, body, path_changed)
+        if verdict != "live":
+            return verdict
+        if not want:
+            return None
+        page_ad = _num(rem_fields(_STYLE_RE.sub("", body or "")).get("رقم الإعلان"))
+        if page_ad is not None:
+            return "live" if str(page_ad) == want else None
+        m = _POSTID_RE.search(body or "")
+        return "live" if m and m.group(1) == want else None
+    return _sig
+
+
+class _OwnAdProbe(http_liveness.LivenessProbe):
+    """hajer's probe: the shared law, with the signal bound to the ad being asked about."""
+
+    def verify_gone(self, ad_number: str):
+        bound = copy.copy(self)          # keeps any seam a test replaced (fetch, session)
+        bound.signal = _signal_for(ad_number, self.signal)
+        return http_liveness.LivenessProbe.verify_gone(bound, ad_number)
+
+
+_probe = _OwnAdProbe(
     platform="hajer",
     signal=_signal,
     session=_oracle_session,
@@ -345,6 +386,15 @@ def _body_lines(p: dict) -> str:
 def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     """Return (row, category, gone). gone=True → sold/rented, mark inactive."""
     f = rem_fields(html_text)
+    # A PAGE WITHOUT ITS FIELD TABLE IS A FAILED FETCH, NOT A LISTING (2026-11-04). The crawl reads the
+    # page with no status check, so a 403/5xx/challenge shell parses to an EMPTY field table. Before this
+    # line the ad number then fell back to the WordPress post id and minted a SECOND identity for the same
+    # post: post 1512 publishes «رقم الإعلان» 1168 and is held as HJ1168, but a degraded read of it wrote
+    # HJ1512 — «Residential Land», no price, no area — at the SAME URL (card_link_identity:dupe:hajer,
+    # alert 1817), and HJ1510 beside HJ1167 at post 1510 the same way. Every crawl that hit a bad read
+    # refreshed the phantom. No row is better than a wrong one: the post is simply not seen this run.
+    if not f:
+        return None, "residential", False
     status = f.get("الحالة", "")
     gone = any(g in status for g in GONE_STATUS)
 

@@ -66,6 +66,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://flow.life"
 SOURCE = "Flow"
@@ -81,6 +82,24 @@ def session() -> cc.Session:
     s = cc.Session(impersonate="chrome")   # impersonate OWNS the User-Agent
     s.headers.update({"Accept": "text/html,application/xhtml+xml", "Accept-Language": "ar,en;q=0.8"})
     return s
+
+
+_PLACE_RE = re.compile(r"google\.com/maps/place/Flow\+([A-Za-z]+)/[^\"'<>\s]*?!3d(-?\d{1,2}\.\d{3,})!4d(-?\d{1,3}\.\d{3,})")
+
+
+def property_pin(page_html: str, prop_slug: str) -> dict:
+    """The PROPERTY's own Google Maps place pin, read off its available-homes page (2026-11-04,
+    pin_coverage_below_floor). Measured live that day: riyadh-narjis prints
+    «google.com/maps/place/Flow+Narjis/@24.9005434,46.6366008,17z/…!3d24.9005434!4d46.6391757…»;
+    riyadh-granada prints a place link WITHOUT coordinates and riyadh-olaya none — both stay pin-less.
+    The place marker is `!3d<lat>!4d<lng>`; the `/@lat,lng` part is the map CAMERA (≈250 m off) and is
+    not read. The place name must be this property's (Flow+Narjis on riyadh-narjis), so another
+    property's link can never pin it. A compound's home types share the property's pin, as rakez's do."""
+    want = prop_slug.removeprefix("riyadh-").replace("-", "").lower()
+    for m in _PLACE_RE.finditer(page_html or ""):
+        if m.group(1).lower() == want:
+            return pin_dict(m.group(2), m.group(3))
+    return {}
 
 
 def page_props(page_html: str) -> Optional[dict]:
@@ -314,12 +333,14 @@ def main() -> int:
                 # The site's own 404 shell (riyadh-science-park) or a property with nothing to let.
                 skipped["property_not_live"] = skipped.get("property_not_live", 0) + 1
                 continue
+            pin = property_pin(r.text, prop_slug)
             for fp in floorplans:
                 seen_floorplans += 1
                 row, cat, why = map_listing(fp, prop_slug, url_by_fid)
                 if not row:
                     skipped[why] = skipped.get(why, 0) + 1
                     continue
+                row["additional_info"].update(pin)
                 if args.type != "all" and cat != args.type:
                     continue
                 (com if cat == "commercial" else res).append(row)

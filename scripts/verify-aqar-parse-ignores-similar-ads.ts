@@ -34,7 +34,10 @@ export function problems(files: F[]): string[] {
     const carries = lastHead.text.includes(CUT) && (!lastHead.text.includes(OLD_HEAD) || afterOld.includes(CUT));
     if (!carries) out.push(`last aqar_parse head writer ${lastHead.name} does not stop head at «إعلانات مشابهة»`);
   }
-  const trgWriters = sorted.filter(f => /trg_aqar_parse/.test(f.text) && /per_meter/.test(f.text));
+  // A WRITER defines the function (create or replace / a needle edit of its live body) — a file that only
+  // MENTIONS trg_aqar_parse in a comment (20261104094019 does) writes nothing and must not be judged as one.
+  const writesTrg = /create\s+or\s+replace\s+function\s+(public\.)?trg_aqar_parse\s*\(|pg_get_functiondef\(\s*'public\.trg_aqar_parse\(\)'/i;
+  const trgWriters = sorted.filter(f => writesTrg.test(f.text) && /per_meter/.test(f.text));
   const lastTrg = trgWriters.at(-1);
   if (!lastTrg || !lastTrg.text.includes(GUARD))
     out.push(`last trg_aqar_parse writer ${lastTrg?.name ?? '(none)'} lets a parsed price overwrite authoritative_absent`);
@@ -69,4 +72,8 @@ const mustCatch = (label: string, caught: boolean) => {
   else console.log(`✓ mutation caught: ${label}`);
 };
 for (const [label, fs] of mutants) mustCatch(label, problems(fs).length > 0);
+// …and the writer predicate is not over-broad: a later file that only MENTIONS the trigger is no writer.
+mustCatch('a comment naming trg_aqar_parse and per_meter is not read as a trigger rewrite',
+  problems([...files, { name: '29991231000002_z.sql',
+    text: `-- trg_aqar_parse respects price_evidence unit per_meter here\nselect 1;` }]).length === 0);
 process.exit(fail ? 1 : 0);

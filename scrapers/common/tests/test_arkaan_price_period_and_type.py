@@ -249,3 +249,26 @@ def test_a_corner_plot_has_no_single_facade():
 
 def test_no_bearing_writes_no_facade():
     assert _land("للبيع ارض سكنية المساحة 460 م² شارع 15 م")["direction"] is None
+
+
+# ── «ريال» gone from the card (live 2464 / AK2464, 2026-11-04) ───────────────────────────────────
+# The card now prints the currency as an icon: «السوم 617,500 سوم المتر 950». Both patterns required the
+# word, so 113 active listings that publish a figure were served with no price («السعر عند الطلب»).
+def test_card_without_the_word_riyal_still_gives_the_published_total_and_rate():
+    row, _ = map_listing(
+        _item("2464", ptype="أرض", deal="للبيع", hood="شرق شرق الحديقة", title="أرض للبيع",
+              specs={"الحي": "شرق شرق الحديقة", "رقم": "383 / ب", "المساحة": "650 م²", "الشارع": "15 م"},
+              price_text="617,500"),
+        _detail(type_text="أرض سكنية للبيع",
+                price_card="السوم 617,500 سوم المتر 950 السعر غير شامل الضريبة والسعي واتساب اتصال",
+                ad_text="للبيع ارض سكنية في حي شرق شرق الحديقة رقم 383/ب المساحة 650 م² شارع 15 م جنوبًا "
+                        "السوم 617 ألف و 500 ريال", offers=None))
+    assert row["price_total"] == 617500
+    assert row["price_per_meter"] == 950
+    assert row["price_evidence"]["authoritative_absent"] is False
+
+
+def test_a_size_after_the_price_label_is_never_a_price():
+    card = arkaan_run._price_card("السعر 650 م² واتساب اتصال")
+    assert card["total"] is None and card["per_meter"] is None
+    assert arkaan_run._price_card("السعر 45,000 الدفع كل 6 شهور واتساب اتصال")["total"] == 45000

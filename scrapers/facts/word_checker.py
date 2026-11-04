@@ -53,6 +53,8 @@ def clean_text(title: Optional[str], description: Optional[str]) -> str:
     and a line break is a clause break here — «الشقة غير مؤثثة\\nمطبخ» must not read kitchen = no).
     HTML blocks (wasalt) become lines first."""
     desc = _STREET_ADDRESS.sub(" ، ", description or "")
+    if (o := _OTHER_OFFERS.search(desc)):   # the broker's list of OTHER ads closes the ad: nothing after it is this unit's
+        desc = desc[:o.start()]
     title = _STREET_ADDRESS.sub(" ، ", title or "")
     if "<" in desc and ">" in desc:
         desc = N.html_block_lines(desc)
@@ -72,6 +74,10 @@ _MARK_EMOJI = re.compile(r"[\u2705\u2714\u2611]\uFE0F?")   # only inside a ✅/�
 # The street the ad is ON is an address, never a feature (2026-11-03 audit round 2: aqar titles «… للبيع في شارع بير قحطان,
 # حي …» read as a well, «في شارع الحمام» as toilets, «في شارع الشلال» as a waterfall). «في شارع X,» up to the comma goes.
 _STREET_ADDRESS = re.compile(r"في شارع [^,،|\n]{1,60}[,،]")
+# A broker's footer listing OTHER offers (🔬 2026-11-04 elevator precision sample: dealapp 7058934 «🌟 أفضل 5 عروض حصرية
+# لدينا (حتى الآن): 🔥 تاون هاوس علوي بمصعد | مخطط رسن طيبة | 280 م …» served lift = yes on a ground-floor unit). The
+# heading sits after the ad's own text (9 active dealapp ads, ~83% of the way in), so the description ends there.
+_OTHER_OFFERS = re.compile(r"(?:أفضل|افضل)\s+[0-9٠-٩]+\s+عروض|عروض(?:نا)?\s+(?:أخرى|اخرى|حصرية|حصريه)\s+(?:لدينا|متوفرة|متوفره)")
 _NO_EMOJI = re.compile(r"[\U0001F6AB\u274C\u26D4\u2716\u274E]\uFE0F?(?!\s*(?:بدون|بلا|لا|غير|ما|مافي|مافيه|ممنوع|يمنع|ليس|no)(?!\w))")
 # (…unless the ad already wrote the no itself: «🚫 بدون سعي» is one no, not two)
 _COLON_NO = re.compile(r"(:[\s*]*لا)(?=\s+(?!(?:يوجد|توجد|يتوفر|تتوفر|غير)(?!\w))\S)")
@@ -458,8 +464,10 @@ _LIST_WORDS = frozenset(_n(w) for w in (
 
 # ── guards ────────────────────────────────────────────────────────────────────────────────────────────────
 # PREPARED / POSSIBLE: the thing is not there yet — no row (the scrapers' _PREPARED_ONLY + «possible» words).
+# «موسس / موسسة» is «مؤسس» typed without the hamza (🔬 2026-11-04 elevator precision sample: aqar 17753855
+# «موسسة مصعد», 14874158 «موسس مصعد» served lift = yes; 2 of 25 sampled yeses).
 _PREPARED = tuple(_n(w) for w in N._PREPARED_ONLY + ("تمديد", "تمديدات", "امكانيه", "بالامكان", "قابل",
-                                                        "قابليه", "يمكن", "ممكن", "يصلح"))
+                                                        "قابليه", "يمكن", "ممكن", "يصلح", "موسس", "موسسه"))
 _PREPARED_PLACE = tuple(_n(w) for w in ("مكان", "مساحه", "موقع"))   # «مكان مسبح», «مكان للمصعد»
 _PLACE_FACTS = frozenset({"pool", "elevator"})
 # NEARBY: about the street, not the unit — no row. The scrapers' _PROXIMITY plus the words a view/distance uses.
@@ -470,6 +478,13 @@ _NEAR = tuple(_n(w) for w in N._PROXIMITY + ("قريب", "قريبه", "قرب",
                                                "walking", "overlooking", "views",
                                                # «بجواره مقهى دانكن» — «next to it» (🔬 2026-11-04 café audit)
                                                "بجواره", "بجوارها", "بجانبه", "بجانبها", "جواره", "جوارها"))
+# A DISTANCE points at its place with «من / عن» (🔬 2026-11-04 live walk): «على مقربة جدًا من حديقة», «على بُعد خطوات من
+# المسجد», «على مسافة 3 كم من جامعة», «على بعد 20 د عن المسجد». Only a fact AFTER that «من / عن» is the nearby place —
+# «🔸المسجد على بعد خطوات 🔸موقف خاص 🔸غرفة سائق» keeps its own parking and driver's room. (A bare «بعد» is «after».)
+# «يتكون من / مكون من» is «consists of», never a distance: aqar 15131878 «… 3020م 💥يتكون من حوش سيارات مصعد» read the
+# plot's «م» (metres) + «من» as «N metres from …» and silenced the lift (elevator recall sample 2026-11-04).
+_DISTANCE_TO = re.compile(r"(?:علي (?:بعد|مقربه|مسافه)|بمقربه|خطوات|بضع خطوات|(?<!\S)(?:د|كم|كيلو|م|متر))(?: \S+){0,4} "
+                          r"(?<!يتكون )(?<!تتكون )(?<!مكون )(?<!مكونه )(?<!يتالف )(?<!تتالف )(?:من|عن)(?: \S+){0,3}$")
 _NEAR_WORDS = frozenset(w for w in _NEAR if " " not in w)
 _NEAR_PHRASES = tuple(w for w in _NEAR if " " in w)
 _PARTIAL = tuple(_n(w) for w in N._PARTIAL_ONLY + N._FLOOR_COVERING)
@@ -603,12 +618,48 @@ _UTILITY = tuple(_n(w) for w in ("كهرب", "مياه", "ماء", "مويه", "
 # and the items of a «خدمات قريبة: مسجد - حديقة» list — the nearby word may come AFTER, or a clause before.
 _PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking", "nursery", "kids_play_area", "sports_court",
                            "football_pitch", "events_hall", "mosque", "market", "in_mall", "restaurant_cafe", "food_allowed"})
-_NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "بجوار", "مقابل"))
+_NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "بجوار", "مقابل", "مقربه", "خطوات",
+                                     # «مسجد قباء: ١٠ دقائق», «🌳 حديقة الرائد — دقيقة واحدة»
+                                     "دقيقه", "دقائق", "دقايق", "دقيقتين", "دقيقتان"))
+# «🕌 المسجد على بُعد خطوات», «مسجد الحي على بُعد 100 م»: the distance comes right AFTER the public place (a unit's own
+# «مسبح خاص على بعد دقائق من البحر» keeps its pool — «خاص» before the distance is the unit's)
+_DISTANCE_AFTER = (_n("علي بعد"), _n("علي مسافه"))
 # A PUBLIC PLACE named after «خلف / أمام / جنبها / ومقابلها / ظهيرة / 4 كيلو» is a landmark, not part of the unit
 # («خلف شبيلي مول», «تتوفر جنبها … سوبرماركت», «ومقابلها مسجد», 2026-11-03 audit round 2). These words are too common to
 # silence every fact — «غرفة غسيل خلف الحديقة 🔸مطبخ» has a kitchen — so they apply to these public places only.
 _NEAR_PUBLIC = frozenset(_n(w) for w in ("جنبها", "جنبه", "خلف", "خلفها", "خلفه", "امام", "امامها", "امامه", "مقابلها",
-                                         "ظهيره", "كيلو", "كم", "تفتح", "behind"))
+                                         "ظهيره", "كيلو", "كم", "تفتح", "behind",
+                                         # 🔬 2026-11-04 public-place audit: «ملاصق لمسجد التقوى», «حولها حدايق ومسجد», «يفتح علي حديقه»,
+                                         # «محيطه به خدمات كاملة (… مسجد)», the typo «وبلقرب من الحديقة»
+                                         "ملاصق", "ملاصقه", "حولها", "حوله", "يفتح", "محيطه", "يحيط", "تحيط", "يحيطها",
+                                         "تحيطها", "بلقرب"))
+# …and a public place the ad OWNS says so: «مرافق المشروع: مصلى», «سوبر ماركت داخل المجمع», «يضم مسجد»
+_OWN_CUES = tuple(_n(w) for w in ("داخل", "بالمجمع", "بالمشروع", "بالعماره", "بالمبني", "مرافق", "يضم", "تضم",
+                                   "يحتوي", "تحتوي", "يوجد", "توجد", "خاص", "خاصه", "مميزات",
+                                   "متكامل", "متكامله"))      # «*خدمات متكاملة* 🔸 ممشى وحديقة» — the project's own list
+# AREA talk is not the ad's own place: «تتميز المنطقة بتوفر خدمات … والسوبرماركت», «يتميز الموقع بتوفر جميع الخدمات مسجد/بقالة»
+_AREA_WORDS = frozenset(_n(w) for w in ("المنطقه", "الحي", "الموقع"))
+_SERVICE_WORDS = tuple(_n(w) for w in ("خدمات", "الخدمات", "بتوفر", "تتوفر", "يتوفر", "مخدوم", "مخدومه"))
+# the object that closes a near phrase as one item: «قريب من الخدمات» / «بالقرب من جميع الخدمات» / «قريب من المرافق»
+_SERVICES_OBJECT = frozenset(_n(w) for w in ("خدمات", "الخدمات", "المرافق", "مرافق"))
+# …and «و بها / وفيها / ويوجد» after the nearby object turns back to the unit: aqar 15315855 «قريب من الدائري و بها
+# مصعد» (elevator recall sample 2026-11-04). Unit facts only, like the rule above.
+_UNIT_AGAIN = frozenset(_n(w) for w in ("بها", "فيها", "يوجد", "توجد", "يتوفر", "تتوفر"))
+_PURE_PUBLIC_FACTS = frozenset({"mosque", "market", "restaurant_cafe", "in_mall"})
+# The PLOT'S NEIGHBOUR is not the ad's own (🔬 2026-11-04): «شارع 10 جنوبي وحديقة», «من الغرب: حديقة + مواقف», «واجهة:
+# غربية على حديقة», «ربع واجهة على جامع», «مشروعنا مباشر على حديقه». A compass direction, a facade, a boundary or
+# «مباشرة» just before a public place makes it the neighbour — unless the ad says it has it («فيلا شمالية فيها حديقة»).
+_BOUNDARY_STEMS = tuple(_n(w) for w in ("شمال", "جنوب", "شرق", "غرب", "جهه", "جهتين", "جهات", "واجهه", "واجهتين",
+                                         "واجهات", "يحد", "حدود", "مباشر"))
+_HAS_CUES = tuple(_n(w) for w in ("فيها", "فيه", "بها", "به", "تحتوي", "يحتوي", "يوجد", "توجد", "يضم", "تضم", "داخل"))
+
+
+def _is_boundary(w: str) -> bool:
+    """«جنوبي», «الشمال», «واجهة» (its «و» is the word's own, not «and»), «وغرباً»."""
+    for x in (w, _strip_wa(w)):
+        if _starts(x, _BOUNDARY_STEMS) or (x.startswith("ال") and _starts(x[2:], _BOUNDARY_STEMS)):
+            return True
+    return False
 _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "restaurant_cafe", "food_allowed", "sports_court",
                                 "football_pitch", "events_hall", "nursery", "garden"})
 # A UNIT FIXTURE is never «nearby» (🔬 2026-11-04 live walk, dealapp): «بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة»,
@@ -623,7 +674,8 @@ _PLACE_WORDS = tuple(_n(w) for w in (
     "مطعم", "مطاعم", "مقهي", "مقاهي", "كافيه", "كافيهات", "كوفي", "حديقه", "حدائق", "بقاله", "بقالات", "سوبرماركت",
     "صيدليه", "صيدليات", "جامعه", "جامعات", "مركز", "مراكز", "محطه", "بنك", "بنوك", "مغسله", "مغاسل", "فندق", "فنادق",
     "shop", "school", "hospital", "mall", "market", "restaurant", "cafe", "café", "park", "mosque", "bank", "grocer",
-    "supermarket", "pharmac", "universit", "hotel", "service", "attraction", "coffee"))
+    "supermarket", "pharmac", "universit", "hotel", "service", "attraction", "coffee",
+    "تموينات", "بلديه", "بحيره", "شارع", "الشارع", "طريق", "مطار", "كليه", "ممشي", "كورنيش", "مدينه", "مصلي"))
 _METER_FACTS = frozenset({"separate_water_meter", "separate_electricity_meter"})
 _DIGITS = "0123456789"
 
@@ -809,18 +861,57 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if any(_strip_wa(w) in ("رخصه", "تصريح", "يسمح", "مسموح") for w in gp[-5:]) and "اعلان" not in g5 and "فال" not in g5 \
             or "نظام البناء" in g5:
         return None, s, e
-    if fact == "furnished" and (any(_starts(w, _PARTIAL) for w in n2) or any(_starts(w, _PARTIAL_BEFORE) for w in prev[-1:])):
+    # A floor covering usually comes with its proclitic: «سطح مفروش بنجيل», «مفروشة بالموكيت», «حوش مفروش بالعشب»
+    # (dealapp 438767 / 598307 / 493432 served furnished = yes, 2026-11-04) — so the word is read bare too.
+    if fact == "furnished" and (any(_starts(w, _PARTIAL) or _starts(_bare(w), _PARTIAL) for w in n2)
+                                or any(_starts(w, _PARTIAL_BEFORE) for w in prev[-1:])):
         return None, s, e
     p5 = gp[-5:]
+    # «قريب من الخدمات» is a COMPLETE item: the near word's object is «the services», so the words after it are the unit's
+    # own (🔬 2026-11-04, muhaysini 14819114 «مميزات العقار موقع قريب من الخدمات موقف سيارات مصعد غرفة غسيل», 14817077
+    # «وقريب من الخدمات مدخلان للشقة مصعدين متوفر»: the lift and the parking read as nearby — 6 of 25 sampled
+    # unbacked elevator yeses were real). Unit facts only: a PUBLIC place keeps every nearby check below.
+    if fact not in _NEAR_PUBLIC_FACTS and fact not in _PUBLIC_FACTS:
+        at = max((k for k, w in enumerate(p5) if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS), default=-1)
+        if at >= 0 and any(_strip_wa(w) in _SERVICES_OBJECT or _strip_wa(w) in _UNIT_AGAIN for w in p5[at + 1:]):
+            p5 = p5[at + 1:]
     if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
-                                          or any(p in " ".join(p5) for p in _NEAR_PHRASES)):
+                                          or any(p in " ".join(p5) for p in _NEAR_PHRASES)
+                                          or _DISTANCE_TO.search(" ".join(gp[-8:]))):
         return None, s, e
     if fact in _NEAR_PUBLIC_FACTS and (list_in or any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in p5)):
         return None, s, e
+    if fact in _NEAR_PUBLIC_FACTS:
+        # a near word up to 9 words back in the same clause («قريب من الدانوب و لولو هايبر ماركت»), unless the ad says it
+        # owns the place after that word («قريب من الخدمات ويوجد بالمجمع مسجد»)
+        w9 = gp[-9:]
+        at = max((k for k, w in enumerate(w9) if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS
+                  or _strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC), default=-1)
+        if at >= 0 and not any(_starts(_strip_wa(w), _OWN_CUES) for w in w9[at + 1:]):
+            return None, s, e
+    if fact in _NEAR_PUBLIC_FACTS:
+        w4 = gp[-4:]
+        at = max((k for k, w in enumerate(w4) if _is_boundary(w)), default=-1)
+        if at >= 0 and not any(_starts(w, _HAS_CUES) or _starts(_strip_wa(w), _HAS_CUES) for w in w4[at + 1:]):
+            return None, s, e
+    if fact in _PURE_PUBLIC_FACTS:
+        w8 = [_strip_wa(w) for w in gp[-8:]]
+        if any(w in _AREA_WORDS or "ال" + w in _AREA_WORDS for w in w8) and any(_starts(w, _SERVICE_WORDS) for w in w8) \
+                and not any(_starts(w, _OWN_CUES) for w in w8):
+            return None, s, e
     n3 = gn[:3]                                      # English puts it AFTER: «car park nearby», «pool and gym nearby»
     if "nearby" in n3 or "close by" in " ".join(n3):
         return None, s, e
-    if fact in _PUBLIC_FACTS and (any(_starts(w, _NEAR_AFTER) for w in gn[:4]) or (near_in and n_words <= 3)):
+    distance_after = any(" ".join(gn[:3]).startswith(d) or " ".join(gn[1:3]).startswith(d) for d in _DISTANCE_AFTER) \
+        and not (gn[:1] and _strip_wa(gn[0]) in ("خاص", "خاصه", "مستقل", "مستقله", "داخلي", "داخليه"))
+    near_after = False
+    for w in gn[:4]:                                 # «مسبح خاص على بعد دقائق من البحر»: the unit's own pool — an ownership
+        if _starts(_strip_wa(w), _OWN_CUES):         # word before the distance ends the look-ahead
+            break
+        if _starts(w, _NEAR_AFTER):
+            near_after = True
+            break
+    if fact in _PUBLIC_FACTS and (near_after or distance_after or (near_in and n_words <= 3)):
         return None, s, e
     ex_before, ex_after = _EXCLUDE.get(fact, ((), ()))
     if fact in _METER_FACTS and "عداد" in t[ws:e]:
@@ -1042,14 +1133,15 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # Only a comma continues the list: a new line, «.», «•» or «-» starts the ad's own feature list.
         sep = raw[prev_end:_off].strip()
         prev_end = _off + len(_c)
-        comma = bool(sep) and set(sep) <= set("،,")
+        comma = bool(sep) and set(sep) <= set("،,-•|▫▪+")  # a list mark continues a nearby list; «.» or a new line ends it
         # a clause that was ONLY the ad's own place name is blanks now (_blank_place_names) — nothing to read, and
         # words[0] below would crash the whole run (2026-11-03: every shard of facts-words died on «… مياه وكهرباء، بيشة»)
         if not t.strip() or ci in void:
             near_list = False
             continue
         words = t.split()
-        list_in = near_list and comma and len(words) <= 3 and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words)
+        list_in = near_list and comma and len(words) <= 5 and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words) \
+            and not any(_starts(_strip_wa(w), _OWN_CUES) for w in words)
         n_words = len(words)
         for fact, pats in _PATTERNS.items():
             for rx, forced in pats:
@@ -1063,7 +1155,8 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             or (cue_in and _starts(_strip_wa(words[0]), _UTILITY))
         # a heading ENDS with the nearby word: «خدمات قريبة:», «بالقرب من:», «Nearby:»
         near_in = any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in words[-2:]) or (near_in and n_words <= 3)
-        near_list = list_in or any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in words) \
+        near_list = list_in or any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS or _strip_wa(w) in _NEAR_PUBLIC
+                                   or w in _NEAR_PUBLIC or _is_boundary(w) for w in words) \
             or any(p in t for p in _NEAR_PHRASES)
         for fact in _COUNT_RES:
             num_hits.setdefault(fact, []).extend(_num_hits(fact, t, ci))
@@ -1211,6 +1304,10 @@ def selftest() -> None:
         ("لا يوجد مصعد", {"elevator": False}, ()),
         ("ولا يوجد مصعد في المبنى", {"elevator": False}, ()),
         ("مفروشة: لا", {"furnished": False}, ()),
+        ("سطح مفروش بنجيل صناعي", {}, ("furnished",)),            # dealapp 438767: a turf roof, not furniture
+        ("غرفة النوم مفروشة بالموكيت", {}, ("furnished",)),        # dealapp 598307: carpeted
+        ("حوش كبير مفروش بالعشب ومظلل", {}, ("furnished",)),       # dealapp 493432: a grassed yard
+        ("شقة مفروشة بالكامل", {"furnished": True}, ()),
         # silent-ads teacher pass 2026-10-26: the furniture named by its kind
         ("شقة بأثاث مودرن ومريح", {"furnished": True}, ()),
         ("استديو مريح بتأثيث فندقي للإيجار اليومي", {"furnished": True}, ()),
@@ -1248,8 +1345,41 @@ def selftest() -> None:
         ("Directly behind Al-Romansiah Restaurant", {}, ("restaurant_cafe",)),
         ("مميزات العقار : مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات", {"elevator": True, "parking": True}, ()),
         ("حوش ، قريب من الخدمات ، موقف سيارات", {"parking": True}, ()),
+        # «قريب من الخدمات» is one item; the lift after it is the unit's own (muhaysini 14819114 / 14817058, 2026-11-04)
+        ("مميزات العقار موقع قريب من الخدمات موقف سيارات مصعد غرفة غسيل", {"elevator": True}, ()),
+        ("نوافذ زجاجية بالقرب من الخدمات موقف سيارات مصعد", {"elevator": True}, ()),
+        ("قريب من الخدمات حوش غرفة سائق تأسيس مصعد", {}, ("elevator",)),
+        ("قريب من الخدمات مسجد ومدارس", {}, ("mosque",)),
+        ("مميزات العقار قريب من الدائري و بها مصعد عرض الشارع ٢٠م", {"elevator": True}, ()),
+        ("قريب من الدائري و بها مسجد", {}, ("mosque",)),
+        ("مخطط نمار 3020م 💥يتكون من حوش سيارات مصعد مدخلين ومجلس رجال", {"elevator": True}, ()),
+        ("على بعد 200 م من المسجد", {}, ("mosque",)),
+        ("تكيف مركزي _مجلس - تفتح علي مرفق ومسجد - موسسة مصعد • غرفه سائق", {}, ("elevator",)),
+        ("تكيف مركزى - دبل هيت - موسس مصعد - مسبح", {}, ("elevator",)),
+        ("دور أرضي ملك مجلس ومطبخ 🌟 أفضل 5 عروض حصرية لدينا (حتى الآن): 🔥 تاون هاوس علوي بمصعد | مخطط رسن طيبة", {"kitchen": True}, ("elevator",)),
         ("Recreation center , restaurant, café, library", {"restaurant_cafe": True}, ()),
         ("قريب من الخدمات\nمسبح خاص\nموقف خاص", {"pool": True, "parking": True}, ()),
+        # a distance points at its place with «من / عن»; the next bullet's own features stay (🔬 2026-11-04)
+        ("🌳 على مقربة جدًا من حديقة", {}, ("garden",)),
+        ("🕌 المسجد على بُعد خطوات", {}, ("mosque",)),
+        ("على بعد 20 د عن المسجد النبوي", {}, ("mosque",)),
+        ("🔸المسجد على بعد خطوات 🔸موقف خاص 🔸غرفة سائق", {"parking": True, "driver_room": True}, ("mosque",)),
+        ("مسبح خاص على بعد دقائق من البحر", {"pool": True}, ()),
+        # public places: adjacent / around / opens onto / a list after a near word / minutes / area talk (🔬 2026-11-04)
+        ("موقع مميز ملاصق لمسجد التقوى", {}, ("mosque",)),
+        ("الشارع الشمالي يفتح على خدمات وحديقة ومسجد", {}, ("mosque", "garden")),
+        ("تتوفر جنبها جميع الخدمات ( سوبرماركت - مغاسل - مسجد - مدارس )", {}, ("mosque", "market")),
+        ("مسجد قباء: ١٠ دقائق", {}, ("mosque",)),
+        ("تتميز المنطقة بتوفر خدمات أساسية مثل المدارس والسوبرماركت والحدائق", {}, ("market",)),
+        ("خدمات المشروع - العاب اطفال - حضانة - حديقة خارجية ( لاند سكيب ) - مصلى", {"mosque": True, "garden": True}, ()),
+        ("ميني سوبر ماركت داخل المجمع", {"market": True}, ()),
+        ("وبلقرب من كرنيش جدة *خدمات متكاملة* 🔸 ممشى وحديقة 🔸 منطقة العاب اطفال", {"garden": True}, ()),
+        # the plot's neighbour (🔬 2026-11-04): a direction / facade / «مباشرة» right before the park or mosque
+        ("شارع : 20 م جنوبي + حديقة", {}, ("garden",)),
+        ("على شارع 30م ومن جهتين حديقه", {}, ("garden",)),
+        ("ربع واجهة على جامع حديث", {}, ("mosque",)),
+        ("موقع مباشر: مباشرة على مسجد وحديقة", {}, ("mosque", "garden")),
+        ("الواجهة شمالية + حديقة خاصة", {"garden": True}, ()),
         ("مطبخ (SPLIT) (غير راكب)", {"kitchen": False}, ()),
         ("مطبخ راكب ومكيفات راكبة", {"kitchen": True, "air_conditioner": True}, ()),
         ("بدون مكيفات ومطبخ", {"air_conditioner": False, "kitchen": False}, ()),
