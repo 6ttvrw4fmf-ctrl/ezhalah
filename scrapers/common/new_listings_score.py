@@ -264,7 +264,9 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
 # وتقسيط: سهِّل مشترياتك…» (Wafi) on 23449574 — none of it is in the seller's text, and each read as «we miss» a
 # rent-now-pay-later / installment the ad never offers. Matched on the exact banner wording only.
 _TASHKEEL = re.compile(r"[\u064B-\u0652]")
-SITE_PROMO_LINE = re.compile(r"ادفع لاحقا مع ايجاري|^وفي وسيط وتقسيط")
+# The banner family, any partner: re-score 41792074733 also showed «… وادفع لاحقًا مع رايز ، تقسيط شهري مريح لشقتك
+# المفضّلة» (23397679) and «استخدم وفّي للتقسيط المريح وحماية مدفوعاتك.» (23548231), in neither seller's text.
+SITE_PROMO_LINE = re.compile(r"استاجر الان وادفع لاحقا مع \S+ ، تقسيط شهري مريح|^وفي وسيط وتقسيط|^استخدم وفي للتقسيط")
 
 # One of the eight compass facades, as a REGA facade cell or a page label states it.
 _FACADE_WORD = re.compile(r"(?:ال)?(شمال|جنوب|شرق|غرب)|(north|south|east|west)", re.I)
@@ -276,7 +278,7 @@ def facade_stated(lines: list[str], kw: str) -> bool:
     """Does a facade line state ONE facade the Advanced Filter could hold? haraj's REGA block prints the label on every
     ad: «واجهة العقار: لا يوجد», «واجهة العقار: -» (no facade) and «واجهة العقار: غربية - شرقية» (two opposite streets,
     a through plot, never one bearing) — 4 of 5 haraj direction «we miss» on 2026-11-04 (dry run 41790110618,
-    23449578 / 23431076 / 23431125 / 23449477 / 23397687). A label alone, «none», or opposite bearings → not stated."""
+    23449578 / 23431076 / 23431125 / 23449477 / 23397687). A label alone, «none», opposite or dashed bearings → not stated."""
     for x in lines:
         m = re.search(kw, x)
         if not m:
@@ -284,7 +286,10 @@ def facade_stated(lines: list[str], kw: str) -> bool:
         # The cell's own value only: up to the next REGA label, and never past 30 characters of prose.
         value = re.split(r"[|]|عدد الغرف|رقم المخطط|عرض الشارع", x[m.end():].lstrip(" :：-–"))[0][:30]
         bearings = {b.group(1) or _FACADE_WORD_EN[b.group(2).lower()] for b in _FACADE_WORD.finditer(value)}
-        if not bearings or any(pair <= bearings for pair in _OPPOSITE):
+        # «غربية - شمالية»: two bearings joined by « - » name two streets (a corner), the rule scrapers/haraj/parse.py
+        # facade_of() stores by (23409982, re-score 41792074733); a diagonal is written without the dash.
+        corner = len(bearings) == 2 and re.search(r"\s[-–]\s", value)
+        if not bearings or corner or any(pair <= bearings for pair in _OPPOSITE):
             continue
         return True
     return False

@@ -801,7 +801,8 @@ def test_dwelleo_bathrooms_and_livings_come_from_its_api_record_not_the_prose():
     ("واجهة العقار: غربية - شرقية", PAGE_SILENT),    # 23397687: two opposite streets, no single bearing
     ("واجهة العقار: شرقية عدد الغرف: 4", WE_MISS),   # ONE facade stated and we serve none: still a miss
     ("واجهة العقار: Eastern", WE_MISS),              # the English REGA cell states one too
-    ("واجهة العقار: جنوبية - شرقية", WE_MISS),       # a diagonal pair is a stated facade (raghdan 23296394)
+    ("واجهة العقار: غربية - شمالية", PAGE_SILENT),   # 23409982: dashed = two streets, haraj parse.facade_of's rule
+    ("واجهة العقار: شمالية شرقية", WE_MISS),         # a diagonal (no dash) is ONE stated facade
 ])
 def test_a_facade_cell_that_states_no_single_bearing_is_page_silent(cell, want):
     assert compare_listing({"direction_ar": None}, page(cell))["direction_ar"] == want
@@ -810,6 +811,8 @@ def test_a_facade_cell_that_states_no_single_bearing_is_page_silent(cell, want):
 @pytest.mark.parametrize("banner", [
     "استأجر الآن وادفع لاحقًا مع إيجاري ، تقسيط شهري مريح لشقتك المفضّلة",   # Ejari, 23431125 / 23409947
     "وفّي وسيط وتقسيط: سهِّل مشترياتك بدفعات ميسَّرة وآمنة.",                    # Wafi, 23449574
+    "استأجر الآن وادفع لاحقًا مع رايز ، تقسيط شهري مريح لشقتك المفضّلة",      # Rize, 23397679
+    "استخدم وفّي للتقسيط المريح وحماية مدفوعاتك.",                               # Wafi, 23548231
 ])
 def test_harajs_partner_banner_is_not_the_ad(banner):
     out = compare_listing({"rent_now_pay_later": None, "installment_available": None}, page("شقة للإيجار", banner))
