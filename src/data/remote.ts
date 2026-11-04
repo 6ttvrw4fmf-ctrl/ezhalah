@@ -19,6 +19,7 @@ import { dedupePhotoUrls, photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { listingDiscountFrom } from '@/lib/listingDisplay';
 import { servedSaleFigures } from '@/lib/meterBoxPrice';
+import { followIndexPerMeterVerdict } from '@/lib/landPerMeterTotal';
 import { orderByScope, scopeForDistricts, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
 import { truncateGlyphs } from '@/lib/typedReveal';
@@ -1822,6 +1823,8 @@ export async function fetchListingsForQuery(
     // VERBATIM — never `!!`, never `?? 0`. Every value inside stays nullable so the card can tell
     // "the source did not publish this" from "false" (R12A.3: UNKNOWN is never rendered as a claim).
     af_canon: (c.af_canon ?? null) as Record<string, unknown> | null,
+    // The price the index matched and ordered this row on — read only to recognise the index's land per-metre verdict.
+    effective_price: (c.effective_price ?? null) as unknown,
   }));
   // The index returns the ARABIC-CANONICAL location for every candidate (region_ar/city_ar/district_ar).
   // We display THAT — never the raw English/transliterated value underneath. (user: Arabic is canonical;
@@ -1899,7 +1902,10 @@ export async function fetchListingsForQuery(
     // this row really satisfies each active predicate — read from the SAME row the filter ran on,
     // never from l.features/l.bathrooms (finalize() collapses their NULLs to 0/false).
     l.canon = c.af_canon;
-    const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
+    // A land «total» the index read as a PER-METRE price (owner 2026-11-04) prints the index's «≈ figure × area», so the
+    // client budget net below keeps the card the server matched (src/lib/landPerMeterTotal.ts).
+    followIndexPerMeterVerdict(l, c.effective_price);
+    const region =(ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
   }
   // The count follows the cards (🔧 1153, 2026-11-01): a row the raw hydration dropped (hidden at source since the
@@ -2143,6 +2149,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // Shown as «~~old~~ خصم X٪» under the (already discounted) price. Null = no line at all.
       discount: priceIsDerived ? null : listingDiscountFrom(deal, r.source ?? 'Aqar', r.price_total, r.price_original, r.discount_pct),
       priceIsDerived,
+      salePriceTotal: deal === 'Buy' && typeof sale.priceTotal === 'number' ? sale.priceTotal : null,
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,
       // CRITICAL: source comes from the DB row, never hardcoded — the card's logo, "Hosted on X",
