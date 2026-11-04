@@ -84,6 +84,10 @@ const mutate = (from: string, to: string): string | null => {
   return src.replace(from, to);
 };
 
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) problems.push(`MUTATION NOT CAUGHT: ${label}`);
+};
+
 const real = run();
 for (const t of TESTS) {
   if (real[t] !== 'GREEN') problems.push(`EXECUTED cleanup.run(): ${t} → ${real[t]}`);
@@ -99,12 +103,8 @@ for (const t of TESTS) {
     '                            .limit(pol["max_delete_per_run"]).execute().data or [])');
   if (m) {
     const r = run(m);
-    if (!r[TESTS[0]].startsWith('RED') && !r[TESTS[0]].includes('Error')) {
-      problems.push('MUTATION NOT CAUGHT: the work-set reverted to the absence-only table query');
-    }
-    if (r[TESTS[2]] === 'GREEN') {
-      problems.push('MUTATION NOT CAUGHT: candidates read from the listing table went unnoticed');
-    }
+    mustCatch('the work-set reverted to the absence-only table query', r[TESTS[0]] !== 'GREEN');
+    mustCatch('candidates read from the listing table', r[TESTS[2]] !== 'GREEN');
   }
 }
 
@@ -118,9 +118,7 @@ for (const t of TESTS) {
     '                    .lt("last_seen_at", cutoff).limit(1).execute())');
   if (m) {
     const r = run(m);
-    if (r[TESTS[0]] === 'GREEN') {
-      problems.push('MUTATION NOT CAUGHT: the eligible count reverted to the absence-only table count');
-    }
+    mustCatch('the eligible count reverted to the absence-only table count', r[TESTS[0]] !== 'GREEN');
   }
 }
 
@@ -198,17 +196,17 @@ problems.push(...sqlProblems(defs));
     const stripped = new Map(defs);
     stripped.set('deletion_clock_eligible_sql',
       pred.replace(/and\s*\(\s*t\.last_verified_alive_at is not null[\s\S]*?interval '1 hour'\)\s*\)/, ''));
-    if (sqlProblems(stripped).length === 0) problems.push('SQL MUTATION NOT CAUGHT: verdict clause removed');
+    mustCatch('SQL: verdict clause removed', sqlProblems(stripped).length > 0);
     const orTrue = new Map(defs);
     orTrue.set('deletion_clock_eligible_sql',
       pred.replace(/and\s*\(\s*t\.last_verified_alive_at is not null/, 'or ( t.last_verified_alive_at is not null'));
-    if (sqlProblems(orTrue).length === 0) problems.push('SQL MUTATION NOT CAUGHT: verdict clause made optional');
+    mustCatch('SQL: verdict clause made optional', sqlProblems(orTrue).length > 0);
   }
   const bl = defs.get('ops_lifecycle_deletion_backlog');
   if (bl) {
     const m = new Map(defs);
     m.set('ops_lifecycle_deletion_backlog', bl.replaceAll('deletion_clock_eligible_sql(', 'own_predicate('));
-    if (sqlProblems(m).length === 0) problems.push('SQL MUTATION NOT CAUGHT: a caller bypasses the shared predicate');
+    mustCatch('SQL: a caller bypasses the shared predicate', sqlProblems(m).length > 0);
   }
 }
 
