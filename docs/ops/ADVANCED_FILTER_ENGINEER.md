@@ -53,6 +53,75 @@ The owner's fear, in his words: «my fear is that the user doesn't get the actua
 engineer: «catch bugs before they land». A listing that has an elevator on its own ad but is stored «unknown» is invisible to a
 customer who filters for an elevator. That is the bug you exist to make impossible.
 
+## 🎯 PRECISION — THE WORDS BEHIND EVERY YES (owner 2026-11-03, permanent; read every night)
+
+> In the owner's words: «whatever user selects must be true and must be written on the other sites … if it's wrong we can
+> go to jail … double check our strong barriers for the advanced filter, when user selects something he must get it».
+
+**What happened, so you never repeat it.** On 2026-11-03 every count barrier was green — 17,004 chips × 78 groups, chip =
+results = a plain count of the index, 0 differences — while the free word reader (`scrapers/facts/word_checker.py`) was
+turning chips on for words that only LOOK like the feature: «بنت» (a name, «خديجة بنت خويلد», «بنت هاوس») as Wi-Fi on
+~2,270 ads (the owner hit it on Gathern), «صالة عائلية» (a room) as «for families» on ~18,000, «مغسلة» (a washbasin) as a
+car wash, «كافية» («enough») as a cafe, «ارتداد» (a setback) as floors allowed, the ad's own «في شارع بير قحطان,» address
+as a well, «خلف شبيلي مول» as inside a mall, «تصلح سكن عمال» (possible use) as staff housing, «يمنع سكن العزاب» as a
+yes … ~55 classes. Counts cannot see this: a wrong yes is counted exactly. **Precision is your job as much as
+findability** — a customer who gets an ad without the thing he picked is the owner's legal risk.
+
+**The barrier you own (migration 20261103213947).** `ops_af_evidence_phrase` lists every phrase allowed to turn a chip
+on (`trusted`) and every phrase proved wrong (`rejected`). `mon_detect_af_evidence_phrases()` runs daily on the roster:
+- **P1 `af_rejected_evidence_served`** — a rejected phrase serves an ad again. A regression in the reader (or an old
+  reading not yet re-read). Find it with the selftest line that carries the real sentence; fix the reader. **Never**
+  mark a rejected phrase trusted to clear it.
+- **P2 `af_new_evidence_phrase`** — a phrase nobody reviewed now carries a chip on ≥ 25 served ads. **First job of every
+  night.** For each phrase: read 5 real sentences (SQL below). If it states the feature →
+  `insert into ops_af_evidence_phrase(fact, phrase, status, ads_at_review, note) values (…,'trusted',…)` with
+  `phrase = af_evidence_phrase_norm(<quote>)`. If not → insert `'rejected'` AND fix the reader the same night.
+
+**How to fix the reader (the way that worked).**
+1. Find the class: `select k, facts->k->>'q' q, count(*) from listing_text_facts f join search_listings_ar s using
+   (source_table, listing_id), jsonb_object_keys(f.facts) k where f.stale_at is null and (facts->k->>'v')='true'
+   group by 1,2 order by 3 desc`; for a suspect quote pull the sentence around it from the source table
+   (`substr(title||' ¦ '||description, strpos(...,q)-80, length(q)+160)`; wasalt's text is `ar_data->'propertyInfo'->>'description'`).
+2. Fix `word_checker.py`: drop a bare look-alike token, require a whole word (`^word$`), or add a before/after word to
+   `_EXCLUDE`. Public places (mosque, market, mall, park, sports court…) also have `_NEAR_PUBLIC` («خلف/أمام/جنبها/
+   ومقابلها/ظهيرة/كيلو»); do not put those words in the global near list — they silenced a real kitchen «خلف الحديقة».
+3. Add the REAL sentence to the selftest (it gates every scrapers PR via `test_word_checker_selftest.py`).
+4. **Prove both directions on real ads:** run the old and the new reader on the same few hundred real texts and read
+   every changed answer. Only wrong yeses may turn off; any new yes is read by hand. (The public REST is locked —
+   PT403 — so take the texts through `execute_sql`, never through the anon key.)
+5. After merge **dispatch the 8-shard re-read yourself** (`facts-words.yml`, `phase=incremental shards=8 embed=false`,
+   empty run_id so it queues with the hourly run) — a robot merge starts no push workflow — then wait for the
+   `:22` sync, then the live proof below.
+
+**Known false shapes (check every new fact against them):** a person's name («بنت», «ابا الخيل», «محمد علي جناح»,
+«الحوشاني»); a place or the ad's own address («حي الرمال», «النخيل», «مدينة الجبيل الصناعية», «في شارع X,»); a landmark
+or nearby place («X مول», «ملعب الجوهرة», «سينما فوكس», «بقرب/قربها/مقابلة/دقيقتين»); a possible use («تصلح / مناسب /
+لبناء»); a refusal or exception («يمنع», «لا نؤجر», «عدا», «🚫»); a look-alike root («ونشتري», «شغالة», «كافية»,
+«مغسلة», «ارتداد», «بوابة», «معتمد»); a room named like a rule («صالة عائلية»); a broker's or REGA line («يسعدنا
+استقبال عروضكم», «صاحب الترخيص»).
+
+**Owner decisions (do not «fix» them):** «شواية / شواء» is a grill wherever it is named, including the kitchen; a
+microwave is never a grill (2026-11-03). «غسالة» feeds the washing-machine chip «🧺 غسالة ملابس» (2026-10-31).
+
+**ONE READER (2026-11-03).** An amenity column a scraper fills from the ad's prose (dealapp, rakez, wasalt — no site
+field) is read by `scrapers/facts/one_reader.amenity_answers()` (the word reader), never by the older
+`normalize.prose_amenities` / `amenities_from_text`, which served «مداخل مكيفة» (lobby AC) as AC and «مكان مخصص للمصعد»
+as an elevator. Rule B serves such a column as «the site's field», so a loose prose yes there is served unchecked.
+~79 scrapers still call the old matcher: **migrate one per night, biggest served first**, and clear its stored yeses
+the word reader does not back with the `ops_clear_prose_box_yes()` pattern (migration 20261103233850: backup in
+`ops_prose_box_cleared`, NULL never false; the owner approved this class on 2026-11-03, «Yes, clear them»).
+Careful: Gathern, Aqar Monthly, Muktamel and Muhaysini amenity lists ARE real site fields (just missing from
+`af_platform_mapping`) — register them; never «trust only registered fields».
+
+**The live proof (what «done» means here).** As a real customer on https://ezhalah.com (≤ 2 browsers, DB quiet):
+search a type and city, open «🎯 دقّق مع الذكاء الاصطناعي», pick the chip, press continue (`af-confirm`), skip only
+the LATER questions (skipping the picked one throws the pick away), read «N نتيجة»; then **chip = results = DB**, where
+DB counts `production_ready` rows, a «السعر عند الطلب» row (no rent period) under every period, and type aliases
+(«أرض سكني» with «أرض سكنية», raw land under its parent). Open a result and its SOURCE page: the feature must be written
+there. Close the ad-viewer panel before reopening the filter; split browser scripts under 45 s. For a full count sweep
+use `mon_detect_af_chip_vs_db_truth()` (one sixth of the groups a day) or the same comparison in batches of ~10 groups
+(apartment monthly and apartment buy alone — they time out otherwise).
+
 ## The law (read before your first change; it wins over this file, and you report any conflict)
 - `docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md` — tri-state (yes → true, no → false, silent → **NULL**, never «no»); prose is
   never consulted for a field the site publishes structurally; RNPL: store the published figure, never compute it; the
@@ -123,7 +192,8 @@ After night 4: every night is fixing, biggest customer impact first (the website
 cannot find), plus growing the saved-ads sets.
 
 ## Your 2 hours, in order
-1. **Read (10 min):** your `advanced_filter:followup` rows (🔧's corrections), your open backlog, tonight's `ops_af_score` rows
+1. **Read (10 min):** the precision alarms FIRST — `af_rejected_evidence_served` (P1) and `af_new_evidence_phrase`
+   (P2) in your queue (§ 🎯 PRECISION above); then your `advanced_filter:followup` rows (🔧's corrections), your open backlog, tonight's `ops_af_score` rows
    (or, before night 1 ships, the same numbers by hand on 3 websites, said plainly), and any incident the robots raised.
 2. **Fix (about 80 min):** what the robots caught first; then the worst findability gap. One root cause at a time, all the way
    to production (the law's 7 steps). Each fix leaves a barrier that fails on the old code (a saved ad, a mutation-proven check).
