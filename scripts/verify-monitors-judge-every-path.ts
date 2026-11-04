@@ -28,6 +28,8 @@ const check = (name: string, cond: boolean, detail = '') => {
   console.log(`  ${cond ? '✓' : '❌'} ${name}${!cond && detail ? ` — ${detail}` : ''}`);
   if (!cond) failures++;
 };
+/** A mutation proof: `caught` runs the guard's predicate against the PREVIOUS (defective) definition. */
+const mutation = (name: string, caught: () => boolean) => check(`(mutation) ${name}`, caught());
 
 /** Body of the definition of `fn` inside one migration file (from CREATE to the closing $function$). */
 function bodyIn(file: string, fn: string): string | null {
@@ -139,7 +141,7 @@ if (all.length >= 2) {
   const dead105 = fires(shift(newSched), changedAt - 86400, -3 * 3600);
   check('jobid 105 silent for 3 h under its new schedule IS frozen', frozen(now, '13,41,49,57 * * * *', dead105, changedAt - 86400));
   // mutation proof: the previous definition raised the false P1
-  check(`(mutation) ${all[1].file} flags jobid 105 — the 2026-11-04 false P1`, frozen(old, '13,41,49,57 * * * *', job105, changedAt));
+  mutation(`${all[1].file} flags jobid 105 — the 2026-11-04 false P1`, () => frozen(old, '13,41,49,57 * * * *', job105, changedAt));
 }
 
 // ── 2. rent tiny gate resolves on the PASS path ──────────────────────────────────────────────────
@@ -147,7 +149,7 @@ console.log('2. mon_detect_rent_tiny_gate_reverted can close what it opens');
 const resolvesTiny = (b: string) => /else[\s\S]*mon_resolve_key\(\s*'monitor_integrity'\s*,\s*'rent_tiny_gate_reverted'\s*\)/.test(b);
 const tiny = defs('mon_detect_rent_tiny_gate_reverted');
 check('latest definition resolves monitor_integrity:rent_tiny_gate_reverted on PASS', !!tiny[0] && resolvesTiny(tiny[0].body), tiny[0]?.file);
-check('(mutation) the previous definition does not', !!tiny[1] && !resolvesTiny(tiny[1].body), tiny[1]?.file);
+mutation(`the previous definition (${tiny[1]?.file}) does not`, () => !!tiny[1] && !resolvesTiny(tiny[1].body));
 
 // ── 3. the routed duplicate-card copy has a resolver ─────────────────────────────────────────────
 console.log('3. duplicate_card_surface_routed is closed by the sweep that re-measures it');
@@ -155,7 +157,7 @@ const resolvesRouted = (b: string) =>
   /mon_resolve_key\(\s*'duplicate_card_surface_routed'/.test(b) && /v_colliding\s*:=\s*v_colliding\s*\|\|/.test(b);
 const coll = defs('mon_detect_url_collisions_res_vs_com');
 check('latest url-collision sweep resolves a routed copy, holding it while a named platform collides', !!coll[0] && resolvesRouted(coll[0].body), coll[0]?.file);
-check('(mutation) the previous sweep does not', !!coll[1] && !resolvesRouted(coll[1].body), coll[1]?.file);
+mutation(`the previous sweep (${coll[1]?.file}) does not`, () => !!coll[1] && !resolvesRouted(coll[1].body));
 
 // ── 4. the stale sweep judges both keys before any `continue` ────────────────────────────────────
 console.log('4. mark_stale_listings_inactive judges its keys on every path');
@@ -178,7 +180,7 @@ const stale = defs('mark_stale_listings_inactive');
 const sNow = stale[0] ? keysBeforeContinue(stale[0].body) : { ok: false, why: 'no definition' };
 check(`latest definition (${stale[0]?.file}) raises-or-resolves both keys before the first continue`, sNow.ok, sNow.why);
 const sOld = stale[1] ? keysBeforeContinue(stale[1].body) : { ok: true, why: 'no previous definition' };
-check(`(mutation) the previous definition (${stale[1]?.file}) is caught`, !sOld.ok, 'previous definition unexpectedly passes');
+mutation(`the previous definition (${stale[1]?.file}) is caught`, () => !sOld.ok);
 check('the stale sweep still deactivates nothing', !!stale[0] && !/set\s+active\s*=\s*false/i.test(stale[0].body));
 
 if (failures) {
