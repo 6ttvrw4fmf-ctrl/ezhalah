@@ -61,10 +61,11 @@ if (problems([{ name: '20990101000000_a.sql', sql: GOOD }]).length) {
   console.error('FAIL  the good shape is rejected:', problems([{ name: '20990101000000_a.sql', sql: GOOD }]));
   failed = true;
 }
-for (const [label, m] of mutants) {
-  if (problems(m).length === 0) { console.error(`FAIL  mutant NOT caught: ${label}`); failed = true; }
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`FAIL  mutant NOT caught: ${label}`); failed = true; }
   else console.log(`PASS  mutant caught: ${label}`);
-}
+};
+for (const [label, m] of mutants) mustCatch(label, problems(m).length > 0);
 
 // ── the real tree ─────────────────────────────────────────────────────────────────────────────────────────
 const migs: Mig[] = readdirSync(MIG).filter((f) => f.endsWith('.sql')).map((f) => ({ name: f, sql: readFileSync(join(MIG, f), 'utf8') }));
