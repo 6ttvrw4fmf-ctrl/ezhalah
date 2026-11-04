@@ -107,21 +107,40 @@ contradicts, (3) then the proof. The function fixes (20261102051729: `aqar_parse
 $x$…$x$)`). A needle-edit migration that touches a function a replay barrier pins (aqar_parse) must also refresh
 `sql/mirrors/<fn>.sql` (md5 = production `pg_get_functiondef`) and `ops_sql_mirror_expected` in a companion.
 
-**Owed → first thing next run (11-02):**
-- **1174 souq24 harvest retry** (merged #9899, c97c51b; targeted souq24 run dispatched 06:25 UTC): once merged, the next souq24 crawl's notes must not say «browse harvest
-  incomplete» on a lone transport_Timeout; alert 12223 clears 72 h after 11-01 10:46 (≈ 11-04 10:46 UTC).
-- **1175 alhumaidan freshness** (20261102054212): no alhumaidan row in `scraper_freshness_alerts` after the 06:10
-  and later crons; alert 4194 resolves ~24 h after the last legacy row (≈ 11-03 00:10 UTC).
-- **aqar 22 restored prices:** served after the 11-02 06:22 sync; commercial 296740/14881483 re-read: aqar's payload
-  publishes no price today, so NULL is source truth.
-- Self-clearing, dated: aqar_liveness kills 12320 (#9794 ok 33/33 on 11-02; clears ≈ 11-04 11:38), shomou
-  11912 (≈ 11-02 08:56), manzo 12026 (≈ 11-02 18:43), albukaeri/superoffice/nowaisiry enumeration_incomplete
-  (clean runs since 10-31/11-01).
-- Not a capture bug (leave the alert to adjudication): superoffice 24 rows = 3 branches × the 8-office window
-  robots.txt allows (`Disallow: /api`); the 184 «baseline» is the old site. dealapp enumeration_incomplete:
-  every active row was seen ≤ 5 days ago and 93 % were verified alive ≤ 3 days ago. The shard guard's
-  denominator is the gap, not lost data.
-- Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442.
+**NEW (11-03): A DETECTOR THAT JUDGES A DAILY BATCH WITH A ROLLING `now() - 24 h` WINDOW FIRES MID-BATCH.** Three
+of tonight's P1s were measuring artifacts of one shape, 88 raises between them: `silent_partial_success:gathern`
+(12-slice batch 04:43–05:10 split by the 04:59 sweep: 4,888 of ~16,000), `dealapp_shard_missing_run` (02:59 sweep, 26
+min into the 02:33 nightly: the 9 shards still RUNNING named «missing» and counted as «blocked»), and
+`silent_partial_success:wasalt_enrich_ar_residential` (an enrichment QUEUE judged as a capture). Before chasing a
+«short crawl» alert, put the alert's `created_at` next to the label's own run window (`scrape_runs` started/finished,
+`finished_at IS NULL` = in flight). Fixed at the root: 20261103051511 (a sliced label's day counts back from its own
+latest run), 20261103052107 (`%\_enrich\_%` labels are queues), 20261103052507 (30 h window, in-flight ≠ blocked).
+
+**NEW (11-03): RUNNERS ARE THE BOTTLENECK OF EVERY PROOF.** 05:30 UTC: 20 of 20 GitHub runners busy (dealapp shards 9,
+the 04:22 nightly 3, muktamel 2, gathern 1, CI 5) and ~70 jobs queued — my crawl waited 14 min, PR checks 30+. The
+dealapp fleet now starts 00:33 (was 02:33; shards take up to 231 min, not the ~97 the slot was chosen for), barrier
+`verify-dealapp-fleet-ends-before-the-engineer-window.ts`. Dispatch every proof crawl in the first 15 minutes.
+
+**NEW (11-03): `source-reread.yml` prints `pin <table>:<id>: maps-link=… | embed=… | short=… | json-lat/lng=…` for
+every ad** — one run says which of the four places holds a site's pin, and «none» on all four means a client-rendered
+map (needs a rendered probe). Use it before writing any pin parser.
+
+**Owed → first thing next run (11-03):**
+- **⏳ dated:** 1164 dealapp fleet at 00:33 — at 05:00 UTC 11-04 no `Deal App shard` job may be in progress (GitHub
+  jobs list of the 00:33 `dealapp-sharded.yml` run) · 1174 souq24: alert 12223 resolves by 11-04 10:46 UTC ·
+  amaall/superoffice pins if tonight's customer journey did not land.
+- **1197 pins, 5 sites still 0** (flow 21, livingcompound 17, aqaralsaudia 16, sodasyat 13, albukaeri 13): the raw pages
+  hold no pair around «maps» (re-read 41584043795) → read the per-ad `pin …` line of the branch re-read, then a
+  rendered probe. Since 20261103 the pin detector watches sites from 10 ads, so they are ONE open P1 until fixed or
+  proven silent («none» needs the URL you proved it on). safa is `none` (the only link is the office's place).
+- **1205 tail:** ramzalqasim 20 ads name only a district (المصيف, اشبيليا…) and no city — source truth; a pin→city
+  rule would be new location semantics (owner). erapulse: proof after its targeted crawl on main.
+- **Not capture bugs (adjudicated with the page):** ashab/gomenassat/maqrat W45 field-fill (source prints no area /
+  no price / only the site placeholder image); abwbna 49 + alobid 37 quarantined (their API sends city = district =
+  lat = null and 64/64 texts name no city); scrape_suspect 12621/12737 are AWS «node» callers, not ours (our functions
+  run in hnd1, our runners are GitHub's, this cloud egress is 160.79.106.17) — owner: allow-list only if they are his.
+- Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442 · nowaisiry guard trips
+  on 2 of 4 days (REST returns 18 vs 20 posts; read the live list next run).
 
 **CHANGED (10-25): a targeted `small-sources-sync` dispatch (`source=<slug>[,<slug>…]`) now creates ONLY those jobs**
 (a `plan` job filters the SMALL_SOURCES list; an unknown slug fails the plan; guard

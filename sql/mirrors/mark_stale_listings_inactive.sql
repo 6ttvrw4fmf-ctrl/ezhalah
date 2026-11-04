@@ -5,7 +5,12 @@
 --   coverage gate can `continue` past them (stuck_open_alert 1293: keys sat unaffirmed up to 15 days while
 --   their tables were behind the breaker). Carries 20261104032124 (greatest(last_seen_at,
 --   last_verified_alive_at)) unchanged. Still deactivates nothing. Barrier: verify-monitors-judge-every-path.ts.
--- Re-verified 2026-11-03 (migration 20261102212825_stale_breaker_escape_resolves_on_reset): UNCHANGED.
+-- Refreshed 2026-11-04 (migration 20261104032124_stale_sweep_counts_direct_alive_verdicts): CHANGED. md5 of everything below: 4ce83b360801e87e0a556f0494621ea9
+--   The stale count and the coverage gate's observed count now read greatest(last_seen_at, last_verified_alive_at):
+--   a direct liveness oracle ALIVE verdict is source evidence (stronger than crawl presence), and the liveness
+--   contract stamps only last_verified_alive_at for it. Needle-edit of three anchors, each asserted to match once;
+--   confirmed against production the same hour: md5(pg_get_functiondef) = 4ce83b360801e87e0a556f0494621ea9.
+-- Re-verified 2026-11-03 (migration 20261102212825_stale_breaker_escape_resolves_on_reset): UNCHANGED (history; superseded by the 2026-11-04 line above).
 --   md5(pg_get_functiondef) in production = 46b864145225e1897ce0ad014c0732e2, identical to this file. Stamped for
 --   verify-sql-mirrors-not-stale (B2): the 2026-11-02 stamp did not name this later same-day migration.
 -- Refreshed 2026-11-02 (re-derived, see below) by the 🔧 Quality & Repair Engineer (2nd daily run) for migration

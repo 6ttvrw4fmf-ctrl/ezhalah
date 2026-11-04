@@ -5572,7 +5572,7 @@ const s = StyleSheet.create({
   shareInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   shareText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
   // Reopen chip for a hidden ad pane — the share button's own tint/hairline idiom, beside it.
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
 

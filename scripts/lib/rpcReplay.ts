@@ -130,6 +130,31 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     if (v !== undefined) decls.set(e[1], v);
   }
 
+  // (f) DOLLAR-QUOTED DECLARATIONS (20261104032124) — `a1 constant text := $a$needle$a$;` and
+  // `b3 constant text := $a$part one$a$ || $a$part two$a$;`. A dollar-quoted literal is raw text (no
+  // escapes), so a needle holding `''1 day''` reads exactly as it sits in the function body. Only
+  // declarations made ENTIRELY of dollar-quoted segments are read; anything else stays invisible.
+  const dollarDeclRe =
+    /([A-Za-z_][A-Za-z0-9_]*)\s+(?:constant\s+)?text\s*:=\s*((?:\s*\$[A-Za-z_]*\$[\s\S]*?\$[A-Za-z_]*\$\s*(?:\|\|)?)+)\s*;/g;
+  let dd: RegExpExecArray | null;
+  while ((dd = dollarDeclRe.exec(sql))) {
+    if (decls.has(dd[1])) continue;
+    const segRe = /\s*\$([A-Za-z_]*)\$([\s\S]*?)\$\1\$\s*(\|\||$)/y;
+    const expr = dd[2].trim();
+    let val = '';
+    let pos = 0;
+    let ok = true;
+    while (pos < expr.length) {
+      segRe.lastIndex = pos;
+      const s = segRe.exec(expr);
+      if (!s) { ok = false; break; }
+      val += s[2];
+      pos = segRe.lastIndex;
+      if (s[3] === '') break;
+    }
+    if (ok && pos >= expr.length) decls.set(dd[1], val);
+  }
+
   const out: { anchor: string; replacement: string }[] = [];
 
   // (c) TABLE-DRIVEN — `edits text[][] := array[ ['needle','replacement','count'], ... ]` applied in

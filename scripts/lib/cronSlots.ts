@@ -98,6 +98,39 @@ export function writerCollisions(jobs: CronJobs, writers: string[]): string[] {
     .map(([k, js]) => `${k} → ${js.join(', ')}`);
 }
 
+/** A single-writer job EVERY one of whose daily starts falls inside another single-writer job's p95 run
+ *  window: it takes pg_try_advisory_xact_lock('search_listings_ar:single_writer'), is refused at every
+ *  start, writes nothing and still reports `succeeded` — mon_detect_search_writer_starved()'s condition,
+ *  judged at review time. Hour-aware over startInstants(), so it covers EVERY schedule shape: starvedPairs()
+ *  only judges plain-hourly victims and writerCollisions() only same-instant starts, which is how
+ *  sync-rich-attrs-wasalt was re-slotted to minute 30 of every third hour inside sync-search-listings-ar's :22 + 890 s window
+ *  (2026-11-04, alert 12926) with every check green. A writer that is refused at SOME starts (an every-10-minutes job
+ *  that also starts outside the window) still gets passes, so it is not reported. */
+export function starvedWriters(jobs: CronJobs, writers: string[], hogs: HogP95): string[] {
+  const out: string[] = [];
+  for (const victim of writers) {
+    const vs = jobs[victim];
+    if (vs === undefined) continue;
+    const starts = startInstants(vs);
+    if (starts.length === 0) continue;
+    const coveredBy = new Set<string>();
+    const allCovered = starts.every(([h, m]) => {
+      const t = h * 60 + m;
+      for (const hog of writers) {
+        if (hog === victim || !(hogs[hog] > 0) || jobs[hog] === undefined) continue;
+        const k = Math.ceil(Math.round(hogs[hog]) / 60);
+        for (const [hh, hm] of startInstants(jobs[hog])) {
+          const d = (t - (hh * 60 + hm) + 1440) % 1440; // minutes since that hog start, wrapping midnight
+          if (d >= 0 && d <= k) { coveredBy.add(hog); return true; }
+        }
+      }
+      return false;
+    });
+    if (allCovered) out.push(`${victim} '${vs}' < ${[...coveredBy].sort().join(', ')}`);
+  }
+  return out.sort();
+}
+
 /** Newest migration version (14-digit prefix) whose non-comment SQL changes a cron schedule. */
 export function newestScheduleMigration(files: Array<{ name: string; sql: string }>): string | null {
   const re = /cron\s*\.\s*(schedule|alter_job|unschedule)\s*\(/i;

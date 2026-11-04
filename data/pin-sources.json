@@ -168,10 +168,10 @@
     },
     "amaall": {
       "pin_source": "page-json",
-      "floor_pct": 1,
+      "floor_pct": 75,
       "proof_url": "https://www.amaall.com/projects/%d8%a3%d8%b1%d8%b6-%d8%b3%d9%83%d9%86%d9%8a%d8%a9-%d8%a8%d9%85%d9%83%d8%a9-%d8%a7%d9%84%d9%85%d9%83%d8%b1%d9%85%d8%a9-%d8%ad%d9%8a-%d8%a7%d9%84%d8%b9%d8%b2%d9%8a%d8%b2%d9%8a%d8%a9/",
-      "proven_on": "2026-10-30",
-      "note": "CAPTURE GAP (32 ads, 0%): the page prints 21.488419,39.934998 in JSON (Leaflet) + a short link (1 ad seen). Backlog. Served 0/32 (0.0%) on 2026-10-30 before today's fixes."
+      "proven_on": "2026-11-03",
+      "note": "The WP REST property_meta.fave_property_location («lat,lng,zoom») is the pair the page's Leaflet map draws; read since ⚡ 2026-11-03 through sa_pin (the Florida theme default 25.68654,-80.431345 is refused; a pair on 3+ posts is a default and is dropped). Branch crawl 2026-11-03 05:34 UTC stored 33 of 36 active rows, 26 distinct pairs (was 0/32 served on 2026-10-30)."
     },
     "amlakalahsa": {
       "pin_source": "feed",
@@ -825,11 +825,11 @@
       "note": "Classified 2026-10-30 from the scraper's read path (ad-page); not re-opened in a browser today. Served 1709/1738 (98.3%). Floor = ratchet below today's number; raise it, never lower it."
     },
     "safa": {
-      "pin_source": "ad-page",
-      "floor_pct": 1,
+      "pin_source": "none",
+      "floor_pct": 0,
       "proof_url": "https://safainv.sa/units/rental?page=1&property_id=12914",
-      "proven_on": "2026-10-30",
-      "note": "CAPTURE GAP (44 ads, 0%): the rendered page carries a maps.app.goo.gl short link; not followed. Backlog. Served 0/44 (0.0%) on 2026-10-30 before today's fixes."
+      "proven_on": "2026-11-03",
+      "note": "Proven silent per unit 2026-11-03 (⚡, backlog 1197): the crawl read every unit sheet and every project page; the ONLY Maps link anywhere is one maps.app.goo.gl link that resolves to the Google place «صفا للاستثمار» (the company office), shared by every project — so it is dropped (shared by 3+ projects). The 2026-10-30 «ad-page» declaration read that office link as a per-ad pin."
     },
     "safera": {
       "pin_source": "none",
@@ -955,7 +955,7 @@
       "floor_pct": 1,
       "proof_url": "https://superoffice.sa/branch/as-suwaidi/unit/H19",
       "proven_on": "2026-10-30",
-      "note": "CAPTURE GAP (39 ads, 0%): the unit page's Google embed is the BRANCH building (24.594860,46.695216) the unit sits in — one pair per branch, like a project pin. Below the 50-ad line; backlog. Served 0/39 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "The unit page's Google embed (maps/embed?pb=…!2d!3d) is the BRANCH building — read since ⚡ 2026-11-03 (pin_from_embed; a pair two branches share is dropped). Only the as-suwaidi branch's unit pages print it (24.594860,46.695216): 3 of 18 active offices pinned on 2026-11-03; the other branches' pages carry no embed. Floor stays 1."
     },
     "suwar": {
       "pin_source": "none",

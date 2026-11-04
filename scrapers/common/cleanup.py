@@ -1008,8 +1008,10 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                  "skipped", "aborted", "abort_reason", "note")}).execute()
         except Exception as audit_err:      # never let the audit write mask the original failure
             print(f"✗ cleanup {platform}: could not record the failed run: {audit_err}", flush=True)
+        # dry_run= is the ONLY carrier of that flag on scrape_runs; without it
+        # mon_detect_cleanup_evidence_gap cannot evidence-check a run that died (2026-11-04).
         end_run(run_id, ok=False, rows_seen=stats["candidates"], rows_upserted=stats["deleted"],
-                notes=f"error: {e}")
+                notes=f"error: {e} dry_run={dry_run}")
         raise
     finally:
         _close_wasalt_browser()  # Chromium is a child process; never leave it holding the CI step open

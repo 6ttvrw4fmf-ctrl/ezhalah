@@ -2506,7 +2506,7 @@ const s = StyleSheet.create({
   shareBtnHover: { backgroundColor: colors.tintFill, borderColor: colors.primary },
   // Top-bar sign-in (mobile, logged-out only — owner 2026-08-19). Compact pill matching the sidebar's
   // CTA green so the action is unmistakable. On desktop the docked sidebar already shows it.
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   hero: { alignItems: 'center', marginTop: 8, marginHorizontal: 4 },
