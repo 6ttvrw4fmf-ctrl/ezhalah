@@ -387,6 +387,11 @@ _CHALLENGE = _Resp(403, "<html><title>Just a moment...</title></html>", "text/ht
 
 def test_verify_gone_kills_on_the_sources_404_and_never_on_a_challenge(monkeypatch):
     monkeypatch.setattr(http_liveness.time, "sleep", lambda *_: None)
+    # HERMETIC (2026-11-04): an access answer earns fresh sessions (ORACLE_RENEGOTIATIONS), and the real
+    # session() reads sakani.sa itself — so this test passed while the runner was walled and turned RED the
+    # day sakani let it in (the live unit read «live»). A fresh session here is another challenged stub.
+    monkeypatch.setattr(R, "_oracle_renewed", 0)
+    monkeypatch.setattr(R, "session", lambda: _Session([_CHALLENGE]))
     monkeypatch.setattr(R, "_oracle_sess", _Session([_Resp(404, '{"message":"not found"}', "application/json")]))
     assert R._verify_gone("SKI1000")[0] == "gone"
     monkeypatch.setattr(R, "_oracle_sess", _Session([_Resp(200, _detail_body(DETAIL_24858), "application/json")]))

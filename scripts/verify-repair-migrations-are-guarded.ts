@@ -120,6 +120,12 @@ const WAIVED: Record<string, string> = {
     'mon_detect_adjudicated_reactivation (rostered, enrolled for this repair in 20261104094703) watches; the crawl left ' +
     'every matrix (RETIRED_PLATFORMS.txt), so no scrape can bring the rows back. The applied file cannot be edited to name ' +
     'the detector (content parity).',
+  // 2026-11-04. Owner reversal of the retirement above, same day («yeah do that ok»): almuteb back to dormant.
+  '20261104224447_unretire_almuteb_back_to_dormant.sql':
+    'a one-off owner decision that undoes 20261104094609 on the same fixed 11 almuteb rows: their adjudications are ' +
+    'removed and the rows made active in ONE transaction, restoring the 2026-10-27 dormant state; they stay out of ' +
+    'search through the dormant gate (production_ready=false), which the v2 location view and the daily stale-listings ' +
+    'detector already watch for every dormant platform. No new data is computed, so there is no invariant to guard.',
   // 2026-11-04. Property Finder launch follow-ups; both are one-off fills of rows the WRITER now produces itself.
   '20261104214154_propertyfinder_license_on_card.sql':
     'a one-off copy of license_number into additional_info.rega_ad_license_number on the stored Property Finder rows; the ' +

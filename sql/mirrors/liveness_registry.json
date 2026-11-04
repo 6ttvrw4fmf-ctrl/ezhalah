@@ -90,6 +90,12 @@
     "grace": 3
   },
   {
+    "platform": "almuteb",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "alobid",
     "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,

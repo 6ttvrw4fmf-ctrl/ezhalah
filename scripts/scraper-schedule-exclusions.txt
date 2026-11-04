@@ -17,4 +17,3 @@
 deal      | scrapers/deal/run.py's own header + docs/ARCHITECTURE.md §12 | RETIRED 2026-06-26 (JSON-API experiment against api.dealapp.sa, reverted after 2 runs; header says "DO NOT ADD TO ANY WORKFLOW MATRIX")
 alnokhba  | docs/ARCHITECTURE.md §12                                     | RETIRED 2026-07-14 — alnokhba-services.com's domain lapsed into a parking page (no real listings)
 toor      | .github/workflows/small-sources-sync.yml (inline NOTE)      | RETIRED 2026-07-06 — toor.ooo IP-blocks both datacenter and Saudi-residential-proxy IPs; historical rows kept, scraper code kept for reference only
-almuteb   | scrapers/RETIRED_PLATFORMS.txt + docs/ops/LISTING_LIVENESS.md §7.1a | RETIRED 2026-11-04 (owner decision 2) — almuteb.sa NXDOMAIN since 2026-10-23 (registry NS = DNS-PARKING.COM); 11 rows kept, hidden + adjudicated
