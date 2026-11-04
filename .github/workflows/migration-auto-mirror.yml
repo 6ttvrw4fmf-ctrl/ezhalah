@@ -27,8 +27,12 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
+      # A queued run checks out the commit of the moment it was DISPATCHED unless told otherwise. 2026-11-04: run
+      # 41767741699 was dispatched 03:32 and got a runner 05:05; it read the 03:32 tree, called two migrations that
+      # had reached main since «missing», and opened duplicate save PRs (#10346, #10347). Read main as it is NOW.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref == 'refs/heads/main' && 'main' || github.sha }}
           fetch-depth: 0
           token: ${{ secrets.BASELINE_PR_TOKEN || github.token }}
       - uses: actions/setup-node@v4
