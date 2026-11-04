@@ -192,7 +192,7 @@ def map_listing(p: dict, deal: str, category: str) -> tuple[Optional[tuple[dict,
         "title": title,
         "description": desc,
         "property_type": ptype,
-        "transaction_type": deal,
+        "transaction_type": "Rent" if deal == "Rent" else "Buy",   # deal is one of the two (SIDES)
         "city": N.map_city(loc["city_ar"]) if loc["city_ar"] else None,
         "city_ar": loc["city_ar"],
         "city_id": loc["city_id"],
@@ -306,6 +306,12 @@ def main() -> int:
             db.upsert_propertyfinder_commercial_batch(com[i:i + 200])
         db.upsert_propertyfinder_offplan(offplan)
         notes = [f"coverage {json.dumps(cover)}"]
+        # an ad that moved between Property Finder's residential and commercial categories leaves its old table
+        superseded = db.retire_superseded_siblings(res_table=RES_TABLE, com_table=COM_TABLE,
+                                                   res_ads={r["ad_number"] for r in res},
+                                                   com_ads={r["ad_number"] for r in com}, source=SOURCE)
+        if superseded:
+            notes.append(f"superseded={superseded}")
         feeds = {RES_TABLE: ("res_buy", "res_rent"), COM_TABLE: ("com_buy", "com_rent")}
         for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
             if rows and all(cover[k]["complete"] for k in feeds[tbl]):
@@ -316,7 +322,7 @@ def main() -> int:
         print("  " + "; ".join(notes[1:]), flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=sum(len(s["props"]) for s in sides.values()),
                              rows_upserted=len(res) + len(com), notes="; ".join(notes)[:900],
-                             check_tables=[RES_TABLE, COM_TABLE])
+                             check_tables=["propertyfinder_residential_listings", "propertyfinder_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)
             return 1
