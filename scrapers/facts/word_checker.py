@@ -639,6 +639,9 @@ _AREA_WORDS = frozenset(_n(w) for w in ("المنطقه", "الحي", "المو�
 _SERVICE_WORDS = tuple(_n(w) for w in ("خدمات", "الخدمات", "بتوفر", "تتوفر", "يتوفر", "مخدوم", "مخدومه"))
 # the object that closes a near phrase as one item: «قريب من الخدمات» / «بالقرب من جميع الخدمات» / «قريب من المرافق»
 _SERVICES_OBJECT = frozenset(_n(w) for w in ("خدمات", "الخدمات", "المرافق", "مرافق"))
+# …and «و بها / وفيها / ويوجد» after the nearby object turns back to the unit: aqar 15315855 «قريب من الدائري و بها
+# مصعد» (elevator recall sample 2026-11-04). Unit facts only, like the rule above.
+_UNIT_AGAIN = frozenset(_n(w) for w in ("بها", "فيها", "يوجد", "توجد", "يتوفر", "تتوفر"))
 _PURE_PUBLIC_FACTS = frozenset({"mosque", "market", "restaurant_cafe", "in_mall"})
 # The PLOT'S NEIGHBOUR is not the ad's own (🔬 2026-11-04): «شارع 10 جنوبي وحديقة», «من الغرب: حديقة + مواقف», «واجهة:
 # غربية على حديقة», «ربع واجهة على جامع», «مشروعنا مباشر على حديقه». A compass direction, a facade, a boundary or
@@ -867,7 +870,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # unbacked elevator yeses were real). Unit facts only: a PUBLIC place keeps every nearby check below.
     if fact not in _NEAR_PUBLIC_FACTS and fact not in _PUBLIC_FACTS:
         at = max((k for k, w in enumerate(p5) if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS), default=-1)
-        if at >= 0 and any(_strip_wa(w) in _SERVICES_OBJECT for w in p5[at + 1:]):
+        if at >= 0 and any(_strip_wa(w) in _SERVICES_OBJECT or _strip_wa(w) in _UNIT_AGAIN for w in p5[at + 1:]):
             p5 = p5[at + 1:]
     if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
                                           or any(p in " ".join(p5) for p in _NEAR_PHRASES)
@@ -1344,6 +1347,8 @@ def selftest() -> None:
         ("نوافذ زجاجية بالقرب من الخدمات موقف سيارات مصعد", {"elevator": True}, ()),
         ("قريب من الخدمات حوش غرفة سائق تأسيس مصعد", {}, ("elevator",)),
         ("قريب من الخدمات مسجد ومدارس", {}, ("mosque",)),
+        ("مميزات العقار قريب من الدائري و بها مصعد عرض الشارع ٢٠م", {"elevator": True}, ()),
+        ("قريب من الدائري و بها مسجد", {}, ("mosque",)),
         ("تكيف مركزي _مجلس - تفتح علي مرفق ومسجد - موسسة مصعد • غرفه سائق", {}, ("elevator",)),
         ("تكيف مركزى - دبل هيت - موسس مصعد - مسبح", {}, ("elevator",)),
         ("دور أرضي ملك مجلس ومطبخ 🌟 أفضل 5 عروض حصرية لدينا (حتى الآن): 🔥 تاون هاوس علوي بمصعد | مخطط رسن طيبة", {"kitchen": True}, ("elevator",)),
