@@ -9,7 +9,7 @@ What happened. On 2026-11-04 a live walk found two reader faults that every exis
 The selftest (one sentence, one expected fact) and the evidence-phrase barrier (which words may be quoted) cannot see
 either: the quoted word was right, the sentence around it was not. Both were found only by reading real ads old-vs-new.
 
-So that reading is now a test. testdata/real_ads_golden.jsonl holds ~500 real ad sentences from aqar, dealapp, haraj,
+So that reading is now a test. testdata/real_ads_golden.jsonl holds ~630 real ad sentences from aqar, dealapp, haraj,
 muhaysini, gathern, wasalt and rightcompound (PDPL-sanitised by the reader's own clean_text; the only long numbers left are
 the public REGA ad-licence numbers), each with every yes / no the reader gives today — answers read by hand on 2026-11-04.
 A change to word_checker.py that changes ONE answer on ONE of them fails here and prints the old-vs-new list.
@@ -95,3 +95,8 @@ def test_lock_catches_a_public_place_near_or_area_read_as_the_ads_own(monkeypatc
     monkeypatch.setattr(W, "_PURE_PUBLIC_FACTS", frozenset())
     monkeypatch.setattr(W, "_OWN_CUES", tuple(W._OWN_CUES) + tuple(W._n(w) for w in ("من", "عن", "و", "في", "علي")))
     assert _changed_facts(_diffs(_rows())) & {"mosque", "market", "garden"}
+
+
+def test_lock_catches_the_plots_neighbour_read_as_the_ads_own(monkeypatch):
+    monkeypatch.setattr(W, "_BOUNDARY_STEMS", ())
+    assert _changed_facts(_diffs(_rows())) & {"mosque", "garden"}

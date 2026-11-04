@@ -110,7 +110,7 @@ restaurants, and markets», «قريبة من جميع الخدمات: مسجد�
 QUOTED word was right; the sentence around it was not — so neither the selftest nor the evidence-phrase barrier could see
 it. Fixed in PR #10304 (`_NEAR_NEVER_FACTS`, plural «مكيفات» is never the lobby's, `_NEGOTIABLE`, `_PLACE_WORDS` nearby
 list). What keeps it from coming back:
-- **The real-ad lock** (`scrapers/common/tests/test_word_checker_real_ads.py`, every scrapers PR): ~560 real sanitised ad
+- **The real-ad lock** (`scrapers/common/tests/test_word_checker_real_ads.py`, every scrapers PR): ~630 real sanitised ad
   sentences with every answer the reader gives, read by hand. A reader change that changes ONE answer is red and prints
   old → new. Regenerate (`UPDATE_REAL_AD_ANSWERS=1`) only after reading every change, and list them in the PR. Every class
   you fix adds ≥ 5 of its real sentences to the file — it may only grow.
@@ -127,7 +127,9 @@ list). What keeps it from coming back:
   حديقة», «مسجد قباء: ١٠ دقائق», «12د عن حديقة», «تتوفر جنبها جميع الخدمات ( سوبرماركت - مغاسل - مسجد )», «تتميز المنطقة
   بتوفر … السوبرماركت» — fixed with `_NEAR_PUBLIC` additions, a 9-word look-back stopped by `_OWN_CUES` («داخل المجمع»,
   «مرافق المشروع», «متكاملة»), `_AREA_WORDS`, minute words in `_NEAR_AFTER`, and list marks («-», «•») continuing a
-  nearby list; still open: a park on the plot boundary («شارع 20 م + حديقة», «من جهتين حديقه»); a nearby comma list after «قريب من / close to / دقائق من»; a near word in the PREVIOUS bullet
+  nearby list; and the PLOT'S NEIGHBOUR — a direction / facade / «مباشرة» right before the park or mosque («شارع 20 م
+  جنوبي + حديقة», «من جهتين حديقه», «ربع واجهة على جامع») — `_BOUNDARY_STEMS`, unless the ad says it has it («فيها»,
+  «يوجد»); a nearby comma list after «قريب من / close to / دقائق من»; a near word in the PREVIOUS bullet
   (🔹 ❄ ✅ are not clause breaks); an entrance adjective («مداخل مكيفة» = lobby) vs AC units («مكيفات»); «قابل للتفاوض»;
   DealApp's REGA list «مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» — there «قريب من الخدمات» is one ITEM, not a
   heading, so the parking after it is real.

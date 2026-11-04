@@ -630,6 +630,20 @@ _OWN_CUES = tuple(_n(w) for w in ("داخل", "بالمجمع", "بالمشرو�
 _AREA_WORDS = frozenset(_n(w) for w in ("المنطقه", "الحي", "الموقع"))
 _SERVICE_WORDS = tuple(_n(w) for w in ("خدمات", "الخدمات", "بتوفر", "تتوفر", "يتوفر", "مخدوم", "مخدومه"))
 _PURE_PUBLIC_FACTS = frozenset({"mosque", "market", "restaurant_cafe", "in_mall"})
+# The PLOT'S NEIGHBOUR is not the ad's own (🔬 2026-11-04): «شارع 10 جنوبي وحديقة», «من الغرب: حديقة + مواقف», «واجهة:
+# غربية على حديقة», «ربع واجهة على جامع», «مشروعنا مباشر على حديقه». A compass direction, a facade, a boundary or
+# «مباشرة» just before a public place makes it the neighbour — unless the ad says it has it («فيلا شمالية فيها حديقة»).
+_BOUNDARY_STEMS = tuple(_n(w) for w in ("شمال", "جنوب", "شرق", "غرب", "جهه", "جهتين", "جهات", "واجهه", "واجهتين",
+                                         "واجهات", "يحد", "حدود", "مباشر"))
+_HAS_CUES = tuple(_n(w) for w in ("فيها", "فيه", "بها", "به", "تحتوي", "يحتوي", "يوجد", "توجد", "يضم", "تضم", "داخل"))
+
+
+def _is_boundary(w: str) -> bool:
+    """«جنوبي», «الشمال», «واجهة» (its «و» is the word's own, not «and»), «وغرباً»."""
+    for x in (w, _strip_wa(w)):
+        if _starts(x, _BOUNDARY_STEMS) or (x.startswith("ال") and _starts(x[2:], _BOUNDARY_STEMS)):
+            return True
+    return False
 _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "restaurant_cafe", "food_allowed", "sports_court",
                                 "football_pitch", "events_hall", "nursery", "garden"})
 # A UNIT FIXTURE is never «nearby» (🔬 2026-11-04 live walk, dealapp): «بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة»,
@@ -645,7 +659,7 @@ _PLACE_WORDS = tuple(_n(w) for w in (
     "صيدليه", "صيدليات", "جامعه", "جامعات", "مركز", "مراكز", "محطه", "بنك", "بنوك", "مغسله", "مغاسل", "فندق", "فنادق",
     "shop", "school", "hospital", "mall", "market", "restaurant", "cafe", "café", "park", "mosque", "bank", "grocer",
     "supermarket", "pharmac", "universit", "hotel", "service", "attraction", "coffee",
-    "تموينات", "بلديه", "بحيره", "شارع", "الشارع", "طريق", "مطار", "كليه", "ممشي", "كورنيش", "مدينه"))
+    "تموينات", "بلديه", "بحيره", "شارع", "الشارع", "طريق", "مطار", "كليه", "ممشي", "كورنيش", "مدينه", "مصلي"))
 _METER_FACTS = frozenset({"separate_water_meter", "separate_electricity_meter"})
 _DIGITS = "0123456789"
 
@@ -847,6 +861,11 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         at = max((k for k, w in enumerate(w9) if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS
                   or _strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC), default=-1)
         if at >= 0 and not any(_starts(_strip_wa(w), _OWN_CUES) for w in w9[at + 1:]):
+            return None, s, e
+    if fact in _NEAR_PUBLIC_FACTS:
+        w4 = gp[-4:]
+        at = max((k for k, w in enumerate(w4) if _is_boundary(w)), default=-1)
+        if at >= 0 and not any(_starts(w, _HAS_CUES) or _starts(_strip_wa(w), _HAS_CUES) for w in w4[at + 1:]):
             return None, s, e
     if fact in _PURE_PUBLIC_FACTS:
         w8 = [_strip_wa(w) for w in gp[-8:]]
@@ -1087,7 +1106,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # Only a comma continues the list: a new line, «.», «•» or «-» starts the ad's own feature list.
         sep = raw[prev_end:_off].strip()
         prev_end = _off + len(_c)
-        comma = bool(sep) and set(sep) <= set("،,-•|▫▪")   # a list mark continues a nearby list; «.» or a new line ends it
+        comma = bool(sep) and set(sep) <= set("،,-•|▫▪+")  # a list mark continues a nearby list; «.» or a new line ends it
         # a clause that was ONLY the ad's own place name is blanks now (_blank_place_names) — nothing to read, and
         # words[0] below would crash the whole run (2026-11-03: every shard of facts-words died on «… مياه وكهرباء، بيشة»)
         if not t.strip() or ci in void:
@@ -1110,7 +1129,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # a heading ENDS with the nearby word: «خدمات قريبة:», «بالقرب من:», «Nearby:»
         near_in = any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in words[-2:]) or (near_in and n_words <= 3)
         near_list = list_in or any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS or _strip_wa(w) in _NEAR_PUBLIC
-                                   or w in _NEAR_PUBLIC for w in words) \
+                                   or w in _NEAR_PUBLIC or _is_boundary(w) for w in words) \
             or any(p in t for p in _NEAR_PHRASES)
         for fact in _COUNT_RES:
             num_hits.setdefault(fact, []).extend(_num_hits(fact, t, ci))
@@ -1312,6 +1331,12 @@ def selftest() -> None:
         ("خدمات المشروع - العاب اطفال - حضانة - حديقة خارجية ( لاند سكيب ) - مصلى", {"mosque": True, "garden": True}, ()),
         ("ميني سوبر ماركت داخل المجمع", {"market": True}, ()),
         ("وبلقرب من كرنيش جدة *خدمات متكاملة* 🔸 ممشى وحديقة 🔸 منطقة العاب اطفال", {"garden": True}, ()),
+        # the plot's neighbour (🔬 2026-11-04): a direction / facade / «مباشرة» right before the park or mosque
+        ("شارع : 20 م جنوبي + حديقة", {}, ("garden",)),
+        ("على شارع 30م ومن جهتين حديقه", {}, ("garden",)),
+        ("ربع واجهة على جامع حديث", {}, ("mosque",)),
+        ("موقع مباشر: مباشرة على مسجد وحديقة", {}, ("mosque", "garden")),
+        ("الواجهة شمالية + حديقة خاصة", {"garden": True}, ()),
         ("مطبخ (SPLIT) (غير راكب)", {"kitchen": False}, ()),
         ("مطبخ راكب ومكيفات راكبة", {"kitchen": True, "air_conditioner": True}, ()),
         ("بدون مكيفات ومطبخ", {"air_conditioner": False, "kitchen": False}, ()),
