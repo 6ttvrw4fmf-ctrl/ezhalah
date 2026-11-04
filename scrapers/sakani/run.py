@@ -693,26 +693,66 @@ def _attrs_verdict(a: dict, purpose: str = "rent") -> Optional[str]:
     return "live"
 
 
+# THE ORACLE GETS THE WALK'S OWN RESILIENCE (🦅 2026-11-03). The walk retries a challenged read 4 times
+# with a growing pause and renegotiates a fresh session when the route walls; the oracle used to make 2
+# quick attempts (1.2 s, 2.4 s) and give up. Measured: on 10-30 18:24 and 11-02 09:43 the first in-run
+# control (SKI25390, SKI25369, both live) answered «HTTP 403 is about our access» and the prune was
+# withheld — every night, silently — so 54 residential + 4 commercial rows the site's own catalogue had
+# dropped for 3–20 crawls (oldest last seen 09-26) stayed in search. An ACCESS answer (403/429/503, no
+# answer) is still never a verdict: it now earns the walk's retries and, bounded per run, a fresh session.
+# A 200/404 verdict is untouched, so this can never manufacture a death — it only lets the oracle read.
+ORACLE_ATTEMPTS = 4
+ORACLE_RENEGOTIATIONS = 3          # fresh sessions per run, shared by every probe
+_ACCESS_WHY = re.compile(r"about our access|no answer from the source|HTTP 5\d\d")
+_oracle_renewed = 0
+
+
+def _probe_once(ad_number: str, uid: str, purpose: str) -> tuple[str, str]:
+    return LivenessProbe(platform="sakani",
+                         signal=lambda st, b, mv: _signal(st, b, mv, purpose),
+                         session=_oracle_session,
+                         url_for=lambda _a: f"{DETAIL}{uid}",
+                         attempts=ORACLE_ATTEMPTS, backoff=PAUSE * 4).verify_gone(ad_number)
+
+
 def _verify_gone(ad_number: str) -> tuple[str, str]:
+    global _oracle_sess, _oracle_renewed
     m = _AD_RE.match(ad_number)
     if not m:
         return "unknown", f"{ad_number!r} is not a {PREFIX}/{SALE_PREFIX}<id> ad number"
     purpose = _PURPOSE_OF[m.group(1)]
-    return LivenessProbe(platform="sakani",
-                         signal=lambda st, b, mv: _signal(st, b, mv, purpose),
-                         session=_oracle_session,
-                         url_for=lambda _a: f"{DETAIL}{m.group(2)}").verify_gone(ad_number)
+    verdict, why = _probe_once(ad_number, m.group(2), purpose)
+    while verdict == "unknown" and _ACCESS_WHY.search(why or "") and _oracle_renewed < ORACLE_RENEGOTIATIONS:
+        _oracle_renewed += 1
+        print(f"   ↻ oracle read of {ad_number} drew an access answer — cool-down, fresh session "
+              f"{_oracle_renewed}/{ORACLE_RENEGOTIATIONS}", flush=True)
+        time.sleep(PAUSE * 20)
+        try:
+            _oracle_sess = session()
+        except Exception as e:  # noqa: BLE001 — a failed negotiation is about our access, never a verdict
+            return "unknown", f"fresh session failed ({type(e).__name__}) after: {why}"
+        verdict, why = _probe_once(ad_number, m.group(2), purpose)
+    return verdict, why
+
+
+_control_why = ""                 # why the last control withheld the prune — written into the run notes
 
 
 def _controls_live(ad_numbers: list[str]) -> bool:
     """In-run positive control: three units parsed live THIS run must answer LIVE through the same
-    oracle, else the transport is not trusted to testify about anyone's absence. Fails closed."""
+    oracle, else the transport is not trusted to testify about anyone's absence. Fails closed.
+    A withheld prune is RECORDED (scrape_runs.notes), never only printed: on 10-30 and 11-02 it was
+    stdout-only and the run row read «pruned=0» as if nothing had been missing."""
+    global _control_why
+    _control_why = ""
     if len(ad_numbers) < 3:
+        _control_why = f"prune withheld: only {len(ad_numbers)} control unit(s)"
         return False
     for ad in ad_numbers[:3]:
         verdict, why = _verify_gone(ad)
         if verdict != "live":
             print(f"  ⚠ oracle control {ad} answered {verdict} ({why}) — prune withheld", flush=True)
+            _control_why = f"prune withheld: control {ad} {verdict} ({why[:80]})"
             return False
         time.sleep(PAUSE)
     return True
@@ -860,8 +900,9 @@ def main() -> int:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:
                     pruned += n
+        withheld = f" | {_control_why}" if _control_why else ""
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
-                             notes=f"pruned={pruned} {notes}"[:300],
+                             notes=f"pruned={pruned}{withheld} {notes}"[:300],
                              degraded=detail_misses * 5 > seen,      # >20 % index-only rows
                              check_tables=["sakani_residential_listings",
                                            "sakani_commercial_listings"])
