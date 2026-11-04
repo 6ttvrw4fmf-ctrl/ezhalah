@@ -1485,7 +1485,7 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   recheck-2 from 20:47 to 20:06 (5 h 49 min after 14:17), so no third reading could land the same day; and on 11-03
   even 20:47 lost it, because the 14:17 pass queued behind the daily run until 15:41 and the 20:47 pass ran 21:17
   (`probed=0`): 20 tuba ads read dead three times stayed on screen. Passes are now 14:17, 20:56, 03:27 UTC
-  (20261104111452 / 111742 / 113034) and `scrapers/common/tests/test_fleet_recheck_passes_are_rested_2026_11_04.py`
+  (20261104111452 / 111742 / 113034) and the pytest shipped in PR #10474
   fails on any gap under 6 h 30 min. When a site's struck rows sit at 2 strikes past the evening, read the recheck's
   `probed=` before the site's oracle.
 - **A cron migration cannot land unattended.** `verify-cron-slot-discipline.ts` requires `sql/mirrors/cron_schedule.json`
