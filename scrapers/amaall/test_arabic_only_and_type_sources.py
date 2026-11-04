@@ -215,6 +215,30 @@ row = _post_features(())
 for col in ("elevator", "parking", "maid_room", "kitchen", "private_entrance", "air_conditioner"):
     assert col not in row, f"an absent feature list must never manufacture {col}=False"
 
+# ── 7. MAP PIN (⚡ 2026-11-03, backlog 1197) — fave_property_location through the one gate.
+from scrapers.amaall.run import meta_pin, shared_default_pins  # noqa: E402
+
+def _pinned(loc, slug="x", default_pins=None):
+    p = {"link": "https://www.amaall.com/projects/x/", "slug": slug, "id": 1,
+         "property_type": [1], "property_status": [1], "property_city": [1],
+         "title": {"rendered": "شقة"}, "content": {"rendered": ""},
+         "property_meta": {"fave_property_location": [loc]} if loc is not None else {}}
+    return p, map_listing(p, _tax(("شقة",), ("للبيع",), ("جدة",)), None, default_pins)[0]
+
+_, row = _pinned("21.488419,39.934998,15")
+assert (row["additional_info"]["latitude"], row["additional_info"]["longitude"]) == (21.488419, 39.934998)
+assert "pin_absent" not in row["additional_info"]
+_, row = _pinned("25.68654,-80.431345,15")          # the Florida theme default
+assert "latitude" not in row["additional_info"] and row["additional_info"]["pin_absent"] is True
+assert row["city"] == "Jeddah" or row["city"], "the pin never decides the city; the taxonomy does"
+_, row = _pinned(None)                              # no meta at all: the source's silence
+assert row["additional_info"]["pin_absent"] is True
+posts = [_pinned("21.5,39.2,15", slug=f"s{i}")[0] for i in range(3)] + [_pinned("21.488419,39.934998", slug="own")[0]]
+assert shared_default_pins(posts) == {(21.5, 39.2)}, "a pair on 3+ posts is a default"
+_, row = _pinned("21.5,39.2,15", default_pins={(21.5, 39.2)})
+assert "latitude" not in row["additional_info"], "a shared default pair is never stored as the ad's pin"
+assert meta_pin({"property_meta": {"fave_property_location": ["0,0,15"]}}) == (None, None)
+
 print("ok: amaall is Arabic-only, status is taxonomy-only, title-type is a fallback, "
       "city never comes from a Florida pin, videos are not photos, and Advanced Filter feature "
       "flags are recognized from property_feature (never invented for an absent/unmapped term)")
