@@ -821,3 +821,9 @@ def test_harajs_partner_banner_is_not_the_ad(banner):
     # The seller's own words still count: an ad that offers instalments is a miss when we serve none.
     assert compare_listing({"installment_available": None},
                            page("فيلا للبيع يوجد تقسيط عن طريق البنك"))["installment_available"] == WE_MISS
+
+
+def test_a_big_decimal_area_with_a_thousands_comma_rounds_to_our_integer():
+    # dealapp 23647174 (2026-11-04): page «المساحة» / «1,157.55 م²», stored 1158 (integer column, backlog 123)
+    assert compare_listing({"area_m2": 1158}, page("المساحة", "1,157.55 م²"))["area"] == MATCH
+    assert compare_listing({"area_m2": 1160}, page("المساحة", "1,157.55 م²"))["area"] == MISMATCH

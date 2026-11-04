@@ -379,6 +379,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
             if any(int(float(m.group(1).replace(",", ".")) + 0.5) == int(float(stored))
                    for m in re.finditer(r"(?<![\d.,])(\d+[.,]\d+)(?![\d])", near)):
                 return MATCH
+            # A thousands separator before the decimals: dealapp 23647174 (2026-11-04 score, re-read 41793162129)
+            # prints «1,157.55 م²» and we store 1158; the pattern above read «1,157» as 1.157.
+            if any(int(float(m.group(1).replace(",", "")) + 0.5) == int(float(stored))
+                   for m in re.finditer(r"(?<![\d.,])(\d{1,3}(?:,\d{3})+\.\d+)(?![\d])", near)):
+                return MATCH
     else:
         # A small figure counts only next to its keyword: on the keyword's own line, or on a
         # neighbouring line that is NOTHING BUT the value («غرف النوم» / «4», «م²» / «240»).
