@@ -153,8 +153,13 @@ def feature_answers(chips: list[str]) -> dict[str, bool]:
     return out
 
 
-_CARD_TOTAL = re.compile(r'(السعر|السوم)\s*([\d,٬]+)\s*ريال')
-_CARD_PPM = re.compile(r'(?:سعر|سوم)\s*المتر\s*([\d,٬]+)\s*ريال')
+# «ريال» is OPTIONAL after the figure: since ~2026-09 the card prints the currency as an icon, so the text reads
+# «السوم 617,500 سوم المتر 950» (live 2464 / AK2464, 2026-11-04: 113 active listings published a figure and were
+# served with no price, «السعر عند الطلب» on the card, because both patterns required the word). The figure must
+# still sit right after its own label, and a size or a percentage after it («السعر 650 م²») is never a price.
+_NOT_MONEY_AFTER = r'(?![\d,٬])(?!\s*(?:م(?![ء-ي])|م²|م2|متر|%))'
+_CARD_TOTAL = re.compile(r'(السعر|السوم)\s*([\d,٬]*\d)' + _NOT_MONEY_AFTER + r'(?:\s*ريال)?')
+_CARD_PPM = re.compile(r'(?:سعر|سوم)\s*المتر\s*([\d,٬]*\d)' + _NOT_MONEY_AFTER + r'(?:\s*ريال)?')
 
 # The ONE Arabic label this source uses that the shared canonical map does not carry. «دبلكس» is a
 # spelling variant of «دوبلكس» (already in TYPE_MAP_AR → "Duplex"); this maps to that SAME existing
