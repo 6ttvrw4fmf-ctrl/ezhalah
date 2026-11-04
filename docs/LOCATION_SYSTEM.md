@@ -424,6 +424,15 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
   cities («الثقبة» of الخبر), 53 cities/towns registered as districts («المبرز» in الهفوف, «حي الدرعية» in الدرعية) —
   until the owner merges or moves each one. `mon_detect_district_guards_missing()` watches the city triggers too.
   Barrier: `scripts/verify-district-guards.ts`.
+- **A homes-center distance is not proof two same-name cities are one (source-page-checks 2026-11-03).**
+  `loc_city_center` is the median pin of a city's OWN homes, so a city that has absorbed another town's homes carries that
+  town's center, and the 40 km «duplicate» test becomes circular. Measured: 20261026013519 (G4) retired «تربه» in منطقة
+  حائل (2372) as a 1.4 km duplicate of Makkah's «تربه» (2156) because ~90 Hail-pinned homes (28.25 N, 42.93 E) sit under
+  2156; the source (aqarcity 29743: addressRegion «منطقة حائل», geo 28.235, 42.910) proves a separate town ~800 km from
+  Makkah's Turbah (21.19 N, 41.60 E). `20261104000502` un-retires 2372, so `retired_place_remap_rows()` stops moving its
+  8 homes into منطقة مكة المكرمة; the other ~90 Hail homes under 2156 are still to be moved (routed, not done). All 12 G4
+  retirements are cross-region pairs judged by the same centers — each needs a source read before its homes move.
+  Barrier: `scripts/verify-turbah-hail-is-its-own-town.ts`.
 
 ### 🔤 Spelling memory — one district, one search identity (owner 2026-10-25)
 - `loc_district_alias(city_id, from_norm, to_norm)`: a spelling sites use that IS one of our districts. Applied inside

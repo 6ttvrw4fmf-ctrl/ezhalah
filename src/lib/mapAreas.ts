@@ -57,6 +57,19 @@ export function bubbleTapSpan(cell: number, latitudeDelta: number): number {
 /** The labels' total — the count pill's number. */
 export const areasTotal = (rows: AreaRow[]): number => rows.reduce((a, r) => a + r.n, 0);
 
+/** ONLY THE PLACES THAT MATTER AT THIS ZOOM (owner 2026-11-03, a country-view screenshot: «the numbers 1 … look a bit
+ *  weird»). «الحزم 1», «يدمة 2», «طبرجل 8» sat beside «الرياض 98 ألف» and, by taking the space, hid Makkah, Buraidah
+ *  and Taif. Like Zillow, a label shows only when it holds at least LABEL_SHARE of the biggest label in view (and never
+ *  fewer than LABEL_MIN listings); smaller places appear as the user zooms in and the biggest in view gets smaller.
+ *  Every listing still counts in the pill (areasTotal of ALL the areas, not just the drawn ones). */
+export const LABEL_SHARE = 0.005;
+export const LABEL_MIN = 10;
+export function visibleAreas(rows: AreaRow[]): AreaRow[] {
+  const max = rows.reduce((m, r) => Math.max(m, r.n), 0);
+  const floor = Math.max(LABEL_MIN, max * LABEL_SHARE);
+  return rows.filter((r) => r.n >= floor);
+}
+
 // ── THE LABELS FEED, FILTERED ON THE PHONE (owner 2026-11-03: «I want it to feel smooth»). Measured: each zoom waited
 //    ~300-420 ms for the network although map_areas_ar() ran in 1 ms; map_areas_feed_ar() hands over every label once
 //    ([is_city, city, district, lat, lng, n_buy, n_rent, n_short]) and these rules pick the ones in view.

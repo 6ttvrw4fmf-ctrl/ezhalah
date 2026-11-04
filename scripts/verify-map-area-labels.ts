@@ -5,7 +5,7 @@
 // shape: un-narrowed views read the labels first, a failed read falls back to the dots, labels are keyed and tappable.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
+import { areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, visibleAreas, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -39,12 +39,19 @@ check('a district view counts the chosen deals, drops a district with none, bigg
 check('a label outside the box is left out', areasFromFeed(feedRows, 'district', ['buy', 'rent', 'short'], { s: 21.59, n: 23, w: 38, e: 40 }).length === 1);
 mustCatch('a district counted with a deal the user did not choose', areasFromFeed(feedRows, 'district', ['buy'], { s: 20, n: 23, w: 38, e: 40 })[0].n === 30);
 check('fetchMapAreas answers from the feed and keeps the RPC as the fallback', /const local = await fetchAreasFeed\(\);\n\s*if \(local\) return areasFromFeed\(local, level, deals, box, 400\);/.test(readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8')) && /if \(!rows\.length\) return null;/.test(readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8')));
+// ONLY THE PLACES THAT MATTER (owner 2026-11-03: «the numbers 1 … look weird»): the screenshot's own country view.
+const country = [['الرياض', 98000], ['جدة', 77000], ['حفر الباطن', 751], ['عرعر', 390], ['القنفذة', 318], ['الافلاج', 104], ['العلا', 35], ['رنية', 29], ['طبرجل', 8], ['يدمة', 2], ['الحزم', 1]].map(([city, n]) => ({ city: city as string, district: '', lat: 0, lng: 0, n: n as number }));
+const shown = visibleAreas(country).map((a) => a.city);
+check('the country view keeps the big places and drops «الحزم 1», «يدمة 2», «طبرجل 8»', shown.includes('الرياض') && shown.includes('حفر الباطن') && !shown.includes('الحزم') && !shown.includes('يدمة') && !shown.includes('طبرجل'));
+check('zoomed into a small region, its small places show (the floor follows the biggest label in view)', visibleAreas(country.filter((a) => a.n < 400)).map((a) => a.city).includes('العلا'));
+mustCatch('a label of 1 listing drawn next to 98 thousand', !visibleAreas(country).some((a) => a.n === 1));
+check('the drawn labels are the visible ones; the pill still counts every listing in view', (src => /drawAreas\(visibleAreas\(areas\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src) && /drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src))(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const data = readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8');
 check('an un-narrowed view reads the labels for its level first', /const level = narrowed \? null : areaLevelFor\(span\.latitudeDelta\);/.test(web) && /const areas = await fetchMapAreas\(paddedBox\(center, span\), level, pins\.deals\);/.test(web));
-check('labels are drawn keyed, counted in the pill, and a failed read falls back to the dots', /drawAreas\(areas, level\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web) && /if \(areas !== 'unknown'\) \{/.test(web) && /next\.set\(`A\|\$\{level\}\|\$\{a\.city\}\|\$\{a\.district\}\|\$\{a\.n\}`, a\)/.test(web));
+check('labels are drawn keyed, counted in the pill, and a failed read falls back to the dots', /drawAreas\(visibleAreas\(areas\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web) && /if \(areas !== 'unknown'\) \{/.test(web) && /next\.set\(`A\|\$\{level\}\|\$\{a\.city\}\|\$\{a\.district\}\|\$\{a\.n\}`, a\)/.test(web));
 check('labels never pile up: MapKit collision hides the smaller neighbour, priority follows the count', /collisionMode: mk\.Annotation\.CollisionMode\?\.Rectangle, displayPriority: 250 \+ Math\.round\(499 \* a\.n \/ maxN\)/.test(web));
-check('the crowded exact-point read shows district names before falling back to the fine grid', /if \(areas !== 'unknown' && denseShowsDistricts\(areas\.filter\(\(a\) => inView\(a, center, span\)\)\.length, span\.latitudeDelta\)\) \{\n\s*drawAreas\(areas, 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web));
+check('the crowded exact-point read shows district names before falling back to the fine grid', /if \(areas !== 'unknown' && denseShowsDistricts\(areas\.filter\(\(a\) => inView\(a, center, span\)\)\.length, span\.latitudeDelta\)\) \{\n\s*drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web));
 check('a close-in crowded bubble shows its count; zoomed-out dots stay plain (owner 2026-11-02)', /if \(counted && cell > 0 && row\.n > 1\) el\.textContent = areaCount\(row\.n, loc\);/.test(web) && /\(\) => element\(row, drawCell, cell === 0 && drawCell > 0\), \{/.test(web));
 mustCatch('a bubble of 5,399 listings drawn as a blank dot at street zoom', /counted && cell > 0 && row\.n > 1/.test(web));
 check('a bubble tap uses bubbleTapSpan (always in)', /const sp = bubbleTapSpan\(cell, m\.region\.span\.latitudeDelta\);/.test(web));

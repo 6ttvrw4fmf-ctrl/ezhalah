@@ -5,6 +5,9 @@ permanently deleted. A row is ONLY hard-deleted when ALL hold:
   1. active = false
   2. missing_count >= policy.min_missing_count   (historical liveness signal)
   3. last_seen_at < now - policy.min_inactive_days
+  3b. a DIRECT source verdict exists for the row (last_verified_alive_at, or a GONE probe since this
+     deactivation) — owner decision 2, 2026-11-03: crawl absence alone never starts the clock.
+     1–3b are ONE SQL predicate, deletion_clock_eligible_sql(), reached via _eligible_rows/_count.
   4. the run is NOT an anomaly (candidate count <= max(anomaly_floor, anomaly_factor × trailing median))
   5. a FRESH re-fetch of the real listing_url confirms it is genuinely gone (404/410 or the platform's
      dead-marker). Anything ambiguous — a live page, a 403/429/5xx, a proxy block, a network error —
@@ -626,6 +629,45 @@ def _trailing_median_deleted(client, platform: str) -> float:
     return float(vals[n // 2]) if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
 
 
+# ── THE DELETION CLOCK NEEDS A DIRECT SOURCE VERDICT (owner decision 2, 2026-11-03) ──────────────
+# Who stands on the deletion clock is decided in ONE place, the SQL function
+# deletion_clock_eligible_sql(), reached through the two RPCs below. It is the old absence predicate
+# (active=false, missing_count >= N, last_seen_at older than D days) PLUS a direct verdict for that
+# very row: last_verified_alive_at is set, or a GONE probe exists in ops_stale_inactivation_probe for
+# its ad_number since (one hour before) this deactivation. Crawl absence alone is UNKNOWN
+# (LISTING_LIVENESS.md §1) and never starts the clock; such rows are left exactly as they are.
+# Never re-introduce a client.table(...) candidate query here: PostgREST filters cannot express the
+# verdict clause, which is precisely how absence-only rows used to reach the delete-time probe.
+# Guard: scripts/verify-deletion-clock-needs-direct-verdict.ts.
+def _eligible_count(client, table: str, pol: dict, cutoff: str) -> int:
+    """Exact size of `table`'s deletion-clock population — or FAIL, never guess (see _count_of)."""
+    res = client.rpc("deletion_clock_eligible_count", {
+        "p_table": table, "p_min_missing": int(pol["min_missing_count"]), "p_cutoff": cutoff,
+    }).execute()
+    n = getattr(res, "data", None)
+    if isinstance(n, list):          # some supabase-py versions wrap a scalar in a list
+        n = n[0] if len(n) == 1 else None
+    if isinstance(n, dict):
+        n = next(iter(n.values()), None) if len(n) == 1 else None
+    if n is None or isinstance(n, bool):
+        raise RuntimeError(
+            "deletion_clock_eligible_count returned no number — refusing to run a destructive "
+            f"cleanup against an unmeasured population ({table}).")
+    return int(n)
+
+
+def _eligible_rows(client, table: str, pol: dict, cutoff: str, limit: int) -> list[dict]:
+    """Oldest-first deletion-clock rows of `table`, at most `limit`. Same predicate as the count."""
+    res = client.rpc("deletion_clock_candidates", {
+        "p_table": table, "p_min_missing": int(pol["min_missing_count"]), "p_cutoff": cutoff,
+        "p_limit": int(limit),
+    }).execute()
+    data = getattr(res, "data", None)
+    if data is None:
+        raise RuntimeError(f"deletion_clock_candidates returned no data for {table} — refusing to guess.")
+    return list(data)
+
+
 def _bounded_candidates(client, tables, pol, cutoff, safe_cap):
     """GLOBAL oldest-first candidate selection across ALL of a platform's tables, capped at
     safe_cap. Used ONLY by bounded one-time runs (`run(..., bounded_cap=...)`) — the standing
@@ -633,10 +675,7 @@ def _bounded_candidates(client, tables, pol, cutoff, safe_cap):
     unchanged, so this never alters production behaviour for a normal automated run."""
     cands: list[tuple[str, dict]] = []
     for t in tables:
-        rows = (client.table(t).select("id, ad_number, listing_url, missing_count, last_seen_at")
-                .eq("active", False).gte("missing_count", pol["min_missing_count"])
-                .lt("last_seen_at", cutoff).order("last_seen_at")
-                .limit(safe_cap).execute().data or [])
+        rows = _eligible_rows(client, t, pol, cutoff, safe_cap)
         cands.extend((t, r) for r in rows)
     cands.sort(key=lambda tr: tr[1].get("last_seen_at") or "")
     return cands[:safe_cap]
@@ -702,10 +741,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
             eligible_total = 0
             platform_rows = 0
             for t in tables:
-                eligible_total += _count_of(
-                    client.table(t).select("id", count="exact")
-                    .eq("active", False).gte("missing_count", pol["min_missing_count"])
-                    .lt("last_seen_at", cutoff).limit(1).execute())
+                eligible_total += _eligible_count(client, t, pol, cutoff)
                 platform_rows += _count_of(
                     client.table(t).select("id", count="exact").limit(1).execute())
             stats["eligible_total"] = eligible_total
@@ -803,10 +839,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 # ── work-set: only now do we pull rows, and only up to the per-run cap ───────────
                 cands = []
                 for t in tables:
-                    rows = (client.table(t).select("id, ad_number, listing_url, missing_count, last_seen_at")
-                            .eq("active", False).gte("missing_count", pol["min_missing_count"])
-                            .lt("last_seen_at", cutoff).order("last_seen_at")
-                            .limit(pol["max_delete_per_run"]).execute().data or [])
+                    rows = _eligible_rows(client, t, pol, cutoff, pol["max_delete_per_run"])
                     cands.extend((t, r) for r in rows)
                 cands = cands[: pol["max_delete_per_run"]]     # hard cap across ALL tables
 
