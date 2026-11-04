@@ -15,6 +15,7 @@ const root = join(import.meta.dirname, '..');
 const lift = async (file: string) => (await liftSymbols(file, [{ header: 'export function internalPath(' }], ['internalPath'])).internalPath as (p: string) => boolean;
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`); if (!ok) failed++; };
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 
 const internal = ['rpc/ops_search_load_now', 'rpc/ops_deploy_lock_status', 'rpc/ops_qa_sweep_plan', 'ops_content_parity_heartbeat',
   'ops_qa_coverage_ledger', 'rpc/mon_run_all_detectors', 'mon_anything', 'rpc/source_district_dropped_rows'];
@@ -60,9 +61,9 @@ const mutate = async (name: string, from: string, to: string) => {
   return lift(f);
 };
 const leaky = await mutate('leaky', "/^(rpc\\/)?(ops_|mon_)/", "/^(mon_)/");
-check('(mutation) catches a rule that lets rpc/ops_* through', !internal.every(leaky));
+mustCatch('a rule that lets rpc/ops_* through', !internal.every(leaky));
 const greedy = await mutate('greedy', "/^(rpc\\/)?(ops_|mon_)/", "/^(rpc\\/)?/");
-check('(mutation) catches a rule that blocks the app\'s own paths', !app.every((p) => !greedy(p)));
+mustCatch('a rule that blocks the app\'s own paths', !app.every((p) => !greedy(p)));
 
 if (failed) { console.log(`\n❌ verify-front-door-refuses-internal-paths: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ the front door keeps internal monitoring doors shut to everyone but our own robots.');
