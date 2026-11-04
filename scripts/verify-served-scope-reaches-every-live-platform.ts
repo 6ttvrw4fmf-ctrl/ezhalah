@@ -24,7 +24,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { loadRegistry } from './lib/testRegistry.ts';
 import { liveHalfProblems } from './lib/liveHalf.ts';
 import {
-  extractServedSearchableTables, servedScopeProblems, type LiveTable,
+  extractServedSearchableTables, extractServedSearchableTablesFromChunks, servedScopeProblems,
+  servedScriptPaths, type LiveTable,
 } from './lib/servedSearchScope.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -151,6 +152,35 @@ mustCatch('a zero-row platform absent from the served scope is NOT reported as u
 // working barrier — the vacuously-red half of PART 3.2's rule.
 mustCatch('…while a served scope that genuinely matches production is NOT flagged',
   servedScopeProblems(healthy, liveOf(healthy)).length === 0);
+
+// M-9: THE SPLIT-CHUNK SHAPE (2026-11-04, alert 11763). Since route splitting the scope array lives in
+// __common-*.js and the entry carries none of it (measured: entry 1,082,788 bytes, 0 table literals;
+// __common 4,654,259 bytes, 299-table scope). Reading only the entry made every live run BLIND.
+const splitHtml = '<script src="/_expo/static/js/web/__common-1c58.js" defer></script>'
+  + '<script src="/_expo/static/js/web/entry-a71d.js" defer></script>'
+  + '<script src="/_expo/static/js/web/index-76cb.js" defer></script>'
+  + '<script src="/_expo/static/js/web/entry-a71d.js" defer></script>';
+const splitChunks: Record<string, string> = {
+  '/_expo/static/js/web/__common-1c58.js': bundleMentioningAbaadElsewhere,
+  '/_expo/static/js/web/entry-a71d.js': 'var App=function(){return null};',
+  '/_expo/static/js/web/index-76cb.js': 'var LOGO="aqar_residential_listings";',
+};
+const paths = servedScriptPaths(splitHtml);
+check('every chunk the page loads is discovered once, in page order', paths.length === 3
+  && paths[0].includes('__common') && paths[1].includes('entry-'), JSON.stringify(paths));
+check('the scope is recovered from the chunk that holds it, wherever that is',
+  extractServedSearchableTablesFromChunks(paths.map((p) => splitChunks[p])).length === healthy.length);
+mustCatch('reading only the ENTRY chunk (the 2026-11-02 shape: a BLIND run on every deploy)',
+  servedScopeProblems(extractServedSearchableTables(splitChunks['/_expo/static/js/web/entry-a71d.js']),
+    liveOf(healthy)).some((p) => p.includes('BLIND')));
+mustCatch('two chunks fused into one longer "scope" (arrays are never joined ACROSS chunks)',
+  extractServedSearchableTablesFromChunks([
+    `var A=['aqar_commercial_listings','aqar_residential_listings']`,
+    `,'wasalt_commercial_listings','wasalt_residential_listings'];`,
+  ]).length === 2);
+const liveSrc = readFileSync(join(ROOT, 'scripts', 'verify-served-scope-reaches-every-live-platform-live.ts'), 'utf8');
+check('the live half reads every served chunk, not only the entry',
+  /servedScriptPaths\(html\)/.test(liveSrc) && /extractServedSearchableTablesFromChunks\(chunks\)/.test(liveSrc));
 
 if (mut > 0) failed += mut;
 

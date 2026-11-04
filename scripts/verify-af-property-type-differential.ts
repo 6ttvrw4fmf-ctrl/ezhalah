@@ -63,7 +63,7 @@
 // LIVE CHECK — excluded from `npm test` (see scripts/test-exclusions.txt); runs in the AF live
 // workflow, like every other check that talks to production.
 
-import { COHORT_QUESTIONS, COHORT_CHIPS } from '../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, COHORT_CARDS, isCardId, type CohortDeal } from '../src/lib/afCohorts.ts';
 import { typeArForTypes, CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { missingVerdict } from './lib/searchDeepPageCap.ts';
@@ -125,8 +125,19 @@ console.log(`\nAF property-type differential — ${RES_TABLES.length} residentia
 // Deliberately a NARROWING answer in every case: a predicate that matches everything would make the
 // diff pass without exercising anything.
 const RESIDENTIAL_BASE_CHIPS = ['elevator', 'parking', 'kitchen'];
-function answerFor(qid: string, cleanType: string): Record<string, unknown> | null {
+// A CARD (comfort, space, safety, … — the 2026-11-01/02 group build) is a themed multi-select whose chips are amenity
+// TOKENS for this (type × deal): its answer is the card's FIRST chip, the same `p_amenities` the app sends when a user
+// ticks it. Before 2026-11-04 every card id fell through to `null`, so the sweep failed «no answerFor() mapping» on
+// every run (alert 11763) and tested none of those predicates.
+export function cardAnswer(qid: string, cleanType: string, leg: string): Record<string, unknown> | null {
+  if (!isCardId(qid)) return null;
+  const keys = COHORT_CARDS[cleanType]?.[leg as CohortDeal]?.[qid] ?? [];
+  return keys.length ? { p_amenities: [keys[0]] } : null;
+}
+function answerFor(qid: string, cleanType: string, leg = ''): Record<string, unknown> | null {
   const chips = COHORT_CHIPS[cleanType] ?? RESIDENTIAL_BASE_CHIPS;
+  const card = cardAnswer(qid, cleanType, leg);
+  if (card) return card;
   switch (qid) {
     case 'bathrooms': return { p_bath_min: 2 };
     case 'property_age': return { p_age_max: 5 };
@@ -137,6 +148,9 @@ function answerFor(qid: string, cleanType: string): Record<string, unknown> | nu
     case 'direction': return DIRECTIONS.length ? { p_directions: DIRECTIONS } : null;
     case 'rating': return { p_rating_min: 4 };
     case 'unit_subtype': return SUBTYPES.length ? { p_unit_subtypes: SUBTYPES } : null;
+    // Residential Building's count questions ride p_amenities like the app's own apply() (src/lib/afIntents.ts)
+    case 'apartments': return { p_amenities: ['apts4'] };
+    case 'shops': return { p_amenities: ['has_shops'] };
     default: return null;                       // an unknown id is reported by the caller, never skipped silently
   }
 }
@@ -236,7 +250,7 @@ for (const [cleanType, cfg] of Object.entries(COHORT_QUESTIONS)) {
     // A baseline with NO AF answer proves type purity on its own, before any predicate narrows it.
     CASES.push({ cleanType, leg, qid: '(no AF — type purity only)', answer: {} });
     for (const qid of ids) {
-      const answer = answerFor(qid, cleanType);
+      const answer = answerFor(qid, cleanType, leg);
       if (!answer) { unmapped.push(`${cleanType}/${leg}/${qid}`); continue; }
       CASES.push({ cleanType, leg, qid, answer });
     }

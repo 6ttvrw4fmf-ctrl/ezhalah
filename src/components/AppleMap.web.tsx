@@ -203,6 +203,17 @@ export function prewarmMap(): void {
   void fetchAreasFeed();
 }
 
+// THE MAP IS KEPT BETWEEN VISITS (owner 2026-11-04: «why does it feel slow moving between tabs»). Measured on ezhalah.com:
+// our code put the 26 city labels on a NEW map 0.25 s after the tab opened, but Apple's map drew them only ~3 s later,
+// after its own first satellite render — on EVERY visit, because the map was destroyed on leaving and rebuilt on return.
+// Now the map lives in its own box: leaving the tab takes the box out of the page (the map keeps its view, its region
+// outlines and its rendered tiles), coming back puts the same box back, so the labels draw at once and the user is where
+// they left off. The map-wide listeners (region outlines, zoom state) were attached once, on the first map; they reach
+// the CURRENT screen through mapSinks, which every mount points at its own state.
+type ParkedMap = { map: MKMap; box: HTMLDivElement };
+let parked: ParkedMap | null = null;
+const mapSinks: { setZoomed: (z: boolean) => void } = { setZoomed: () => {} };
+
 let initialized = false;
 function initOnce(mk: MapKit, language: string) {
   if (initialized) return;
@@ -444,10 +455,38 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     let map: MKMap | null = null;
     let gone = false;
     const onError = (e: { status?: string }) => { if (e.status === 'Unauthorized' || e.status === 'Too Many Requests') setFailed(true); };
+    mapSinks.setZoomed = setZoomed;
+    // A RETURN VISIT: the same map, put back — no new map, no 3 s wait for Apple's first render.
+    const kept = parked; const mkKept = mapkitOf();
+    const hostEl = hostRef.current as unknown as HTMLElement | null;
+    if (kept && mkKept && hostEl) {
+      parked = null;
+      hostEl.appendChild(kept.box);
+      mkKept.addEventListener('error', onError);
+      mapRef.current = kept.map;
+      live.map = kept.map;
+      const lat = kept.map.region.span.latitudeDelta;
+      const home = hostEl.clientHeight > hostEl.clientWidth ? KSA_SPAN_PORTRAIT : KSA_SPAN;
+      setZoomed(lat < home.latitudeDelta * 0.85);
+      const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));   // the box may be a new size
+      setMapReady((n) => n + 1);
+      return () => {
+        cancelAnimationFrame(id);
+        mkKept.removeEventListener('error', onError);
+        mapRef.current = null;
+        live.map = null;
+        kept.box.remove();
+        parked = kept;
+      };
+    }
     loadMapKit().then((mk) => {
       if (gone) return;
-      const el = hostRef.current as unknown as HTMLElement | null;
-      if (!el) return;
+      const host = hostRef.current as unknown as HTMLElement | null;
+      if (!host) return;
+      // The map's own box (kept between visits, see ParkedMap): fills the host exactly like the host did.
+      const el = document.createElement('div');
+      el.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0';
+      host.appendChild(el);
       // Apple's  Maps mark and «معلومات قانونية» are drawn INSIDE the map image, bottom-right in Arabic, and no
       // page direction or style moves them (measured live 2026-10-31: no DOM node carries them). Our corner controls
       // keep clear of that strip instead.
@@ -525,7 +564,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (!map) return;
           const lat = map.region.span.latitudeDelta;
           if (!homeLatDelta) homeLatDelta = lat;
-          setZoomed(lat < homeLatDelta * 0.85);
+          mapSinks.setZoomed(lat < homeLatDelta * 0.85);
           const ratio = lat / homeLatDelta;
           // Zooming out: squared so the drop is quick: 1.2× out → ~70%, 2× out → ~25%, then the floor.
           // Zooming in: linear from IN_FADE_START down to 0 at IN_FADE_END — Apple's own lines take over.
@@ -544,7 +583,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (mk) mk.removeEventListener('error', onError);
       mapRef.current = null;
       live.map = null;
-      map?.destroy();
+      // Kept for the next visit, not destroyed: its box leaves the page with this screen.
+      const box = (map as unknown as { element?: HTMLElement } | null)?.element as HTMLDivElement | undefined;
+      if (map && box) { box.remove(); parked = { map, box }; } else map?.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -32,8 +32,14 @@ on:
     workflows: ['Deploy frontend (production)']
     types: [completed]
 
+# ONE GROUP PER KIND OF RUN (🔬 2026-11-04, alert 11763). GitHub keeps ONE pending run per group and silently
+# cancels the older pending one. Deploy-triggered runs arrive many times an hour and most of them verify nothing
+# (the gate finds no shipped bundle), so in one shared group they replaced the waiting DAILY run: the 04:23 schedule
+# (which GitHub starts ~10-12 UTC) was cancelled on 11-02 and 11-03, and after the 11-04 00:49 harness fix no run had
+# verified main at all — alert 11763 stood open on a stale failure. The daily / manual run now waits in its own group;
+# deploy runs still queue behind each other. At most two of these runs overlap, each chaining its own sweeps.
 concurrency:
-  group: af-live-truth-check
+  group: af-live-truth-check-${{ github.event_name == 'workflow_run' && 'deploy' || 'daily' }}
   cancel-in-progress: false
 
 env:

@@ -113,6 +113,13 @@ const WAIVED: Record<string, string> = {
     'property_age is NULL, splices it into the mon_run_all_detectors() roster (a planted NULL is caught at apply) and enrolls ' +
     'the repair in ops_repair_guarantee_registry. The parser half (scrapers/haraj/parse.age_of) is executed by ' +
     'verify-open-age-bucket-never-answers-up-to.ts on every CI run',
+  // 2026-11-04. Owner-approved platform retirement («Yes, use your picks», decision 2).
+  '20261104094609_retire_almuteb_domain_does_not_resolve.sql':
+    'a one-off owner decision on the fixed set of 11 almuteb rows (almuteb.sa NXDOMAIN since 2026-10-23); every row is ' +
+    'registered in ops_adjudicated_retraction, which auto_recover_false_inactive() honours and ' +
+    'mon_detect_adjudicated_reactivation (rostered, enrolled for this repair in 20261104094703) watches; the crawl left ' +
+    'every matrix (RETIRED_PLATFORMS.txt), so no scrape can bring the rows back. The applied file cannot be edited to name ' +
+    'the detector (content parity).',
   // 2026-10-27. Owner-approved one-off retirement («do that please fix everything»).
   '20261027025056_razre_retire_wix_era_rows.sql':
     'a one-off owner decision on a fixed set of 94 rows from razre.sa before its rebuild (Wix /onepro-1/ URLs that now ' +
