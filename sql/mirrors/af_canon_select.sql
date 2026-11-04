@@ -1,4 +1,10 @@
 -- MIRROR of the `af_canon` projection injected into public.location_search_candidates_ar's template
+-- PLACEMENT (2026-11-04, migration 20261104033508): this expression is NO LONGER projected in the `matched` CTE
+--   (that line is now `null::jsonb as af_canon`). It is packed in the OUTER select, for the returned page only:
+--   `(select <this expression> from public.search_listings_ar s where s.source_table = u.source_table and
+--   s.listing_id = u.listing_id) as af_canon`. Per-row packing made a nationwide AF search take 22 s (past anon's
+--   20 s timeout). A chip migration splices new keys there; the old needle «… end as af_canon» no longer exists
+--   and scripts/verify-af-canon-packed-for-the-page.ts refuses any later migration that writes it back.
 -- by 20260903_af_canon_on_results_rpc (owner rule §12A / R13.12, 2026-09-03: "whatever the user
 -- selected in Advanced Filter must be visibly and truthfully shown on the returned property card").
 -- Re-verified 2026-11-02 (migrations 20261102100954 + 20261102101415): FOUR more jsonb_build_object (|| joined) pack the

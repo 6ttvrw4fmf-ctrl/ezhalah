@@ -62,7 +62,7 @@
     "novel-type-alarm": "41 * * * *",
     "location-pipeline-monitor": "52 * * * *",
     "resolve-english-city-overlay": "54 * * * *",
-    "gh-wasalt-enum-liveness": "9 21 */2 * *",
+    "gh-wasalt-enum-liveness": "9 21 * * *",
     "mon-detectors-and-dispatch": "59 * * * *",
     "gh-wasalt-enrich-ar": "30 5,17 * * *",
     "wasalt-enrich-backlog-monitor": "45 * * * *",

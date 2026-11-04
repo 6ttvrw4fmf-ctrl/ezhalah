@@ -605,7 +605,9 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         # : الدور الاول : مشب . مجلس رجال …». 2026-10-30: 1,740 of 1,740 active rows stored none, so the AI facts
         # reader had nothing to read. This is the text, not a reading of it: the land / «يليه» filtering above
         # (unit_description_text) still decides the amenity columns. No box → NULL, never ''.
-        "description": redact_pii(ad_description(page_html)) or None,
+        # One line per source line (keep_lines): the stored box must split into the same clauses the amenity
+        # reader split it into, or a re-read of the stored copy sees one run-on clause (crawl-health 2026-11-04).
+        "description": redact_pii(ad_description(page_html), keep_lines=True) or None,
     }
     if deal == "Rent":
         row["price_annual"] = price_annual
