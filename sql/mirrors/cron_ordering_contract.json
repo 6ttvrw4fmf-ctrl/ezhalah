@@ -22,7 +22,7 @@
   "_mirrored_through_migration": "20261020175228",
   "_mirrored_through_migration_why": "The NEWEST migration version in supabase/migrations/ whose SQL mentions ops_cron_ordering_contract. scripts/verify-cron-ordering-contract.ts recomputes this from the tree and fails if it does not match, so a migration that changes the contract without updating this file goes RED on its own PR. That is AGENTS.md's apply-and-mirror rule enforced from the diff alone — no secret, no network, and no SQL parsing. If you add such a migration, re-read production, update the rows/schedules above, and set this to the new version.",
   "_measured_at": "2026-10-20",
-  "_measured_by": "🔧 Quality & Repair, via Supabase MCP against project aannarbkwcymrotzwdbo: select * from ops_cron_ordering_contract; select jobid, jobname, schedule, command from cron.job (jobid 28 has been at :22 since 20260918171507; the 2026-09-12 reading of :36 was stale). [2026-10-18] re-read after 20261018120750 via Supabase MCP: select * from ops_cron_ordering_contract; jobid 180 refresh-district-list-after-sync at 33 * * * *. [2026-10-20] re-read after 20261020002310 via Supabase MCP: select * from ops_cron_ordering_contract; jobid 183 strip-shared-default-pins at 15 * * * *. [2026-10-20] re-read after 20261020175228 via Supabase MCP: jobid 184 strip-far-from-city-pins at 16 * * * *.",
+  "_measured_by": "🔧 Quality & Repair, via Supabase MCP against project aannarbkwcymrotzwdbo: select * from ops_cron_ordering_contract; select jobid, jobname, schedule, command from cron.job (jobid 28 has been at :22 since 20260918171507; the 2026-09-12 reading of :36 was stale). [2026-10-18] re-read after 20261018120750 via Supabase MCP: select * from ops_cron_ordering_contract; jobid 180 refresh-district-list-after-sync at 33 * * * *. [2026-10-20] re-read after 20261020002310 via Supabase MCP: select * from ops_cron_ordering_contract; jobid 183 strip-shared-default-pins at 15 * * * *. [2026-10-20] re-read after 20261020175228 via Supabase MCP: jobid 184 strip-far-from-city-pins at 16 * * * *. [2026-11-04] re-read after the cron rebalance (owner decision 6): jobid 17 at 16, 109 at 14, 180 at 50, 35 at 54, 184 at 11; 28 and 183 unchanged. [2026-11-04 01:02] re-read after 20261104010208: jobid 184 at 14.",
   "contract": [
     {
       "upstream_job": "sync-search-listings-ar",
@@ -63,13 +63,13 @@
     }
   ],
   "schedules": {
-    "refresh-district-display-canon": "8 * * * *",
-    "refresh_listing_native_location_v1": "20 * * * *",
+    "refresh-district-display-canon": "14 * * * *",
+    "refresh_listing_native_location_v1": "16 * * * *",
     "sync-search-listings-ar": "22 * * * *",
-    "resolve-english-city-overlay": "50 * * * *",
-    "refresh-district-list-after-sync": "33 * * * *",
+    "resolve-english-city-overlay": "54 * * * *",
+    "refresh-district-list-after-sync": "50 * * * *",
     "strip-shared-default-pins": "15 * * * *",
-    "strip-far-from-city-pins": "16 * * * *"
+    "strip-far-from-city-pins": "14 * * * *"
   },
   "_jobids": {
     "refresh-district-display-canon": 109,
@@ -81,12 +81,12 @@
     "strip-far-from-city-pins": 184
   },
   "_gaps_as_measured": [
-    "refresh-district-display-canon :08 -> sync-search-listings-ar :22 = 14 min (floor 2)",
-    "refresh_listing_native_location_v1 :20 -> sync-search-listings-ar :22 = 2 min (floor 7) — satisfied by the advisory lock location_pipeline:v1_refresh, not by the clock",
-    "sync-search-listings-ar :22 -> resolve-english-city-overlay :50 = 28 min (floor 9)",
-    "sync-search-listings-ar :22 -> refresh-district-list-after-sync :33 = 11 min (floor 9)",
+    "refresh-district-display-canon :14 -> sync-search-listings-ar :22 = 8 min (floor 2)",
+    "refresh_listing_native_location_v1 :16 -> sync-search-listings-ar :22 = 6 min (floor 7) — satisfied by the advisory lock location_pipeline:v1_refresh, not by the clock",
+    "sync-search-listings-ar :22 -> resolve-english-city-overlay :54 = 32 min (floor 9)",
+    "sync-search-listings-ar :22 -> refresh-district-list-after-sync :50 = 28 min (floor 9)",
     "strip-shared-default-pins :15 -> sync-search-listings-ar :22 = 7 min (floor 5)",
-    "strip-far-from-city-pins :16 -> sync-search-listings-ar :22 = 6 min (floor 5)"
+    "strip-far-from-city-pins :14 -> sync-search-listings-ar :22 = 8 min (floor 5)"
   ],
   "lock_dependencies": [
     {

@@ -34,16 +34,26 @@ export function safeName(name) {
   return s || 'migration';
 }
 
-/** Which missing migrations to mirror now: old enough, not already being mirrored, at most MAX_PER_RUN. */
-export function planMirrors(missing, now, existingBranches) {
-  const taken = new Set(existingBranches);
+/** Which missing migrations to mirror now: old enough, not already being mirrored, at most MAX_PER_RUN.
+ *  «Being mirrored» = an OPEN PR whose head is mirror/<version> (`takenHeads`). A bare branch with no open PR is
+ *  NOT a claim: on 2026-11-03 four of 🔬's five applied migrations (20261103091902 … 093636) had stale
+ *  mirror/<version> branches and no PR — the files travelled in #10130 beside sql/mirrors/ — so every run read
+ *  «someone is on it», mirrored nothing, and the drift gate refused six deploys over 2 h 37 min. Such a version is
+ *  mirrored on mirror/<version>-auto so the stale branch is never touched. */
+export function planMirrors(missing, now, takenHeads, existingBranches = takenHeads) {
+  const taken = new Set(takenHeads);
+  const exists = new Set(existingBranches);
   return (missing ?? [])
     .filter((m) => {
       const t = versionTime(m?.version);
       return t && now.getTime() - t.getTime() >= GRACE_MINUTES * 60_000 && !taken.has(`mirror/${m.version}`);
     })
     .slice(0, MAX_PER_RUN)
-    .map((m) => ({ version: m.version, file: `supabase/migrations/${m.version}_${safeName(m.name)}.sql`, branch: `mirror/${m.version}` }));
+    .map((m) => ({
+      version: m.version,
+      file: `supabase/migrations/${m.version}_${safeName(m.name)}.sql`,
+      branch: exists.has(`mirror/${m.version}`) ? `mirror/${m.version}-auto` : `mirror/${m.version}`,
+    }));
 }
 
 if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/auto-mirror-migrations.mjs')) {
@@ -67,7 +77,10 @@ if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/auto-mirror-migration
   const missing = pre?.missing_in_git_details;
   if (!Array.isArray(missing)) die('preflight returned no missing_in_git_details (never read as "nothing missing")');
   const branches = git('ls-remote', '--heads', 'origin', 'mirror/*').split('\n').filter(Boolean).map((l) => l.split('refs/heads/')[1]);
-  const plan = planMirrors(missing, new Date(), branches);
+  // Only an OPEN PR claims a version; a leftover branch does not (2026-11-03: 178 mirror/* branches on origin).
+  const openHeads = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '300', '--json', 'headRefName'], { encoding: 'utf8' }))
+    .map((p) => p.headRefName).filter((h) => /^mirror\//.test(h));
+  const plan = planMirrors(missing, new Date(), openHeads, branches);
   console.log(`missing in git: ${missing.length}; mirroring now: ${plan.length}`);
   let failed = 0;
   for (const p of plan) {

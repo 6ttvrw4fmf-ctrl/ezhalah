@@ -69,6 +69,9 @@ export const ABOUT_ART_BREAKPOINT = 640;
 // useAtLeast() like every other width-gated flag; the scan now also catches renamed width reads.
 // At 390px the English Agent header exceeded the viewport by 13px; keep both labels inside.
 export const SHARE_LABEL_BREAKPOINT = 420;
+/** The long «إنشاء حساب / تسجيل الدخول» label only from this width (owner 2026-11-03, a screenshot on a 430 pt iPhone: with
+ *  the «ENG» pill added beside it, the long label pushed «مشاركة» off the right edge). Below it: «تسجيل الدخول». */
+export const SIGNUP_LABEL_BREAKPOINT = 520;
 
 // AI-chat site picker (owner 2026-10-09, Perplexity-style): below this width it is a bottom sheet
 // with a drag-handle look; at/above it a compact floating card. Same SSR rule as every gate above.

@@ -107,11 +107,13 @@ const browser = await chromium.launch({
 });
 const errors = [];
 const warnings = [];
+const chunksSeen = []; // every /_expo/static/js/web/ chunk the page asked for, by file name (🔧 11-03)
 const missedTaps = [];
 const beforeReload = []; // errors the planted failure caused, kept as evidence, not as the verdict
 let loaded = false;
 let failedOnce = null;
 let reloaded = false;
+let screenText = ''; // what the customer SEES after the planted failure (evidence when nothing reloads)
 let screenshot = null;
 try {
   const ctx = await browser.newContext({
@@ -129,14 +131,25 @@ try {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`pageerror: ${String(e?.message || e).slice(0, 300)}`));
   page.on('console', (m) => { if (m.type() === 'error') warnings.push(`console.error: ${m.text().slice(0, 300)}`); });
+  // Every script chunk the page asked for, by file name — so a --fail-once that planted nothing says what it COULD have
+  // matched instead of leaving the next run to guess the chunk's name (🔧 11-03: run 41643230975 planted nothing on /agent).
+  page.on('request', (r) => { const u = r.url(); if (u.includes('/_expo/static/js/web/')) chunksSeen.push(u.split('/').pop().split('?')[0].slice(0, 80)); });
   if (FAIL_ONCE) {
     // The stale-tab shape: the FIRST request for the named chunk fails (as a renamed chunk does after a deploy);
     // every later request goes through. The fix must reload the page once; what it threw before the reload is
     // evidence, and the verdict is read from the page AFTER its reload.
+    // A deploy RENAMES the chunk, so an old tab's every request for it 404s until the tab reloads and gets the new
+    // HTML — aborting only the FIRST request planted nothing fatal (run 41649183142: the preload failed, the import
+    // that followed succeeded, no reload, the fix never had to fire). Every request for the named chunk fails until
+    // the main frame navigates a second time (the self-reload); from then on every request goes through.
+    // A DOCUMENT load, not a frame navigation: expo-router's tab taps are pushState navigations and Playwright reports
+    // those as `framenavigated` too — counting them lifted the abort on the first tap, before the lazy route chunk
+    // was even requested (run 41653288115: map- seen, nothing planted). `load` fires only when a new document loads.
+    let docLoads = 0;
+    page.on('load', () => { docLoads++; });
     await ctx.route((u) => u.href.includes(FAIL_ONCE), (route) => {
-      if (failedOnce) return route.continue();
-      failedOnce = route.request().url();
-      log(`    · aborting once: ${failedOnce}`);
+      if (docLoads >= 2) return route.continue();
+      if (!failedOnce) { failedOnce = route.request().url(); log(`    · aborting until the tab reloads: ${failedOnce}`); }
       return route.abort('failed');
     });
     let loads = 0;
@@ -156,9 +169,10 @@ try {
   if (FAIL_ONCE) {
     await page.waitForFunction(() => performance.getEntriesByType('navigation')[0]?.type === 'reload', null, { timeout: 20000 })
       .then(() => { reloaded = true; }).catch(() => {});
-    if (!failedOnce) errors.push(`fail-once: no request matched «${FAIL_ONCE}» — nothing was planted`);
-    log(`    · planted ${failedOnce ? 'once' : 'nothing'} · page reloaded itself: ${reloaded}`);
+    log(`    · planted ${failedOnce ? 'once' : 'nothing yet'} · page reloaded itself: ${reloaded}`);
     await page.waitForTimeout(4000); // the reloaded shell mounts
+    screenText = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 400)).catch(() => '');
+    log(`    · screen: «${screenText.slice(0, 160)}»`);
   }
   for (let round = 1; loaded && round <= REPEAT; round++) {
     for (const t of TAPS) {
@@ -175,6 +189,9 @@ try {
     }
   }
   await page.waitForTimeout(SETTLE);
+  // Judged AFTER the taps: a lazy route chunk (map-) is only requested when its tab is tapped (run 41654540323 planted
+  // on the first tap), so «nothing was planted» is only known once every tap has run.
+  if (FAIL_ONCE && !failedOnce) errors.push(`fail-once: no request matched «${FAIL_ONCE}» — nothing was planted (chunks seen: ${chunksSeen.slice(0, 20).join(', ') || 'none'})`);
   const rejections = await page.evaluate(() => window.__probeRejections || []).catch(() => []);
   for (const r of rejections) errors.push(`unhandledrejection: ${String(r).slice(0, 300)}`);
   if (errors.length || missedTaps.length || (STRICT && warnings.length)) {
@@ -189,7 +206,7 @@ try {
 }
 const verdict = verdictFor({ loaded, missedTaps, errors, warnings, strict: STRICT, reloadExpected: !!FAIL_ONCE, reloaded });
 const out = { url: URL_, taps: TAPS, repeat: REPEAT, gapMs: GAP, phone: PHONE, loaded, missedTaps, errors, warnings, screenshot, status: verdict,
-  ...(FAIL_ONCE ? { failOnce: FAIL_ONCE, failedOnce, reloaded, beforeReload } : {}) };
+  ...(FAIL_ONCE ? { failOnce: FAIL_ONCE, failedOnce, reloaded, beforeReload, screenText, chunksSeen: chunksSeen.slice(0, 40) } : {}) };
 console.log(JSON.stringify(out));
 log(`SUMMARY page-probe ${verdict} · loaded=${loaded} · taps missed=${missedTaps.length} · errors=${errors.length} · console warnings=${warnings.length}${STRICT ? ' (strict)' : ''}${FAIL_ONCE ? ` · planted=${failedOnce ? 1 : 0} reloaded=${reloaded} errorsBeforeReload=${beforeReload.length}` : ''}`);
 process.exit(verdict === 'PASS' ? 0 : 1);

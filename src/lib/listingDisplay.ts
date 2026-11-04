@@ -7,6 +7,7 @@ import { englishCatalogText, translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNR
 import { arabicOrPlaceholder } from './arabicText';
 import { translitPlace } from './translitPlace';
 import { advertisedMonthly } from './rentPool';
+import { SERVICE_FACILITY_TYPES } from '@/data/propertyTypes';
 
 // #1 (source-accurate, mirrors ResultCard.tsx): the RAW scraped type when it's already Arabic, else
 // the clean-type mapping translated to Arabic — never leaks a raw English type string.
@@ -16,6 +17,20 @@ export function listingTypeAr(listing: Listing): string {
     'ar',
     TYPE_UNRESOLVED_AR,
   );
+}
+
+// THE HEADLINE NAMES THE TYPE THE USER SEARCHED (owner 2026-11-03: «when you display the ad you must show the thing the user
+// selected on the property type»): the filter type the ad was found by (cleanType) in the filter's own Arabic words. One
+// helper for every headline — the result card, the ad page's top line, read-aloud — so they never disagree. The source's
+// own wording stays on the card's type row / «Property Type» stat (listingTypeAr, owner 2026-07-06). Facility sub-types
+// gathered under «مرافق خدمية» keep the source word (owner 2026-09-28), as does any type without an Arabic label.
+export function listingSearchedTypeAr(listing: Listing): string {
+  const ct = listing.cleanType;
+  if (ct && !(SERVICE_FACILITY_TYPES as readonly string[]).includes(ct)) {
+    const ar = translate('ar', ct);
+    if (/[ء-ي]/.test(ar)) return ar;
+  }
+  return listingTypeAr(listing);
 }
 
 // District + city, Arabic-canonical (mirrors ResultCard's `place(...)/{cityAr}` headline).

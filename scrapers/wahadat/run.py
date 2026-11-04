@@ -148,17 +148,31 @@ def _main_project(raw: str, slug: str) -> Optional[dict]:
     i = raw.find('"slug":"' + slug + '"')
     if i < 0:
         return None
-    ids = list(re.finditer(r"/project/api/projects/([0-9a-f\-]{36})/", raw[:i]))
-    if not ids:
-        return None
-    uuid = ids[-1].group(1)
     dec = json.JSONDecoder()
-    for m in re.finditer(r'\{"id":"' + re.escape(uuid) + '"', raw):
+    ids = list(re.finditer(r"/project/api/projects/([0-9a-f\-]{36})/", raw[:i]))
+    if ids:
+        uuid = ids[-1].group(1)
+        for m in re.finditer(r'\{"id":"' + re.escape(uuid) + '"', raw):
+            try:
+                obj, _ = dec.raw_decode(raw, m.start())
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and obj.get("slug") == slug:
+                return obj
+        return None
+    # The page stopped carrying absolute_url (measured 2026-11-03: 0 occurrences on every project
+    # page, so all 120 pages read «project_object_not_found» and three crawls stored nothing). The
+    # page's own object still opens `{"id":"<uuid>"` BEFORE its slug and encloses it, so walk the
+    # object starts that precede the slug, nearest first, and accept only an object that ENCLOSES
+    # that slug and whose OWN slug is the page's — a related project or a nested owner/type object
+    # can never match it.
+    starts = list(re.finditer(r'\{"id":"[0-9a-f\-]{36}"', raw[:i]))
+    for m in reversed(starts[-200:]):
         try:
-            obj, _ = dec.raw_decode(raw, m.start())
+            obj, end = dec.raw_decode(raw, m.start())
         except ValueError:
             continue
-        if isinstance(obj, dict) and obj.get("slug") == slug:
+        if end > i and isinstance(obj, dict) and obj.get("slug") == slug:
             return obj
     return None
 
@@ -217,11 +231,25 @@ def unit_uid(u: dict) -> str:
 OFF_MARKET_STATUSES = ("sold", "reserved")
 
 
+# A project the source has REMOVED answers HTTP 200 with its own «not found» page: <title>«المشروع غير
+# موجود | وحدات», body «404 الصفحة غير موجودة» — byte-for-byte the page a made-up slug gets. Measured
+# live 2026-11-03: قسورة-02 and دام-101 (their units at 12 strikes, served since 10-21) answer it, while a
+# listed project (ريزي-33-النرجس) answers its own name. Its units went with it: off market. Read only
+# from a page that did NOT parse as a project, and only in a run that read at least one real project.
+_PROJECT_NOT_FOUND = re.compile(r"<title>\s*المشروع غير موجود")
+
+
+def project_not_found(page_html: str) -> bool:
+    return bool(_PROJECT_NOT_FOUND.search(page_html or ""))
+
+
 def off_market_oracle(off_market: dict[str, str]):
     """verify_gone for prune_unseen: gone only for units this run read as sold/reserved."""
     def verify_gone(ad_number: str):
         st = off_market.get(ad_number)
         if st:
+            if st == "project_not_found":
+                return "gone", "its project page answers the source's own «المشروع غير موجود» (removed)"
             return "gone", f"the unit's own record in its project page states status={st}"
         return "unknown", "not read as sold/reserved this run (absence is never a death)"
     return verify_gone
@@ -410,6 +438,7 @@ def main() -> int:
     held: set[str] = set()      # units of a project whose own is_active is not True — see below
     off_market: dict[str, str] = {}   # ad_number -> sold/reserved, read from the unit's own record
     seen_projects = 0
+    removed_projects: set[str] = set()   # project pages that answered the source's own «not found»
     try:
         for u in urls:
             try:
@@ -419,6 +448,8 @@ def main() -> int:
                     continue
                 proj, units = parse_project(r.text, u)
                 if proj is None:
+                    if project_not_found(r.text):
+                        removed_projects.add(u)
                     skipped["project_object_not_found"] = skipped.get("project_object_not_found", 0) + 1
                     continue
             except Exception as e:                      # noqa: BLE001
@@ -488,6 +519,9 @@ def main() -> int:
                 except Exception:                       # noqa: BLE001 — unread stays unknown
                     struck = []
                 off_market.update(read_unlisted_projects(sess, set(urls), struck))
+                if seen_projects:                       # a real project was read: the site serves us
+                    off_market.update({r["ad_number"]: "project_not_found" for r in struck
+                                       if r.get("listing_url") in removed_projects})
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | held, source=SOURCE,
                                     verify_gone=off_market_oracle(off_market))
                 if n < 0:

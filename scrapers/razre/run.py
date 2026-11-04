@@ -95,6 +95,7 @@ _PROJECT_URL_RE = re.compile(r"^https://www\.razre\.sa/projects/([a-z0-9][a-z0-9
 _LOC_RE = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>")
 _SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script>", re.S | re.I)
 
+_BUILDING_AMENITY = {"مصعد": "elevator", "مواقف سيارات": "parking"}
 _PROJECT_STATUS_SKIP = {"soon": "off_plan_project", "sold_out": "project_sold_out"}
 _UNIT_STATUS_SKIP = {"sold": "unit_sold", "reserved": "unit_reserved"}
 _TYPE_AR = {"apartment": "شقة", "annex": "ملحق"}
@@ -289,6 +290,14 @@ def map_listing(unit: Any, page: dict, url: str) -> tuple[Optional[dict], str, s
                               "source_field": "ld_json.image"}
     amenities = [redact_pii(_clean(a.get("name"))) for a in cx.get("amenityFeature") or []
                  if isinstance(a, dict) and a.get("value") is True and _clean(a.get("name"))]
+    # The project's OWN LD amenityFeature list, read for the two features that belong to the BUILDING every unit
+    # of it shares: a lift and car parking (🔬 2026-11-03). The lists differ per project (raz-55: 8 features, haven-1:
+    # 14, re-read that night), so this is not one stock list stamped on every ad (the rakez trap). Unit-level
+    # features (smart home, finishes) are not read from it. True-only: a feature the list does not name is silence.
+    for name in amenities:
+        col = _BUILDING_AMENITY.get(name)
+        if col:
+            row[col] = True
     info = {
         "source_record_id": uid,
         "project_slug": slug,

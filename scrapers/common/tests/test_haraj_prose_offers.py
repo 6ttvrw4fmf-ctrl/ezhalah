@@ -151,3 +151,28 @@ def test_unresolved_city_or_request_is_never_stored(catalog):
 def test_phones_are_never_stored(catalog):
     row, *_ = post("شقة للايجار الايجار 2500 شهري", "للتواصل 0551234567 ابو محمد")
     assert "0551234567" not in (row["description"] or "") and row["price_annual"] == 2500 * 12
+
+
+def test_area_redundant_plural_thousands_is_not_multiplied_2026_11_03():
+    # «5000 الاف متر» is 5,000 m² in the seller's words; the parser stored 5,000,000 (Haraj 19008644 and two more).
+    from scrapers.haraj.prose import area_of
+    assert area_of("حوش للايجار مساحه 5000 الاف متر بصك سكني", "")["area"] == 5000
+    assert area_of("استراحة للبيع مساحة 8000 الاف القرين", "")["area"] == 8000
+    assert area_of("استراحه", "المساحه 3000 الاف مفصوله رجال ونساء")["area"] == 3000
+    # the measured scale words still scale
+    assert area_of("ارض مساحه 96 الف متر", "")["area"] == 96000
+    assert area_of("ارض مساحه 5 الاف متر", "")["area"] == 5000
+    assert area_of("مزرعة مساحه 1500 الف متر", "")["area"] == 1500000
+
+
+def test_bare_offer_figure_equal_to_the_stated_area_is_not_a_price_2026_11_03():
+    # HRJ 18362394: «للبيع 5الف» in the title is the 5,000 m² the body states; the price is «on contact».
+    title = "عرض حصري استراحة مجهزة للبيع 5الف بالرحمانية الخرج"
+    body = ("المساحة الكلية: 5,000 متر مربع. الموقع: مخطط الرحمانية (الخرج). "
+            "للتعرف على التفاصيل، السعر، ومعاينة الموقع على الطبيعة: لا تتردد في التواصل")
+    assert X.asking_price(title, body)["price"] is None
+    # the same bare figure is still a price when the post states a different area, or none
+    assert X.asking_price("استراحة للبيع 500الف", "المساحة 5,000 متر مربع")["price"] == 500000
+    assert X.asking_price("للبيع بـ 250 الف ريال", "")["price"] == 250000
+    # an explicit price word is never dropped for matching the area
+    assert X.asking_price("ارض مساحه 300 م2", "السعر 300 ريال")["price"] == 300

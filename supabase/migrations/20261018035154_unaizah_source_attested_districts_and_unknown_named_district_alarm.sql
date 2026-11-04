@@ -1,4 +1,3 @@
--- APPLIED 2026-10-18 03:51:54 UTC (owner session, DB quiet: 1 active API query). Pre-check: 24 names new, 0 already catalogued, 0 town names.
 -- Owner 2026-10-17 («Ibrahim Al-Qarawi puts the district in the title but we don't capture or match it — fix the
 -- ones I have and make sure we never get it again»). Measured 2026-10-17: 832 of 2,600 ialqarawi ads had no
 -- district; their titles say «… بحي النزهة بعنيزة». Root cause: find_district_in_text() accepts only exact

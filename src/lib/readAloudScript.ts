@@ -8,7 +8,7 @@
 //   — so what's spoken can never disagree with what's shown.
 import type { Listing } from '@/data/listings';
 import { translate } from '@/i18n';
-import { listingTypeAr, listingLocationAr, listingPriceAr, listingPlatformAr } from './listingDisplay';
+import { listingSearchedTypeAr, listingLocationAr, listingPriceAr, listingPlatformAr } from './listingDisplay';
 import { listingTypeEn, listingLocationEn, listingPlatformEn, listingPrice } from './listingDisplay';
 import type { ReadAloudSegment } from './readAloud';
 
@@ -31,7 +31,7 @@ function cardSpeech(listing: Listing, locale: 'ar' | 'en' = 'ar'): string {
     facts.push(listingPlatformEn(listing));
     return facts.join('. ');
   }
-  const headline = `${listingTypeAr(listing)} في ${listingLocationAr(listing)}`;
+  const headline = `${listingSearchedTypeAr(listing)} في ${listingLocationAr(listing)}`;
   const price = listingPriceAr(listing);
   const stats: string[] = [];
   if (listing.beds > 0) stats.push(`${listing.beds} ${translate('ar', listing.beds === 1 ? 'Bed' : 'Beds')}`);

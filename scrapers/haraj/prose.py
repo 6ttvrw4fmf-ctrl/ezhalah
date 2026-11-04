@@ -172,6 +172,10 @@ def asking_price(title: str, body: str) -> dict:
         out["why"] = "bid («السوم»): no price"
         return out
     cands: list[tuple[int, Optional[str], bool, str]] = []
+    # The post's own stated area. A figure after the bare «للبيع / ب» that equals it is the SIZE, not a price:
+    # «استراحة مجهزة للبيع 5الف» over a body saying «المساحة الكلية: 5,000 متر مربع» and «للتعرف على … السعر»
+    # tell us; it was stored as a 5,000 SAR price (HRJ 18362394, alert price_eq_area_or_ppm, 2026-11-03).
+    stated_area = area_of(title, body)["area"]
     for m in (list(_PRICE_RE.finditer(t)) + list(_BI_RE.finditer(t)) + list(_MILLION_WORD.finditer(t))
               + list(_PPM_RE.finditer(t))):
         if m.re is _MILLION_WORD:
@@ -191,6 +195,8 @@ def asking_price(title: str, body: str) -> dict:
             if m.re is _BI_RE and not (scale or re.match(r"\s*(?:ريال|ر\.?س|شهري|سنوي|يومي|للشهر|للسنه|بالشهر|بالسنه)", after)
                                        or (v >= 100 and re.match(r"\s*(?:$|\n|[.,،!؟)])", after))):
                 continue                                         # the bare «ب» needs a unit / currency / period / an end
+            if m.re is _BI_RE and stated_area and v == round(stated_area):
+                continue                                         # «للبيع 5الف» = the 5,000 m² the post states
             if re.fullmatch(r"(?:13|14)\d\d", num_txt) and re.match(r"\s*ه", after):
                 continue
         if re.match(r"\s*(?:ريال\s*)?(?:او|ا و|الي|الى|-|–|لين|حتي|حتى|ل)\s*\d", t[num_end:num_end + 20]):
@@ -248,7 +254,10 @@ def area_of(title: str, body: str) -> dict:
                 v = float(num.replace(",", ""))
             except ValueError:
                 continue
-            if m.group(2):
+            # «96 الف» is 96,000 m² — but the PLURAL «الاف» after a number already written in thousands is the
+            # colloquial redundancy «5000 الاف متر» = 5,000 m² (Haraj 19008644 / 20813689 / 20837877 were stored as
+            # 5,000,000 / 8,000,000 / 3,000,000 m², 2026-11-03). Only the plural after >= 1000 is left unscaled.
+            if m.group(2) and not (m.group(2) == "الاف" and v >= 1000):
                 v *= 1000
             if 10 <= v <= 10_000_000:
                 vals.setdefault(v, t[m.start():m.end()].strip())

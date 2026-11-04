@@ -1,6 +1,53 @@
 # The AI facts reader — new ads nightly, the backlog once, 30 USD a month (owner, 2026-10-26)
 
-> **Cadence change (2026-11-03, migration 20261103013129):** the free word reader's incremental run (pg_cron `gh-facts-words-nightly`, name kept) now fires every hour at :25 UTC instead of 07:05 nightly, so a new ad's own words reach its chip within about an hour (owner: «whenever we get a new listing the description immediately matches»). One run reads only new / changed ads in ~12 minutes, no paid AI. Where this file says «nightly» about the free reader, read «hourly».
+> **Cadence change (2026-11-03, migration 20261103013129):** the free word reader's incremental run (pg_cron `gh-facts-words-nightly`, name kept) now fires every hour at :01 UTC instead of 07:05 nightly (it was :25 for its first day; migration 20261103101143 moved it to :01 so each ~12-minute run ends before the :22 search sync — at :25 every read missed that hour's sync and waited for the next, up to about two hours), so a new ad's own words reach its chip within about an hour (owner: «whenever we get a new listing the description immediately matches»). One run reads only new / changed ads in ~12 minutes, no paid AI. Where this file says «nightly» about the free reader, read «hourly».
+
+> **Missed real AC (2026-11-04 live walk, after the prose-box clear).** The reader stays silent — never «no» — when in
+> doubt, and the 11-03 clear used that silence; a live walk then found ~1 in 3 cleared DealApp AC ads did say AC.
+> Two leaks: a near word in the bullet BEFORE («بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة», «قريب من المسجد 9 مكيفات»)
+> silenced the unit's AC, and an entrance word two words back («مدخلان🔹 مكيفات راكبة») read the AC units as the lobby's.
+> Fixed for the AC only (`_NEAR_NEVER_FACTS`; plural «مكيفات» is never the lobby's — «مداخل مكيفة» still is), plus
+> «قابل للتفاوض» (negotiable) no longer counts as «can be fitted» except for public places. Proof: old-vs-new on 115
+> real trigger snippets (34 changes, all right) and 120 «قابل للتفاوض» snippets (4 changes, all right). A kitchen or a
+> lift CAN be a nearby place's, so they keep the near rule. The clear's backup is `ops_prose_box_cleared`.
+> Same day, the café chip: about half of sampled yeses were NEARBY places in a comma list («Close to shops, restaurants,
+> and markets», «قريبة من جميع الخدمات: مسجد، بقالة، مطعم», «بجواره مقهى»). A near word now runs on across commas
+> through PLACE items (`_PLACE_WORDS`) and silences only `_NEAR_PUBLIC_FACTS` (café, mosque, market, park…); it stops
+> at the first non-place item, so DealApp's REGA list «قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» keeps its parking.
+> Proof: 110 real nearby-list snippets → 10 changes, all a wrong yes turned off, no real feature lost.
+
+> **Owner decision — the grill chip (2026-11-03): «grill is grill, microwave isn't a grill».** A «شواية» / «شواء» counts for
+> the grill chip wherever the ad names it, including a kitchen appliance («فرن شواية», «مطبخ … فرن - شواية - ميكرويف»).
+> A microwave is never a grill (the reader has no microwave token for it). Do not add an «oven nearby» exclusion to the
+> grill fact — it was proposed (PR #10269) and closed on this decision.
+
+> **Precision audit (2026-11-03, owner: «make sure everything I select appears like matches»).** Chip *counts* were
+> exact (17,004 chips × 78 groups = a plain count of the index, 0 differences); some chip *matches* were not. The free
+> reader answered yes for look-alike words: «بنت» (a name, «بنت هاوس») as Wi-Fi/internet, «ونشتري» as a crane, a bare
+> «الرمال» (the district) as a dunes view, «غرفة شغالة» as a producing farm, «أبواب مرتفعة» as a raised plot,
+> «للشبابيك» as for-youth, «يسعدنا استقبال عروضكم» as reception, «صاحب / تاريخ انتهاء الترخيص» (the REGA ad licence)
+> as a licence, a bare «معتمد» as an approved plan, «واجهة العقار: Eastern» as frontage, a bearing («جنوب طريق
+> الملك») as on a main road, and near words it lacked («بقرب», «قربها», «مقابلة», «دقيقتين»). «عدا / باستثناء» and a
+> 🚫/❌ mark now read as no. Proof was old-vs-new on ~2,000 real active ads: only wrong yeses turned off, no new yes.
+> **How to re-run it:** list each key's top quotes from `listing_text_facts` (v = true), read the sentence around
+> any quote that is not the fact's own word, and fix the catalogue in `scrapers/facts/word_checker.py` with the real
+> sentence as a selftest line. The selftest now gates every scrapers PR
+> (`scrapers/common/tests/test_word_checker_selftest.py`, run by common-location-tests.yml).
+>
+> **Round 2 + the evidence-phrase barrier (2026-11-03 evening, PR #10211, migration 20261103213947).** Three reviewers
+> read real sentences for all ~180 chips; ~40 more look-alike classes were fixed (e.g. «صالة عائلية» a room → for families,
+> «مغسلة» a basin → car wash, «كافية» enough → cafe, «ارتداد» a setback → floors, the ad's own «في شارع X,» address,
+> landmarks «خلف شبيلي مول», «تصلح سكن عمال» a possible use, refusals «يمنع سكن العزاب»). Wasalt's elevator/AC/private
+> entrance now come from this same reader (one reader). After the 8-shard re-read, all 17,004 chip counts again equal the
+> index, and a live walk (Riyadh short-stay rest houses → «عوائل» 17 = DB 17; Gathern unit 26129 «مخصص ل عوائل فقط») matched
+> the source. **The barrier:** `ops_af_evidence_phrase` lists the phrases that may turn a chip on (1,759 trusted, 57
+> rejected). `mon_detect_af_evidence_phrases()` (daily, on the roster) raises **P1 `af_rejected_evidence_served`** if a
+> rejected phrase serves any ad again, and **P2 `af_new_evidence_phrase`** when an unreviewed phrase reaches 25 served ads.
+> To clear the P2: read 5 real sentences, insert the phrase as trusted, or as rejected AND fix the reader. Never trust a
+> rejected phrase to silence the P1.
+> **Still open (owner decision):** some scrapers fill elevator / AC / maid room from the ad text with the older
+> `normalize.prose_amenities` (dealapp, rakez, aqar non-villa maid/driver …) and Rule B serves those as the site's field;
+> the code switch is easy but the stored yeses do not self-heal, so clearing them is a bulk data change for the owner.
 
 **Owner's words:** «I don't mind us using the AI … make a very good plan … the max budget for the AI backend is
 30 dollars monthly … start now with the more listings.»

@@ -513,6 +513,28 @@ const COMMERCIAL_TYPES = [
 ];
 const TYPES = [...RESIDENTIAL_TYPES, ...COMMERCIAL_TYPES];
 
+// THE MODEL SOMETIMES NAMES THE TYPE IN ARABIC («شقة», «فيلا») although the contract below says "ONE canonical English
+// type". Measured live 2026-11-03 (audit-invariants.yml, backlog 1263): «شقة للإيجار السنوي في الرياض» → type «شقة»,
+// «فيلا للبيع في جدة» → type «فيلا». The app already folds these (src/data/agent.ts typeFromAgent, after offices were
+// shown for an apartment ask on 2026-10-13), but every OTHER reader of this response got the raw word. The edge now
+// keeps its own contract: an Arabic type word maps to the same canonical type the app maps it to (AR_TYPE in
+// src/data/agent.ts, mirrored here word for word for the canonical TYPES); anything else passes through untouched.
+const AR_TYPE_CANON: Record<string, string> = {
+  "شقة": "Apartment", "شقه": "Apartment", "فيلا": "Villa", "فلة": "Villa", "دور": "Floor", "بيت": "Villa",
+  "منزل": "Villa", "غرفة": "Room", "غرفه": "Room", "عمارة": "Building", "عماره": "Building",
+  "استراحة": "Rest House", "استراحه": "Rest House", "شاليه": "Chalet", "مكتب": "Office",
+  "مستودع": "Warehouse", "محل": "Shop", "معرض": "Showroom", "مصنع": "Factory", "ورشة": "Workshop",
+  "مزرعة": "Farm", "مزرعه": "Farm", "مخيم": "Camp", "كشك": "Shop", "محطة": "Gas Station", "مكاتب مشتركة": "Office",
+  "أرض زراعية": "Agriculture Plot", "ارض زراعية": "Agriculture Plot",
+  "أرض": "Residential Land", "ارض": "Residential Land",
+};
+export function canonType(t: unknown): string | null {
+  if (typeof t !== "string" || !t.trim()) return null;
+  const s = t.trim();
+  if (TYPES.includes(s)) return s;
+  return AR_TYPE_CANON[s] ?? AR_TYPE_CANON[s.replace(/^ال/, "")] ?? s;
+}
+
 const SYSTEM = `You are Ezhalah (Arabic: ازهله) — a warm, friendly, fast Saudi real-estate search assistant. You help people find properties in Saudi Arabia and nothing else. You feel like a knowledgeable Saudi friend, not a corporate bot. You are NOT a legal, financial, investment, or market advisor.
 
 BRAND NAME: write it as "Ezhalah" in English and "إزهله" in Arabic. NEVER translate its meaning (never "facilitate", "ease", "simplify"). The brand is ALWAYS spelled "إزهله" (with hamza) in Arabic in any reply you give.
@@ -1110,15 +1132,24 @@ Deno.serve(async (req: Request) => {
       // the same spend gate and the same 2-attempt bound as an HTTP retry, so nothing routes around
       // the guards and spend stays bounded.
       const EMPTY_REPLY_NUDGE = "\nOUTPUT RULE: the previous attempt returned an empty reply. Output the complete JSON object now — never an empty or whitespace-only reply.";
+      const JSON_ONLY_TURN_RULE = "[Reply with ONLY the complete JSON object described in the system message — no other text.]";
       // The re-ask LEAVES json_object mode. The blank-line reply is that mode's documented defect, and
       // measured 2026-10-18 (backlog 643, 2/2 on the deployed #7310 code) the nudged re-ask in the same
       // mode answered the same 39 blank characters (43 completion tokens, finish_reason stop). Text mode
       // answers; jsonObjectFromReply() cuts the object out of fences or a sentence, and JSON.parse below
       // still decides. The FIRST attempt keeps json_object mode — the cheap, usually-right path.
+      // The rule ALSO closes the LAST user turn (2026-11-03, backlog 1263): appended only to the ~18k-token SYSTEM
+      // prompt, the text-mode re-ask answered plain prose 3/3 on the audit's broad-search probe («أدور لك في جدة إيجار
+      // وبيع، وكم غرفة نوم تحتاجون؟») — no object to cut out, so the customer got a 502. The last turn is where the model
+      // looks for what to do now.
+      const lastIdx = messages.length - 1;
       const { response_format: _jsonMode, ...textModePayload } = JSON.parse(payload);
       const nudgedPayload = JSON.stringify({
         ...textModePayload,
-        messages: [{ ...messages[0], content: String(messages[0].content) + EMPTY_REPLY_NUDGE }, ...messages.slice(1)],
+        messages: messages.map((m: any, i: number) => (
+          i === 0 ? { ...m, content: String(m.content) + EMPTY_REPLY_NUDGE }
+          : i === lastIdx && m.role === "user" ? { ...m, content: String(m.content) + "\n\n" + JSON_ONLY_TURN_RULE }
+          : m)),
       });
       let res: Response | null = null;
       let data: any = null;
@@ -1243,6 +1274,15 @@ Deno.serve(async (req: Request) => {
         });
         return parsed;
       } catch {
+        // PROSE IS A REPLY, NOT A CRASH (2026-11-03, backlog 1263). When even the re-ask answers plain words (no JSON
+        // object anywhere), those words are still the model's answer to the customer. Serve them as a message turn —
+        // the decision ladder downstream still owns kind/search — instead of a 502 error page. Logged distinctly so a
+        // rise is visible (agent health: prose_fallback), never silent.
+        const prose = String(choice?.message?.content ?? "").trim();
+        if (emptyRetried && prose && !prose.includes("{")) {
+          recordHealth("prose_fallback", Date.now() - t0, { ...why, prose_len: prose.length });
+          return { kind: "message", reply: prose, __proseFallback: true };
+        }
         recordHealth("unparseable", Date.now() - t0, why);
         return { __err: json({ error: "unparseable model output", raw, ...why }, 502) };
       }
@@ -1451,7 +1491,7 @@ Deno.serve(async (req: Request) => {
         locationStateValidated,
         geographicScope: out.geographicScope ?? prevQuery?.geographicScope,
         excludedPlatforms: Array.isArray(out.excludedPlatforms) ? out.excludedPlatforms : [],
-        type: typeof out.type === "string" && out.type ? out.type : null,
+        type: canonType(out.type),
         detail: typeof out.detail === "string" && out.detail ? out.detail : null,
         price,
         priceOriginal: priceOriginal || undefined,
@@ -1516,7 +1556,7 @@ Deno.serve(async (req: Request) => {
           if (distinct.length >= 2) {
             if (alreadyAsked) {
               location = distinct[0].city;
-              anyCityReply = searchLineText(locale === "en", typeof out.type === "string" ? out.type : null, location, text, lastBotReply);
+              anyCityReply = searchLineText(locale === "en", canonType(out.type), location, text, lastBotReply);
             } else ambiguityReply = severalCitiesQuestion(distinct.map((a) => a.city), text, lastBotReply, locale === "en");
           }
         }
@@ -1721,7 +1761,7 @@ Deno.serve(async (req: Request) => {
       if (anyCityReply) replyOut = anyCityReply;
       else if (notMeasured) replyOut = notMeasured;
       else if (replyBreaksSearchRules(replyOut, text)) {
-        replyOut = searchLineText(locale === "en", typeof out.type === "string" ? out.type : null, location, text, lastBotReply);
+        replyOut = searchLineText(locale === "en", canonType(out.type), location, text, lastBotReply);
       }
       // «١٠٠٠ متر» in the reply IS the 1000 in `detail` — compare digits the same way, or the note repeats the size
       // («… أرض ١٠٠٠ متر … 🏡 (1000 م²)», found live 2026-10-11).
@@ -1881,7 +1921,7 @@ Deno.serve(async (req: Request) => {
           districtPin,
           districts: validatedDistricts,
           locationStateValidated,
-          type: typeof out.type === "string" && out.type ? out.type : null,
+          type: canonType(out.type),
           detail: typeof out.detail === "string" && out.detail ? out.detail : null,
           // A complete new request starts fresh: the app keeps nothing from the previous search, and a budget read from an EARLIER
           // message is not this one's (see isFreshRequest, live 2026-10-13).

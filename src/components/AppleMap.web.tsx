@@ -27,19 +27,19 @@
 // → «تعذّر تحميل الخريطة» in the same box, not an empty beige rectangle (A FAILED FETCH IS NOT AN EMPTY ANSWER).
 // Regions that fail to load leave the plain map (still usable) and are reported in the console.
 import { useEffect, useRef, useState } from 'react';
-import { Ionicons } from '@expo/vector-icons';
-import { Image as XImage } from 'expo-image';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
+import { onSurface } from '@/lib/mapSurface';
 
-// The ground-type button's face (owner 2026-11-02: «replace it with the mascot»): the falconer in the farmer's
-// draped shemagh with a pickaxe — assets/images/soil-mascot.svg, built from insight-falconer-original.png.
-const GROUND_MASCOT = require('../../assets/images/soil-mascot.svg');
+// The soil mascot (assets/images/soil-mascot.svg) wore this button for a day; owner 2026-11-03: «hide the mascot,
+// will add it later, not the priority» — the ground-layers icon is back until the soil layer itself is built.
 const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
 const TOKEN_URL = '/api/mapkit-token';
 const REGIONS_URL = '/ksa-regions.json';
@@ -121,7 +121,8 @@ type MapKit = {
   CircleOverlay: new (center: unknown, radius: number, o?: { style?: unknown; enabled?: boolean }) => unknown;
   Directions: (new (o?: { language?: string }) => { route: (req: { origin: unknown; destination: unknown; transportType?: unknown }, cb: (err: unknown, data: { routes: { polyline: { points: Coord[] }; distance: number }[] }) => void) => number }) & { Transport: { Automobile: unknown } };
   MarkerAnnotation: new (coord: unknown, o?: { title?: string; color?: string; glyphColor?: string; animates?: boolean }) => unknown;
-  Annotation: new (coord: unknown, factory: (coord: unknown, o: { data?: unknown }) => HTMLElement, o?: { data?: unknown; anchorOffset?: unknown; calloutEnabled?: boolean; size?: { width: number; height: number } }) => unknown;
+  Annotation: (new (coord: unknown, factory: (coord: unknown, o: { data?: unknown }) => HTMLElement, o?: { data?: unknown; anchorOffset?: unknown; calloutEnabled?: boolean; size?: { width: number; height: number }; displayPriority?: number; collisionMode?: unknown }) => unknown)
+    & { CollisionMode?: { Rectangle?: unknown } };
   DOMPoint?: unknown;
   Search: new (o: { region?: unknown; language?: string; limitToCountries?: string; includePointsOfInterest?: boolean }) => MKSearch;
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
@@ -406,11 +407,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const [groundOpen, setGroundOpen] = useState(false);
   // Satellite with labels by default (owner 2026-10-31: «keep the default satellite»).
   const [mapType, setMapType] = useState<'standard' | 'hybrid' | 'muted'>('hybrid');
+  // THE MAP'S POP-UP CARDS CLOSE WHEN THE USER DOES SOMETHING ELSE (owner 2026-11-03: «if the user selects something
+  // else it goes away — I clicked the satellite photo and the ground-type card stayed»). Layers and ground type are one
+  // family of cards: opening one closes the other, choosing a map style closes both, and so does touching or moving the
+  // map, a pin, a zoom button, the draw button or the full-screen button.
+  const closePanels = () => { setLayersOpen(false); setGroundOpen(false); };
   const applyMapType = (k: 'standard' | 'hybrid' | 'muted') => {
     const mk = mapkitOf();
     const m = mapRef.current;
     if (mk && m) m.mapType = k === 'hybrid' ? mk.Map.MapTypes.Hybrid : k === 'muted' ? mk.Map.MapTypes.MutedStandard : mk.Map.MapTypes.Standard;
     setMapType(k);
+    closePanels();
   };
 
   useEffect(() => {
@@ -545,6 +552,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     if (!mk || !m || !pinFilter) return;
     const pins = pinFilter;
     let seq = 0; let timer: ReturnType<typeof setTimeout> | null = null; let mine: unknown[] = [];
+    // Both one-time feeds start downloading as the map opens, so the first zooms already answer on the phone.
+    void fetchAreasFeed(); void fetchMapDots();
     const keyed = new Map<string, unknown>();   // the annotations on the map, by what they show — a pan keeps what stays
     const loc = localeRef.current === 'ar' ? 'ar' : 'en';
     // What a tap does: a bubble zooms into its cell, a pin hands its row up (the card sheet). Called from the element's
@@ -554,23 +563,34 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     let lastPick = 0;
     const pick = (row: PinRow, cell: number) => {
       lastPick = Date.now();
+      closePanels();
       if (cell > 0) {
         live.history.push(m.region);
-        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(row.lat, row.lng), new mk.CoordinateSpan(cell * 2.2, cell * 2.2)), true);
+        // Always IN (measured live 2026-11-03: a street-zoom bubble's fixed 2.2-cell span was wider than the view it sat
+        // in, so a tap zoomed OUT and flipped back to district names): at most a third of the current view.
+        const sp = bubbleTapSpan(cell, m.region.span.latitudeDelta);
+        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(row.lat, row.lng), new mk.CoordinateSpan(sp, sp)), true);
       } else onPinSelectRef.current?.(row);
     };
     // SMALL heads (owner 2026-11-02: «the pin is so so big»): 11 px text, a slim pill. ZOOMED OUT, A CELL IS A DOT
     // (owner 2026-11-02, Zillow: «pins don't show the price unless you zoom in»): a 14 px deal-coloured dot, no number;
     // the count of what is in view sits in the pill at the bottom of the map instead.
-    const element = (row: PinRow, cell: number) => {
+    // `counted`: the close-in crowded fallback, where a bubble holds many listings at street zoom — it shows its count.
+    // Zoomed-out dots stay plain (owner 2026-11-02, Zillow).
+    const element = (row: PinRow, cell: number, counted = false) => {
       const el = document.createElement('div');
       const color = cell > 0 ? dotColor(row) : pinColor(row);
       el.setAttribute('data-testid', cell > 0 ? 'map-bubble' : 'map-pin');
       el.style.cssText = `font:600 11px/1 -apple-system,system-ui,sans-serif;color:#fff;background:${color};border:1.5px solid #fff;cursor:pointer;touch-action:none;` +
         (cell > 0
-          ? 'border-radius:50%;width:14px;height:14px;box-shadow:0 1px 3px rgba(0,0,0,.4)'
+          ? (counted && row.n > 1
+            // A close-in bubble holding many listings says how many (measured live 2026-11-03: a tap on «النعيم» showed
+            // 5,399 listings as three blank dots, which read as an almost empty map).
+            ? 'border-radius:12px;min-width:16px;padding:4px 7px;text-align:center;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.4)'
+            : 'border-radius:50%;width:14px;height:14px;box-shadow:0 1px 3px rgba(0,0,0,.4)')
           : 'border-radius:10px;padding:4px 7px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);position:relative');
       el.textContent = cell > 0 ? '' : pinHead(row, loc);
+      if (counted && cell > 0 && row.n > 1) el.textContent = areaCount(row.n, loc);
       if (cell === 0) {
         const tip = document.createElement('div');
         tip.style.cssText = `position:absolute;left:50%;bottom:-5px;width:0;height:0;margin-left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid ${color}`;
@@ -625,10 +645,65 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const d = nearestDot(shown, project, e.clientX - rect.left, e.clientY - rect.top);
       if (d) pick({ lat: d.lat, lng: d.lng, n: d.n, deal: d.deal, type_ar: null, platforms: 0, ids: null, price: null, platform: null } as PinRow, cellForSpan(m.region.span.latitudeDelta) || 0.01);
     };
+    // AREA LABELS (owner's father, relayed 2026-11-03: «show only the number of listings in the area at such low zoom,
+    // and place marks only when the user zooms in further»; «at this zoom level show the names of the districts only
+    // and the number of listings»): far out, one label per city; at city zoom, one per district; pins only closer in.
+    // A tap on a label zooms into it. Keyed like the pins, so a pan keeps the labels that stay.
+    const pickArea = (a: AreaRow, level: AreaLevel) => {
+      live.history.push(m.region);
+      const sp = areaZoomSpan(level);
+      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(a.lat, a.lng), new mk.CoordinateSpan(sp, sp)), true);
+    };
+    const areaElement = (a: AreaRow, level: AreaLevel) => {
+      const el = document.createElement('div');
+      el.setAttribute('data-testid', 'map-area');
+      el.style.cssText = 'font:700 12px/1.15 -apple-system,system-ui,sans-serif;color:#24232B;background:rgba(255,255,255,.96);'
+        + 'border:1px solid rgba(36,35,43,.18);border-radius:12px;padding:5px 9px;white-space:nowrap;text-align:center;'
+        + 'box-shadow:0 1px 4px rgba(0,0,0,.28);cursor:pointer;touch-action:none';
+      const name = document.createElement('div'); name.textContent = areaName(a, level);
+      const count = document.createElement('div'); count.textContent = areaCount(a.n, loc);
+      count.style.cssText = `font-weight:800;font-size:11px;color:${PIN_COLOR.buy};margin-top:1px`;
+      el.append(name, count);
+      let down: { x: number; y: number } | null = null;
+      el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      el.addEventListener('pointerup', (e) => {
+        const d = down; down = null;
+        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 10) { e.stopPropagation(); pickArea(a, level); }
+      });
+      return el;
+    };
+    const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
+      const next = new Map<string, AreaRow>();
+      for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
+      for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
+      // NO PILE-UPS: MapKit hides a label that collides with a higher-priority one, and priority follows the count, so
+      // the biggest districts show and a smaller neighbour appears as the user zooms in (Jeddah alone has 107).
+      const maxN = Math.max(1, ...areas.map((a) => a.n));
+      for (const [k, a] of next) {
+        if (keyed.has(k)) continue;
+        const ann = new mk.Annotation(new mk.Coordinate(a.lat, a.lng), () => areaElement(a, level), {
+          calloutEnabled: false, collisionMode: mk.Annotation.CollisionMode?.Rectangle, displayPriority: 250 + Math.round(499 * a.n / maxN),
+        });
+        keyed.set(k, ann); m.addAnnotation(ann);
+      }
+      mine = [...keyed.values()];
+    };
     const load = async () => {
       const my = ++seq;
       const { center, span } = m.region;
       const cell = cellForSpan(span.latitudeDelta);
+      const level = narrowed ? null : areaLevelFor(span.latitudeDelta);
+      if (level) {
+        const areas = await fetchMapAreas(paddedBox(center, span), level, pins.deals);
+        if (my !== seq || mapRef.current !== m) return;
+        if (areas !== 'unknown') {
+          hideCanvas(); shown = [];
+          drawAreas(visibleAreas(areas), level);
+          setPinCount(areasTotal(areas));
+          return;
+        }
+        // The labels failed to load: the dots below, never an empty map.
+      }
       if (cell > 0 && !narrowed) {
         const all = await fetchMapDots();
         if (my !== seq || mapRef.current !== m) return;
@@ -640,17 +715,39 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         // The feed failed (or the projection could not be calibrated): the live grid path below, never an empty map.
       }
       hideCanvas(); shown = [];
+      // SMOOTH (owner 2026-11-03: «I want it to feel smooth»): a close view the dots feed (already on the phone) says holds
+      // more than CROWD_ESTIMATE listings is crowded without asking the network; only a view that may fit as pins reads.
+      const dots = cell === 0 && !narrowed ? await fetchMapDots() : 'unknown';
+      if (my !== seq || mapRef.current !== m) return;
+      const crowdedByDots = dots !== 'unknown' && dotsTotal(dotsInView(dots, pins.deals, { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 })) > CROWD_ESTIMATE;
       // Exact points are read with a small cap: one row over PIN_SHOW_MAX is enough to know the view is too dense.
-      let rows = await fetchMapPins(paddedBox(center, span), cell, pins, cell === 0 ? PIN_SHOW_MAX + 1 : PIN_LIMIT);
+      let rows: PinRow[] | 'unknown' = crowdedByDots ? [] : await fetchMapPins(paddedBox(center, span), cell, pins, cell === 0 ? PIN_SHOW_MAX + 1 : PIN_LIMIT);
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
       // DENSE VIEW: the exact-point read hit its cap, so pins would silently show a PART of the listings (downtown
       // Riyadh holds thousands in one city-zoom view). Never a partial set — read the same view again as a fine bubble
       // grid, where every listing is counted, and draw bubbles until the user zooms closer.
       let drawCell = cell;
-      if (cell === 0 && rows.length > PIN_SHOW_MAX) {
+      if (cell === 0 && (crowdedByDots || rows.length > PIN_SHOW_MAX)) {
+        // Too crowded for price pins (owner's father, 2026-11-03: «at this zoom level show the names of the districts
+        // only and the number of listings»): district names while two or more districts share the view; once one
+        // district fills the screen, the fine count grid until the user zooms closer.
+        if (!narrowed) {
+          const areas = await fetchMapAreas(paddedBox(center, span), 'district', pins.deals);
+          if (my !== seq || mapRef.current !== m) return;
+          if (areas !== 'unknown' && denseShowsDistricts(areas.filter((a) => inView(a, center, span)).length, span.latitudeDelta)) {
+            drawAreas(visibleAreas(areas), 'district');
+            setPinCount(areasTotal(areas));
+            return;
+          }
+        }
         drawCell = fineCellForSpan(span.latitudeDelta);
-        rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
-        if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
+        if (dots !== 'unknown' && drawCell === 0.01) {
+          // The bubbles from the dots feed itself (it is the same 0.01° grid) — no second network read.
+          rows = bubblesFromDots(dotsInView(dots, pins.deals, paddedBox(center, span))).map((b) => ({ ...b, type_ar: null, platforms: 0, ids: null, price: null, platform: null }) as PinRow);
+        } else {
+          rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
+          if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
+        }
       }
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
@@ -663,14 +760,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       for (const [k, a] of keyed) if (!next.has(k)) { m.removeAnnotation(a); keyed.delete(k); }
       for (const [k, row] of next) {
         if (keyed.has(k)) continue;
-        const a = new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell), {
+        const a = new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell, cell === 0 && drawCell > 0), {
           data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -6),
         });
         keyed.set(k, a); m.addAnnotation(a);
       }
       mine = [...keyed.values()];
     };
-    const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 220); };
+    const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 120); };
     const onSelect = (e: { annotation?: { data?: { pin?: PinRow; cell?: number } } }) => {
       const d = e.annotation?.data; if (!d?.pin) return;
       if (Date.now() - lastPick < 600) return;   // the element's own tap handler already picked it
@@ -679,14 +776,20 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     m.addEventListener('region-change-end', onRegion);
     m.addEventListener('region-change-start', hideCanvas);
     m.addEventListener('select', onSelect);
-    m.element.addEventListener('click', onCanvasTap);
+    // Held on the element it was added to: on unmount the map effect above destroys the map (nulling `element`)
+    // BEFORE this cleanup runs (src/lib/mapSurface.ts; measured 11-03, an uncaught TypeError on a fast tab switch).
+    const offCanvasTap = onSurface(m, 'click', onCanvasTap);
+    const offPanelsClose = onSurface(m, 'pointerdown', closePanels);
+    m.addEventListener('region-change-start', closePanels);
     void load();
     return () => {
       seq++; if (timer) clearTimeout(timer);
       m.removeEventListener('region-change-end', onRegion as unknown as (e: unknown) => void);
       m.removeEventListener('region-change-start', hideCanvas as unknown as (e: unknown) => void);
       m.removeEventListener('select', onSelect as unknown as (e: unknown) => void);
-      m.element.removeEventListener('click', onCanvasTap);
+      offCanvasTap();
+      offPanelsClose();
+      m.removeEventListener('region-change-start', closePanels as unknown as (e: unknown) => void);
       canvas.remove();
       if (mapRef.current === m) clear();
     };
@@ -706,6 +809,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // Design only for now: nothing searches inside the shape yet.
   // + / − (owner 2026-10-31: «click to zoom»): halve or double the visible span around the same centre.
   const zoomBy = (f: number) => {
+    closePanels();
     const mk = mapkitOf(); const m = mapRef.current;
     if (!mk || !m) return;
     const { center, span } = m.region;
@@ -722,7 +826,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const m = mapRef.current;
     if (m) { m.isScrollEnabled = on; m.isZoomEnabled = on; m.isRotationEnabled = on; }
   };
-  const startDrawing = () => { setSketch(null); setDrawing(true); gestures(false); };
+  const startDrawing = () => { closePanels(); setSketch(null); setDrawing(true); gestures(false); };
   const cancelDrawing = () => {
     const m = mapRef.current;
     if (m && sketchRef.current) m.removeOverlay(sketchRef.current);
@@ -814,7 +918,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {onExpand && !failed && !drawing ? (
-        <Pressable style={s.closeBtn} onPress={onExpand} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+        <Pressable style={s.closeBtn} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
@@ -867,7 +971,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       {/* Layers, far bottom-right (owner 2026-10-31: «far down right»). In English Apple's mark is bottom-LEFT and the
           corner is free; in Arabic the mark sits bottom-RIGHT, inside the map image, so the button lifts above it. */}
       {roomy && !failed && !drawing ? (
-        <Pressable style={[s.layersBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => setLayersOpen((o) => !o)} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
+        <Pressable style={[s.layersBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => { setLayersOpen((o) => !o); setGroundOpen(false); }} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
           <Ionicons name="layers-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
@@ -884,7 +988,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       {/* Ground type, beside the layers button (owner 2026-11-02: «add it beside it»). Same circle, same lift in Arabic. */}
       {!failed && !drawing ? (
         <Pressable style={[s.groundBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => { setGroundOpen((o) => !o); setLayersOpen(false); }} accessibilityRole="button" accessibilityLabel={t('Ground type')} testID="map-ground-btn">
-          <XImage source={GROUND_MASCOT} contentFit="contain" accessible={false} style={s.groundMascot} />
+          <MaterialCommunityIcons name="waves" size={21} color={colors.ink} />
         </Pressable>
       ) : null}
       {groundOpen && !failed && !drawing ? (

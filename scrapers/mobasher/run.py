@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 API = ("https://discovery-api.prod.mobasher.sa/api/v1/discovery/direct-sale"
@@ -180,6 +181,62 @@ def map_listing(x: dict, facts: dict) -> tuple[Optional[tuple[dict, str]], str]:
     return (row, category), ""
 
 
+# ── LIVENESS ORACLE (2026-11-03) ───────────────────────────────────────────────────────────────
+# The feed lists status=ACTIVE only, and prune_unseen's default reader believes only a 404/410 — but this
+# Next.js site answers a REMOVED ad with HTTP 200 and a record-less page (served <title> is the bare site
+# name «مباشر | Mobasher» instead of the ad's title; the browser then draws «رقم الإعلان: 0»), the SAME page
+# it serves for a made-up slug. Measured live 2026-11-03: the two struck ads (missing since
+# 10-05 and 10-30) and /ar/direct/realestate/x-1000000000000 all render that shell; a live ad's page
+# carries its record — "status":"ACTIVE" next to "paymentStatus". So: the record says ACTIVE → live; the
+# record names a closed status → gone; no record at all → gone ONLY while a known-live ad from this run
+# still renders its record through the same session (the positive control) — a broken render, a block
+# or a throttle cannot pass that control, so they remove nothing. The stored /direct/… URL 307s to
+# /ar/direct/…, so the ad is asked for at its /ar/ address (a redirect would read as another page).
+_RECORD_STATUS = re.compile(r'\\?"status\\?":\\?"([A-Z_]+)\\?",\\?"paymentStatus')
+_GENERIC_TITLE = re.compile(r"<title>\s*مباشر \| Mobasher\s*</title>")   # the record-less page's own title
+_CLOSED = frozenset({"SOLD", "CLOSED", "EXPIRED", "CANCELLED", "CANCELED", "INACTIVE", "DELETED",
+                     "ARCHIVED", "REJECTED", "COMPLETED"})
+
+
+def _own_signal(status, body, moved):
+    if status in (404, 410):
+        return "gone"
+    if status != 200 or moved or not body:
+        return None
+    m = _RECORD_STATUS.search(body)
+    if m:
+        st = m.group(1)
+        return "live" if st == "ACTIVE" else ("gone" if st in _CLOSED else None)
+    if "paymentStatus" in body or "enSlug" in body:
+        return None                      # a record we could not read is not an empty page
+    return "gone" if _GENERIC_TITLE.search(body) else None
+
+
+def _ar_url(url: Optional[str]) -> Optional[str]:
+    if not url or not url.startswith(SITE):
+        return None
+    return "https://mobasher.sa/ar/direct/realestate/" + url[len(SITE):]
+
+
+_stored_url = stored_listing_url(("mobasher_residential_listings", "mobasher_commercial_listings"))
+
+
+def _make_verify_gone(s, control_url: Optional[str]):
+    def probe(ad_number: str, url: Optional[str], canary=None) -> tuple[str, str]:
+        if not url:
+            return "unknown", f"{ad_number!r} has no stored mobasher /direct/realestate/ URL"
+        return LivenessProbe(platform=SLUG, signal=_own_signal, session=lambda: s,
+                             url_for=lambda _a: url, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control_url:
+            return False, "no ad from this run to use as a positive control"
+        verdict, why = probe("control", control_url)
+        return verdict == "live", f"positive control {control_url}: {why}"
+
+    return lambda ad_number: probe(ad_number, _ar_url(_stored_url(ad_number)), canary=canary)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -232,9 +289,11 @@ def main() -> int:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         # an unreadable PAGE costs only age/facade, never the listing — the feed is the inventory
         complete = len(listings) >= declared > 0
+        verify_gone = _make_verify_gone(s, _ar_url((res + com)[0]["listing_url"]) if (res or com) else None)
         for tbl, rr in (("mobasher_residential_listings", res), ("mobasher_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
+                                    verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:

@@ -62,6 +62,22 @@ RELATED_CARD = re.compile(r'<a href="https://ksaaqar\.com/ad/[^"]*">\s*<h5>.*?</
 # /Property/Details/<id>: 13605201 (no description of its own) scored «furnished» from ad 72's card sentence
 # «يوجد شقة في نفس المشروع داخليه مؤثثة», and 18862188 scored «kitchen» from four other ads' cards
 # (CI re-read 41292070655, 🔬 2026-11-01, backlog 1123).
+# A RADIO BUTTON's option label is the site's own search control, never the ad. sakan prints its «filters-popup»
+# on every ad page: «حالة التأثيث» then `<input type="radio" name="property_furnishing_status" …>مؤثث`, «شبه مؤثث»,
+# «غير مؤثث». Read as lines that became «the page says مؤثث», so the score asked «furnished» of 10 of 10 sampled
+# sakan ads and called all 10 a «we miss» (ops_af_score 2026-11-03; page re-read 94863, 🔬). The text that follows a
+# radio input up to the next tag is dropped; a checkbox is kept (some themes print a TICKED feature list that way).
+RADIO_OPTION = re.compile(r'<input\b[^>]*\btype=["\']?radio["\']?[^>]*>[^<]{0,80}', re.I)
+# …and a DROPDOWN is the same control. nofodh prints a <select> of every property type and district on each ad page
+# («تراس», «حي الشرفة الشمالية», «مشرفة» …), so the score asked «balcony» of 10 of 10 sampled nofodh ads
+# (ops_af_score 2026-11-03, balcony we_miss 10; page 472243 re-read the same night).
+SELECT_BLOCK = re.compile(r"<select\b[^>]*>.*?</select>", re.S | re.I)
+# …and a BUTTON is a control too: sukna prints AI prompt chips on every unit page («خطة تقسيط ميسّرة», «استثمار بـ 3
+# ملايين ريال»), read as the ad offering instalments (installment_available we_miss 10 of 10; unit 711 re-read).
+BUTTON_BLOCK = re.compile(r"<button\b[^>]*>.*?</button>", re.S | re.I)
+# A WordPress MENU ITEM is the site's navigation, not the ad: aqaralriyadh's menu «شقق مفروشة» on every page read as
+# the ad saying furnished (furnished we_miss 5 of 5, 2026-11-03 re-read). Only the anchor text of a `menu-item` <li>.
+MENU_ITEM_LINK = re.compile(r'(<li\b[^>]*class="[^"]*\bmenu-item\b[^"]*"[^>]*>\s*<a\b[^>]*>)[^<]{0,80}', re.I)
 RESULT_CARD_TEXT = re.compile(r'<p class="(?:result-card-description|property-showcase-location)\b[^"]*"[^>]*>.*?</p>',
                               re.S | re.I)
 
@@ -190,6 +206,8 @@ def _number_first_lines(body: str) -> list[str]:
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     body = RESULT_CARD_TEXT.sub(" ", body or "")   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
+    body = SELECT_BLOCK.sub(" ", RADIO_OPTION.sub(" ", body))   # …nor the site's own search-filter choices
+    body = MENU_ITEM_LINK.sub(r"\1 ", BUTTON_BLOCK.sub(" ", body))  # …nor its buttons and menu links
     jsonld = []
     for block in JSONLD.findall(body or ""):
         try:

@@ -891,3 +891,16 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   re-categorised ad. 🆕 10-31: a key that existed only in our capture cost a 20-minute crawl. Rule: one live read of the
   record (the page or the current payload) before the first write; measure the live effect within minutes; undo in the
   same run. (Third night of this family → ⚡'s rulebook carries it as a rule since #9910.)
+
+## Rule from 2026-11-01 and 2026-11-03 (copied by 🔧; the same lesson on two nights, so it is a rule)
+
+- **A fix is live only when a crawl from the FIXED commit is the LAST writer of the rows you prove — and a branch
+  crawl is never that writer once the nightly main crawl runs.** 11-01: a queued nightly job checked out the
+  dispatch-time commit and overwrote the fixed 06:54 dealapp crawl (backlog 1139). 11-03: your branch crawls (amaall
+  05:34, superoffice 05:44, albukaeri 06:27, tawia 06:31) wrote the new pins and the proof row read «30/32 served»;
+  the nightly MAIN crawls at 06:50–06:55 (old code — #10083 was still open, its one `data/` file outside the robot's
+  lanes) wrote last, and at 13:1x `pin_coverage_by_platform()` read amaall 0/32, superoffice 0/17, albukaeri 0/13,
+  tawia 0/4. Rule: a PASS row names the run id and commit of the crawl that wrote the rows; a branch-crawl PASS is
+  provisional until the PR is on main and the first MAIN crawl after it has re-written the rows; read
+  `scrape_runs` for the site after your proof and before your end row — if a later run is not from the fixed
+  commit, the proof is «⏳ dated: first main crawl after merge», never PASS.

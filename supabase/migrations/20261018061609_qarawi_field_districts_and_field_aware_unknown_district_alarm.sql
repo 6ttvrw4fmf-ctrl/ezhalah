@@ -1,4 +1,3 @@
--- APPLIED 2026-10-18 06:16:09 UTC (owner session, DB quiet). Al-Qarawi unknown districts after it: 0; fleet backlog routed to 🆕 (backlog 657-659).
 -- Owner 2026-10-17 follow-up («there is more — I'm confident they should have a title like this»): the
 -- 20261018035154 batch read only «بحي X» titles. ialqarawi's own «الحي» field names more, and the same field
 -- across the fleet holds ~3,300 district-less ads whose district our catalog does not know (muhaysini 904,

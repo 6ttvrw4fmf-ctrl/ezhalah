@@ -6,7 +6,7 @@ import { colors, font, lightColors, radius } from '@/theme/tokens';
 import { BUZZER_GOLD, TAP44 } from '@/theme/palette';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR, englishCatalogText } from '@/i18n';
 import { freeTextEn } from '@/lib/freeTextEn';
-import { listingPrice, listingDiscountOldPrice, sourceName, monthlyLineText } from '@/lib/listingDisplay';
+import { listingPrice, listingDiscountOldPrice, sourceName, monthlyLineText, listingSearchedTypeAr } from '@/lib/listingDisplay';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { DIRECTION_LABEL } from '@/lib/afEvidence';
@@ -595,7 +595,11 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
               </View>
             ) : null}
             <View style={s.keyLine}>
-              <Text numberOfLines={1} style={[s.keyTx, s.keyType, keyFont]}>{typeLabel}</Text>
+              {/* the top line names the type the user searched; the source's own word follows when it differs (owner 2026-11-03) */}
+              <Text numberOfLines={1} style={[s.keyTx, s.keyType, keyFont]} testID="listing-preview-searched-type">{locale === 'ar' ? listingSearchedTypeAr(l) : typeLabel}</Text>
+              {locale === 'ar' && listingSearchedTypeAr(l) !== typeLabel ? (
+                <Text numberOfLines={1} style={[s.keyTx, keyFont]} testID="listing-preview-source-type">({typeLabel})</Text>
+              ) : null}
               <View style={s.deal}><Text numberOfLines={1} style={s.dealTx}>{t(l.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text></View>
               {stats.map((v) => (
                 <View key={v} style={s.keyStat}>

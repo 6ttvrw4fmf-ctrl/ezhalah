@@ -54,6 +54,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.http_liveness import LivenessProbe
 
 REST = "https://amlakalahsa.com/wp-json/wp/v2"
 SITE = "https://amlakalahsa.com"
@@ -409,6 +410,44 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     return row, category.lower()
 
 
+# ── LIVENESS ORACLE (2026-11-03) ───────────────────────────────────────────────────────────────
+# The stored permalink is the WRONG address to ask: WordPress answers a missing slug by redirecting to the
+# closest-named post, so a removed ad's URL lands on ANOTHER ad and read as alive. Measured live: AMH19625's
+# permalink (missing from the API since 2026-10-13) 301s to a different post (950,000 SAR / 500 m² instead
+# of 570,000 / 300); its own id /?p=19625 answers 404 (REST: rest_forbidden = not public); a made-up id 404.
+# A live id /?p=19774 redirects to its permalink and the page carries body class postid-19774. So the ad is
+# asked for by its OWN post id, never by slug, and a 404 is believed only while a known-live ad from this
+# run still reads live (the positive control).
+def _own_signal(pid: str):
+    def signal(status, body, moved):
+        if status in (404, 410) and not moved:
+            return "gone"
+        if status == 200 and f"postid-{pid}" in (body or ""):
+            return "live"
+        return None
+    return signal
+
+
+def _make_verify_gone(control_ad: Optional[str]):
+    s = session()
+
+    def probe(ad_number: str, canary=None) -> tuple[str, str]:
+        m = re.fullmatch(r"AMH(\d+)", ad_number or "")
+        if not m:
+            return "unknown", f"{ad_number!r} is not an amlakalahsa ad number"
+        pid = m.group(1)
+        return LivenessProbe(platform="amlakalahsa", signal=_own_signal(pid), session=lambda: s,
+                             url_for=lambda _a: f"{SITE}/?p={pid}", canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control_ad:
+            return False, "no ad from this run to use as a positive control"
+        verdict, why = probe(control_ad)
+        return verdict == "live", f"positive control {control_ad}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--limit-test", type=int, default=0,
@@ -476,9 +515,10 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        verify_gone = _make_verify_gone((seen_res + seen_com)[0] if (seen_res or seen_com) else None)
         for tbl, seen_ads in (("amlakalahsa_residential_listings", seen_res),
                               ("amlakalahsa_commercial_listings", seen_com)):
-            n = db.prune_unseen(tbl, set(seen_ads), source="AmlakAlAhsa")
+            n = db.prune_unseen(tbl, set(seen_ads), source="AmlakAlAhsa", verify_gone=verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped — kept existing active")
             else:

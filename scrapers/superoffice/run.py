@@ -26,7 +26,17 @@ WHY ONLY THE SERVER-RENDERED WINDOW (robots.txt)
 site's robots.txt says `Disallow: /api`. This fleet never calls a path robots.txt disallows
 (scrapers/razre, wahadat, arkaan), so the crawl reads only the server-rendered pages: the window per
 branch + /services/private-office. An office the window stopped showing is NOT gone — its own page is
-read (below) and only that page may retire it. Whether to read the API is an owner decision.
+read (below) and only that page may retire it.
+
+OWNER DECISION 4 (2026-11-03, «Yes, use your picks»): respect robots.txt — never read /api/office-listing.
+The robots-allowed set (WINDOW offices × each branch on the sitemap, 24 on 2026-11-03: al-aarid 8 of 18,
+as-suwaidi 8 of 56, al-rawdah 8 of 170) IS this site's complete, expected catalogue for Ezhalah. The
+robots-allowed /sitemap/units.xml was measured EMPTY the same day. The monitors know it from
+ops_platform_catalogue_rebase (superoffice, expected 24 a run): the old site's 184-row history no longer
+reads as a collapse, and a run under half of 24 still raises silent_partial_success. A window SHORTER
+than min(WINDOW, totalCount) is a truncated page, not a smaller catalogue: it blocks pruning
+(window_is_whole). Each run re-reads robots.txt and only REPORTS when /api stops being disallowed —
+reading it then is a new owner decision, never automatic.
 
 TRAPS
 -----
@@ -83,6 +93,8 @@ SLUG = "superoffice"
 CITY_AR = "الرياض"          # every branch is in Riyadh; the address line must still name it
 SERVICE = "private-office"
 SITEMAP = f"{BASE}/sitemap/offices.xml"
+ROBOTS = f"{BASE}/robots.txt"
+WINDOW = 8                  # offices each branch page server-renders (the rest sit behind the disallowed /api)
 DIRECT_ALIVE_ORACLE = "superoffice.unit_page.jsonld_offer_availability"
 
 _BRANCH_RE = re.compile(r"<loc>https://superoffice\.sa/branch/([a-z0-9-]+)/private-office</loc>")
@@ -156,6 +168,35 @@ def parse_listing_page(page: str) -> dict[str, Any]:
     if not isinstance(obj, dict) or not isinstance(obj.get("units"), list):
         raise ValueError("office list is not a {units: [...]} object")
     return obj
+
+
+def window_is_whole(lst: dict[str, Any]) -> bool:
+    """A branch page's server-rendered window is whole when it holds min(WINDOW, totalCount) offices. A
+    shorter window (or an unreadable totalCount) is a truncated page — never read as a smaller catalogue."""
+    try:
+        total = int(lst.get("totalCount"))
+    except (TypeError, ValueError):
+        return False
+    units = [u for u in lst.get("units") or [] if isinstance(u, dict) and u.get("code")]
+    return total >= 0 and len(units) >= min(WINDOW, total)
+
+
+def robots_disallows_api(robots_txt: str) -> Optional[bool]:
+    """True when robots.txt's `User-Agent: *` group disallows /api; False when it no longer does; None
+    when the file could not be read as a robots file (unknown — never read as permission)."""
+    if not robots_txt or "user-agent" not in robots_txt.lower():
+        return None
+    applies, saw_star = False, False
+    for raw in robots_txt.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        key, _, val = line.partition(":")
+        key, val = key.strip().lower(), val.strip()
+        if key == "user-agent":
+            applies = val == "*"
+            saw_star = saw_star or applies
+        elif applies and key == "disallow" and val and ("/api/office-listing".startswith(val.rstrip("*"))):
+            return True
+    return False if saw_star else None
 
 
 # ── an office's own page ─────────────────────────────────────────────────────────────────────────
@@ -413,6 +454,11 @@ def collect_units(s, branches: list[str]) -> tuple[dict[str, dict], dict[str, in
             continue
         if branch:
             totals[branch] = int(lst.get("totalCount") or 0)
+            if not window_is_whole(lst):
+                # a truncated page: keep what it shows, but the crawl is not the whole catalogue → no prune
+                print(f"  ✗ {url}: window holds {len(lst['units'])} office(s), expected "
+                      f"min({WINDOW}, totalCount={lst.get('totalCount')!r})", flush=True)
+                unreadable += 1
         for u in lst["units"]:
             if isinstance(u, dict) and u.get("branchSlug") and u.get("code"):
                 units.setdefault(ad_number_for(u["branchSlug"], u["code"]), u)
@@ -431,6 +477,13 @@ def main() -> int:
     # every crawler on the shared resilient path; backlog 63). The session owns the profile.
     s, tried = retry_smarter_session(BASE, timeout=40)
     print(f"  route: {' · '.join(tried)}", flush=True)
+    try:
+        api_disallowed = robots_disallows_api(get(s, ROBOTS))
+    except Exception:  # noqa: BLE001
+        api_disallowed = None
+    if api_disallowed is False:
+        print("  ⓘ robots.txt no longer disallows /api — the crawl still does not read it (owner decision 4, "
+              "2026-11-03); reading it would be a new owner decision", flush=True)
     branches = branches_from_sitemap(get(s, SITEMAP))
     print(f"{SOURCE}: {len(branches)} branch private-office page(s) on its sitemap: {branches}", flush=True)
     units, totals, unreadable = collect_units(s, branches) if branches else ({}, {}, 1)

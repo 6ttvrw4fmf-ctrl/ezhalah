@@ -1,4 +1,3 @@
--- APPLIED 2026-10-18 06:50:50 UTC (owner session).
 -- First live run of mon_detect_unknown_named_district (2026-10-18 06:50 UTC) listed «الطائف» (sokok, 72 ads) as an
 -- unknown district: loc_catalog_city.city_norm is norm_ar («الطائف») while the candidate was compared with
 -- norm_district_tok («طايف»). A city's own name is never a district: compare both sides with norm_district_tok.
@@ -42,4 +41,3 @@ begin
       p_min);
   end loop;
 end $function$;
-

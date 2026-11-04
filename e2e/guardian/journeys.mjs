@@ -257,8 +257,19 @@ const G2 = {
 // Google and Apple ONLY (owner ruling 2026-09-01). Phone/WhatsApp OTP was removed; scripts/
 // verify-no-phone-auth.ts pins it in the SOURCE — this pins it in what production actually renders.
 const PHONE_MARKERS = /رقم الجوال|رقم الهاتف|رمز التحقق|واتساب|WhatsApp|\bOTP\b|\+966/;
-/** The always-present entry point that raises the auth surface on demand (both viewports). */
+/** The always-present entry point that raises the auth surface on demand (both viewports). Its LABEL depends on
+ *  the width: src/app/index.tsx renders `t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')`, so a narrow phone top
+ *  bar reads «تسجيل الدخول» while the long label lives in the (closed) drawer. Measured 2026-11-03 on ezhalah.com at
+ *  375 px: the top bar shows «تسجيل الدخول» and the long label is not on screen — the journey read that as "there
+ *  is no way to sign in" (guardian run 41590614252). Both labels are tried, long first; neither = a real failure. */
 const SIGNIN_ENTRY = 'إنشاء حساب / تسجيل الدخول';
+const SIGNIN_ENTRIES = [SIGNIN_ENTRY, 'تسجيل الدخول'];
+const tapSignInEntry = async (page) => {
+  for (const [i, label] of SIGNIN_ENTRIES.entries()) {
+    if (await tap(page, label, i === 0 ? 5000 : 15000)) return label;
+  }
+  return null;
+};
 
 /** Everything about the auth surface as a guest sees it, in one read. */
 const authSurface = (page) => page.evaluate((phoneSrc) => {
@@ -380,16 +391,16 @@ const G3 = {
     // centred presentation. Returning early there would have left the whole auth surface untested
     // on exactly the viewport most of this app's users are on — a journey passing on silence.
     if (fresh.invitations === 0) {
-      const opened = await tap(page, SIGNIN_ENTRY);
+      const opened = await tapSignInEntry(page);
       if (!opened) {
-        bad.push(`signed out with no auth invitation on screen and no «${SIGNIN_ENTRY}» entry point to open one — there is no way to sign in`);
+        bad.push(`signed out with no auth invitation on screen and no «${SIGNIN_ENTRIES.join('» / «')}» entry point to open one — there is no way to sign in`);
         return violated(bad, seen);
       }
       await sleep(2500);
       const onDemand = await authSurface(page);
       check('after the on-demand sign-in entry point', onDemand);
       if (onDemand.invitations === 0) {
-        bad.push(`pressing «${SIGNIN_ENTRY}» opened no auth invitation — the only sign-in entry point at this viewport is dead`);
+        bad.push(`pressing «${opened}» opened no auth invitation — the only sign-in entry point at this viewport is dead`);
         return violated(bad, seen);
       }
     }

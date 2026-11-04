@@ -96,6 +96,12 @@ TYPE_MAP_AR = {
     "ارض تجارية": "Commercial Land", "أرض تجارية": "Commercial Land",
     "عمارة تجارية": "Commercial Building", "مجمع تجاري": "Commercial Building",
     "محطة": "Gas Station", "محطة وقود": "Gas Station", "مغسلة": "Shop", "كشك": "Kiosk",
+    # 2026-11-03 (🔧 repair, legacy_novel_type alerts): live Deal types that leaked raw and were served as
+    # «غير معروف». «بلك» (a land block; all 11 live ads are titled «ارض للبيع …»), «ستريب مول» (a strip
+    # mall, the same family as «مجمع تجاري»), and the two clinic words (a medical building is a
+    # مرافق خدمية Health Center, like «مركز صحي»).
+    "بلك": "Residential Land", "ستريب مول": "Commercial Building",
+    "مبنى عيادات": "Health Center", "مجمع طبي": "Health Center",
 }
 COMMERCIAL_TYPES = {
     "Office", "Shop", "Showroom", "Warehouse", "Workshop", "Factory", "Hotel",
@@ -876,6 +882,22 @@ def _fetch_fail_summary(limit: int = 6, max_len: int = 240) -> str:
     return f" fetch_fail_total={total} fetch_fail={parts}"[:max_len]
 
 
+# AN UNPROVABLE NIGHT IS A FAILED NIGHT (crawl-health 2026-11-04). Shard 19/24 on 2026-11-03 attempted 2,375 ids and
+# parsed 356: 2,019 pages came back 200 with ng-state and no listing schema, while its 23 sibling shards parsed
+# 96-99% of theirs the same night and dealapp_liveness quarantined itself on canary_live=0/3 at the same hour — dealapp
+# was serving shells, not reporting 2,019 removals. The collapse guard rightly withheld the prune, but the run still
+# finalized ok=true, so the only barrier that saw it was mon_detect_silent_partial_success. A shard that could read
+# fewer than half the ids it set out to read has not enumerated its slice: it is DEGRADED (end_run demotes it to
+# ok=false and CI reddens), never a small catalogue. Normal nights sit at 96-99%; the cut sits far from both.
+UNPROVABLE_MIN_ATTEMPTED = 50
+UNPROVABLE_HIT_RATE = 0.5
+
+
+def capture_unprovable(attempted: int, parsed: int) -> bool:
+    """True when this run parsed fewer than half the ids it attempted (and attempted enough to judge)."""
+    return attempted >= UNPROVABLE_MIN_ATTEMPTED and parsed < UNPROVABLE_HIT_RATE * attempted
+
+
 def _record_status_200_no_schema(adid: str, requested_url: str, resp: Any) -> None:
     try:
         final_url = str(getattr(resp, "url", "") or "")
@@ -1083,9 +1105,10 @@ PROSE_AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "pa
 
 def af_answers(aprops: dict, description: Optional[str]) -> dict[str, bool]:
     out: dict[str, bool] = {}
-    for col, val in normalize.amenities_from_lines(description).items():
-        if col in PROSE_AMENITY_COLUMNS:
-            out[col] = val
+    # ONE READER (owner 2026-11-03, «clear them»): the prose answers come from the Advanced Filter's word reader.
+    # The older normalize matcher served ~2,400 yeses the ad's words do not state (e.g. «مداخل مكيفة» as AC).
+    from scrapers.facts.one_reader import amenity_answers
+    out.update(amenity_answers(description, PROSE_AMENITY_COLUMNS, {"balcony": "balcony_terrace"}))
     util = aprops.get("utilities")
     if isinstance(util, str) and util.strip():
         for tok in re.split(r"[,،]", util):
@@ -1497,9 +1520,14 @@ def main() -> int:
         # note so a run's coverage shortfall is adjudicable straight from SQL: attempted vs
         # rows_upserted gives the hit rate, and the buckets say whether the misses were
         # dealapp's app reporting the ids gone or our fetches never rendering a live page.
+        unprovable = capture_unprovable(len(ids), seen_n)
+        if unprovable:
+            print(f"✗ Deal App: parsed {seen_n} of {len(ids)} attempted ids — this slice was NOT enumerated "
+                  "(see capture_unprovable); the run is reported degraded, never as a small catalogue.", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
                               notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)} absent={len(absent)}"
-                                    f"{_fetch_fail_summary()}",
+                                    f"{' unprovable_capture' if unprovable else ''}{_fetch_fail_summary()}",
+                              degraded=unprovable,
                               check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
         if not healthy:
             print("✗ Deal App: run demoted to unhealthy by end_run()'s RC-B guard "

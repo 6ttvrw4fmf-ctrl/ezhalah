@@ -47,7 +47,7 @@ import { useI18n } from '@/i18n';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useAtLeast } from '@/lib/useAtLeast';
-import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
+import { SHARE_LABEL_BREAKPOINT, SIGNUP_LABEL_BREAKPOINT } from '@/lib/responsive';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { noTranslateRef } from '@/noTranslate';
 
@@ -68,6 +68,7 @@ export default function MapRoute() {
   const { user, openAuth, authChecked } = useApp();
   const docked = useDocked();
   const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
+  const signUpLabelFits = useAtLeast(SIGNUP_LABEL_BREAKPOINT);
   const [shareOpen, setShareOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Full-screen map (owner 2026-10-31: «when the user clicks on the map take him inside the map», then «zoom in
@@ -128,7 +129,7 @@ export default function MapRoute() {
               dataSet={{ ...TAP44 }}
             >
               <Ionicons name="person-outline" size={15} color="#fff" />
-              <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
+              <Text style={s.topSignInText}>{t(signUpLabelFits ? 'Sign up / Log in' : 'Sign in')}</Text>
             </Pressable>
           )}
           {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}

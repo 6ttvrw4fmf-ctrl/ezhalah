@@ -199,9 +199,17 @@ class LivenessProbe:
 
 
 def _path_of(u: str) -> str:
-    from urllib.parse import urlparse
+    """The URL's path, percent-DECODED, so a request and its landing compare as the same page.
+
+    The HTTP client percent-encodes a raw Arabic slug on the wire and reports the encoded form as
+    `r.url`, so the raw stored URL and its own landing used to differ byte-for-byte and every
+    Arabic-slug probe read as an unresolved redirect (`path_changed`) — UNKNOWN forever. Measured
+    2026-11-03: mizlaj MZ29 (`/guest/listings/فيلا-مع-…-٢٥٠`) answered a direct 404 with no
+    redirect, the crawl's verify_gone held it «1 unknown» at full strikes, and it stayed on screen
+    (served_after_source_gone:mizlaj, alert 12838). A real redirect to another path still differs."""
+    from urllib.parse import unquote, urlparse
     p = urlparse(u)
-    return (p.path or "/").rstrip("/") or "/"
+    return unquote(p.path or "/").rstrip("/") or "/"
 
 
 def stored_listing_url(tables: tuple[str, ...]) -> Callable[[str], Optional[str]]:
@@ -228,3 +236,67 @@ def stored_listing_url(tables: tuple[str, ...]) -> Callable[[str], Optional[str]
                 return r.data[0].get("listing_url") or None
         return None
     return url_for
+
+
+# ── OWNER-APPROVED REMOVAL STATUS (owner decision 2026-11-03) ────────────────────────────────────────
+# The law above stays universal: decide() and read_is_unbelievable() never read a 403 or a 5xx as a death.
+# The owner approved ONE narrow exception, per site and per status, for sites measured to answer a REMOVED
+# ad with an error while their live ads answer 200 (asked: «hide them … only if the same check opens a live
+# ad from that site fine, and the error repeats on 2 checks» → «Yes, hide them»). Measured 2026-11-03:
+#   alshawaf / bossbih (Drupal): an UNPUBLISHED node answers 403 twice; a deleted one 404; live 200.
+#   aqaratikom (nawait.sa /api/v1/ad/<uuid>): a removed ad answers 500 twice; a made-up uuid 404; live 200.
+#   abralosol (owner «Yes, hide them» for this site, 2026-11-03): a removed ad's /{nid} answers 403 with the
+#   site's own page «لايمكن فتح هذة الصفحة»; a made-up nid 404; live 200 — its caller also requires that text.
+# A site joins this table only with the owner's approval. Nothing else may call a 403/5xx a death.
+OWNER_APPROVED_REMOVAL_STATUS: dict[str, int] = {"alshawaf": 403, "bossbih": 403, "aqaratikom": 500,
+                                                  "abralosol": 403}
+
+
+def removal_by_owner_approved_status(
+        platform: str,
+        fetch: Callable[[str], tuple[Optional[int], str, bool]],
+        url: str,
+        control_url: Optional[str],
+        control_signal: Signal,
+        pause: float = 1.5,
+        body_must: Optional[Any] = None) -> Optional[Verdict]:
+    """GONE only when ALL hold: the site is in OWNER_APPROVED_REMOVAL_STATUS; the ad's own URL answers that
+    exact status on two reads, neither redirected (and, when `body_must` is given, both bodies match it); and
+    in the SAME check a live control ad of the same site reads LIVE through the site's own signal. Anything
+    else returns None (the caller keeps UNKNOWN)."""
+    code = OWNER_APPROVED_REMOVAL_STATUS.get(platform)
+    if code is None or not url or not control_url or control_url == url:
+        return None
+    reads = []
+    for i in range(2):
+        st, body, moved = fetch(url)
+        if st != code or moved or (body_must is not None and not body_must.search(body or "")):
+            return None
+        reads.append(st)
+        if i == 0:
+            time.sleep(pause)
+    cst, cbody, cmoved = fetch(control_url)
+    if decide(cst, cbody, cmoved, control_signal) != ("live", f"source still serves this listing (HTTP {cst})"):
+        return None
+    return ("gone", f"owner rule 2026-11-03: HTTP {code} on two reads while live control {control_url} "
+                    f"answered live (HTTP {cst})")
+
+
+def live_control_url(tables: tuple[str, ...], exclude: str = "",
+                     max_age_hours: int = 72) -> Optional[str]:
+    """The stored URL of an ad of the same site that a direct read proved ALIVE recently (the control).
+    A failed lookup is None, which keeps the row UNKNOWN — never a removal without a control."""
+    from datetime import datetime, timedelta, timezone
+    from scrapers.common import db
+    since = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+    for tbl in tables:
+        try:
+            r = (db.sb().table(tbl).select("ad_number,listing_url").eq("active", True)
+                 .gte("last_verified_alive_at", since).order("last_verified_alive_at", desc=True)
+                 .limit(5).execute())
+        except Exception:  # noqa: BLE001
+            return None
+        for row in r.data or []:
+            if row.get("listing_url") and row.get("ad_number") != exclude:
+                return row["listing_url"]
+    return None

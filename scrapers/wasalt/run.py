@@ -358,7 +358,7 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
     sub = info.get("propertySubType") or ""
     # Unmapped subtype → RAW preserved (never a guessed default; Batch 2 type-truth contract) —
     # byte-identical to the old `TYPE_MAP.get(sub, sub or None)`.
-    property_type = normalize.map_type_en(sub) or (sub or None)
+    property_type = normalize.map_type_en(sub, WASALT_TYPE_OVERRIDES) or (sub or None)
     # Resolve the "Additional Information" panel ONCE so we can also set the detail_enriched flag.
     if FETCH_DETAIL and s is not None:
         deep = _fetch_additional_attributes(s, slug)
@@ -663,9 +663,22 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
     }
 
 
+# 2026-11-03 (🔧 repair, legacy_novel_type alerts 6898/6899/9822/12436): four live wasalt subtypes had no
+# key and leaked raw, so search served them as «غير معروف» and the type filter could not reach them. Each
+# maps to the clean type its own ad names: «أرض زراعية 200,000م2» (Farming Land), «مجمع سكني» (Complex),
+# «Telecom Tower for Sale» (wasalt writes a lowercase t), «Teller for Sale» (an ATM site). Kept here, not in
+# normalize.TYPE_MAP_EN, whose key set is pinned verbatim to the old private maps.
+WASALT_TYPE_OVERRIDES = {
+    "Farming Land": "Agriculture Plot", "Complex": "Compound",
+    "Telecom tower": "Telecom Tower", "Teller": "ATM Site",
+}
+
+
 def is_land_type(property_type) -> bool:
-    """wasalt land types are the English «… Land» words (Residential Land, Farming Land, Commercial Land)."""
-    return bool(property_type) and str(property_type).strip().endswith("Land")
+    """wasalt land types are the English «… Land» words (Residential Land, Commercial Land) plus
+    Agriculture Plot, which wasalt's «Farming Land» maps to since 2026-11-03."""
+    t = str(property_type or "").strip()
+    return bool(t) and (t.endswith("Land") or t == "Agriculture Plot")
 
 
 def land_service_fields(property_type, addl_info) -> dict:

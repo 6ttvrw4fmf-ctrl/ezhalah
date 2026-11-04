@@ -559,7 +559,8 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
     'expo-image': { Image: 'Image' }, '@expo/vector-icons/Ionicons': { default: 'Ionicons' },
     '@/theme/tokens': { colors: {}, radius: {}, font: { family: {} }, lightColors: {} }, '@/theme/palette': { TAP44: {}, BUZZER_GOLD: {} },
     '@/i18n': { useI18n: () => ({ locale, isRTL: locale === 'ar', t: (key: string, vars?: Record<string, string | number>) => translate(locale, key, vars) }), englishCatalogText: (x: string) => x },
-    '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price', monthlyLineText: () => null },
+    // listingSearchedTypeAr (2026-11-03, the headline type) is not what this barrier measures; a shim returning the source word keeps the render as before
+    '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price', monthlyLineText: () => null, listingSearchedTypeAr: (l: { type?: string }) => l.type ?? '' },
     '@/lib/arabicText': arabicText,
     '@/lib/translitPlace': { translitPlace: (x: string) => x }, '@/lib/freeTextEn': { freeTextEn: (x: string) => x }, '@/lib/afEvidence': { DIRECTION_LABEL: {} },
     '@/lib/useAtLeast': { useAtLeast: () => false }, '@/lib/responsive': { PICKER_SHEET_BREAKPOINT: 768 }, '@/lib/useReducedMotion': { useReducedMotion: () => true },

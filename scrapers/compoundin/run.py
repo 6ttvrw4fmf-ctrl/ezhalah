@@ -232,6 +232,18 @@ def is_delisted(page_html: str) -> bool:
     return bool(m and _DELISTED_RE.search(m.group(1)))
 
 
+def is_directory_only(page_html: str) -> bool:
+    """A compound whose units were all withdrawn: CompoundIn keeps the page (HTTP 200, same h1) but
+    renders it as a DIRECTORY entry — `cin-directory-compound` block with its map, «About / Location /
+    Compounds near …» — and no «Units» section and no unit card at all. Measured live 2026-11-03:
+    aqua-compound, retal-residence, florentina-compound and soul are in that state (0 unit cards, no
+    `cin-property-units`), while listed compounds (azure-al-reem 10 units, dur-alhada 3) carry the
+    `cin-property-units` section and no directory block. All three conditions must hold."""
+    return ("cin-directory-compound" in page_html
+            and "cin-property-units" not in page_html
+            and "cin-unit-card" not in page_html)
+
+
 def compound_location(page_html: str) -> tuple[Optional[str], Optional[str]]:
     """(city_en, district_en), each read from a place the source uses for that field only.
 
@@ -393,9 +405,25 @@ def photos(page_html: str) -> Optional[list[str]]:
 # shared law. A delisted compound answers HTTP 200 with «This compound is no longer listed» in its
 # <h1> (CIN703/CIN704, ayanna-olaya-compound, 2026-09-28: gone from the sitemap, page delisted, rows
 # still active since 09-22) → GONE for every unit it had. A listed page carrying this unit's own
-# `data-cin-contact-unit` card → LIVE. Anything else — including a listed page without this unit,
-# which has not been measured — is no opinion, so the row holds.
+# `data-cin-contact-unit` card → LIVE. A page turned into a directory entry (no «Units» section, no
+# unit card, `cin-directory-compound` block — see is_directory_only) → GONE for every unit it had.
+# Anything else — including a listed page with a «Units» section that omits this unit — is no
+# opinion, so the row holds.
+#
+# A UNIT THE PAGE ITSELF MARKS «Not available» (2026-11-03). The page keeps a withdrawn unit's card
+# (`<article … id="unit-<uid>">`) but gives it the ribbon «Not available» and drops its «Inquire Now»
+# button — so the crawl, which keys a card by that button's data-cin-contact-unit, skips it and the row
+# was struck 24 crawls while its own card said it was off the market. Measured live on dur-alhada:
+# CIN810's card carries the ribbon and no button; 809, 811 and 812 (live) carry the button and no
+# ribbon. That card → GONE. A card with the ribbon is never read as LIVE, button or not.
 _AD_RE = re.compile(rf"^{PREFIX}(\d+)$")
+_UNIT_ARTICLE_RE = re.compile(r'<article\b[^>]*\bid="unit-(\d+)"[^>]*>(.*?)</article>', re.S)
+_NOT_AVAILABLE_RE = re.compile(r'cin-unit-card__ribbon">\s*Not available\s*<', re.I)
+
+
+def unit_marked_not_available(page_html: str, uid: str) -> bool:
+    return any(u == uid and _NOT_AVAILABLE_RE.search(card)
+               for u, card in _UNIT_ARTICLE_RE.findall(page_html))
 
 
 def _unit_signal(uid: str):
@@ -404,6 +432,13 @@ def _unit_signal(uid: str):
             return None
         if is_delisted(body):
             return "gone"
+        if is_directory_only(body) and not _moved:
+            # the page now lists no units at all: every unit it had went with them (2026-11-03)
+            return "gone"
+        if not _moved and unit_marked_not_available(body, uid):
+            return "gone"
+        if unit_marked_not_available(body, uid):
+            return None
         return "live" if any(c["uid"] == uid for c in unit_cards(body)) else None
     return signal
 

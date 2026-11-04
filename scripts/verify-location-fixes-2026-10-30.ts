@@ -44,7 +44,7 @@ export function problems(ms: Mig[]): string[] {
   if (!v) p.push('mon_district_contradicts_source is never defined');
   else {
     if (!/AS\s+MATERIALIZED/i.test(v.b)) p.push(`${v.f}: the cheap text filter is no longer fenced (MATERIALIZED) — the detector times out on ~417k rows`);
-    if (!/NOT\s+COALESCE\(loc_display_district_ar\(t\.city_id,\s*t\.source_says\)\s*=\s*t\.we_display,\s*false\)/i.test(v.b)) p.push(`${v.f}: spelling variants count as contradictions again`);
+    if (!/NOT\s+COALESCE\(\s*\(?\s*loc_display_district_ar\((?:t\.)?city_id,\s*(?:t\.)?source_says\)\s*=\s*(?:t\.)?we_display\s*\)?\s*,\s*false\)/i.test(v.b)) p.push(`${v.f}: spelling variants count as contradictions again`);
     if (!/aqar_address_district\(a\.listing_url\)/.test(v.b)) p.push(`${v.f}: Aqar's own address no longer excuses the district it names`);
   }
   const dropped = fnBody(ms, 'source_district_dropped_rows');

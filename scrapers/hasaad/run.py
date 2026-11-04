@@ -234,6 +234,23 @@ def fetch_project_urls(s: cc.Session, limit: int = 0) -> list[str]:
     return urls[:limit] if limit else urls
 
 
+# The project's OWN «مميزات مشروع» block (`<div id="pro_features">`, one `<h4>` per feature: «مصعد» / «3 مصاعد»,
+# «مصعد» / «FUJI»). Read 2026-11-03 on all 6 live projects: the block differs per project (FUJI vs 3 مصاعد), so it is
+# that building's statement, not shared art. elevator stayed NULL on all 12 active units and the AF «مصعد» search never
+# found them (ops_af_score hasaad elevator we_miss 5 of 5). Only the LIFT is read: a building feature every unit
+# shares. True-only — a block that does not name it is silence.
+_FEATURES_RE = re.compile(r'id="pro_features"(.*?)(?:id="pro_location"|id="pro_units"|<footer|$)', re.S)
+_FEATURE_H4_RE = re.compile(r"<h4>(.*?)</h4>", re.S)
+
+
+def project_has_lift(page_html: str) -> Optional[bool]:
+    m = _FEATURES_RE.search(page_html or "")
+    if not m:
+        return None
+    heads = [plain(h) for h in _FEATURE_H4_RE.findall(m.group(1))]
+    return True if any(h in ("مصعد", "مصاعد") for h in heads) else None
+
+
 def parse_project(page_html: str) -> dict[str, Any]:
     """The project-level facts and every unit card, exactly as the page states them."""
     m = _POSTID_RE.search(page_html)
@@ -268,6 +285,7 @@ def parse_project(page_html: str) -> dict[str, Any]:
             photos.append(e)
     return {"post_id": m.group(1) if m else None, "title": title, "city": city, "district": district,
             "status_chip": plain(cm.group(1)) if cm else "", "units": units, "photos": photos,
+            "lift": project_has_lift(page_html),
             "units_total": normalize.to_int(um.group(1)) if um else None}
 
 
@@ -339,6 +357,8 @@ def map_units(url: str, project: dict[str, Any]) -> tuple[list[dict], dict[str, 
                 kind="total", origin="structured"),
             **normalize.amenities_from_text(spec_text),
         }
+        if project.get("lift"):
+            row["elevator"] = True
         row["additional_info"] = {k: v for k, v in {
             "project_post_id": pid, "unit_post_id": u["id"], "project_title": title,
             "model_name": u["name"], "price_raw": u["price_raw"] or None,

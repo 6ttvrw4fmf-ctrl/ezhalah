@@ -1,4 +1,3 @@
--- APPLIED 2026-10-18 06:55:29 UTC (owner session).
 -- Owner decision 2026-10-17 («sure do that»): «حي الفرسان» is an عنيزة district (52 ialqarawi ads name it in their
 -- own «الحي» field and titles «بحي الفرسان بعنيزة»). It was held back only because norm_district_tok folds it onto
 -- the town «فرسان» (Farasan island, جازان) — a different place 900 km away; the district is city-scoped to عنيزة.

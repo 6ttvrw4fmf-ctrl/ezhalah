@@ -49,7 +49,7 @@ from curl_cffi import requests as cc
 from scrapers.common import arabic_location as AL
 from scrapers.common import db
 from scrapers.common.http import retry_smarter_session
-from scrapers.common.http_liveness import LivenessProbe
+from scrapers.common.http_liveness import LivenessProbe, removal_by_owner_approved_status
 from scrapers.common import normalize as N
 from scrapers.common.pii import redact_capture, redact_pii
 from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link
@@ -342,7 +342,25 @@ def _make_verify_gone(control: Optional[dict]):
         verdict, why = probe(control["ad_number"])
         return verdict == "live", f"positive control {control['ad_number']}: {why}"
 
-    return lambda ad_number: probe(ad_number, canary=canary)
+    def verify(ad_number: str) -> tuple[str, str]:
+        verdict, why = probe(ad_number, canary=canary)
+        if verdict != "unknown":
+            return verdict, why
+        # Owner rule 2026-11-03 («Yes, hide them»): a removed ad answers 403 with the site's own
+        # «لايمكن فتح هذة الصفحة» page. Believed only on two such reads while the control reads live.
+        url = _oracle_url_for(ad_number)
+        ctrl = _oracle_url_for(control["ad_number"]) if control else None
+        reader = LivenessProbe(platform="abralosol", signal=_oracle_signal, session=lambda: s,
+                               url_for=_oracle_url_for)
+        owner = removal_by_owner_approved_status("abralosol", reader.fetch, url, ctrl, _oracle_signal,
+                                                 body_must=_CANNOT_OPEN)
+        return owner or (verdict, why)
+
+    return verify
+
+
+# The site's own page for an ad it no longer shows (measured 2026-11-03 on /8047, /4676, /7784 → 403).
+_CANNOT_OPEN = re.compile(r"لايمكن فتح هذة الصفحة")
 
 
 # ── detail page ─────────────────────────────────────────────────────────────────────────────────
