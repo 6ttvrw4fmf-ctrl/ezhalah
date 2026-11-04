@@ -161,6 +161,8 @@ export const PLATFORMS: Platform[] = [
   { name: 'سوبر أوفيس', domain: 'superoffice.sa', brand: 'SuperOffice', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // haraj: حراج — public classifieds; ONLY REGA-licensed property offers are listed (owner 2026-10-16), ~7 of every 150 property-titled posts read on 2026-10-16.
   { name: 'حراج', domain: 'haraj.com.sa', brand: 'Haraj', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // propertyfinder: Property Finder Saudi — 4,516 ads + 155 off-plan (hidden) measured 2026-11-04, BOTH sides (3,306 sale + 1,210 rent).
+  { name: 'بروبرتي فايندر', domain: 'propertyfinder.sa', brand: 'Property Finder', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // shomou: مكتب شموع العقار (Al-Ahsa) — 142 in-date ads of 1,028 listed (835 past their own end date) measured 2026-09-28.
   { name: 'شموع العقار', domain: 'shomoalaqar.com.sa', brand: 'Shomou', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // maktab: منصة مكتب — 11 offices with in-date REGA ad licences (Riyadh + Tabuk) measured 2026-09-28.

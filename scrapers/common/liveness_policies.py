@@ -91,7 +91,7 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # almuteb JOINS this set on 2026-11-04 (owner «Yes, use your picks», decision 2): almuteb.sa has answered
 # NXDOMAIN since 2026-10-23; the platform is retired (RETIRED_PLATFORMS.txt) and its 11 rows are hidden and
 # adjudicated, kept. Its CANDIDATE_PLUS_DIRECT policy left the registry in the same change.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj", "facts",
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "moj", "facts",
                                        "almuteb"})
 
 
@@ -1133,6 +1133,13 @@ POLICIES: dict[str, _P] = {
         "prune_unseen unless every detail page was readable.",
         "An oracle is possible — /web/gallery/<id> answers HTTP 404 for an unknown id — but it is "
         "not written yet, so this does not claim a direct check."),
+    "propertyfinder": _P(
+        _pol("propertyfinder", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's four COMPLETE category lists (/ar/<side>/عقارات-….html?page=N, "
+        "__NEXT_DATA__ searchResult, walked to meta.page_count and checked against meta.total_count; a side short "
+        "of it is walked twice). run.py prunes a table only when every side feeding it walked completely.",
+        "No oracle is possible within the owner's access rule: single-ad /plp/ pages answer 403 to robots and are "
+        "never fetched, so the complete list is the only reading there is."),
     "opensooq": _P(
         _pol("opensooq", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the real-estate SERP's inline JSON (/ar/عقارات?page=N, "
@@ -1598,6 +1605,8 @@ SOURCE_LIST_DAILY: tuple[str, ...] = (
     "abralosol", "albukaeri", "aqaratikom", "aqarnajran", "arkaan", "awal", "dallali",
     "fahadalshahri", "fursaghyr", "maqrat", "muajarh", "nafithh", "october", "opensooq",
     "ramzalqasim", "safera", "satel", "shmoualshmal", "shomou", "squares", "vmksa", "wahadat",
+    # Property Finder launch (owner 2026-11-04 approved the source; launched by the owner's switch)
+    "propertyfinder",
 )
 for _p in SOURCE_LIST_DAILY:
     assert POLICIES[_p]["strategy"] == CRAWL_PRESENCE_ONLY, _p      # never demote an oracle tier
