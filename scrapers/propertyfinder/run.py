@@ -126,7 +126,13 @@ def location(p: dict) -> dict[str, Any]:
                             "full_name": (p.get("location") or {}).get("full_name")}}
 
 
-def price_fields(p: dict, deal: str) -> tuple[Optional[dict], str]:
+# OWNER 2026-11-04: a RESIDENTIAL rent Property Finder labels «yearly» at a per-month-sized figure is a MONTHLY price.
+# Same band as the fleet's cheap-yearly / silent-period rule (src/lib/rentPool.ts CHEAP_YEARLY_FROM/BELOW,
+# judge_silent_rent_period_ar): 300 <= value < 8,000. Below 300 is a placeholder and stays as published.
+PER_MONTH_FROM, PER_MONTH_BELOW = 300, 8_000
+
+
+def price_fields(p: dict, deal: str, category: str = "residential") -> tuple[Optional[dict], str]:
     pr = p.get("price") or {}
     period = pr.get("period")
     if period and _PERIOD_SIDE.get(period) not in (None, deal):
@@ -141,6 +147,11 @@ def price_fields(p: dict, deal: str) -> tuple[Optional[dict], str]:
         out["price_annual"] = db.AUTHORITATIVE_NULL
         out["rent_period"] = {"yearly": "annual", "monthly": "monthly"}.get(period)
         stored, kind = None, "annual"
+    elif period == "yearly" and category == "residential" and PER_MONTH_FROM <= value < PER_MONTH_BELOW:
+        # stored the monthly way (×12); the evidence keeps PF's own figure + word and says why
+        out["rent_period"], out["price_annual"] = N.rent_period_and_annual(value, "شهري")
+        stored, kind = out["price_annual"], "monthly"
+        out["_yearly_label_judged_monthly"] = True
     elif period == "yearly":
         out["rent_period"], out["price_annual"] = N.rent_period_and_annual(value, "سنوي")
         stored, kind = out["price_annual"], "annual"
@@ -153,6 +164,9 @@ def price_fields(p: dict, deal: str) -> tuple[Optional[dict], str]:
     out["price_evidence"] = N.price_evidence(
         field="property.price.value", raw=pr.get("value"), stored=stored, kind=kind, unit="total",
         origin="api", authoritative_absent=on_request)
+    if out.pop("_yearly_label_judged_monthly", False):
+        out["price_evidence"].update(source_period="yearly", judged_monthly=True,
+                                     judged_by="owner 2026-11-04: PF «yearly» residential rent 300–7,999 = monthly ×12")
     return out, ""
 
 
@@ -168,7 +182,7 @@ def map_listing(p: dict, deal: str, category: str) -> tuple[Optional[tuple[dict,
     ptype = type_of(p.get("property_type"), category)
     if not ptype:
         return None, f"type_unmapped_{p.get('property_type')}"
-    prices, why = price_fields(p, deal)
+    prices, why = price_fields(p, deal, category)
     if prices is None:
         return None, why
     loc = location(p)

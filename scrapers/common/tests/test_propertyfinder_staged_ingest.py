@@ -77,6 +77,20 @@ def test_rent_period_maps_straight_across():
     assert daily["price_evidence"]["raw"] == 600 and daily["additional_info"]["price_period"] == "daily"
 
 
+def test_cheap_yearly_residential_rent_is_stored_monthly_owner_2026_11_04():
+    # «yearly» 3,900 on a home = a per-month price: stored monthly ×12, PF's own figure + word kept as evidence
+    r = _row(_ad(offering_type="للايجار", price={"value": 3900, "period": "yearly"}), deal="Rent")
+    assert (r["rent_period"], r["price_annual"]) == ("monthly", 46800)
+    ev = r["price_evidence"]
+    assert (ev["raw"], ev["source_period"], ev["judged_monthly"]) == (3900, "yearly", True)
+    # the edges of the fleet band (300 ≤ v < 8,000) and the commercial side stay as published
+    for v in (299, 8000):
+        r = _row(_ad(offering_type="للايجار", price={"value": v, "period": "yearly"}), deal="Rent")
+        assert (r["rent_period"], r["price_annual"]) == ("annual", v) and "judged_monthly" not in r["price_evidence"]
+    office = _row(_ad(offering_type="للايجار", price={"value": 800, "period": "yearly"}), deal="Rent", cat="commercial")
+    assert (office["rent_period"], office["price_annual"]) == ("annual", 800)
+
+
 def test_hidden_price_is_price_on_request_and_a_contradicting_period_is_skipped():
     r = _row(_ad(price={"value": 0, "period": "sell", "is_hidden": True}))
     assert r["price_total"] is R.db.AUTHORITATIVE_NULL and r["price_evidence"]["authoritative_absent"] is True
