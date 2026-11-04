@@ -92,6 +92,15 @@ renewed at 50 minutes. The front door labels every call `x-ezhalah-human: pass|n
 its Turnstile Privacy Addendum in their privacy policy. Done 2026-10-21: owner-approved line in Privacy Policy §6
 (src/data/legal.ts + legalEnglish.ts, «Last updated» 21 October 2026), linking https://www.cloudflare.com/turnstile-privacy-policy/.
 
+**Why visitors lack a pass — measured, then made visible (2026-11-04).** 24 h of real browsers (robot=0, BotID human):
+iPhones carried the pass on 1,125 calls (111 without), desktop on 29 of 1,157, Android on 0 of 433. ezhalah.com is an
+accepted hostname (a test widget on ezhalah.com answered 600010 — "looks automated" in our CDP-driven browser — not
+110200 "domain not allowed"). The widget's errors used to be swallowed, so every door call now carries
+`ezhalah-tsc=<state>` in x-client-info: `wait` (no outcome yet), `ok` (pass minted), `err<code>` (Cloudflare's code),
+`srv<status>` (/api/human refused the token), `load` (script never loaded). Read it next to `ts=pass|none` in edge_logs
+before deciding the fix. **Do not enforce Turnstile until desktop and Android pass rates are explained and high.**
+Barrier: `scripts/verify-turnstile-reports-why.ts`.
+
 ## Network guard: no VPN, Tor or server networks (owner 2026-10-21: «aqar and those websites also don't work with VPN»)
 
 - Lists in `ops_network_block`, refreshed daily at 03:41 UTC by **Network guard lists**
