@@ -119,7 +119,12 @@ REMOVAL ORACLE (measured 2026-09-23 through the DETAIL route)
     20000, 20100), and the bogus 99999999.
   · live id     → HTTP 200 status "published" / publish true: 24858 (rent) and 24798 (sale).
   · hidden id   → HTTP 403 text/plain (20250): an existing unit the API will not show. Under the
-    shared law a 403 is about OUR access and can never kill.
+    shared law a 403 is about OUR access and can never kill — EXCEPT by the owner rule of 2026-11-04
+    (OWNER_APPROVED_REMOVAL_STATUS, LISTING_LIVENESS.md §7.1): measured that day from a laptop, four
+    struck units (23412, 23438, 22775, 20252) answered 403 text/plain with a BLANK body, a made-up id
+    404 {"message":"not found"}; a Cloudflare challenge is a 403 text/html «Just a moment…» page.
+    So a unit is removed only when its own DETAIL URL answers a blank-bodied 403 on two reads, neither
+    redirected, AND a recently proven-live sakani unit reads LIVE through this oracle in the same check.
   verify_gone: 404 not-found → gone; 200 whose status left "published" / publish false → gone; 200
   whose licence says a purpose other than rent → gone (it is no longer a rental); 200 published rent
   → live; anything else → no opinion → UNKNOWN. Pruning runs only after a complete, unlimited
@@ -163,7 +168,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import http, db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
-from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.http_liveness import (LivenessProbe, live_control_url,  # noqa: E402
+                                           removal_by_owner_approved_status)
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
 BASE = "https://sakani.sa"
@@ -715,6 +721,39 @@ def _probe_once(ad_number: str, uid: str, purpose: str) -> tuple[str, str]:
                          attempts=ORACLE_ATTEMPTS, backoff=PAUSE * 4).verify_gone(ad_number)
 
 
+# OWNER RULE 2026-11-04 («Yes, use your picks», decision 1): a REMOVED sakani unit answers HTTP 403 with
+# a BLANK text/plain body; a Cloudflare challenge is a 403 with an HTML «Just a moment…» page. Only the
+# blank shape may count, and only through removal_by_owner_approved_status (two reads, no redirect, a
+# live control of this site reading LIVE in the same check). Anything else stays UNKNOWN.
+_REMOVED_403_BODY = re.compile(r"\A\s*\Z")
+_UNIT_ID = re.compile(r"/market-unit/(\d+)/?$")
+
+
+def _control_live(_status, body, moved) -> Optional[str]:
+    """The control only has to prove the site is serving live units to US right now: a published record
+    of either purpose reads LIVE. Anything else is None (no control → no removal)."""
+    sig = _signal(_status, body, moved, "rent")
+    return "live" if sig == "live" or _signal(_status, body, moved, "sale") == "live" else None
+
+
+def _removed_by_owner_rule(ad_number: str, uid: str) -> Optional[tuple[str, str]]:
+    probe = LivenessProbe(platform="sakani", signal=_control_live, session=_oracle_session,
+                          url_for=lambda _a: None)
+    # Cheapest proof first: a challenge page (the common 403) is never the removed shape, so it costs
+    # no control lookup and no further reads.
+    st, body, moved = probe.fetch(f"{DETAIL}{uid}")
+    if st != 403 or moved or not _REMOVED_403_BODY.search(body or ""):
+        return None
+    control = live_control_url(("sakani_residential_listings", "sakani_commercial_listings"),
+                               exclude=ad_number)
+    cm = _UNIT_ID.search(control or "")
+    if not cm or cm.group(1) == uid:
+        return None
+    return removal_by_owner_approved_status("sakani", probe.fetch, f"{DETAIL}{uid}",
+                                            f"{DETAIL}{cm.group(1)}", _control_live,
+                                            pause=PAUSE, body_must=_REMOVED_403_BODY)
+
+
 def _verify_gone(ad_number: str) -> tuple[str, str]:
     global _oracle_sess, _oracle_renewed
     m = _AD_RE.match(ad_number)
@@ -722,7 +761,14 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
         return "unknown", f"{ad_number!r} is not a {PREFIX}/{SALE_PREFIX}<id> ad number"
     purpose = _PURPOSE_OF[m.group(1)]
     verdict, why = _probe_once(ad_number, m.group(2), purpose)
-    while verdict == "unknown" and _ACCESS_WHY.search(why or "") and _oracle_renewed < ORACLE_RENEGOTIATIONS:
+    while True:
+        if verdict == "unknown" and "HTTP 403" in (why or ""):
+            by_status = _removed_by_owner_rule(ad_number, m.group(2))
+            if by_status:
+                return by_status
+        if not (verdict == "unknown" and _ACCESS_WHY.search(why or "")
+                and _oracle_renewed < ORACLE_RENEGOTIATIONS):
+            break
         _oracle_renewed += 1
         print(f"   ↻ oracle read of {ad_number} drew an access answer — cool-down, fresh session "
               f"{_oracle_renewed}/{ORACLE_RENEGOTIATIONS}", flush=True)
