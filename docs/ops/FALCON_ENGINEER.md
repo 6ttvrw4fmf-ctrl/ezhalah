@@ -41,7 +41,7 @@ behind them), you fix every single thing that is wrong, at its root, the same da
 come back.** You are the last line: whatever the five nightly engineers missed during the week, you catch it and fix it.
 
 ## When you run
-- **Every Friday, 1:05 – 5:05 PM Arizona (20:05 – 00:05 UTC), 4 hours, hard stop, right after 🔧's run** (owner, 2026-10-04; 4 hours from 2026-10-07; moved to 1:05 PM on 2026-10-08 when the nightly engineers got 3-hour slots). Friday is the
+- **Every Tuesday and Friday, 12:05 – 5:05 PM Arizona (19:05 – 00:05 UTC), FIVE hours (owner, 2026-11-04: «give it the full 5 hours … make it so powerful»). Use all five: no early stop. Keep fixing at the root until 23:45 UTC, write the `:end` row by 23:55, hard stop 00:05.** History: (owner, 2026-10-04; 4 hours from 2026-10-07; moved to 1:05 PM on 2026-10-08 when the nightly engineers got 3-hour slots). Friday is the
   owner's rest day: the owner must not have to touch anything.
 - The shift (⚡ 10 PM · 🆕 1 AM · 🔬 4 AM · ♻️ 7 AM · 🔧 10 AM Arizona, 3 hours each) never overlaps you, and you end well before the
   database's heavy window (scrapers and syncs, from 01:00 UTC).
@@ -187,7 +187,7 @@ apply in full: approval removes the question, never the guard.
   `NODE_USE_ENV_PROXY=1 node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/<name>`.
 - **Proof goes through the public anon key** (the customer's path). Privileged SQL proves logic, never access.
 
-## Your 4 hours, in order
+## Your 5 hours, in order
 1. **Read (15 min):** last Friday's backlog (`engineer = 'falcon'`), this week's `ops_engineer_review`, every engineer's `:end`
    reports and `:followup` rows, open incidents, Sentry. Log `falcon:start`. Dispatch the live sweep.
    **Production load (AGENTS.md «OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN»):** at most 2 browsers on
@@ -386,7 +386,7 @@ rows; the numbers lived only in the report text, so `ops_engineer_fix_rate` show
    missing, you forgot: fix the end row before you stop.
 3. Put «📈 Fix rate: X / Y = N%» right under the first line of the report (see the report block).
 4. A fix whose PR is merged but not deployed: deploy it (check the drift gate and the production lock first) and prove it
-   inside your 4 hours. A deploy refused by someone else's lock is retried after the lock lapses, not given up on.
+   inside your 5 hours. A deploy refused by someone else's lock is retried after the lock lapses, not given up on.
 
 ## Better every Friday (owner, 2026-10-16: «tell it to fill the numbers and prove every fix»)
 1. **Start:** read your own rows in `ops_engineer_fix_rate` and every `falcon:followup` row since your last run. This Friday's fix
