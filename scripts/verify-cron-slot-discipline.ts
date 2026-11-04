@@ -27,7 +27,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  type CronJobs, maxPerInstant, minuteZeroStarts, newestScheduleMigration, starvedPairs, writerCollisions,
+  type CronJobs, maxPerInstant, minuteZeroStarts, newestScheduleMigration, starvedPairs, starvedWriters, writerCollisions,
 } from './lib/cronSlots.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -94,6 +94,10 @@ const wc = writerCollisions(jobs, writers);
 check('no two single-writer jobs start in the same (hour, minute)', wc.length === 0, wc.join('; '));
 
 // 5a. currency against the migration tree
+const sw = starvedWriters(jobs, writers, hogs);
+check('no single-writer job starts ONLY inside another writer\'s p95 window (every pass refused, reported succeeded)',
+  sw.length === 0, `${sw.join('; ')} — move it to a minute outside the writer windows (alert 12926: jobid 68 at :30 inside sync-search-listings-ar :22 + 890 s)`);
+
 const migDir = join(ROOT, 'supabase/migrations');
 const files = readdirSync(migDir).filter((f) => f.endsWith('.sql'))
   .map((name) => ({ name, sql: readFileSync(join(migDir, name), 'utf8') }));
@@ -127,6 +131,15 @@ mustCatch('a window that wraps past the top of the hour (:59 + 11 min reaches :0
 mustCatch('five jobs stacked on one minute', maxPerInstant({ a: '13 * * * *', b: '13 * * * *', c: '13 * * * *',
   d: '13 * * * *', e: '13 * * * *' }).max > MAX_PER_INSTANT);
 mustCatch('two writers on one instant', writerCollisions({ x: '7-59/10 * * * *', y: '17 * * * *' }, ['x', 'y']).length > 0);
+mustCatch('THE MEASURED CASE: a three-hourly writer at :30 inside the hourly sync :22 + 890 s (alert 12926)',
+  starvedWriters({ ...jobs, 'sync-rich-attrs-wasalt': '30 */3 * * *' }, writers, hogs)
+    .some((p) => p.startsWith('sync-rich-attrs-wasalt ')));
+mustCatch('a writer whose window wraps past midnight still starves one starting at 00:03',
+  starvedWriters({ a: '58 23 * * *', b: '3 0 * * *' }, ['a', 'b'], { a: 600 }).some((p) => p.startsWith('b ')));
+check('(negative control) an every-10-minutes writer refused at SOME starts is not starved',
+  starvedWriters({ a: '22 * * * *', b: '5-59/10 * * * *' }, ['a', 'b'], { a: 890 }).length === 0);
+check('(negative control) a writer outside every window is not starved',
+  starvedWriters({ a: '22 * * * *', b: '11 */3 * * *' }, ['a', 'b'], { a: 890 }).length === 0);
 mustCatch('a newer migration that alters a schedule without a mirror update',
   newestScheduleMigration([...files, { name: '99991231235959_x.sql', sql: "select cron.alter_job(1, schedule := '5 * * * *');" }])
     !== mirror._mirrored_through_migration);
