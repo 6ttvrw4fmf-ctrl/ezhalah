@@ -20,6 +20,9 @@ const SYMBOLS = [
   { header: 'export function frontDoorUrl(' }, { header: 'function frontDoorFetch(' }, { header: 'export function doorHiccup(' },
   { header: 'export function fallbackLabel(' }, { header: "export const NETWORK_BLOCKED_EVENT = 'ezhalah:network-blocked';", endsWith: /;$/ },
   { header: 'export function isNetworkBlocked(' }, { header: 'export function frontDoorAnswered(' },
+  // the Turnstile state every door call carries (verify-turnstile-reports-why.ts)
+  { header: "let turnstileState = 'ezhalah-tsc=wait';", endsWith: /;$/ }, { header: 'export function turnstileLabel(' },
+  { header: 'function withTurnstileLabel(' },
 ];
 // The fake browser: each call takes the next scripted outcome; «door» = /sb/, «direct» = supabase.co.
 const PRELUDE = `const url = 'https://p.supabase.co';

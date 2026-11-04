@@ -18,6 +18,7 @@ type Label = (kind: string, detail?: string) => string;
 const lift = async (f: string) => (await liftSymbols(f, [{ header: 'export function turnstileLabel(' }], ['turnstileLabel'])).turnstileLabel as Label;
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`); if (!ok) failed++; };
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 
 const turnstileLabel = await lift(file);
 const cases: [string, string | undefined, string][] = [
@@ -43,9 +44,9 @@ const tmp = mkdtempSync(join(tmpdir(), 'ts-label-'));
 const leakyFile = join(tmp, 'leaky.ts');
 writeFileSync(leakyFile, src.replace("/^[0-9a-z]{1,8}$/i.test(String(detail))", 'true'));
 const leaky = await lift(leakyFile);
-check('(mutation) catches a label that passes raw text into the logs', leaky('err', 'a b<script>') !== 'ezhalah-tsc=errx');
+mustCatch('a label that passes raw text into the logs', leaky('err', 'a b<script>') !== 'ezhalah-tsc=errx');
 const dropped = src.replace('window.fetch(front, withTurnstileLabel(init))', 'window.fetch(front, init)');
-check('(mutation) catches a door call that drops the state', !/const viaDoor = \(\) => window\.fetch\(front, withTurnstileLabel\(init\)\);/.test(dropped));
+mustCatch('a door call that drops the state', !/const viaDoor = \(\) => window\.fetch\(front, withTurnstileLabel\(init\)\);/.test(dropped));
 
 if (failed) { console.log(`\n❌ verify-turnstile-reports-why: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ Turnstile reports why it passed or failed on every door call, and still never blocks or delays anyone.');
