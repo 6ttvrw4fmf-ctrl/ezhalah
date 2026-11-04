@@ -291,7 +291,12 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // label), flooding the RPC candidate set + total_count with Commercial Buildings.
   // مجمع/برج added 2026-07-27: sanadak bare forms, verified live as res-table-only (8 + 1 rows) —
   // same reasoning as مجمع سكني above, kinds stays ['res'].
-  'Residential Building':{ rawTypes: ['Building', 'مجمع سكني', 'مجمع', 'برج'], kinds: ['res'] },
+  // 'Compound' added 2026-11-04 (🔧): wasalt/aqargate STORE the English word (EN_TO_AR maps it to مجمع, so the index
+  // counts the row under this chip) but the raw-table card fetch (keptFiltersReq → .in('property_type', rawTypes)) did
+  // not ask for it — the Filter said «1» and drew no card (wasalt 13993632, customer-journey 41837852546). The rule is
+  // executed by scripts/verify-card-fetch-keeps-what-the-count-counted.ts: every stored English type the index maps
+  // into a chip's labels must be in that chip's rawTypes.
+  'Residential Building':{ rawTypes: ['Building', 'مجمع سكني', 'مجمع', 'برج', 'Compound'], kinds: ['res'] },
   // Residential — Villas & Houses
   'Villa':               { rawTypes: ['Villa', 'Palace', 'House'], kinds: ['res'] }, // فيلا search includes raw قصر + بيت (House folded in — few raw listings, owner request 2026-07-20); تاون هاوس moved to Duplex (owner 2026-10-12)
   'Duplex':              { rawTypes: ['Duplex', 'تاون هاوس'], kinds: BOTH }, // تاون هاوس = town house, filed under Duplex (owner 2026-10-12); // BOTH: see Studio note — october maps "duplex"→'Duplex' then routes it commercial via category_for_type
@@ -334,7 +339,7 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   'Self Storage':        { rawTypes: ['Self Storage', 'تخزين ذاتي'], kinds: BOTH },
   // ('Service Facilities' is DERIVED from SERVICE_FACILITY_TYPES right after this object — single source of truth.)
   'Gas Station':         { rawTypes: ['Gas Station', 'Station', 'محطة بنزين'], kinds: BOTH },
-  'Staff Housing':       { rawTypes: ['سكن عمال'], kinds: BOTH },
+  'Staff Housing':       { rawTypes: ['سكن عمال', 'Staff Housing'], kinds: BOTH }, // + the English stored form (same rule as Compound, 2026-11-04)
   // Commercial — Plots (physically in RES tables on Aqar → both)
   'Commercial Land':     { rawTypes: ['Commercial Land', 'أرض تجاري', 'أرض تجارية', 'أرض سكني تجاري'], kinds: BOTH },
   'Industrial Land':     { rawTypes: ['Industrial Land', 'أرض صناعي', 'أرض صناعية'], kinds: BOTH },
