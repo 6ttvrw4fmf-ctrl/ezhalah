@@ -46,7 +46,8 @@ export function planMirrors(missing, now, takenHeads, existingBranches = takenHe
   return (missing ?? [])
     .filter((m) => {
       const t = versionTime(m?.version);
-      return t && now.getTime() - t.getTime() >= GRACE_MINUTES * 60_000 && !taken.has(`mirror/${m.version}`);
+      return t && now.getTime() - t.getTime() >= GRACE_MINUTES * 60_000
+        && !taken.has(`mirror/${m.version}`) && !taken.has(`mirror/${m.version}-auto`);
     })
     .slice(0, MAX_PER_RUN)
     .map((m) => ({
@@ -93,7 +94,10 @@ if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/auto-mirror-migration
       git('add', p.file);
       git('-c', 'user.name=ezhalah-auto-mirror', '-c', 'user.email=auto-mirror@users.noreply.github.com',
         'commit', '-q', '-m', `mirror (auto): ${p.version} byte-exact from production`);
-      git('push', '-q', 'origin', `${p.branch}:${p.branch}`);
+      // A `-auto` branch is this robot's own (never a person's), so a leftover one from a cancelled or failed run is
+      // overwritten. 2026-11-04 run 41767741699: mirror/20261104013243-auto was left by an earlier run, the plain push
+      // was refused «non-fast-forward», and the run went red. A person's mirror/<version> branch is never forced.
+      git('push', '-q', ...(p.branch.endsWith('-auto') ? ['--force'] : []), 'origin', `${p.branch}:${p.branch}`);
       execFileSync('gh', ['pr', 'create', '--head', p.branch, '--base', 'main',
         '--title', `mirror (auto): ${p.version} ${p.file.split('/').pop()}`,
         '--body', `Applied to production but missing from git, ${GRACE_MINUTES}+ minutes after it was applied. ` +

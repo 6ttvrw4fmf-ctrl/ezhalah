@@ -30,9 +30,16 @@ _ROAD_WORDS = ("طريق", "شارع")
 _PREFIX = r"(?:وب|ب|و|ل|ف)?"
 
 
+# A word character for the whole-word test: letters, digits, «_», tatweel and the short-vowel marks. NOT the
+# whole U+0600–U+06FF block: that block also holds Arabic PUNCTUATION («،» «؛» «؟»), so «بمدينة بريدة، مصممة»
+# read as no city at all (erapulse 20551803, 2026-11-04 — the only one of 30 unplaced Qassim ads whose text
+# names its city).
+_WORD = r"[\w\u064B-\u065F\u0670]"
+
+
 def _pattern(word: str) -> re.Pattern[str]:
     # «الرس» glued to «ب» is «بالرس»; a word starting with ال keeps its ال after the preposition.
-    return re.compile(r"(?<![\w؀-ۿ])" + _PREFIX + re.escape(word) + r"(?![\w؀-ۿ])")
+    return re.compile(r"(?<!" + _WORD + r")" + _PREFIX + re.escape(word) + r"(?!" + _WORD + r")")
 
 
 _PATTERNS = {w: _pattern(w) for w in QASSIM_CITIES}

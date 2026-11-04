@@ -59,6 +59,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize
 from scrapers.common.http import retry_smarter_session
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.source_pin import pin_dict
 
 REST = "https://aqaralsaudia.com/wp-json/wp/v2"
 SITE = "https://aqaralsaudia.com"
@@ -461,6 +462,16 @@ def map_listing(post: dict) -> tuple[Optional[dict], str]:
                            if k.startswith("REAL_HOMES_") and v not in (None, "", [], {})},
         **feature_cols,
     }
+    # The ad's own map pin (owner 2026-10-09, backlog 1197): RealHomes keeps it in
+    # property_meta.REAL_HOMES_property_location {"latitude","longitude"} — the pair the page's Leaflet map
+    # draws. Captured into source_capture since 10-30 and never read into a pin, so 16 of 16 ads served 0
+    # pins. Through the one source_pin gate (outside Saudi Arabia / 0,0 / not a number → nothing); a pair
+    # > 150 km from the ad's city (the theme's 23.33,45.33 default on 2 Riyadh ads) is stripped on write by
+    # the database's far-from-city trigger. No pair → no key, so a stored pin is never blanked.
+    loc = pm.get("REAL_HOMES_property_location")
+    pin = pin_dict(loc.get("latitude"), loc.get("longitude")) if isinstance(loc, dict) else {}
+    if pin:
+        row["additional_info"] = pin
     return row, category.lower()
 
 
