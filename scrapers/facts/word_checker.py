@@ -629,6 +629,8 @@ _OWN_CUES = tuple(_n(w) for w in ("داخل", "بالمجمع", "بالمشرو�
 # AREA talk is not the ad's own place: «تتميز المنطقة بتوفر خدمات … والسوبرماركت», «يتميز الموقع بتوفر جميع الخدمات مسجد/بقالة»
 _AREA_WORDS = frozenset(_n(w) for w in ("المنطقه", "الحي", "الموقع"))
 _SERVICE_WORDS = tuple(_n(w) for w in ("خدمات", "الخدمات", "بتوفر", "تتوفر", "يتوفر", "مخدوم", "مخدومه"))
+# the object that closes a near phrase as one item: «قريب من الخدمات» / «بالقرب من جميع الخدمات» / «قريب من المرافق»
+_SERVICES_OBJECT = frozenset(_n(w) for w in ("خدمات", "الخدمات", "المرافق", "مرافق"))
 _PURE_PUBLIC_FACTS = frozenset({"mosque", "market", "restaurant_cafe", "in_mall"})
 # The PLOT'S NEIGHBOUR is not the ad's own (🔬 2026-11-04): «شارع 10 جنوبي وحديقة», «من الغرب: حديقة + مواقف», «واجهة:
 # غربية على حديقة», «ربع واجهة على جامع», «مشروعنا مباشر على حديقه». A compass direction, a facade, a boundary or
@@ -851,6 +853,14 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                                 or any(_starts(w, _PARTIAL_BEFORE) for w in prev[-1:])):
         return None, s, e
     p5 = gp[-5:]
+    # «قريب من الخدمات» is a COMPLETE item: the near word's object is «the services», so the words after it are the unit's
+    # own (🔬 2026-11-04, muhaysini 14819114 «مميزات العقار موقع قريب من الخدمات موقف سيارات مصعد غرفة غسيل», 14817077
+    # «وقريب من الخدمات مدخلان للشقة مصعدين متوفر»: the lift and the parking read as nearby — 6 of 25 sampled
+    # unbacked elevator yeses were real). Unit facts only: a PUBLIC place keeps every nearby check below.
+    if fact not in _NEAR_PUBLIC_FACTS and fact not in _PUBLIC_FACTS:
+        at = max((k for k, w in enumerate(p5) if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS), default=-1)
+        if at >= 0 and any(_strip_wa(w) in _SERVICES_OBJECT for w in p5[at + 1:]):
+            p5 = p5[at + 1:]
     if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
                                           or any(p in " ".join(p5) for p in _NEAR_PHRASES)
                                           or _DISTANCE_TO.search(" ".join(gp[-8:]))):
@@ -1321,6 +1331,11 @@ def selftest() -> None:
         ("Directly behind Al-Romansiah Restaurant", {}, ("restaurant_cafe",)),
         ("مميزات العقار : مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات", {"elevator": True, "parking": True}, ()),
         ("حوش ، قريب من الخدمات ، موقف سيارات", {"parking": True}, ()),
+        # «قريب من الخدمات» is one item; the lift after it is the unit's own (muhaysini 14819114 / 14817058, 2026-11-04)
+        ("مميزات العقار موقع قريب من الخدمات موقف سيارات مصعد غرفة غسيل", {"elevator": True}, ()),
+        ("نوافذ زجاجية بالقرب من الخدمات موقف سيارات مصعد", {"elevator": True}, ()),
+        ("قريب من الخدمات حوش غرفة سائق تأسيس مصعد", {}, ("elevator",)),
+        ("قريب من الخدمات مسجد ومدارس", {}, ("mosque",)),
         ("Recreation center , restaurant, café, library", {"restaurant_cafe": True}, ()),
         ("قريب من الخدمات\nمسبح خاص\nموقف خاص", {"pool": True, "parking": True}, ()),
         # a distance points at its place with «من / عن»; the next bullet's own features stay (🔬 2026-11-04)
