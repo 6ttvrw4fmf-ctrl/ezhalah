@@ -177,7 +177,7 @@ const s = StyleSheet.create({
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   topBrand: { fontSize: 22, fontWeight: '800', color: colors.ink }, // same size as الوسيط الذكي's title (owner 2026-10-31: «ezhalah must all be the same size, big»)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   shareBtn: { minWidth: 46, paddingHorizontal: 15, height: 46, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine, ...cardShadow, shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   shareBtnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
