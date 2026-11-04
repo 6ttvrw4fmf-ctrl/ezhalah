@@ -63,11 +63,20 @@ def get_json(s: cc.Session, url: str) -> Any:
             time.sleep(2 + attempt * 3)
 
 
-def walk(s: cc.Session) -> tuple[list[dict], int]:
+# THE WALK FOLLOWS THE SOURCE'S OWN PAGINATION (crawl-health 2026-11-04). It used to stop at `range(1, 50)` — page 49 —
+# whatever the API said. Measured 2026-11-04: total_count 982, page_size 20, total_pages 50, so page 50 was never read,
+# the walk could never reach the declared total, `complete` stayed false and the absence prune never ran again
+# (alert zero_new_stall:manzo). The walk now reads until has_next is false; WALK_PAGE_CEILING only stops a source
+# that never says «last page», and a walk it cuts short is short of the declared total, so it prunes nothing.
+WALK_PAGE_CEILING = 1000
+
+
+def walk(s: cc.Session, fetch=None) -> tuple[list[dict], int]:
+    fetch = fetch or get_json
     rows: list[dict] = []
     total = 0
-    for page in range(1, 50):
-        d = get_json(s, f"{API}/search/?page={page}")
+    for page in range(1, WALK_PAGE_CEILING + 1):
+        d = fetch(s, f"{API}/search/?page={page}")
         pg = d.get("pagination") or {}
         total = int(pg.get("total_count") or 0)
         rows += d.get("results") or []
@@ -84,6 +93,26 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
 DETAIL_WORKERS = 10
 
 
+# WHY a detail record could not be read (crawl-health 2026-11-04). The 11-03 run could not read 342 of 856 records and
+# said only «342 unreadable»: no status, no exception, nothing in the row. The breakdown now rides into the job log and
+# scrape_runs.notes, so the next shortfall says whether the API refused (429/403), timed out or answered 5xx.
+UNREADABLE_WHY: dict[str, int] = {}
+_why_lock = threading.Lock()
+
+
+def _note_unreadable(e: BaseException) -> None:
+    resp = getattr(e, "response", None)
+    code = getattr(resp, "status_code", None)
+    key = f"http_{code}" if code else type(e).__name__
+    with _why_lock:
+        UNREADABLE_WHY[key] = UNREADABLE_WHY.get(key, 0) + 1
+
+
+def unreadable_summary() -> str:
+    with _why_lock:
+        return ",".join(f"{k}={v}" for k, v in sorted(UNREADABLE_WHY.items(), key=lambda kv: -kv[1]))
+
+
 def read_details(s: cc.Session, listing: list[dict], fetch=None) -> list[Optional[dict]]:
     fetch = fetch or get_json
     local = threading.local()
@@ -96,7 +125,8 @@ def read_details(s: cc.Session, listing: list[dict], fetch=None) -> list[Optiona
         try:
             d = fetch(sess, f"{API}/details/s/{p['slug']}/")
             return d.get("data") or d
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            _note_unreadable(e)
             return None
 
     with ThreadPoolExecutor(DETAIL_WORKERS) as ex:
@@ -295,7 +325,8 @@ def main() -> int:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
             print(f"  absence prune skipped: {unreadable} unreadable detail(s) or a short walk "
-                  f"(listed {len(listing)}, API total {declared}); own-page readings only", flush=True)
+                  f"(listed {len(listing)}, API total {declared}); own-page readings only"
+                  f"{' — unreadable: ' + unreadable_summary() if unreadable else ''}", flush=True)
         # The API ANSWERED (a failed fetch raises above) and itself declares total_count=0 with no
         # results: the source published its own empty catalogue (2026-10-01/02: its one ad came
         # down). That is an answer, not a blocked crawl, so the run is not demoted to red for it.
@@ -305,7 +336,10 @@ def main() -> int:
                   "catalogue. Reporting healthy rather than red — this is not a blocked crawl.", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(listing), rows_upserted=len(res) + len(com),
                              allow_empty=source_empty,
-                             notes="source-published empty (API total_count=0)" if source_empty else None,
+                             notes=("source-published empty (API total_count=0)" if source_empty else
+                                    (f"listed={len(listing)} declared={declared} unreadable={unreadable}"
+                                     f"{' why=' + unreadable_summary() if unreadable else ''}"
+                                     " | prune withheld: walk incomplete") if not complete else None),
                              check_tables=["manzo_residential_listings", "manzo_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)

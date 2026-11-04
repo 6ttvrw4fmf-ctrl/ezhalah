@@ -141,11 +141,18 @@ _NAME_LABEL_RE = re.compile(
 )
 
 
-def redact_pii(text: Any) -> Any:
+def redact_pii(text: Any, *, keep_lines: bool = False) -> Any:
     """Remove Saudi contact numbers, WhatsApp/Telegram handles, emails and labelled advertiser /
     ad-officer names from free text.
     Returns the cleaned string (whitespace-collapsed), or None if nothing readable remains.
-    Non-string input is returned unchanged."""
+    Non-string input is returned unchanged.
+
+    keep_lines=True (crawl-health 2026-11-04): the redaction is identical, but line breaks survive the collapse —
+    spaces collapse within a line and blank lines drop. A description box read line by line (one clause per <br>)
+    must be STORED line by line too, or anything that re-reads the stored copy sees one run-on clause: sadiqeltajer
+    stored «… على شارع 40 … ومطبخ …» as one line, so mon_detect_sadiqeltajer_af_outside_room_list (which drops a
+    clause naming a neighbour, as the reader does) dropped the whole box and flagged the kitchen the reader had
+    rightly read from its own line."""
     if not isinstance(text, str) or not text:
         return text
     out = _WA_RE.sub(_REDACTED, text)
@@ -154,6 +161,9 @@ def redact_pii(text: Any) -> Any:
     out = _PHONE_SHAPES_RE.sub(_REDACTED, out)
     out = _PHONE_RE.sub(_REDACTED, out)
     out = _NAME_LABEL_RE.sub(r"\1" + _REDACTED, out)   # before the collapse: a line break ends a name
+    if keep_lines:
+        out = "\n".join(ln for ln in (re.sub(r"[^\S\n]+", " ", x).strip() for x in out.split("\n")) if ln)
+        return out or None
     out = re.sub(r"\s+", " ", out).strip()
     return out or None
 
