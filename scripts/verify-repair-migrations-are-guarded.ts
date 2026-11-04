@@ -120,6 +120,17 @@ const WAIVED: Record<string, string> = {
     'mon_detect_adjudicated_reactivation (rostered, enrolled for this repair in 20261104094703) watches; the crawl left ' +
     'every matrix (RETIRED_PLATFORMS.txt), so no scrape can bring the rows back. The applied file cannot be edited to name ' +
     'the detector (content parity).',
+  // 2026-11-04. Property Finder launch follow-ups; both are one-off fills of rows the WRITER now produces itself.
+  '20261104214154_propertyfinder_license_on_card.sql':
+    'a one-off copy of license_number into additional_info.rega_ad_license_number on the stored Property Finder rows; the ' +
+    'writer is fixed (scrapers/propertyfinder/run.py map_listing writes the key on every daily crawl, asserted by ' +
+    'test_propertyfinder_staged_ingest.py in the workflow\'s own pre-crawl test step), so every row is rewritten each day ' +
+    'and the fill cannot decay. The applied file cannot be edited to name it (content parity).',
+  '20261104215527_propertyfinder_cheap_yearly_rent_stored_monthly.sql':
+    'owner decision 2026-11-04 on the 12 measured rows (PF «yearly» residential rents 300–7,999 = monthly ×12, evidence ' +
+    'flagged judged_monthly); the writer is fixed (scrapers/propertyfinder/run.py price_fields, band edges and the ' +
+    'untouched commercial side asserted by test_cheap_yearly_residential_rent_is_stored_monthly_owner_2026_11_04, run before ' +
+    'every crawl), so the daily crawl re-stores every such row the same way. Content parity forbids naming it in the file.',
   // 2026-10-27. Owner-approved one-off retirement («do that please fix everything»).
   '20261027025056_razre_retire_wix_era_rows.sql':
     'a one-off owner decision on a fixed set of 94 rows from razre.sa before its rebuild (Wix /onepro-1/ URLs that now ' +
