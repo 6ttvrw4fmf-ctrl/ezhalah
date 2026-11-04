@@ -11,7 +11,7 @@
     "DO NOT go green by raising max_per_instant, adding a starvation exemption or editing hog_p95_s down.",
     "Fix the SCHEDULE. max_per_instant is shrink-only (8 before 2026-11-03, 4 after, 2 after the 2026-11-04 consolidation)."
   ],
-  "_mirrored_through_migration": "20261104220450",
+  "_mirrored_through_migration": "20261104221607",
   "_measured_at": "2026-11-04",
   "_measured_by": "cron-rebalance session via Supabase MCP: select jobname, schedule from cron.job where active; p95 = percentile_cont(0.95) of end_time - start_time over cron.job_run_details, last 7 days (the window mon_cron_hog_windows() uses); writers = distinct jobname from ops_cron_start_instants() where writer_fn is not null. [2026-11-04 01:02] re-read after 20261104010208: 4 re-slots; hog p95s re-measured (38: 667 s, 28: 890 s). [2026-11-04] re-read after 20261104043631 (cron consolidation): 33 small jobs became steps of 4 bundle jobs (ops_run_cron_bundle), 18 re-slots; busiest hour 99 starts, no instant above 2, so the ratchet drops 4 -> 2 = the live detector's own bar (>= 3 raises). [2026-11-04 09:36] +purge-cron-run-history '27 1 * * *' (20261104093546, owner decision 3: cron.job_run_details keeps 30 days); 1:27 had no other start.",
   "_capacity": "<= 99 starts an hour after the 2026-11-04 consolidation (24 are mon-p0-fast-lane). The live detector raises at 3 per (hour, minute), so the ratchet is 2.",
@@ -93,6 +93,7 @@
     "mon-district-blank-unexplained": "30 4 * * *",
     "mon-image-coverage-snapshot": "37 3 * * *",
     "mon-index-label-unrepairable": "29 3 * * *",
+    "mon-land-ppm-typed-as-total": "36 5 * * *",
     "mon-one-sided-platforms": "25 4 * * *",
     "mon-p0-fast-lane": "1,4,7,10,13,15,18,21,24,26,28,31,34,35,38,40,42,44,46,48,51,54,57,58 * * * *",
     "mon-price-fidelity": "47 * * * *",

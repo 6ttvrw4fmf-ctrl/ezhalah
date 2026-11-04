@@ -328,6 +328,11 @@ export function ResultCard({
           {listing.priceIsDerived ? (
             <Text style={card.derivedTotalNote} numberOfLines={1}>{t('Calculated from price per m² × area — not published by the source')}</Text>
           ) : null}
+          {listing.typedTotalAsPerMeter != null ? (
+            <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-total-as-ppm">
+              {t('The ad put {n} SAR in the price box — read as the price per m²', { n: Number(listing.typedTotalAsPerMeter).toLocaleString('en-US') })}
+            </Text>
+          ) : null}
 
           <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
             {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
@@ -535,6 +540,13 @@ export function ResultCard({
         {listing.priceIsDerived ? (
           <Text style={card.derivedTotalNote} numberOfLines={1}>
             {t('Calculated from price per m² × area — not published by the source')}
+          </Text>
+        ) : null}
+        {/* THE SELLER'S OWN FIGURE STAYS VISIBLE (owner 2026-11-04): the index read the ad's «total» as a per-metre price
+            (src/lib/landPerMeterTotal.ts), so say what the ad actually wrote, next to the «≈» total we computed. */}
+        {listing.typedTotalAsPerMeter != null ? (
+          <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-total-as-ppm">
+            {t('The ad put {n} SAR in the price box — read as the price per m²', { n: Number(listing.typedTotalAsPerMeter).toLocaleString('en-US') })}
           </Text>
         ) : null}
         {/* Guest rating — renders ONLY when the listing carries one (Gathern). e.g. ★ 9.9 (59 تقييم) */}
