@@ -1102,6 +1102,37 @@ had fallen behind the rules. Each class below now has a mutation-proven barrier;
    unprovable forever. The fix is per site, validated on a known-live and a known-removed page (compoundin ribbon,
    maqrat licence end date, wahadat «المشروع غير موجود»), never a looser kill rule.
 
+### Cron slot discipline (owner decision 6, 2026-11-03 — «Yes, use your picks»)
+
+**The owner's pick:** each minute carries as few jobs as possible, `:00` is left to the matview refresh, and the jobs
+`cron_starvation_risk` names move out of the hog windows, lowering a cadence only where the hour is full.
+Applied by migration `20261104000454` (minute changes only: no command changed, and no hour changed, so no work
+moved into or out of the 05–17 / 21–23 UTC heavy windows).
+
+- **`:00` is empty in every hour.** `run-remediation` and `mon-engineer-locked-out` run `*/15` at offsets 3 and 2,
+  `alert-to-incident-bridge` runs `*/20` at offset 9, and the daily jobs that used `:00` start later in the same hour.
+- **Hog windows** (p95, the detector's own measure): `mon-detectors-and-dispatch` :59 → :10,
+  `refresh_listing_native_location_v1` **now :16** → :21, `sync-search-listings-ar` :22 → :37. Moving the matview
+  refresh from :20 to :16 took the index writer out of its window (that was the P1 half of alert 3844). The pair still
+  orders by the advisory lock `location_pipeline:v1_refresh`, and :16 is still before :22.
+- **Every hourly job lives outside those windows except `mon-p0-fast-lane`.** Its 24 minutes with a 3-minute worst gap
+  are the owner's 5-minute P0 SLO (`verify-p0-delivery-sla.ts`); no such list can avoid a 34-minute band, so
+  `cron_starvation_risk` stays open on that one job, at P2.
+- **Cadence lowered where the hour is full:** `mon-search-latency-sample` 12 → 4 an hour; `refresh-mon-audit-counts`,
+  `mon-watchdog-detector-job`, `mon-alert-flapping`, `mon-remediation-worker-stale` 2 → 1 an hour.
+- **«At most one job per minute» is not reachable by re-slotting.** It needs ≤ 60 starts an hour; the instance has
+  130–145 after the cuts (24 of them the P0 lane alone). The worst (hour, minute) fell from 8 jobs to 4, which is the
+  ratchet now. `cron_minute_collision` (≥ 3 per instant) therefore stays open. Getting to 1 needs a different decision:
+  merging the ~40 zero-second dispatch/monitor jobs into fewer jobs, or running more of them every 2 hours.
+- **Measured before the change:** with `cron.max_running_jobs = 32`, every job the starvation alarm named had started
+  on time on every run for 7 days (start offset < 0.1 s for nearly all). The windows were a risk, not observed
+  starvation.
+
+Barrier: `scripts/verify-cron-slot-discipline.ts` over the committed mirror `sql/mirrors/cron_schedule.json`
+(minute 0 empty, no non-exempt job in a hog window, stack ≤ 4 and shrink-only, no two single-writer jobs on one
+instant, mirror current with the newest migration that changes a cron schedule). **Any migration that schedules,
+re-slots or unschedules a cron job updates that mirror in the same PR.**
+
 ---
 
 ## 20. Permanent rules (the non-negotiables)
