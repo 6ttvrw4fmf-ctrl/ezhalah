@@ -274,9 +274,17 @@ export function sentinelGateProblems(enrich: string): string[] {
       'the source never retracted');
   }
 
-  if (/price_per_meter":\s*\(?AUTHORITATIVE_NULL/.test(enrich)) {
-    out.push('price_per_meter is being blanked by the total-price decision — aqar not publishing a ' +
-      'TOTAL says nothing about the per-meter figure');
+  // price_per_meter may be blanked ONLY by owner decision #4 (2026-11-04): aqar's placeholder «سعر المتر 1»,
+  // through its own flag `rate_one` (source-settled like the others). Any other gate on it — above all a
+  // total-price flag — is the old defect: aqar not publishing a TOTAL says nothing about the per-meter figure.
+  for (const m of enrich.matchAll(/price_per_meter":\s*\(?AUTHORITATIVE_NULL if ([^\n]*?) else /g)) {
+    if (unwrap(m[1]) !== 'rate_one' || !flags.has('rate_one')) {
+      out.push('price_per_meter is being blanked by the total-price decision — aqar not publishing a ' +
+        "TOTAL says nothing about the per-meter figure (only decision #4's own `rate_one` flag may clear it)");
+    }
+  }
+  if (/price_per_meter":\s*\(?AUTHORITATIVE_NULL\s*\)?\s*,/.test(enrich)) {
+    out.push('price_per_meter is blanked unconditionally');
   }
 
   return out;
@@ -314,10 +322,11 @@ const mustCatch = (label: string, caught: boolean) => {
 // The shipped gated assignment, recovered from the source so the mutants edit REAL code.
 const gatedLine = enrich
   .split('\n')
-  .find((l) => !l.trimStart().startsWith('#') && /AUTHORITATIVE_NULL if authoritative_no_price/.test(l)) ?? '';
+  // 2026-11-04: the gate reads `(authoritative_no_price or rate_x_area)` since owner decision #4.
+  .find((l) => !l.trimStart().startsWith('#') && /AUTHORITATIVE_NULL if \(?authoritative_no_price/.test(l)) ?? '';
 
 mustCatch('the 2026-08-22 incident re-introduced: an AUTHORITATIVE_NULL written UNCONDITIONALLY, so a blocked fetch blanks a known price',
-  sentinelGateProblems(enrich.replace(gatedLine, gatedLine.replace(/ if authoritative_no_price[^,\n]*/, ''))).length > 0);
+  sentinelGateProblems(enrich.replace(gatedLine, gatedLine.replace(/ if \(?authoritative_no_price[^,\n]*/, ''))).length > 0);
 
 mustCatch('the flag surviving in name but stopping being derived from the source oracle (gated on a constant instead)',
   sentinelGateProblems(enrich.replace(/authoritative_no_price\s*=\s*bool\([^\n]*\)/, 'authoritative_no_price = True')).length > 0);
@@ -327,6 +336,16 @@ mustCatch('…and the subtler version: the flag no longer requiring the source t
 
 mustCatch('the per-metre price being blanked by a decision about the TOTAL (سعر المتر is its own published field)',
   sentinelGateProblems(enrich.replace(gatedLine, `${gatedLine}\n        "price_per_meter": (AUTHORITATIVE_NULL if authoritative_no_price else ppm),`)).length > 0);
+
+const ppmLine = /"price_per_meter":\s*AUTHORITATIVE_NULL if rate_one else price_per_meter,/;
+mustCatch("decision #4's placeholder clear re-gated on a TOTAL-price flag (authoritative_no_price)",
+  sentinelGateProblems(enrich.replace(ppmLine, '"price_per_meter": AUTHORITATIVE_NULL if authoritative_no_price else price_per_meter,')).length > 0);
+mustCatch('…or rate_one no longer requiring a successful read of the page (a failed fetch would clear a real rate)',
+  sentinelGateProblems(enrich.replace(/rate_one\s*=\s*bool\(s_authoritative and /, 'rate_one = bool(')).length > 0);
+mustCatch('…or rate_x_area no longer requiring it (a failed fetch would clear a real price)',
+  sentinelGateProblems(enrich.replace(/rate_x_area\s*=\s*bool\(s_authoritative and /, 'rate_x_area = bool(')).length > 0);
+mustCatch('…or the per-metre price blanked unconditionally',
+  sentinelGateProblems(enrich.replace(ppmLine, '"price_per_meter": AUTHORITATIVE_NULL,')).length > 0);
 
 mustCatch('the enricher naming the sentinel NOWHERE — an unreadable subject reads as MISSING, never as "0 of 0 gated, all clear"',
   sentinelGateProblems(enrich.replace(/AUTHORITATIVE_NULL/g, 'None')).length > 0);
@@ -342,10 +361,10 @@ mustCatch('…or that is re-assigned after its source-settled definition',
   sentinelGateProblems(enrich.replace(/(\n\s*)(if rate_headline and price_per_meter is None:)/, '$1rate_headline = True$1$2')).length > 0);
 
 mustCatch('a gate OR-ing a source-settled flag with a made-up one',
-  sentinelGateProblems(enrich.replace(/AUTHORITATIVE_NULL if \(authoritative_no_price or rate_headline\)/, 'AUTHORITATIVE_NULL if (authoritative_no_price or fetch_failed)')).length > 0);
+  sentinelGateProblems(enrich.replace(/AUTHORITATIVE_NULL if \(authoritative_no_price or rate_headline or rate_x_area\)/, 'AUTHORITATIVE_NULL if (authoritative_no_price or fetch_failed)')).length > 0);
 
 mustCatch('the old blind spot: a gate that starts with the flag but ORs on anything (`authoritative_no_price or True`)',
-  sentinelGateProblems(enrich.replace(gatedLine, gatedLine.replace(/if authoritative_no_price and/, 'if authoritative_no_price or True and'))).length > 0);
+  sentinelGateProblems(enrich.replace(gatedLine, gatedLine.replace(/if \(authoritative_no_price or rate_x_area\)/, 'if (authoritative_no_price or rate_x_area or True)'))).length > 0);
 
 const villaLine = '            features[col] = AUTHORITATIVE_NULL';
 mustCatch('the Villa-form clear (decision 5) widened to EVERY form (a Villa\'s published maid/driver would be blanked)',

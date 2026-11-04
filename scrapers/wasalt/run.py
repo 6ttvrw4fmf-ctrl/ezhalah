@@ -668,10 +668,16 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
 # maps to the clean type its own ad names: «أرض زراعية 200,000م2» (Farming Land), «مجمع سكني» (Complex),
 # «Telecom Tower for Sale» (wasalt writes a lowercase t), «Teller for Sale» (an ATM site). Kept here, not in
 # normalize.TYPE_MAP_EN, whose key set is pinned verbatim to the old private maps.
+#
+# OWNER DECISION #9 (2026-11-04) reverses the last two: wasalt «Teller» (an ATM site) and «Telecom tower»
+# stay «غير معروف» (unknown) — deliberately UNMAPPED, so they leak raw and the index serves «غير معروف».
+# The decision is recorded in known_property_types (migration 20261104094019), which is what stops
+# legacy_novel_type re-raising them. Do not map them again without a new owner decision
+# (scrapers/common/tests/test_live_novel_types_are_mapped.py pins it).
 WASALT_TYPE_OVERRIDES = {
     "Farming Land": "Agriculture Plot", "Complex": "Compound",
-    "Telecom tower": "Telecom Tower", "Teller": "ATM Site",
 }
+WASALT_DELIBERATELY_UNMAPPED = ("Teller", "Telecom tower")   # owner decision #9, 2026-11-04
 
 
 def is_land_type(property_type) -> bool:
