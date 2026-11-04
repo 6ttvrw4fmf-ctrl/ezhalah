@@ -1168,6 +1168,12 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             if verdict == MISMATCH:
                 col = next(c for n, _, c, _ in FIELDS if n == name)
                 print(f"    mismatch {key} {name}: stored={stored.get(col)!r}", flush=True)
+            elif verdict == WE_MISS and name in AF_FIELDS:
+                # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
+                kw = next(k for n, _, _, k in FIELDS if n == name)
+                hit = next((x for x in ([page.get("title") or ""] + list(page.get("evidence_lines") or [])
+                                        + (page.get("text_head") or "").split(" | ")) if re.search(kw, norm(x))), "")
+                print(f"    we_miss {key} {name}: page={hit[:160]!r}", flush=True)
         fold(row, key, results, stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
