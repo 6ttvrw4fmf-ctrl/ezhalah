@@ -473,6 +473,12 @@ the slug is in `scrapers/RETIRED_PLATFORMS.txt` and `NOT_PRODUCTION_SEARCHABLE`,
 with the DNS evidence (rows kept). This is NOT a liveness rule: an unreachable source is still UNKNOWN for every
 other site (§7). A site that stops resolving is retired only with the owner's decision.
 
+**Reversed the same day (owner, 2026-11-04, «yeah do that ok»): almuteb is DORMANT again, not retired.** A retired
+platform never returns by itself; a dormant one is re-crawled daily and `reactivate_recovered_dormant_platforms()`
+flips it back to active on the first crawl that saves rows. Its matrix line, `ops_liveness_registry` row and
+CANDIDATE_PLUS_DIRECT policy are back; its 11 rows left `ops_adjudicated_retraction` and are active again, hidden
+from search by the dormant gate exactly as they were from 2026-10-27 to 2026-11-04.
+
 ### 7.2 Two owner decisions of 2026-11-03 that change NOTHING — written down so nobody "fixes" them
 
 The owner answered «Yes, use your picks» to both recommendations:
