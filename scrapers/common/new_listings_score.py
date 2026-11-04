@@ -182,7 +182,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
     lines = [norm(x) for x in ([page.get("title") or ""] + list((page.get("meta") or {}).values())
                                + (page.get("evidence_lines") or [])
                                + (page.get("text_head") or "").split(" | "))]
-    lines = [x for x in lines if x]
+    lines = [x for x in lines if x and not SITE_PROMO_LINE.search(_TASHKEEL.sub("", x))]
     jsonld = norm(json.dumps(page.get("jsonld") or [], ensure_ascii=False))
     whole = "\n".join(lines + ([jsonld] if page.get("jsonld") else []))
     whole_loc = "\n".join([x for x in lines if not CONTACT_LINE.search(x)]
@@ -244,6 +244,8 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             out[name] = _cmp_valued(stored.get(col), SITE_DEAL_MENU.sub("", whole), DEAL_KW)
         else:
             out[name] = _cmp_word(stored.get(col), whole, kw)
+            if name == "direction_ar" and out[name] == WE_MISS and not facade_stated(lines, kw):
+                out[name] = PAGE_SILENT
             # haraj's REGA licence block prints the facade in English («واجهة العقار: Eastern», 21831096, backlog 1090).
             if name == "direction_ar" and out[name] == MISMATCH and stored.get(col):
                 en = FACADE_EN.get(norm(str(stored.get(col))))
@@ -256,6 +258,36 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                     out[name] = MATCH
     return out
 
+
+# A site's own promo banner is not the ad. haraj prints partner offers under every ad (score dry run 41790110618,
+# 2026-11-04): «استأجر الآن وادفع لاحقًا مع إيجاري ، تقسيط شهري مريح…» (Ejari) on 23431125 / 23409947 and «وفّي وسيط
+# وتقسيط: سهِّل مشترياتك…» (Wafi) on 23449574 — none of it is in the seller's text, and each read as «we miss» a
+# rent-now-pay-later / installment the ad never offers. Matched on the exact banner wording only.
+_TASHKEEL = re.compile(r"[\u064B-\u0652]")
+SITE_PROMO_LINE = re.compile(r"ادفع لاحقا مع ايجاري|^وفي وسيط وتقسيط")
+
+# One of the eight compass facades, as a REGA facade cell or a page label states it.
+_FACADE_WORD = re.compile(r"(?:ال)?(شمال|جنوب|شرق|غرب)|(north|south|east|west)", re.I)
+_FACADE_WORD_EN = {"north": "شمال", "south": "جنوب", "east": "شرق", "west": "غرب"}
+_OPPOSITE = ({"شرق", "غرب"}, {"شمال", "جنوب"})
+
+
+def facade_stated(lines: list[str], kw: str) -> bool:
+    """Does a facade line state ONE facade the Advanced Filter could hold? haraj's REGA block prints the label on every
+    ad: «واجهة العقار: لا يوجد», «واجهة العقار: -» (no facade) and «واجهة العقار: غربية - شرقية» (two opposite streets,
+    a through plot, never one bearing) — 4 of 5 haraj direction «we miss» on 2026-11-04 (dry run 41790110618,
+    23449578 / 23431076 / 23431125 / 23449477 / 23397687). A label alone, «none», or opposite bearings → not stated."""
+    for x in lines:
+        m = re.search(kw, x)
+        if not m:
+            continue
+        # The cell's own value only: up to the next REGA label, and never past 30 characters of prose.
+        value = re.split(r"[|]|عدد الغرف|رقم المخطط|عرض الشارع", x[m.end():].lstrip(" :：-–"))[0][:30]
+        bearings = {b.group(1) or _FACADE_WORD_EN[b.group(2).lower()] for b in _FACADE_WORD.finditer(value)}
+        if not bearings or any(pair <= bearings for pair in _OPPOSITE):
+            continue
+        return True
+    return False
 
 # «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
 SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
