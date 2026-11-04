@@ -3,9 +3,15 @@
 -- Property Finder joins listing_rich_attrs (owner 2026-10-16, licensed offers only; its pin is additional_info.latitude/longitude) — an Advanced-Filter view, so without an arm every one of
 -- their listings answers "unknown" to every AF question. Arm shape is batch 6's verbatim, appended to
 -- the body read LIVE at apply time; the same short-lock retry loop.
+-- ADAPTED AT LAUNCH (2026-11-04): the live view is no longer one flat UNION — since 2026-10-26 the AF amenity
+-- columns (majlis … building_rules) are computed in outer layers over an INNER 31-column union, so appending
+-- the arms at the end failed («each UNION query must have the same number of columns», clean rollback). The
+-- arms are now spliced INSIDE the inner union, right after its last arm (october_commercial_listings, whose
+-- closing «) v_1_1_1_1» must be found exactly once in the live body), so every outer layer reads them unchanged.
 set local statement_timeout = '5min';
 DO $do$
 DECLARE base text; arms text; t text; i int; ok boolean := false;
+  anchor constant text := E'FROM october_commercial_listings x\n  WHERE x.active)';
   tables text[] := ARRAY['propertyfinder_residential_listings','propertyfinder_commercial_listings'];
 BEGIN
   IF position('propertyfinder_residential_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) > 0 THEN
@@ -16,6 +22,9 @@ BEGIN
     BEGIN
       SET LOCAL lock_timeout = '3s';
       base := rtrim(rtrim(pg_get_viewdef('public.listing_rich_attrs'::regclass,true)),';');
+      IF (length(base) - length(replace(base, anchor, ''))) / length(anchor) <> 1 THEN
+        RAISE EXCEPTION 'listing_rich_attrs inner-union anchor (the october commercial arm) not found exactly once - shape moved, refusing to guess';
+      END IF;
       arms := '';
       FOREACH t IN ARRAY tables LOOP
         arms := arms || format($f$
@@ -63,7 +72,8 @@ UNION ALL
    FROM %1$I x
   WHERE x.active$f$, t);
       END LOOP;
-      EXECUTE 'CREATE OR REPLACE VIEW public.listing_rich_attrs AS ' || base || arms;
+      EXECUTE 'CREATE OR REPLACE VIEW public.listing_rich_attrs AS ' ||
+        replace(base, anchor, left(anchor, length(anchor) - 1) || arms || ')');
       EXECUTE 'GRANT ALL ON public.listing_rich_attrs TO postgres, anon, authenticated, service_role';
       ok := true;
       EXIT;

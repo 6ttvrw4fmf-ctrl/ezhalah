@@ -1,6 +1,11 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-11-04 (Property Finder launch, migrations 20261104180049 wiring + 20261104180642 replay, 20261104181423 digest):
+--   CHANGED. Two propertyfinder arms spliced after the haraj commercial
+--   arm; 148,007 -> 149,342 chars. md5 of everything below this header block: 14cd19d8345818bcdb4b9b9ff7591f81 == live,
+--   registered by sql_mirror_expected_catches_up_to_propertyfinder_arms.
+--
 -- Re-verified 2026-11-03 (migration 20261103052931 district recovery reads this view, it does not change it):
 -- UNCHANGED, md5(pg_get_viewdef(..., true)) = ea8174b63953cfc25aef4a39af032f0a, the value recorded below.
 --
@@ -612,6 +617,30 @@
             haraj_commercial_listings.transaction_type
            FROM haraj_commercial_listings
           WHERE haraj_commercial_listings.active
+        UNION ALL
+         SELECT 'propertyfinder'::text AS platform,
+            'propertyfinder_residential_listings'::text AS source_table,
+            propertyfinder_residential_listings.id AS listing_id,
+            propertyfinder_residential_listings.city_ar,
+            propertyfinder_residential_listings.city_id,
+            propertyfinder_residential_listings.district_ar,
+            propertyfinder_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            propertyfinder_residential_listings.transaction_type
+           FROM propertyfinder_residential_listings
+          WHERE propertyfinder_residential_listings.active
+        UNION ALL
+         SELECT 'propertyfinder'::text AS platform,
+            'propertyfinder_commercial_listings'::text AS source_table,
+            propertyfinder_commercial_listings.id AS listing_id,
+            propertyfinder_commercial_listings.city_ar,
+            propertyfinder_commercial_listings.city_id,
+            propertyfinder_commercial_listings.district_ar,
+            propertyfinder_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            propertyfinder_commercial_listings.transaction_type
+           FROM propertyfinder_commercial_listings
+          WHERE propertyfinder_commercial_listings.active
         UNION ALL
          SELECT 'superoffice'::text AS platform,
             'superoffice_residential_listings'::text AS source_table,
