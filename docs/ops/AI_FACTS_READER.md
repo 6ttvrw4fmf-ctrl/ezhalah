@@ -15,7 +15,10 @@
 > through PLACE items (`_PLACE_WORDS`) and silences only `_NEAR_PUBLIC_FACTS` (café, mosque, market, park…); it stops
 > at the first non-place item, so DealApp's REGA list «قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» keeps its parking.
 > Proof: 110 real nearby-list snippets → 10 changes, all a wrong yes turned off, no real feature lost.
-> **Locked since (owner: «I never want this to happen ever again»):** those ~370 real sentences and every answer the
+> A live re-check after the re-read found the same family once more — «🌳 على مقربة جدًا من حديقة», «🕌 المسجد على بُعد
+> خطوات» served as the ad's own park and mosque. A distance now points at its place with «من / عن» (or sits right after a
+> public place); the next bullet's own «موقف خاص» stays. Proof: 130 real distance snippets → 11 changes, all right.
+> **Locked since (owner: «I never want this to happen ever again»):** those ~500 real sentences and every answer the
 > reader gives on them are `scrapers/facts/testdata/real_ads_golden.jsonl`, checked on every scrapers PR by
 > `scrapers/common/tests/test_word_checker_real_ads.py` (undoing either fix turns it red). Reader silence is UNKNOWN:
 > never clear a stored yes on silence without reading ≥ 25 of the rows first (`docs/ops/ADVANCED_FILTER_ENGINEER.md`).

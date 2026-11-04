@@ -470,6 +470,10 @@ _NEAR = tuple(_n(w) for w in N._PROXIMITY + ("قريب", "قريبه", "قرب",
                                                "walking", "overlooking", "views",
                                                # «بجواره مقهى دانكن» — «next to it» (🔬 2026-11-04 café audit)
                                                "بجواره", "بجوارها", "بجانبه", "بجانبها", "جواره", "جوارها"))
+# A DISTANCE points at its place with «من / عن» (🔬 2026-11-04 live walk): «على مقربة جدًا من حديقة», «على بُعد خطوات من
+# المسجد», «على مسافة 3 كم من جامعة», «على بعد 20 د عن المسجد». Only a fact AFTER that «من / عن» is the nearby place —
+# «🔸المسجد على بعد خطوات 🔸موقف خاص 🔸غرفة سائق» keeps its own parking and driver's room. (A bare «بعد» is «after».)
+_DISTANCE_TO = re.compile(r"(?:علي (?:بعد|مقربه|مسافه)|بمقربه|خطوات|بضع خطوات)(?: \S+){0,4} (?:من|عن)(?: \S+){0,3}$")
 _NEAR_WORDS = frozenset(w for w in _NEAR if " " not in w)
 _NEAR_PHRASES = tuple(w for w in _NEAR if " " in w)
 _PARTIAL = tuple(_n(w) for w in N._PARTIAL_ONLY + N._FLOOR_COVERING)
@@ -603,7 +607,10 @@ _UTILITY = tuple(_n(w) for w in ("كهرب", "مياه", "ماء", "مويه", "
 # and the items of a «خدمات قريبة: مسجد - حديقة» list — the nearby word may come AFTER, or a clause before.
 _PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking", "nursery", "kids_play_area", "sports_court",
                            "football_pitch", "events_hall", "mosque", "market", "in_mall", "restaurant_cafe", "food_allowed"})
-_NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "بجوار", "مقابل"))
+_NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "بجوار", "مقابل", "مقربه", "خطوات"))
+# «🕌 المسجد على بُعد خطوات», «مسجد الحي على بُعد 100 م»: the distance comes right AFTER the public place (a unit's own
+# «مسبح خاص على بعد دقائق من البحر» keeps its pool — «خاص» before the distance is the unit's)
+_DISTANCE_AFTER = (_n("علي بعد"), _n("علي مسافه"))
 # A PUBLIC PLACE named after «خلف / أمام / جنبها / ومقابلها / ظهيرة / 4 كيلو» is a landmark, not part of the unit
 # («خلف شبيلي مول», «تتوفر جنبها … سوبرماركت», «ومقابلها مسجد», 2026-11-03 audit round 2). These words are too common to
 # silence every fact — «غرفة غسيل خلف الحديقة 🔸مطبخ» has a kitchen — so they apply to these public places only.
@@ -813,14 +820,17 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e
     p5 = gp[-5:]
     if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
-                                          or any(p in " ".join(p5) for p in _NEAR_PHRASES)):
+                                          or any(p in " ".join(p5) for p in _NEAR_PHRASES)
+                                          or _DISTANCE_TO.search(" ".join(gp[-8:]))):
         return None, s, e
     if fact in _NEAR_PUBLIC_FACTS and (list_in or any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in p5)):
         return None, s, e
     n3 = gn[:3]                                      # English puts it AFTER: «car park nearby», «pool and gym nearby»
     if "nearby" in n3 or "close by" in " ".join(n3):
         return None, s, e
-    if fact in _PUBLIC_FACTS and (any(_starts(w, _NEAR_AFTER) for w in gn[:4]) or (near_in and n_words <= 3)):
+    distance_after = any(" ".join(gn[:3]).startswith(d) or " ".join(gn[1:3]).startswith(d) for d in _DISTANCE_AFTER) \
+        and not (gn[:1] and _strip_wa(gn[0]) in ("خاص", "خاصه", "مستقل", "مستقله", "داخلي", "داخليه"))
+    if fact in _PUBLIC_FACTS and (any(_starts(w, _NEAR_AFTER) for w in gn[:4]) or distance_after or (near_in and n_words <= 3)):
         return None, s, e
     ex_before, ex_after = _EXCLUDE.get(fact, ((), ()))
     if fact in _METER_FACTS and "عداد" in t[ws:e]:
@@ -1250,6 +1260,12 @@ def selftest() -> None:
         ("حوش ، قريب من الخدمات ، موقف سيارات", {"parking": True}, ()),
         ("Recreation center , restaurant, café, library", {"restaurant_cafe": True}, ()),
         ("قريب من الخدمات\nمسبح خاص\nموقف خاص", {"pool": True, "parking": True}, ()),
+        # a distance points at its place with «من / عن»; the next bullet's own features stay (🔬 2026-11-04)
+        ("🌳 على مقربة جدًا من حديقة", {}, ("garden",)),
+        ("🕌 المسجد على بُعد خطوات", {}, ("mosque",)),
+        ("على بعد 20 د عن المسجد النبوي", {}, ("mosque",)),
+        ("🔸المسجد على بعد خطوات 🔸موقف خاص 🔸غرفة سائق", {"parking": True, "driver_room": True}, ("mosque",)),
+        ("مسبح خاص على بعد دقائق من البحر", {"pool": True}, ()),
         ("مطبخ (SPLIT) (غير راكب)", {"kitchen": False}, ()),
         ("مطبخ راكب ومكيفات راكبة", {"kitchen": True, "air_conditioner": True}, ()),
         ("بدون مكيفات ومطبخ", {"air_conditioner": False, "kitchen": False}, ()),

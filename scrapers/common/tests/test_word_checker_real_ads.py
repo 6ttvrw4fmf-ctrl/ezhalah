@@ -4,11 +4,12 @@ again»).
 What happened. On 2026-11-04 a live walk found two reader faults that every existing barrier passed:
   1. real unit AC read as nothing — a near word or an entrance in the bullet BEFORE («بلكونة مطلة على لاندسكيب 🔹مكيفات
      راكبة», «مدخلان🔹 مكيفات راكبة») silenced it, and «قابل للتفاوض» (negotiable) read as «can be fitted»;
-  2. nearby places read as the ad's own — «Close to shops, restaurants, and markets», «قريبة من جميع الخدمات: مسجد، مطعم».
+  2. nearby places read as the ad's own — «Close to shops, restaurants, and markets», «قريبة من جميع الخدمات: مسجد، مطعم»,
+     and after the re-read a live check found more: «🌳 على مقربة جدًا من حديقة», «🕌 المسجد على بُعد خطوات».
 The selftest (one sentence, one expected fact) and the evidence-phrase barrier (which words may be quoted) cannot see
 either: the quoted word was right, the sentence around it was not. Both were found only by reading real ads old-vs-new.
 
-So that reading is now a test. testdata/real_ads_golden.jsonl holds 369 real ad sentences from aqar, dealapp, haraj,
+So that reading is now a test. testdata/real_ads_golden.jsonl holds ~500 real ad sentences from aqar, dealapp, haraj,
 muhaysini, gathern, wasalt and rightcompound (PDPL-sanitised by the reader's own clean_text; the only long numbers left are
 the public REGA ad-licence numbers), each with every yes / no the reader gives today — answers read by hand on 2026-11-04.
 A change to word_checker.py that changes ONE answer on ONE of them fails here and prints the old-vs-new list.
@@ -81,3 +82,10 @@ def test_lock_catches_a_nearby_list_read_as_the_ads_own(monkeypatch):
 def test_lock_catches_negotiable_read_as_can_be_fitted(monkeypatch):
     monkeypatch.setattr(W, "_NEGOTIABLE", ())
     assert _diffs(_rows()), "undoing the «قابل للتفاوض» fix changed nothing — the lock cannot see it"
+
+
+def test_lock_catches_a_distance_read_as_the_ads_own(monkeypatch):
+    import re as _re
+    monkeypatch.setattr(W, "_DISTANCE_TO", _re.compile(r"(?!x)x"))
+    monkeypatch.setattr(W, "_DISTANCE_AFTER", ())
+    assert _changed_facts(_diffs(_rows())) & {"mosque", "garden", "all_services"}
