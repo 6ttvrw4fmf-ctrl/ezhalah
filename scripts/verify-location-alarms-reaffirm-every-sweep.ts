@@ -36,9 +36,11 @@ for (const p of fixProblems(fixSql)) { console.log(`FAIL  ${fix}: ${p}`); bad++;
 // A later full redefinition of any of the five must not restore the frozen branch.
 for (const f of files.filter((n) => n > fix)) {
   const s = readFileSync(join(dir, f), 'utf8');
+  // Whole-file, deliberately: a later file that redefines one of the five AND carries the frozen branch anywhere is red
+  // (conservative — no body window to mis-cut).
   for (const fn of FIVE) {
-    const m = s.match(new RegExp(`create or replace function public\\.${fn}\\(\\)[\\s\\S]*?\\$function\\$;`, 'i'));
-    if (m && FROZEN.test(m[0])) { console.log(`FAIL  ${f}: ${fn} raises only when no alert is open again`); bad++; }
+    const redefines = s.toLowerCase().includes(`create or replace function public.${fn}()`);
+    if (redefines && FROZEN.test(s)) { console.log(`FAIL  ${f}: ${fn} redefined next to a raise-only-when-closed branch`); bad++; }
   }
 }
 
