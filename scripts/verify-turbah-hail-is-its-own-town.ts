@@ -43,18 +43,19 @@ export function problems(migs: Mig[]): string[] {
 }
 
 let fail = 0;
-const expect = (label: string, got: string[], wantRed: boolean) => {
-  const red = got.length > 0;
-  if (red !== wantRed) { console.log(`FAIL  mutation: ${label} → ${red ? 'RED' : 'GREEN'}, expected ${wantRed ? 'RED' : 'GREEN'}`); fail++; }
+// mustCatch(label, held): `held` must be true — a broken input is RED, a sound one is GREEN.
+const mustCatch = (label: string, held: boolean) => {
+  if (!held) { console.log(`FAIL  mutation: ${label}`); fail++; }
 };
+const red = (m: Mig[]) => problems(m).length > 0;
 const un = 'update public.loc_catalog_city\n set retired_at = null, retired_why = null\n where city_id = 2372 and region_id = 8;';
 const re = "update public.loc_catalog_city set retired_at = now(), retired_why = 'dup' where city_id = 2372;";
-expect('un-retire only', problems([{ n: '20261103000000_a.sql', s: un }]), false);
-expect('nothing un-retires', problems([{ n: '20261103000000_a.sql', s: 'select 1;' }]), true);
-expect('re-retired afterwards', problems([{ n: '20261103000000_a.sql', s: un }, { n: '20261104000000_b.sql', s: re }]), true);
-expect('retire then un-retire', problems([{ n: '20261026000000_a.sql', s: re }, { n: '20261103000000_b.sql', s: un }]), false);
-expect('other city ignored', problems([{ n: '20261103000000_a.sql', s: un }, { n: '20261104000000_b.sql', s: re.replace('2372', '23721') }]), false);
-expect('commented-out retire ignored', problems([{ n: '20261103000000_a.sql', s: un }, { n: '20261104000000_b.sql', s: '-- ' + re }]), false);
+mustCatch('un-retire only is GREEN', !red([{ n: '20261103000000_a.sql', s: un }]));
+mustCatch('nothing un-retires is RED', red([{ n: '20261103000000_a.sql', s: 'select 1;' }]));
+mustCatch('re-retired afterwards is RED', red([{ n: '20261103000000_a.sql', s: un }, { n: '20261104000000_b.sql', s: re }]));
+mustCatch('retire then un-retire is GREEN', !red([{ n: '20261026000000_a.sql', s: re }, { n: '20261103000000_b.sql', s: un }]));
+mustCatch('another city is ignored', !red([{ n: '20261103000000_a.sql', s: un }, { n: '20261104000000_b.sql', s: re.replace('2372', '23721') }]));
+mustCatch('a commented-out retire is ignored', !red([{ n: '20261103000000_a.sql', s: un }, { n: '20261104000000_b.sql', s: '-- ' + re }]));
 
 const dir = join(import.meta.dirname, '..', 'supabase', 'migrations');
 const tree = readdirSync(dir).filter((f) => f.endsWith('.sql')).map((n) => ({ n, s: readFileSync(join(dir, n), 'utf8') }));
