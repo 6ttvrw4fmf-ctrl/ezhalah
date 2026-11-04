@@ -8,12 +8,17 @@
 //   2. SEARCH — Riyadh through the real Filter, until the first result card is on screen.
 //   3. TAP    — press the first golden card («اضغط هنا»): the longest freeze (long task) in the 3 s after the tap,
 //               the moment the owner felt as «not smooth» (measured 2026-10-27: 380 ms on a laptop ≈ 1.5 s here).
+//   0. TABS + MAP (owner 2026-11-04: «we need to make sure it's never ever slow … people will run away»), run first:
+//      tap «خريطة» until city names are on the map (first visit), back to «تصفية» until the form answers, «خريطة» again
+//      (the map is kept between visits), two taps on «+» until the closer view's labels show, and «الوسيط الذكي» until
+//      its message box is on screen. Measured the day these were added, on a laptop: map first visit ~4.2 s before the
+//      bridge labels (#10554), return 0.85 s, Filter 0.07 s.
 // Any step over its budget, or any step that cannot complete, fails the run (never a silent pass).
 import '../../scripts/lib/robotPass.mjs';
 import { chromium, devices } from '@playwright/test';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah.com';
-export const BUDGET = { openMs: 12_000, searchMs: 25_000, tapFreezeMs: 1_000 };
+export const BUDGET = { openMs: 12_000, searchMs: 25_000, tapFreezeMs: 1_000, mapFirstMs: 5_000, filterBackMs: 2_500, mapReturnMs: 3_000, zoomMs: 4_000, brokerMs: 4_000 };
 
 const browser = await chromium.launch();
 const results = {};
@@ -35,6 +40,51 @@ try {
 
   // Cookie banner, if shown: essential only (privacy default).
   await page.getByText('الضروري فقط', { exact: true }).click({ timeout: 3_000 }).catch(() => {});
+
+  // 0. TABS + MAP — what a visitor feels when moving around (labels on the map, a form that answers, a box to type in).
+  const tab = (label) => page.locator('[role=tab]', { hasText: label }).first();
+  const until = async (fn, arg) => page.waitForFunction(fn, arg, { timeout: 30_000, polling: 25 });
+  const labelsOnMap = () => location.pathname === '/map' && [...document.querySelectorAll('[data-testid=map-area]')]
+    .some((a) => { const r = a.getBoundingClientRect(); return r.width > 0 && r.top >= 0 && r.top < innerHeight; });
+  const formBack = () => location.pathname === '/' && [...document.querySelectorAll('*')].some((e) => e.childElementCount === 0 && e.textContent === 'بحث' && e.getBoundingClientRect().width > 0);
+  await page.waitForTimeout(5_000);   // a reader's pause: the page settles and the quiet map warm-up runs
+  t = Date.now(); await tab('خريطة').click(); await until(labelsOnMap); results.mapFirstMs = Date.now() - t;
+  say(results.mapFirstMs <= BUDGET.mapFirstMs, 'map: first visit until city names are on the map', results.mapFirstMs, BUDGET.mapFirstMs);
+  await page.waitForTimeout(2_000);
+  t = Date.now(); await tab('تصفية').click(); await until(formBack); results.filterBackMs = Date.now() - t;
+  say(results.filterBackMs <= BUDGET.filterBackMs, 'tabs: back to Filter until the form answers', results.filterBackMs, BUDGET.filterBackMs);
+  await page.waitForTimeout(2_000);
+  t = Date.now(); await tab('خريطة').click(); await until(labelsOnMap); results.mapReturnMs = Date.now() - t;
+  say(results.mapReturnMs <= BUDGET.mapReturnMs, 'map: return visit until city names are on the map', results.mapReturnMs, BUDGET.mapReturnMs);
+  await page.waitForTimeout(1_500);
+  const before = await page.evaluate(() => [...document.querySelectorAll('[data-testid=map-area]')].map((e) => e.textContent).join('|'));
+  // A timeline of the zoom (printed only when the step is over budget): map movement, label changes, data reads.
+  await page.evaluate(() => {
+    const mk = window.mapkit; const m = mk?.maps?.[mk.maps.length - 1]; const t0 = performance.now(); window.__zt = [];
+    const at = () => Math.round(performance.now() - t0);
+    m?.addEventListener('region-change-start', () => window.__zt.push(`move-start@${at()}`));
+    m?.addEventListener('region-change-end', () => window.__zt.push(`move-end@${at()} span=${m.region.span.latitudeDelta.toFixed(2)}`));
+    let last = ''; const iv = setInterval(() => { const now = [...document.querySelectorAll('[data-testid=map-area]')].filter((e) => e.getBoundingClientRect().width > 0).length + '/' + (m?.annotations?.length ?? 0); if (now !== last) { window.__zt.push(`labels ${now}@${at()}`); last = now; } }, 50);
+    setTimeout(() => clearInterval(iv), 30_000);
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) if (/rpc|feed|sb\//.test(e.name)) window.__zt.push(`read ${e.name.split('/').pop().split('?')[0]} ${Math.round(e.startTime - t0)}+${Math.round(e.duration)}`); }).observe({ type: 'resource' });
+  });
+  // Zoomed the way a pinch does — the map itself, to a quarter of the span — so the time is the MAP's answer. A robot tap
+  // on «+» measured the wrong thing: on a phone the Google sign-in sheet can sit over that corner (the map did not start
+  // moving until 6.8 s after the tap), and a scripted press does not reach the button in touch mode.
+  t = Date.now();
+  await page.evaluate(() => {
+    const mk = window.mapkit; const m = mk.maps[mk.maps.length - 1]; const r = m.region;
+    m.setRegionAnimated(new mk.CoordinateRegion(r.center, new mk.CoordinateSpan(r.span.latitudeDelta / 4, r.span.longitudeDelta / 4)), true);
+  });
+  await until((prev) => { const now = [...document.querySelectorAll('[data-testid=map-area]')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.textContent).join('|'); return now.length > 0 && now !== prev; }, before);
+  results.zoomMs = Date.now() - t;
+  say(results.zoomMs <= BUDGET.zoomMs, 'map: zoom in (pinch-like, ¼ span) until the closer view is labelled', results.zoomMs, BUDGET.zoomMs);
+  if (results.zoomMs > BUDGET.zoomMs) console.log(`      zoom timeline: ${(await page.evaluate(() => window.__zt)).join(' · ')}`);
+  t = Date.now(); await tab('الوسيط الذكي').click();
+  await until(() => location.pathname === '/agent' && [...document.querySelectorAll('textarea')].some((x) => x.getBoundingClientRect().width > 0));
+  results.brokerMs = Date.now() - t;
+  say(results.brokerMs <= BUDGET.brokerMs, 'tabs: Smart Broker until its message box is on screen', results.brokerMs, BUDGET.brokerMs);
+  await tab('تصفية').click(); await until(formBack);
 
   // 2. SEARCH (Riyadh, the real Filter)
   t = Date.now();
@@ -65,4 +115,4 @@ try {
 }
 console.log(`\nmeasured: ${JSON.stringify(results)}`);
 if (failed) { console.error(`❌ site speed watch: ${failed} problem(s) — the engineers get this as an alert.`); process.exit(1); }
-console.log('✅ site speed watch: ezhalah.com opens, searches and answers a tap within budget on a mid-range phone.');
+console.log('✅ site speed watch: ezhalah.com opens, moves between tabs, shows the map, searches and answers a tap within budget on a mid-range phone.');
