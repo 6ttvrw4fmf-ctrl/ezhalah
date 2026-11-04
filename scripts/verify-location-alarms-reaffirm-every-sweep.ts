@@ -28,6 +28,10 @@ function fixProblems(sql: string): string[] {
 }
 
 let bad = 0;
+function mustCatch(label: string, caught: boolean): void {
+  if (!caught) { console.log(`FAIL  mutation not caught: ${label}`); bad++; }
+}
+
 const fix = files.filter((f) => f.endsWith('_location_alarms_reaffirm_every_sweep.sql')).at(-1);
 if (!fix) { console.log('FAIL  the re-affirm migration is missing'); process.exit(1); }
 const fixSql = readFileSync(join(dir, fix), 'utf8');
@@ -45,12 +49,10 @@ for (const f of files.filter((n) => n > fix)) {
 }
 
 // Mutation proofs.
-if (fixProblems(fixSql.replace(/'mon_detect_district_blank_unexplained',\s*/, '')).length === 0) { console.log('FAIL  mutation: dropping a detector passes'); bad++; }
-if (fixProblems(fixSql.replace(/a_new constant text := E'else/, "a_new constant text := E'elsif v_open is null then")).length === 0) {
-  console.log('FAIL  mutation: keeping the frozen branch passes'); bad++;
-}
+mustCatch('dropping a detector', fixProblems(fixSql.replace(/'mon_detect_district_blank_unexplained',\s*/, '')).length > 0);
+mustCatch('keeping the frozen branch', fixProblems(fixSql.replace(/a_new constant text := E'else/, "a_new constant text := E'elsif v_open is null then")).length > 0);
 const frozenBody = "create or replace function public.mon_detect_source_district_dropped() as $function$ begin if n = 0 then null;\n  elsif v_open is null then\n    r := public.mon_raise('P1'); end if; end $function$;";
-if (!FROZEN.test(frozenBody)) { console.log('FAIL  mutation: the frozen-branch pattern does not match a frozen body'); bad++; }
+mustCatch('a frozen body', FROZEN.test(frozenBody));
 
 if (bad) process.exit(1);
 console.log(`✓ the five location alarms re-affirm every sweep (${fix})`);

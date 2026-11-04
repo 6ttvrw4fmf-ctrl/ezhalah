@@ -29,6 +29,10 @@ function problems(sql: string): string[] {
 
 const newest = files.filter((f) => /c_max_tables\s+constant\s+int\s*:=/.test(readFileSync(join(dir, f), 'utf8'))).at(-1);
 let bad = 0;
+function mustCatch(label: string, caught: boolean): void {
+  if (!caught) { console.log(`FAIL  mutation not caught: ${label}`); bad++; }
+}
+
 if (!newest) { console.log('FAIL  no migration sets c_max_tables'); process.exit(1); }
 const sql = readFileSync(join(dir, newest), 'utf8');
 for (const p of problems(sql)) { console.log(`FAIL  ${newest}: ${p}`); bad++; }
@@ -41,8 +45,8 @@ if (!fullBody || !/exit when extract\(epoch from \(clock_timestamp\(\) - v_t0\)\
 
 // Mutation proofs: the 2026-09-19 constant, and a bigger constant, must both go red.
 const old = readFileSync(join(dir, '20260919061517_loc_rel_rotation_throughput_must_scale_with_the_platform_count.sql'), 'utf8');
-if (problems(old).length === 0) { console.log('FAIL  mutation: the fixed 4 of 20260919061517 passes'); bad++; }
-if (problems('  c_max_tables constant int     := 40;').length === 0) { console.log('FAIL  mutation: a bigger constant passes'); bad++; }
+mustCatch('the fixed 4 of 20260919061517', problems(old).length > 0);
+mustCatch('a bigger constant', problems('  c_max_tables constant int     := 40;').length > 0);
 
 if (bad) process.exit(1);
 console.log(`✓ loc_rel tick work follows the rotation size (${newest}), bounded by the 30 s budget`);

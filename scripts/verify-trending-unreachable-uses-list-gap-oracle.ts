@@ -31,15 +31,17 @@ function problems(sql: string): string[] {
 
 const newest = files.filter((f) => readFileSync(join(dir, f), 'utf8').includes('mon_trending_district_barrier')).at(-1);
 let bad = 0;
+function mustCatch(label: string, caught: boolean): void {
+  if (!caught) { console.log(`FAIL  mutation not caught: ${label}`); bad++; }
+}
+
 if (!newest) { console.log('FAIL  no migration defines mon_trending_district_barrier'); process.exit(1); }
 const sql = readFileSync(join(dir, newest), 'utf8');
 for (const p of problems(sql)) { console.log(`FAIL  ${newest}: ${p}`); bad++; }
 
 // Mutation proofs: dropping the list_rule filter, or the oracle itself, must go red.
-if (problems(sql.replace(/where w\.list_rule is null/g, '')).length === 0) { console.log('FAIL  mutation: no list_rule filter still passes'); bad++; }
-if (problems(sql.replace(/public\.served_district_not_offered\(\)/g, 'public.search_listings_ar')).length === 0) {
-  console.log('FAIL  mutation: counting search_listings_ar directly still passes'); bad++;
-}
+mustCatch('no list_rule filter', problems(sql.replace(/where w\.list_rule is null/g, '')).length > 0);
+mustCatch('counting search_listings_ar directly', problems(sql.replace(/public\.served_district_not_offered\(\)/g, 'public.search_listings_ar')).length > 0);
 
 if (bad) process.exit(1);
 console.log(`✓ trending unreachable-by-district (${newest}) counts only real list gaps, via served_district_not_offered()`);

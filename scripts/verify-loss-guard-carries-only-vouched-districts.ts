@@ -40,6 +40,10 @@ const newest = files.filter((f) => {
 }).at(-1);
 
 let bad = 0;
+function mustCatch(label: string, caught: boolean): void {
+  if (!caught) { console.log(`FAIL  mutation not caught: ${label}`); bad++; }
+}
+
 if (!newest) {
   console.log('FAIL  no migration writes the district-recovery loss-guard carry');
   process.exit(1);
@@ -51,9 +55,9 @@ for (const p of vouchProblems(sql)) { console.log(`FAIL  ${newest}: ${p}`); bad+
 
 // Mutation proof: the same file with the predicate stripped must be judged unsafe.
 const mutant = sql.replace(/o\.basis = 'pin' and exists/g, 'true or exists').replace(/coalesce\(o\.basis, ''\) not in/g, 'o.basis not in');
-if (vouchProblems(mutant).length === 0) { console.log('FAIL  mutation proof: a carry without the vouch still passes'); bad++; }
+mustCatch('a carry without the vouch', vouchProblems(mutant).length > 0);
 const old = readFileSync(join(dir, '20261103052931_district_recovery_never_freezes_and_title_heals.sql'), 'utf8');
-if (vouchProblems(old).length === 0) { console.log('FAIL  mutation proof: the pre-fix carry (20261103052931) passes'); bad++; }
+mustCatch('the pre-fix carry (20261103052931)', vouchProblems(old).length > 0);
 
 if (bad) process.exit(1);
 console.log(`✓ loss-guard carry (${newest}) keeps source words and carries a pin/title district only while it is vouched for`);
