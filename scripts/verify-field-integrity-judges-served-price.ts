@@ -61,9 +61,10 @@ const mutants: Array<[string, Array<{ name: string; sql: string }>]> = [
     { name: '2.sql', sql: 'create or replace function public.mon_detect_field_integrity() returns int ...' }]],
 ];
 let fail = 0;
-for (const [label, input] of mutants) {
-  if (problems(input).length === 0) { console.error(`✗ mutant survived: ${label}`); fail++; }
+function mustCatch(label: string, caught: boolean): void {
+  if (!caught) { console.error(`✗ mutant survived: ${label}`); fail++; }
 }
+for (const [label, input] of mutants) mustCatch(label, problems(input).length > 0);
 if (problems([{ name: '1.sql', sql: GOOD }]).length) { console.error('✗ the good shape is rejected'); fail++; }
 
 // ── the real tree ──────────────────────────────────────────────────────────────────────────────────

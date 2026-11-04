@@ -49,9 +49,10 @@ const mutants: Array<[string, Array<{ name: string; sql: string }>]> = [
   ['later redefinition drops it', [{ name: '1.sql', sql: GOOD },
     { name: '2.sql', sql: 'create or replace function public.mon_detect_suspicious_listing_facts() returns int' }]],
 ];
-for (const [label, input] of mutants) {
-  if (problems(input).length === 0) { console.error(`✗ mutant survived: ${label}`); fail++; }
+function mustCatch(label: string, caught: boolean): void {
+  if (!caught) { console.error(`✗ mutant survived: ${label}`); fail++; }
 }
+for (const [label, input] of mutants) mustCatch(label, problems(input).length > 0);
 if (problems([{ name: '1.sql', sql: GOOD }]).length) { console.error('✗ the good shape is rejected'); fail++; }
 
 const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))
