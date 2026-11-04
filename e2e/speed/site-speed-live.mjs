@@ -58,7 +58,6 @@ try {
   say(results.mapReturnMs <= BUDGET.mapReturnMs, 'map: return visit until city names are on the map', results.mapReturnMs, BUDGET.mapReturnMs);
   await page.waitForTimeout(1_500);
   const before = await page.evaluate(() => [...document.querySelectorAll('[data-testid=map-area]')].map((e) => e.textContent).join('|'));
-  const plus = page.getByRole('button', { name: /Zoom in|تكبير/ }).first();
   // A timeline of the zoom (printed only when the step is over budget): map movement, label changes, data reads.
   await page.evaluate(() => {
     const mk = window.mapkit; const m = mk?.maps?.[mk.maps.length - 1]; const t0 = performance.now(); window.__zt = [];
@@ -69,7 +68,13 @@ try {
     setTimeout(() => clearInterval(iv), 30_000);
     new PerformanceObserver((l) => { for (const e of l.getEntries()) if (/rpc|feed|sb\//.test(e.name)) window.__zt.push(`read ${e.name.split('/').pop().split('?')[0]} ${Math.round(e.startTime - t0)}+${Math.round(e.duration)}`); }).observe({ type: 'resource' });
   });
-  t = Date.now(); await plus.click(); await page.waitForTimeout(250); await plus.click();
+  // Pressed in the page itself: on a phone the Google sign-in sheet can sit over the map's corner, and a robot click
+  // would wait for it (measured: the map did not start moving until 6.8 s after the tap). This times the MAP's answer.
+  t = Date.now();
+  await page.evaluate(async () => {
+    const b = [...document.querySelectorAll('[aria-label]')].find((e) => /Zoom in|تكبير/.test(e.getAttribute('aria-label') ?? ''));
+    b?.click(); await new Promise((r) => setTimeout(r, 250)); b?.click();
+  });
   await until((prev) => { const now = [...document.querySelectorAll('[data-testid=map-area]')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.textContent).join('|'); return now.length > 0 && now !== prev; }, before);
   results.zoomMs = Date.now() - t;
   say(results.zoomMs <= BUDGET.zoomMs, 'map: two zoom-ins until the closer view is labelled', results.zoomMs, BUDGET.zoomMs);
