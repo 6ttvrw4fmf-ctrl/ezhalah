@@ -1,4 +1,10 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-11-04 (migration 20261104051446_stale_sweep_judges_its_keys_on_every_path): full-body replace.
+--   md5 of everything below this header block (pg_get_functiondef in production, trailing newline): 31fae80c8e612554087185f99894648b
+--   Change: stale_listings_detected and stale_coverage_gate are raised-or-resolved BEFORE the breaker and the
+--   coverage gate can `continue` past them (stuck_open_alert 1293: keys sat unaffirmed up to 15 days while
+--   their tables were behind the breaker). Carries 20261104032124 (greatest(last_seen_at,
+--   last_verified_alive_at)) unchanged. Still deactivates nothing. Barrier: verify-monitors-judge-every-path.ts.
 -- Refreshed 2026-11-04 (migration 20261104032124_stale_sweep_counts_direct_alive_verdicts): CHANGED. md5 of everything below: 4ce83b360801e87e0a556f0494621ea9
 --   The stale count and the coverage gate's observed count now read greatest(last_seen_at, last_verified_alive_at):
 --   a direct liveness oracle ALIVE verdict is source evidence (stronger than crawl presence), and the liveness
@@ -58,7 +64,7 @@ declare
   coverage_frac     constant numeric  := 0.50;
   min_population    constant int      := 30;
   plat text; alive boolean; st record; escaped int;
-  observed int; cov_window_hours int; coverage_floor int;
+  observed int; cov_window_hours int; coverage_floor int; cov_gated boolean;
 begin
   for t in
     select tablename from pg_tables
@@ -69,6 +75,64 @@ begin
     execute format('select count(*) from public.%I where active = true', t) into act;
     execute format('select count(*) from public.%I where active = true and greatest(last_seen_at, last_verified_alive_at) < now() - $1 * interval ''1 day''', t)
       using stale_days into stale;
+
+    plat := regexp_replace(t, '_(residential|commercial)_listings$', '');
+
+    -- 2026-11-04: the REPORT key is judged here, before any gate can `continue` past it. Breaker and
+    -- coverage gate stop deactivation; this path deactivates nothing, so neither may hide the report.
+    if stale > 0 then
+      perform public.mon_raise(
+        'P2', 'stale_listings_detected', plat, 'stale_listings_detected:' || t,
+        jsonb_build_object(
+          'table', t, 'active', act, 'stale', stale, 'stale_days', stale_days,
+          'note', 'reported only — this path never deactivates (a time-based sweep cannot verify '
+               || 'a listing is dead). Deactivation belongs to aqar/wasalt liveness, prune_unseen, '
+               || 'or cleanup.py, all of which re-fetch the source first.'));
+    else
+      perform public.mon_resolve_key('stale_listings_detected', 'stale_listings_detected:' || t);
+    end if;
+
+    -- ROLLING COVERAGE, cadence-derived. Same window rule as mon_detect_refresh_coverage():
+    -- a platform gets 3x its own expected scrape interval to cover its population. Platforms with
+    -- no cadence row default to 24h -> a 72h window; aqar (8h) -> 24h; souq24 (48h) -> 144h.
+    -- 2026-11-04: measured before the breaker too, so the gate's key is judged on breaker days.
+    select coalesce(pc.expected_hours, 24) * 3 into cov_window_hours
+      from public.platform_cadence pc where pc.platform = plat;
+    cov_window_hours := coalesce(cov_window_hours, 72);
+
+    -- Distinct ACTIVE rows re-confirmed at the source inside the window. Slice-agnostic by
+    -- construction: 24 slices of 1/24th of the population each cover it exactly as well as one
+    -- monolithic run, and no row is ever double-counted.
+    execute format(
+      'select count(*) from public.%I where active = true and greatest(last_seen_at, last_verified_alive_at) > now() - make_interval(hours => %s)',
+      t, cov_window_hours) into observed;
+
+    coverage_floor := ceil(coverage_frac * act);
+    cov_gated := false;
+    if act >= min_population and observed < coverage_floor then
+      cov_gated := true;
+    end if;
+
+    if cov_gated and stale > 0 then
+      perform public.mon_raise(
+        'P2', 'stale_coverage_gate', plat, 'stale_coverage_gate:' || t,
+        jsonb_build_object(
+          'table', t, 'active', act, 'stale_withheld', stale,
+          'observed_in_window', observed,
+          'coverage_floor', coverage_floor,
+          'coverage_frac', coverage_frac,
+          'window_hours', cov_window_hours,
+          'measure', 'distinct ACTIVE rows whose greatest(last_seen_at, last_verified_alive_at) is inside the window '
+                  || '(a direct liveness oracle ALIVE verdict counts: it is stronger evidence than crawl presence). '
+                  || 'Every write to last_seen_at is a real source observation (a crawl upsert, '
+                  || 'or a liveness oracle confirming the listing live); no DB function writes '
+                  || 'it, so a blocked crawl cannot inflate this number. Replaced '
+                  || 'max(rows_seen) of a single run on 2026-08-29: that could never be met by a '
+                  || 'sliced scraper, was satisfiable by a non-capture bookkeeping run, and was '
+                  || 'vacuous for commercial tables.'));
+    else
+      perform public.mon_resolve_key('stale_coverage_gate', 'stale_coverage_gate:' || t);
+    end if;
 
     if act >= min_population and stale > max_frac * act then
       raise notice 'mark_stale: SKIP %  (% of % active would go stale > %%%)', t, stale, act, (max_frac*100)::int;
@@ -86,7 +150,6 @@ begin
 
       select * into st from public.mon_stale_breaker_state where tbl = t;
 
-      plat  := regexp_replace(t, '_(residential|commercial)_listings$', '');
       alive := exists (
         select 1 from public.scrape_runs r
         where r.ok
@@ -126,66 +189,16 @@ begin
     -- 2026-11-02: the breaker did not trip for this table on this run, so its escape alert is no longer true.
     perform public.mon_resolve_key('stale_breaker_escape', 'stale_breaker_escape:' || t);
 
-    plat := regexp_replace(t, '_(residential|commercial)_listings$', '');
-
-    -- ROLLING COVERAGE, cadence-derived. Same window rule as mon_detect_refresh_coverage():
-    -- a platform gets 3x its own expected scrape interval to cover its population. Platforms with
-    -- no cadence row default to 24h -> a 72h window; aqar (8h) -> 24h; souq24 (48h) -> 144h.
-    select coalesce(pc.expected_hours, 24) * 3 into cov_window_hours
-      from public.platform_cadence pc where pc.platform = plat;
-    cov_window_hours := coalesce(cov_window_hours, 72);
-
-    -- Distinct ACTIVE rows re-confirmed at the source inside the window. Slice-agnostic by
-    -- construction: 24 slices of 1/24th of the population each cover it exactly as well as one
-    -- monolithic run, and no row is ever double-counted.
-    execute format(
-      'select count(*) from public.%I where active = true and greatest(last_seen_at, last_verified_alive_at) > now() - make_interval(hours => %s)',
-      t, cov_window_hours) into observed;
-
-    coverage_floor := ceil(coverage_frac * act);
-
-    if act >= min_population and observed < coverage_floor then
+    if cov_gated then
       skipped := skipped + 1;
       raise notice 'mark_stale: COVERAGE-SKIP % (observed=% of % active in %h < floor=% ; % stale row(s) withheld)',
         t, observed, act, cov_window_hours, coverage_floor, stale;
-      if stale > 0 then
-        perform public.mon_raise(
-          'P2', 'stale_coverage_gate', plat, 'stale_coverage_gate:' || t,
-          jsonb_build_object(
-            'table', t, 'active', act, 'stale_withheld', stale,
-            'observed_in_window', observed,
-            'coverage_floor', coverage_floor,
-            'coverage_frac', coverage_frac,
-            'window_hours', cov_window_hours,
-            'measure', 'distinct ACTIVE rows whose greatest(last_seen_at, last_verified_alive_at) is inside the window '
-                    || '(a direct liveness oracle ALIVE verdict counts: it is stronger evidence than crawl presence). '
-                    || 'Every write to last_seen_at is a real source observation (a crawl upsert, '
-                    || 'or a liveness oracle confirming the listing live); no DB function writes '
-                    || 'it, so a blocked crawl cannot inflate this number. Replaced '
-                    || 'max(rows_seen) of a single run on 2026-08-29: that could never be met by a '
-                    || 'sliced scraper, was satisfiable by a non-capture bookkeeping run, and was '
-                    || 'vacuous for commercial tables.'));
-      end if;
       continue;
     end if;
 
-    update public.alert_event set resolved_at = now()
-     where kind = 'stale_coverage_gate' and dedup_key = 'stale_coverage_gate:' || t and resolved_at is null;
-
     n := 0;
     if stale > 0 then
-      perform public.mon_raise(
-        'P2', 'stale_listings_detected', plat, 'stale_listings_detected:' || t,
-        jsonb_build_object(
-          'table', t, 'active', act, 'stale', stale, 'stale_days', stale_days,
-          'note', 'reported only — this path never deactivates (a time-based sweep cannot verify '
-               || 'a listing is dead). Deactivation belongs to aqar/wasalt liveness, prune_unseen, '
-               || 'or cleanup.py, all of which re-fetch the source first.'));
       raise notice 'mark_stale: % stale row(s) in % REPORTED, none deactivated', stale, t;
-    else
-      update public.alert_event set resolved_at = now()
-       where kind = 'stale_listings_detected' and dedup_key = 'stale_listings_detected:' || t
-         and resolved_at is null;
     end if;
     total := total + n;
   end loop;
