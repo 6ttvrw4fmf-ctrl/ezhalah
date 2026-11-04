@@ -105,7 +105,7 @@ const onHost = hostMod.frontDoorHost as (h: string) => boolean;
 check('the front door runs on the real site only, never on localhost, CI or previews',
   onHost('ezhalah-app.vercel.app') && onHost('ezhalah.com') && onHost('www.ezhalah.com') && !onHost('evil-ezhalah.com') && !onHost('localhost') && !onHost('127.0.0.1') && onHost('ezhalah-a71gaft2d-enzalah.vercel.app') && onHost('ezhalah-app-git-fix-x-enzalah.vercel.app') && !onHost('ezhalah-a71gaft2d-evil.vercel.app') && !onHost('evil-ezhalah-a71gaft2d-enzalah.vercel.app') && !onHost('ezhalah-a71gaft2d-enzalah.vercel.app.evil.com')
   && /&& frontDoorHost\(window\.location\?\.hostname \?\? ''\);/.test(client));
-check('a Turnstile failure can never become an uncaught page error', /'error-callback': \(\) => true/.test(client));
+check('a Turnstile failure can never become an uncaught page error', /'error-callback': \(\) => true|'error-callback': \([^)]*\) => \{[^}]*\breturn true; \}/.test(client));
 mustCatch('the host gate removed from the switch', !/&& frontDoorHost\(window\.location\?\.hostname \?\? ''\);/.test(client.replace("\n  && frontDoorHost(window.location?.hostname ?? '');", ';')));
 
 // 8. The log labels name a coarse device class and country, never the address or the full user agent (2026-10-22:
