@@ -769,6 +769,13 @@ used to end on.
 - **Two same-name towns are one only when a SOURCE says so** — never because their homes-centers sit close
   (a center is computed from homes, so a mis-homed town drags it). تربه/حائل (2372) is its own town
   (2026-11-03, `docs/LOCATION_SYSTEM.md` «A homes-center distance is not proof…»).
+- **District recovery's loss guard carries SOURCE words only (2026-11-04, `20261104060958`).** When a refill of
+  `district_recovery` would lose districts, the guard keeps them — but a basis `pin` / `title` row is kept only while
+  `listing_pin_district` (applied) / `listing_title_district` still names that district; a pin or title guess whose
+  voucher is gone is dropped, never carried. Guard: `scripts/verify-loss-guard-carries-only-vouched-districts.ts`.
+- **An open location alarm is re-affirmed every sweep** (`mon_raise` dedups and refreshes detail + `last_affirmed_at`):
+  never `elsif v_open is null then mon_raise(...)`, which froze an alert at its first-day numbers. Guard:
+  `scripts/verify-location-alarms-reaffirm-every-sweep.ts`.
 - Internal north-star key = Saudi catalog IDs (`docs/LOCATION_SYSTEM.md`). Landmarks in a Supabase
   `landmarks` table (~6.5k), client `ensureLandmarks()` cache.
 
