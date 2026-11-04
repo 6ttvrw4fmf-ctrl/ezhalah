@@ -1152,7 +1152,7 @@ and re-slots 18 jobs. Busiest hour 146 → **99 starts, no (hour, minute) above 
 cleared on truth and the slot ratchet is now **2** (the live detector's own bar). `mon-p0-fast-lane` is untouched.
 
 - **A bundle step fails as loudly as the job it replaced.** `ops_run_cron_bundle()` runs each step in its own
-  subtransaction, logs it in `ops_cron_bundle_step_run`, raises **P1 `cron_health` `cron_bundle_step_fail:<bundle>:<fn>`**
+  subtransaction, logs it in `ops_cron_bundle_step_run`, raises **P1 `cron_health` `cron_bundle_step_fail:<bundle>:<step no>:<fn>`** (step number since `20261104044638`)
   on failure and resolves it on the step's next success. It does not catch `query_canceled`: a statement timeout still
   fails the whole job where `cron_health` / `cron_timeout_headroom` see it. It restores `lock_timeout` /
   `statement_timeout` after every step.
@@ -1163,7 +1163,7 @@ cleared on truth and the slot ratchet is now **2** (the live detector's own bar)
   `bundle-locations-10min`).
 - **`cron_starvation_risk` is judged on evidence.** A (victim, minute, hog) is cleared only when, since both jobs' current
   schedules, the victim started < 60 s late at that minute in ≥ expected − 1 hours **and** ≥ 3 of those starts fell inside a
-  run of the hog (`mon_cron_victim_proven_alongside_hog`). Measured: the P0 lane started 168/168 at every flagged minute, 168
+  run of the hog (`mon_cron_starved_schedules_with_evidence`, one scan for all pairs; `mon_cron_victim_proven_alongside_hog` for one pair). Measured: the P0 lane started 168/168 at every flagged minute, 168
   times during the sweep at :01. A missed or late start, or no observed co-run, still raises. Never clear it by narrowing the
   window or loosening the rule.
 - **`cron_grace_tight` reads one window.** Its "recent cadence" now starts at `schedule_changed_at`, like the grace it is

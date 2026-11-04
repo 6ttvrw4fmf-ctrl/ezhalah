@@ -112,8 +112,22 @@ check('the evidence window starts at the later of both jobs\' schedule changes',
 const detMig = newest(/create or replace function public\.mon_detect_cron_starvation_risk\(/i);
 const detSql = detMig ? stripComments(detMig.sql) : '';
 check('the starvation detector raises only pairs WITHOUT that evidence',
-  /mon_cron_victim_proven_alongside_hog\(s\.victim_jobid, s\.victim_minute, s\.hog_jobid\) as proven/.test(detSql)
-  && /count\(\*\) filter \(where not e\.proven\)/.test(detSql));
+  /count\(\*\) filter \(where not e\.proven\)/.test(detSql));
+// 20261104044638: the detector reads every pair's evidence from ONE scan of the involved jobs' runs
+// (the per-pair version took 57 s). The batch function must carry the same rule as the single one.
+const swapMig = newest(/public\.mon_detect_cron_starvation_risk/);
+check('the detector\'s newest definition takes its evidence from the batch function',
+  !!swapMig && /select s\.\* from public\.mon_cron_starved_schedules_with_evidence\(\) s/.test(swapMig.sql));
+const batchMig = newest(/create or replace function public\.mon_cron_starved_schedules_with_evidence\(/i);
+const batchSql = batchMig ? stripComments(batchMig.sql) : '';
+check('the batch evidence function applies the same rule (>= 3 co-runs, <= 1 missed, < 60 s late, both schedule changes)',
+  /\(co_run >= 3 and on_time >= expected - 1\) as proven/.test(batchSql)
+  && (batchSql.match(/< interval '60 seconds'/g) ?? []).length === 2
+  && /fv\.schedule_changed_at/.test(batchSql) && /fh\.schedule_changed_at/.test(batchSql)
+  && /runs as materialized/.test(batchSql));
+const keyMig = newest(/cron_bundle_step_fail/);
+check('a bundle step\'s alert key carries its step number (five trigger_gh_workflow steps share a name)',
+  !!keyMig && /'cron_bundle_step_fail:' \|\| p_bundle \|\| ':' \|\| i \|\| ':' \|\| v_fn/.test(keyMig.sql));
 
 const H = 3_600_000;
 const now = Date.UTC(2026, 10, 4, 12, 0, 30);
