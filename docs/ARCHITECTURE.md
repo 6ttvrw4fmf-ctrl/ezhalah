@@ -766,6 +766,9 @@ used to end on.
 - **Exact-location-only:** a valid place with 0 listings returns an **honest zero** — never substitute a
   nearby place. Ambiguity → search all + notice (filter) / ask city (agent).
 - **Unresolved-location** listings appear in Saudi-wide search only.
+- **Two same-name towns are one only when a SOURCE says so** — never because their homes-centers sit close
+  (a center is computed from homes, so a mis-homed town drags it). تربه/حائل (2372) is its own town
+  (2026-11-03, `docs/LOCATION_SYSTEM.md` «A homes-center distance is not proof…»).
 - Internal north-star key = Saudi catalog IDs (`docs/LOCATION_SYSTEM.md`). Landmarks in a Supabase
   `landmarks` table (~6.5k), client `ensureLandmarks()` cache.
 
