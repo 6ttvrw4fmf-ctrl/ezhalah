@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
@@ -698,7 +698,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (my !== seq || mapRef.current !== m) return;
         if (areas !== 'unknown') {
           hideCanvas(); shown = [];
-          drawAreas(areas, level);
+          drawAreas(visibleAreas(areas), level);
           setPinCount(areasTotal(areas));
           return;
         }
@@ -735,7 +735,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           const areas = await fetchMapAreas(paddedBox(center, span), 'district', pins.deals);
           if (my !== seq || mapRef.current !== m) return;
           if (areas !== 'unknown' && denseShowsDistricts(areas.filter((a) => inView(a, center, span)).length, span.latitudeDelta)) {
-            drawAreas(areas, 'district');
+            drawAreas(visibleAreas(areas), 'district');
             setPinCount(areasTotal(areas));
             return;
           }

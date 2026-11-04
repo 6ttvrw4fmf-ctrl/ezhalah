@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
 import { parseAreasFeed, areasFromFeed, type AreaFeedRow, type AreaLevel, type AreaRow } from '@/lib/mapAreas';
 
-export { CROWD_ESTIMATE, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/lib/mapAreas';
+export { CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/lib/mapAreas';
 
 // The labels feed, once per visit (map_areas_feed_ar(), ~5.7k labels, ~70 KB brotli). A failed read is retried on the
 // next ask and the per-view RPC below answers meanwhile — never an empty map.
