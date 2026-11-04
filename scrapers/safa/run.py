@@ -240,7 +240,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, page_pin  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
@@ -389,6 +389,8 @@ def fetch_project_meta(s: cc.Session, pid: str, cache: dict[str, dict]) -> dict[
         "name": _one(r"<h1[^>]*>(.*?)</h1>", body),
         "city_ar": _one(r'<div class="city">(.*?)</div>', body),
         "district_raw": _one(r'<span class="Grey-700 fs-18">الموقع</span>\s*<h4>(.*?)</h4>', body),
+        # MAP PIN source #2 (see PIN below): the project page's own Maps link or maps.app.goo.gl link.
+        "pin_text": _pin_text(body),
     }
     cache[pid] = meta
     return meta
@@ -758,8 +760,51 @@ def crawl(s: cc.Session, limit: int = 0) -> tuple[list[dict], dict[str, dict], b
             unreadable["sheet_unreadable"] = unreadable.get("sheet_unreadable", 0) + 1
             complete = False
             continue
-        out.append({"card": card, "popup": parse_popup(popup)})
+        out.append({"card": card, "popup": parse_popup(popup), "pin_text": _pin_text(popup)})
     return out, roster, complete, unreadable
+
+
+# ── PIN (⚡ 2026-11-03, backlog 1197: served 0/44 while the page carries a maps.app.goo.gl link) ───────
+# Only the Maps parts of a page are kept (a link with the pair, or a short link), never the markup, which
+# carries the sales office's contact channels. The unit's own sheet wins; else its project's page (a unit
+# sits in its project, the project-page pattern of rakez). A pair that THREE or more different projects
+# share is the office/footer map, never a unit's pin, and is dropped. Every short link is resolved once.
+SHARED_PIN_PROJECTS = 3
+
+
+def _pin_text(html: Optional[str]) -> Optional[str]:
+    """The Maps evidence on a page: a Maps URL that carries a pair, else a short Maps link, else None."""
+    if not html:
+        return None
+    pin = page_pin.pin_from_html(html)
+    if pin:
+        return f"https://maps.google.com/maps?q={pin['latitude']},{pin['longitude']}"
+    return page_pin.short_maps_link(html)
+
+
+def unit_pins(units: list[dict[str, Any]], resolve) -> dict[int, dict]:
+    """{index: {"latitude","longitude"} | {"pin_absent": True} | {}} for each unit.
+
+    `units[i]` carries "pin_text" (its sheet), "project_pin_text" and "pid". `resolve(text)` turns a
+    pin text into a pin dict ({} = the hop failed). {} means «no verdict this run» (keep the stored pin);
+    pin_absent is written only when both pages were read and neither names a place."""
+    cache: dict[str, dict] = {}
+    raw: dict[int, dict] = {}
+    for i, u in enumerate(units):
+        text = u.get("pin_text") or u.get("project_pin_text")
+        if not text:
+            raw[i] = {"pin_absent": True}
+            continue
+        if text not in cache:
+            cache[text] = resolve(text) or {}
+        raw[i] = dict(cache[text])
+    projects: dict[tuple, set] = {}
+    for i, pin in raw.items():
+        if "latitude" in pin:
+            projects.setdefault((pin["latitude"], pin["longitude"]), set()).add(units[i].get("pid"))
+    shared = {k for k, v in projects.items() if len(v) >= SHARED_PIN_PROJECTS}
+    return {i: ({"pin_absent": True} if "latitude" in pin and (pin["latitude"], pin["longitude"]) in shared
+                else pin) for i, pin in raw.items()}
 
 
 def _project_id_of(popup: dict[str, Any], card: dict[str, Any]) -> Optional[str]:
@@ -866,6 +911,8 @@ def main() -> int:
         if not units:
             raise RuntimeError(f"{BASE} served no readable unit sheets")
         meta_cache: dict[str, dict] = {}
+        built: list[tuple[dict, str]] = []
+        pin_units: list[dict] = []
         for u in units:
             card, popup = u["card"], u["popup"]
             pid = _project_id_of(popup, card)
@@ -876,6 +923,14 @@ def main() -> int:
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
+            built.append((row, cat))
+            pin_units.append({"pin_text": u.get("pin_text"), "pid": pid,
+                              "project_pin_text": project.get("pin_text")})
+        pins = unit_pins(pin_units, page_pin.pin_from_page)
+        print(f"  pins: {sum(1 for p in pins.values() if 'latitude' in p)}/{len(built)} "
+              f"(absent {sum(1 for p in pins.values() if 'pin_absent' in p)})", flush=True)
+        for i, (row, cat) in enumerate(built):
+            row["additional_info"].update(pins.get(i) or {})
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)

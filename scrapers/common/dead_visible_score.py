@@ -42,7 +42,7 @@ from scrapers.common.cleanup import PLATFORMS
 from scrapers.common.db import sb
 from scrapers.common.fleet_liveness import SITES, oracle_for
 from scrapers.common.fleet_liveness import read as oracle_read
-from scrapers.common.lifecycle_spot_check import CANARIES, _reader_for, control_misses, open_ad, pick_controls
+from scrapers.common.lifecycle_spot_check import CANARIES, CRAWL_ORACLES, _reader_for, control_misses, open_ad, pick_controls
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
 from scrapers.common.liveness_trust import canary_environment_ok
 
@@ -155,8 +155,12 @@ def reader_for(platform: str, control: dict | None):
             out = site(r["listing_url"])            # a reader may also say why: (verdict, evidence)
             return out[0] if isinstance(out, tuple) else out
         return "site-reader", read_site
-    if platform in SITES:
-        oracle = oracle_for(SITES[platform], control)
+    # A site whose CRAWL hands prune_unseen a body-reading oracle (CRAWL_ORACLES) is read by it too,
+    # exactly as the spot check does (2026-11-04: #10151 added aqaratikom to the spot check only, so
+    # the 09:05 score still read it «status-only», and a status read of its SPA shell says «live»).
+    spec = SITES.get(platform) or CRAWL_ORACLES.get(platform)
+    if spec is not None:
+        oracle = oracle_for(spec, control)
         return "site-oracle", lambda r: oracle_read(oracle, r["ad_number"])[0]
     marker = PLATFORMS.get(platform, {}).get("dead_marker")
     return ("registered-marker" if marker else "status-only"), lambda r: open_ad(r["listing_url"], marker)

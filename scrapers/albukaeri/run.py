@@ -43,7 +43,7 @@ from typing import Any, Optional
 from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, page_pin  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
@@ -124,6 +124,9 @@ def parse_page(pid: str, page: str) -> dict[str, Any]:
         # no upsert, no prune), never "no date, so available"
         raise ValueError(f"{pid}: licence end date present but unreadable")
     return {
+        # MAP PIN (⚡ 2026-11-03, backlog 1197): the ad page's own Maps link, else its maps.app.goo.gl link (resolved
+        # through the job's proxy/browser hop). A pair many ads share is dropped in main() (drop_shared_pins).
+        "pin": page_pin.pin_from_page(page),
         "id": pid,
         "title": _clean((re.search(r'<h1 class="prop-hero-title">(.*?)</h1>', page, re.S) or [None, ""])[1]),
         "street_line": _clean((re.search(r'<p class="prop-hero-street">(.*?)</p>', page, re.S) or [None, ""])[1]),
@@ -244,6 +247,7 @@ def map_page(d: dict[str, Any], type_ar: Optional[str]) -> tuple[Optional[tuple[
         "features": feats or None,
         "bounds": dict(d["bounds"]) if any(v for _, v in d["bounds"]) else None,
         "rega_mediation_contract_number": side.get("رقم عقد الوساطة"),
+        **(d.get("pin") or {}),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [], {})})
     row["source_capture"] = strip_pii_fields({
@@ -366,6 +370,9 @@ def main() -> int:
                        "direction", "street_width_m", "bedrooms", "plan_parcel")}, ensure_ascii=False)[:260])
             return 0
 
+        shared = page_pin.drop_shared_pins(res + com)
+        print(f"  pins: {sum(1 for r in res + com if r['additional_info'].get('latitude') is not None)}/{len(res) + len(com)}"
+              + (f" (dropped a pair {shared} ads share)" if shared else ""), flush=True)
         db.upsert_albukaeri_residential_batch(res)
         db.upsert_albukaeri_commercial_batch(com)
         superseded = db.retire_superseded_siblings(

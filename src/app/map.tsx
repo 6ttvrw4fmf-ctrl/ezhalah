@@ -25,12 +25,16 @@ type MapModules = {
   MapSearchBar: typeof import('@/components/MapDealRow').MapSearchBar;
   MapRouteFields: typeof import('@/components/MapDealRow').MapRouteFields;
 };
+// Kept for the whole visit: a second (or warmed) visit to the map renders the map at once, with no blank first frame.
+let loadedMods: MapModules | null = null;
 function useMapModules(): MapModules | null {
-  const [mods, setMods] = useState<MapModules | null>(null);
+  const [mods, setMods] = useState<MapModules | null>(loadedMods);
   useEffect(() => {
+    if (loadedMods) return;
     let on = true;
     Promise.all([import('@/components/AppleMap'), import('@/components/MapDealRow')]).then(([a, d]) => {
-      if (on) setMods({ AppleMap: a.default, countPinsInView: a.countPinsInView, MapDealRow: d.default, MapSearchBar: d.MapSearchBar, MapRouteFields: d.MapRouteFields });
+      loadedMods = { AppleMap: a.default, countPinsInView: a.countPinsInView, MapDealRow: d.default, MapSearchBar: d.MapSearchBar, MapRouteFields: d.MapRouteFields };
+      if (on) setMods(loadedMods);
     });
     return () => { on = false; };
   }, []);
@@ -47,7 +51,7 @@ import { useI18n } from '@/i18n';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useAtLeast } from '@/lib/useAtLeast';
-import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
+import { SHARE_LABEL_BREAKPOINT, SIGNUP_LABEL_BREAKPOINT } from '@/lib/responsive';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { noTranslateRef } from '@/noTranslate';
 
@@ -68,6 +72,7 @@ export default function MapRoute() {
   const { user, openAuth, authChecked } = useApp();
   const docked = useDocked();
   const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
+  const signUpLabelFits = useAtLeast(SIGNUP_LABEL_BREAKPOINT);
   const [shareOpen, setShareOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Full-screen map (owner 2026-10-31: «when the user clicks on the map take him inside the map», then «zoom in
@@ -128,7 +133,7 @@ export default function MapRoute() {
               dataSet={{ ...TAP44 }}
             >
               <Ionicons name="person-outline" size={15} color="#fff" />
-              <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
+              <Text style={s.topSignInText}>{t(signUpLabelFits ? 'Sign up / Log in' : 'Sign in')}</Text>
             </Pressable>
           )}
           {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
@@ -176,7 +181,7 @@ const s = StyleSheet.create({
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   topBrand: { fontSize: 22, fontWeight: '800', color: colors.ink }, // same size as الوسيط الذكي's title (owner 2026-10-31: «ezhalah must all be the same size, big»)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   shareBtn: { minWidth: 46, paddingHorizontal: 15, height: 46, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine, ...cardShadow, shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   shareBtnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },

@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: "Single platform to check (leave empty to check all 4 enabled platforms)"
+        description: "Single platform to check (leave empty to check every platform the deletion engine registers)"
         required: false
         type: string
       sample:
@@ -46,7 +46,32 @@ env:
   EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
 
 jobs:
+  # THE MATRIX IS READ FROM THE DELETER, NEVER TYPED (2026-11-03). It used to be a hand-kept list
+  # "kept in sync" with cleanup.PLATFORMS by a comment; the engine grew to nine sites (2026-09-28:
+  # aqarmonthly, jazwtn, mizlaj, nowaisiry, raghdan) and this list stayed at four, so 374 permanent
+  # deletions on raghdan / aqarmonthly / mizlaj / nowaisiry were never sampled and
+  # mon_detect_lifecycle_deletion_audit_unconfirmed read NEVER_AUDITED on all four for weeks.
+  # Barrier: scripts/verify-deletion-audit-covers-every-deleter.ts.
+  plan:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    outputs:
+      platforms: ${{ steps.plan.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - id: plan
+        run: |
+          python -c "import json; from scrapers.common.cleanup import PLATFORMS; print('platforms=' + json.dumps(sorted(PLATFORMS)))" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
   verify:
+    needs: plan
     name: Verify ${{ matrix.platform }}
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 180 min (was 60), matching wasalt-cleanup.yml: the wasalt leg now drives a real browser per
@@ -56,9 +81,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Every platform currently registered in scrapers/common/cleanup.py's PLATFORMS dict — keep
-        # this list in sync with that dict when a new platform is added to the engine.
-        platform: [aqar, wasalt, gathern, aqarcity]
+        # Every platform registered in scrapers/common/cleanup.py's PLATFORMS dict, read by `plan`.
+        platform: ${{ fromJSON(needs.plan.outputs.platforms) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

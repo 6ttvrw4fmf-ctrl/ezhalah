@@ -163,3 +163,16 @@ def test_area_redundant_plural_thousands_is_not_multiplied_2026_11_03():
     assert area_of("ارض مساحه 96 الف متر", "")["area"] == 96000
     assert area_of("ارض مساحه 5 الاف متر", "")["area"] == 5000
     assert area_of("مزرعة مساحه 1500 الف متر", "")["area"] == 1500000
+
+
+def test_bare_offer_figure_equal_to_the_stated_area_is_not_a_price_2026_11_03():
+    # HRJ 18362394: «للبيع 5الف» in the title is the 5,000 m² the body states; the price is «on contact».
+    title = "عرض حصري استراحة مجهزة للبيع 5الف بالرحمانية الخرج"
+    body = ("المساحة الكلية: 5,000 متر مربع. الموقع: مخطط الرحمانية (الخرج). "
+            "للتعرف على التفاصيل، السعر، ومعاينة الموقع على الطبيعة: لا تتردد في التواصل")
+    assert X.asking_price(title, body)["price"] is None
+    # the same bare figure is still a price when the post states a different area, or none
+    assert X.asking_price("استراحة للبيع 500الف", "المساحة 5,000 متر مربع")["price"] == 500000
+    assert X.asking_price("للبيع بـ 250 الف ريال", "")["price"] == 250000
+    # an explicit price word is never dropped for matching the area
+    assert X.asking_price("ارض مساحه 300 م2", "السعر 300 ريال")["price"] == 300

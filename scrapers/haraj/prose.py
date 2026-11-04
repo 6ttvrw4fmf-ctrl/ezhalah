@@ -172,6 +172,10 @@ def asking_price(title: str, body: str) -> dict:
         out["why"] = "bid («السوم»): no price"
         return out
     cands: list[tuple[int, Optional[str], bool, str]] = []
+    # The post's own stated area. A figure after the bare «للبيع / ب» that equals it is the SIZE, not a price:
+    # «استراحة مجهزة للبيع 5الف» over a body saying «المساحة الكلية: 5,000 متر مربع» and «للتعرف على … السعر»
+    # tell us; it was stored as a 5,000 SAR price (HRJ 18362394, alert price_eq_area_or_ppm, 2026-11-03).
+    stated_area = area_of(title, body)["area"]
     for m in (list(_PRICE_RE.finditer(t)) + list(_BI_RE.finditer(t)) + list(_MILLION_WORD.finditer(t))
               + list(_PPM_RE.finditer(t))):
         if m.re is _MILLION_WORD:
@@ -191,6 +195,8 @@ def asking_price(title: str, body: str) -> dict:
             if m.re is _BI_RE and not (scale or re.match(r"\s*(?:ريال|ر\.?س|شهري|سنوي|يومي|للشهر|للسنه|بالشهر|بالسنه)", after)
                                        or (v >= 100 and re.match(r"\s*(?:$|\n|[.,،!؟)])", after))):
                 continue                                         # the bare «ب» needs a unit / currency / period / an end
+            if m.re is _BI_RE and stated_area and v == round(stated_area):
+                continue                                         # «للبيع 5الف» = the 5,000 m² the post states
             if re.fullmatch(r"(?:13|14)\d\d", num_txt) and re.match(r"\s*ه", after):
                 continue
         if re.match(r"\s*(?:ريال\s*)?(?:او|ا و|الي|الى|-|–|لين|حتي|حتى|ل)\s*\d", t[num_end:num_end + 20]):

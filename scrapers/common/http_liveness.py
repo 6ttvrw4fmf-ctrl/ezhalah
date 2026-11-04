@@ -247,9 +247,12 @@ def stored_listing_url(tables: tuple[str, ...]) -> Callable[[str], Optional[str]
 #   aqaratikom (nawait.sa /api/v1/ad/<uuid>): a removed ad answers 500 twice; a made-up uuid 404; live 200.
 #   abralosol (owner «Yes, hide them» for this site, 2026-11-03): a removed ad's /{nid} answers 403 with the
 #   site's own page «لايمكن فتح هذة الصفحة»; a made-up nid 404; live 200 — its caller also requires that text.
+#   sakani (owner «Yes, use your picks», decision 1, 2026-11-04): a removed unit's DETAIL API answers 403 with a
+#   BLANK text/plain body (23412, 23438, 22775, 20252); a made-up id 404; a Cloudflare challenge is a 403 HTML
+#   «Just a moment…» page — so its caller requires the blank body (`body_must`) as well as the live control.
 # A site joins this table only with the owner's approval. Nothing else may call a 403/5xx a death.
 OWNER_APPROVED_REMOVAL_STATUS: dict[str, int] = {"alshawaf": 403, "bossbih": 403, "aqaratikom": 500,
-                                                  "abralosol": 403}
+                                                  "abralosol": 403, "sakani": 403}
 
 
 def removal_by_owner_approved_status(

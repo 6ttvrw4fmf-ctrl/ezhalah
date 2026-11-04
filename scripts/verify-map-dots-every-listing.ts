@@ -6,7 +6,7 @@
 // grid path (never an empty map), the canvas hides while the map moves and repaints when it settles.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseDots, dotsInView, dotsTotal, mercY, projectorFrom, dotRadius, nearestDot } from '../src/lib/mapDots.ts';
+import { parseDots, dotsInView, dotsTotal, mercY, projectorFrom, dotRadius, nearestDot, bubblesFromDots } from '../src/lib/mapDots.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -50,10 +50,20 @@ check('zoomed out with no narrowing, the map paints the dots in view on the canv
 check('a failed feed falls through to the live grid path (never an empty map)', /if \(all !== 'unknown'\) \{/.test(web) && /hideCanvas\(\); shown = \[\];/.test(web));
 check('the canvas hides while the map moves and is removed with the layer', /m\.addEventListener\('region-change-start', hideCanvas\)/.test(web) && /canvas\.remove\(\);/.test(web));
 check('the projection is calibrated on two points MapKit itself placed on the page', /convertCoordinateToPointOnPage/.test(web) && /project = projectorFrom\(ref\(/.test(web));
-check('a tap on a dot zooms into it through the shared pick', /m\.element\.addEventListener\('click', onCanvasTap\)/.test(web) && /const d = nearestDot\(shown, project,/.test(web));
+check('a tap on a dot zooms into it through the shared pick', /onSurface\(m, 'click', onCanvasTap\)/.test(web) && /const d = nearestDot\(shown, project,/.test(web));
 check('narrowing (category, type, beds, area, price, polygon) keeps the live filtered path', /const narrowed = !!\(pins\.category \|\| pins\.types\?\.length \|\| pins\.beds\?\.length/.test(web));
 check('src/lib/mapDots.ts is import-free apart from a type (the barrier executes it in Node)', !/^import (?!type )/m.test(readFileSync(join(root, 'src/lib/mapDots.ts'), 'utf8')));
 check('a committed migration creates map_dots_ar() from the 0.01° grid and allowlists it', readdirSync(join(root, 'supabase/migrations')).some((f) => { if (!/map_dots_feed/.test(f)) return false; const sql = readFileSync(join(root, 'supabase/migrations', f), 'utf8'); return /create or replace function public\.map_dots_ar\(\)/.test(sql) && /where g\.cell = 0\.01/.test(sql) && /ops_public_secdef_allowlist/.test(sql); }));
+
+// SMOOTH (owner 2026-11-03): the crowded street-zoom bubbles are built on the phone from the dots feed — every listing
+// counted once, one bubble per 0.01° cell, deals merged into «mixed».
+{
+  const ds = [{ lat: 21.6141, lng: 39.1421, deal: 'buy' as const, n: 900 }, { lat: 21.6139, lng: 39.1419, deal: 'rent' as const, n: 19 }, { lat: 21.6302, lng: 39.1501, deal: 'buy' as const, n: 415 }];
+  const bs = bubblesFromDots(ds);
+  check('bubblesFromDots: one bubble per cell, every listing counted once', bs.length === 2 && bs.reduce((a, b) => a + b.n, 0) === dotsTotal(ds));
+  check('bubblesFromDots: two deals in one cell read «mixed», one deal keeps its own', bs.some((b) => b.n === 919 && b.deal === 'mixed') && bs.some((b) => b.n === 415 && b.deal === 'buy'));
+  mustCatch('a bubble that drops a deal\'s listings', bs.find((b) => b.deal === 'mixed')?.n !== 900);
+}
 
 if (failed) { console.error(`\n❌ verify-map-dots-every-listing: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\nverify-map-dots-every-listing: all checks passed');

@@ -8,9 +8,10 @@ every FEATURED ad, because the «مميز» badge sits between «-->» and the d
 were counted as one «no_type_deal_or_city», so nothing said which categories were lost. The shapes
 below are copied from live pages (ad codes 7117, 5880, 8817, 8134).
 
-The mixed buckets («دورين», «دور و شقتين و ادوار», «مستودعات و ورش» …) hold several property types
-under one name — ad 5965 is titled «فله», described «دور مع شاليه», and filed «دور و شقتين و ادوار».
-They stay out (AMBIGUOUS-MAPPING ASK-FIRST), but each is counted by its own name.
+The mixed buckets («دورين», «مستودعات و ورش» …) hold several property types under one name. They
+stay out (AMBIGUOUS-MAPPING ASK-FIRST), but each is counted by its own name. «دور و شقتين و ادوار»
+(→ Floor) and «شقق ووحدات» (→ Apartment) were in that list until the owner decided them on
+2026-11-04 (decision 8).
 
 Run: python -m pytest scrapers/common/tests/test_sadiqeltajer_reads_every_real_category.py -q
 """
@@ -58,13 +59,20 @@ READ = {
     "--&gt; للايجار فلة --&gt; إيجار فلل ودبلكسات (ايجار) كود الاعلان : 8321 للايجار فلة "
     "35,000 ريال ( للإيجار ) 400 م²":
         ("Villa", "Rent"),
+    # OWNER DECISION 8 (2026-11-04): the two formerly-mixed buckets are filed as one type each.
+    "--&gt; اربع شقق --&gt; بيع شقق ووحدات كود الاعلان : 9001 على السوم اربع شقق 400 م²":
+        ("Apartment", "Buy"),
+    "--&gt; شقة --&gt; إيجار شقق و وحدات كود الاعلان : 9002 للايجار شقة 20,000 ريال 120 م²":
+        ("Apartment", "Rent"),
+    "--&gt; دور ارضي --&gt; بيع دور وشقتين و ادوار كود الاعلان : 9003 على السوم دور ارضي 300 م²":
+        ("Floor", "Buy"),
+    "--&gt; للبيع فله --&gt; بيع دور و شقتين و ادوار كود الاعلان : 5965 على السوم للبيع فله 690 م²":
+        ("Floor", "Buy"),
 }
 
 SKIPPED = {
     "--&gt; دورين --&gt; بيع دورين كود الاعلان : 6576 (حد) دورين 570,000 ريال 290 م²":
         "unmapped:دورين",
-    "--&gt; للبيع فله --&gt; بيع دور و شقتين و ادوار كود الاعلان : 5965 على السوم للبيع فله 690 م²":
-        "unmapped:دور و شقتين و ادوار",
     "--&gt; مخطط --&gt; بيع مخططات كود الاعلان : 7709 على السوم مخطط 9000 م²":
         "subdivision_plan",
 }

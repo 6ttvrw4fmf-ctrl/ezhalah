@@ -226,7 +226,10 @@ jobs:
             #   shatri: `proxy: true` (2026-10-02, Scraping Engineer) — WP REST answered 403 to the runner IP;
             #   the scraper probes 3 profiles DIRECT first, so the proxy is spent only when refused.
             - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20, proxy: true }
-            - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
+            #   NOTE: almuteb is NOT here. RETIRED 2026-11-04 (owner «Yes, use your picks», decision 2):
+            #   almuteb.sa has answered NXDOMAIN since 2026-10-23 and its .sa registry name servers are
+            #   DNS-PARKING.COM; every run since 2026-10-24 failed with curl(6). Its 11 rows are kept,
+            #   hidden and adjudicated (ops_adjudicated_retraction). See scrapers/RETIRED_PLATFORMS.txt.
             - { source: aalbarrak,      cmd: "python -m scrapers.aalbarrak.run --type all", tmo: 20 }
             - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
             - { source: snam,           cmd: "python -m scrapers.snam.run --type all", tmo: 20 }
@@ -288,7 +291,8 @@ jobs:
             - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 90 }
             - { source: razre,         cmd: "python -m scrapers.razre.run --type all", tmo: 20 }
             - { source: reinvest,      cmd: "python -m scrapers.reinvest.run --type all", tmo: 30 }
-            - { source: safa,          cmd: "python -m scrapers.safa.run --type all", tmo: 20 }
+            # safa: proxy + browser ONLY for the maps.app.goo.gl pin hop (⚡ 2026-11-03, backlog 1197; served 0/44 pins).
+            - { source: safa,          cmd: "python -m scrapers.safa.run --type all", tmo: 30, proxy: true, browser: true }
             - { source: sokok,         cmd: "python -m scrapers.sokok.run --type all", tmo: 30 }
             - { source: sukna,         cmd: "python -m scrapers.sukna.run --type all", tmo: 25 }
             - { source: tuba,          cmd: "python -m scrapers.tuba.run --type all", tmo: 60 }
@@ -316,13 +320,13 @@ jobs:
             - { source: ashab,       cmd: "python -m scrapers.ashab.run --type all", tmo: 45, proxy: true }
             - { source: manafe,      cmd: "python -m scrapers.manafe.run --type all", tmo: 25 }
             - { source: wajaf,       cmd: "python -m scrapers.wajaf.run --type all", tmo: 10, proxy: true }
-            - { source: albukaeri,   cmd: "python -m scrapers.albukaeri.run --type all", tmo: 10, proxy: true }
+            - { source: albukaeri,   cmd: "python -m scrapers.albukaeri.run --type all", tmo: 15, proxy: true, browser: true }   # browser: the goo.gl pin hop (⚡ 11-03)
             #   ryadah: `proxy: true` (2026-09-28) — WP REST 403'd the runner IP; the probe tries 3
             #   profiles DIRECT before the proxy, so the proxy is only used when DIRECT is refused.
             - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10, proxy: true }
             - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10, proxy: true }
             - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10, proxy: true }
-            - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10, proxy: true }
+            - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 15, proxy: true, browser: true }   # browser: the goo.gl pin hop (⚡ 11-03)
             # SuperOffice (2026-09-27): owner-approved — available private offices only.
             - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10, proxy: true }
             # 2026-09-28 (owner-approved): Shomou = 26 index pages + ~1,028 ad pages (only in-date ads kept);

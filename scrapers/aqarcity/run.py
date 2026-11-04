@@ -177,6 +177,11 @@ _PHONE_RE = re.compile(
 )
 # Decorative wrappers the contact number is sometimes wrapped in: ((05..)), [05..], 05.5.5...
 _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3}")
+# A mobile written ONE DIGIT SHORT: «05» + 7 digits, nothing touching either end (backlog 1096, 2026-11-04).
+# 3 active ads carried one, each straight after a contact cue or a name («للتواصل والاستفسار : 05…»,
+# «… العقارية. 05…», «موظف بنك الراجحي: خالد 05…»): `0?5\d{8}` needs 8 digits after the 5, so all three
+# survived. No licence (فال 11…/12…/72…), CR number (10 digits) or price is a 9-digit run starting «05».
+_PHONE_SHORT = re.compile(r"(?<![0-9٠-٩])[0٠][5٥][0-9٠-٩]{7}(?![0-9٠-٩])")
 
 PI_RE = re.compile(
     r'pi-item__label\">\s*(?:<i[^>]*></i>)?\s*(.*?)\s*</div>\s*'
@@ -385,6 +390,7 @@ def _redact(text: Optional[str]) -> Optional[str]:
         return text
     t = _PHONE_LOOSE.sub(" ", text)
     t = _PHONE_RE.sub(" ", t)
+    t = _PHONE_SHORT.sub(" ", t)
     # the line that introduces the contact ("للاتصال والاستفسار") often survives — drop trailing digits
     t = re.sub(r"_?للاتصال[^_\n]*", " ", t)
     t = re.sub(r"\s{2,}", " ", t).strip()

@@ -53,6 +53,7 @@ def test_non_land_never_mapped():
 
 def test_land_type_detection():
     assert is_land_type("Residential Land") and is_land_type("Commercial Land") and is_land_type("Farming Land")
+    assert is_land_type("Agriculture Plot")  # wasalt «Farming Land» maps here since 2026-11-03
     assert not is_land_type("Landmark Tower") and not is_land_type("Apartment")
 
 

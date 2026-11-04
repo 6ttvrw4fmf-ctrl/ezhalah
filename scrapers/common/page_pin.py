@@ -276,3 +276,24 @@ def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
         _DEBUG_LEFT[0] -= 1
         print(f"   ⓘ short-link pin {url[:60]}: {' | '.join(seen)} → {'pin' if hit else 'none'}", flush=True)
     return hit
+
+
+def drop_shared_pins(rows: list[dict], min_rows: int = 3) -> int:
+    """A pair that min_rows or more rows of ONE crawl carry is the site's office / default map, not each ad's own pin
+    (⚡ 2026-11-03: tawia prints its office 27.019,49.645 in every page's JSON; safa's only link is the office's place).
+    Removes latitude/longitude from those rows' additional_info; returns how many rows lost the pair."""
+    seen: dict[tuple, int] = {}
+    for r in rows:
+        ai = r.get("additional_info") or {}
+        if ai.get("latitude") is not None:
+            k = (ai["latitude"], ai["longitude"])
+            seen[k] = seen.get(k, 0) + 1
+    shared = {k for k, n in seen.items() if n >= min_rows}
+    dropped = 0
+    for r in rows:
+        ai = r.get("additional_info") or {}
+        if (ai.get("latitude"), ai.get("longitude")) in shared:
+            ai.pop("latitude", None)
+            ai.pop("longitude", None)
+            dropped += 1
+    return dropped

@@ -232,15 +232,13 @@ def test_MUTATION_the_old_no_op_behaviour_fails(monkeypatch):
 # production on consecutive days — amaall (6 ads) and arkaan (1) — and the wiring check had nothing
 # to say about either, because neither was in the tuple. Discovery by SHAPE is the fix; the baseline
 # only records how much of the discovered set is still outstanding.
-UNWIRED_DUAL_ROUTING_BASELINE = {
-    "abeea", "abralosol", "abwbna", "aldarim", "alhoshan", "alkhaas", "alnokhba", "alobid",
-    "alta", "amlakalahsa", "aouj", "aqaratikom", "aqarcity", "aqargate", "awal", "azdad",
-    "bahadhabab", "deal", "eaqartabuk", "eastabha", "erapulse", "fursaghyr", "hajer", "jazwtn",
-    "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry", "october", "raghdan", "ramzalqasim",
-    "rawasidark", "remal", "sanadak", "satel", "shmoualshmal", "souq24", "therc", "toor", "wasalt",
-}
-# Measured 2026-09-13. Lowering this is the point; raising it is a regression.
-UNWIRED_CEILING = 41
+UNWIRED_DUAL_ROUTING_BASELINE = {"deal"}
+# Measured 2026-09-13 at 41. Re-measured 2026-11-04: 39 of those 41 had wired the step since and the
+# baseline still named them, so a platform could have UN-wired again under its own stale entry without
+# this test noticing (wasalt was the last one wired, for url_collision_res_vs_com:wasalt). The set is now
+# exact, and test_every_dual_routing_scraper_is_wired_or_explicitly_outstanding fails on a stale entry.
+# Lowering this is the point; raising it is a regression.
+UNWIRED_CEILING = 1
 
 
 def _dual_routing_scrapers():
@@ -285,6 +283,11 @@ def test_every_dual_routing_scraper_is_wired_or_explicitly_outstanding():
     )
     stale = UNWIRED_DUAL_ROUTING_BASELINE - set(found)
     assert not stale, f"baseline names scrapers that no longer route to both tables: {sorted(stale)}"
+    wired_but_listed = UNWIRED_DUAL_ROUTING_BASELINE - unwired
+    assert not wired_but_listed, (
+        f"these scrapers now call retire_superseded_siblings but are still listed as outstanding: "
+        f"{sorted(wired_but_listed)} — remove them and lower UNWIRED_CEILING (shrink-only)."
+    )
 
 
 def _call_lines(src: str, attr: str) -> list[int]:

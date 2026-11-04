@@ -160,9 +160,15 @@
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 985 of 1158 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
     },
     "aqar": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 90584
+      "floor_pct": 90,
+      "today_pct": 91.6,
+      "active_rows": 180184,
+      "rebased": {
+        "from": 97,
+        "to": 90,
+        "why": "Owner decision 6, 2026-11-04 («Yes, use your picks»): re-base the aqar floor from 97% to ~91%. The old 97% (and today_pct 100) were measured while photo_urls carried OTHER listings' photos; the 2026-10-11 fix removed those, and since then ~8% of aqar ads honestly have no photos of their own. Floor set at 90, ~1.3 points under the 24-day low (91.3) — about 2,300 ads — so a real capture regression still fires and day-to-day churn does not.",
+        "evidence": "mon_image_coverage daily snapshots, platform='aqar', read 2026-11-04 via Supabase MCP: 2026-09-26..10-10 100.0% every day (with_images = active_rows exactly, the cross-listing photo defect); 2026-10-11 91.3% (168,090 rows, 153,477 with images) the day the fix landed; 2026-10-12..11-04 range 91.5–91.8 (11-04: 180,184 active, 165,082 with images = 91.6%)."
+      }
     },
     "aqaralriyadh": {
       "imageless_at_source": true,

@@ -34,16 +34,27 @@ export function safeName(name) {
   return s || 'migration';
 }
 
-/** Which missing migrations to mirror now: old enough, not already being mirrored, at most MAX_PER_RUN. */
-export function planMirrors(missing, now, existingBranches) {
-  const taken = new Set(existingBranches);
+/** Which missing migrations to mirror now: old enough, not already being mirrored, at most MAX_PER_RUN.
+ *  «Being mirrored» = an OPEN PR whose head is mirror/<version> (`takenHeads`). A bare branch with no open PR is
+ *  NOT a claim: on 2026-11-03 four of 🔬's five applied migrations (20261103091902 … 093636) had stale
+ *  mirror/<version> branches and no PR — the files travelled in #10130 beside sql/mirrors/ — so every run read
+ *  «someone is on it», mirrored nothing, and the drift gate refused six deploys over 2 h 37 min. Such a version is
+ *  mirrored on mirror/<version>-auto so the stale branch is never touched. */
+export function planMirrors(missing, now, takenHeads, existingBranches = takenHeads) {
+  const taken = new Set(takenHeads);
+  const exists = new Set(existingBranches);
   return (missing ?? [])
     .filter((m) => {
       const t = versionTime(m?.version);
-      return t && now.getTime() - t.getTime() >= GRACE_MINUTES * 60_000 && !taken.has(`mirror/${m.version}`);
+      return t && now.getTime() - t.getTime() >= GRACE_MINUTES * 60_000
+        && !taken.has(`mirror/${m.version}`) && !taken.has(`mirror/${m.version}-auto`);
     })
     .slice(0, MAX_PER_RUN)
-    .map((m) => ({ version: m.version, file: `supabase/migrations/${m.version}_${safeName(m.name)}.sql`, branch: `mirror/${m.version}` }));
+    .map((m) => ({
+      version: m.version,
+      file: `supabase/migrations/${m.version}_${safeName(m.name)}.sql`,
+      branch: exists.has(`mirror/${m.version}`) ? `mirror/${m.version}-auto` : `mirror/${m.version}`,
+    }));
 }
 
 if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/auto-mirror-migrations.mjs')) {
@@ -67,7 +78,10 @@ if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/auto-mirror-migration
   const missing = pre?.missing_in_git_details;
   if (!Array.isArray(missing)) die('preflight returned no missing_in_git_details (never read as "nothing missing")');
   const branches = git('ls-remote', '--heads', 'origin', 'mirror/*').split('\n').filter(Boolean).map((l) => l.split('refs/heads/')[1]);
-  const plan = planMirrors(missing, new Date(), branches);
+  // Only an OPEN PR claims a version; a leftover branch does not (2026-11-03: 178 mirror/* branches on origin).
+  const openHeads = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '300', '--json', 'headRefName'], { encoding: 'utf8' }))
+    .map((p) => p.headRefName).filter((h) => /^mirror\//.test(h));
+  const plan = planMirrors(missing, new Date(), openHeads, branches);
   console.log(`missing in git: ${missing.length}; mirroring now: ${plan.length}`);
   let failed = 0;
   for (const p of plan) {
@@ -80,7 +94,10 @@ if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/auto-mirror-migration
       git('add', p.file);
       git('-c', 'user.name=ezhalah-auto-mirror', '-c', 'user.email=auto-mirror@users.noreply.github.com',
         'commit', '-q', '-m', `mirror (auto): ${p.version} byte-exact from production`);
-      git('push', '-q', 'origin', `${p.branch}:${p.branch}`);
+      // A `-auto` branch is this robot's own (never a person's), so a leftover one from a cancelled or failed run is
+      // overwritten. 2026-11-04 run 41767741699: mirror/20261104013243-auto was left by an earlier run, the plain push
+      // was refused «non-fast-forward», and the run went red. A person's mirror/<version> branch is never forced.
+      git('push', '-q', ...(p.branch.endsWith('-auto') ? ['--force'] : []), 'origin', `${p.branch}:${p.branch}`);
       execFileSync('gh', ['pr', 'create', '--head', p.branch, '--base', 'main',
         '--title', `mirror (auto): ${p.version} ${p.file.split('/').pop()}`,
         '--body', `Applied to production but missing from git, ${GRACE_MINUTES}+ minutes after it was applied. ` +

@@ -1,5 +1,5 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
--- Re-verified 2026-11-03 (migration 20261102053242_mon_detect_aqar_price_over_authoritative_absent): UNCHANGED.
+-- Re-verified 2026-11-03 (migration 20261103191545_repair_guarantee_enroll_66_unreachable_repairs): UNCHANGED. That migration names this object only inside text it inserts; production md5 re-read 21:45 UTC (🔧).
 --   md5(pg_get_functiondef) in production = 875f73fe437078aef9475631feb8bb25, identical to this file. Stamped for
 --   verify-sql-mirrors-not-stale (B2): the 2026-11-02 stamp did not name this later same-day migration.
 -- Refreshed 2026-08-10 (structured-beats-prose P0). TWO lines were inverted:

@@ -26,7 +26,17 @@ WHY ONLY THE SERVER-RENDERED WINDOW (robots.txt)
 site's robots.txt says `Disallow: /api`. This fleet never calls a path robots.txt disallows
 (scrapers/razre, wahadat, arkaan), so the crawl reads only the server-rendered pages: the window per
 branch + /services/private-office. An office the window stopped showing is NOT gone — its own page is
-read (below) and only that page may retire it. Whether to read the API is an owner decision.
+read (below) and only that page may retire it.
+
+OWNER DECISION 4 (2026-11-03, «Yes, use your picks»): respect robots.txt — never read /api/office-listing.
+The robots-allowed set (WINDOW offices × each branch on the sitemap, 24 on 2026-11-03: al-aarid 8 of 18,
+as-suwaidi 8 of 56, al-rawdah 8 of 170) IS this site's complete, expected catalogue for Ezhalah. The
+robots-allowed /sitemap/units.xml was measured EMPTY the same day. The monitors know it from
+ops_platform_catalogue_rebase (superoffice, expected 24 a run): the old site's 184-row history no longer
+reads as a collapse, and a run under half of 24 still raises silent_partial_success. A window SHORTER
+than min(WINDOW, totalCount) is a truncated page, not a smaller catalogue: it blocks pruning
+(window_is_whole). Each run re-reads robots.txt and only REPORTS when /api stops being disallowed —
+reading it then is a new owner decision, never automatic.
 
 TRAPS
 -----
@@ -71,7 +81,7 @@ from urllib.parse import urljoin, urlparse
 from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, page_pin  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
@@ -83,6 +93,8 @@ SLUG = "superoffice"
 CITY_AR = "الرياض"          # every branch is in Riyadh; the address line must still name it
 SERVICE = "private-office"
 SITEMAP = f"{BASE}/sitemap/offices.xml"
+ROBOTS = f"{BASE}/robots.txt"
+WINDOW = 8                  # offices each branch page server-renders (the rest sit behind the disallowed /api)
 DIRECT_ALIVE_ORACLE = "superoffice.unit_page.jsonld_offer_availability"
 
 _BRANCH_RE = re.compile(r"<loc>https://superoffice\.sa/branch/([a-z0-9-]+)/private-office</loc>")
@@ -158,6 +170,35 @@ def parse_listing_page(page: str) -> dict[str, Any]:
     return obj
 
 
+def window_is_whole(lst: dict[str, Any]) -> bool:
+    """A branch page's server-rendered window is whole when it holds min(WINDOW, totalCount) offices. A
+    shorter window (or an unreadable totalCount) is a truncated page — never read as a smaller catalogue."""
+    try:
+        total = int(lst.get("totalCount"))
+    except (TypeError, ValueError):
+        return False
+    units = [u for u in lst.get("units") or [] if isinstance(u, dict) and u.get("code")]
+    return total >= 0 and len(units) >= min(WINDOW, total)
+
+
+def robots_disallows_api(robots_txt: str) -> Optional[bool]:
+    """True when robots.txt's `User-Agent: *` group disallows /api; False when it no longer does; None
+    when the file could not be read as a robots file (unknown — never read as permission)."""
+    if not robots_txt or "user-agent" not in robots_txt.lower():
+        return None
+    applies, saw_star = False, False
+    for raw in robots_txt.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        key, _, val = line.partition(":")
+        key, val = key.strip().lower(), val.strip()
+        if key == "user-agent":
+            applies = val == "*"
+            saw_star = saw_star or applies
+        elif applies and key == "disallow" and val and ("/api/office-listing".startswith(val.rstrip("*"))):
+            return True
+    return False if saw_star else None
+
+
 # ── an office's own page ─────────────────────────────────────────────────────────────────────────
 def _product_ld(page: str) -> Optional[dict]:
     for m in _LDJSON_RE.finditer(page or ""):
@@ -203,6 +244,10 @@ def parse_unit_page(page: str) -> dict[str, Any]:
         "address": _text(addr.group(1)) if addr else None,
         "includes": [x for x in (_text(li) for li in re.findall(r"<li[^>]*>(.*?)</li>", inc.group(1), re.S))
                      if x] if inc else [],
+        # MAP PIN (⚡ 2026-11-03, backlog 1197: 0/19 served). The unit page's Google embed («maps/embed?pb=…
+        # !2dLNG!3dLAT») is the BRANCH building the office sits in — measured per branch on 2026-10-30
+        # (as-suwaidi 24.594860,46.695216) — the project-page pattern. A page with no embed → {} (no pin).
+        "pin": page_pin.pin_from_embed(page),
     }
 
 
@@ -294,6 +339,7 @@ def map_unit(unit: dict, page: dict) -> tuple[Optional[tuple[dict, str]], str]:
                         for t in unit.get("termPrices") or [] if isinstance(t, dict)] or None,
         "source_area_sqm_raw": unit.get("areaSqm"),
         "includes_ar": includes or None,
+        **(page.get("pin") or {}),
     }
     row["additional_info"] = redact_capture(strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [], {})}))
     row["source_capture"] = redact_capture(strip_pii_fields({"schema": "superoffice.next.v2", "unit": {
@@ -301,6 +347,23 @@ def map_unit(unit: dict, page: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "page": {k: page.get(k) for k in ("url", "name", "price", "availability", "address")}}))
     db.mark_direct_alive(row, oracle=DIRECT_ALIVE_ORACLE)
     return (row, normalize.category_for_type(ptype).lower()), ""
+
+
+def drop_cross_branch_pins(rows: list[dict]) -> int:
+    """A pair that TWO OR MORE different branches print is not a branch building (a head-office or site-wide
+    map): drop it from every row. Returns how many branches shared the worst pair (0 = nothing dropped)."""
+    branches: dict[tuple, set] = {}
+    for r in rows:
+        ai = r.get("additional_info") or {}
+        if ai.get("latitude") is not None:
+            branches.setdefault((ai["latitude"], ai["longitude"]), set()).add(ai.get("branch_slug"))
+    shared = {k: v for k, v in branches.items() if len(v) >= 2}
+    for r in rows:
+        ai = r.get("additional_info") or {}
+        if (ai.get("latitude"), ai.get("longitude")) in shared:
+            ai.pop("latitude", None)
+            ai.pop("longitude", None)
+    return max((len(v) for v in shared.values()), default=0)
 
 
 # ── Own-page oracle ──────────────────────────────────────────────────────────────────────────────
@@ -391,6 +454,11 @@ def collect_units(s, branches: list[str]) -> tuple[dict[str, dict], dict[str, in
             continue
         if branch:
             totals[branch] = int(lst.get("totalCount") or 0)
+            if not window_is_whole(lst):
+                # a truncated page: keep what it shows, but the crawl is not the whole catalogue → no prune
+                print(f"  ✗ {url}: window holds {len(lst['units'])} office(s), expected "
+                      f"min({WINDOW}, totalCount={lst.get('totalCount')!r})", flush=True)
+                unreadable += 1
         for u in lst["units"]:
             if isinstance(u, dict) and u.get("branchSlug") and u.get("code"):
                 units.setdefault(ad_number_for(u["branchSlug"], u["code"]), u)
@@ -409,6 +477,13 @@ def main() -> int:
     # every crawler on the shared resilient path; backlog 63). The session owns the profile.
     s, tried = retry_smarter_session(BASE, timeout=40)
     print(f"  route: {' · '.join(tried)}", flush=True)
+    try:
+        api_disallowed = robots_disallows_api(get(s, ROBOTS))
+    except Exception:  # noqa: BLE001
+        api_disallowed = None
+    if api_disallowed is False:
+        print("  ⓘ robots.txt no longer disallows /api — the crawl still does not read it (owner decision 4, "
+              "2026-11-03); reading it would be a new owner decision", flush=True)
     branches = branches_from_sitemap(get(s, SITEMAP))
     print(f"{SOURCE}: {len(branches)} branch private-office page(s) on its sitemap: {branches}", flush=True)
     units, totals, unreadable = collect_units(s, branches) if branches else ({}, {}, 1)
@@ -436,6 +511,9 @@ def main() -> int:
             row, cat = got
             (com if cat == "commercial" else res).append(row)
             time.sleep(0.3)
+        dropped = drop_cross_branch_pins(res + com)
+        print(f"  pins: {sum(1 for r in res + com if r['additional_info'].get('latitude') is not None)}"
+              f"/{len(res) + len(com)}" + (f" (dropped a pair {dropped} branches share)" if dropped else ""), flush=True)
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)

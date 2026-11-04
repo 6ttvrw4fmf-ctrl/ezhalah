@@ -53,6 +53,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://livingcompound.com"
@@ -151,6 +152,26 @@ def photos(page_html: str) -> Optional[list[str]]:
     return list(dict.fromkeys(flat))[:20] or None
 
 
+_SINGLE_MAP_RE = re.compile(r'class="[^"]*g5ere__single-property-map-canvas[^"]*"\s+data-location="([^"]*)"')
+
+
+def single_map_pin(page_html: str, pid: Optional[str]) -> dict:
+    """The ad's OWN pin: the single-property map canvas's data-location, and only when its "id" is this
+    page's post id (2026-11-04, re-read live on 9773 / 9730 / 9822 / 9543 — each a different pair).
+    The same page prints a data-location for every RELATED property card, and the theme's script
+    carries a Sydney default (-33.868419); neither is read. Its «Get directions» link is an address /
+    plus-code query, not a pair, and is not read either. Nothing is geocoded."""
+    if not pid:
+        return {}
+    for m in _SINGLE_MAP_RE.finditer(page_html or ""):
+        loc = ihtml.unescape(m.group(1))
+        idm = re.search(r'"id"\s*:\s*"?(\d+)', loc)
+        pos = re.search(r'"position"\s*:\s*\{\s*"lat"\s*:\s*"?(-?[\d.]+)"?\s*,\s*"lng"\s*:\s*"?(-?[\d.]+)', loc)
+        if idm and pos and idm.group(1) == str(pid):
+            return pin_dict(pos.group(1), pos.group(2))
+    return {}
+
+
 def map_listing(url: str, page_html: str) -> tuple[Optional[dict], Optional[str], str]:
     """One /property/<slug>/ page → (row, category, skip_reason). row is None iff skip_reason."""
     pid = post_id(page_html)
@@ -216,6 +237,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], Optional[str]
             "entrances": d.get("real_estate_number-of-entrance"), "year_built": d.get("property_year"),
             "size_raw": d.get("size"), "features_en": ", ".join(features(page_html)) or None,
             "price_postfix": postfix or None,
+            **single_map_pin(page_html, pid),
         }.items() if v},
     }
     sz = re.search(r"([\d,\.]+)\s*m", d.get("size") or "")

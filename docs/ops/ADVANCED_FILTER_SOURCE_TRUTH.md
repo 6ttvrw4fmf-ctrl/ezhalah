@@ -125,6 +125,15 @@ made the column permanently `NULL`. **Both were wrong.** aqar publishes
 published `true`. The premise "the source doesn't publish it" must be proven by reading the source
 payload, never inferred from the field's absence in the part of it we happen to parse.
 
+### A prose-only column's silence is WRITTEN, not dropped (2026-11-04)
+
+When a site has no structured field for an amenity and the ad's prose is the whole source (dealapp), a
+column the fully-read description no longer states is sent as `db.AUTHORITATIVE_NULL`, never as a plain
+`None`: `_unknown_must_not_overwrite_known` drops a `None`, so a yes the reader later learns to refuse
+(«سطح مفروش بنجيل» — a turf roof, not furniture) stayed stored and served forever (dealapp 438767 /
+598307 / 493432, alarm `dealapp_partial_furnished_as_yes`). No description read → nothing is written,
+so a failed fetch still never erases. Guard: `scrapers/common/tests/test_dealapp_af_answers.py`.
+
 ## 3. Protected fields
 
 These must be carried end-to-end, tri-state, for every platform that publishes them:

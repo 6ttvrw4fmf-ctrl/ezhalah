@@ -699,6 +699,17 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
   New scrapers must capture Arabic natively.
 - **Proxy note:** partners that block GitHub datacenter IPs (Wasalt, Souq24, **Toor** — fixed 2026-07-06
   PR #32) route through the Saudi residential proxy (`WASALT_PROXY_URL` in the workflow env).
+- **One source ad, one row (2026-11-04).** A dual-table scraper files an ad by the ad's OWN published
+  classification, never by the search/category page that returned it (wasalt: «Property usage» —
+  Commercial → commercial, any other published usage → residential, none → the search's category), and
+  calls `db.retire_superseded_siblings()` so the copy in the other table is retired (every dual-table
+  scraper but `deal` does; `test_retire_superseded_siblings.py` keeps that list exact). A page read that
+  did not render the ad's own fields is a FAILED FETCH and mints no row (hajer: the post-id fallback
+  made a phantom HJ1512 beside HJ1168), and a liveness "live" must name THIS ad, not any page at the
+  stored URL. A URL shared by different ads is a duplicate only when the ad_number is shared; distinct
+  ads that embed the page's own id (`listing_ad_embeds_url_id`, nufouth `?ads-N4175=1`) or a platform
+  on `ops_card_link_granularity` are page granularity (`mon_detect_url_collisions_res_vs_com`,
+  `mon_detect_card_link_identity`, guard `scripts/verify-url-collision-needs-the-same-ad.ts`).
 
 ---
 
@@ -766,6 +777,16 @@ used to end on.
 - **Exact-location-only:** a valid place with 0 listings returns an **honest zero** — never substitute a
   nearby place. Ambiguity → search all + notice (filter) / ask city (agent).
 - **Unresolved-location** listings appear in Saudi-wide search only.
+- **Two same-name towns are one only when a SOURCE says so** — never because their homes-centers sit close
+  (a center is computed from homes, so a mis-homed town drags it). تربه/حائل (2372) is its own town
+  (2026-11-03, `docs/LOCATION_SYSTEM.md` «A homes-center distance is not proof…»).
+- **District recovery's loss guard carries SOURCE words only (2026-11-04, `20261104060958`).** When a refill of
+  `district_recovery` would lose districts, the guard keeps them — but a basis `pin` / `title` row is kept only while
+  `listing_pin_district` (applied) / `listing_title_district` still names that district; a pin or title guess whose
+  voucher is gone is dropped, never carried. Guard: `scripts/verify-loss-guard-carries-only-vouched-districts.ts`.
+- **An open location alarm is re-affirmed every sweep** (`mon_raise` dedups and refreshes detail + `last_affirmed_at`):
+  never `elsif v_open is null then mon_raise(...)`, which froze an alert at its first-day numbers. Guard:
+  `scripts/verify-location-alarms-reaffirm-every-sweep.ts`.
 - Internal north-star key = Saudi catalog IDs (`docs/LOCATION_SYSTEM.md`). Landmarks in a Supabase
   `landmarks` table (~6.5k), client `ensureLandmarks()` cache.
 
@@ -780,6 +801,12 @@ used to end on.
   filter option. Merge duplicates/synonyms to the same filter. **Never** modify the card, remove/redesign
   filter UI, or guess — if unsure, **show the duplicates to the owner first**.
 - Palace folds into Villa at the normalization layer only (raw DB untouched).
+- **صادق التاجر's two mixed buckets (owner decision 8, 2026-11-04 — «Yes, use your picks»):** «شقق ووحدات»
+  (also printed «شقق و وحدات») → Apartment and «دور وشقتين و ادوار» (also «دور و شقتين و ادوار») → Floor,
+  so those ads are crawled again (128 + 69 were skipped as `unmapped:` on 2026-11-04). The mapping lives in
+  `_TYPE_AR` (`scrapers/sadiqeltajer/run.py`), pinned by `test_sadiqeltajer_reads_every_real_category.py`.
+  Both land on types the taxonomy already has (`type_ar` شقة / دور), so no taxonomy change. Every other
+  sadiq mixed bucket («دورين», «مستودعات و ورش», «تجاري ارض للمستودعات و للورش», «بيع تجاري») stays out.
 - Long-tail raw types are mapped to existing filters (reachability ~181,369/181,370). Open hierarchy
   questions remain (see §21).
 - **Coverage is enforced, not assumed:** `scripts/verify-taxonomy.ts` (deploy-blocking, §19.1) fails the
@@ -805,6 +832,13 @@ used to end on.
   half-hourly roster — repairs first, P1 only for rows the trigger could not label, borderline count in
   its payload. The «never "no period filter"» rules below are unchanged: a NULL that survives is the
   borderline or a price-on-request row, and those still enter no single-period pool.
+  **The flag follows the source on every sync (2026-11-03, `20261103204042`):** the sync's ON CONFLICT hands
+  over `rent_period_judged=excluded.rent_period_judged` (its INSERT pass's verdict) and the trigger keeps a
+  handed-over TRUE only when `rent_period_judgment_holds()` backs it — before that, 1,939 stated rows kept
+  judged=true and 8 silent rows kept false. Every rent-period detector excludes a judged row through that
+  ONE predicate (never by trusting the flag alone); `mon_detect_rent_period_inferred_when_source_silent`'s
+  limb `judged_flag_on_stated_period` watches the flag the other way. Guard:
+  `scripts/verify-rent-period-judged-flag-follows-source.ts`.
 - `query.rentPeriod` ∈ `{'monthly','annual','both'}`, default `annual`; the control shows only for Rent.
 - **`'both'` (owner feature 2026-08-14) = the UNION OF TWO KNOWN PERIODS, never "no period filter".**
   `p_rent_period IS NULL` already meant "don't filter", and that also admits the rent rows whose source
@@ -1060,6 +1094,120 @@ covered by a dedicated barrier. See migration `20260810145200_extend_readside_gu
 PR #425 for the fix; PRs #409/#410/#406 remain open awaiting owner review (migration-touching, per the
 migration-drift-guard rule in `AGENTS.md`).
 
+### 19.x How detectors went wrong — the 2026-11-03 alarm sweep (owner: «we never want those same bugs appearing»)
+
+78 P1 alarms were open; a team sweep fixed or disproved 24 at the root. Most were not data bugs but DETECTORS that
+had fallen behind the rules. Each class below now has a mutation-proven barrier; apply the rule to every NEW detector.
+
+1. **A detector must judge served data by EVERY owner rule the data follows — not by an older formula.** Four
+   detectors flagged correct rows because they predated the silent-period judgment (owner 2026-09-28) and the pool
+   rule (2026-10-25): cheap-yearly (856 rows, `20261103191243`), price fidelity (`20261103193951`), rent-period
+   inferred-when-silent and rent-period contract (`20261103204042`). A row with `rent_period_judged = true` is
+   correct at ×12. Barriers: `verify-cheap-yearly-is-monthly.ts`, `verify-price-fidelity-detectors-read-source-evidence.ts`,
+   `verify-rent-period-judged-flag-follows-source.ts`.
+2. **Evidence recognised by a LABEL must accept every caller that writes it.** The crawl's `prune_unseen(verify_gone)`
+   and `fleet_liveness.<platform>` write the same verdicts under different labels; two detectors read only one and
+   reported "no re-check path" / "oracle never retires" on sites that had real GONE verdicts (`20261103193846`,
+   `20261103194015`). Barriers: `verify-stale-remediation-sees-crawl-oracle.ts`, `verify-oracle-retirement-reads-every-caller.ts`.
+3. **A list "kept in sync by a comment" is drift waiting to happen — derive it or check it.** The deletion-audit
+   workflow matrix listed 4 sites while the deletion engine had 9. Barrier: `verify-deletion-audit-covers-every-deleter.ts`.
+4. **A status code alone is not a reading.** Gathern answers HTTP 404 both for a removed unit (body «الصفحة غير موجودة»)
+   and, to some probes, for a live one; only the body decides. Barrier: `scrapers/common/tests/test_gathern_bare_404_is_not_a_reading.py`.
+5. **A share/coverage alarm must leave out rows nobody can fix** (a source that publishes no location; inactive rows;
+   a snapshot that names the same place plus its parent) — or it can never clear (`20261103194247`, `20261103194322`).
+   Barrier: `verify-crawl-health-detectors-judge-what-users-see.ts`.
+6. **Every key a detector raises needs a path that closes it, on every arm**, and a detector must not skip its raise
+   when the alert is already open (`mon_raise` dedups; skipping it stops re-affirmation) (`20261103214028`).
+   Barriers: `verify-zero-new-stall-closes-false-keys.ts`, `verify-detectors-reaffirm-open-alerts.ts`,
+   `verify-cron-attendance-follows-schedule-change.ts`.
+7. **A flag computed on INSERT must also travel on ON CONFLICT.** The sync dropped `rent_period_judged` on update, so it
+   went stale both ways (`20261103204042`).
+8. **A parser anchored on one page field breaks silently when the site removes it** (wahadat's `absolute_url`, PR
+   #10223: every crawl stored nothing for a day). `silent_partial_success` caught it; anchor on something the page
+   cannot drop (its own slug) and test against a live page.
+9. **"Absence never hides" (2026-10-05) needs each site's own LIVE and GONE signal**, or a struck row stays shown and
+   unprovable forever. The fix is per site, validated on a known-live and a known-removed page (compoundin ribbon,
+   maqrat licence end date, wahadat «المشروع غير موجود»), never a looser kill rule.
+
+### Cron slot discipline (owner decision 6, 2026-11-03 — «Yes, use your picks»)
+
+**The owner's pick:** each minute carries as few jobs as possible, `:00` is left to the matview refresh, and the jobs
+`cron_starvation_risk` names move out of the hog windows, lowering a cadence only where the hour is full.
+Applied by migrations `20261104000454` + `20261104010208` (minute changes only: no command changed, and no hour changed, so no work
+moved into or out of the 05–17 / 21–23 UTC heavy windows).
+
+- **`:00` is empty in every hour.** `run-remediation` and `mon-engineer-locked-out` run `*/15` at offsets 3 and 2,
+  `alert-to-incident-bridge` runs `*/20` at offset 9, and the daily jobs that used `:00` start later in the same hour.
+- **Hog windows** (p95, the detector's own measure): `mon-detectors-and-dispatch` :59 → :10 (:11 since p95 667 s),
+  `refresh_listing_native_location_v1` **now :16** → :21, `sync-search-listings-ar` :22 → :37. Moving the matview
+  refresh from :20 to :16 took the index writer out of its window (that was the P1 half of alert 3844). The pair still
+  orders by the advisory lock `location_pipeline:v1_refresh`, and :16 is still before :22.
+- **Every hourly job lives outside those windows except `mon-p0-fast-lane`.** Its 24 minutes with a 3-minute worst gap
+  are the owner's 5-minute P0 SLO (`verify-p0-delivery-sla.ts`); no such list can avoid a 34-minute band, so
+  `cron_starvation_risk` stays open on that one job, at P2.
+- **Cadence lowered where the hour is full:** `mon-search-latency-sample` 12 → 4 an hour; `refresh-mon-audit-counts`,
+  `mon-watchdog-detector-job`, `mon-alert-flapping`, `mon-remediation-worker-stale` 2 → 1 an hour.
+- **«At most one job per minute» is not reachable by re-slotting.** It needs ≤ 60 starts an hour; the instance has
+  130–145 after the cuts (24 of them the P0 lane alone). The worst (hour, minute) fell from 8 jobs to 4, which is the
+  ratchet now. `cron_minute_collision` (≥ 3 per instant) therefore stays open. Getting to 1 needs a different decision:
+  merging the ~40 zero-second dispatch/monitor jobs into fewer jobs, or running more of them every 2 hours.
+- **What actually holds the scheduler (measured in the first hour, fixed by `20261104010208`):** the 15-minute sync
+  did not delay a single start. But while `district-recovery-pipeline` ran (121 s) nothing new started: the four :44
+  jobs, the P0 lane among them, began at 00:45:01, the second it finished. The :20 jobs waited the same way behind the
+  tail of `refresh_listing_native_location_v1`, which also calls `refresh_district_recovery()`. Starts came about a
+  minute late and none was lost. `district-recovery-pipeline` now runs at :54, so the minute after it carries no P0 run.
+  The 7-day history agrees: before this change, jobs at :24/:25 (inside the old :20 refresh's tail) started up to 34–59 s late.
+- **Windows drift with p95.** Within the hour, the sweep's p95 rose 650 → 667 s (window to :11) and the sync sits at
+  890 s (past 900 s it reaches :38). The follow-up keeps :11 and :38 free of hourly jobs, so the layout survives both
+  windows growing by one more minute. Re-measure before you add a job near a window edge.
+
+Barrier: `scripts/verify-cron-slot-discipline.ts` over the committed mirror `sql/mirrors/cron_schedule.json`
+(minute 0 empty, no non-exempt job in a hog window, stack ≤ 2 (was 4 until 2026-11-04) and shrink-only, no two single-writer jobs on one
+instant, mirror current with the newest migration that changes a cron schedule). **Any migration that schedules,
+re-slots or unschedules a cron job updates that mirror in the same PR.**
+
+### Bundled cron jobs (owner, 2026-11-04 — «do whatever u can to fix all problems», the YES to merging small jobs)
+
+The "different decision" above was taken: migration `20261104043631` runs **33 small jobs (each p95 < 11 s) as steps of
+four bundle jobs** — `bundle-locations-10min` (aqar/dealapp location resolvers, every 10 min at :01),
+`bundle-quarter-hour` (engineer-locked-out, run-remediation, alert→incident bridge, engineer-automerge dispatch, every
+15 min at :02), `bundle-hourly-resolvers` (:12) and `bundle-hourly-monitors` (:43, 21 monitors and backstop dispatches) —
+and re-slots 18 jobs. Busiest hour 146 → **99 starts, no (hour, minute) above 2, :00 empty**, so `cron_minute_collision`
+cleared on truth and the slot ratchet is now **2** (the live detector's own bar). `mon-p0-fast-lane` is untouched.
+
+- **A bundle step fails as loudly as the job it replaced.** `ops_run_cron_bundle()` runs each step in its own
+  subtransaction, logs it in `ops_cron_bundle_step_run`, raises **P1 `cron_health` `cron_bundle_step_fail:<bundle>:<step no>:<fn>`** (step number since `20261104044638`)
+  on failure and resolves it on the step's next success. It does not catch `query_canceled`: a statement timeout still
+  fails the whole job where `cron_health` / `cron_timeout_headroom` see it. It restores `lock_timeout` /
+  `statement_timeout` after every step.
+- **Never bundle a single-writer function** (anything taking `search_index_writer_lock(`) — they keep their own job and
+  instant. Steps stay literal `select public.fn(...)` in the cron command so `mon_orphaned_detectors()` and the writer scan
+  still read them. A job referenced by NAME elsewhere stays its own job (`gh-dealapp-liveness`: a scrapers test reads its
+  newest migration) or gets its reader updated in the same migration (`location_pipeline_monitor` now watches
+  `bundle-locations-10min`).
+- **`cron_starvation_risk` is judged on evidence.** A (victim, minute, hog) is cleared only when, since both jobs' current
+  schedules, the victim started < 60 s late at that minute in ≥ expected − 1 hours **and** ≥ 3 of those starts fell inside a
+  run of the hog (`mon_cron_starved_schedules_with_evidence`, one scan for all pairs; `mon_cron_victim_proven_alongside_hog` for one pair). Measured: the P0 lane started 168/168 at every flagged minute, 168
+  times during the sweep at :01. A missed or late start, or no observed co-run, still raises. Never clear it by narrowing the
+  window or loosening the rule.
+- **`cron_grace_tight` reads one window.** Its "recent cadence" now starts at `schedule_changed_at`, like the grace it is
+  compared with (jobid 36 went every-other-day → daily and false-alarmed on its old 48 h gaps).
+
+Barrier: `scripts/verify-cron-bundles-stay-honest.ts` (runner isolation/reporting, no writer step, mirror ↔ migration,
+the evidence rule mirrored in `scripts/lib/cronSlots.ts` and mutation-proven, the grace window).
+
+### Cron run history keeps 30 days (owner decision 3, 2026-11-04 — «Yes, use your picks»)
+
+`cron.job_run_details` had grown to 260,081 rows / 72 MB (oldest 2026-06-11) with only its `runid` key. Every reader was
+read back from production that day: the longest window any function or view applies to it is **7 days** (the cron
+hog/starvation/frozen/gap/grace detectors, `mon_detect_detector_sweep_budget`); `ops_freshness_by_layer` reads the newest
+success only. Migration `20261104093546` adds `ops_purge_cron_run_history()` and the daily job
+`purge-cron-run-history` (`27 1 * * *`, 04:27 Riyadh): it deletes rows older than **30 days** in 5,000-row batches down the
+primary key (≤ 40 batches a run). **30 days is a floor enforced inside the function** — asking to keep fewer raises. First
+run 2026-11-04: 163,004 rows deleted in 33 batches, 97,088 kept. Barrier `scripts/verify-cron-history-retention-floor.ts`
+pins the floor, the daily schedule, and that **no committed reader of `job_run_details` looks back more than 30 days** — a
+new detector needing a longer history must raise the retention in the same change, never read a truncated table.
+
 ---
 
 ## 20. Permanent rules (the non-negotiables)
@@ -1075,6 +1223,10 @@ migration-drift-guard rule in `AGENTS.md`).
 - **Short stays is ONE Advanced Filter cohort — no property-type question, no rating question (owner 2026-10-31).** Because «إقامات قصيرة» is Gathern + Aqar Monthly only, a plain short-stays search (Residential · Rent · monthly; not 'both', not Buy+Rent) is one pool whatever group or type the user picked, so `cohortAllows()` answers from `SHORT_STAYS_QUESTIONS` (bathrooms, amenities) first and `unresolvedScopeTiers()` asks neither the group nor the type tier («the user picked Short stays, that's enough»). Before this, the per-type intersection resolved a GROUP pick to zero questions (Chalet / Camp / Rest House / Floor / Studio have no short-stays cohort of their own) and the interview never opened for the group a user picks. No rating question: Aqar Monthly has no rating, so a rating floor would hide all of its ads — `rating` and `unit_subtype` stay certified for a typed chat sentence only (`SHORT_STAYS_CHAT_ONLY`), the card never asks them. Amenity chips on short stays are the residential base for the whole pool. A typed «شاليه» still scopes the search; it is just never asked. Measured 2026-10-31: 18,963 short-stay ads, bathrooms known on 98.8 % (every type ≥ 82 %). Yearly rent, Buy and the mixed period keep the intersection rules unchanged. Guards: `scripts/verify-short-stays-one-cohort.ts` (executes the real gates), the group-coverage, one-predicate and matrix-truth barriers carry the rule. **The four locked questions (owner 2026-11-01):** 🚽 bathrooms → 🔑 comfort (locked: self check-in, Wi-Fi, washing machine, bills included, elevator, parking, private entrance) → 🏠 space & safety (majlis, balcony, private roof, soundproof, cameras, cleaning service) → ✨ fun (pool, gym, jacuzzi, smart TV / cinema, billiards), asked in that fixed order (`shortStaysAskTier`; the `comfort` / `space` / `fun` cards in advancedFilters.ts). Each card offers the chips that already have a count path today (elevator, parking, private entrance, washing machine = `laundry_room` · majlis, balcony · pool, gym); the rest join one chip at a time once the free word reader and the count exist. Every chip carries its emoji; the generic amenities card is never asked on short stays (chat-only). All three write the one `q.amenities` bag, so card evidence, receipt chips and the re-entry carry (`AMENITY_BAG_QUESTION_IDS`) work unchanged. Next: the owner's new chips — self check-in, Wi-Fi, bills included (only ads that say included), grill, kids' play area, jacuzzi, outdoor seating — one chip at a time, each with its free-word-reader words and its count first.
 - **A sale total typed into the «سعر المتر» box is served as the seller's price (owner 2026-10-28, «fix it … make sure we never get those mistakes again»).** Measured that day: 26 located sale listings (25 dealapp, 1 muhaysini) were hidden by the price/size gate at trillions of riyals, e.g. dealapp 582750 at 12.4 trillion for raw land. On each one the site's OWN per-meter field equals price ÷ area to within 0.1%: the seller typed the total into the per-meter box and the site multiplied it by the area. The ad text agrees wherever it states a price («إجمالي القيمة: 5,858,132», «14 ريال للمتر»). The search index's trigger `enforce_price_size_sanity()` serves that figure through `public.price_typed_in_meter_box_ar(price, area, per_meter)` (Buy only; the box must match price ÷ area ±0.2% and be a sane total at 0.1–150,000 SAR/m²) and recomputes `price_per_meter`. Every other impossible row stays hidden exactly as before: no guess is served, and a listing without a per-meter field (haraj, wasalt) is never «corrected». Source tables are untouched (PRICE = SOURCE holds there). This supersedes, for this one proven class, the 2026-08-03 «copy whatever they display, even if small to large» rule, by the owner's explicit decision. Migrations `20261028213252` (the rule), `20261029003318` (applies before the verified exemption, which had served 10 such rows at up to 22 trillion SAR) and `20261029003805` (P1 `meter_box_typo_served` inside `mon_detect_impossible_price_size()` if a typo is ever served again); each DO block proves both directions.
 - **A «yearly» rent under 8,000 SAR on a home or business unit is a per-month price (owner 2026-10-26, «investigate the monthly prices kept in yearly and put a very very strong guard … make sure we show yearly always»).** Measured that day over the live index: «سنوي» apartments price 8,410 below 8,000 SAR, 194 between 8,000 and 12,000, then 2,202 at 12,000–20,000 and 56,282 above; the sites' own ad text says «شهري» on 3,269 of Aqar's 5,272 cheap «yearly» ads; Wasalt's own payload labels e.g. 3,300 as `rentFreq.yearly` with no monthly figure beside it. The source's word stays the source's word in the source tables (PRICE = SOURCE, PERIOD = SOURCE untouched); what we SERVE reads such a figure as monthly ×12 — the index's `price_annual` through `public.rent_price_annual_ar(platform, rent_period, price_annual, property_type)`, the card through `src/lib/rentPool.ts::cheapYearlyIsMonthly` in `finalize()` — so the yearly search, the budget filters and the card agree, and the card says «السعر المعلن 3,300 شهرياً» under the yearly price. The band [300, 8,000) and the type list (Apartment, Villa, Floor, Duplex, Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom, Commercial Building) live in ONE place each side and are pinned equal by `scripts/verify-cheap-yearly-is-monthly.ts`; rooms, land, rest houses, chalets, camps and farms are out (a room at 6,000 a year is real), and a figure UNDER 300 is a placeholder, not a monthly rent (118 such rows measured on the rule's first live hour: 1, 12, 35, 100 …) — it stays as published and the price-magnitude guards own it. Off switch: `ops_feature_flags.cheap_yearly_is_monthly` (off = the published figure, restored by the next hourly sync). Guard: `mon_detect_cheap_yearly_rent_served()` (P1, twice an hour, while the flag is on) watches the INVARIANT, not a price band: for every served rent row, `search_listings_ar.price_annual` must equal `rent_price_annual_ar(the source row's platform, period word, figure, type)` — a band predicate was tried first and cried wolf on exactly the placeholder and monthly-word rows the rule never touches. This supersedes, for this one class, the 2026-09-03 "rent period = source, never derived" rule — by the owner's explicit decision.
+- **aqar «سعر المتر 1» is no price — never rate × area (owner 2026-11-04, «Yes, use your picks» to decision 4).** «سعر المتر 1» is aqar's placeholder, and aqar multiplies it by the area into its own headline (ad 6738236: «21,721 § ريال / سنوي» for 21,721 m²). When the page's rate is exactly «1» the enricher writes `price_per_meter` as `AUTHORITATIVE_NULL` (so `price_total_effective` / `derivedTotalFromPerMeter` have nothing to multiply), and a price equal to 1 × area as no price with `price_evidence.authoritative_absent` (so `trg_aqar_parse` never re-reads it from prose) — `rate_placeholder_fields()` in `scrapers/aqar/enrich_residential.py`, test `scrapers/common/tests/test_aqar_rate_one_is_no_price.py`. A real «1.5» / «1.86» rate and a real price beside a «1» rate are untouched. Repair `20261104094019`: before, 109 active sale cards were served 1 × area as a derived total and 16 stored the 1 × area headline; after, `price_per_meter` cleared on 184 rows (154 active), the 1 × area price on 19 (16 active, logged in `ops_authoritative_null_price`), 0 left. Supersedes the three `ops_price_eq_area_verified` adjudications of that shape (8982174, 10222037, 12069092). Watch: `mon_detect_aqar_rate_one_served_as_price`. Not extended to other platforms (haraj 22 / abralosol 2 rows with a stored rate 1 were measured the same day and left as they are — not in the decision).
+- **A farm/land whose own site publishes an impossible area stays hidden by the plausibility gate (owner 2026-11-04, decision 5).** `price_size_impossible()` (area > 50,000,000 m²) keeps withholding it from search; this is decided, not a defect. `price_gate_withheld` (in `location_pipeline_monitor`) no longer asks for an owner decision on these: `gate_withheld_area_is_source_published()` excludes a withheld row only when it is a farm/land (`type_ar` «مزرعة…» / «أرض…»), no PRICE clause gates it, and its own `source_capture` prints the area — anything else (a parser-error suspect) still raises. On the day: aqar farms 15150858 / 15150868 / 15204126, each page printing «المساحة 59,2x0,300 م²»; the alert (open since 2026-08-17) resolved. The migration's check block proves both directions (59,260,301, a «شقة», and a price-clause row are not covered).
+- **wasalt «Teller» (ATM site) and «Telecom tower» stay «غير معروف» (owner 2026-11-04, decision 9).** Deliberately unmapped: `WASALT_DELIBERATELY_UNMAPPED` in `scrapers/wasalt/run.py` (the two overrides added on 2026-11-03 were removed). The decision is RECORDED, not hidden: both raw values sit in `known_property_types` with an «owner decision #9» note (`20261104094019`), which is what `detect_novel_property_types()` reads, so `legacy_novel_type` stops re-raising these two only (alerts 12920 / 12921 resolved). Mapping them needs a new owner decision; `test_live_novel_types_are_mapped.py` pins it.
+- **aqar «غرفة خادمة» / «غرفة سائق» exist only on aqar's VILLA ad form (owner 2026-11-03, «Yes, use your picks» to decision 5).** On every non-Villa aqar row (residential or commercial) `maid_room` / `driver_room` are not source values and are NULL. The enricher sends `AUTHORITATIVE_NULL` for both on any non-Villa form (`_villa_form_only()` in `scrapers/aqar/enrich_residential.py`, test `scrapers/common/tests/test_aqar_maid_driver_villa_form_only.py`), because a plain None is dropped by the upsert guard and could never clear a stored value — which is how 258 + 9 values came back after the 2026-08-24 cohort repair (aqar's payload still carries the keys on a few non-Villa ads; the page never shows them). Evidence: probe #18/#19 in `ops_aqar_commercial_amenity_probe`, and the 2026-11-03 recheck (the rendered «المميزات» block names the room on 11,374 of 12,578 Villa rows carrying a true, 0 of 77 non-Villa). Cleared values are logged in `ops_amenity_defabrication_evidence`; the watch is `mon_detect_fabricated_unpublished_amenity`. Villa (aqar's «house» slug included) keeps the source's own 0/1. The description-text overlay (RULE B) is separate and unchanged.
 - **Near-twin district names merge by themselves when the homes sit in the same place (owner 2026-10-26: «if it's less than 3 km then it's the same … Apple Maps is always the right name … our district list is one name; the card shows what they wrote»).** Two served district names in one city, one letter apart (the pair the `district_near_twins_served` alarm lists), are ONE district when the homes under each sit less than 3 km apart (centroid of served pins, 3+ pins on each side) AND the names differ only by spelling — never by a number, an ordinal (الأول … العاشر) or a trailing sector letter (شرق المطار أ / ب / د, مخطط ا / ب): those are different districts however close. The list keeps one name — the side already on our list (Apple Maps / owner-approved) — and the other spelling becomes a `loc_district_alias` row the fold joins at the next sync; search, the district chip and the count use that one name, while the card keeps printing the site's own wording. Both-listed pairs stay the owner's call; neither-listed pairs first need the real name added through the list guards (the `district_copies_unlisted` lane). Nightly `district_twin_auto_merge()` (03:05 UTC), every merge logged in `ops_district_twin_merges`, flag `ops_feature_flags.district_twin_auto_merge`, watchdog `mon_detect_district_twin_auto_merge_suspect()` (P1, twice an hour: an auto alias whose names now sit 3 km+ apart or differ by a number/sector is raised with the alias to drop). Guard: `scripts/verify-district-twin-auto-merge.ts`.
 - **Response feedback (owner 2026-10-01):** selecting either thumb moves both visible thumbs together until they touch, then fades the unselected thumb, leaving one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Keep the existing top-of-chat confirmation popup. Feedback storage and response scope remain unchanged.
 
@@ -1432,6 +1584,18 @@ migration-drift-guard rule in `AGENTS.md`).
      about the plot and stays.
   6. A chip says only what the ad says · Skip on every question · pick many · a chip at 0 hides itself · source tables
      untouched.
+
+- **SuperOffice respects robots.txt; a catalogue that changed shape on purpose is rebased PER PLATFORM (owner
+  2026-11-03, «Yes, use your picks», decision 4).** superoffice.sa's rebuilt site server-renders 8 private offices per
+  branch; the rest load from `/api/office-listing`, which https://superoffice.sa/robots.txt disallows (`Disallow: /api`;
+  the robots-allowed `/sitemap/units.xml` is empty). We never read it: the robots-allowed set (24 on 2026-11-03) IS the
+  catalogue. `ops_platform_catalogue_rebase` holds one row per such platform — rebase moment, expected run size, reason,
+  https link to the rule, evidence — and `rows_collapse` / `silent_partial_success` judge that platform only from the
+  rebase, holding it to the declared size from its first run (a run under half of it raises, mode
+  `declared_catalogue`). Fleet thresholds are never lowered for one site. The scraper treats a branch window shorter
+  than min(8, totalCount) as truncated (no prune) and re-reads robots.txt each run, only REPORTING if `/api` stops being
+  disallowed — reading it would be a new owner decision. Guards: `scripts/verify-catalogue-rebase-is-scoped-and-still-alarms.ts`,
+  `scrapers/common/tests/test_superoffice_new_site_2026_10_29.py`.
 
 ---
 

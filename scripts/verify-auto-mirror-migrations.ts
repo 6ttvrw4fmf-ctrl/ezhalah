@@ -31,13 +31,29 @@ check(`at most ${MAX_PER_RUN} PRs per run`, planMirrors(Array.from({ length: 30 
 check(`grace period is ${GRACE_MINUTES} minutes (the applying session gets the first chance)`, GRACE_MINUTES >= 10 && GRACE_MINUTES <= 60);
 mustCatch('a robot with no grace period (races the session that applied it)',
   planMirrors([{ version: '20261027215500', name: 'x' }], now, []).length === 0);
+check('a stale mirror/<version> branch with NO open PR does not block the mirror (🔧 2026-11-03: four 🔬 versions sat unmirrored 2 h 37 min)',
+  (() => { const p = planMirrors([{ version: '20261027201642', name: 'x' }], now, [], ['mirror/20261027201642']); return p.length === 1 && p[0].branch === 'mirror/20261027201642-auto'; })());
+check('an OPEN PR on mirror/<version> still claims the version',
+  planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642'], ['mirror/20261027201642']).length === 0);
+mustCatch('a robot that reads a bare branch as a claim (the 11-03 shape)',
+  planMirrors([{ version: '20261027201642', name: 'x' }], now, [], ['mirror/20261027201642']).length !== 0);
 mustCatch('a robot that ignores an existing mirror branch (duplicate PRs)',
   planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642']).length === 0);
 
+check('an OPEN PR on mirror/<version>-auto is a claim too (2026-11-04: the robot re-mirrored its own open PR)',
+  planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642-auto'], ['mirror/20261027201642', 'mirror/20261027201642-auto']).length === 0);
+mustCatch('a robot that ignores its own open -auto PR',
+  planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642-auto'], ['mirror/20261027201642', 'mirror/20261027201642-auto']).length === 0);
+
 const wf = readFileSync(join(root, '.github/workflows/migration-auto-mirror.yml'), 'utf8');
 const script = readFileSync(join(root, 'scripts/auto-mirror-migrations.mjs'), 'utf8');
+check('the script asks GitHub for OPEN PR heads, not only for branches', /gh', \['pr', 'list', '--state', 'open'/.test(script) && /planMirrors\(missing, new Date\(\), openHeads, branches\)/.test(script));
 check('the workflow runs on a schedule and invokes the script', /cron: '/.test(wf) && /node scripts\/auto-mirror-migrations\.mjs/.test(wf));
 check('it opens PRs with the PR token (a GITHUB_TOKEN PR triggers no checks, so it would never merge)', /BASELINE_PR_TOKEN/.test(wf));
+check('a queued run reads main as it is when it RUNS, not the dispatch-time commit (2026-11-04: duplicate PRs #10346/#10347)',
+  /ref: \$\{\{ github\.ref == 'refs\/heads\/main' && 'main' \|\| github\.sha \}\}/.test(wf));
+check('only the robot\'s own -auto branch is force-pushed (a leftover one turned run 41767741699 red)',
+  /p\.branch\.endsWith\('-auto'\) \? \['--force'\]/.test(script) && !/'--force', 'origin', `\$\{p\.branch\}/.test(script));
 check('a red run reaches a human (failure→alert bridge)', /raise-workflow-alert\.mjs/.test(wf) && /if: always\(\)/.test(wf));
 check('it never writes to the database (reads only the two preflight RPCs)',
   !/\bapply_migration\b|\/rest\/v1\/(?!rpc\/)/.test(script) && /ops_migration_sql/.test(script) && /ops_deploy_preflight_checks/.test(script));

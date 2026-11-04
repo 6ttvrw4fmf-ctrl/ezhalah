@@ -78,7 +78,7 @@ import { listingOpenUrl, openListing } from '@/lib/openListing';
 import {
   EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
 } from '@/lib/inAppViewer';
-import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT, SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
+import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT, SHARE_LABEL_BREAKPOINT, SIGNUP_LABEL_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
 import { ConfettiOverlay } from '@/components/ConfettiOverlay';
@@ -948,6 +948,7 @@ export default function Agent() {
     Animated.spring(shareScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
   // Same rule as the Filter screen: «مشاركة» always shows; below this width the sign-in pill shortens.
   const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
+  const signUpLabelFits = useAtLeast(SIGNUP_LABEL_BREAKPOINT);
   // Filter / AI ModeSwitch (owner 2026-08-16): the pill no longer lives in the top-right corner —
   // it sits CENTERED under the header, mirroring the home hero's centered pill, so switching modes
   // reads as one control staying in the middle rather than teleporting into the corner. And the
@@ -4300,7 +4301,7 @@ export default function Agent() {
             dataSet={{ ...TAP44 }}
           >
             {topBarRoomy ? <Ionicons name="person-outline" size={15} color="#fff" /> : null}
-            <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
+            <Text style={s.topSignInText}>{t(signUpLabelFits ? 'Sign up / Log in' : 'Sign in')}</Text>
           </Pressable>
         )}
         {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
@@ -5571,7 +5572,7 @@ const s = StyleSheet.create({
   shareInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   shareText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
   // Reopen chip for a hidden ad pane — the share button's own tint/hairline idiom, beside it.
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
 

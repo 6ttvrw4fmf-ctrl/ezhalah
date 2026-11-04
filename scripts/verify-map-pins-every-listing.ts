@@ -91,7 +91,7 @@ mustCatch('a group sent as its English name instead of the index\'s Arabic label
 const data = readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8');
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const screen = readFileSync(join(root, 'src/app/map.tsx'), 'utf8');
-check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure arguments', /boundedRpc<PinRow\[\]>\(supabase\.rpc\('map_pins_ar', rpcArgs\(box, cell, filter, limit\)\)\)/.test(data) && /return pinsFrom\(result\)/.test(data));
+check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure arguments', /const args = rpcArgs\(box, cell, filter, limit\);/.test(data) && /boundedRpc<PinRow\[\]>\(supabase\.rpc\('map_pins_ar', args\)\)/.test(data) && /const rows = pinsFrom\(result\);/.test(data) && /if \(rows !== 'unknown'\) \{/.test(data));
 check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins, cell === 0 \? PIN_SHOW_MAX \+ 1 : PIN_LIMIT\)/.test(web) && /keyed\.set\(k, a\); m\.addAnnotation\(a\);/.test(web) && /mine = \[\.\.\.keyed\.values\(\)\];/.test(web));
 // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan removes only the pins that left the view and adds only
 // the new ones, keyed by what the head shows; never the old clear-all-then-add-all flicker.
@@ -121,8 +121,13 @@ mustCatch('a region select that fires while the outline is invisible', !/if \(!r
 // NEVER A PARTIAL SET OF PINS: an exact-point read that hit PIN_LIMIT is re-read as a fine bubble grid (every listing
 // counted), and the bubbles are drawn with THAT cell (element, data and anchor all follow drawCell).
 check('AppleMap.web.tsx falls back to a fine bubble grid when the exact read hit its cap (after district names, when 2+ districts share the view), and draws with that cell',
-  /if \(cell === 0 && rows\.length > PIN_SHOW_MAX\) \{[\s\S]{0,900}?\n\s*drawCell = fineCellForSpan\(span\.latitudeDelta\);\n\s*rows = await fetchMapPins\(paddedBox\(center, span\), drawCell, pins\);/.test(web)
+  /if \(cell === 0 && \(crowdedByDots \|\| rows\.length > PIN_SHOW_MAX\)\) \{[\s\S]{0,900}?\n\s*drawCell = fineCellForSpan\(span\.latitudeDelta\);[\s\S]{0,500}?rows = await fetchMapPins\(paddedBox\(center, span\), drawCell, pins\);/.test(web)
   && /element\(row, drawCell(, [^)]*)?\)/.test(web) && /data: \{ pin: row, cell: drawCell \}/.test(web) && /anchorOffset: drawCell > 0/.test(web));
+// SMOOTH (owner 2026-11-03): the crowded view is decided from the dots feed and drawn from it — no network wait —
+// and only successful pin reads are remembered (a failed read is never cached as an answer).
+check('a crowded close view is decided by the dots feed (> CROWD_ESTIMATE) and skips the exact read', /const crowdedByDots = dots !== 'unknown' && dotsTotal\(dotsInView\(dots, pins\.deals, /.test(web) && /> CROWD_ESTIMATE;/.test(web) && /crowdedByDots \? \[\] : await fetchMapPins\(/.test(web));
+check('the crowded bubbles come from the dots feed when it is the same 0.01° grid', /if \(dots !== 'unknown' && drawCell === 0\.01\) \{[\s\S]{0,200}?bubblesFromDots\(dotsInView\(dots, pins\.deals, paddedBox\(center, span\)\)\)/.test(web));
+check('a failed pin read is never remembered', /if \(rows !== 'unknown'\) \{\n\s*recent\.delete\(key\); recent\.set\(key, \{ at: Date\.now\(\), rows \}\);/.test(data));
 check('the fine grid is ~14 rows on the ladder, floor 0.01°, and finer than the normal grid', fineCellForSpan(0.14) === 0.01 && fineCellForSpan(0.001) === 0.01 && fineCellForSpan(1) === 0.02 && fineCellForSpan(1) < cellForSpan(1));
 mustCatch('a fine grid coarser than the normal grid (the fallback would not resolve a dense view)', fineCellForSpan(0.5) < cellForSpan(0.5));
 check('PIN_LIMIT is the cap the data module sends by default', PIN_LIMIT === 3000 && /limit = 3000\)/.test(readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8')));
@@ -133,7 +138,7 @@ mustCatch('a view that draws thousands of overlapping heads (the cap gone)', PIN
 check('AppleMap.web.tsx reloads on region-change-end and drops a late answer', /addEventListener\('region-change-end', onRegion\)/.test(web) && /if \(my !== seq \|\| rows === 'unknown'/.test(web));
 check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('const keyOf = (r: PinRow)'));
 check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape \? '\{n\} listings inside the boundary'/.test(web));
-check('a bubble tap zooms in; a pin tap hands the row up (one shared pick)', /const pick = \(row: PinRow, cell: number\) => \{[\s\S]{0,400}?if \(cell > 0\) \{[\s\S]{0,300}?\} else onPinSelectRef\.current\?\.\(row\);/.test(web));
+check('a bubble tap zooms in; a pin tap hands the row up (one shared pick)', /const pick = \(row: PinRow, cell: number\) => \{[\s\S]{0,400}?if \(cell > 0\) \{[\s\S]{0,700}?\} else onPinSelectRef\.current\?\.\(row\);/.test(web));
 // TOUCH: on a phone MapKit's `select` never fired for a tap on a custom annotation (owner 2026-11-02: «when I click it
 // doesn't show»). The head element carries its own pointerdown/pointerup tap (≤ 10 px of movement), and MapKit's
 // mouse `select` is deduped against it by time.

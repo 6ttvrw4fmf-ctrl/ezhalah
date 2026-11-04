@@ -9,6 +9,9 @@
 // scripts/verify-language-survives-sign-in.ts); once signed in it is saved to the account like any choice.
 // A signed-in user has the sidebar / account menu for this, so the pill is for guests only — and, like the
 // sign-in pill beside it, only where the sidebar is a drawer (not docked), which already carries the toggle.
+// SMALLER + EVEN GAPS (owner 2026-11-04, a screenshot on a 430 pt iPhone: «the space between ENG and log in is very
+// wide», «make the English smaller»): 24 px tall, 10 px text, and no own margin — it and the sign-in pill used to
+// add 8 px on top of the row's 6 px gap, so every top-bar gap is now the row's 6 px. TAP44 keeps the tap target.
 // SMALL (owner: «make it so small, ENG»): a short pill, «ENG» in the Arabic UI and «عربي» in the English one — the
 // language a tap switches TO, untranslated, so it is readable to the person who needs it. Its OWN colour (owner:
 // «make the pill a unique colour»): a deep teal, used nowhere else in the top bar, so it is neither the plum
@@ -49,9 +52,9 @@ export default function TopBarLanguage({ inSidebar = false }: { inSidebar?: bool
 }
 
 const s = StyleSheet.create({
-  pill: { alignItems: 'center', justifyContent: 'center', backgroundColor: TEAL, borderWidth: 1, borderColor: TEAL, borderRadius: radius.pill, height: 30, paddingHorizontal: 11, marginRight: 8 },
-  pillSidebar: { marginRight: 0, marginLeft: 'auto' },
+  pill: { alignItems: 'center', justifyContent: 'center', backgroundColor: TEAL, borderWidth: 1, borderColor: TEAL, borderRadius: radius.pill, height: 24, paddingHorizontal: 8 },
+  pillSidebar: { marginLeft: 'auto' },
   pillHover: { backgroundColor: TEAL_HOVER, borderColor: TEAL_HOVER },
   pillPressed: { opacity: 0.9 },
-  text: { fontSize: 11.5, fontWeight: '800', color: '#fff', includeFontPadding: false },
+  text: { fontSize: 10, fontWeight: '800', color: '#fff', includeFontPadding: false },
 });

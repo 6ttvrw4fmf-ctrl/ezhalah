@@ -11,7 +11,7 @@
 
 import {
   judgeOption, judgeUnion, judgeIntersection, judgeZero, judgeUnknownCaption, boundaryReport,
-  rowSatisfies, strictCols, optionWouldRender, settleOnOneIndex, UNREADABLE_STAMP,
+  rowSatisfies, strictCols, predCols, optionWouldRender, settleOnOneIndex, UNREADABLE_STAMP,
   type Pred, type OptionEvidence,
 } from './lib/afSurfaceJudge.ts';
 
@@ -26,6 +26,24 @@ const mustReject = (label: string, v: { ok: boolean; reasons?: string[] }, needl
     v.ok ? 'judge said OK' : `reasons: ${(v.reasons ?? []).join(' | ')}`);
 
 console.log('\nAF surface judge — offline mutation proof\n');
+
+// ── the oracle must SELECT every column an OR reads (🦅 2026-11-03, run 41655241707) ─────────────────────
+// separate_meters = either meter true. strictCols() is empty for an OR (correctly: no single NULL excludes the row),
+// and the full-surface sweep used it as its SELECT list, so the fetched rows carried neither meter and every row of
+// a correct set «failed the predicate» — garden_yard, jacuzzi_sauna, water_tank_well the same.
+{
+  const either: Pred = { kind: 'or', preds: [{ kind: 'true', col: 'separate_electricity_meter' }, { kind: 'true', col: 'separate_water_meter' }] };
+  const full = { separate_electricity_meter: true, separate_water_meter: false };
+  const pick = (cols: string[]) => Object.fromEntries(cols.map((c) => [c, (full as Record<string, unknown>)[c]]));
+  check('predCols() names both columns of an EITHER chip', predCols(either).join(',') === 'separate_electricity_meter,separate_water_meter', predCols(either).join(','));
+  check('a row fetched with predCols() satisfies the EITHER chip it truly matches', rowSatisfies(pick(predCols(either)), either));
+  check('MUTATION — the old strictCols() select list cannot evaluate an OR (the 11-03 false «violations»)', !rowSatisfies(pick(strictCols(either)), either));
+  const nested: Pred = { kind: 'and', preds: [{ kind: 'gte', col: 'bathrooms', n: 2 }, either] };
+  check('predCols() walks an AND of an OR', predCols(nested).join(',') === 'bathrooms,separate_electricity_meter,separate_water_meter', predCols(nested).join(','));
+  const sweep = (await import('node:fs')).readFileSync(new URL('./verify-af-full-surface-differential.ts', import.meta.url), 'utf8');
+  check('the full-surface sweep selects predCols(), never a strict-only list, for its oracle rows',
+    /oracle\([^)]*predCols\(/.test(sweep) && !/oracle\([^)]*strictCols/.test(sweep));
+}
 
 // ── a correct case ────────────────────────────────────────────────────────────────────────────────
 const ids = ['a:1', 'a:2', 'b:3'];

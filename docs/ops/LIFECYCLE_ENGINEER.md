@@ -1479,6 +1479,26 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   one removed unit on a project page (nufouth, expattrusted) read as two copies disagreeing; a pair is one
   listing only when the ad_numbers match or the url carries just those two rows.
 
+## Lessons from 2026-11-04 (♻️)
+- **A "minute only" cron re-slot can break a rest rule.** The fleet recheck re-reads a struck row only 6 h
+  (REPROBE_MIN_HOURS) after its last reading, stamped when the site's run ENDS. The 11-04 cron rebalance moved
+  recheck-2 from 20:47 to 20:06 (5 h 49 min after 14:17), so no third reading could land the same day; and on 11-03
+  even 20:47 lost it, because the 14:17 pass queued behind the daily run until 15:41 and the 20:47 pass ran 21:17
+  (`probed=0`): 20 tuba ads read dead three times stayed on screen. Passes are now 14:17, 20:56, 03:27 UTC
+  (20261104111452 / 111742 / 113034) and the pytest shipped in PR #10474
+  fails on any gap under 6 h 30 min. When a site's struck rows sit at 2 strikes past the evening, read the recheck's
+  `probed=` before the site's oracle.
+- **A cron migration cannot land unattended.** `verify-cron-slot-discipline.ts` requires `sql/mirrors/cron_schedule.json`
+  in the same PR as any schedule-changing migration, and the merge robot takes a mirror PR only when every file is under
+  `supabase/migrations/`. So a cron change is a LINE 1 PR every time; ship it in the first 30 minutes, and pick free
+  minutes first (`no (hour, minute) starts more than 2 jobs`) so it is applied once, not three times.
+- **Every reader of a site needs the same reader table.** #10151 gave aqaratikom its crawl oracle in the spot check
+  (`CRAWL_ORACLES`) but `dead_visible_score.reader_for` read only `fleet_liveness.SITES`, so the 09:05 score stayed
+  `status-only` (#10472). When you register a reader, grep every `reader_for` / `pick_reader` caller.
+- **A decision recorded in `ops_adjudicated_retraction` is evidence.** `mon_detect_unknown_treated_as_dead` raised a P1
+  asking to restore 11 almuteb rows the owner had retired (NXDOMAIN); it now excuses a retraction recorded within ±1 h
+  of the deactivation (20261104112157). `stale_listings_detected` likewise skips dormant/retired sites (20261104112551).
+
 ## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
 
 1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
@@ -1582,3 +1602,16 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   re-categorised ad. 🆕 10-31: a key that existed only in our capture cost a 20-minute crawl. Rule: one live read of the
   record (the page or the current payload) before the first write; measure the live effect within minutes; undo in the
   same run. (Third night of this family → ⚡'s rulebook carries it as a rule since #9910.)
+
+## 📚 FLEET LESSONS 2026-11-03 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A branch crawl's PASS dies when the nightly MAIN crawl writes last.** ⚡ 11-01 (dealapp fleet) and ⚡ 11-03
+  (amaall/superoffice pins 30/32 → 0/32 by 06:55 while #10083 was open). Rule: prove on the first MAIN crawl after the
+  merge and name the last writer (run id + commit) in the proof row.
+- **② A mirror PR that carries anything outside `supabase/migrations/` waits for a person, and every deploy in the repo
+  waits with it.** 🔬 #9791, #9949, #10130 (11-03: six refused deploys 09:26–12:13, auto-deploy breaker tripped, AF
+  sweep restarts). Rule: apply → mirror-only PR titled «mirror» within 10 minutes → barriers in a separate scripts-only PR.
+- **③ A detector must know the cadence of the job it watches and the owner rules of the column it reads.** 🔧 11-03
+  (city_pin_check_silent paged against a 14-hour scheduled gap; searchability read 31 honest-unknown alsaedan arrivals
+  as «stuck»), 🔬 11-03 (five detectors behind approved rules), ♻️ 11-03 (adjudicated_reactivation vs a republish).
+  Rule: read the job's cron line and the rule's migration before trusting a detector; prove both directions with real numbers.

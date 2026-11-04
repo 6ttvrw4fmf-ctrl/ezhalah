@@ -498,6 +498,13 @@ _TYPE_AR = {
     "محلات و صالات تجارية": "محل",        # 33 — the RENT spelling of «تجاري محلات و صالات تجارية»
     "ورش صناعية": "ورشة",                 # 5 → Workshop
     "تجاري فندق": "فندق",                 # 1 → Hotel
+    # OWNER DECISION 8 (2026-11-04, «Yes, use your picks»): the two largest buckets the run notes
+    # counted as unmapped (118 + 10 and 69 on 2026-11-04) are filed under ONE type each, so those
+    # ads are crawled again. Both spellings the site prints (with and without the space after «و»):
+    "شقق ووحدات": "شقة",                  # → Apartment (ad: /ads/arbaa-ohdat-bhy-alroaby-shrk-bryd)
+    "شقق و وحدات": "شقة",                 # → Apartment
+    "دور وشقتين و ادوار": "دور",          # → Floor (ad: /ads/dor-ardy-hy-albsatyn-mkhtt-alokyt)
+    "دور و شقتين و ادوار": "دور",         # → Floor
 }
 
 # «مخططات» is a SUBDIVISION PLAN — a whole layout of many plots, not one property with one price.
@@ -509,7 +516,8 @@ _TYPE_SKIP = {"مخططات", "مخطط"}
 # property types, and the category alone cannot say which one a given ad is. Measured 2026-09-28:
 #   «دور و شقتين و ادوار» (37): «دور ارضي» (a floor), «دور وشقتين» (a floor + two flats, i.e. a
 #       whole building), «بيت قديم», «مجمع سكني», and ad 5965 whose title says «فله» while its own
-#       description says «دور مع شاليه».
+#       description says «دور مع شاليه». → RESOLVED by the owner 2026-11-04 (decision 8): Floor,
+#       mapped in _TYPE_AR above together with «شقق ووحدات» → Apartment.
 #   «دورين» (21): «دورين مفصولات» (two separate floors), «فله دورين», «عمارة دورين», «بيت شعبي
 #       دورين», «دور علوي نظام دبلوكس».
 #   «مستودعات و ورش» (25): warehouse OR workshop — and one is a factory («مصنع»).
@@ -605,7 +613,9 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         # : الدور الاول : مشب . مجلس رجال …». 2026-10-30: 1,740 of 1,740 active rows stored none, so the AI facts
         # reader had nothing to read. This is the text, not a reading of it: the land / «يليه» filtering above
         # (unit_description_text) still decides the amenity columns. No box → NULL, never ''.
-        "description": redact_pii(ad_description(page_html)) or None,
+        # One line per source line (keep_lines): the stored box must split into the same clauses the amenity
+        # reader split it into, or a re-read of the stored copy sees one run-on clause (crawl-health 2026-11-04).
+        "description": redact_pii(ad_description(page_html), keep_lines=True) or None,
     }
     if deal == "Rent":
         row["price_annual"] = price_annual

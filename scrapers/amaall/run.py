@@ -16,7 +16,13 @@ and the Arabic post is the canonical one.
 THE COORDINATES ARE NOT A LOCATION. fave_property_location reads `25.68654,-80.431345` on several
 posts — a NEGATIVE longitude, i.e. Florida, not Saudi Arabia. It is a theme default, exactly the
 class of signal that got danaalkhair deferred. Location comes ONLY from the property_city taxonomy;
-no coordinate is ever consulted, and neither is the title.
+no coordinate is ever consulted for the city or district, and neither is the title.
+
+THE MAP PIN IS THE SAME META, THROUGH THE ONE GATE (⚡ 2026-11-03, backlog 1197: served 0/32 pins while the
+page draws its Leaflet map from this very pair, e.g. 21.488419,39.934998). `fave_property_location`
+(«lat,lng,zoom») → source_pin.sa_pin, which refuses the Florida default (outside Saudi Arabia). A pair
+repeated on SHARED_PIN_POSTS or more posts is a theme/office default, not the ad's own pin, and is dropped
+too. The pin is display only; it never decides a city.
 
 «حي النعيم» IS A DISTRICT SITTING IN THE CITY TAXONOMY (their data-entry slip, 1 post). It is
 refused rather than allowed to invent a city called "An Naeem District" — the shared resolver
@@ -54,6 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
+from scrapers.common.source_pin import sa_pin  # noqa: E402
 
 BASE = "https://www.amaall.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -248,8 +255,32 @@ def fetch_images(s: Optional[cc.Session], posts: list[dict]) -> dict[int, list[s
     return out
 
 
+SHARED_PIN_POSTS = 3
+
+
+def meta_pin(p: dict) -> tuple[Optional[float], Optional[float]]:
+    """The post's own pair from fave_property_location («lat,lng[,zoom]»), or (None, None)."""
+    raw = _meta1(p.get("property_meta") or {}, "fave_property_location")
+    parts = str(raw or "").split(",")
+    if len(parts) < 2:
+        return None, None
+    la, lo = sa_pin(parts[0], parts[1])
+    return (round(la, 6), round(lo, 6)) if la is not None else (None, None)
+
+
+def shared_default_pins(posts: list[dict]) -> set[tuple[float, float]]:
+    """Pairs that SHARED_PIN_POSTS or more distinct posts carry: a default, never an ad's own pin."""
+    seen: dict[tuple[float, float], set] = {}
+    for p in posts:
+        la, lo = meta_pin(p)
+        if la is not None:
+            seen.setdefault((la, lo), set()).add(p.get("slug") or p.get("id"))
+    return {k for k, v in seen.items() if len(v) >= SHARED_PIN_POSTS}
+
+
 def map_listing(p: dict, tax: dict[str, dict[int, str]],
-                images: Optional[dict[int, list[str]]] = None) -> tuple[Optional[dict], str]:
+                images: Optional[dict[int, list[str]]] = None,
+                default_pins: Optional[set] = None) -> tuple[Optional[dict], str]:
     link = p.get("link")
     if not link or not is_arabic_post(p):
         return None, "residential"      # English duplicate — see the module docstring
@@ -353,6 +384,14 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "language": "ar",
     }
 
+    # MAP PIN — see the module docstring. The REST read succeeded, so a missing/refused pair is the
+    # source's silence (pin_absent), never a failed read.
+    la, lo = meta_pin(p)
+    if la is not None and (la, lo) not in (default_pins or set()):
+        info["latitude"], info["longitude"] = la, lo
+    else:
+        info["pin_absent"] = True
+
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{int(hashlib.md5((p.get('slug') or str(p.get('id'))).encode()).hexdigest()[:12], 16)}",
         "listing_url": link,
@@ -432,9 +471,12 @@ def main() -> int:
             posts = posts[: args.limit]
         images = fetch_images(s, posts)
 
+        default_pins = shared_default_pins(posts)
+        if default_pins:
+            print(f"  shared default pins dropped: {sorted(default_pins)}")
         unmapped: dict[str, int] = {}
         for p in posts:
-            row, cat = map_listing(p, tax, images)
+            row, cat = map_listing(p, tax, images, default_pins)
             if not row:
                 names = tax.get("property_type") or {}
                 for tid in (p.get("property_type") or []):
@@ -496,8 +538,9 @@ def main() -> int:
                 print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI "
                       "instead of reporting a silent success.", flush=True)
                 return 1
+            pinned = sum(1 for r in res + com if r["additional_info"].get("latitude") is not None)
             print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted "
-                  f"({gone_ct} sold/rented)")
+                  f"({gone_ct} sold/rented) · pins {pinned}/{n}")
         return 0
     except Exception as e:
         if run_id:

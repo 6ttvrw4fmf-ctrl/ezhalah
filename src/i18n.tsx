@@ -1495,6 +1495,7 @@ const AR: Record<string, string> = {
   'SuperOffice': 'سوبر أوفيس',     // the site's own Arabic name (superoffice.sa)
   'Shomou': 'شموع العقار',         // «مكتب شموع العقار للاستثمار والتطوير العقاري» (shomoalaqar.com.sa footer)
   'Haraj': 'حراج',
+  'Property Finder': 'بروبرتي فايندر',
   // A reopened history chat's card whose listing was removed at its source since (owner 2026-10-18).
   'Listing ended': 'انتهى الإعلان',
   'No longer available on the source site': 'لم يعد متاحًا على الموقع',                  // the site's own name (haraj.com.sa)

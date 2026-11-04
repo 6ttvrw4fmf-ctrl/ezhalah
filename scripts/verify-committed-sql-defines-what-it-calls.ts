@@ -97,7 +97,11 @@ export function unresolvedPublicRefs(files: SqlFile[]): Map<string, string[]> {
     // RELATION reference, not a call: the parenthesis belongs to the column list. Without this the
     // reader flagged public.aqar_resolver_log() on 2026-10-12 for a plain insert into that table.
     // Only the insert-target shape is exempt; `select public.fn(` still reads as a call.
+    // A RAISE message is prose, not a call (2026-11-04: ops_run_cron_bundle's refusal text
+    // 'step % is not a single "select public.fn(...)" call' read as a call to public.fn()). Only the
+    // message literal of a RAISE is blanked; a call in a cron command string still reads as one.
     const code = stripSqlCommentsAndBlanks(sql)
+      .replace(/(\braise\s+(?:exception|warning|notice|info|log|debug)\s+)'(?:[^']|'')*'/gi, "$1'<message>'")
       .replace(/(\binsert\s+into\s+public\.[a-zA-Z0-9_]+)\s*\(/gi, '$1 /*cols*/ (');
     for (const n of namesIn(code, DEFINES_FUNCTION)) defined.add(n);
     for (const n of namesIn(code, DEFINES_RELATION)) defined.add(n);
@@ -184,6 +188,15 @@ const INSERT_TARGET: SqlFile[] = [
 mustCatch('an INSERT target with a column list being read as a call (while a real call still is)',
   !unresolvedPublicRefs(INSERT_TARGET).has('some_log') &&
   unresolvedPublicRefs(INSERT_TARGET).has('really_missing'));
+
+// A RAISE message naming a call is prose; a cron command string naming one is a call. Both directions.
+const RAISE_MESSAGE: SqlFile[] = [
+  { file: 'a.sql', sql: "do $$ begin raise exception 'step % is not a single \"select public.fn(...)\" call', 1; end $$;\n"
+      + "select cron.schedule('x', '1 * * * *', 'select public.really_missing()');" },
+];
+mustCatch('a RAISE message read as a call (while a call in a cron command still is)',
+  !unresolvedPublicRefs(RAISE_MESSAGE).has('fn') &&
+  unresolvedPublicRefs(RAISE_MESSAGE).has('really_missing'));
 
 // The negative direction: a real definition in the same corpus must silence it, or the check is a
 // constant red that someone will eventually delete.

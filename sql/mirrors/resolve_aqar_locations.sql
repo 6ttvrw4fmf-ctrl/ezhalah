@@ -17,6 +17,10 @@
 --   all 71 match the body below, the sole difference being the trailing `;` this mirror adds so the
 --   file is runnable (which is why the recorded md5 is of the FILE BODY, 313aa32e…, and not equal to
 --   md5(pg_get_functiondef) = ef38f2304a92172f39a716a8c3a6324f). The function is unchanged.
+-- Re-verified 2026-11-04: migration 20261104043631 (cron consolidation) CALLS this function as a step
+--   of the bundle-locations-10min cron job; it does not redefine it. md5(pg_get_functiondef) is still
+--   ef38f2304a92172f39a716a8c3a6324f and md5(pg_get_functiondef || ';' || newline) is 313aa32e…, the
+--   recorded body md5, checked against production 2026-11-04.
 CREATE OR REPLACE FUNCTION public.resolve_aqar_locations()
  RETURNS TABLE(shadow_added integer, lal_added integer)
  LANGUAGE plpgsql

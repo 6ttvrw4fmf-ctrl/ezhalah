@@ -82,6 +82,26 @@ FLEET_DAILY_DIRECT site, whose daily revisit hides on three direct readings by d
 wait for a second and third identical reading is dropped. Migration `20261020183753`. `decide()` is the single origin of every deactivation, and it writes an auditable reason
 string (`source_confirmed_dead:direct:strikes=3/3`).
 
+### 2.1 The DELETION clock needs a direct verdict too (owner decision 2, 2026-11-03 — permanent)
+
+**An ad becomes eligible for the deletion clock only after at least one DIRECT source verdict for
+that row — `last_verified_alive_at` is set, or a `GONE` probe sits in `ops_stale_inactivation_probe`
+for its `ad_number` (probed no earlier than an hour before this deactivation). Crawl absence alone
+(`missing_count`, `last_seen_at`) never starts it.** Rows without a verdict stay out of the clock:
+they are not deleted and not changed, they stay exactly as they are. The owner's answer was
+"Yes, use your picks" to that recommendation.
+
+The predicate exists in ONE place, `deletion_clock_eligible_sql()`, and every reader uses it: the
+retention engine (`scrapers/common/cleanup.py` → `deletion_clock_candidates` /
+`deletion_clock_eligible_count`), `ops_lifecycle_deletion_backlog()` and
+`ops_lifecycle_backlog_evidence_class()`. Every other deletion guard (delete-time fresh re-probe,
+anomaly/fraction gates, health gate, inconclusive freeze, audit trail) is unchanged — this only adds
+a precondition. `mon_detect_deletion_clock_without_evidence` measures the engine's real set with its
+own independent verdict clause, so it fires again the day the predicate loses the clause. Never make
+it green by changing its threshold, and never by deleting. Guard:
+`scripts/verify-deletion-clock-needs-direct-verdict.ts`. (Before: gathern 210 of 13,522 eligible,
+wasalt residential 117, aqar residential 36, wasalt commercial 14 rows had no verdict at all.)
+
 ## 3. "Seen by the crawler" and "proven alive" are different facts, stored in different columns
 
 | column | means |
@@ -115,6 +135,40 @@ with 30 directly-read in-feed controls (flips abort under 90% live). It changes 
 *verified*, never what counts as *dead*: removal still needs a DIRECT gone reading, and
 `LivenessPolicy` raises if `absence_is_candidate_only` is disabled. No other platform may declare
 it without an owner decision recorded here.
+
+### 3.1 "Stale" means NO source evidence of EITHER kind (2026-11-04, migration 20261104032124)
+
+Because the two facts live in two columns, any question of the form *"when did the source last tell
+us this ad exists?"* must read **both**: `greatest(last_seen_at, last_verified_alive_at)`. A direct
+ALIVE verdict is the stronger of the two, and the contract stamps only `last_verified_alive_at` for
+it. The daily stale sweep `mark_stale_listings_inactive()` read `last_seen_at` alone, so platforms
+whose oracle re-reads every row but whose crawl sees a slice read as stale: muhaysini 7,024 of 18,785
+"stale" with every row directly verified inside 3 days (13 days of `stale_breaker_escape`), haraj
+13,315 of 15,073. It now reads both, in the stale count AND the coverage gate. A row with neither
+stamp in the window is still reported. The sweep never deactivates anything, so no kill rule moved.
+Barrier: `scripts/verify-stale-coverage-gate.ts` §E (both directions) and its §D revert guard.
+
+**refresh_coverage, feed-only platforms (owner decision 7, 2026-11-04 — «Yes, use your picks»; migration
+`20261104093521`).** For haraj — a STREAM of new posts that no crawl can re-see — a direct own-page
+liveness verdict (`last_verified_alive_at`) counts as "refreshed" in `mon_detect_refresh_coverage()`, as it
+already does in the stale gate above. Measured that day: 16,197 active haraj rows, 1,052 crawl-seen inside
+72 h, 16,195 directly verified ALIVE inside it; `refresh_coverage:haraj` (P1, open since 10-30 at «6.5%»)
+resolved on the first run. **Every other platform's refresh_coverage still measures the CRAWL alone** —
+that detector exists to notice a crawl that stopped re-seeing a catalogue, which a still-running oracle
+would hide. The list is `feed_only` in the SQL = `FEED_ONLY_PLATFORMS` in `scripts/lib/refreshCoverage.ts`;
+a new entry is an owner decision. Barrier: `scripts/verify-feed-only-refresh-counts-direct-verdict.ts`.
+The 2 haraj rows still in `stale_listings_detected:haraj_residential_listings` (HRJ11190706520,
+HRJ11190764055) are honest: their own pages answer 200 with neither a RealEstateListing nor «العرض محذوف
+او قديم», which §1 reads as UNKNOWN — no verdict, so they stay reported and live.
+
+### 3.2 A deactivation is never written into the DELETION ledger (2026-11-04, migration 20261104033440)
+
+`cleanup_deletion_log` is written before a hard delete, so a row there claims permanent destruction.
+Three hand-written repairs (20260919010944, a 2026-09-19 bulk pass, 20261104013008) deactivated
+wasalt ads on real direct evidence and recorded that in the DELETION ledger — 133 false claims. They
+now live in `ops_stale_inactivation_probe`, and `scripts/verify-deactivation-is-not-written-to-deletion-ledger.ts`
+fails any later migration that inserts into `cleanup_deletion_log` without deleting a listing.
+Record a deactivation in `ops_stale_inactivation_probe` and register it in `ops_adjudicated_retraction`.
 
 ## 4. Every production-searchable platform must declare a strategy
 
@@ -398,12 +452,40 @@ The owner approved one narrow exception («Yes, hide them»), for sites measured
 an error while their live ads answer 200: alshawaf and bossbih (an UNPUBLISHED Drupal node → 403; deleted →
 404) and aqaratikom (`/api/v1/ad/<uuid>` of a removed ad → 500; a made-up uuid → 404); and abralosol (owner yes
 for this site, 2026-11-03: a removed `/{nid}` → 403 carrying the site's own «لايمكن فتح هذة الصفحة» page, which
-its caller also requires — `body_must`). Such an ad is hidden
+its caller also requires — `body_must`); and sakani (owner «Yes, use your picks», decision 1, 2026-11-04: a
+removed unit's DETAIL API `/marketUnitsApi/v6/market_units/<id>` answers 403 `text/plain` with a BLANK body —
+measured on struck units 23412, 23438, 22775, 20252 — a made-up id 404 `{"message":"not found"}`, live 200; a
+Cloudflare challenge is a 403 HTML «Just a moment…» page, so the caller requires the blank body — `body_must` —
+and a challenge stays UNKNOWN). Such an ad is hidden
 only when ALL hold: the site and that exact status are in `OWNER_APPROVED_REMOVAL_STATUS`
 (`scrapers/common/http_liveness.py`); the ad's own URL answers it on two reads, neither redirected; and in the
 SAME check a recently proven-live ad of the same site reads LIVE through the site's own signal
 (`removal_by_owner_approved_status`, `live_control_url`). No control, a blocked control, a different status
 or a redirect → UNKNOWN. A new site joins the table only with the owner's approval.
+
+### 7.1a A retired platform is hidden by decision, not by a liveness verdict (almuteb, owner 2026-11-04)
+
+The owner answered «Yes, use your picks» (decision 2): almuteb.sa has not resolved since 2026-10-23 (every crawl
+since 2026-10-24 04:39 UTC failed with curl(6); re-measured 2026-11-04 NXDOMAIN at 8.8.8.8 and 1.1.1.1, and the .sa
+registry lists its name servers as DNS-PARKING.COM). almuteb is RETIRED: `platform_registry.status = 'retired'`,
+the slug is in `scrapers/RETIRED_PLATFORMS.txt` and `NOT_PRODUCTION_SEARCHABLE`, its matrix line and its
+`ops_liveness_registry` row are gone, and its 11 listings are hidden and registered in `ops_adjudicated_retraction`
+with the DNS evidence (rows kept). This is NOT a liveness rule: an unreachable source is still UNKNOWN for every
+other site (§7). A site that stops resolving is retired only with the owner's decision.
+
+### 7.2 Two owner decisions of 2026-11-03 that change NOTHING — written down so nobody "fixes" them
+
+The owner answered «Yes, use your picks» to both recommendations:
+
+- **Absence alone still never hides — even after weeks (maqrat).** Five maqrat ads (MQR6, MQR10115, MQR110,
+  MQR10111, MQR10158) left the site's own complete list 15–30 crawls ago, their licences run to 2026-12 … 2027-10,
+  and a removed maqrat page is byte-identical to a live one (probe 37618176662). They stay SHOWN as UNKNOWN. Do not
+  add an "N crawls missing ⇒ gone" rule for maqrat or any other site; a site with no removal signal stays unknown
+  until it publishes one (maqrat's licence end date already retires ads on the day it passes, PR #10222). The
+  `served_after_source_gone:maqrat_residential_listings` alert describing exactly these rows is expected.
+- **Wasalt liveness keeps its declared 48 h SLA; it is NOT moved to daily** (daily would roughly double metered
+  proxy use). §7 still forbids changing the SLA to clear an alarm, so `liveness_checking_stalled:wasalt` is cleared
+  only by the checker meeting 48 h, never by redeclaring it.
 
 ## 8. Where the pieces live
 

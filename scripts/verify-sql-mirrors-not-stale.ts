@@ -62,6 +62,42 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { stripSqlComments } from './lib/repairClassifier.ts';
 
+// …AND A NAME IN A DESCRIPTION IS PROSE TOO (🦅 2026-11-03). A migration that ENROLLS earlier repairs in a registry
+// (20261103191545_repair_guarantee_enroll_66_unreachable_repairs) carries their descriptions as INSERT values:
+// «Companion of 20261102051729 (aqar_parse never reads a similar-ad price; trg_aqar_parse keeps …)». Read as a
+// change, that made aqar_parse.sql and trg_aqar_parse.sql «stale» on a migration that changes neither, and the
+// auto-mirror PR #10221 sat red for hours (the required suite failing a byte-exact mirror). Inside a single-quoted
+// literal a name counts only when it is SQL-shaped — schema-qualified (public.x), called (x(…)), or the whole literal
+// (pg_get_functiondef('x'::regproc)); everywhere else, including dollar-quoted bodies, any mention counts as before.
+function touchesExecuted(obj: string, sqlNoComments: string): boolean {
+  const bare = new RegExp(`\\b${obj}\\b`);
+  const shaped = new RegExp(`(?:\\bpublic\\.${obj}\\b|\\b${obj}\\s*\\(|^\\s*(?:public\\.)?${obj}\\s*$`
+    // dynamic DDL in a literal: execute 'create or replace view x as …' / 'drop trigger x on t' / 'alter function x …'
+    + `|\\b(?:create|alter|drop|replace)\\b[^;']{0,60}?\\b(?:function|view|trigger|table|index|type)\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?(?:public\\.)?${obj}\\b`
+    + `|\\bon\\s+(?:public\\.)?${obj}\\b)`, 'i');
+  let code = '';
+  let i = 0;
+  while (i < sqlNoComments.length) {
+    const c = sqlNoComments[i];
+    const dq = c === '$' ? sqlNoComments.slice(i).match(/^\$[A-Za-z_]*\$/) : null;
+    if (dq) {                                   // a dollar-quoted body is code: keep it, scan inside it
+      code += dq[0]; i += dq[0].length; continue;
+    }
+    if (c === "'") {                            // a single-quoted literal ('' escapes a quote)
+      let j = i + 1; let lit = '';
+      while (j < sqlNoComments.length) {
+        if (sqlNoComments[j] === "'" && sqlNoComments[j + 1] === "'") { lit += "'"; j += 2; continue; }
+        if (sqlNoComments[j] === "'") break;
+        lit += sqlNoComments[j]; j++;
+      }
+      if (shaped.test(lit)) return true;
+      code += "''"; i = j + 1; continue;
+    }
+    code += c; i++;
+  }
+  return bare.test(code);
+}
+
 const MIRRORS_DIR = 'sql/mirrors';
 const MIGRATIONS_DIR = 'supabase/migrations';
 
@@ -144,7 +180,7 @@ for (const file of mirrors) {
   );
   check(`    header carries a Refreshed/Re-verified date`, dates.length > 0);
 
-  const touching = migrations.filter((m) => new RegExp(`\\b${objectName}\\b`).test(m.body));
+  const touching = migrations.filter((m) => touchesExecuted(objectName, m.body));
   if (dates.length > 0 && touching.length > 0) {
     const mirrorDate = dates.sort().at(-1)!;
     const newest = touching.map((m) => m.date).sort().at(-1)!;
@@ -173,7 +209,7 @@ for (const file of mirrors) {
 // EXECUTED against the real predicate, not asserted about it. Each case is a migration body shaped
 // like one the tree actually contains; `touches()` is the exact expression the loop above uses.
 console.log('\n  mutation proof — (B) counts EXECUTED SQL and ignores prose\n');
-const touches = (obj: string, sql: string) => new RegExp(`\\b${obj}\\b`).test(stripSqlComments(sql));
+const touches = (obj: string, sql: string) => touchesExecuted(obj, stripSqlComments(sql));
 const OBJ = 'aqar_parse';
 
 check('    a CREATE OR REPLACE of the object still counts',
@@ -183,6 +219,19 @@ check('    a regexp_replace needle-edit still counts (the 20260805190111 shape t
 check('    a DROP still counts', touches(OBJ, `drop function if exists public.${OBJ}();`));
 check('    the object named inside an executed STRING LITERAL still counts',
   touches(OBJ, `do $$ begin execute 'alter function public.${OBJ}() owner to postgres'; end $$;`));
+check('    a description stored as an INSERT value does NOT count (the 20261103191545 enrolment shape)',
+  !touches(OBJ, `insert into public.ops_repair_guarantee_registry (repair_version, invariant) values\n ('20261102053242', 'Companion of 20261102051729 (${OBJ} never reads a similar-ad price; trg_${OBJ} keeps it)');`));
+check('    …while the same name as the WHOLE literal still counts (pg_get_functiondef(\'x\'::regproc))',
+  touches(OBJ, `select pg_get_functiondef('${OBJ}'::regproc);`));
+check('    …and a CALL inside a literal still counts (execute \'select x(…)\')',
+  touches(OBJ, `do $$ begin execute 'select ${OBJ}(null, null)'; end $$;`));
+check('    …and a bare name inside a DOLLAR-quoted body still counts (it is code, not prose)',
+  touches(OBJ, `create or replace function public.other() returns void as $f$ begin perform ${OBJ}; end $f$;`));
+check('    …and a doubled quote inside the literal does not end it early (prose after it stays prose)',
+  !touches(OBJ, `insert into t values ('it''s why ${OBJ} matters');`));
+check('    …and dynamic DDL with a BARE name inside a literal still counts (execute \'create or replace view x as …\')',
+  touches(OBJ, `do $$ begin execute 'create or replace view ${OBJ} as select 1'; end $$;`)
+  && touches(OBJ, `select 1; execute 'drop function if exists ${OBJ}';`));
 check('    a line comment that only MENTIONS the object does NOT count (the false positive)',
   !touches(OBJ, `-- see public.${OBJ} for where the parse happens\nupdate public.af_field_registry set ui_exposed = true;`));
 check('    a block comment that only mentions it does NOT count',

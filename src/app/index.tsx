@@ -16,7 +16,7 @@ import { HERO_TAGLINE_KEYS, nextHeroTaglineIndex } from '@/data/heroTaglineRotat
 import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { useAtLeast } from '@/lib/useAtLeast';
-import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
+import { SHARE_LABEL_BREAKPOINT, SIGNUP_LABEL_BREAKPOINT } from '@/lib/responsive';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
@@ -1215,6 +1215,7 @@ export default function Home() {
   // served HTML (width 0) had none — React #418 on every desktop/tablet visit, and every production
   // deploy failed the post-deploy hydration gate from 2026-09-05 21:33Z until this line.
   const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
+  const signUpLabelFits = useAtLeast(SIGNUP_LABEL_BREAKPOINT);
 
   const detail = query.type ? detailFor(query.type) : null;
   // Context-level detail: shown at category/group level when no specific type is selected.
@@ -1441,7 +1442,7 @@ export default function Home() {
                   dataSet={{ ...TAP44 }}
                 >
                   <Ionicons name="person-outline" size={15} color="#fff" />
-                  <Text style={[s.topSignInText, x.topSignInText]}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
+                  <Text style={[s.topSignInText, x.topSignInText]}>{t(signUpLabelFits ? 'Sign up / Log in' : 'Sign in')}</Text>
                 </Pressable>
               )}
               {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
@@ -2505,7 +2506,7 @@ const s = StyleSheet.create({
   shareBtnHover: { backgroundColor: colors.tintFill, borderColor: colors.primary },
   // Top-bar sign-in (mobile, logged-out only — owner 2026-08-19). Compact pill matching the sidebar's
   // CTA green so the action is unmistakable. On desktop the docked sidebar already shows it.
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   hero: { alignItems: 'center', marginTop: 8, marginHorizontal: 4 },

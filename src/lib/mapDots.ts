@@ -64,3 +64,15 @@ export function nearestDot(dots: MapDot[], project: (lat: number, lng: number) =
   }
   return best;
 }
+
+/** The crowded close-in view's count bubbles, built on the phone from the dots feed (the feed IS the 0.01° grid the
+ *  map would otherwise read again over the network): one bubble per cell, deals merged, position weighted by count. */
+export function bubblesFromDots(dots: MapDot[], cell = 0.01): { lat: number; lng: number; n: number; deal: string }[] {
+  const by = new Map<string, { la: number; lo: number; n: number; deals: Set<string> }>();
+  for (const d of dots) {
+    const k = `${Math.round(d.lat / cell)}|${Math.round(d.lng / cell)}`;
+    const b = by.get(k) ?? { la: 0, lo: 0, n: 0, deals: new Set<string>() };
+    b.la += d.lat * d.n; b.lo += d.lng * d.n; b.n += d.n; b.deals.add(d.deal); by.set(k, b);
+  }
+  return [...by.values()].map((b) => ({ lat: b.la / b.n, lng: b.lo / b.n, n: b.n, deal: b.deals.size === 1 ? [...b.deals][0] : 'mixed' }));
+}

@@ -44,7 +44,38 @@ export const COHORT_TOKENS = {
 };
 const UTILITY_COLUMN = { car_entrance: 'car_entrance', sanitation: 'sanitation', electricity: 'electricity', water_supply: 'water_supply' };
 
-export const afTargetsFor = (row, max = 2) => {
+// THE CHIPS THE PRODUCT REALLY SHOWS (🔬 2026-11-04, backlog 1268). Since 2026-11-01 the AF asks amenities through the
+// themed cards of src/lib/afCohorts.ts COHORT_CARDS (per type × deal), not one generic chip list — a Villa Buy shows no
+// kitchen / AC / parking chip at all. Picking targets from AMENITY_TOKEN_COLUMN alone sent journeys after chips that
+// are never on screen, so they ended UNKNOWN «interview never offered a question» and hid real misses (run
+// 41714162229: 3 of 8 UNKNOWN). customer-journey.mjs passes COHORT_CARDS in; a target is then a chip of the leg the
+// customer's search opens (the TAPPED type, Buy / annual / «إقامات قصيرة»). The card chip «furnished» is an amenity
+// token like the rest. No card table (a type the cards do not cover) keeps the generic rule below.
+export const TAP_COHORT_KEY = {
+  'شقة': 'Apartment', 'دور': 'Floor', 'استوديو': 'Studio', 'غرفة': 'Room', 'عمارة سكنية': 'Residential Building',
+  'فيلا': 'Villa', 'دوبلكس': 'Duplex', 'استراحة': 'Rest House', 'شاليه': 'Chalet', 'مخيم': 'Camp', 'مزرعة': 'Farm',
+  'أرض زراعية': 'Agriculture Plot', 'أرض سكنية': 'Residential Land', 'مكتب': 'Office', 'محل': 'Shop', 'معرض': 'Showroom',
+  'مستودع': 'Warehouse', 'ورشة': 'Workshop', 'مصنع': 'Factory', 'مبنى تجاري': 'Commercial Building', 'فندق': 'Hotel',
+  'محطة وقود': 'Gas Station', 'أرض تجارية': 'Commercial Land', 'أرض صناعية': 'Industrial Land',
+};
+export const cohortLeg = (row) => (row.deal_ar === 'بيع' ? 'Buy' : row.rent_period_ar === 'شهري' ? 'RentMonthly' : 'RentAnnual');
+/** The set of chip keys the AF cards offer for this listing's search, or null when the cards do not cover it. */
+export const offeredChips = (row, cards) => {
+  if (!cards) return null;
+  const key = TAP_COHORT_KEY[typeUi(row.type_ar, row.source_table)?.tap];
+  const lists = key ? cards[key]?.[cohortLeg(row)] : undefined;
+  return lists ? new Set(Object.values(lists).flat()) : null;
+};
+const CARD_TOKEN_COLUMN = { ...AMENITY_TOKEN_COLUMN, ...UTILITY_COLUMN, furnished: 'furnished' };
+
+export const afTargetsFor = (row, max = 2, cards = null) => {
+  const offered = offeredChips(row, cards);
+  if (offered) {
+    return Object.keys(CARD_TOKEN_COLUMN)
+      .filter((token) => offered.has(token) && row[CARD_TOKEN_COLUMN[token]] === true)
+      .map((token) => ({ kind: 'amenity', token }))
+      .slice(0, max);
+  }
   const t = [];
   const cohort = COHORT_TOKENS[row.type_ar] ?? { only: null, extra: [] };
   const tokens = cohort.only ?? [...Object.keys(AMENITY_TOKEN_COLUMN), ...cohort.extra];
@@ -52,7 +83,10 @@ export const afTargetsFor = (row, max = 2) => {
     const col = AMENITY_TOKEN_COLUMN[token] ?? UTILITY_COLUMN[token];
     if (row[col] === true) t.push({ kind: 'amenity', token });
   }
-  if (row.deal_ar === 'إيجار' && row.furnished === true) t.push({ kind: 'furnished' });
+  // The furnished QUESTION exists on annual rent only: src/lib/afCohorts.ts COHORT_QUESTIONS lists no
+  // `furnished` under RentMonthly (fresh-dead there, 100% true on Gathern), so a «إقامات قصيرة» journey
+  // that targets it can only end UNKNOWN «interview never offered a question» (🦅 backlog 811).
+  if (row.deal_ar === 'إيجار' && row.rent_period_ar !== 'شهري' && row.furnished === true) t.push({ kind: 'furnished' });
   return t.slice(0, max);
 };
 
@@ -202,6 +236,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   assert.deepEqual(afTargetsFor({ type_ar: 'فيلا', deal_ar: 'بيع', sanitation: true, electricity: true }),
     [{ kind: 'amenity', token: 'sanitation' }]);
   assert.deepEqual(afTargetsFor({ type_ar: 'شقة', deal_ar: 'بيع', electricity: true, sanitation: true }), []);
+  // card-driven targets (backlog 1268): a Villa Buy shows no kitchen chip, so kitchen is never a target there
+  const CARDS = { Villa: { Buy: { space: ['majlis', 'maid_room'], build: ['car_entrance'] }, RentAnnual: { comfort: ['kitchen', 'furnished'] } } };
+  assert.deepEqual(afTargetsFor({ type_ar: 'فيلا', deal_ar: 'بيع', kitchen: true, maid_room: true, car_entrance: true }, 2, CARDS),
+    [{ kind: 'amenity', token: 'maid_room' }, { kind: 'amenity', token: 'car_entrance' }]);
+  assert.deepEqual(afTargetsFor({ type_ar: 'فيلا', deal_ar: 'إيجار', rent_period_ar: 'سنوي', kitchen: true, furnished: true }, 2, CARDS),
+    [{ kind: 'amenity', token: 'kitchen' }, { kind: 'amenity', token: 'furnished' }]);
+  assert.deepEqual(afTargetsFor({ type_ar: 'بيت', deal_ar: 'بيع', kitchen: true }, 2, CARDS), [], 'بيت is tapped as فيلا');
   assert.ok(carriedOnRequest({ p_amenities: ['elevator'], p_furnished: true },
     afTargetsFor(row)).carried);
   assert.ok(!carriedOnRequest({ p_amenities: [] }, [{ kind: 'amenity', token: 'elevator' }]).carried);

@@ -30,12 +30,15 @@ def test_struck_rows_head_the_worklist(monkeypatch):
     queries = []
 
     class _Client:
-        def table(self, _t):
+        def table(self, t):
             q = _Q(queries)
+            q.tbl = t
             queries.append(q)
             return q
 
     def fake_execute(q, what=""):
+        if q.tbl != L.TABLE:          # the commercial table holds nothing in this scenario
+            return type("R", (), {"data": []})()
         return type("R", (), {"data": struck if q.struck else rotation})()
     monkeypatch.setattr(L, "_execute", fake_execute)
     got = [r["id"] for r in L._collect_candidates(_Client(), 600)]

@@ -114,6 +114,10 @@ const DECLARED: Record<string, Verdict> = {
   // cleanup.run() is ever called, so no real client is constructed and the verdict cannot depend on
   // production being reachable.
   'verify-cleanup-run-death-leaves-a-record.ts': 'offline-safe',
+  // Measured 2026-11-03 (owner decision 2, deletion clock): normal exit 0, blackhole
+  // (SUPABASE_URL=https://127.0.0.1:9) exit 0. Same driver as the line above: test_cleanup's
+  // _install() swaps C.sb for the fake client before cleanup.run(), so nothing reaches production.
+  'verify-deletion-clock-needs-direct-verdict.ts': 'offline-safe',
   // Measured 2026-09-18 (routine #4, ops_incident #307): normal exit 0, blackhole exit 0. Its python
   // harness replaces scrapers.common.db in sys.modules BEFORE importing the enricher, so no client is
   // ever constructed and the verdict cannot depend on production being reachable.
