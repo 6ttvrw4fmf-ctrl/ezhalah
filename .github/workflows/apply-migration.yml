@@ -42,6 +42,9 @@ concurrency:
   group: apply-migration
   cancel-in-progress: false
 
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   apply:
     name: Apply ${{ inputs.file }}
