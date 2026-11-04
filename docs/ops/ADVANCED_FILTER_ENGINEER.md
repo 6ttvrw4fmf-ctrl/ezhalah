@@ -354,6 +354,20 @@ lists you with your 120-minute cap.
    (c) open AF backlog count at the end vs at your start.
    If any of the three is worse than last night, the report's first line says which and why, and tomorrow's self-note names the
    one change of approach that fixes it. A night that is not measurably better is never rated above 8.
+7. **Lessons of 11-04 (measured), so they are not learned twice:**
+   - **A test fixture is copied from the RE-READ page, never typed from memory.** #10132 «fixed» sakan's radio filter
+     with a fixture that put the option text after the `<input>`; the live page puts it in `<label for=…>`, so the
+     test passed and the 11-04 score still read furnished «stated» on 9 of 10. Re-read one live page (Supabase
+     `net.http_get` reaches sites this container cannot) and paste its markup into the test.
+   - **A green workflow run can have verified nothing.** af-live-truth-check's deploy-chained runs whose gate finds no
+     shipped bundle finish «success» in seconds; GitHub keeps ONE pending run per concurrency group, so those no-ops
+     cancelled the waiting daily run (11-02, 11-03) and alert 11763 stood on a stale failure. Read the run's JOBS
+     (skipped = nothing checked), not its colour.
+   - **A detector baseline must be arrivals, not a backfill.** af_coverage_cliff read muktamel's 550-row re-import day
+     as a 19.9% car-entrance rate; the true arrival rate was 8.2%. Before trusting a «cliff», look at the prior
+     window's rows per day.
+   - **The two-way sample finds what every barrier misses.** 25 + 25 sentences on one chip found two reader bugs and a
+     PDPL-sanitizer truncation (a one-line ad lost its whole body after «واتساب») in 20 minutes.
 6. **Tonight's lessons (10-12), so they are not learned twice:**
    - Two live AF checks were red because the MEASURING TOOL was wrong (the «Raw Land» tag, the nested age ladder), not the product.
      Reproduce one failing cell with `AF_MATRIX_ONLY=… AF_MATRIX_MODES=…` before touching any RPC.
