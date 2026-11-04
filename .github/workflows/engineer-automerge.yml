@@ -76,8 +76,17 @@ jobs:
             # The merge GATE itself never auto-merges: engineer-automerge.yml, scripts/safe-pr-merge.ts and the secret
             # handshake (scripts/lib/gateFetch.mjs, scripts/lib/robotPass.mjs) still need a person, so a robot cannot
             # widen its own door. Package files and supabase/ (other than a mirror) stay with a person.
+            # data/ (pin-sources.json, catalog aliases) is a scraper declaration the engineers own with the parser: ⚡'s
+            # #10083 sat green for 8 h on 2026-11-03 because its one data/ file read as «outside» (🔧 11-03).
+            # sql/mirrors/ holds read-only copies of live DB objects with a verified-md5 stamp; verify-sql-mirrors-not-stale
+            # forces the stamp to travel WITH a migration's mirror file, so a mirror PR touching a mirrored function could
+            # never be robot-mergeable and the drift gate refused every deploy until a person merged it (🔬 #10130: six
+            # refused deploys, 09:26–12:13 UTC 2026-11-03; #9791 and #9949 before it). A stamp changes nothing in production.
             outside=$(printf '%s\n' "$files" \
-              | grep -vE '^(scrapers|scripts|e2e|docs|src|public|\.github/workflows)/' \
+              # sql/*.generated.sql are the taxonomy seeds the build gate REGENERATES from src/data/taxonomy.source.json
+              # (verify-taxonomy layer 1.C demands byte-equality, so they cannot ship apart from the src/ change that
+              # produced them): 🔧's #10508 (a src/ customer fix) sat «for a person» on 2026-11-04 over one such file.
+              | grep -vE '^(scrapers|scripts|e2e|docs|src|public|data|sql/mirrors|\.github/workflows)/|^sql/[^/]+\.generated\.sql$' \
               ; printf '%s\n' "$files" \
               | grep -E '^(\.github/workflows/engineer-automerge\.yml|scripts/safe-pr-merge\.ts|scripts/lib/gateFetch\.mjs|scripts/lib/robotPass\.mjs)$' \
               ; true)
