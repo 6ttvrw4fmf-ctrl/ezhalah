@@ -148,6 +148,19 @@ whose oracle re-reads every row but whose crawl sees a slice read as stale: muha
 stamp in the window is still reported. The sweep never deactivates anything, so no kill rule moved.
 Barrier: `scripts/verify-stale-coverage-gate.ts` §E (both directions) and its §D revert guard.
 
+**refresh_coverage, feed-only platforms (owner decision 7, 2026-11-04 — «Yes, use your picks»; migration
+`20261104093521`).** For haraj — a STREAM of new posts that no crawl can re-see — a direct own-page
+liveness verdict (`last_verified_alive_at`) counts as "refreshed" in `mon_detect_refresh_coverage()`, as it
+already does in the stale gate above. Measured that day: 16,197 active haraj rows, 1,052 crawl-seen inside
+72 h, 16,195 directly verified ALIVE inside it; `refresh_coverage:haraj` (P1, open since 10-30 at «6.5%»)
+resolved on the first run. **Every other platform's refresh_coverage still measures the CRAWL alone** —
+that detector exists to notice a crawl that stopped re-seeing a catalogue, which a still-running oracle
+would hide. The list is `feed_only` in the SQL = `FEED_ONLY_PLATFORMS` in `scripts/lib/refreshCoverage.ts`;
+a new entry is an owner decision. Barrier: `scripts/verify-feed-only-refresh-counts-direct-verdict.ts`.
+The 2 haraj rows still in `stale_listings_detected:haraj_residential_listings` (HRJ11190706520,
+HRJ11190764055) are honest: their own pages answer 200 with neither a RealEstateListing nor «العرض محذوف
+او قديم», which §1 reads as UNKNOWN — no verdict, so they stay reported and live.
+
 ### 3.2 A deactivation is never written into the DELETION ledger (2026-11-04, migration 20261104033440)
 
 `cleanup_deletion_log` is written before a hard delete, so a row there claims permanent destruction.

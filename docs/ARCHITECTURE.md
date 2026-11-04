@@ -1190,6 +1190,18 @@ cleared on truth and the slot ratchet is now **2** (the live detector's own bar)
 Barrier: `scripts/verify-cron-bundles-stay-honest.ts` (runner isolation/reporting, no writer step, mirror ↔ migration,
 the evidence rule mirrored in `scripts/lib/cronSlots.ts` and mutation-proven, the grace window).
 
+### Cron run history keeps 30 days (owner decision 3, 2026-11-04 — «Yes, use your picks»)
+
+`cron.job_run_details` had grown to 260,081 rows / 72 MB (oldest 2026-06-11) with only its `runid` key. Every reader was
+read back from production that day: the longest window any function or view applies to it is **7 days** (the cron
+hog/starvation/frozen/gap/grace detectors, `mon_detect_detector_sweep_budget`); `ops_freshness_by_layer` reads the newest
+success only. Migration `20261104093546` adds `ops_purge_cron_run_history()` and the daily job
+`purge-cron-run-history` (`27 1 * * *`, 04:27 Riyadh): it deletes rows older than **30 days** in 5,000-row batches down the
+primary key (≤ 40 batches a run). **30 days is a floor enforced inside the function** — asking to keep fewer raises. First
+run 2026-11-04: 163,004 rows deleted in 33 batches, 97,088 kept. Barrier `scripts/verify-cron-history-retention-floor.ts`
+pins the floor, the daily schedule, and that **no committed reader of `job_run_details` looks back more than 30 days** — a
+new detector needing a longer history must raise the retention in the same change, never read a truncated table.
+
 ---
 
 ## 20. Permanent rules (the non-negotiables)
