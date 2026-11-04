@@ -94,6 +94,11 @@ BUTTON_BLOCK = re.compile(r"<button\b[^>]*>.*?</button>", re.S | re.I)
 MENU_ITEM_LINK = re.compile(r'(<li\b[^>]*class="[^"]*\bmenu-item\b[^"]*"[^>]*>\s*<a\b[^>]*>)[^<]{0,80}', re.I)
 RESULT_CARD_TEXT = re.compile(r'<p class="(?:result-card-description|property-showcase-location)\b[^"]*"[^>]*>.*?</p>',
                               re.S | re.I)
+# …and a HOUZEZ (WordPress theme) listing card: <div class="item-body"> → the other ad's title, address and its
+# <ul class="item-amenities"> «غرف: 4 · حمامات: 3 · 140 م2 · موقف: 1». Houzez prints item-amenities only in listing
+# cards, never in the ad's own detail panel. shatri 13105178 / 13105179 (75 / 87 m², 2026-11-04 score: parking
+# «we_miss», findability 3 of 5) read «موقف: 1» off a 140 m² neighbour's card (page re-read the same night, HTTP 200).
+HOUZEZ_CARD = re.compile(r'<div class="item-body\b[^"]*"[^>]*>.*?</ul>', re.S | re.I)
 
 
 # A spec table renders its label and its value as two elements («عدد غرف النوم» / «1»): split on tags they
@@ -219,7 +224,7 @@ def _number_first_lines(body: str) -> list[str]:
 
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
-    body = RESULT_CARD_TEXT.sub(" ", body or "")   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
+    body = HOUZEZ_CARD.sub(" ", RESULT_CARD_TEXT.sub(" ", body or ""))   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
     body = SELECT_BLOCK.sub(" ", drop_radio_controls(body))   # …nor the site's own search-filter choices
     body = MENU_ITEM_LINK.sub(r"\1 ", BUTTON_BLOCK.sub(" ", body))  # …nor its buttons and menu links
     jsonld = []

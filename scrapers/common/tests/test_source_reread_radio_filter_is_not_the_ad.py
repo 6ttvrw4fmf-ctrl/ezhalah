@@ -75,3 +75,17 @@ def test_a_label_bound_to_a_radio_input_is_not_a_page_line():
 def test_a_label_bound_to_a_checkbox_or_text_field_is_kept():
     own = OWN + '<input type="checkbox" id="lift" checked disabled><label for="lift">مصعد</label>'
     assert "مصعد" in _all(page_evidence(own + POPUP_REAL))
+
+
+# shatri 13105178 (75 m², 2026-11-04, real Houzez markup trimmed): a neighbour's listing card «140 م2 · موقف: 1».
+HOUZEZ = ('<div class="item-body w-100 flex-grow-1"><h2 class="item-title mb-2 "><a href="https://shatrirealestate.com/'
+          'property/alsafa-4-rooms/">شقق تمليك 4 غرف مساحة 140 متر حي الصفا جدة</a></h2>'
+          '<ul class="item-amenities d-flex"><li class="h-area"><span class="hz-figure me-1">140</span> '
+          '<span class="hz-figure area_postfix">م2</span></li><li class="h-cars"><span class="item-amenities-text">'
+          'موقف:</span> <span class="hz-figure">1</span></li></ul><a class="btn">التفاصيل</a></div>')
+
+
+def test_a_houzez_listing_card_is_not_the_ad():
+    page = page_evidence('<h1>تملك شقة استديو من غرفتين في حي الصفا</h1><p>مصعد مشترك</p>' + HOUZEZ)
+    assert "موقف" not in _all(page) and "140" not in _all(page)
+    assert "مصعد" in _all(page)
