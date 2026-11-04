@@ -68,16 +68,17 @@ try {
     setTimeout(() => clearInterval(iv), 30_000);
     new PerformanceObserver((l) => { for (const e of l.getEntries()) if (/rpc|feed|sb\//.test(e.name)) window.__zt.push(`read ${e.name.split('/').pop().split('?')[0]} ${Math.round(e.startTime - t0)}+${Math.round(e.duration)}`); }).observe({ type: 'resource' });
   });
-  // Pressed in the page itself: on a phone the Google sign-in sheet can sit over the map's corner, and a robot click
-  // would wait for it (measured: the map did not start moving until 6.8 s after the tap). This times the MAP's answer.
+  // Zoomed the way a pinch does — the map itself, to a quarter of the span — so the time is the MAP's answer. A robot tap
+  // on «+» measured the wrong thing: on a phone the Google sign-in sheet can sit over that corner (the map did not start
+  // moving until 6.8 s after the tap), and a scripted press does not reach the button in touch mode.
   t = Date.now();
-  await page.evaluate(async () => {
-    const b = [...document.querySelectorAll('[aria-label]')].find((e) => /Zoom in|تكبير/.test(e.getAttribute('aria-label') ?? ''));
-    b?.click(); await new Promise((r) => setTimeout(r, 250)); b?.click();
+  await page.evaluate(() => {
+    const mk = window.mapkit; const m = mk.maps[mk.maps.length - 1]; const r = m.region;
+    m.setRegionAnimated(new mk.CoordinateRegion(r.center, new mk.CoordinateSpan(r.span.latitudeDelta / 4, r.span.longitudeDelta / 4)), true);
   });
   await until((prev) => { const now = [...document.querySelectorAll('[data-testid=map-area]')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.textContent).join('|'); return now.length > 0 && now !== prev; }, before);
   results.zoomMs = Date.now() - t;
-  say(results.zoomMs <= BUDGET.zoomMs, 'map: two zoom-ins until the closer view is labelled', results.zoomMs, BUDGET.zoomMs);
+  say(results.zoomMs <= BUDGET.zoomMs, 'map: zoom in (pinch-like, ¼ span) until the closer view is labelled', results.zoomMs, BUDGET.zoomMs);
   if (results.zoomMs > BUDGET.zoomMs) console.log(`      zoom timeline: ${(await page.evaluate(() => window.__zt)).join(' · ')}`);
   t = Date.now(); await tab('الوسيط الذكي').click();
   await until(() => location.pathname === '/agent' && [...document.querySelectorAll('textarea')].some((x) => x.getBoundingClientRect().width > 0));
