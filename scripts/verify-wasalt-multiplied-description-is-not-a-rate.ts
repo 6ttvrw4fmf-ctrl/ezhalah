@@ -66,6 +66,7 @@ function problems(s: string): string[] {
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
+const mustCatch = (label: string, caught: boolean, why = '') => check(`mutant caught: ${label}`, caught, why);
 const live = problems(sql);
 check(`${file} holds the rule (price_size_impossible from ${psiFile})`, live.length === 0, live.join('; '));
 
@@ -81,7 +82,7 @@ const mutants: Array<[string, (s: string) => string]> = [
 ];
 for (const [label, mutate] of mutants) {
   const m = mutate(sql);
-  check(`mutant caught: ${label}`, m !== sql && problems(m).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+  mustCatch(label, m !== sql && problems(m).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 console.log(failed === 0 ? 'OK: a multiplied wasalt description is never read as a rate, by the trigger or by its detector' : `${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);
