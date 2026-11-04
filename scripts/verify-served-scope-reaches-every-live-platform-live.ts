@@ -22,7 +22,7 @@
 //   node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-served-scope-reaches-every-live-platform-live.ts
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import {
-  extractServedSearchableTables, servedScopeProblems, type LiveTable,
+  extractServedSearchableTablesFromChunks, servedScopeProblems, servedScriptPaths, type LiveTable,
 } from './lib/servedSearchScope.ts';
 
 const PROD = 'https://ezhalah-app.vercel.app';
@@ -57,19 +57,25 @@ const fetchText = async (url: string, label: string): Promise<string> => {
 };
 
 const html = await fetchText(`${PROD}/`, 'production HTML');
-const entry = /\/_expo\/static\/js\/web\/entry-[a-f0-9]+\.js/.exec(html);
-if (!entry) {
+// EVERY chunk the page loads, not only the entry (2026-11-04): since route splitting the scope array
+// sits in __common-*.js and the entry holds none of it — servedScriptPaths() in the lib says why.
+const scripts = servedScriptPaths(html);
+if (!scripts.some((p) => /\/entry-[a-f0-9]+\.js$/.test(p))) {
   die('production HTML references no Expo web entry bundle — the app may have moved off Expo web, '
     + "so this check's bundle discovery needs updating. It is BLIND, not clean.");
 }
-console.log(`  served entry bundle: ${entry[0]}`);
-const bundle = await fetchText(`${PROD}${entry[0]}`, 'served entry bundle');
-// The real bundle measured 7,014,751 bytes on 2026-09-25. A floor three orders of magnitude below
-// that still catches an error page or a truncated transfer passing as a bundle.
-if (bundle.length < 500_000) die(`served bundle is only ${bundle.length} bytes — not a real bundle`);
-console.log(`  served bundle bytes: ${bundle.length.toLocaleString()}`);
+const chunks: string[] = [];
+for (const p of scripts) {
+  const body = await fetchText(`${PROD}${p}`, `served chunk ${p}`);
+  console.log(`  served chunk: ${p} (${body.length.toLocaleString()} bytes)`);
+  chunks.push(body);
+}
+// The real single bundle measured 7,014,751 bytes on 2026-09-25 (≈ 6.2 MB across the split chunks on
+// 2026-11-04). A floor this far below still catches an error page or a truncated transfer.
+const totalBytes = chunks.reduce((n, c) => n + c.length, 0);
+if (totalBytes < 500_000) die(`served chunks total only ${totalBytes} bytes — not a real bundle`);
 
-const served = extractServedSearchableTables(bundle);
+const served = extractServedSearchableTablesFromChunks(chunks);
 console.log(`  SEARCHABLE_TABLES in the served bundle: ${served.length}`);
 
 // ── 2. production's live inventory ────────────────────────────────────────────────────────────────
