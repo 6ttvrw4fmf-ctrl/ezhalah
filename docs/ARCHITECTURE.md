@@ -801,6 +801,12 @@ used to end on.
   filter option. Merge duplicates/synonyms to the same filter. **Never** modify the card, remove/redesign
   filter UI, or guess — if unsure, **show the duplicates to the owner first**.
 - Palace folds into Villa at the normalization layer only (raw DB untouched).
+- **صادق التاجر's two mixed buckets (owner decision 8, 2026-11-04 — «Yes, use your picks»):** «شقق ووحدات»
+  (also printed «شقق و وحدات») → Apartment and «دور وشقتين و ادوار» (also «دور و شقتين و ادوار») → Floor,
+  so those ads are crawled again (128 + 69 were skipped as `unmapped:` on 2026-11-04). The mapping lives in
+  `_TYPE_AR` (`scrapers/sadiqeltajer/run.py`), pinned by `test_sadiqeltajer_reads_every_real_category.py`.
+  Both land on types the taxonomy already has (`type_ar` شقة / دور), so no taxonomy change. Every other
+  sadiq mixed bucket («دورين», «مستودعات و ورش», «تجاري ارض للمستودعات و للورش», «بيع تجاري») stays out.
 - Long-tail raw types are mapped to existing filters (reachability ~181,369/181,370). Open hierarchy
   questions remain (see §21).
 - **Coverage is enforced, not assumed:** `scripts/verify-taxonomy.ts` (deploy-blocking, §19.1) fails the
