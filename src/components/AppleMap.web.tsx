@@ -748,6 +748,51 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         keyed.set(k, ann); m.addAnnotation(ann);
       }
       mine = [...keyed.values()];
+      bridgeAreas([...next.values()], level);
+    };
+    // BRIDGE LABELS (owner 2026-11-04: «we need to make sure it's never ever slow»). Measured on ezhalah.com: a NEW map
+    // draws its first annotation ~3.0 s after it is created, whatever the map type (standard 3,046 ms, hybrid 3,053,
+    // satellite 3,065) and wherever it was built (off-screen or transparent pre-drawing did not shorten it), while
+    // map.convertCoordinateToPointOnPage answers at once. So until Apple's own labels appear, the same labels are drawn
+    // by us in a plain layer over the map, placed through that projection with the same anchor (bottom-centre) and the
+    // same count priority (biggest first, a label overlapping a bigger one left out). The layer goes the moment Apple's
+    // labels are on the map, the moment the map starts moving (its positions would go stale), and after 6 s at most.
+    let bridge: HTMLDivElement | null = null;
+    let bridgeTimer: ReturnType<typeof setInterval> | null = null;
+    const clearBridge = () => { if (bridgeTimer) clearInterval(bridgeTimer); bridgeTimer = null; bridge?.remove(); bridge = null; };
+    const bridgeAreas = (areas: AreaRow[], level: AreaLevel) => {
+      clearBridge();
+      const box = (m as unknown as { element?: HTMLElement }).element;
+      const hostEl = hostRef.current as unknown as HTMLElement | null;
+      if (!box || !hostEl || box.querySelector('[data-testid=map-area]')) return;   // Apple already draws labels here
+      const toPage = (m as unknown as { convertCoordinateToPointOnPage: (c: unknown) => { x: number; y: number } }).convertCoordinateToPointOnPage.bind(m);
+      const layer = document.createElement('div');
+      layer.setAttribute('data-testid', 'map-area-bridge');
+      layer.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:2;overflow:hidden';
+      hostEl.appendChild(layer);
+      const hr = hostEl.getBoundingClientRect();
+      const ox = hr.left + window.scrollX; const oy = hr.top + window.scrollY;
+      const placed: DOMRect[] = [];
+      for (const a of [...areas].sort((x, y) => y.n - x.n)) {
+        let pt: { x: number; y: number };
+        try { pt = toPage(new mk.Coordinate(a.lat, a.lng)); } catch { continue; }
+        const el = areaElement(a, level);
+        el.style.position = 'absolute';
+        el.style.left = `${pt.x - ox}px`;
+        el.style.top = `${pt.y - oy}px`;
+        el.style.transform = 'translate(-50%, -100%)';
+        el.style.pointerEvents = 'auto';
+        layer.appendChild(el);
+        const r = el.getBoundingClientRect();
+        const outside = r.right < hr.left || r.left > hr.right || r.bottom < hr.top || r.top > hr.bottom;
+        if (outside || placed.some((q) => !(r.right < q.left || r.left > q.right || r.bottom < q.top || r.top > q.bottom))) { el.remove(); continue; }
+        placed.push(r);
+      }
+      bridge = layer;
+      const born = Date.now();
+      bridgeTimer = setInterval(() => {
+        if (box.querySelector('[data-testid=map-area]') || Date.now() - born > 6000) clearBridge();
+      }, 50);
     };
     const load = async () => {
       const my = ++seq;
@@ -842,6 +887,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const offCanvasTap = onSurface(m, 'click', onCanvasTap);
     const offPanelsClose = onSurface(m, 'pointerdown', closePanels);
     m.addEventListener('region-change-start', closePanels);
+    m.addEventListener('region-change-start', clearBridge);
     void load();
     return () => {
       seq++; if (timer) clearTimeout(timer);
@@ -850,6 +896,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       m.removeEventListener('select', onSelect as unknown as (e: unknown) => void);
       offCanvasTap();
       offPanelsClose();
+      clearBridge();
+      m.removeEventListener('region-change-start', clearBridge as unknown as (e: unknown) => void);
       m.removeEventListener('region-change-start', closePanels as unknown as (e: unknown) => void);
       canvas.remove();
       if (mapRef.current === m) clear();
