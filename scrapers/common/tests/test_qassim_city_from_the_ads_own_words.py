@@ -34,6 +34,10 @@ from scrapers.ramzalqasim.run import map_marker  # noqa: E402
     ("📍 للبيع أرض سكنية في حي رامات - البدايع", "Al Badai"),                            # ramz 615841
     ("للإيجار وحده علويه بحي الصفاء – بريدة", "Buraidah"),                               # erapulse 648059
     ("حي المصيف – عنيزة قريب من طريق بريدة", "Unaizah"),          # a road named for a city is not the place
+    # 2026-11-04: Arabic punctuation right after the city is a word END, not a letter (erapulse 20551803).
+    ("تطرح شركة نبض العصر للعقارات فيلا للبيع في حي الفايزية بمدينة بريدة، مصممة لتلبي", "Buraidah"),
+    ("أرض للبيع في عنيزة؛ على شارعين", "Unaizah"),
+    ("هل تبحث عن فيلا في الرس؟", "Ar Rass"),
 ])
 def test_one_city_named_by_the_ad_is_taken(text, want):
     assert single_named_city([text])[0] == want
@@ -92,3 +96,10 @@ def test_erapulse_row_takes_the_title_city_and_keeps_null_without_one():
     assert row["additional_info"]["city_source"] == "title_or_description"
     bare = _era("شاليه بحي التوفيق", "التوفيق")                               # erapulse 648063: names no city
     assert bare is not None and bare["city"] is None and "city_source" not in bare["additional_info"]
+
+
+def test_arabic_punctuation_does_not_glue_a_city_into_a_longer_word():
+    # «المدارس،» is still a word that merely ENDS in الرس — the comma fix must not open that door.
+    assert single_named_city(["قريبة من المدارس، والخدمات"]) is None
+    # and a real two-city text stays ambiguous with punctuation in between
+    assert single_named_city(["بين بريدة، وعنيزة"]) is None
