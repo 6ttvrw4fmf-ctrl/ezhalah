@@ -5,42 +5,52 @@ import { Platform } from 'react-native';
 // data-ezh-* attributes (react-native-web `dataSet`) and this one stylesheet animates them; native
 // renders the same box without motion. prefers-reduced-motion: no motion, and startNameParty draws nothing.
 
-/** THE CELEBRATION IS FIREWORKS (owner 2026-10-28, from the moving preview: «make it like fireworks, exploding … I want a
- *  lot and quick … keep sending»; it replaces the 2026-10-27 confetti). Rockets fire from the bottom of the screen, one
- *  every ~LAUNCH_EVERY_MS for LAUNCH_FOR_MS, all over the width, and each explodes into a round shell of sparks and
- *  confetti that falls and fades. The headline listens: at the FIRST pop it shows «نورت {name} 🥳…»
- *  (PARTY_FIRST_POP_EVENT) and when the last spark is gone it changes to the fact (PARTY_END_EVENT). One fixed full-screen
- *  canvas, removed at the end and in any case by PARTY_MS. Self-contained: no external script. */
-export const LAUNCH_FOR_MS = 3500;
-/** faster and denser (owner 2026-10-28: «faster, a lot of pops … full laptop screen … make it cool») */
-export const LAUNCH_EVERY_MS = 35;
-/** Wider screens get proportionally more rockets so a laptop is as full as a phone (at most ~1.7× the phone rate). */
-export const launchEveryFor = (width: number): number => LAUNCH_EVERY_MS * Math.min(1, Math.max(0.6, 500 / (width || 500)));
-export const SPARKS_PER_BURST = 85;
-/** POP INTO CONFETTI (owner 2026-10-30: «i want the fire works to pop confetti»): half of every shell is confetti (it was
- *  ~30 %), and each pop also throws CONFETTI_PER_BURST extra pieces that float down slowly after the sparks fade. */
-export const CONFETTI_SHARE = 0.5;
-export const CONFETTI_PER_BURST = 24;
-/** The layer is always gone by then (rise ≤ ~1 s and sparks ≤ ~1.6 s after the last launch). */
-export const PARTY_MS = 6500;
+/** THE CELEBRATION IS A PARTY (owner 2026-11-04, from the moving preview: «i dont like the fire works i want party» → picked
+ *  «4 · all together» and «yeah i love it put it live»; it replaces the 2026-10-28 fireworks). Three things at once, one
+ *  canvas: PARTY POPPERS blast confetti and curly ribbons up from both bottom corners (two volleys), BALLOONS float up
+ *  and each pops into confetti, and CONFETTI RAINS from the top. The headline listens: at the FIRST pop (the poppers, at
+ *  once) it shows «نورت {name} 🥳…» (PARTY_FIRST_POP_EVENT) and when the last piece is gone it changes to the fact
+ *  (PARTY_END_EVENT). One fixed full-screen canvas, removed at the end and in any case by PARTY_MS. Self-contained: no
+ *  external script. Preview: claude.ai/artifact/8LXg8zQi5PRkwPAV9hHTFQ. */
 /** Ezhalah green and gold first, then party colours. */
-export const FIREWORK_COLORS = ['#2f7247', '#5fae7c', '#d8b14a', '#f2c14e', '#e9739a', '#4f8fe0', '#a77ee8', '#ff8a3d'];
+export const PARTY_COLORS = ['#2f7247', '#5fae7c', '#d8b14a', '#f2c14e', '#e9739a', '#4f8fe0', '#a77ee8', '#ff8a3d'];
+/** confetti pieces each corner throws per volley; every RIBBON_EVERY-th piece is a curly ribbon */
+export const POPPER_PIECES = 110;
+export const POPPER_VOLLEYS_MS = [0, 450];
+export const RIBBON_EVERY = 9;
+/** balloons (on a phone): one leaves every BALLOON_EVERY_MS; each pops into BALLOON_BURST pieces */
+export const BALLOONS = 14;
+export const BALLOON_EVERY_MS = 90;
+export const BALLOON_BURST = 26;
+/** a balloon's climb, in 60 fps frames — fixed per balloon so it takes the same real time on a slow phone */
+export const balloonFlightFrames = (i: number): number => 120 + ((i * 37) % 50);
+/** confetti falling from the top (on a phone), spread over RAIN_FOR_MS */
+export const RAIN_PIECES = 120;
+export const RAIN_FOR_MS = 1600;
+/** Wider screens get proportionally more balloons and rain so a laptop is as full as a phone (at most 1.7×). */
+export const partyScale = (width: number): number => Math.min(1.7, Math.max(1, (width || 500) / 500));
+/** The layer is always gone by then (last balloon ~1.2 s + climb ≤ ~2.8 s + its confetti ≤ 3 s). */
+export const PARTY_MS = 7500;
 export const PARTY_FIRST_POP_EVENT = 'ezhalah:party-first-pop';
 export const PARTY_END_EVENT = 'ezhalah:party-end';
-/** SOONER (owner 2026-10-29: «the fireworks come up a bit late, make it faster»): rockets climb faster, and the opening
- *  volley (the rockets of the first OPENING_MS) starts already high, so the first pop lands in about a third of a second. */
-export const ROCKET_GRAVITY = 0.6;
-export const OPENING_MS = 160;
-export const OPENING_HOP = 0.09;
-export type Rocket = { at: number; x: number; ty: number; c: string; c2: string };
-/** The launch plan: when each rocket leaves, where (fraction of the width) and how high it bursts (fraction of the height). */
-export function fireworksPlan(rand: () => number = Math.random, every: number = LAUNCH_EVERY_MS): Rocket[] {
-  const out: Rocket[] = [];
-  for (let at = 0, i = 0; at < LAUNCH_FOR_MS; at += every * (0.6 + 0.8 * rand()), i++) {
-    out.push({ at: Math.round(at), x: 0.06 + 0.88 * rand(), ty: 0.06 + 0.54 * rand(), c: FIREWORK_COLORS[i % FIREWORK_COLORS.length], c2: FIREWORK_COLORS[(i + 3) % FIREWORK_COLORS.length] });
-  }
-  return out;
+/** the first balloon popping — its climb runs on real time, so a slow phone must not delay it */
+export const PARTY_BALLOON_POP_EVENT = 'ezhalah:party-balloon-pop';
+export type PartyCue = { at: number; kind: 'popper' | 'balloon' | 'rain'; x: number; i: number };
+/** The plan: when each popper fires (x = corner 0 | 1), each balloon leaves and each raindrop of confetti starts
+ *  (x = fraction of the width), sorted by time. */
+export function partyPlan(width: number, rand: () => number = Math.random): PartyCue[] {
+  const out: PartyCue[] = [];
+  const k = partyScale(width);
+  for (const at of POPPER_VOLLEYS_MS) { out.push({ at, kind: 'popper', x: 0, i: 0 }, { at, kind: 'popper', x: 1, i: 0 }); }
+  const nb = Math.round(BALLOONS * k);
+  for (let i = 0; i < nb; i++) out.push({ at: i * BALLOON_EVERY_MS, kind: 'balloon', x: 0.06 + 0.88 * rand(), i });
+  const nr = Math.round(RAIN_PIECES * k);
+  for (let i = 0; i < nr; i++) out.push({ at: Math.round(rand() * RAIN_FOR_MS), kind: 'rain', x: rand(), i });
+  return out.sort((a, b) => a.at - b.at);
 }
+/** How many confetti pieces and ribbons the whole show throws on a screen this wide. */
+export const partyPieces = (width: number): number =>
+  POPPER_VOLLEYS_MS.length * 2 * POPPER_PIECES + Math.round(BALLOONS * partyScale(width)) * BALLOON_BURST + Math.round(RAIN_PIECES * partyScale(width));
 /** A second celebration this soon after one is skipped: the sign-up box and the sign-in welcome never stack. */
 export const PARTY_GAP_MS = 6000;
 /** The home headline listens for this to shine (2 passes) while the party plays. */
@@ -111,8 +121,8 @@ export function startNamePartyFromBox(reduced: boolean): void {
   startNameParty(reduced);
 }
 
-/** The fireworks after a sign-in / sign-up. Decoration only: pointer-events:none, one canvas, and the whole layer removes
- *  itself when the last spark is gone (and at PARTY_MS at the latest). No external script. Reduced motion → nothing. */
+/** The party after a sign-in / sign-up. Decoration only: pointer-events:none, one canvas, and the whole layer removes
+ *  itself when the last piece is gone (and at PARTY_MS at the latest). No external script. Reduced motion → nothing. */
 export function startNameParty(reduced: boolean): void {
   if (reduced || Platform.OS !== 'web' || typeof document === 'undefined') return;
   const now = Date.now();
@@ -130,7 +140,7 @@ export function startNameParty(reduced: boolean): void {
   let ended = false;
   const finish = () => { if (ended) return; ended = true; layer.remove(); say(PARTY_END_EVENT); };
   setTimeout(finish, PARTY_MS);
-  let popped = false;
+  let popped = false, balloonPopped = false;
   const firstPop = () => { if (!popped) { popped = true; say(PARTY_FIRST_POP_EVENT); } };
 
   const ctx = (canvas as any).getContext?.('2d') as CanvasRenderingContext2D | null | undefined;
@@ -142,87 +152,113 @@ export function startNameParty(reduced: boolean): void {
   (canvas as any).style.width = '100%'; (canvas as any).style.height = '100%';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const rnd = (a: number, b: number) => a + Math.random() * (b - a);
-  const rockets = fireworksPlan(Math.random, launchEveryFor(W)).map((r) => ({ ...r, x: r.x * W, y: r.at < OPENING_MS ? (r.ty + OPENING_HOP) * H : H + 10, ty: r.ty * H, vy: 0, done: false }));
-  type Spark = { x: number; y: number; px: number; py: number; vx: number; vy: number; life: number; max: number; c: string; kind: 0 | 1 | 2 | 3; w: number; h: number; rot: number; vr: number; flip: number };
-  const sparks: Spark[] = [];
-  const explode = (r: typeof rockets[number]) => {
-    firstPop();
-    const n = SPARKS_PER_BURST + ((Math.random() * 25) | 0), base = rnd(2.6, 3.8);
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + rnd(-0.06, 0.06), sp = base * rnd(0.55, 1.05);
-      sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: rnd(1100, 1600),
-        c: Math.random() < 0.5 ? r.c : r.c2, kind: Math.random() < CONFETTI_SHARE ? 1 : 0, w: rnd(3, 6), h: rnd(6, 10), rot: rnd(0, 6), vr: rnd(-0.3, 0.3), flip: rnd(0, 6) });
-    }
-    for (let i = 0; i < 10; i++) sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: rnd(-0.6, 0.6), vy: rnd(-0.6, 0.6), life: 0, max: rnd(400, 700), c: '#fff6d8', kind: 2, w: 0, h: 0, rot: 0, vr: 0, flip: 0 });
-    // the extra confetti: party colours, a softer burst, and a longer life so it is still drifting down after the sparks
-    for (let i = 0; i < CONFETTI_PER_BURST; i++) {
-      const a = rnd(0, Math.PI * 2), sp = base * rnd(0.25, 0.7);
-      sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.6, life: 0, max: rnd(1700, 2300),
-        c: FIREWORK_COLORS[(Math.random() * FIREWORK_COLORS.length) | 0], kind: 1, w: rnd(4, 7), h: rnd(7, 11), rot: rnd(0, 6), vr: rnd(-0.3, 0.3), flip: rnd(0, 6) });
-    }
-    // «make it cool»: about a third of the shells get an inner ring of gold glitter that twinkles
-    if (Math.random() < 0.35) for (let i = 0; i < 28; i++) {
-      const a = (i / 28) * Math.PI * 2, sp = base * 0.45;
-      sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: rnd(900, 1300), c: '#f2c14e', kind: 3, w: 0, h: 0, rot: 0, vr: 0, flip: 0 });
+  const color = () => PARTY_COLORS[(Math.random() * PARTY_COLORS.length) | 0];
+  const plan = partyPlan(W);
+  let next = 0;
+  type Piece = { x: number; y: number; vx: number; vy: number; c: string; w: number; h: number; flip: number; life: number; max: number; ribbon: boolean; trail: number[] };
+  type Balloon = { x: number; y: number; r: number; c: string; vy: number; sw: number; pop: number };
+  const pieces: Piece[] = [];
+  let balloons: Balloon[] = [];
+  const piece = (x: number, y: number, vx: number, vy: number, ribbon: boolean) =>
+    pieces.push({ x, y, vx, vy, c: color(), w: rnd(5, 9), h: rnd(9, 14), flip: rnd(0, 6), life: 0, max: rnd(2200, 3000), ribbon, trail: [] });
+  const cue = (q: PartyCue) => {
+    if (q.kind === 'popper') {
+      firstPop();
+      const left = q.x === 0;
+      for (let i = 0; i < POPPER_PIECES; i++) {
+        const a = -Math.PI / 2 + (left ? 1 : -1) * rnd(0.15, 0.75), sp = rnd(9, 17) * Math.min(1.25, Math.max(0.8, H / 800));
+        piece(left ? 0 : W, H, Math.cos(a) * sp, Math.sin(a) * sp, i % RIBBON_EVERY === 0);
+      }
+    } else if (q.kind === 'rain') {
+      piece(q.x * W, -20, rnd(-1, 1), rnd(1, 3), Math.random() < 0.12);
+    } else {
+      const pop = rnd(0.1, 0.45) * H;
+      balloons.push({ x: q.x * W, y: H + 60, r: rnd(22, 32), c: color(), vy: (H + 60 - pop) / balloonFlightFrames(q.i), sw: rnd(0, 6), pop });
     }
   };
-  // SMOOTH ON A PHONE (owner 2026-10-30: «it's slow … feels stuck»). Up to ~5,000 sparks are in the air at once, and each
-  // used to be its own beginPath + stroke (and a save/rotate/restore per confetti piece) — far more draw calls than a
-  // phone can make in 16 ms, so frames dropped, and the old 32 ms cap on a frame's step turned every dropped frame into
-  // slow motion. Now: sparks are DRAWN IN BATCHES (one path per colour × width × fade level — a few dozen draw calls a
-  // frame, not thousands), finished sparks leave the list, and a frame steps by the time that really passed (≤ 50 ms),
-  // so a slow phone skips frames instead of slowing the party down.
-  const LEVELS = 3; // fade (alpha) and width steps a spark is drawn at
-  const lines = new Map<string, number[]>(); // `${colour}|${level}` → x0,y0,x1,y1, …
-  const rects = new Map<string, number[]>(); // `${colour}|${level}` → x,y,w,h, …
-  const dots = new Map<number, number[]>();  // level → x,y,r, …
+  // SMOOTH ON A PHONE (owner 2026-10-30: «it's slow … feels stuck»): pieces are DRAWN IN BATCHES — one path per colour ×
+  // fade level for confetti, for ribbons, and for balloons — so a frame costs a few dozen draw calls, not one per piece;
+  // finished pieces leave the list; and a frame steps by the time that really passed (≤ 50 ms), so a slow phone skips
+  // frames instead of slowing the party down.
+  const LEVELS = 3;
+  const rects = new Map<string, number[]>();   // `${colour}|${level}` → x,y,w,h, …
+  const ribbons = new Map<string, number[][]>(); // `${colour}|${level}` → [x0,y0,x1,y1,…] per ribbon
+  const bodies = new Map<string, number[]>();  // colour → x,y,r, …
+  const strings: number[] = [], shines: number[] = [];
   const push = <K,>(m: Map<K, number[]>, k: K, ...v: number[]) => { const a = m.get(k); if (a) a.push(...v); else m.set(k, v); };
   let t0 = -1, last = 0;
   const frame = (now: number) => {
     if (ended) return;
     if (t0 < 0) { t0 = now; last = now; }
     const t = now - t0, dt = Math.min(50, now - last) / 16.7; last = now;
+    while (next < plan.length && plan[next].at <= t) cue(plan[next++]);
     ctx.clearRect(0, 0, W, H);
-    let alive = 0;
-    ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.lineCap = 'round';
-    for (const r of rockets) {
-      if (r.done) continue;
-      alive++;
-      if (t < r.at) continue;
-      if (!r.vy) r.vy = -Math.sqrt(2 * ROCKET_GRAVITY * (r.y - r.ty)) * 1.02;
-      r.y += r.vy * dt; r.vy += ROCKET_GRAVITY * dt;
-      push(lines, `${r.c}|${LEVELS - 1}`, r.x, r.y - r.vy * 3, r.x, r.y);
-      push(dots, LEVELS - 1, r.x, r.y, 2);
-      if (r.vy >= -0.4) { r.done = true; explode(r); }
+    let keepB = 0;
+    for (let i = 0; i < balloons.length; i++) {
+      const b = balloons[i];
+      b.y -= b.vy * dt; b.sw += 0.04 * dt;
+      const bx = b.x + Math.sin(b.sw) * 10;
+      if (b.y <= b.pop) {
+        if (!balloonPopped) { balloonPopped = true; say(PARTY_BALLOON_POP_EVENT); }
+        for (let j = 0; j < BALLOON_BURST; j++) { const a = rnd(0, Math.PI * 2), sp = rnd(2, 6); piece(bx, b.y, Math.cos(a) * sp, Math.sin(a) * sp, false); }
+        continue;
+      }
+      balloons[keepB++] = b;
+      strings.push(bx, b.y + b.r * 1.2, bx + 8, b.y + b.r * 2, bx, b.y + b.r * 3);
+      push(bodies, b.c, bx, b.y, b.r);
+      shines.push(bx - b.r * 0.3, b.y - b.r * 0.35, b.r);
     }
-    const drag = Math.pow(0.965, dt);
+    balloons.length = keepB;
+    const drag = Math.pow(0.97, dt);
     let keep = 0;
-    for (let i = 0; i < sparks.length; i++) {
-      const s = sparks[i];
-      s.life += 16.7 * dt; if (s.life > s.max) continue;
-      sparks[keep++] = s;
-      const k = 1 - s.life / s.max;
-      const lv = Math.min(LEVELS - 1, Math.floor(Math.min(1, k * 1.4) * LEVELS));
-      s.px = s.x; s.py = s.y; s.vx *= drag; s.vy = s.vy * drag + 0.045 * dt; s.x += s.vx * dt; s.y += s.vy * dt;
-      if (s.kind === 2) { push(dots, lv, s.x, s.y, 3 * k + 1); continue; }
-      if (s.kind === 3) { if (Math.random() < 0.6) push(rects, `${Math.random() < 0.5 ? s.c : '#fff6d8'}|${lv}`, s.x - 1.2, s.y - 1.2, 2.4, 2.4); continue; }
-      if (s.kind === 1) {
-        // confetti: it flips (its height breathes with cos) and sways — drawn upright, which reads the same at this size
-        s.flip += 0.14 * dt; s.x += Math.sin(s.flip) * 0.35;
-        const hh = Math.max(0.8, s.h * Math.abs(Math.cos(s.flip)));
-        push(rects, `${s.c}|${lv}`, s.x - s.w / 2, s.y - hh / 2, s.w, hh);
+    for (let i = 0; i < pieces.length; i++) {
+      const p = pieces[i];
+      p.life += 16.7 * dt; if (p.life > p.max || p.y > H + 40) continue;
+      pieces[keep++] = p;
+      p.vx *= drag; p.vy = Math.min(2.6, p.vy * drag + 0.12 * dt);
+      p.flip += 0.12 * dt; p.x += (p.vx + Math.sin(p.flip) * 0.6) * dt; p.y += p.vy * dt;
+      const lv = Math.min(LEVELS - 1, Math.floor(Math.min(1, (p.max - p.life) / 500) * LEVELS));
+      if (p.ribbon) {
+        p.trail.push(p.x, p.y); if (p.trail.length > 40) p.trail.splice(0, 2);
+        const line: number[] = [];
+        for (let j = 0; j < p.trail.length; j += 2) line.push(p.trail[j] + Math.sin(j * 0.4 + p.flip) * 5, p.trail[j + 1]);
+        const key = `${p.c}|${lv}`, a = ribbons.get(key); if (a) a.push(line); else ribbons.set(key, [line]);
       } else {
-        push(lines, `${s.c}|${lv}`, s.px - s.vx * 2, s.py - s.vy * 2, s.x, s.y);
+        // confetti flips (its height breathes with cos) and sways — drawn upright, which reads the same at this size
+        const hh = Math.max(1, p.h * Math.abs(Math.cos(p.flip)));
+        push(rects, `${p.c}|${lv}`, p.x - p.w / 2, p.y - hh / 2, p.w, hh);
       }
     }
-    sparks.length = keep;
-    alive += keep;
+    pieces.length = keep;
     const alphaOf = (lv: number) => (lv + 1) / LEVELS;
-    for (const [key, a] of lines) {
-      const [c, l] = key.split('|'); const lv = Number(l);
-      ctx.globalAlpha = alphaOf(lv); ctx.strokeStyle = c; ctx.lineWidth = 0.9 + lv * 0.8;
+    if (strings.length) {
+      ctx.globalAlpha = 1; ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1;
       ctx.beginPath();
-      for (let j = 0; j < a.length; j += 4) { ctx.moveTo(a[j], a[j + 1]); ctx.lineTo(a[j + 2], a[j + 3]); }
+      for (let j = 0; j < strings.length; j += 6) { ctx.moveTo(strings[j], strings[j + 1]); ctx.quadraticCurveTo(strings[j + 2], strings[j + 3], strings[j + 4], strings[j + 5]); }
+      ctx.stroke();
+    }
+    for (const [c, a] of bodies) {
+      ctx.globalAlpha = 1; ctx.fillStyle = c;
+      ctx.beginPath();
+      for (let j = 0; j < a.length; j += 3) {
+        const x = a[j], y = a[j + 1], r = a[j + 2];
+        ctx.moveTo(x + r * 0.85, y); ctx.ellipse(x, y, r * 0.85, r, 0, 0, Math.PI * 2);
+        ctx.moveTo(x - 4, y + r + 5); ctx.lineTo(x + 4, y + r + 5); ctx.lineTo(x, y + r - 1); ctx.closePath();
+      }
+      ctx.fill();
+    }
+    if (shines.length) {
+      ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(255,255,255,.45)';
+      ctx.beginPath();
+      for (let j = 0; j < shines.length; j += 3) { const r = shines[j + 2]; ctx.moveTo(shines[j] + r * 0.18, shines[j + 1]); ctx.ellipse(shines[j], shines[j + 1], r * 0.18, r * 0.3, -0.5, 0, Math.PI * 2); }
+      ctx.fill();
+    }
+    ctx.lineWidth = 3; ctx.lineCap = 'round';
+    for (const [key, lines] of ribbons) {
+      const [c, l] = key.split('|');
+      ctx.globalAlpha = alphaOf(Number(l)); ctx.strokeStyle = c;
+      ctx.beginPath();
+      for (const a of lines) { ctx.moveTo(a[0], a[1]); for (let j = 2; j < a.length; j += 2) ctx.lineTo(a[j], a[j + 1]); }
       ctx.stroke();
     }
     for (const [key, a] of rects) {
@@ -232,16 +268,9 @@ export function startNameParty(reduced: boolean): void {
       for (let j = 0; j < a.length; j += 4) ctx.rect(a[j], a[j + 1], a[j + 2], a[j + 3]);
       ctx.fill();
     }
-    ctx.fillStyle = '#fff6d8';
-    for (const [lv, a] of dots) {
-      ctx.globalAlpha = alphaOf(lv);
-      ctx.beginPath();
-      for (let j = 0; j < a.length; j += 3) { ctx.moveTo(a[j] + a[j + 2], a[j + 1]); ctx.arc(a[j], a[j + 1], a[j + 2], 0, 7); }
-      ctx.fill();
-    }
-    lines.clear(); rects.clear(); dots.clear();
+    rects.clear(); ribbons.clear(); bodies.clear(); strings.length = 0; shines.length = 0;
     ctx.globalAlpha = 1;
-    if (!alive) { finish(); return; }
+    if (next >= plan.length && !pieces.length && !balloons.length) { finish(); return; }
     raf(frame);
   };
   raf(frame);

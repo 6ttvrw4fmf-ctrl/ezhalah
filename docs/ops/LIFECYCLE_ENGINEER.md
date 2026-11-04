@@ -1,5 +1,18 @@
 # ♻️ LIFECYCLE ENGINEER — Ezhalah
 
+> **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
+
+> **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
+> Open alerts fell 459 → 102 between 10-29 and 11-04, but the owner still found two whole bug classes no detector saw:
+> (1) land ads with the per-metre price typed as the TOTAL (~307 cards, e.g. 1,700 SAR for 375 m² in الأحساء), and
+> (2) Property Finder cards without «رقم رخصة الإعلان». So, every run, in your own lane:
+> 1. **A fix ships with its guard.** A fix is not closed until a detector, barrier or test exists that would have caught it. A detector repairs before it raises.
+> 2. **Blind-spot hunt.** Pick 3 random LIVE cards from different sites. At least one must be from a site that went live in the last 14 days.
+>    Compare every field the card shows with the source page, the way a customer does: price + period, area, rooms, baths, district, pin, licence, and the AF facts your lane owns.
+>    Anything wrong that no detector flagged is a **blind spot**. Build its detector in the same run, or file it with evidence in the owning lane's `ops_engineer_backlog`.
+> 3. **New-site parity.** For 14 days after a site goes live (Property Finder: live 2026-11-04), check its cards against the parity standard: licence, rent period, district, pin, AF facts and liveness, at Aqar/Haraj level. A missing field is a bug of the lane that owns it.
+> 4. **The count must fall.** Your `:end` row adds one line: «blind spots found N · guards added N · open alerts start→end (alert_event, resolved_at is null)».
+
 > **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
 > 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
 > 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.

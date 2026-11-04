@@ -1,0 +1,108 @@
+# Apply ONE committed migration to production without the Supabase MCP's «are you sure?» (owner 2026-11-04).
+#
+# The MCP server asks its own confirmation for apply_migration and for UPDATE/DELETE in execute_sql; an unattended
+# routine cannot answer, so the call times out (2026-11-03: the 🦅 applied no SQL after 20:12 UTC, fixed 4 of 15).
+# Routine tool_policy_overrides do not reach that question. This path does not ask one; it checks instead:
+#   1. refuses a version already in supabase_migrations.schema_migrations
+#   2. runs the repo's own pre-apply checks (citations: check-migration-before-apply.ts, verify-migration-references-
+#      resolve.ts; repair guard: verify-repair-migrations-are-guarded.ts)
+#   3. refuses DROP TABLE/SCHEMA, TRUNCATE, ALTER ROLE, GRANT on internal tables to public roles, UPDATE/DELETE
+#      without WHERE (scripts/ops/apply-migration.mjs lint — executed SQL only, temp tables exempt)
+#   4. waits up to 90 s for a quiet database (AGENTS.md rule 1), else refuses
+#   then applies the file AND its history row in one transaction (version + name from the filename, statements =
+#   the exact bytes), and writes one ops_daily_engineer_run row (phase apply-migration) for every real dispatch.
+# Mirror: the file is on the dispatched branch; if that branch has not reached main 20 min later,
+# migration-auto-mirror.yml (every 15 min) opens the byte-exact save PR on its own. Nothing to dispatch.
+#
+#   gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'
+#   add -f dry_run=true to run every check and stop before the database is changed.
+name: Apply migration (production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "supabase/migrations/<14 digits>_<name>.sql, committed at the dispatched ref"
+        required: true
+        type: string
+      reason:
+        description: "Why (recorded in the audit row)"
+        required: true
+        type: string
+      dry_run:
+        description: "Run every check, then stop without applying or writing the audit row"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-migration
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  apply:
+    name: Apply ${{ inputs.file }}
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      FILE: ${{ inputs.file }}
+      REASON: ${{ inputs.reason }}
+      AM: node --experimental-strip-types --no-warnings scripts/ops/apply-migration.mjs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Input names one committed migration
+        run: |
+          if ! printf '%s' "$FILE" | grep -Eq '^supabase/migrations/[0-9]{14}_[a-z0-9_]+\.sql$'; then
+            echo "::error::refused — file must match ^supabase/migrations/\d{14}_[a-z0-9_]+\.sql\$"; exit 1
+          fi
+          [ -f "$FILE" ] || { echo "::error::refused — $FILE does not exist at $GITHUB_REF_NAME ($GITHUB_SHA)"; exit 1; }
+          [ -n "$SUPABASE_ACCESS_TOKEN" ] || { echo "::error::SUPABASE_ACCESS_TOKEN secret is not set"; exit 1; }
+          echo "file $FILE md5 $(md5sum "$FILE" | cut -c1-32) at $GITHUB_REF_NAME $GITHUB_SHA by $GITHUB_ACTOR — $REASON"
+
+      - name: 1. Not already applied
+        id: applied
+        run: $AM applied "$FILE"
+
+      - name: 2. Repo pre-apply checks
+        id: checks
+        run: |
+          node --experimental-strip-types --no-warnings scripts/check-migration-before-apply.ts "$FILE"
+          node --experimental-strip-types --no-warnings scripts/verify-migration-references-resolve.ts
+          node --experimental-strip-types --no-warnings scripts/verify-repair-migrations-are-guarded.ts
+
+      - name: 3. Forbidden-statement lint
+        id: lint
+        run: $AM lint "$FILE"
+
+      - name: 4. Database is quiet
+        id: quiet
+        run: $AM quiet
+
+      - name: Apply + record history (one transaction)
+        id: apply
+        if: ${{ !inputs.dry_run }}
+        run: $AM apply "$FILE"
+
+      - name: Dry run stops here
+        if: ${{ inputs.dry_run }}
+        run: echo "DRY RUN — every check passed; nothing applied, no audit row."
+
+      - name: Audit row (ops_daily_engineer_run, phase apply-migration)
+        if: ${{ always() && !inputs.dry_run && steps.applied.outcome != 'skipped' }}
+        run: |
+          if [ "${{ steps.apply.outcome }}" = success ]; then R=applied; W=''
+          elif [ "${{ steps.apply.outcome }}" = failure ]; then R=failed; W='apply step failed; transaction rolled back'
+          else R=refused; W="applied=${{ steps.applied.outcome }} checks=${{ steps.checks.outcome }} lint=${{ steps.lint.outcome }} quiet=${{ steps.quiet.outcome }}"
+          fi
+          $AM audit "$FILE" "$R" "$W"
