@@ -160,7 +160,15 @@ async function fetchWithRetry(url: string, init: RequestInit = {}): Promise<Resp
   throw last instanceof Error ? last : new Error(`fetch failed: ${url}`);
 }
 
+// A key fetched ahead of time by prewarmMap() is used once if it is still young (keys last TOKEN_SECONDS on the server;
+// a warm key is used only within WARM_TOKEN_MS of being minted, far inside that), then every later call mints afresh.
+const WARM_TOKEN_MS = 5 * 60_000;
+let warmToken: { at: number; p: Promise<string> } | null = null;
 async function fetchToken(): Promise<string> {
+  const w = warmToken; warmToken = null;
+  if (w && Date.now() - w.at < WARM_TOKEN_MS) {
+    try { return await w.p; } catch { /* a failed warm-up is no answer — mint a fresh one below */ }
+  }
   const r = await fetchWithRetry(TOKEN_URL, { cache: 'no-store' });
   if (!r.ok) throw new Error(`token ${r.status}`);
   const j = (await r.json()) as { token?: unknown };
@@ -182,6 +190,29 @@ function loadRegions(): Promise<Region[]> {
     .catch((e) => { regionsLoad = null; throw e; });
   return regionsLoad;
 }
+
+/** INSTANT FIRST MAP (owner 2026-11-04: «why does it feel slow moving between tabs»). Measured on ezhalah.com: the first
+ *  visit to «خريطة» downloaded Apple's script (~230 KB), the region outlines, a map key and the labels/dots feeds only
+ *  after the tap. Called quietly a few seconds after any page settles (src/lib/mapWarmup.ts): everything the map needs is
+ *  already here when the user taps it. Every failure is swallowed — the map's own load path still runs and retries. */
+export function prewarmMap(): void {
+  void loadMapKit().catch(() => {});
+  void loadRegions().catch(() => {});
+  if (!warmToken) { const p = (async () => { const r = await fetchWithRetry(TOKEN_URL, { cache: 'no-store' }); if (!r.ok) throw new Error(`token ${r.status}`); const j = (await r.json()) as { token?: unknown }; if (typeof j.token !== 'string' || !j.token) throw new Error('token missing'); return j.token; })(); p.catch(() => {}); warmToken = { at: Date.now(), p }; }
+  void fetchMapDots();
+  void fetchAreasFeed();
+}
+
+// THE MAP IS KEPT BETWEEN VISITS (owner 2026-11-04: «why does it feel slow moving between tabs»). Measured on ezhalah.com:
+// our code put the 26 city labels on a NEW map 0.25 s after the tab opened, but Apple's map drew them only ~3 s later,
+// after its own first satellite render — on EVERY visit, because the map was destroyed on leaving and rebuilt on return.
+// Now the map lives in its own box: leaving the tab takes the box out of the page (the map keeps its view, its region
+// outlines and its rendered tiles), coming back puts the same box back, so the labels draw at once and the user is where
+// they left off. The map-wide listeners (region outlines, zoom state) were attached once, on the first map; they reach
+// the CURRENT screen through mapSinks, which every mount points at its own state.
+type ParkedMap = { map: MKMap; box: HTMLDivElement };
+let parked: ParkedMap | null = null;
+const mapSinks: { setZoomed: (z: boolean) => void } = { setZoomed: () => {} };
 
 let initialized = false;
 function initOnce(mk: MapKit, language: string) {
@@ -424,10 +455,38 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     let map: MKMap | null = null;
     let gone = false;
     const onError = (e: { status?: string }) => { if (e.status === 'Unauthorized' || e.status === 'Too Many Requests') setFailed(true); };
+    mapSinks.setZoomed = setZoomed;
+    // A RETURN VISIT: the same map, put back — no new map, no 3 s wait for Apple's first render.
+    const kept = parked; const mkKept = mapkitOf();
+    const hostEl = hostRef.current as unknown as HTMLElement | null;
+    if (kept && mkKept && hostEl) {
+      parked = null;
+      hostEl.appendChild(kept.box);
+      mkKept.addEventListener('error', onError);
+      mapRef.current = kept.map;
+      live.map = kept.map;
+      const lat = kept.map.region.span.latitudeDelta;
+      const home = hostEl.clientHeight > hostEl.clientWidth ? KSA_SPAN_PORTRAIT : KSA_SPAN;
+      setZoomed(lat < home.latitudeDelta * 0.85);
+      const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));   // the box may be a new size
+      setMapReady((n) => n + 1);
+      return () => {
+        cancelAnimationFrame(id);
+        mkKept.removeEventListener('error', onError);
+        mapRef.current = null;
+        live.map = null;
+        kept.box.remove();
+        parked = kept;
+      };
+    }
     loadMapKit().then((mk) => {
       if (gone) return;
-      const el = hostRef.current as unknown as HTMLElement | null;
-      if (!el) return;
+      const host = hostRef.current as unknown as HTMLElement | null;
+      if (!host) return;
+      // The map's own box (kept between visits, see ParkedMap): fills the host exactly like the host did.
+      const el = document.createElement('div');
+      el.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0';
+      host.appendChild(el);
       // Apple's  Maps mark and «معلومات قانونية» are drawn INSIDE the map image, bottom-right in Arabic, and no
       // page direction or style moves them (measured live 2026-10-31: no DOM node carries them). Our corner controls
       // keep clear of that strip instead.
@@ -505,7 +564,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (!map) return;
           const lat = map.region.span.latitudeDelta;
           if (!homeLatDelta) homeLatDelta = lat;
-          setZoomed(lat < homeLatDelta * 0.85);
+          mapSinks.setZoomed(lat < homeLatDelta * 0.85);
           const ratio = lat / homeLatDelta;
           // Zooming out: squared so the drop is quick: 1.2× out → ~70%, 2× out → ~25%, then the floor.
           // Zooming in: linear from IN_FADE_START down to 0 at IN_FADE_END — Apple's own lines take over.
@@ -524,7 +583,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (mk) mk.removeEventListener('error', onError);
       mapRef.current = null;
       live.map = null;
-      map?.destroy();
+      // Kept for the next visit, not destroyed: its box leaves the page with this screen.
+      const box = (map as unknown as { element?: HTMLElement } | null)?.element as HTMLDivElement | undefined;
+      if (map && box) { box.remove(); parked = { map, box }; } else map?.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -668,10 +668,16 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
 # maps to the clean type its own ad names: «أرض زراعية 200,000م2» (Farming Land), «مجمع سكني» (Complex),
 # «Telecom Tower for Sale» (wasalt writes a lowercase t), «Teller for Sale» (an ATM site). Kept here, not in
 # normalize.TYPE_MAP_EN, whose key set is pinned verbatim to the old private maps.
+#
+# OWNER DECISION #9 (2026-11-04) reverses the last two: wasalt «Teller» (an ATM site) and «Telecom tower»
+# stay «غير معروف» (unknown) — deliberately UNMAPPED, so they leak raw and the index serves «غير معروف».
+# The decision is recorded in known_property_types (migration 20261104094019), which is what stops
+# legacy_novel_type re-raising them. Do not map them again without a new owner decision
+# (scrapers/common/tests/test_live_novel_types_are_mapped.py pins it).
 WASALT_TYPE_OVERRIDES = {
     "Farming Land": "Agriculture Plot", "Complex": "Compound",
-    "Telecom tower": "Telecom Tower", "Teller": "ATM Site",
 }
+WASALT_DELIBERATELY_UNMAPPED = ("Teller", "Telecom tower")   # owner decision #9, 2026-11-04
 
 
 def is_land_type(property_type) -> bool:
@@ -723,6 +729,63 @@ def _yes_no(addl_info, key: str):
                 return False
             return None
     return None
+
+
+# ONE SOURCE AD, ONE TABLE (2026-11-04, url_collision_res_vs_com:wasalt, alert 6925). The search's
+# `type=residential|commercial` is a QUERY, not the ad's identity: wasalt's commercial search also
+# answers non-commercial ads (its "building" and "land" slugs overlap the residential ones), and the
+# old code filed every ad by the search that returned it. Measured that day: 38 of 2,192 active
+# commercial rows carried the SOURCE'S OWN «Property usage» (propertyMainType) Residential (25),
+# Residential Commercial (9) or Agricultural (4), and 30 of them were the same ad_number already live
+# in the residential table — one ad, two cards, one URL (WST5904998 «فيلا سكنية» twice). The residential
+# table holds 2 commercial-usage ads of 93,048. So the table follows the ad's own usage: «Commercial» →
+# commercial, any other published usage → residential, no usage published → the search's category
+# (silence decides nothing new). An ad whose usage the source DID publish then supersedes its row in
+# the other table through db.retire_superseded_siblings — the mechanism hajer/sadin/dealapp use —
+# because a row nobody upserts any more is never aged out (enum strikes are self-healed by its live
+# URL). Only a known usage supersedes, and only after its own upsert landed.
+def usage_of(row: dict) -> Optional[str]:
+    """The source's own «Property usage» on this row, or None when it published none."""
+    for item in row.get("additional_info") or []:
+        if isinstance(item, dict) and item.get("key") == "propertyMainType":
+            v = str(item.get("value") or "").strip()
+            return v or None
+    return None
+
+
+def table_category(row: dict, search_cat: str) -> str:
+    usage = usage_of(row)
+    if usage is None:
+        return search_cat
+    return "commercial" if usage == "Commercial" else "residential"
+
+
+def upsert_page(batch: list[dict], search_cat: str, page: int) -> int:
+    """Upsert one page into the table each ad's own usage names; returns rows upserted."""
+    by_cat: dict[str, list[dict]] = {"residential": [], "commercial": []}
+    for row in batch:
+        by_cat[table_category(row, search_cat)].append(row)
+    landed: dict[str, set] = {"residential": set(), "commercial": set()}
+    n = 0
+    for cat, rows in by_cat.items():
+        if not rows:
+            continue
+        upserter = db.upsert_wasalt_commercial_batch if cat == "commercial" else db.upsert_wasalt_residential_batch
+        try:
+            upserter(rows)  # one round-trip per page per table
+        except Exception as e:
+            print(f"   ✗ batch upsert failed (page {page}, {cat}): {str(e)[:90]}")
+            continue
+        n += len(rows)
+        landed[cat] = {r["ad_number"] for r in rows if r.get("ad_number") and usage_of(r) is not None}
+    if landed["residential"] or landed["commercial"]:
+        try:
+            db.retire_superseded_siblings(
+                res_table="wasalt_residential_listings", com_table="wasalt_commercial_listings",
+                res_ads=landed["residential"], com_ads=landed["commercial"])
+        except Exception as e:  # noqa: BLE001 — a failed retirement leaves a duplicate, never hides an ad
+            print(f"   ⚠ supersession check failed (page {page}): {str(e)[:90]}")
+    return n
 
 
 def upsert(row: dict, main_type: str) -> None:
@@ -790,8 +853,6 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int, start_pag
         print(f"   ✗ page 1 unanswerable after the full retry ladder — abandoning {slug}/{deal} "
               f"rather than re-running the same ladder on the same route")
         return 0, count, False, True
-    is_commercial = cat == "commercial"
-    upserter = db.upsert_wasalt_commercial_batch if is_commercial else db.upsert_wasalt_residential_batch
     upserted = 0
     truncated = False
     skipped: list[int] = []
@@ -861,11 +922,7 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int, start_pag
                 continue
             batch.append(row)
         if batch:
-            try:
-                upserter(batch)  # one round-trip per page
-                upserted += len(batch)
-            except Exception as e:
-                print(f"   ✗ batch upsert failed (page {page}): {str(e)[:90]}")
+            upserted += upsert_page(batch, cat, page)
         if page % 20 == 0:
             print(f"   [{page}/{pages}] upserted so far: {upserted}")
     if skipped:

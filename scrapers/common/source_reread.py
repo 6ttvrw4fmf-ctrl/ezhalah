@@ -68,6 +68,20 @@ RELATED_CARD = re.compile(r'<a href="https://ksaaqar\.com/ad/[^"]*">\s*<h5>.*?</
 # sakan ads and called all 10 a «we miss» (ops_af_score 2026-11-03; page re-read 94863, 🔬). The text that follows a
 # radio input up to the next tag is dropped; a checkbox is kept (some themes print a TICKED feature list that way).
 RADIO_OPTION = re.compile(r'<input\b[^>]*\btype=["\']?radio["\']?[^>]*>[^<]{0,80}', re.I)
+# …and its option text usually sits in a SEPARATE <label for="<the input's id>">, not after the input: the live sakan
+# page (12613050 re-read 2026-11-04, HTTP 200) prints `<input type="radio" … id="furnishing_new" hidden value="1">
+# <label for="furnishing_new">مؤثث</label>`, so the 11-03 fix dropped only the whitespace and tonight's score still
+# read furnished «stated» on 9 of 10 sakan ads. A label bound to a radio input's id is dropped with the input.
+RADIO_ID = re.compile(r'<input\b(?=[^>]*\btype=["\']?radio["\']?)[^>]*\bid=["\']([^"\']+)["\']', re.I)
+
+
+def drop_radio_controls(body: str) -> str:
+    """Remove every radio input with the text after it, and every <label for=…> bound to one of their ids."""
+    ids = set(RADIO_ID.findall(body))
+    if ids:
+        body = re.sub(r'<label\b[^>]*\bfor=["\']([^"\']+)["\'][^>]*>.*?</label>',
+                      lambda m: " " if m.group(1) in ids else m.group(0), body, flags=re.S | re.I)
+    return RADIO_OPTION.sub(" ", body)
 # …and a DROPDOWN is the same control. nofodh prints a <select> of every property type and district on each ad page
 # («تراس», «حي الشرفة الشمالية», «مشرفة» …), so the score asked «balcony» of 10 of 10 sampled nofodh ads
 # (ops_af_score 2026-11-03, balcony we_miss 10; page 472243 re-read the same night).
@@ -80,6 +94,11 @@ BUTTON_BLOCK = re.compile(r"<button\b[^>]*>.*?</button>", re.S | re.I)
 MENU_ITEM_LINK = re.compile(r'(<li\b[^>]*class="[^"]*\bmenu-item\b[^"]*"[^>]*>\s*<a\b[^>]*>)[^<]{0,80}', re.I)
 RESULT_CARD_TEXT = re.compile(r'<p class="(?:result-card-description|property-showcase-location)\b[^"]*"[^>]*>.*?</p>',
                               re.S | re.I)
+# …and a HOUZEZ (WordPress theme) listing card: <div class="item-body"> → the other ad's title, address and its
+# <ul class="item-amenities"> «غرف: 4 · حمامات: 3 · 140 م2 · موقف: 1». Houzez prints item-amenities only in listing
+# cards, never in the ad's own detail panel. shatri 13105178 / 13105179 (75 / 87 m², 2026-11-04 score: parking
+# «we_miss», findability 3 of 5) read «موقف: 1» off a 140 m² neighbour's card (page re-read the same night, HTTP 200).
+HOUZEZ_CARD = re.compile(r'<div class="item-body\b[^"]*"[^>]*>.*?</ul>', re.S | re.I)
 
 
 # A spec table renders its label and its value as two elements («عدد غرف النوم» / «1»): split on tags they
@@ -205,8 +224,8 @@ def _number_first_lines(body: str) -> list[str]:
 
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
-    body = RESULT_CARD_TEXT.sub(" ", body or "")   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
-    body = SELECT_BLOCK.sub(" ", RADIO_OPTION.sub(" ", body))   # …nor the site's own search-filter choices
+    body = HOUZEZ_CARD.sub(" ", RESULT_CARD_TEXT.sub(" ", body or ""))   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
+    body = SELECT_BLOCK.sub(" ", drop_radio_controls(body))   # …nor the site's own search-filter choices
     body = MENU_ITEM_LINK.sub(r"\1 ", BUTTON_BLOCK.sub(" ", body))  # …nor its buttons and menu links
     jsonld = []
     for block in JSONLD.findall(body or ""):

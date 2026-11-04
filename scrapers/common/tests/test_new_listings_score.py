@@ -792,3 +792,38 @@ def test_dwelleo_bathrooms_and_livings_come_from_its_api_record_not_the_prose():
     assert compare_listing({"living_rooms": 4}, p)["living_rooms"] == MISMATCH
     # The floor is never restated: the page does not show it and the record's 0 is ambiguous.
     assert not any("الطابق" in x or "الدور" in x for x in lines)
+
+
+# ── haraj AF recall 2026-11-04 (dry run 41790110618): what the page did NOT state ─────────────────
+@pytest.mark.parametrize("cell,want", [
+    ("واجهة العقار: لا يوجد", PAGE_SILENT),          # 23449578: the cell says «none»
+    ("واجهة العقار: -", PAGE_SILENT),                # 23431076 / 23431125 / 23449477: an empty cell
+    ("واجهة العقار: غربية - شرقية", PAGE_SILENT),    # 23397687: two opposite streets, no single bearing
+    ("واجهة العقار: شرقية عدد الغرف: 4", WE_MISS),   # ONE facade stated and we serve none: still a miss
+    ("واجهة العقار: Eastern", WE_MISS),              # the English REGA cell states one too
+    ("واجهة العقار: غربية - شمالية", PAGE_SILENT),   # 23409982: dashed = two streets, haraj parse.facade_of's rule
+    ("واجهة العقار: شمالية شرقية", WE_MISS),         # a diagonal (no dash) is ONE stated facade
+])
+def test_a_facade_cell_that_states_no_single_bearing_is_page_silent(cell, want):
+    assert compare_listing({"direction_ar": None}, page(cell))["direction_ar"] == want
+
+
+@pytest.mark.parametrize("banner", [
+    "استأجر الآن وادفع لاحقًا مع إيجاري ، تقسيط شهري مريح لشقتك المفضّلة",   # Ejari, 23431125 / 23409947
+    "وفّي وسيط وتقسيط: سهِّل مشترياتك بدفعات ميسَّرة وآمنة.",                    # Wafi, 23449574
+    "استأجر الآن وادفع لاحقًا مع رايز ، تقسيط شهري مريح لشقتك المفضّلة",      # Rize, 23397679
+    "استخدم وفّي للتقسيط المريح وحماية مدفوعاتك.",                               # Wafi, 23548231
+])
+def test_harajs_partner_banner_is_not_the_ad(banner):
+    out = compare_listing({"rent_now_pay_later": None, "installment_available": None}, page("شقة للإيجار", banner))
+    assert out["rent_now_pay_later"] == PAGE_SILENT
+    assert out["installment_available"] == PAGE_SILENT
+    # The seller's own words still count: an ad that offers instalments is a miss when we serve none.
+    assert compare_listing({"installment_available": None},
+                           page("فيلا للبيع يوجد تقسيط عن طريق البنك"))["installment_available"] == WE_MISS
+
+
+def test_a_big_decimal_area_with_a_thousands_comma_rounds_to_our_integer():
+    # dealapp 23647174 (2026-11-04): page «المساحة» / «1,157.55 م²», stored 1158 (integer column, backlog 123)
+    assert compare_listing({"area_m2": 1158}, page("المساحة", "1,157.55 م²"))["area"] == MATCH
+    assert compare_listing({"area_m2": 1160}, page("المساحة", "1,157.55 م²"))["area"] == MISMATCH

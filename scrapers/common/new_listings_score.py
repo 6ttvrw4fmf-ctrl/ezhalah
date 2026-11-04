@@ -182,7 +182,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
     lines = [norm(x) for x in ([page.get("title") or ""] + list((page.get("meta") or {}).values())
                                + (page.get("evidence_lines") or [])
                                + (page.get("text_head") or "").split(" | "))]
-    lines = [x for x in lines if x]
+    lines = [x for x in lines if x and not SITE_PROMO_LINE.search(_TASHKEEL.sub("", x))]
     jsonld = norm(json.dumps(page.get("jsonld") or [], ensure_ascii=False))
     whole = "\n".join(lines + ([jsonld] if page.get("jsonld") else []))
     whole_loc = "\n".join([x for x in lines if not CONTACT_LINE.search(x)]
@@ -244,6 +244,8 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             out[name] = _cmp_valued(stored.get(col), SITE_DEAL_MENU.sub("", whole), DEAL_KW)
         else:
             out[name] = _cmp_word(stored.get(col), whole, kw)
+            if name == "direction_ar" and out[name] == WE_MISS and not facade_stated(lines, kw):
+                out[name] = PAGE_SILENT
             # haraj's REGA licence block prints the facade in English («واجهة العقار: Eastern», 21831096, backlog 1090).
             if name == "direction_ar" and out[name] == MISMATCH and stored.get(col):
                 en = FACADE_EN.get(norm(str(stored.get(col))))
@@ -256,6 +258,41 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                     out[name] = MATCH
     return out
 
+
+# A site's own promo banner is not the ad. haraj prints partner offers under every ad (score dry run 41790110618,
+# 2026-11-04): «استأجر الآن وادفع لاحقًا مع إيجاري ، تقسيط شهري مريح…» (Ejari) on 23431125 / 23409947 and «وفّي وسيط
+# وتقسيط: سهِّل مشترياتك…» (Wafi) on 23449574 — none of it is in the seller's text, and each read as «we miss» a
+# rent-now-pay-later / installment the ad never offers. Matched on the exact banner wording only.
+_TASHKEEL = re.compile(r"[\u064B-\u0652]")
+# The banner family, any partner: re-score 41792074733 also showed «… وادفع لاحقًا مع رايز ، تقسيط شهري مريح لشقتك
+# المفضّلة» (23397679) and «استخدم وفّي للتقسيط المريح وحماية مدفوعاتك.» (23548231), in neither seller's text.
+SITE_PROMO_LINE = re.compile(r"استاجر الان وادفع لاحقا مع \S+ ، تقسيط شهري مريح|^وفي وسيط وتقسيط|^استخدم وفي للتقسيط")
+
+# One of the eight compass facades, as a REGA facade cell or a page label states it.
+_FACADE_WORD = re.compile(r"(?:ال)?(شمال|جنوب|شرق|غرب)|(north|south|east|west)", re.I)
+_FACADE_WORD_EN = {"north": "شمال", "south": "جنوب", "east": "شرق", "west": "غرب"}
+_OPPOSITE = ({"شرق", "غرب"}, {"شمال", "جنوب"})
+
+
+def facade_stated(lines: list[str], kw: str) -> bool:
+    """Does a facade line state ONE facade the Advanced Filter could hold? haraj's REGA block prints the label on every
+    ad: «واجهة العقار: لا يوجد», «واجهة العقار: -» (no facade) and «واجهة العقار: غربية - شرقية» (two opposite streets,
+    a through plot, never one bearing) — 4 of 5 haraj direction «we miss» on 2026-11-04 (dry run 41790110618,
+    23449578 / 23431076 / 23431125 / 23449477 / 23397687). A label alone, «none», opposite or dashed bearings → not stated."""
+    for x in lines:
+        m = re.search(kw, x)
+        if not m:
+            continue
+        # The cell's own value only: up to the next REGA label, and never past 30 characters of prose.
+        value = re.split(r"[|]|عدد الغرف|رقم المخطط|عرض الشارع", x[m.end():].lstrip(" :：-–"))[0][:30]
+        bearings = {b.group(1) or _FACADE_WORD_EN[b.group(2).lower()] for b in _FACADE_WORD.finditer(value)}
+        # «غربية - شمالية»: two bearings joined by « - » name two streets (a corner), the rule scrapers/haraj/parse.py
+        # facade_of() stores by (23409982, re-score 41792074733); a diagonal is written without the dash.
+        corner = len(bearings) == 2 and re.search(r"\s[-–]\s", value)
+        if not bearings or corner or any(pair <= bearings for pair in _OPPOSITE):
+            continue
+        return True
+    return False
 
 # «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
 SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
@@ -341,6 +378,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
             near = " | ".join(lines[j] for i in kw_hits for j in (i - 1, i, i + 1) if 0 <= j < len(lines))
             if any(int(float(m.group(1).replace(",", ".")) + 0.5) == int(float(stored))
                    for m in re.finditer(r"(?<![\d.,])(\d+[.,]\d+)(?![\d])", near)):
+                return MATCH
+            # A thousands separator before the decimals: dealapp 23647174 (2026-11-04 score, re-read 41793162129)
+            # prints «1,157.55 م²» and we store 1158; the pattern above read «1,157» as 1.157.
+            if any(int(float(m.group(1).replace(",", "")) + 0.5) == int(float(stored))
+                   for m in re.finditer(r"(?<![\d.,])(\d{1,3}(?:,\d{3})+\.\d+)(?![\d])", near)):
                 return MATCH
     else:
         # A small figure counts only next to its keyword: on the keyword's own line, or on a
@@ -1168,6 +1210,12 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             if verdict == MISMATCH:
                 col = next(c for n, _, c, _ in FIELDS if n == name)
                 print(f"    mismatch {key} {name}: stored={stored.get(col)!r}", flush=True)
+            elif verdict == WE_MISS and name in AF_FIELDS:
+                # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
+                kw = next(k for n, _, _, k in FIELDS if n == name)
+                hit = next((x for x in ([page.get("title") or ""] + list(page.get("evidence_lines") or [])
+                                        + (page.get("text_head") or "").split(" | ")) if re.search(kw, norm(x))), "")
+                print(f"    we_miss {key} {name}: page={hit[:160]!r}", flush=True)
         fold(row, key, results, stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"

@@ -226,7 +226,10 @@ jobs:
             #   shatri: `proxy: true` (2026-10-02, Scraping Engineer) — WP REST answered 403 to the runner IP;
             #   the scraper probes 3 profiles DIRECT first, so the proxy is spent only when refused.
             - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20, proxy: true }
-            - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
+            #   NOTE: almuteb is NOT here. RETIRED 2026-11-04 (owner «Yes, use your picks», decision 2):
+            #   almuteb.sa has answered NXDOMAIN since 2026-10-23 and its .sa registry name servers are
+            #   DNS-PARKING.COM; every run since 2026-10-24 failed with curl(6). Its 11 rows are kept,
+            #   hidden and adjudicated (ops_adjudicated_retraction). See scrapers/RETIRED_PLATFORMS.txt.
             - { source: aalbarrak,      cmd: "python -m scrapers.aalbarrak.run --type all", tmo: 20 }
             - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
             - { source: snam,           cmd: "python -m scrapers.snam.run --type all", tmo: 20 }

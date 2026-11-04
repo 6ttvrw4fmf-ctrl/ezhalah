@@ -1224,6 +1224,8 @@ export function SourceBadge({ source }: { source: string }) {
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return <PlatformLogo source={SUPEROFFICE_LOGO} />;
   if (s.includes('شموع العقار') || s.includes('shomou')) return <PlatformLogo source={SHOMOU_LOGO} />;
   if (s.includes('حراج') || s.includes('haraj')) return <PlatformLogo source={HARAJ_LOGO} />;
+  // Property Finder: NO badge until the owner supplies the official logo file (an explicit null, never the Aqar fallback).
+  if (s.includes('بروبرتي فايندر') || s.includes('propertyfinder')) return null;
   if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={MAKTAB_LOGO} />;
   if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={SIRDAB_LOGO} />;
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;
@@ -1414,6 +1416,7 @@ function sourceHost(source: string): string {
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'superoffice.sa';
   if (s.includes('شموع العقار') || s.includes('shomou')) return 'shomoalaqar.com.sa';
   if (s.includes('حراج') || s.includes('haraj')) return 'haraj.com.sa';
+  if (s.includes('بروبرتي فايندر') || s.includes('propertyfinder')) return 'propertyfinder.sa';
   if (s.includes('منصة مكتب') || s.includes('maktab')) return 'maktab.sa';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'marketplace.sirdab.co';
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';

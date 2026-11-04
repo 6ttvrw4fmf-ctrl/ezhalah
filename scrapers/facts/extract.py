@@ -215,6 +215,29 @@ def text_hash(title: Optional[str], description: Optional[str]) -> str:
     return hashlib.md5(((title or "") + "\n" + (description or "")).encode("utf-8")).hexdigest()
 
 
+# …but in a ONE-LINE ad the clause is the whole ad, and the contact words often come FIRST (🔬 2026-11-04, aqar 15316395:
+# «للتواصل اتصال أو واتساب ابو يوسف الدور الأول تتكون من 3 غرف … 1 مطبخ مصعد سطح موقف سياره …»): cutting to the clause
+# end dropped the whole body, so its lift and parking were never read (4 of 25 sampled «مصعد» ads with no answer were real
+# lifts; ~3% of active aqar ads carry 150+ chars after a contact word on the same line). So the cut is the contact word
+# and the CONTACT_SPAN words after it (where a name, a number or a handle sits; phones and «ابو X» are also removed by
+# redact_pii / _KUNYA_RE), and the rest of the clause is kept only when at least MIN_BODY_AFTER words of ad remain —
+# a short tail («للاستفسار أبو أحمد 055…  أخبر المالك …») still goes whole, as before.
+CONTACT_SPAN = 8
+_PERSON_TITLE_RE = re.compile(r"^(?:ال|و)?(?:استاذ|أستاذ|مهندس|شيخ|سيد|دكتور|اخوكم|أخوكم|م\.|أ\.|د\.)")
+MIN_BODY_AFTER = 8
+
+
+def _cut_contact(clause: str) -> str:
+    m = _CONTACT_CLAUSE_RE.search(clause)
+    if not m:
+        return clause
+    words = clause[m.start():].split()
+    if len(words) < 1 + CONTACT_SPAN + MIN_BODY_AFTER \
+            or any(_PERSON_TITLE_RE.match(w) for w in words[1 + CONTACT_SPAN:4 + CONTACT_SPAN]):
+        return clause[:m.start()]   # a title right after the span: the name may run on — cut the clause whole
+    return clause[:m.start()] + " " + _cut_contact(" ".join(words[1 + CONTACT_SPAN:]))
+
+
 def sanitize(title: Optional[str], description: Optional[str]) -> str:
     """Title + description with contact data, URLs, kunyas and contact clauses removed, then the fleet
     PII redactor (phones in every shape/digit set, emails, labelled advertiser names)."""
@@ -226,11 +249,7 @@ def sanitize(title: Optional[str], description: Optional[str]) -> str:
     # («3 غرف ومجلس ومسبح للاستفسار أبو أحمد»); dropping the clause dropped the whole ad (measured 2026-10-31:
     # ~100 ads read as <30 chars and were never sent to the model).
     parts = _CLAUSE_SPLIT_RE.split(raw)
-    kept = []
-    for p in parts:
-        m = _CONTACT_CLAUSE_RE.search(p)
-        kept.append(p if not m else p[:m.start()])
-    raw = "".join(kept)
+    raw = "".join(_cut_contact(p) for p in parts)
     out = redact_pii(raw) or ""
     out = out.replace("[redacted]", " ")
     out = " ".join(out.split())

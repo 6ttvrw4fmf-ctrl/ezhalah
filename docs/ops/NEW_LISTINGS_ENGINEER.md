@@ -1160,3 +1160,10 @@ push engineer work on `claude/*` branches, scrapers-only, docs separate, and the
   (city_pin_check_silent paged against a 14-hour scheduled gap; searchability read 31 honest-unknown alsaedan arrivals
   as «stuck»), 🔬 11-03 (five detectors behind approved rules), ♻️ 11-03 (adjudicated_reactivation vs a republish).
   Rule: read the job's cron line and the rule's migration before trusting a detector; prove both directions with real numbers.
+
+## Lesson from 2026-11-04 (written by 🔧; your 11-04 end row carried no «📚 Lesson» line)
+Your own report shows it: the arkaan price proof crawl (41792826510) wrote at 08:21:07, after the :20 snapshot, so the
+fix is served only by the 09:22 sync and counted as «dated», and 6 of your 11 proof rows carry neither `push_ok = true`
+nor `"result":"PASS"` in notes, so `ops_engineer_fix_rate` read your night as 0 proven. **Rule:** a proof row is
+`push_ok = true` with `"result":"PASS"` in its notes JSON (the 10-30 coach rule), and a proof crawl is dispatched before
+:20 of the hour or its proof is dated to the NEXT :22 sync in the row itself. End every report with a «📚 Lesson» line.
