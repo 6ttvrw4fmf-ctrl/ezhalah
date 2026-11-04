@@ -69,6 +69,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://sodasyat.sa"
@@ -160,6 +161,20 @@ def list_catalogue(s: cc.Session) -> tuple[list[str], Optional[int], dict[str, l
     return list(ids), counter, cards
 
 
+_MARKER_RE = re.compile(r"new\s+google\.maps\.Marker\(\s*\{\s*position\s*:\s*\{\s*lat\s*:\s*(-?[\d.]+)\s*,\s*lng\s*:\s*(-?[\d.]+)")
+
+
+def marker_pin(page_html: str) -> dict:
+    """The ad's OWN pin: the live `new google.maps.Marker({position: {lat, lng}})` of the detail map
+    (2026-11-04, re-read live on 2722 / 2736 / 2702 / 2739 — four different pairs, so it is per ad, not a
+    site default). The page also keeps several COMMENTED-OUT markers and circles (`// var marker = …`);
+    whole-line `//` comments are removed first so only the marker the map really draws is read. The
+    map's `center:` is not read on its own. Nothing is geocoded."""
+    live = "\n".join(ln for ln in (page_html or "").splitlines() if not ln.lstrip().startswith("//"))
+    m = _MARKER_RE.search(live)
+    return pin_dict(m.group(1), m.group(2)) if m else {}
+
+
 def parse_detail(page_html: str) -> dict[str, Any]:
     """The listing's own fields. HTML comments are removed FIRST: the page comments out an
     advertiser-name field, a «حاله العقار» field and the office's FAL licence, none of which is
@@ -195,6 +210,7 @@ def parse_detail(page_html: str) -> dict[str, Any]:
         "type_text": facts.get("نوع العقار") or None,
         "facts": facts,
         "photos": list(dict.fromkeys(re.findall(r'https://dashboard\.sodasyat\.sa/public/storage/photos/[^"\s]+', h))),
+        "pin": marker_pin(h),
     }
 
 
@@ -307,6 +323,7 @@ def map_listing(pid: str, d: dict[str, Any], card_specs: list[str] = ()) -> tupl
         "price_per_meter_raw": facts.get("سعر المتر") or None,
         "deed_location_text": d.get("deed_text") or None, "specs": leftover or None,
         "photo_count": len(d.get("photos") or []) or None,
+        **(d.get("pin") or {}),
     }.items() if v is not None}
     return row, category, ""
 

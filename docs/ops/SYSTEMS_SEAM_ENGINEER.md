@@ -109,6 +109,18 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   words**, the detector that watches it, when it was last verified, and the outcome of that
   verification.
 
+  **The rotation now runs itself (2026-11-04, `20261104115418` + `20261104115708`).** Its only writer
+  of `last_verified_at` was routine #7, deleted 2026-09-27, so 120 of 215 entries went stale with
+  nothing able to close the alarm. `ops_repair_guarantee_rotate()`, called at the top of
+  `mon_detect_repair_guarantee_stale()`, visits each repair whose detector exists and is reachable,
+  once per 20 h: if the detector ran cleanly in the last 26 h and its `mon_raise` kinds are readable,
+  it writes `detector_clean` (no open alert of those kinds) or `detector_raising` (keys kept) and
+  stamps `last_verified_at`; otherwise it records `undetermined` in `last_detail.rotation` and does
+  NOT stamp. It never writes `holds` (that still takes a per-invariant evidence re-check), never
+  overwrites `violated`, and never touches a repair with no detector — those stay on the unwatched
+  limb (57 on 2026-11-04) until someone points them at a real detector. A rotation failure raises
+  `repair_guarantee_rotation_failed`. Barrier: `scripts/verify-repair-guarantee-rotation-runs-itself.ts`.
+
   **Coverage is PERMANENT — there is no 90-day window, and none may be re-introduced.** The window
   this replaces was the exact opposite of the point: a four-month-old decayed invariant fell out of
   scope entirely, and a repair aged out of the sweep on the very schedule that made it likely to

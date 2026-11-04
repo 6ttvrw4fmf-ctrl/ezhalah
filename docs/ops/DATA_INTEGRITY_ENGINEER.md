@@ -1326,6 +1326,45 @@ reliable evidence either way), 83 SOURCE_CONFLICT (the ad's own neighborhood con
 recompute — 60 of them «Dammam»→«الخبر» reversed, `DERIVED_STORE_FRESHNESS.md`'s own "proximity/
 geocode drift, not source truth" call, independently reached).
 
+## 34. Source pages re-read in a real browser, 2026-11-04 (one page at a time, ~45 loads, no CAPTCHA)
+
+Findings only; each line is what the SOURCE page showed that day. Re-read before acting on any of it.
+
+- **dealapp 617103 (554,113,966/yr) and 548643 (100,000,000/yr)** — both now render dealapp's generic shell
+  (browser redirects to `/tabs/home`; curl 200 with no ad schema), while a live control (585131) renders its ad.
+  The price cannot be re-read. 617103's stored description says «الإيجار السنوي: 20,000 ريال» and 554113966 is
+  0554113966-shaped, so it was very likely a phone in `offers.price`. Both rows carry `missing_count = 1`; the
+  liveness contract retires them at grace — never by hand, never repriced.
+- **Bedroom counts flagged by field_integrity_bedrooms (aqar 6, alqasem 1, wasalt 8)** — every one is published by
+  the source (aqar grid «غرف النوم 72» and title «72 غرفة»; wasalt «777 Bedrooms»; alqasem «غرف 166» on an ad it
+  types شقة for a 46-flat building). Registered in `ops_bedrooms_source_verified` (migration 20261104105012),
+  value-pinned (`scripts/verify-bedrooms-register-is-value-pinned.ts`).
+- **aqarcity «حالة ترخيص الإعلان»** — the label is GONE. The licence block now reads «الترخيص: ينتهي قريباً · رقم
+  الترخيص · ساري حتى · تاريخ إصدار الترخيص · مصدر الإعلان». `rega_license_status` is therefore NULL on new rows.
+  It is evidence-only (CAPTURED_FIELD_CLASSIFICATION.md row 8); the new badge is a computed expiry state, not the
+  old «نشط/فعال» status, so it is NOT aliased onto the old key.
+- **aqar recategorised twins** — the old-category URL redirects (`?redirected=true`) to the new category path, and
+  the page's own title names the new type (6871932: فلل-للبيع → مجمعات-للبيع «مجمع»; 6904292 and four more:
+  شقق → استوديوهات «استوديو»). The old copy is the stale one. aqar crawls each table in its own workflow and
+  never calls `db.retire_superseded_siblings()` — routed, not fixed here.
+- **rakez 77097 / 57535** — 77097 «سكف 26» publishes no feature list; its unit text lists rooms only (no مصعد,
+  مكيف, موقف) → NULL is right. 57535 lists «خصائص المشروع: … مصاعد» → our elevator = true is right; no AC or
+  parking published. (Already recorded in `ops_amenity_capture_verified`.)
+- **lifecycle_duplicate_stale_copy** — dealapp 196823 «ارض تجارية للإيجار» and 617922 «استخدامات العقار: تجاري»:
+  commercial table is right, residential retirements adjudicated. wasalt 5908747/5908750/5908754: live, «Property
+  usage: Residential», but the LIVE copy sits in `wasalt_commercial_listings` (legacy mis-route; today's
+  `table_category()` routes by usage) — routed. **sadin**: the whole site answers `410 Gone` (home page included),
+  the platform is `dormant`, last crawl 2026-09-07, yet 83 sadin rows are still served. A site-wide 410 is not a
+  per-ad verdict; retiring sadin is an owner decision (asked, not done).
+- **Pins** — sodasyat (live `google.maps.Marker`), livingcompound (single-property canvas `data-location` keyed by
+  post id) and flow (riyadh-narjis place link `!3d!4d`; granada/olaya print no pair) were wired with tests.
+  aqaralsaudia's 23.333333,45.333333 is the RealHomes JSON-LD default → `ops_default_pin_register`.
+- **Age (age_resolver_platform_gap)** — maktab: the rendered page labels «عمر العقار : خمس سنوات» (details/108,
+  stored 5) — a plain fetch sees only the client shell. ibaax: the ad's API record carries REGA "Property Age"
+  («جديد» on 779, stored 0). abwbna: the API's year_built; 39628 stores 29 and its text says «العمر 30 سنه
+  تقريباً» → registered trusted (20261104105616). maktab/ibaax were withheld by another session the same morning
+  for want of a readable page; the browser reads above are the evidence for re-admitting them.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve

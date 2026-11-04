@@ -1,0 +1,52 @@
+# Property Finder Saudi STAGED ingest (owner approved the source 2026-11-04; the owner launches it himself —
+# docs/ops/PROPERTYFINDER_LAUNCH.md). Walks the four Arabic category pages + ?page=N of propertyfinder.sa with our
+# honest bot user-agent (≤ 1 request a second, no impersonation, no proxy; any 403/429/503/CAPTCHA stops the run)
+# and upserts into propertyfinder_{residential,commercial}_listings + propertyfinder_offplan_units. Those tables
+# are NOT wired into search and the registry row is staged, so nothing this writes reaches a customer.
+#
+# NO SCHEDULE while staged: dispatched by hand. The launch adds the daily pg_cron dispatch (the liveness tier
+# «own full list = the check» needs a complete walk every day).
+name: Property Finder sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Walk + map, write nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: propertyfinder-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  sync:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ~190 pages at ≥ 1.1 s (+ a second walk of a side that drifted short): ~8 minutes.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Property Finder tests (price/period = source, PDPL, off-plan hidden, polite crawler)
+        run: pip install pytest && python -m pytest -q scrapers/common/tests/test_propertyfinder_staged_ingest.py
+      - name: Sync Property Finder (staged)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DRY: ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: exec python -m scrapers.propertyfinder.run $DRY

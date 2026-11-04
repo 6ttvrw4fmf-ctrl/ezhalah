@@ -447,6 +447,30 @@ def _amenities(p: dict[str, Any], specs: dict[str, str]) -> dict[str, bool]:
     return out
 
 
+# The description's «تفاصيل الأدوار» block is the site's own per-floor room form (🔬 2026-11-04, backlog coach job 1):
+#   «تفاصيل الدور الأرضي عدد المجالس: 1 ، دورات المياه: 2 ، الصالات: 1 ، غرف النوم: 1 ، … تفاصيل الدور الأول …»
+# Measured on 2,283 active ads: 1,829 carry it; «عدد المجالس: N» on 1,780, «الصالات: N» on 1,408, «غرف المعيشة: N» on
+# 462 — and halls / reception_rooms_majlis were NULL on every one (af-score 11-03: living_rooms we_miss 6/10, majlis
+# 7/10). Each label appears once per floor, so the unit's count is the SUM over its floors; «الصالات» and «غرف المعيشة»
+# are both living rooms (the fleet's `halls`, as sukna/daryusuf map them) and are separate cells, so they add.
+# Only inside the block (never a bare «صالة» in prose); a block that names a label nowhere leaves it NULL.
+_FLOOR_BLOCK = "تفاصيل الدور"
+_FLOOR_COUNT_RE = re.compile(r"(عدد المجالس|الصالات|غرف المعيشة)\s*:\s*([\d\u0660-\u0669]{1,2})(?![\d\u0660-\u0669])")
+_FLOOR_COUNT_COL = {"عدد المجالس": "reception_rooms_majlis", "الصالات": "halls", "غرف المعيشة": "halls"}
+
+
+def floor_room_counts(description: Optional[str]) -> dict[str, int]:
+    """{halls, reception_rooms_majlis} summed over the «تفاصيل الأدوار» floors; {} when the block is absent."""
+    t = description or ""
+    if _FLOOR_BLOCK not in t:
+        return {}
+    out: dict[str, int] = {}
+    for label, n in _FLOOR_COUNT_RE.findall(t[t.index(_FLOOR_BLOCK):]):
+        col = _FLOOR_COUNT_COL[label]
+        out[col] = out.get(col, 0) + int(_digits(n))
+    return {k: v for k, v in out.items() if 0 <= v <= 30}
+
+
 def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). Returns (None, category, why) for anything this source has
     not actually established — never a guess."""
@@ -537,6 +561,7 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "area_m2": area,
         "bedrooms": bedrooms,
         "bathrooms": normalize.to_int(p.get("bathrooms_raw")),
+        **(floor_room_counts(p.get("description")) if property_type in _DWELLING_TYPES else {}),
         "photo_urls": (p.get("photos") or [])[:20] or None,
         "property_age": normalize.exact_age(specs.get("عمر العقار")),   # «اكثر من عشر سنوات» → NULL
         # Labelled cells: «عرض الشارع: 15» → 15; «واجهة العقار: شمال» → شمال, «غير محدد» → NULL, and
