@@ -16,6 +16,7 @@ import { markAppSessionStarted } from '@/lib/appSession';
 import { usePromptInsets } from '@/lib/bottomPromptInset';
 import { useVisualViewportRoot } from '@/lib/visualViewportFrame';
 import { installTapDebug } from '@/lib/tapDebug';
+import { warmMapSoon } from '@/lib/mapWarmup';
 import { Image as ExpoImage } from 'expo-image';
 import { PLATFORM_META } from '@/data/loaderPlatforms';
 import { scheduleLogoPrefetch } from '@/lib/prefetchLoaderLogos';
@@ -109,6 +110,8 @@ function Shell() {
   useVisualViewportRoot();
   // ?debug=tap only: an on-screen log of what each touch hit (see lib/tapDebug.ts). No-op otherwise.
   useEffect(() => installTapDebug(), []);
+  // Instant first map: fetch the map's code and data quietly once the page has settled (src/lib/mapWarmup.ts).
+  useEffect(() => { if (Platform.OS === 'web') warmMapSoon(); }, []);
   const pathname = usePathname();
   const router = useRouter();
   // The AUTO-SHOWING centered popup (owner 2026-08-28) was RETIRED by the owner's 2026-08-29

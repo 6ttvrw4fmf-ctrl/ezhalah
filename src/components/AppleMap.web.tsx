@@ -160,7 +160,15 @@ async function fetchWithRetry(url: string, init: RequestInit = {}): Promise<Resp
   throw last instanceof Error ? last : new Error(`fetch failed: ${url}`);
 }
 
+// A key fetched ahead of time by prewarmMap() is used once if it is still young (keys last TOKEN_SECONDS on the server;
+// a warm key is used only within WARM_TOKEN_MS of being minted, far inside that), then every later call mints afresh.
+const WARM_TOKEN_MS = 5 * 60_000;
+let warmToken: { at: number; p: Promise<string> } | null = null;
 async function fetchToken(): Promise<string> {
+  const w = warmToken; warmToken = null;
+  if (w && Date.now() - w.at < WARM_TOKEN_MS) {
+    try { return await w.p; } catch { /* a failed warm-up is no answer — mint a fresh one below */ }
+  }
   const r = await fetchWithRetry(TOKEN_URL, { cache: 'no-store' });
   if (!r.ok) throw new Error(`token ${r.status}`);
   const j = (await r.json()) as { token?: unknown };
@@ -181,6 +189,18 @@ function loadRegions(): Promise<Region[]> {
     })
     .catch((e) => { regionsLoad = null; throw e; });
   return regionsLoad;
+}
+
+/** INSTANT FIRST MAP (owner 2026-11-04: «why does it feel slow moving between tabs»). Measured on ezhalah.com: the first
+ *  visit to «خريطة» downloaded Apple's script (~230 KB), the region outlines, a map key and the labels/dots feeds only
+ *  after the tap. Called quietly a few seconds after any page settles (src/lib/mapWarmup.ts): everything the map needs is
+ *  already here when the user taps it. Every failure is swallowed — the map's own load path still runs and retries. */
+export function prewarmMap(): void {
+  void loadMapKit().catch(() => {});
+  void loadRegions().catch(() => {});
+  if (!warmToken) { const p = (async () => { const r = await fetchWithRetry(TOKEN_URL, { cache: 'no-store' }); if (!r.ok) throw new Error(`token ${r.status}`); const j = (await r.json()) as { token?: unknown }; if (typeof j.token !== 'string' || !j.token) throw new Error('token missing'); return j.token; })(); p.catch(() => {}); warmToken = { at: Date.now(), p }; }
+  void fetchMapDots();
+  void fetchAreasFeed();
 }
 
 let initialized = false;
