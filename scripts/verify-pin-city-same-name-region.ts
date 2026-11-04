@@ -20,6 +20,7 @@ import { join } from 'node:path';
 const MIG = join(import.meta.dirname, '..', 'supabase', 'migrations');
 let fail = 0;
 const check = (name: string, ok: boolean) => { if (!ok) { console.log(`FAIL  ${name}`); fail++; } };
+const mustCatch = check; // a mutation proof: the predicate applied to a deliberately broken input must reject it
 
 type Rule = [string, RegExp];
 export const RULES: Rule[] = [
@@ -44,7 +45,7 @@ const all = touching.map((f) => readFileSync(join(MIG, f), 'utf8')).join('\n');
 holds(all).forEach((ok, i) => check(`rule: ${RULES[i][0]}`, ok));
 // each rule must catch its own removal
 const cut = (sql: string, rx: RegExp) => sql.replace(new RegExp(rx.source, 'g'), '/*removed*/');
-RULES.forEach(([name, rx], i) => check(`mutation not caught: ${name}`, !holds(cut(all, rx))[i]));
+RULES.forEach(([name, rx], i) => mustCatch(`mutation not caught: ${name}`, !holds(cut(all, rx))[i]));
 
 // a later migration that rewrites refresh_pin_city_correction wholesale must carry the arm too: the newest file
 // that redefines the function body (create or replace … refresh_pin_city_correction) must not predate the arm.

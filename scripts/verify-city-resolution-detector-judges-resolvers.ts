@@ -18,6 +18,7 @@ import { join } from 'node:path';
 const MIG = join(import.meta.dirname, '..', 'supabase', 'migrations');
 let fail = 0;
 const check = (name: string, ok: boolean) => { if (!ok) { console.log(`FAIL  ${name}`); fail++; } };
+const mustCatch = check; // a mutation proof: the predicate applied to a deliberately broken input must reject it
 
 export const SHAPES = [
   String.raw`city_norm\s*(=|\s+in\s*\()`,
@@ -61,11 +62,11 @@ RESOLVERS.forEach((b, i) => check(`resolver #${i + 1} is no longer caught`, isRe
 // mutation proof: the OLD mention test flags the non-resolvers (the false alarm), and dropping any one comparison
 // shape blinds the limb to at least one real resolver form — so each shape is load-bearing.
 const oldTest = (b: string) => /city_norm/i.test(b) || /normalize_ar\s*\(\s*[a-z0-9_.]*city/i.test(b);
-check('mutation: the old mention test must flag the three non-resolvers', NOT_RESOLVERS.every(oldTest));
-check('mutation: an empty shape list must miss every resolver', RESOLVERS.every((b) => !isResolver(b, [])));
-check('mutation: problems() must reject a limb that lost a shape',
+mustCatch('mutation: the old mention test must flag the three non-resolvers', NOT_RESOLVERS.every(oldTest));
+mustCatch('mutation: an empty shape list must miss every resolver', RESOLVERS.every((b) => !isResolver(b, [])));
+mustCatch('mutation: problems() must reject a limb that lost a shape',
   problems(`a_new constant text o.body ~* '${SHAPES[0]}' o.body ~* '${SHAPES[1]}'`).length > 0);
-check('mutation: problems() must reject the bare mention test',
+mustCatch('mutation: problems() must reject the bare mention test',
   problems(`a_new constant text ${SHAPES.map((s) => `o.body ~* '${s}'`).join(' ')} ${BARE}`).length > 0);
 
 const tree = readdirSync(MIG).filter((f) => f.endsWith('.sql')).map((n) => ({ n, s: readFileSync(join(MIG, n), 'utf8') }));
