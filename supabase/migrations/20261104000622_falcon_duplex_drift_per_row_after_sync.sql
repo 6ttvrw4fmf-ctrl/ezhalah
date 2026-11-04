@@ -1,21 +1,8 @@
--- 🦅 Falcon 2026-11-03 — TWO DATABASE CHANGES WAITING FOR A PERSON TO APPLY.
--- Why a person: the Supabase MCP apply_migration asked a confirmation question at 20:12 UTC that an
--- unattended routine cannot answer (FALCON_ENGINEER.md «THE SUPABASE QUESTION RULE»). Nothing below has
--- been applied. Apply each part with apply_migration while the database is quiet (AGENTS.md rule 1),
--- then mirror the version apply_migration mints into supabase/migrations/ (mirror PR, «mirror» in title).
--- check-migration-before-apply.ts: PASS for part 1 (it cites no migration).
---
--- PART 2 (wasalt enum liveness cadence) is at the bottom.
-
--- ═══ PART 1 — duplex_index_drift: per row, and only after a sync pass ════════════════════════════════
--- Before: 16 opens in 7 days on ONE dedup key (owner repeat list #8). Every open read «missing 1-2», was
--- raised at :59 right after the :22 sync and cleared by the next one with nobody touching anything.
--- Per-row truth at 20:10 UTC: 933 active Duplex rows in platform tables, 933 of them in search_listings_ar.
--- duplex_index_drift reopened 16 times in 7 days on ONE key, each time «missing 1-2», each time raised at :59 right
--- after the :22 search sync and cleared by the next one. A Duplex listing that a crawl inserts or reactivates at :30
--- cannot be in search_listings_ar until the next :22 sync, so a COUNT compare read normal sync lag as drift. A count
--- compare could also hide a real loss behind an extra row. Now: per row, and only a listing that was already missing
--- BEFORE the latest successful sync (cron job sync-search-listings-ar) and is still missing after it is drift.
+-- 🦅 Falcon 2026-11-03, applied by the owner session. duplex_index_drift reopened 16 times in 7 days on ONE key, each time
+-- «missing 1-2», each time raised at :59 right after the :22 search sync and cleared by the next one. A Duplex listing
+-- that a crawl inserts or reactivates at :30 cannot be in search_listings_ar until the next :22 sync, so a COUNT compare
+-- read normal sync lag as drift, and could hide a real loss behind an extra row. Now: per row, and only a listing that
+-- was already missing BEFORE the latest successful sync (cron job sync-search-listings-ar) and is still missing is drift.
 create table if not exists public.ops_duplex_unindexed_seen (
   source_table text not null,
   listing_id bigint not null,
@@ -96,12 +83,3 @@ begin
 
   return n;
 end $function$;
-
--- ═══ PART 2 — wasalt enum liveness runs every day, not every other day ═════════════════════════════════
--- liveness_checking_stalled:wasalt opens between runs by construction: pg_cron job 36 dispatches
--- wasalt-enum-liveness.yml at «0 21 */2 * *» (48 h apart) while the stall window is least(sla 48 h, 30 h)
--- = 30 h. Measured 11-03 06:59: 95,775 active rows, 0 checked in 30 h, 8,290 in 7 days against a need of
--- 47,888 a day. The workflow's own concurrency group (cancel-in-progress: false) prevents overlap, and a
--- full enumeration took 3h26m on 11-01 (run 41349680012), so a daily start never stacks.
--- Do NOT clear the alert by widening the window or raising sla_hours (LISTING_LIVENESS.md §7).
-select cron.alter_job(36, schedule := '0 21 * * *');
