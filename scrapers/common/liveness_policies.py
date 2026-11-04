@@ -81,8 +81,9 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # amlakalahsa JOINS this set on 2026-09-12 (single-office Al-Ahsa WordPress+ACF listing site).
 # CRAWL_PRESENCE_ONLY for the same reason as remal/amaall above: a small WordPress REST catalogue
 # (6 CPTs, ~260 posts) re-read in full each run, with no per-listing revisit endpoint of its own.
-# propertyfinder (2026-10-10) is a SHADOW reader only (its shadow.py writes nothing): it gets its liveness
-# policy in the same change that makes it production-searchable. haraj LEFT this set on 2026-10-16 (owner:
+# propertyfinder (2026-11-04) is STAGED: scrapers/propertyfinder/run.py stores rows in tables no search arm reads,
+# its registry row is 'retired' until the owner launches it (docs/ops/PROPERTYFINDER_LAUNCH.md). It gets its
+# SOURCE_LIST_PRESENCE policy in that launch change, the one that makes it production-searchable. haraj LEFT this set on 2026-10-16 (owner:
 # licensed offers only go live) with its CANDIDATE_PLUS_DIRECT entry below.
 # moj (2026-10-10) is not a listing platform at all: it reads the Ministry of Justice's district sales
 # aggregates into moj_district_sales (scrapers/moj/sales.py) and writes no listing.

@@ -2207,6 +2207,21 @@ def upsert_haraj_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("haraj_commercial_listings", rows)
 
 
+def upsert_propertyfinder_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("propertyfinder_residential_listings", rows)
+
+
+def upsert_propertyfinder_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("propertyfinder_commercial_listings", rows)
+
+
+def upsert_propertyfinder_offplan(rows: list[dict[str, Any]]) -> None:
+    """Off-plan Property Finder ads → their own hidden table (never a *_listings row; owner 2026-10-25)."""
+    for i in range(0, len(rows), 200):
+        _execute(sb().table("propertyfinder_offplan_units").upsert(rows[i:i + 200], on_conflict="ad_number"),
+                 what="propertyfinder_offplan_units")
+
+
 def upsert_shomou_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("shomou_residential_listings", rows)
 
