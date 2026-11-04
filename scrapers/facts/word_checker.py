@@ -481,7 +481,10 @@ _NEAR = tuple(_n(w) for w in N._PROXIMITY + ("قريب", "قريبه", "قرب",
 # A DISTANCE points at its place with «من / عن» (🔬 2026-11-04 live walk): «على مقربة جدًا من حديقة», «على بُعد خطوات من
 # المسجد», «على مسافة 3 كم من جامعة», «على بعد 20 د عن المسجد». Only a fact AFTER that «من / عن» is the nearby place —
 # «🔸المسجد على بعد خطوات 🔸موقف خاص 🔸غرفة سائق» keeps its own parking and driver's room. (A bare «بعد» is «after».)
-_DISTANCE_TO = re.compile(r"(?:علي (?:بعد|مقربه|مسافه)|بمقربه|خطوات|بضع خطوات|(?<!\S)(?:د|كم|كيلو|م|متر))(?: \S+){0,4} (?:من|عن)(?: \S+){0,3}$")
+# «يتكون من / مكون من» is «consists of», never a distance: aqar 15131878 «… 3020م 💥يتكون من حوش سيارات مصعد» read the
+# plot's «م» (metres) + «من» as «N metres from …» and silenced the lift (elevator recall sample 2026-11-04).
+_DISTANCE_TO = re.compile(r"(?:علي (?:بعد|مقربه|مسافه)|بمقربه|خطوات|بضع خطوات|(?<!\S)(?:د|كم|كيلو|م|متر))(?: \S+){0,4} "
+                          r"(?<!يتكون )(?<!تتكون )(?<!مكون )(?<!مكونه )(?<!يتالف )(?<!تتالف )(?:من|عن)(?: \S+){0,3}$")
 _NEAR_WORDS = frozenset(w for w in _NEAR if " " not in w)
 _NEAR_PHRASES = tuple(w for w in _NEAR if " " in w)
 _PARTIAL = tuple(_n(w) for w in N._PARTIAL_ONLY + N._FLOOR_COVERING)
@@ -1349,6 +1352,8 @@ def selftest() -> None:
         ("قريب من الخدمات مسجد ومدارس", {}, ("mosque",)),
         ("مميزات العقار قريب من الدائري و بها مصعد عرض الشارع ٢٠م", {"elevator": True}, ()),
         ("قريب من الدائري و بها مسجد", {}, ("mosque",)),
+        ("مخطط نمار 3020م 💥يتكون من حوش سيارات مصعد مدخلين ومجلس رجال", {"elevator": True}, ()),
+        ("على بعد 200 م من المسجد", {}, ("mosque",)),
         ("تكيف مركزي _مجلس - تفتح علي مرفق ومسجد - موسسة مصعد • غرفه سائق", {}, ("elevator",)),
         ("تكيف مركزى - دبل هيت - موسس مصعد - مسبح", {}, ("elevator",)),
         ("دور أرضي ملك مجلس ومطبخ 🌟 أفضل 5 عروض حصرية لدينا (حتى الآن): 🔥 تاون هاوس علوي بمصعد | مخطط رسن طيبة", {"kitchen": True}, ("elevator",)),
