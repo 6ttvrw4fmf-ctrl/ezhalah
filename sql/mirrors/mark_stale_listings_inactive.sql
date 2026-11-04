@@ -1,5 +1,10 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
--- Re-verified 2026-11-03 (migration 20261102212825_stale_breaker_escape_resolves_on_reset): UNCHANGED.
+-- Refreshed 2026-11-04 (migration 20261104032124_stale_sweep_counts_direct_alive_verdicts): CHANGED. md5 of everything below: 4ce83b360801e87e0a556f0494621ea9
+--   The stale count and the coverage gate's observed count now read greatest(last_seen_at, last_verified_alive_at):
+--   a direct liveness oracle ALIVE verdict is source evidence (stronger than crawl presence), and the liveness
+--   contract stamps only last_verified_alive_at for it. Needle-edit of three anchors, each asserted to match once;
+--   confirmed against production the same hour: md5(pg_get_functiondef) = 4ce83b360801e87e0a556f0494621ea9.
+-- Re-verified 2026-11-03 (migration 20261102212825_stale_breaker_escape_resolves_on_reset): UNCHANGED (history; superseded by the 2026-11-04 line above).
 --   md5(pg_get_functiondef) in production = 46b864145225e1897ce0ad014c0732e2, identical to this file. Stamped for
 --   verify-sql-mirrors-not-stale (B2): the 2026-11-02 stamp did not name this later same-day migration.
 -- Refreshed 2026-11-02 (re-derived, see below) by the 🔧 Quality & Repair Engineer (2nd daily run) for migration
@@ -62,7 +67,7 @@ begin
       and tablename <> 'aqar_residential_listings'
   loop
     execute format('select count(*) from public.%I where active = true', t) into act;
-    execute format('select count(*) from public.%I where active = true and last_seen_at < now() - $1 * interval ''1 day''', t)
+    execute format('select count(*) from public.%I where active = true and greatest(last_seen_at, last_verified_alive_at) < now() - $1 * interval ''1 day''', t)
       using stale_days into stale;
 
     if act >= min_population and stale > max_frac * act then
@@ -134,7 +139,7 @@ begin
     -- construction: 24 slices of 1/24th of the population each cover it exactly as well as one
     -- monolithic run, and no row is ever double-counted.
     execute format(
-      'select count(*) from public.%I where active = true and last_seen_at > now() - make_interval(hours => %s)',
+      'select count(*) from public.%I where active = true and greatest(last_seen_at, last_verified_alive_at) > now() - make_interval(hours => %s)',
       t, cov_window_hours) into observed;
 
     coverage_floor := ceil(coverage_frac * act);
@@ -152,7 +157,8 @@ begin
             'coverage_floor', coverage_floor,
             'coverage_frac', coverage_frac,
             'window_hours', cov_window_hours,
-            'measure', 'distinct ACTIVE rows whose last_seen_at was refreshed inside the window. '
+            'measure', 'distinct ACTIVE rows whose greatest(last_seen_at, last_verified_alive_at) is inside the window '
+                    || '(a direct liveness oracle ALIVE verdict counts: it is stronger evidence than crawl presence). '
                     || 'Every write to last_seen_at is a real source observation (a crawl upsert, '
                     || 'or a liveness oracle confirming the listing live); no DB function writes '
                     || 'it, so a blocked crawl cannot inflate this number. Replaced '

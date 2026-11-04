@@ -136,6 +136,18 @@ with 30 directly-read in-feed controls (flips abort under 90% live). It changes 
 `LivenessPolicy` raises if `absence_is_candidate_only` is disabled. No other platform may declare
 it without an owner decision recorded here.
 
+### 3.1 "Stale" means NO source evidence of EITHER kind (2026-11-04, migration 20261104032124)
+
+Because the two facts live in two columns, any question of the form *"when did the source last tell
+us this ad exists?"* must read **both**: `greatest(last_seen_at, last_verified_alive_at)`. A direct
+ALIVE verdict is the stronger of the two, and the contract stamps only `last_verified_alive_at` for
+it. The daily stale sweep `mark_stale_listings_inactive()` read `last_seen_at` alone, so platforms
+whose oracle re-reads every row but whose crawl sees a slice read as stale: muhaysini 7,024 of 18,785
+"stale" with every row directly verified inside 3 days (13 days of `stale_breaker_escape`), haraj
+13,315 of 15,073. It now reads both, in the stale count AND the coverage gate. A row with neither
+stamp in the window is still reported. The sweep never deactivates anything, so no kill rule moved.
+Barrier: `scripts/verify-stale-coverage-gate.ts` §E (both directions) and its §D revert guard.
+
 ## 4. Every production-searchable platform must declare a strategy
 
 `scrapers/common/liveness_policies.py` is the registry. A platform without an entry raises
