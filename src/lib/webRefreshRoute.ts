@@ -42,6 +42,17 @@
 const EXEMPT_PATHS = new Set(['/', '/auth']);
 
 /**
+ * The DOORS (owner 2026-09-03): `/support` and `/about` raise components/InfoModal and then replace
+ * the URL with '/' THEMSELVES (src/app/support.tsx, src/app/about.tsx). They still land on Home — but
+ * the door has to mount first. Since the web bundle is split per route (app.json asyncRoutes, #9956,
+ * 2026-11-02), a door's screen is a lazy chunk, so this root-layout guard ran its `router.replace('/')`
+ * before the door existed and the modal was never raised: /support opened the bare Filter home
+ * (guardian «the-doors-open», last pass 2026-11-02 09:04 UTC, red on every run after). Leaving the
+ * doors to their own redirect keeps «a refresh lands on Home» true and lets the door open first.
+ */
+export const DOOR_PATHS: ReadonlySet<string> = new Set(['/support', '/about']);
+
+/**
  * True when the URL still carries an unconsumed search intent.
  *
  * Kept (rather than deleted with the old restore behaviour) because it states the one fact the
@@ -67,6 +78,7 @@ export function hasRestorableQuery(search: string): boolean {
 export function shouldSendRefreshHome(pathname: string | null | undefined, search: string): boolean {
   if (!pathname) return false;
   if (EXEMPT_PATHS.has(pathname)) return false;
+  if (DOOR_PATHS.has(pathname)) return false;   // the door goes Home itself, after raising its modal
   // Every other deep route — including `/agent` since 2026-08-16 (owner: "when i refresh takes me to
   // the filter page … not this here") — comes back on Home. With or without params: `?filter=`/
   // `?seed=` on a page load are never executable anyway (appSession gate), so carrying them to an
