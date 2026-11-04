@@ -702,6 +702,36 @@ def parse_price_per_meter(text: str) -> Optional[int]:
     return None
 
 
+def ppm_is_placeholder(text: str) -> bool:
+    """True when the page's «سعر المتر» is exactly 1 — aqar's placeholder rate, not a price.
+
+    Owner decision #4 (2026-11-04): an aqar ad with no price and only «سعر المتر 1 ريال» shows NO
+    price — never rate × area. aqar itself multiplies that placeholder by the area into its headline
+    (ad 6738236 renders «21,721 § ريال / سنوي» for 21,721 m² beside «سعر المتر 1 §»), and the index
+    would derive 1 × area for a sale with no total (price_total_effective). Exactly the digit «1»:
+    «1.25» or «1,093.74» is a real published rate and is untouched."""
+    m = _PPM_LABEL_RE.search(text or "")
+    return bool(m) and m.group(1) == "1"
+
+
+def price_is_rate_one_x_area(area_m2, price_total, price_annual, rent_period) -> bool:
+    """True when the published figure IS 1 × area — aqar's own multiplication of its placeholder rate,
+    so it is no price either (owner decision #4). Called only when the page's rate is the placeholder.
+    A price that differs from the area is the advertiser's real figure and stays."""
+    shown = {price_total, price_annual}
+    if price_annual and rent_period == "monthly":
+        shown.add(price_annual // 12)
+    shown.discard(None)
+    return bool(area_m2) and area_m2 in shown
+
+
+def rate_placeholder_fields(text: str, area_m2, price_total, price_annual, rent_period) -> dict[str, bool]:
+    """What owner decision #4 retracts on this page: {'ppm': the placeholder rate 1, 'price': a 1 × area figure}."""
+    ppm = ppm_is_placeholder(text)
+    return {"ppm": ppm,
+            "price": ppm and price_is_rate_one_x_area(area_m2, price_total, price_annual, rent_period)}
+
+
 def _html_to_text(html: str) -> str:
     """Strip HTML tags + collapse whitespace so 'غرف النوم<span>3</span>' becomes
     'غرف النوم 3' — which our label+number regexes can match."""
@@ -1095,6 +1125,15 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     if land_usage_from:
         source_capture["land_usage_from"] = land_usage_from
 
+    # Owner decision #4 (2026-11-04): «سعر المتر 1» is a placeholder; a price equal to 1 × area is aqar's
+    # multiplication, not the advertiser's figure. Both are written as an authoritative NULL.
+    # Both are settled by a SUCCESSFUL read of aqar's own page (s_authoritative): a failed fetch settles nothing.
+    placeholder = rate_placeholder_fields(text, area_m2, price_total, price_annual, rent_period)
+    rate_one = bool(s_authoritative and placeholder["ppm"])
+    rate_x_area = bool(s_authoritative and placeholder["price"])
+    if rate_x_area:
+        price_ev_raw = "سعر المتر 1 × المساحة"
+
     return {
         "ad_number":               ad_number,
         "listing_url":             url,
@@ -1119,11 +1158,12 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         # upsert guard writes the NULL instead of preserving a stale figure; None everywhere else,
         # which the guard still drops. price_per_meter is untouched by this: «سعر المتر» is its own
         # published field and aqar's non-publication of a TOTAL says nothing about it.
-        "price_annual":            (AUTHORITATIVE_NULL if authoritative_no_price and transaction_type == "Rent"
-                                    else price_annual),
-        "price_total":             (AUTHORITATIVE_NULL if (authoritative_no_price or rate_headline)
+        "price_annual":            (AUTHORITATIVE_NULL if (authoritative_no_price or rate_x_area)
+                                    and transaction_type == "Rent" else price_annual),
+        "price_total":             (AUTHORITATIVE_NULL if (authoritative_no_price or rate_headline or rate_x_area)
                                     and transaction_type != "Rent" else price_total),
-        "price_per_meter":         price_per_meter,
+        # The placeholder rate is cleared by ITS OWN flag (decision #4), never by the total-price decision.
+        "price_per_meter":         AUTHORITATIVE_NULL if rate_one else price_per_meter,
         "rent_period":             rent_period,
         # PRICE = SOURCE evidence (owner invariant 2026-08-04). Evidence exists so a stored price can
         # be adjudicated from the DB alone: the 48 rows repaired on 2026-08-04 stored 440 while their
@@ -1145,11 +1185,13 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             field=("aqar RSC payload price field" if price_ev_origin == "structured"
                    else "price slot (rendered text)"),
             raw=price_ev_raw,
-            stored=price_per_meter if rate_headline else (price_total if price_total is not None else price_annual),
+            stored=(None if rate_x_area else price_per_meter if rate_headline
+                    else (price_total if price_total is not None else price_annual)),
             kind="per_meter" if rate_headline else ("total" if price_total is not None else "annual"),
             unit="per_meter" if rate_headline else "total",
             origin=price_ev_origin,
-            authoritative_absent=authoritative_no_price,
+            # rate_x_area: the page's only "price" is aqar's 1 × area — it published no price (decision #4).
+            authoritative_absent=authoritative_no_price or rate_x_area,
         ),
         "rent_now_pay_later":         rent_now_pay_later,
         "rent_now_pay_later_monthly": rent_now_pay_later_monthly,
