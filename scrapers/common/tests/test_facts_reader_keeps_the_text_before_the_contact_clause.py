@@ -44,3 +44,32 @@ def test_a_clause_that_is_only_contact_is_still_dropped_whole():
     out = sanitize("فيلا للبيع", "فيلا دورين مع مسبح وملحق. للتواصل واتساب ابو سعد. موقف سيارتين")
     assert "مسبح وملحق" in out and "موقف سيارتين" in out
     assert "واتساب" not in out and "للتواصل" not in out and "ابو سعد" not in out
+
+
+# aqar 15316395 (2026-11-04), one line, the contact words FIRST and the whole ad after them (name changed, number fake).
+ONE_LINE = ("للتواصل اتصال أو واتساب ابو يوسف 0551234567 الدور الأول تتكون من 3 غرف نوم 1 غرفة طعام 1 صالة 1 مجلس "
+            "3 حمام 1 مطبخ مصعد سطح موقف سياره مخدومة بالتحلية الضمانات تامين ضد العيوب الخفية 10 سنوات")
+
+
+def test_a_one_line_ad_after_its_contact_words_is_kept():
+    out = sanitize(None, ONE_LINE)
+    for feature in ("مطبخ مصعد سطح", "موقف سياره", "العيوب الخفية"):
+        assert feature in out, out
+
+
+def test_the_contact_words_of_a_one_line_ad_are_still_gone():
+    out = sanitize(None, ONE_LINE)
+    for pii in ("للتواصل", "واتساب", "يوسف", "0551234567"):
+        assert pii not in out, out
+
+
+def test_a_long_name_after_a_contact_word_never_survives():
+    # a six-word name with no kunya, then the ad: the name sits inside the cut span
+    out = sanitize(None, "للتواصل مع الاستاذ عبدالرحمن بن محمد بن سعد العتيبي فيلا دورين مع مسبح وملحق ومجلس رجال وموقف سيارتين وحوش")
+    assert "عبدالرحمن" not in out and "العتيبي" not in out, out
+
+
+def test_a_title_after_the_span_cuts_the_clause_whole():
+    txt = ("للتواصل واتساب الوسيط العقاري المعتمد لدى الهيئة العامة للعقار الاستاذ فهد فيلا دورين مع مسبح وملحق ومجلس "
+           "رجال وموقف سيارتين وحوش")
+    assert "فهد" not in sanitize(None, txt)
