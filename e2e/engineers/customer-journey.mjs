@@ -43,6 +43,9 @@ import {
   normUrl, isMainSearch, afTargetsFor, carriedOnRequest, typeUi, TYPE_UI,
   priceOf, rangeAround, clampToPriceBox, pickSpread, idKey,
 } from './journey-lib.mjs';
+// The AF's own card lists (backlog 1268): targets are chips the product really shows for the listing's type × deal.
+// A plain static import — if the module cannot load the run fails loudly, never falls back to guessing.
+import { COHORT_CARDS } from '../../src/lib/afCohorts.ts';
 
 // ── environment ────────────────────────────────────────────────────────────────────────────
 const require = createRequire(import.meta.url);
@@ -133,7 +136,7 @@ const sampleListings = async (n) => {
   }
   const rows = (await Promise.all(platforms.map((p) =>
     rest(`search_listings_ar?select=${ROW_COLS}&${base}&platform=eq.${encodeURIComponent(p)}&order=first_seen_at.desc&limit=30`)))).flat();
-  const usable = rows.filter((r) => typeUi(r.type_ar, r.source_table) && (MODE !== 'af' || afTargetsFor(r).length));
+  const usable = rows.filter((r) => typeUi(r.type_ar, r.source_table) && (MODE !== 'af' || afTargetsFor(r, 2, COHORT_CARDS).length));
   if (MODE !== 'af') return pickSpread(usable, n);
   // The app offers the guided interview only above 25 results, so an AF sample prefers listings
   // whose city + deal + type scope is comfortably larger (one cheap exact-count request each).
@@ -410,7 +413,7 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     }
 
     // ── AF mode: the guided interview ──────────────────────────────────────────────────────
-    const targets = afTargetsFor(row);
+    const targets = afTargetsFor(row, 2, COHORT_CARDS);
     if (!targets.length) { result.status = 'UNKNOWN'; result.failedStep = 'listing carries no DB-known AF answer (all unknown/false)'; return result; }
     result.evidence.cardFoundBeforeAF = found;            // informative, not the AF verdict
     step(`open AF (targets: ${targets.map((t) => t.kind === 'amenity' ? t.token : 'furnished=yes').join(', ')})`);
