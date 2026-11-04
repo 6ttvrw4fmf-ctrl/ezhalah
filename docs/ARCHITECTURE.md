@@ -1109,12 +1109,12 @@ had fallen behind the rules. Each class below now has a mutation-proven barrier;
 
 **The owner's pick:** each minute carries as few jobs as possible, `:00` is left to the matview refresh, and the jobs
 `cron_starvation_risk` names move out of the hog windows, lowering a cadence only where the hour is full.
-Applied by migration `20261104000454` (minute changes only: no command changed, and no hour changed, so no work
+Applied by migrations `20261104000454` + `20261104010208` (minute changes only: no command changed, and no hour changed, so no work
 moved into or out of the 05–17 / 21–23 UTC heavy windows).
 
 - **`:00` is empty in every hour.** `run-remediation` and `mon-engineer-locked-out` run `*/15` at offsets 3 and 2,
   `alert-to-incident-bridge` runs `*/20` at offset 9, and the daily jobs that used `:00` start later in the same hour.
-- **Hog windows** (p95, the detector's own measure): `mon-detectors-and-dispatch` :59 → :10,
+- **Hog windows** (p95, the detector's own measure): `mon-detectors-and-dispatch` :59 → :10 (:11 since p95 667 s),
   `refresh_listing_native_location_v1` **now :16** → :21, `sync-search-listings-ar` :22 → :37. Moving the matview
   refresh from :20 to :16 took the index writer out of its window (that was the P1 half of alert 3844). The pair still
   orders by the advisory lock `location_pipeline:v1_refresh`, and :16 is still before :22.
@@ -1127,9 +1127,15 @@ moved into or out of the 05–17 / 21–23 UTC heavy windows).
   130–145 after the cuts (24 of them the P0 lane alone). The worst (hour, minute) fell from 8 jobs to 4, which is the
   ratchet now. `cron_minute_collision` (≥ 3 per instant) therefore stays open. Getting to 1 needs a different decision:
   merging the ~40 zero-second dispatch/monitor jobs into fewer jobs, or running more of them every 2 hours.
-- **Measured before the change:** with `cron.max_running_jobs = 32`, every job the starvation alarm named had started
-  on time on every run for 7 days (start offset < 0.1 s for nearly all). The windows were a risk, not observed
-  starvation.
+- **What actually holds the scheduler (measured in the first hour, fixed by `20261104010208`):** the 15-minute sync
+  did not delay a single start. But while `district-recovery-pipeline` ran (121 s) nothing new started: the four :44
+  jobs, the P0 lane among them, began at 00:45:01, the second it finished. The :20 jobs waited the same way behind the
+  tail of `refresh_listing_native_location_v1`, which also calls `refresh_district_recovery()`. Starts came about a
+  minute late and none was lost. `district-recovery-pipeline` now runs at :54, so the minute after it carries no P0 run.
+  The 7-day history agrees: before this change, jobs at :24/:25 (inside the old :20 refresh's tail) started up to 34–59 s late.
+- **Windows drift with p95.** Within the hour, the sweep's p95 rose 650 → 667 s (window to :11) and the sync sits at
+  890 s (past 900 s it reaches :38). The follow-up keeps :11 and :38 free of hourly jobs, so the layout survives both
+  windows growing by one more minute. Re-measure before you add a job near a window edge.
 
 Barrier: `scripts/verify-cron-slot-discipline.ts` over the committed mirror `sql/mirrors/cron_schedule.json`
 (minute 0 empty, no non-exempt job in a hog window, stack ≤ 4 and shrink-only, no two single-writer jobs on one
