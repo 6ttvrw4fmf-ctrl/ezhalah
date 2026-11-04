@@ -53,6 +53,13 @@ const WAIVED: Record<string, string> = {
     'undone by 20261103232309_revert_hide_billion_price_typos.sql the same hour (owner: «dont hide, show me» — a source\'s ' +
     'own number is never hidden); the revert restored enforce_price_size_sanity and dropped the helper, and the next ' +
     'sync re-served every row (339 of 339 over 1 B SAR live at 23:37 UTC). Nothing of this repair remains to decay.',
+  // 2026-11-03, owner decision 5: aqar maid/driver room exist only on the Villa form.
+  '20261103233906_aqar_non_villa_maid_driver_room_null.sql':
+    'owner-approved NULL of maid_room/driver_room on aqar non-Villa rows (258 residential + 9 commercial, every value logged ' +
+    'to ops_amenity_defabrication_evidence first); watched by the standing detector that found it, ' +
+    'mon_detect_fabricated_unpublished_amenity (alert fabricated_unpublished_amenity, in the roster), which re-raises on any ' +
+    'non-Villa value (probe #18/#19 cohort), and the writer is fixed (_villa_form_only in scrapers/aqar/enrich_residential.py, ' +
+    'test_aqar_maid_driver_villa_form_only.py). The applied file cannot be edited to name it (content parity: byte-exact mirror).',
   // 2026-11-03. haraj 18362394: «للبيع 5الف» was the 5,000 m² the post states, stored as a 5,000 SAR price (price_eq_area_or_ppm).
   '20261103194345_price_eq_area_adjudicated_haraj_sanadak.sql':
     'one-row evidence repair (haraj 18362394 price → NULL, the value the fixed parser scrapers/haraj/prose.py now computes, ' +

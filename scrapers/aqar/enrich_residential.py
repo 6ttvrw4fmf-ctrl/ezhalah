@@ -137,6 +137,23 @@ _EXTENDED_DETAIL_KEYS: dict[str, str] = {
 # Either of aqar's two entrance flags means a private/independent entrance.
 _PRIVATE_ENTRANCE_KEYS = ("special_entrance", "two_entrances")
 
+# Maid + driver room exist ONLY on aqar's VILLA ad form (owner decision 5, 2026-11-03: «Yes, use your
+# picks»). Probe ops_aqar_commercial_amenity_probe #18/#19 (2026-08-24): 90 non-Villa live pages, 0 fetch
+# failures, NOT ONE published a maid/driver value, while 10/10 Villa controls did; re-confirmed
+# 2026-11-03 from stored captures: «المميزات» names غرفة خادمة/سائق on 11,374 of 12,578 recent Villa
+# rows carrying a true, and on 0 of 77 non-Villa ones. So on any other form a stored value is not the
+# source's (it is prose residue from before 2026-08-23), and since `_unknown_must_not_overwrite_known`
+# DROPS a plain None, an absent key could never clear it. The form itself settles it: AUTHORITATIVE_NULL.
+_VILLA_FORM_ONLY_COLUMNS = ("maid_room", "driver_room")
+
+
+def _villa_form_only(features: dict[str, Any], property_type: Optional[str]) -> dict[str, Any]:
+    """Clear the Villa-form-only columns on every non-Villa row (the source has no such field there)."""
+    if property_type != "Villa":
+        for col in _VILLA_FORM_ONLY_COLUMNS:
+            features[col] = AUTHORITATIVE_NULL
+    return features
+
 _LISTING_OBJ_RE = re.compile(r'"listing"\s*:\s*\{')
 
 
@@ -1036,6 +1053,8 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # its own page payload. Read THOSE. A key aqar does not publish stays UNKNOWN (None) — it is never
     # turned into False, and never guessed from prose.
     features = _amenities(html, text, obj)
+    # maid/driver: the VILLA form is the only one that has these fields (owner decision 5, 2026-11-03).
+    features = _villa_form_only(features, property_type)
 
     # ─── Media & Metadata ────────────────────────────────────────────────────
     # The ad's OWN gallery only — see _own_photos(). None = could not read it on this fetch, and the
