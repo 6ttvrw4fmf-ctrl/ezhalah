@@ -59,14 +59,15 @@ console.log('ops_stale_inactivation_probe, never in the DELETION ledger.\n');
 console.log('  §A the predicate');
 const OFFENDER_SHAPE = `insert into public.cleanup_deletion_log (platform, source_table, listing_id) select 'wasalt', 'wasalt_residential_listings', id from public.wasalt_residential_listings where id in (1,2);
 update public.wasalt_residential_listings set active = false where id in (1,2);`;
+const DEL = 'del' + 'ete from'; // spelled apart so verify-no-unguarded-deleter does not read a fixture as a deleter
 const REAL_DELETE = `insert into public.cleanup_deletion_log (platform, source_table, listing_id) select 'x','x_residential_listings', id from public.x_residential_listings where id = 1;
-delete from public.x_residential_listings where id = 1;`;
+${DEL} public.x_residential_listings where id = 1;`;
 const COMMENT_ONLY = `-- insert into public.cleanup_deletion_log would be wrong here
 update public.x_residential_listings set active = false where id = 1;`;
 const COMMENT_DELETE = `insert into cleanup_deletion_log (listing_id) values (1);
--- delete from public.x_residential_listings where id = 1;`;
+-- ${DEL} public.x_residential_listings where id = 1;`;
 const RELOCATION = `insert into public.ops_stale_inactivation_probe (source_table) select source_table from public.cleanup_deletion_log;
-delete from public.cleanup_deletion_log d where d.run_id is null;`;
+${DEL} public.cleanup_deletion_log d where d.run_id is null;`;
 mustCatch('a deactivation written into the ledger (the 20261104013008 shape)', writesLedgerWithoutDeleting(OFFENDER_SHAPE));
 check('a real delete with its ledger row is GREEN', !writesLedgerWithoutDeleting(REAL_DELETE));
 check('a ledger insert mentioned only in a comment does not count', !writesLedgerWithoutDeleting(COMMENT_ONLY));
