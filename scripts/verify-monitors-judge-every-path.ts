@@ -157,7 +157,11 @@ const resolvesRouted = (b: string) =>
   /mon_resolve_key\(\s*'duplicate_card_surface_routed'/.test(b) && /v_colliding\s*:=\s*v_colliding\s*\|\|/.test(b);
 const coll = defs('mon_detect_url_collisions_res_vs_com');
 check('latest url-collision sweep resolves a routed copy, holding it while a named platform collides', !!coll[0] && resolvesRouted(coll[0].body), coll[0]?.file);
-mutation(`the previous sweep (${coll[1]?.file}) does not`, () => !!coll[1] && !resolvesRouted(coll[1].body));
+// Every definition since the resolver landed must keep it; the mutation is the last one BEFORE it
+// (a later sweep that rewrites the judgement, e.g. 20261104075037, is not the pre-fix shape).
+const firstWithout = coll.findIndex((d) => !resolvesRouted(d.body));
+check('every url-collision sweep since the resolver landed keeps it', firstWithout !== 0 && coll.slice(0, firstWithout < 0 ? coll.length : firstWithout).every((d) => resolvesRouted(d.body)));
+mutation(`the sweep before the resolver (${coll[firstWithout]?.file}) does not`, () => firstWithout > 0 && !resolvesRouted(coll[firstWithout].body));
 
 // ── 4. the stale sweep judges both keys before any `continue` ────────────────────────────────────
 console.log('4. mark_stale_listings_inactive judges its keys on every path');
