@@ -54,3 +54,24 @@ def test_a_wordpress_menu_link_is_not_the_ad():
             '<a href="https://aqaralriyadh.com/category/x/">شقق مفروشة</a></li></ul>')
     assert "مفروشة" not in _all(page_evidence(OWN + menu))
     assert "مفروشة" in page_evidence(OWN + menu + "<p>الشقة مفروشة</p>")["text_head"]
+
+
+# The REAL markup (sakan 12613050 re-read from production 2026-11-04, HTTP 200): the option text is a separate
+# <label for=…>. The fixture above put the text right after the input, so the 11-03 fix passed while the score kept
+# reading «مؤثث» on 9 of 10 sakan ads.
+POPUP_REAL = ('<span class="f14">حالة التأثيث</span>'
+              '<input type="radio" name="property_furnishing_status" id="furnishing_new" hidden value="1"> '
+              '<label for="furnishing_new">مؤثث</label> '
+              '<input type="radio" name="property_furnishing_status" id="furnishing_bw" hidden value="2"> '
+              '<label for="furnishing_bw">شبه مؤثث</label> '
+              '<input type="radio" name="property_furnishing_status" id="furnishing_status_old" hidden value="3"> '
+              '<label for="furnishing_status_old">غير مؤثث</label>')
+
+
+def test_a_label_bound_to_a_radio_input_is_not_a_page_line():
+    assert "مؤثث" not in _all(page_evidence(OWN + POPUP_REAL))
+
+
+def test_a_label_bound_to_a_checkbox_or_text_field_is_kept():
+    own = OWN + '<input type="checkbox" id="lift" checked disabled><label for="lift">مصعد</label>'
+    assert "مصعد" in _all(page_evidence(own + POPUP_REAL))
