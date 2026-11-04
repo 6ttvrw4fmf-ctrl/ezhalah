@@ -22,7 +22,10 @@ SCHEMA = '{{"@id":"real-estate-listing-schema-{}"}}'
 class _Table:
     def __init__(self, sink, name):
         self.sink, self.name, self._payload, self._filters = sink, name, None, {}
-        self._rows = sink.rows
+        # Residential is the table every scripted test speaks about; the other table answers only
+        # what a test put in sink.rows_by_table (2026-11-04: the sweep reads BOTH tables).
+        self._rows = sink.rows if name == R.TABLE else sink.rows_by_table.get(name, [])
+    def insert(self, rows): self.sink.inserts.append((self.name, list(rows))); return self
     def select(self, *a, **k): return self
     def eq(self, col, val): self._filters[col] = val; return self
     def in_(self, col, vals): self._filters[col] = tuple(vals); return self
@@ -36,6 +39,7 @@ class _Table:
     def execute(self):
         if self._payload is not None:
             self.sink.writes.append((self._filters.get("id"), dict(self._payload)))
+            self.sink.table_writes.append((self.name, self._filters.get("id"), dict(self._payload)))
             return type("R", (), {"data": []})()
         rows = list(self._rows)
         if getattr(self, "_gt", None):
@@ -45,8 +49,9 @@ class _Table:
 
 
 class _Client:
-    def __init__(self, rows):
+    def __init__(self, rows, rows_by_table=None):
         self.rows, self.writes, self.orders = rows, [], []
+        self.rows_by_table, self.table_writes, self.inserts = dict(rows_by_table or {}), [], []
     def table(self, name): return _Table(self, name)
 
 
@@ -69,8 +74,8 @@ def wire(monkeypatch):
     """Neutralise all I/O; return a helper that runs main() against scripted probe responses."""
     run_name: list[str] = []
 
-    def run(rows, responses, argv, sitemap=frozenset(), canary=HEALTHY):
-        client = _Client(rows)
+    def run(rows, responses, argv, sitemap=frozenset(), canary=HEALTHY, rows_by_table=None):
+        client = _Client(rows, rows_by_table)
         monkeypatch.setattr(R, "_canaries", lambda c, s, budget=None: dict(canary))
         monkeypatch.setattr(R, "sb", lambda: client)
         monkeypatch.setattr(R, "begin_run", lambda name: (run_name.append(name), 1)[1])
@@ -404,3 +409,41 @@ def test_alive_since_read_is_strict_and_fails_closed():
     assert R.alive_since_read("2026-10-10T02:00:00Z", "2026-10-10T02:30:00+00:00") is False
     assert R.alive_since_read(None, "2026-10-10T02:30:00+00:00") is False
     assert R.alive_since_read("garbage", "2026-10-10T02:30:00+00:00") is False
+
+
+# -- BOTH tables (2026-11-04) ------------------------------------------------------------------
+# The sweep read dealapp_residential only, so dealapp_commercial DA598834 / DA615946 sat at 5 strikes
+# for 5 days, served, with no reader able to decide them (served_after_source_gone:dealapp_commercial).
+
+def test_a_commercial_ad_is_read_and_its_kill_lands_on_the_commercial_table(wire):
+    alive = [_row(i) for i in range(1, 40)]                  # residential, enough to trust the run
+    com_url = "https://dealapp.sa/ar/ad-details/70007"
+    com = [{**_row(7, strikes=2), "listing_url": com_url}]   # SAME id as a residential row
+    responses = {REQ.format(i): (200, SCHEMA.format(i), REQ.format(i)) for i in range(1, 40)}
+    responses[com_url] = (404, "", com_url)                  # the commercial ad's own page: gone
+    client = wire(alive, responses, ["--limit", "100", "--apply"],
+                  rows_by_table={R.COMMERCIAL_TABLE: com})
+    kills = [(t, i) for t, i, p in client.table_writes if p.get("active") is False]
+    assert kills == [(R.COMMERCIAL_TABLE, 7)], \
+        f"the commercial row's kill must land on the commercial table, never residential id 7: {kills}"
+    res7 = [p for t, i, p in client.table_writes if t == R.TABLE and i == 7]
+    assert res7 and all(p.get("active") is not False for p in res7), "residential id 7 is alive"
+    detail = [r for name, rs in client.inserts if name == "dealapp_liveness_detail" for r in rs]
+    assert [(r["source_table"], r["listing_id"], r["verdict"]) for r in detail] == \
+        [(R.COMMERCIAL_TABLE, 7, "kill")]
+
+
+def test_candidates_come_from_both_tables_with_their_own_identity():
+    sink = type("S", (), {})()
+    sink.rows, sink.orders = [_row(1, strikes=3)], []
+    sink.rows_by_table = {R.COMMERCIAL_TABLE: [_row(1, strikes=4)]}
+    asked = []
+
+    class _C:
+        def table(self, name):
+            asked.append(name)
+            return _Table(sink, name)
+    got = R._collect_candidates(_C(), 10)
+    assert set(asked) == {R.TABLE, R.COMMERCIAL_TABLE}
+    assert [(r["_tbl"], r["id"]) for r in got] == [(R.COMMERCIAL_TABLE, 1), (R.TABLE, 1)], \
+        "the same id in two tables is two rows; the 4-strike one leads"

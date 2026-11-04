@@ -53,6 +53,14 @@ from scrapers.dealapp.liveness import (  # FRESH_MAX_AGE_S: one rule, shared wit
 
 BASE = "https://dealapp.sa"
 TABLE = "dealapp_residential_listings"
+# BOTH tables (2026-11-04). The sweep read only the residential table, so a dealapp COMMERCIAL ad the
+# site removed had no reader that could decide it: the crawl's prune holds a removed ad UNKNOWN (its
+# page renders the bogus-id shell) and only this sweep's bracketed render reads it gone. Measured
+# 2026-11-04: dealapp_commercial DA598834 / DA615946 at 5 strikes, served for 5 days, their own pages
+# redirecting to /ar/tabs/home in a browser, and no dealapp_liveness_detail row for either, ever.
+# Every candidate row carries `_tbl`; every write goes to that row's own table.
+COMMERCIAL_TABLE = "dealapp_commercial_listings"
+TABLES: tuple[str, ...] = (TABLE, COMMERCIAL_TABLE)
 SITEMAP_INDEX = f"{BASE}/sitemap.xml"
 MIN_INTERVAL = 0.35
 
@@ -140,7 +148,21 @@ def _adid(listing_url: str) -> str:
     return m.group(1) if m else ""
 
 
-def _collect_candidates(client, limit: int) -> list[dict]:
+def _tbl(row: dict) -> str:
+    """The table a candidate row came from (residential when a caller built the row by hand)."""
+    return row.get("_tbl") or TABLE
+
+
+def _key(row: dict) -> tuple[str, int]:
+    """Row identity across BOTH tables: ids are per-table sequences, so an id alone can collide."""
+    return (_tbl(row), row["id"])
+
+
+def _probe_age(r: dict) -> str:
+    return r.get("last_liveness_probe_at") or ""
+
+
+def _collect_candidates(client, limit: int, tables: tuple[str, ...] = TABLES) -> list[dict]:
     """Active rows, least-recently LOOKED AT first (LISTING_LIFECYCLE_ENGINEER.md §4.1d).
 
     This used to order by last_verified_alive_at NULLS FIRST. A row dealapp answers with a shell
@@ -151,7 +173,25 @@ def _collect_candidates(client, limit: int) -> list[dict]:
     every verdict, so a probed row goes to the back for a full cycle."""
     cols = ("id, ad_number, listing_url, missing_count, last_verified_alive_at, "
             "last_liveness_probe_at")
-    rows = (_execute(client.table(TABLE).select(cols)
+    rows: list[dict] = []
+    struck: list[dict] = []
+    for tbl in tables:
+        r_rows, r_struck = _collect_table(client, tbl, cols, limit)
+        rows += [dict(r, _tbl=tbl) for r in r_rows]
+        struck += [dict(r, _tbl=tbl) for r in r_struck]
+    # One rotation across both tables: least-recently looked at first (NULL = never, leads), and
+    # struck rows by strikes then probe age -- the same two orders each table query applies.
+    rows.sort(key=lambda r: (r.get("last_liveness_probe_at") is not None, _probe_age(r)))
+    struck.sort(key=lambda r: (-int(r.get("missing_count") or 0),
+                               r.get("last_liveness_probe_at") is not None, _probe_age(r)))
+    keys = {_key(r) for r in struck}
+    rows = struck + [r for r in rows if _key(r) not in keys]
+    return [r for r in rows if (r.get("listing_url") or "").strip()]
+
+
+def _collect_table(client, tbl: str, cols: str, limit: int) -> tuple[list[dict], list[dict]]:
+    """One table's rotation window and struck rows (the two reads _collect_candidates merges)."""
+    rows = (_execute(client.table(tbl).select(cols)
                      .eq("active", True)
                      .order("last_liveness_probe_at", desc=False, nullsfirst=True)
                      .limit(max(limit * 4, limit) if limit else 20000),
@@ -166,15 +206,13 @@ def _collect_candidates(client, limit: int) -> list[dict]:
     # `limit` struck rows was always the 1-strike ones: the crawl re-stamps every row at >= 2 strikes
     # nightly, so on 10-25 the 10:47 run read 17 struck rows and none at >= 2, while 117 served ads sat
     # at 3-11 strikes with no alive reading in 48 h (76 of them read gone twice that morning).
-    struck = (_execute(client.table(TABLE).select(cols)
+    struck = (_execute(client.table(tbl).select(cols)
                        .eq("active", True).gt("missing_count", 0)
                        .order("missing_count", desc=True)
                        .order("last_liveness_probe_at", desc=False, nullsfirst=True)
                        .limit(limit or 20000),
                        what="dealapp struck candidates").data or [])
-    ids = {r["id"] for r in struck}
-    rows = struck + [r for r in rows if r["id"] not in ids]
-    return [r for r in rows if (r.get("listing_url") or "").strip()]
+    return rows, struck
 
 
 def _probe_order(r: dict, sitemap) -> tuple:
@@ -456,7 +494,7 @@ def main() -> int:
                 # never resolve (migration 20260924). Never evidence of life on its own.
                 patch = {"missing_count": 0, "last_liveness_probe_at": now_iso,
                          **verification_patch(d, now_iso=now_iso)}
-                _execute(client.table(TABLE).update(patch).eq("id", row["id"]), what="dealapp verify")
+                _execute(client.table(_tbl(row)).update(patch).eq("id", row["id"]), what="dealapp verify")
                 stats["verified"] += 1
 
         bracketed = [a for a in bracketed_none(_RENDERS) if a in struck_adids]
@@ -473,11 +511,13 @@ def main() -> int:
         if writes_ok:
             # "We LOOKED", for every row this run read that no branch below writes: UNKNOWNs, and
             # strikes/kills the trust gate held back. Never evidence — only the rotation key.
-            looked = [row["id"] for row, action, _s, _st, _r in pending
+            looked = [row for row, action, _s, _st, _r in pending
                       if action not in ("reset",) and not (trusted and action in ("strike", "deactivate"))]
-            for i in range(0, len(looked), 200):
-                _execute(client.table(TABLE).update({"last_liveness_probe_at": now_iso})
-                         .in_("id", looked[i:i + 200]), what="dealapp looked")
+            for tbl in TABLES:
+                ids_t = [row["id"] for row in looked if _tbl(row) == tbl]
+                for i in range(0, len(ids_t), 200):
+                    _execute(client.table(tbl).update({"last_liveness_probe_at": now_iso})
+                             .in_("id", ids_t[i:i + 200]), what="dealapp looked")
 
         # A LIVE ANSWER BETWEEN STRIKES RESETS THEM — even one written by another reader while this
         # sweep was still reading (2026-10-10). The crawl shards and this sweep run at the same
@@ -492,25 +532,26 @@ def main() -> int:
             to_write = [(row, read_iso) for row, action, _s, _st, read_iso in pending
                         if action in ("strike", "deactivate")]
             stamps: dict = {}
-            ids = [row["id"] for row, _r in to_write]
-            for i in range(0, len(ids), 200):
-                res = _execute(client.table(TABLE).select("id, last_verified_alive_at")
-                               .in_("id", ids[i:i + 200]), what="dealapp recheck-alive")
-                for r in (getattr(res, "data", None) or []):
-                    stamps[r["id"]] = r.get("last_verified_alive_at")
-            held_alive = {row["id"] for row, read_iso in to_write
-                          if alive_since_read(stamps.get(row["id"]), read_iso)}
+            for tbl in TABLES:
+                ids = [row["id"] for row, _r in to_write if _tbl(row) == tbl]
+                for i in range(0, len(ids), 200):
+                    res = _execute(client.table(tbl).select("id, last_verified_alive_at")
+                                   .in_("id", ids[i:i + 200]), what="dealapp recheck-alive")
+                    for r in (getattr(res, "data", None) or []):
+                        stamps[(tbl, r["id"])] = r.get("last_verified_alive_at")
+            held_alive = {_key(row) for row, read_iso in to_write
+                          if alive_since_read(stamps.get(_key(row)), read_iso)}
             stats["held_alive"] = len(held_alive)
             for row, action, strikes, _status, _read in pending:
-                if row["id"] in held_alive:
+                if _key(row) in held_alive:
                     continue
                 if action == "strike":
-                    _execute(client.table(TABLE).update({"missing_count": strikes,
+                    _execute(client.table(_tbl(row)).update({"missing_count": strikes,
                                                          "last_liveness_probe_at": now_iso})
                              .eq("id", row["id"]), what="dealapp strike")
                     stats["struck"] += 1
                 elif action == "deactivate":
-                    _execute(client.table(TABLE).update(
+                    _execute(client.table(_tbl(row)).update(
                         {"missing_count": strikes, "active": False,
                          "last_liveness_probe_at": now_iso}).eq("id", row["id"]), what="dealapp kill")
                     stats["deactivated"] += 1
@@ -530,7 +571,7 @@ def main() -> int:
         detail_rows = [
             {
                 "run_at": now_iso,
-                "source_table": TABLE,
+                "source_table": _tbl(row),
                 "listing_id": row["id"],
                 "http_status": st if st else None,   # NULL = the fetch itself failed
                 # dealapp_liveness_detail's CHECK allows ('strike','kill','unknown') — NOT
@@ -545,7 +586,7 @@ def main() -> int:
                 "missing_count_before": int(row.get("missing_count") or 0),
                 "missing_count_after": strikes,
                 "applied": bool(writes_ok and trusted and action in ("strike", "deactivate")
-                                and row["id"] not in held_alive),
+                                and _key(row) not in held_alive),
             }
             for row, action, strikes, st, _read in pending
             if action != "reset"
