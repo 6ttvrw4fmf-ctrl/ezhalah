@@ -609,6 +609,10 @@ _NEAR_PUBLIC = frozenset(_n(w) for w in ("جنبها", "جنبه", "خلف", "خ
                                          "ظهيره", "كيلو", "كم", "تفتح"))
 _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "restaurant_cafe", "food_allowed", "sports_court",
                                 "football_pitch", "events_hall", "nursery", "garden"})
+# A UNIT FIXTURE is never «nearby» (🔬 2026-11-04 live walk, dealapp): «بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة»,
+# «قريب من المسجد عدد 9 مكيفات راكبه», «20 دقيقة من روشن ❄ تكييف» — the near word belongs to the bullet before, the AC
+# is the unit's. Kept to the AC: a kitchen or a lift CAN be a nearby place's («قريب من مطبخ السلطان», a tower's lifts).
+_NEAR_NEVER_FACTS = frozenset({"air_conditioner"})
 _METER_FACTS = frozenset({"separate_water_meter", "separate_electricity_meter"})
 _DIGITS = "0123456789"
 
@@ -646,6 +650,16 @@ def _bare(w: str) -> str:
     w = w[1:] if w.startswith("و") and len(w) > 3 else w
     w = w[1:] if w[:1] in ("ب", "ل", "ف") and len(w) > 3 else w
     return _strip_wa(w)
+
+
+# «قابل للتفاوض» is NEGOTIABLE, never «can be fitted» (🔬 2026-11-04, dealapp 17491376 «المطبخ راكب المكيفات راكبه وقابل
+# للتفاوض» read no AC): that «قابل» is dropped before the PREPARED words look at the neighbours.
+_NEGOTIABLE = ("للتفاوض", "للتفاهم", "للنقاش", "للسوم", "للمساومه")
+
+
+def _not_negotiable(words: list[str]) -> list[str]:
+    return [w for k, w in enumerate(words)
+            if not (_strip_wa(w) in ("قابل", "قابله") and words[k + 1:k + 2] and words[k + 1].startswith(_NEGOTIABLE))]
 
 
 def _strip_wa(w: str) -> str:
@@ -773,7 +787,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     gp = [w.lstrip(_DIGITS) or w for w in prev]
     gn = [w.lstrip(_DIGITS) or w for w in nxt]
     p2, n2 = gp[-2:], gn[:2]
-    if any(_starts(w, _PREPARED) for w in p2 + n2) or "prepared for" in " ".join(n2):
+    # a PUBLIC place keeps the old reading: «خدمات سيرا على الاقدام مثل بقالة … ومقهى السعر قابل للتفاوض» is a nearby café
+    neg = (lambda ws_: ws_) if fact in _PUBLIC_FACTS or fact in _NEAR_PUBLIC_FACTS else _not_negotiable
+    if any(_starts(w, _PREPARED) for w in neg(gp[-2:] + [""])[:-1] + neg(gn[:3])[:2]) \
+            or "prepared for" in " ".join(n2):
         return None, s, e
     if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) for w in p2):
         return None, s, e
@@ -784,7 +801,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if fact == "furnished" and (any(_starts(w, _PARTIAL) for w in n2) or any(_starts(w, _PARTIAL_BEFORE) for w in prev[-1:])):
         return None, s, e
     p5 = gp[-5:]
-    if any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5) or any(p in " ".join(p5) for p in _NEAR_PHRASES):
+    if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
+                                          or any(p in " ".join(p5) for p in _NEAR_PHRASES)):
         return None, s, e
     if fact in _NEAR_PUBLIC_FACTS and any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in p5):
         return None, s, e
@@ -796,6 +814,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     ex_before, ex_after = _EXCLUDE.get(fact, ((), ()))
     if fact in _METER_FACTS and "عداد" in t[ws:e]:
         ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
+    if fact == "air_conditioner" and "مكيفات" in t[ws:we]:
+        ex_before = ()                               # «مدخلان🔹 مكيفات راكبة»: AC UNITS are the home's; a lobby is «مدخل مكيف»
     if fact in _NEEDS_CUE and p2 and _starts(p2[-1], _CUES):
         ex_before, ex0 = (), ex_before               # «3 غرف واصل كهرباء»: the cue sits between (AI teacher pass 2026-10-27)
         if _starts(p2[-1], ("عداد",)):
@@ -1184,6 +1204,20 @@ def selftest() -> None:
         ("المطبخ والمكيفات غير راكبة", {"kitchen": False, "air_conditioner": False}, ()),
         ("مطبخ، مكيفات غير راكبة", {"kitchen": True, "air_conditioner": False}, ()),
         ("مكيفات ومطبخ راكب", {"kitchen": True, "air_conditioner": True}, ()),
+        # 🔬 2026-11-04 live walk: a near word or an entrance in the bullet BEFORE does not take the unit's AC away
+        ("بلكونة بانورامية مطله على لاندسكيب 🔹مكيفات راكبة", {"air_conditioner": True}, ()),
+        ("قريب من المسجد عدد 9 مكيفات راكبه", {"air_conditioner": True}, ()),
+        ("20 دقيقة من واجهة روشن ❄ تكييف", {"air_conditioner": True}, ()),
+        ("مدخلان للشقة مكيفات جديدة", {"air_conditioner": True}, ()),
+        ("🔸مدخل سيارة ✅ مكيفات راكبة", {"air_conditioner": True}, ()),
+        ("ممرات واسعة مكيفة", {}, ("air_conditioner",)),
+        ("مدخل فندقي مكيف", {}, ("air_conditioner",)),
+        ("قريب من: 🔸 مسجد 🔸 حديقة", {}, ("garden", "mosque")),
+        # «قابل للتفاوض» is negotiable, never «can be fitted»; a public place keeps the old reading
+        ("المطبخ راكب المكيفات راكبه وقابل للتفاوض", {"kitchen": True, "air_conditioner": True}, ()),
+        ("السعر قابل للتفاوض مطبخ راكب", {"kitchen": True}, ()),
+        ("مكيفات قابلة للتركيب", {}, ("air_conditioner",)),
+        ("خدمات سيرا على الاقدام مثل بقالة ومغسلة ملابس وصالون حلاقة ومقهى السعر قابل للتفاوض", {}, ("restaurant_cafe",)),
         ("مطبخ (SPLIT) (غير راكب)", {"kitchen": False}, ()),
         ("مطبخ راكب ومكيفات راكبة", {"kitchen": True, "air_conditioner": True}, ()),
         ("بدون مكيفات ومطبخ", {"air_conditioner": False, "kitchen": False}, ()),

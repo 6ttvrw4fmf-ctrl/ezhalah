@@ -2,6 +2,15 @@
 
 > **Cadence change (2026-11-03, migration 20261103013129):** the free word reader's incremental run (pg_cron `gh-facts-words-nightly`, name kept) now fires every hour at :01 UTC instead of 07:05 nightly (it was :25 for its first day; migration 20261103101143 moved it to :01 so each ~12-minute run ends before the :22 search sync — at :25 every read missed that hour's sync and waited for the next, up to about two hours), so a new ad's own words reach its chip within about an hour (owner: «whenever we get a new listing the description immediately matches»). One run reads only new / changed ads in ~12 minutes, no paid AI. Where this file says «nightly» about the free reader, read «hourly».
 
+> **Missed real AC (2026-11-04 live walk, after the prose-box clear).** The reader stays silent — never «no» — when in
+> doubt, and the 11-03 clear used that silence; a live walk then found ~1 in 3 cleared DealApp AC ads did say AC.
+> Two leaks: a near word in the bullet BEFORE («بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة», «قريب من المسجد 9 مكيفات»)
+> silenced the unit's AC, and an entrance word two words back («مدخلان🔹 مكيفات راكبة») read the AC units as the lobby's.
+> Fixed for the AC only (`_NEAR_NEVER_FACTS`; plural «مكيفات» is never the lobby's — «مداخل مكيفة» still is), plus
+> «قابل للتفاوض» (negotiable) no longer counts as «can be fitted» except for public places. Proof: old-vs-new on 115
+> real trigger snippets (34 changes, all right) and 120 «قابل للتفاوض» snippets (4 changes, all right). A kitchen or a
+> lift CAN be a nearby place's, so they keep the near rule. The clear's backup is `ops_prose_box_cleared`.
+
 > **Owner decision — the grill chip (2026-11-03): «grill is grill, microwave isn't a grill».** A «شواية» / «شواء» counts for
 > the grill chip wherever the ad names it, including a kitchen appliance («فرن شواية», «مطبخ … فرن - شواية - ميكرويف»).
 > A microwave is never a grill (the reader has no microwave token for it). Do not add an «oven nearby» exclusion to the
