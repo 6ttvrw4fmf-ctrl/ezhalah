@@ -85,7 +85,8 @@ on (`trusted`) and every phrase proved wrong (`rejected`). `mon_detect_af_eviden
 2. Fix `word_checker.py`: drop a bare look-alike token, require a whole word (`^word$`), or add a before/after word to
    `_EXCLUDE`. Public places (mosque, market, mall, park, sports court…) also have `_NEAR_PUBLIC` («خلف/أمام/جنبها/
    ومقابلها/ظهيرة/كيلو»); do not put those words in the global near list — they silenced a real kitchen «خلف الحديقة».
-3. Add the REAL sentence to the selftest (it gates every scrapers PR via `test_word_checker_selftest.py`).
+3. Add the REAL sentence to the selftest (it gates every scrapers PR via `test_word_checker_selftest.py`) AND its real
+   sentences to the real-ad lock `scrapers/facts/testdata/real_ads_golden.jsonl` (see «THE SENTENCE, NOT THE WORD» below).
 4. **Prove both directions on real ads:** run the old and the new reader on the same few hundred real texts and read
    every changed answer. Only wrong yeses may turn off; any new yes is read by hand. (The public REST is locked —
    PT403 — so take the texts through `execute_sql`, never through the anon key.)
@@ -99,6 +100,39 @@ or nearby place («X مول», «ملعب الجوهرة», «سينما فوك�
 لبناء»); a refusal or exception («يمنع», «لا نؤجر», «عدا», «🚫»); a look-alike root («ونشتري», «شغالة», «كافية»,
 «مغسلة», «ارتداد», «بوابة», «معتمد»); a room named like a rule («صالة عائلية»); a broker's or REGA line («يسعدنا
 استقبال عروضكم», «صاحب الترخيص»).
+
+**THE SENTENCE, NOT THE WORD — AND SILENCE IS NOT «NO» (2026-11-04; owner: «we need it fixed, I never want this to
+happen ever again»).** On 2026-11-04 every barrier above was green while a live walk found two faults: (1) real unit AC
+read as nothing — a near word or an entrance in the bullet BEFORE («بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة», «مدخلان🔹
+مكيفات راكبة») silenced it, and «قابل للتفاوض» (negotiable) read as «can be fitted»; the 11-03 prose-box clear then used
+that silence and took ~1 in 3 real DealApp AC yeses away; (2) nearby places read as the ad's own — «Close to shops,
+restaurants, and markets», «قريبة من جميع الخدمات: مسجد، بقالة، مطعم» (about half the sampled café yeses). In both the
+QUOTED word was right; the sentence around it was not — so neither the selftest nor the evidence-phrase barrier could see
+it. Fixed in PR #10304 (`_NEAR_NEVER_FACTS`, plural «مكيفات» is never the lobby's, `_NEGOTIABLE`, `_PLACE_WORDS` nearby
+list). What keeps it from coming back:
+- **The real-ad lock** (`scrapers/common/tests/test_word_checker_real_ads.py`, every scrapers PR): ~630 real sanitised ad
+  sentences with every answer the reader gives, read by hand. A reader change that changes ONE answer is red and prints
+  old → new. Regenerate (`UPDATE_REAL_AD_ANSWERS=1`) only after reading every change, and list them in the PR. Every class
+  you fix adds ≥ 5 of its real sentences to the file — it may only grow.
+- **Silence is UNKNOWN, never «no».** Never clear, lower or switch off a stored yes because the reader is silent. Before
+  any bulk clear, read ≥ 25 random rows of the set you are about to clear; if 2 or more state the fact, fix the reader
+  first and do not clear.
+- **Nightly two-way sample, read as sentences.** Precision: 25 served yeses of a chip, the whole line around the quote
+  (nearby list? near word in the bullet before? a lobby's «مدخل مكيف»?). Recall: 25 ads that carry the chip's plain word
+  («مكيفات راكبة», «مطبخ راكب») but no answer — every real miss is a reader fix the same night.
+- **Known context shapes:** a distance pointing at a place with «من / عن» («🌳 على مقربة جدًا من حديقة», «على بُعد خطوات
+  من المسجد», «على بعد 20 د عن المسجد») or right after it («🕌 المسجد على بُعد خطوات») — found by the live re-check after
+  the 11-04 re-read and fixed with `_DISTANCE_TO` / `_DISTANCE_AFTER`; for PUBLIC places (mosque, market, café, park, mall)
+  a sample of 60 served yeses read as sentences was ~37% nearby on 11-04: «ملاصق لمسجد», «حولها حدايق ومسجد», «يفتح على
+  حديقة», «مسجد قباء: ١٠ دقائق», «12د عن حديقة», «تتوفر جنبها جميع الخدمات ( سوبرماركت - مغاسل - مسجد )», «تتميز المنطقة
+  بتوفر … السوبرماركت» — fixed with `_NEAR_PUBLIC` additions, a 9-word look-back stopped by `_OWN_CUES` («داخل المجمع»,
+  «مرافق المشروع», «متكاملة»), `_AREA_WORDS`, minute words in `_NEAR_AFTER`, and list marks («-», «•») continuing a
+  nearby list; and the PLOT'S NEIGHBOUR — a direction / facade / «مباشرة» right before the park or mosque («شارع 20 م
+  جنوبي + حديقة», «من جهتين حديقه», «ربع واجهة على جامع») — `_BOUNDARY_STEMS`, unless the ad says it has it («فيها»,
+  «يوجد»); a nearby comma list after «قريب من / close to / دقائق من»; a near word in the PREVIOUS bullet
+  (🔹 ❄ ✅ are not clause breaks); an entrance adjective («مداخل مكيفة» = lobby) vs AC units («مكيفات»); «قابل للتفاوض»;
+  DealApp's REGA list «مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» — there «قريب من الخدمات» is one ITEM, not a
+  heading, so the parking after it is real.
 
 **Owner decisions (do not «fix» them):** «شواية / شواء» is a grill wherever it is named, including the kitchen; a
 microwave is never a grill (2026-11-03). «غسالة» feeds the washing-machine chip «🧺 غسالة ملابس» (2026-10-31).
