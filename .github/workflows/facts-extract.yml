@@ -143,3 +143,21 @@ jobs:
         run: |
           exec python -m scrapers.facts.extract --run-id "$RUN_ID" --mode "$MODE" --category "$CATEGORY" --provider "$PROVIDER" --model "$MODEL" --batch "${BATCH:-16}" --shard "$SHARD" --limit "${LIMIT:-10000}" --platforms "$PLATFORMS" --max-usd "${MAX_USD:-1.5}" \
             $([ "$SKIP_DONE" = "true" ] && echo --skip-done) $([ "$SILENT" = "true" ] && echo --silent)
+      # A NIGHT THAT DID NOT FINISH IS LOUD (owner 2026-11-03: «we never have to have this»). On 11-02 and 11-03 this job
+      # failed / was cancelled at the 300-min timeout and only a quiet P2 noticed, three days later. A cancel here is a
+      # failure for us (the reader did not finish its night), so it is reported as one — P1 (one open alert for the workflow; a green night resolves it).
+      - uses: actions/setup-node@v4
+        if: always()
+        with:
+          node-version: '24'
+      - name: Bridge this lane's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind af_live_check_failed
+          --workflow facts-extract.yml
+          --status ${{ job.status == 'cancelled' && 'failure' || job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
