@@ -76,6 +76,33 @@ export function extractServedSearchableTables(bundle: string): string[] {
 }
 
 /**
+ * Every Expo web script the production HTML references, in page order (2026-11-04, alert 11763).
+ *
+ * Since route splitting (2026-11-02) the SEARCHABLE_TABLES array no longer lives in `entry-*.js`:
+ * measured that day on ezhalah.com, the entry (1,082,788 bytes) holds 0 table literals and
+ * `__common-*.js` (4,654,259 bytes) holds the 299-table scope. A check that fetched only the entry
+ * extracted nothing and failed BLIND on every af-live-truth-check run. The scope is read from EVERY
+ * chunk the page itself loads, so it follows the array wherever the bundler puts it next.
+ */
+export function servedScriptPaths(html: string): string[] {
+  const out: string[] = [];
+  for (const m of html.matchAll(/\/_expo\/static\/js\/web\/[A-Za-z0-9_.-]+\.js/g)) {
+    if (!out.includes(m[0])) out.push(m[0]);
+  }
+  return out;
+}
+
+/** The longest scope array found in any one of the served chunks (never fused ACROSS chunks). */
+export function extractServedSearchableTablesFromChunks(chunks: readonly string[]): string[] {
+  let best: string[] = [];
+  for (const c of chunks) {
+    const got = extractServedSearchableTables(c);
+    if (got.length > best.length) best = got;
+  }
+  return best;
+}
+
+/**
  * Everything wrong with what the SERVED bundle can reach, as human-readable lines. Empty means the
  * served scope and production's live inventory agree.
  *

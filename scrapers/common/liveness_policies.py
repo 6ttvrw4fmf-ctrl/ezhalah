@@ -81,13 +81,18 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # amlakalahsa JOINS this set on 2026-09-12 (single-office Al-Ahsa WordPress+ACF listing site).
 # CRAWL_PRESENCE_ONLY for the same reason as remal/amaall above: a small WordPress REST catalogue
 # (6 CPTs, ~260 posts) re-read in full each run, with no per-listing revisit endpoint of its own.
-# propertyfinder (2026-10-10) is a SHADOW reader only (its shadow.py writes nothing): it gets its liveness
-# policy in the same change that makes it production-searchable. haraj LEFT this set on 2026-10-16 (owner:
+# propertyfinder (2026-11-04) is STAGED: scrapers/propertyfinder/run.py stores rows in tables no search arm reads,
+# its registry row is 'retired' until the owner launches it (docs/ops/PROPERTYFINDER_LAUNCH.md). It gets its
+# SOURCE_LIST_PRESENCE policy in that launch change, the one that makes it production-searchable. haraj LEFT this set on 2026-10-16 (owner:
 # licensed offers only go live) with its CANDIDATE_PLUS_DIRECT entry below.
 # moj (2026-10-10) is not a listing platform at all: it reads the Ministry of Justice's district sales
 # aggregates into moj_district_sales (scrapers/moj/sales.py) and writes no listing.
 # "facts" is not a platform: scrapers/facts/ is the facts-extraction test reader (2026-10-24), like "common".
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj", "facts"})
+# almuteb JOINS this set on 2026-11-04 (owner «Yes, use your picks», decision 2): almuteb.sa has answered
+# NXDOMAIN since 2026-10-23; the platform is retired (RETIRED_PLATFORMS.txt) and its 11 rows are hidden and
+# adjudicated, kept. Its CANDIDATE_PLUS_DIRECT policy left the registry in the same change.
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj", "facts",
+                                       "almuteb"})
 
 
 class _P(dict):
@@ -497,16 +502,6 @@ POLICIES: dict[str, _P] = {
         "Measured 2026-09-24: rented/sold ids 84, 48, 82 → 404 (3/3); live 92, 93, 80 → 200 (3/3); "
         "999999 → 500. Rented/sold cards carry no href on the catalogue, so the crawl never links "
         "them either."),
-    "almuteb": _P(
-        _pol("almuteb", 3, 168), CANDIDATE_PLUS_DIRECT,
-        "the post's own wp/v2/properties REST record: HTTP 404 carrying rest_post_invalid_id is "
-        "GONE; a 200 for this id whose status is not publish or whose property_status terms match "
-        "the closed-deal vocabulary (تم البيع / تم الإيجار / مباع / مؤجر) is GONE; for a -U<i> "
-        "multi-unit row, the parent 200 with fewer fave_multi_units than the unit's index is GONE "
-        "(the post lives on, the unit was removed). Otherwise LIVE; a 200 for another id, an "
-        "unparseable body and 401/403/429/5xx are UNKNOWN.",
-        "Measured 2026-09-24: 10 posts, all publish, one carrying a Houzez multi-unit; the "
-        "closed-deal ids are resolved from the live property_status taxonomy each run."),
     "aalbarrak": _P(
         _pol("aalbarrak", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the post's own wp/v2/properties REST record: HTTP 404 carrying rest_post_invalid_id is "

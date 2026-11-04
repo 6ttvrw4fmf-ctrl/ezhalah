@@ -34,7 +34,8 @@ SHARED = re.compile(
 # A source the OWNER requires to be read with our own honest bot user-agent and NO browser impersonation
 # or proxy (Haraj, owner 2026-10-09/10-16: «honest access, never bypass anything»). The shared resilient
 # path is exactly impersonation + a proxy leg, so it is forbidden there; a refused read stays a failed run.
-OWNER_HONEST_CLIENT = frozenset({"haraj"})
+# Property Finder (owner 2026-11-04): the same rule — honest UA, no impersonation, no proxy, a wall stops the run.
+OWNER_HONEST_CLIENT = frozenset({"haraj", "propertyfinder"})
 
 
 def _code(p: Path) -> str:
