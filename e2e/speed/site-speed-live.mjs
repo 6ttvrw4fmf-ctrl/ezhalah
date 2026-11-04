@@ -59,10 +59,21 @@ try {
   await page.waitForTimeout(1_500);
   const before = await page.evaluate(() => [...document.querySelectorAll('[data-testid=map-area]')].map((e) => e.textContent).join('|'));
   const plus = page.getByRole('button', { name: /Zoom in|تكبير/ }).first();
+  // A timeline of the zoom (printed only when the step is over budget): map movement, label changes, data reads.
+  await page.evaluate(() => {
+    const mk = window.mapkit; const m = mk?.maps?.[mk.maps.length - 1]; const t0 = performance.now(); window.__zt = [];
+    const at = () => Math.round(performance.now() - t0);
+    m?.addEventListener('region-change-start', () => window.__zt.push(`move-start@${at()}`));
+    m?.addEventListener('region-change-end', () => window.__zt.push(`move-end@${at()} span=${m.region.span.latitudeDelta.toFixed(2)}`));
+    let last = ''; const iv = setInterval(() => { const now = [...document.querySelectorAll('[data-testid=map-area]')].filter((e) => e.getBoundingClientRect().width > 0).length + '/' + (m?.annotations?.length ?? 0); if (now !== last) { window.__zt.push(`labels ${now}@${at()}`); last = now; } }, 50);
+    setTimeout(() => clearInterval(iv), 30_000);
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) if (/rpc|feed|sb\//.test(e.name)) window.__zt.push(`read ${e.name.split('/').pop().split('?')[0]} ${Math.round(e.startTime - t0)}+${Math.round(e.duration)}`); }).observe({ type: 'resource' });
+  });
   t = Date.now(); await plus.click(); await page.waitForTimeout(250); await plus.click();
   await until((prev) => { const now = [...document.querySelectorAll('[data-testid=map-area]')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.textContent).join('|'); return now.length > 0 && now !== prev; }, before);
   results.zoomMs = Date.now() - t;
   say(results.zoomMs <= BUDGET.zoomMs, 'map: two zoom-ins until the closer view is labelled', results.zoomMs, BUDGET.zoomMs);
+  if (results.zoomMs > BUDGET.zoomMs) console.log(`      zoom timeline: ${(await page.evaluate(() => window.__zt)).join(' · ')}`);
   t = Date.now(); await tab('الوسيط الذكي').click();
   await until(() => location.pathname === '/agent' && [...document.querySelectorAll('textarea')].some((x) => x.getBoundingClientRect().width > 0));
   results.brokerMs = Date.now() - t;
