@@ -211,6 +211,7 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'Hall': 'Commercial Building', 'Cinema': 'Commercial Building', // قاعة/سينما → Commercial Building (Specialized Facilities retired 2026-07-07; card still shows raw Hall/Cinema)
   'Gas Station': 'Gas Station', 'Station': 'Gas Station', 'محطة بنزين': 'Gas Station',
   'سكن عمال': 'Staff Housing',
+  'Staff Housing': 'Staff Housing',     // the English stored form (same rule as Compound, 🔧 2026-11-04)
   // مرافق خدمية expansion (owner decision 2026-09-11, ops_incident #172): the source publishes these
   // REAL Arabic types (dealapp: مستشفى «مستشفى / مركز صحي للإيجار», مركز أعمال ×3, منتجع, موقع صراف),
   // but they were absent from known_type_ar so the search-index trigger (enforce_price_size_sanity)
@@ -241,6 +242,7 @@ const RAW_TO_CLEAN: Record<string, string> = {
   // verified live-in-DB before mapping (never guessed). [[feedback_ambiguous-mapping-ask-first-rule]]
   'إستراحة': 'Rest House',              // aqarcity hamza spelling variant of استراحة (11 rows, res table)
   'مجمع': 'Residential Building',       // sanadak bare form of مجمع سكني (8 rows, res table)
+  'Compound': 'Residential Building',   // wasalt/aqargate store the English word (EN_TO_AR → مجمع); counted by the chip, so the card fetch must know it too (🔧 2026-11-04)
   'برج': 'Residential Building',        // sanadak bare tower, distinct from برج اتصالات (1 row, res table)
 };
 
