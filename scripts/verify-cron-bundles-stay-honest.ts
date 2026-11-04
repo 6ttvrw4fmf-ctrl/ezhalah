@@ -121,7 +121,10 @@ check('the starvation detector raises only pairs WITHOUT that evidence',
   /count\(\*\) filter \(where not e\.proven\)/.test(detSql));
 // 20261104044638: the detector reads every pair's evidence from ONE scan of the involved jobs' runs
 // (the per-pair version took 57 s). The batch function must carry the same rule as the single one.
-const swapMig = newest(/public\.mon_detect_cron_starvation_risk/);
+// The newest DEFINITION or body patch (20261104044638 is an execute-replace patch), not the newest mention: a bundle migration that re-states its steps lists
+// `select public.mon_detect_cron_starvation_risk()` as a step and used to be read as the detector's body
+// (🔧 2026-11-04: 20261104220450 only adds a dispatch step to bundle-hourly-monitors).
+const swapMig = newest(/create or replace function public\.mon_detect_cron_starvation_risk\(|pg_get_functiondef\('public\.mon_detect_cron_starvation_risk'/i);
 check('the detector\'s newest definition takes its evidence from the batch function',
   !!swapMig && /select s\.\* from public\.mon_cron_starved_schedules_with_evidence\(\) s/.test(swapMig.sql));
 const batchMig = newest(/create or replace function public\.mon_cron_starved_schedules_with_evidence\(/i);
