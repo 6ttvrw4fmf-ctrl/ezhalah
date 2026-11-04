@@ -15,6 +15,18 @@
 > through PLACE items (`_PLACE_WORDS`) and silences only `_NEAR_PUBLIC_FACTS` (café, mosque, market, park…); it stops
 > at the first non-place item, so DealApp's REGA list «قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» keeps its parking.
 > Proof: 110 real nearby-list snippets → 10 changes, all a wrong yes turned off, no real feature lost.
+> A live re-check after the re-read found the same family once more — «🌳 على مقربة جدًا من حديقة», «🕌 المسجد على بُعد
+> خطوات» served as the ad's own park and mosque. A distance now points at its place with «من / عن» (or sits right after a
+> public place); the next bullet's own «موقف خاص» stays. Proof: 130 real distance snippets → 11 changes, all right.
+> Then 60 served mosque / park / market yeses read as sentences: ~37% were nearby or area talk («ملاصق لمسجد», «يفتح على
+> حديقة», «مسجد قباء: ١٠ دقائق», «جنبها جميع الخدمات ( سوبرماركت - مسجد )», «تتميز المنطقة بتوفر …»). Fixed for public places
+> only, stopped by ownership words («داخل المجمع», «مرافق المشروع», «خدمات متكاملة»). Proof: 35 changes over 405 samples,
+> all right after one fix (a project's own «خدمات متكاملة: ممشى وحديقة» kept). The plot's neighbour («شارع 20 م جنوبي +
+> حديقة», «ربع واجهة على جامع», «مباشرة على مسجد وحديقة») — 70 real snippets, 5 changes, all right.
+> **Locked since (owner: «I never want this to happen ever again»):** those ~630 real sentences and every answer the
+> reader gives on them are `scrapers/facts/testdata/real_ads_golden.jsonl`, checked on every scrapers PR by
+> `scrapers/common/tests/test_word_checker_real_ads.py` (undoing either fix turns it red). Reader silence is UNKNOWN:
+> never clear a stored yes on silence without reading ≥ 25 of the rows first (`docs/ops/ADVANCED_FILTER_ENGINEER.md`).
 
 > **Owner decision — the grill chip (2026-11-03): «grill is grill, microwave isn't a grill».** A «شواية» / «شواء» counts for
 > the grill chip wherever the ad names it, including a kitchen appliance («فرن شواية», «مطبخ … فرن - شواية - ميكرويف»).

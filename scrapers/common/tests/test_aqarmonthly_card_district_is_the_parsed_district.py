@@ -82,6 +82,22 @@ def test_an_unresolved_district_stays_null_never_invented():
     assert r["district_ar"] is None
 
 
+def test_unplaced_same_name_town_still_gets_no_city_glued_on(monkeypatch):
+    # AQM5708581 (2026-11-04, alert aqarmonthly_card_district_drift): المجمعة is four catalog towns and Aqar's city 40 is
+    # deliberately unhinted, so the city stays unresolved. The card still read «حي الملك فهد المجمعة» (the pre-09-21 glued
+    # parse) while the index said «حي الملك فهد». The writer must strip the trailing town by name even when it cannot
+    # place it, and write the same value into both columns.
+    import scrapers.aqarmonthly.run as run
+    monkeypatch.setattr(al, "_CITY", {"المجمعه": [(24, 1), (1343, 4), (1494, 6), (1761, 8)]})
+    monkeypatch.setattr(al, "_CID_AR", {24: "المجمعة", 1343: "المجمعة", 1494: "المجمعة", 1761: "المجمعة"})
+    monkeypatch.setattr(run, "_district_from_aqar_id", lambda *a: None)
+    r = map_listing({"id": 5708581, "uri": "شارع-بدر-حي-الملك-فهد-المجمعة-المجمعة-5708581", "area": 79, "imgs": [],
+                     "city_id": 40, "address": "شارع بدر ، حي الملك فهد ، المجمعة ، المجمعة"}, PRICE)
+    assert r["city_id"] is None
+    assert r["neighborhood"] == "حي الملك فهد"
+    assert r["neighborhood"] == r["district_ar"]
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))
