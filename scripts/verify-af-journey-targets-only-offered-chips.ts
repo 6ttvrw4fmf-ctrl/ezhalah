@@ -57,7 +57,10 @@ if (!src.includes(guarded)) { console.error('✗ the guarded line moved — re-p
 const dir = mkdtempSync(join(tmpdir(), 'af-journey-cards-'));
 const mutant = join(dir, 'journey-lib.mjs');
 writeFileSync(mutant, src.replace(guarded, '.filter((token) => row[CARD_TOKEN_COLUMN[token]] === true)'));
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`✗ mutation proof: ${label} was NOT caught`); process.exit(1); }
+};
 // an import error fails the run, never counts as caught
-if (!problems((await import(mutant)) as Lib).length) { console.error('✗ mutation proof: the card-blind picker was NOT caught'); process.exit(1); }
+mustCatch('the card-blind picker', problems((await import(mutant)) as Lib).length > 0);
 
 console.log('✓ AF journeys target only chips the AF cards show for the type × deal (mutation caught)');
