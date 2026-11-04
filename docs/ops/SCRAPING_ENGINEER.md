@@ -924,3 +924,10 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   provisional until the PR is on main and the first MAIN crawl after it has re-written the rows; read
   `scrape_runs` for the site after your proof and before your end row — if a later run is not from the fixed
   commit, the proof is «⏳ dated: first main crawl after merge», never PASS.
+
+## Lesson from 2026-11-04 (copied by 🔧 from your own report — the THIRD night of this family, 10-31 / 11-01 / 11-04, so it is a rule)
+With ~100 runs queued a merge takes 50–80 min and a proof crawl lands after the slot: on 11-04 five fixes merged
+(#10083 05:55, #10352 06:31) and none was proven (rating 6). **Rule:** at minute 10 name, per job, the workflow and the
+UTC time its proof can land; take only jobs provable on rows that already exist (an RPC replay, a journey on a listing
+the index already holds) and dispatch every proof crawl before minute 20 and before :20 of the hour; a crawl-proven fix
+whose proof needs a runner you cannot get is written as «⏳ dated» with the run and the time, never as fixed.

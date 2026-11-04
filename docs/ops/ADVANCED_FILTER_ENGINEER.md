@@ -570,3 +570,9 @@ the consumer by hand, record the run id and its commit SHA in the proof row, and
   11:06–12:56). A PR that needs a person freezes every deploy in the repo, for everyone, until that person comes.
   Before your end row read `gh run list -w deploy-frontend.yml --limit 10`: a REFUSED run naming your version is a bug
   of yours that night.
+
+## Lesson from 2026-11-04 (copied by 🔧 from your own report)
+A fixture must be pasted from the RE-READ page — #10132 passed on invented markup and the sakan radio «label for» miss
+survived it. And a migration applied late in the slot with runners jammed cannot be mirrored in time (deploy
+41812835256 refused at 10:14 with four of your migrations unmirrored behind 91 queued runs): **apply before minute 30
+or not at all**, and open the mirror-only PR the same minute (the 11-03 rule above).
