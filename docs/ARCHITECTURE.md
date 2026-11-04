@@ -699,6 +699,17 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
   New scrapers must capture Arabic natively.
 - **Proxy note:** partners that block GitHub datacenter IPs (Wasalt, Souq24, **Toor** — fixed 2026-07-06
   PR #32) route through the Saudi residential proxy (`WASALT_PROXY_URL` in the workflow env).
+- **One source ad, one row (2026-11-04).** A dual-table scraper files an ad by the ad's OWN published
+  classification, never by the search/category page that returned it (wasalt: «Property usage» —
+  Commercial → commercial, any other published usage → residential, none → the search's category), and
+  calls `db.retire_superseded_siblings()` so the copy in the other table is retired (every dual-table
+  scraper but `deal` does; `test_retire_superseded_siblings.py` keeps that list exact). A page read that
+  did not render the ad's own fields is a FAILED FETCH and mints no row (hajer: the post-id fallback
+  made a phantom HJ1512 beside HJ1168), and a liveness "live" must name THIS ad, not any page at the
+  stored URL. A URL shared by different ads is a duplicate only when the ad_number is shared; distinct
+  ads that embed the page's own id (`listing_ad_embeds_url_id`, nufouth `?ads-N4175=1`) or a platform
+  on `ops_card_link_granularity` are page granularity (`mon_detect_url_collisions_res_vs_com`,
+  `mon_detect_card_link_identity`, guard `scripts/verify-url-collision-needs-the-same-ad.ts`).
 
 ---
 
