@@ -458,8 +458,10 @@ _LIST_WORDS = frozenset(_n(w) for w in (
 
 # ── guards ────────────────────────────────────────────────────────────────────────────────────────────────
 # PREPARED / POSSIBLE: the thing is not there yet — no row (the scrapers' _PREPARED_ONLY + «possible» words).
+# «موسس / موسسة» is «مؤسس» typed without the hamza (🔬 2026-11-04 elevator precision sample: aqar 17753855
+# «موسسة مصعد», 14874158 «موسس مصعد» served lift = yes; 2 of 25 sampled yeses).
 _PREPARED = tuple(_n(w) for w in N._PREPARED_ONLY + ("تمديد", "تمديدات", "امكانيه", "بالامكان", "قابل",
-                                                        "قابليه", "يمكن", "ممكن", "يصلح"))
+                                                        "قابليه", "يمكن", "ممكن", "يصلح", "موسس", "موسسه"))
 _PREPARED_PLACE = tuple(_n(w) for w in ("مكان", "مساحه", "موقع"))   # «مكان مسبح», «مكان للمصعد»
 _PLACE_FACTS = frozenset({"pool", "elevator"})
 # NEARBY: about the street, not the unit — no row. The scrapers' _PROXIMITY plus the words a view/distance uses.
@@ -1336,6 +1338,8 @@ def selftest() -> None:
         ("نوافذ زجاجية بالقرب من الخدمات موقف سيارات مصعد", {"elevator": True}, ()),
         ("قريب من الخدمات حوش غرفة سائق تأسيس مصعد", {}, ("elevator",)),
         ("قريب من الخدمات مسجد ومدارس", {}, ("mosque",)),
+        ("تكيف مركزي _مجلس - تفتح علي مرفق ومسجد - موسسة مصعد • غرفه سائق", {}, ("elevator",)),
+        ("تكيف مركزى - دبل هيت - موسس مصعد - مسبح", {}, ("elevator",)),
         ("Recreation center , restaurant, café, library", {"restaurant_cafe": True}, ()),
         ("قريب من الخدمات\nمسبح خاص\nموقف خاص", {"pool": True, "parking": True}, ()),
         # a distance points at its place with «من / عن»; the next bullet's own features stay (🔬 2026-11-04)
