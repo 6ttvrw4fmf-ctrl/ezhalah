@@ -35,6 +35,16 @@ export function safeRestPath(p: string | null): string | null {
   return /^(rpc\/)?[A-Za-z0-9_]+$/.test(p) ? p : null;
 }
 
+/** INTERNAL DOORS STAY SHUT (owner 2026-11-04: «lock the back-room doors»). Monitoring tables and functions (ops_*,
+ *  mon_*, and source_district_dropped_rows) are allowlisted for the publishable key so our own CI checks can read them —
+ *  and those checks reach the database DIRECTLY with the gate handshake, never through this door. The web app never
+ *  names them. Measured live that day: a real browser on ezhalah.com could still call rpc/ops_search_load_now here
+ *  (200; scripts were already refused by BotID and the back door by the lock). So the door refuses them to anyone
+ *  without the robot pass. */
+export function internalPath(p: string): boolean {
+  return /^(rpc\/)?(ops_|mon_)/.test(p) || p === 'rpc/source_district_dropped_rows';
+}
+
 /** «bot=human ts=pass robot=0 dev=iphone cc=SA»: what the two guards and the robot pass said about this call, plus the
  *  coarse device class and country, for the API logs. Never the address or the full user agent. */
 export function doorLabels(bot: string, human: string, robot: boolean, ua = '', country = ''): string {
@@ -83,12 +93,14 @@ async function handle(request: Request): Promise<Response> {
   url.searchParams.delete('__p');
   url.searchParams.delete('ezsbpath');
 
+  // Our own robots (scripts/lib/robotPass.mjs) carry the gate secret: never refused by BotID, Turnstile or the internal-path rule.
+  const robot = robotPass(request.headers.get('x-ezhalah-robot'), GATE);
+  if (!robot && internalPath(path)) return Response.json({ message: 'not found' }, { status: 404, headers: { 'x-ezhalah-bot': 'skip' } });
+
   let bot = 'unknown';
   try { bot = (await checkBotId()).isBot ? 'bot' : 'human'; } catch { /* the check itself failed: unknown, never a block */ }
   const human = !TURNSTILE_KEY ? 'off'
     : (await humanPassValid(readCookie(request.headers.get('cookie'), HUMAN_COOKIE), Date.now() / 1000, TURNSTILE_KEY)) ? 'pass' : 'none';
-  // Our own robots (scripts/lib/robotPass.mjs) carry the gate secret: never refused by BotID or Turnstile.
-  const robot = robotPass(request.headers.get('x-ezhalah-robot'), GATE);
   if (!robot && ((ENFORCE && bot === 'bot') || (TURNSTILE_ENFORCE && human === 'none'))) {
     return Response.json({ message: 'Access denied' }, { status: 403, headers: { 'x-ezhalah-bot': bot, 'x-ezhalah-human': human } });
   }
