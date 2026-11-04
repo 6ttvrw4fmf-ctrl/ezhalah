@@ -59,7 +59,8 @@ def test_the_universal_law_is_unchanged():
     assert L.read_is_unbelievable(500, "x") is not None
     assert L.decide(403, "x", False, lambda *a: "gone") is None
     # abralosol joined with the owner's own «Yes, hide them» for that site (2026-11-03, in chat).
-    assert set(L.OWNER_APPROVED_REMOVAL_STATUS) == {"alshawaf", "bossbih", "aqaratikom", "abralosol"}
+    # sakani joined with the owner's «Yes, use your picks» (decision 1, 2026-11-04).
+    assert set(L.OWNER_APPROVED_REMOVAL_STATUS) == {"alshawaf", "bossbih", "aqaratikom", "abralosol", "sakani"}
 
 
 # ── wired into each site's oracle ──────────────────────────────────────────────────────────────────

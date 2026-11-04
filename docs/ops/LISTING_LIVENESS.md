@@ -452,12 +452,26 @@ The owner approved one narrow exception («Yes, hide them»), for sites measured
 an error while their live ads answer 200: alshawaf and bossbih (an UNPUBLISHED Drupal node → 403; deleted →
 404) and aqaratikom (`/api/v1/ad/<uuid>` of a removed ad → 500; a made-up uuid → 404); and abralosol (owner yes
 for this site, 2026-11-03: a removed `/{nid}` → 403 carrying the site's own «لايمكن فتح هذة الصفحة» page, which
-its caller also requires — `body_must`). Such an ad is hidden
+its caller also requires — `body_must`); and sakani (owner «Yes, use your picks», decision 1, 2026-11-04: a
+removed unit's DETAIL API `/marketUnitsApi/v6/market_units/<id>` answers 403 `text/plain` with a BLANK body —
+measured on struck units 23412, 23438, 22775, 20252 — a made-up id 404 `{"message":"not found"}`, live 200; a
+Cloudflare challenge is a 403 HTML «Just a moment…» page, so the caller requires the blank body — `body_must` —
+and a challenge stays UNKNOWN). Such an ad is hidden
 only when ALL hold: the site and that exact status are in `OWNER_APPROVED_REMOVAL_STATUS`
 (`scrapers/common/http_liveness.py`); the ad's own URL answers it on two reads, neither redirected; and in the
 SAME check a recently proven-live ad of the same site reads LIVE through the site's own signal
 (`removal_by_owner_approved_status`, `live_control_url`). No control, a blocked control, a different status
 or a redirect → UNKNOWN. A new site joins the table only with the owner's approval.
+
+### 7.1a A retired platform is hidden by decision, not by a liveness verdict (almuteb, owner 2026-11-04)
+
+The owner answered «Yes, use your picks» (decision 2): almuteb.sa has not resolved since 2026-10-23 (every crawl
+since 2026-10-24 04:39 UTC failed with curl(6); re-measured 2026-11-04 NXDOMAIN at 8.8.8.8 and 1.1.1.1, and the .sa
+registry lists its name servers as DNS-PARKING.COM). almuteb is RETIRED: `platform_registry.status = 'retired'`,
+the slug is in `scrapers/RETIRED_PLATFORMS.txt` and `NOT_PRODUCTION_SEARCHABLE`, its matrix line and its
+`ops_liveness_registry` row are gone, and its 11 listings are hidden and registered in `ops_adjudicated_retraction`
+with the DNS evidence (rows kept). This is NOT a liveness rule: an unreachable source is still UNKNOWN for every
+other site (§7). A site that stops resolving is retired only with the owner's decision.
 
 ### 7.2 Two owner decisions of 2026-11-03 that change NOTHING — written down so nobody "fixes" them
 
