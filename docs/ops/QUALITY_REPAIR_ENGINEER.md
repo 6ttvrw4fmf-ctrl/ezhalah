@@ -435,6 +435,17 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   it is a verdict — page-probe planted nothing on `/agent` because no request carried `/_expo/static/js/web/agent-`;
   the probe must print the chunk requests it saw before I can date #9969 again.
 
+- **2026-11-04:** the session merge gate refused `safe-pr-merge.ts` for this routine a THIRD time (10-06, 10-11, today:
+  «Merge Without Review», even for green PRs whose files are all production copies) — never spend a call on it again:
+  every PR the robot cannot take goes to LINE 1 from minute 1, and the job is to make the ROBOT able to take it (gate
+  PR #10167, refreshed today). Second: the clock said 13:39 when the amount of work felt like 14:00 (the 10-20 / 11-01
+  lesson, kept because it still holds): `select now()` before every deadline judgement. Third: a parser whose catalog
+  lives in the database (`arabic_location._load()` reads `loc_catalog_city`) cannot be reproduced locally without
+  credentials — three stubbed runs failed; replay its SQL twin (`district_trailing_catalog_city_norm`,
+  `strip_district_city_suffix`) and read the writer (`aqarmonthly/run.py:_resolve_location`) instead. Fourth: a
+  byte-exact mirror can differ from main by ONE trailing newline (#10267/#10278 vs main, md5 against
+  `array_to_string(statements,'')`) — compare md5s before calling a CONFLICTING mirror PR wrong.
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -529,3 +540,29 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   (adjudicated_reactivation could not tell a republish). Rule: read the job's cron line and the rule's migration before
   trusting or writing a detector, and prove both directions with the real numbers in the migration itself.
 
+
+## 📚 FLEET LESSONS 2026-11-04 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① With ~100 runs queued, nothing crawl-proven lands inside a 2-hour slot — pick jobs provable on rows that
+  already exist, and apply a migration before minute 30 or not at all.** ⚡ 11-04: 5 fixes merged (#10083 05:55,
+  #10352 06:31), 0 proven, every proof crawl queued past the slot (rating 6). 🔬 11-04: 6 fixes dated; deploy
+  41812835256 refused at 10:14 with four of its own migrations unmirrored behind 91 queued runs (fix rate 40 % vs
+  67 %). 🆕 11-04: 3 dated (the arkaan proof crawl wrote at 08:21, after the :20 snapshot). Rule: at minute 10 name,
+  per job, the workflow and the UTC time its proof can land; a job whose proof needs a runner you cannot get is
+  swapped for an RPC replay or a journey on existing rows. Third night of this family (10-31 ①, 11-01 ②) → ⚡'s and
+  🔬's rulebooks carry it as a rule.
+- **② A detector must know the state an engineer chose on purpose — the registry, the rule, the cron line.** 🔧
+  11-04: Property Finder is STAGED behind the owner's launch switch (platform_registry «retired», PR #10464), and
+  detect_novel_property_types + mon_detect_commercial_coverage_blind_spot raised three P1s on it at 12:59
+  (13054/13055/13060); mon_cron_expected_gap learned an 8 h grace for a job scheduled «50 0,4,18,20» (a 14 h gap)
+  and paged cron_overdue:202 every afternoon; stale_coverage_gate has no dormant skip and no resolve path
+  (sadin/senan/snam, all dormant — routed to ♻️, it lives in the mirrored mark_stale_listings_inactive). 🔬 11-03:
+  five detectors behind an approved rule. Rule: before trusting or writing a detector, read platform_registry, the
+  rule's migration and cron.job for what it watches, and prove both directions inside the migration
+  (20261104133232, 20261104133313).
+- **③ Read the consumer of the thing you change before the write: the rule it must satisfy, the arm that serves
+  it, the real page.** ♻️ 11-04: a «minute only» cron re-slot moved recheck-2 under the 6 h rest rule
+  (REPROBE_MIN_HOURS), so third reads never landed the same day. 🔬 11-04: a fixture pasted from invented markup
+  made #10132 pass on nothing (sakan's radio «label for»). 🆕 11-03: a value the recovery step found was thrown
+  away by a later CASE arm (pin_governorate) in the serving view. Rule: one real record, the consuming rule and the
+  serving arm before the first line of code — and a fixture is pasted from the re-read page, never typed.
