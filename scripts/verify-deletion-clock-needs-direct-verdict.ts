@@ -24,9 +24,10 @@
 //   The live half is the detector itself: mon_detect_deletion_clock_without_evidence runs twice an
 //   hour in production against the engine's real set.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { codeOnly, replayFunction } from './lib/rpcReplay.ts';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLEANUP = join(ROOT, 'scrapers', 'common', 'cleanup.py');
@@ -131,19 +132,15 @@ if (/\.gte\("missing_count", pol\["min_missing_count"\]\)/.test(src)) {
 
 // ── 2. The committed SQL ────────────────────────────────────────────────────────────────────────
 type Defs = Map<string, string>;
+// The effective body of each function after replaying every committed migration, via the repo's
+// one tag-generic reader (scripts/lib/rpcReplay.ts). Comments are stripped so prose cannot satisfy
+// a code assertion; a migration that touches a function in a way the reader cannot interpret FAILS.
 function latestDefinitions(names: string[]): Defs {
   const out: Defs = new Map();
-  const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort();
-  for (const f of files) {
-    const s = readFileSync(join(MIGRATIONS, f), 'utf8');
-    for (const n of names) {
-      const re = new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${n}\\s*\\(`, 'ig');
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(s))) {
-        const end = s.indexOf('$function$;', m.index);
-        out.set(n, s.slice(m.index, end < 0 ? undefined : end));
-      }
-    }
+  for (const n of names) {
+    const r = replayFunction(MIGRATIONS, n);
+    if (r.unresolved.length) problems.push(`${n}: uninterpretable change in ${r.unresolved.join(', ')}`);
+    if (r.body) out.set(n, codeOnly(r.body));
   }
   return out;
 }
