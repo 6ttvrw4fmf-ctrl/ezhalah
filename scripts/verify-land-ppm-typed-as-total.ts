@@ -19,6 +19,7 @@ import { servedTotalFromTypedPerMeter, followIndexPerMeterVerdict } from '../src
 import { derivedTotalEquation, DERIVED_TOTAL_MAX } from '../src/data/listings.ts';
 import { SERVED_TOTAL_MAX } from '../src/lib/landPerMeterTotal.ts';
 import { liftSymbols } from './lib/liftSymbols.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const MIG = join(ROOT, 'supabase', 'migrations');
@@ -58,7 +59,7 @@ check('the trigger is edited by ONE exact text replace with a RAISE guard (never
   /if k <> 1 then raise exception 'enforce_price_size_sanity: expected exactly 1 anchor/.test(WIRE_SQL)
   && !/create\s+or\s+replace\s+function\s+public\.enforce_price_size_sanity/i.test(WIRE_SQL));
 check('the inserted trigger text names neither payment_monthly nor rent_now_pay_later (RNPL block untouched)',
-  !/payment_monthly|rent_now_pay_later/.test(WIRE_SQL.slice(WIRE_SQL.indexOf('b_trig text'), WIRE_SQL.indexOf('a_fid text'))));
+  !/payment_monthly|rent_now_pay_later/.test(windowBetween(WIRE_SQL, 'b_trig text', 'a_fid text', 'wire migration')));
 check('the trigger keeps the source figure as the per-metre rate and flags the row',
   /NEW\.price_per_meter := NEW\.price_total;\\n'[\s\S]*NEW\.price_total := v_fix;\\n'[\s\S]*NEW\.ppm_typed_as_total := true;/.test(WIRE_SQL));
 check('an UPDATE that leaves the price alone keeps the flag (idempotent re-judge)',
