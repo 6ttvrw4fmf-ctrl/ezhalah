@@ -62,6 +62,7 @@ def test_sale_price_is_the_source_number_and_nothing_derived():
     assert r["price_evidence"]["raw"] == 2100000 and r["price_evidence"]["origin"] == "api"
     assert (r["area_m2"], r["bedrooms"], r["bathrooms"]) == (142, 3, 8)       # «7+» is the source's own 8
     assert r["license_number"] == "7200911553" and r["district_ar"] == "الملك فهد"
+    assert r["additional_info"]["rega_ad_license_number"] == "7200911553"   # the card's «رقم رخصة الإعلان» row
     assert r["additional_info"]["latitude"] == pytest.approx(24.74589729) and r["furnished"] is None   # PARTLY
 
 

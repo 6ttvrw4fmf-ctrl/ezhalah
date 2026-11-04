@@ -233,6 +233,8 @@ def map_listing(p: dict, deal: str, category: str) -> tuple[Optional[tuple[dict,
         "utilities_price_type": p.get("utilities_price_type"),
         "mortgage_cashback": p.get("mortgage_cashback"),
         "images_count": p.get("images_count"),
+        # the card's «رقم رخصة الإعلان» row reads this key (remote.ts ADDL_FIELDS), as Haraj's run.py writes it
+        "rega_ad_license_number": row["license_number"],
         "location": loc["pf_location"],
         **loc["pin"],
     }
