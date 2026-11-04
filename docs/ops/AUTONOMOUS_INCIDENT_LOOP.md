@@ -199,3 +199,21 @@ category 4: a genuine product, business, or cost decision.
 | `scripts/verify-scheduled-checks-alert-on-failure.ts` | every scheduled workflow raises an alert on failure, with reasoned exemptions |
 | `scripts/verify-guardian-journeys.ts` | every journey declares a routable surface, covers both viewports, never resolves an incident, never submits the support form |
 | `scripts/verify-deploy-bundle-check-pipeline.ts` | the post-deploy bundle assertion can never again fail because it passed |
+| `scripts/verify-monitors-judge-every-path.ts` | §10: a detector judges a cron job by its CURRENT schedule; every key a monitor can raise it can also resolve, on a path it really reaches |
+
+## §10 — A monitor judges every path, against the evidence that is true now (2026-11-04, permanent)
+
+Measured the night of 2026-11-03/04, four alarms about the alarms had one root shape:
+
+- **Judge a job by its current schedule.** `mon_cron_frozen_jobs()` measured a job's period from 7
+  days of history; the cron rebalance moved jobid 105 to `13,41,49,57 * * * *` and its honest
+  28-minute gap paged a P1 `cron_scheduler_frozen` every hour (`alert_flapping`). The cadence is now
+  read only since `ops_cron_job_first_seen.schedule_changed_at`, and the overdue line is never shorter
+  than the schedule's own longest gap (`mon_cron_max_gap_s`) plus three periods.
+- **A key a function can raise, it must be able to resolve** on its evaluated clean path
+  (`mon_detect_rent_tiny_gate_reverted`), and a hand-routed copy of a measured condition is resolved
+  by the sweep that measures it (`duplicate_card_surface_routed` ← `mon_detect_url_collisions_res_vs_com`).
+- **Judge report keys before any gate `continue`s.** `mark_stale_listings_inactive()` skipped its
+  breaker tables before reaching `stale_listings_detected` / `stale_coverage_gate`, so keys sat
+  unaffirmed for up to 15 days (`stuck_open_alert`). A gate that stops deactivation must never stop a
+  report.

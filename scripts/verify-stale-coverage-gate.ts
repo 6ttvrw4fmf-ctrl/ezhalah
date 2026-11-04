@@ -173,8 +173,8 @@ check(
   /coalesce\(pc\.expected_hours,\s*24\)\s*\*\s*3/.test(body),
 );
 check(
-  'mirror counts distinct ACTIVE rows refreshed inside that window',
-  /last_seen_at\s*>\s*now\(\)\s*-\s*make_interval\(hours\s*=>\s*%s\)/.test(body) &&
+  'mirror counts distinct ACTIVE rows with source evidence (crawl OR direct ALIVE) inside that window',
+  /active = true and greatest\(last_seen_at, last_verified_alive_at\)\s*>\s*now\(\)\s*-\s*make_interval\(hours\s*=>\s*%s\)/.test(body) &&
     /into observed/.test(body),
 );
 check(
