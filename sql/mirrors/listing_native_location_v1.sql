@@ -1,6 +1,10 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-11-04 (migration 20261104135530 pin_corrected_city_keeps_native_district reads this matview — the
+-- v2 view's pin-corrected arm and source_district_dropped_rows() read v1.district_ar — it does not change it):
+-- UNCHANGED, md5(pg_get_viewdef(..., true)) = ea8174b63953cfc25aef4a39af032f0a, the value recorded below.
+--
 -- Re-verified 2026-11-03 (migration 20261103052931 district recovery reads this view, it does not change it):
 -- UNCHANGED, md5(pg_get_viewdef(..., true)) = ea8174b63953cfc25aef4a39af032f0a, the value recorded below.
 --
