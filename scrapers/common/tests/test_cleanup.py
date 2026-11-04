@@ -823,6 +823,30 @@ def test_pre_delete_ledger_claims_are_still_written_when_the_delete_dies():
     assert killer.inserted.get("cleanup_deletion_log"), "pre-delete claims must still be recorded"
 
 
+def test_run_killed_mid_delete_keeps_the_dry_run_marker_on_scrape_runs():
+    """Earned 2026-11-04 (cleanup_evidence_gap, cleanup_run_unclassifiable:57213 / :57619). Two
+    cleanup:aqar runs on 2026-10-02 died mid-run (57014, PGRST002) after reporting 1,150 and 248
+    deletions, and the error path wrote notes="error: …" with NO dry_run= marker. That marker is the
+    only carrier of the flag on scrape_runs, so mon_detect_cleanup_evidence_gap limb A could not
+    tell those runs from dry runs and never compared their ledger claims with their deletes — the
+    exact runs (uncontrolled deaths) where the two are most likely to disagree."""
+    rows = {"testp_listings": [_cand(1)], "testp_other": [_cand(2)]}
+    c = _install(rows, POL(anomaly_floor=100), probe=lambda url: (404, ""),
+                 tables=("testp_listings", "testp_other"))
+    notes: list = []
+    C.end_run = lambda *a, **k: notes.append(k.get("notes") or "") or True
+    killer = _DeleteTimeoutClient(c.rows, allow_chunks=1)
+    C.sb = lambda: killer
+    try:
+        C.run("testp", force=True)
+    except Exception:
+        pass
+    assert notes, "the failed run must still close its scrape_runs row"
+    assert "dry_run=False" in notes[-1], (
+        f"a real run that dies must say dry_run=False in its scrape_runs notes, got {notes[-1]!r}")
+    assert "57014" in notes[-1], "and still name why it died"
+
+
 def test_write_chunk_is_small_enough_for_the_slow_archive_trigger():
     """Each delete fires trg_archive_hard_delete (jsonb archive of the whole row; ~16ms/row on
     wasalt because of its ar_data blob). At 200/batch that is ~3.4s in one statement and 57014'd a

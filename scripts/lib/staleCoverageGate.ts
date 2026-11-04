@@ -73,3 +73,39 @@ export function legacyProxyTrips(active: number, bestSingleRunRows: number | nul
 export function proxyReachableForSlicedScraper(slices: number): boolean {
   return slices <= Math.floor(1 / COVERAGE_FRAC);
 }
+
+// ── Source evidence per row (2026-11-04, migration 20261104032124) ─────────────────────────────
+//
+// "When did the source last tell us this listing exists?" has TWO answers since the liveness
+// contract (scrapers/common/liveness_contract.py) split them: last_seen_at = the crawler met the ad
+// on a browse page / feed / sitemap; last_verified_alive_at = a DIRECT fetch of the ad's own page
+// answered ALIVE. The second is the stronger fact, and the contract stamps ONLY that column for it.
+// The sweep read last_seen_at alone, so a platform whose crawl sees a slice but whose oracle
+// re-fetches every row read as stale: measured 2026-11-04, muhaysini_residential 7,024 "stale" of
+// 18,785 with all 18,785 directly verified inside 3 days — 13 days of stale_breaker_escape.
+
+/** Latest source evidence for a row, epoch ms. NULL-ignoring, exactly like SQL greatest(). */
+export function latestSourceEvidence(lastSeenMs: number | null, lastVerifiedAliveMs: number | null): number | null {
+  if (lastSeenMs === null) return lastVerifiedAliveMs;
+  if (lastVerifiedAliveMs === null) return lastSeenMs;
+  return Math.max(lastSeenMs, lastVerifiedAliveMs);
+}
+
+export type RowStamps = { lastSeenMs: number | null; lastVerifiedAliveMs: number | null };
+
+/** THE STALE PREDICATE: no source evidence of either kind inside `staleDays`. NULL evidence is not stale (SQL `<` on NULL). */
+export function rowIsStale(row: RowStamps, nowMs: number, staleDays: number): boolean {
+  const ev = latestSourceEvidence(row.lastSeenMs, row.lastVerifiedAliveMs);
+  return ev !== null && ev < nowMs - staleDays * 86_400_000;
+}
+
+/** Counted in the coverage gate's `observed`: source evidence of either kind inside the window. */
+export function rowObservedInWindow(row: RowStamps, nowMs: number, windowHours: number): boolean {
+  const ev = latestSourceEvidence(row.lastSeenMs, row.lastVerifiedAliveMs);
+  return ev !== null && ev > nowMs - windowHours * 3_600_000;
+}
+
+/** THE LEGACY PREDICATE (before 2026-11-04), kept so the barrier can prove the difference. */
+export function legacyRowIsStale(row: RowStamps, nowMs: number, staleDays: number): boolean {
+  return row.lastSeenMs !== null && row.lastSeenMs < nowMs - staleDays * 86_400_000;
+}

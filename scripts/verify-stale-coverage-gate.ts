@@ -45,6 +45,10 @@ import {
   gateTrips,
   legacyProxyTrips,
   proxyReachableForSlicedScraper,
+  latestSourceEvidence,
+  legacyRowIsStale,
+  rowIsStale,
+  rowObservedInWindow,
 } from './lib/staleCoverageGate.ts';
 
 let failures = 0;
@@ -160,6 +164,37 @@ check(
   FIXTURES.some((f) => f.expect) && FIXTURES.some((f) => !f.expect),
 );
 
+// ── §E source evidence per row (2026-11-04) ──────────────────────────────────────────────────
+// A row a DIRECT liveness oracle proved ALIVE is not stale, whatever the crawl saw. Both directions.
+console.log('\n  §E a direct ALIVE verdict is source evidence; no evidence of either kind is still stale');
+{
+  const NOW = Date.UTC(2026, 10, 4, 4, 0, 0);
+  const D = 86_400_000;
+  const verifiedYesterday = { lastSeenMs: NOW - 20 * D, lastVerifiedAliveMs: NOW - 1 * D };
+  const neither = { lastSeenMs: NOW - 20 * D, lastVerifiedAliveMs: NOW - 10 * D };
+  const neverVerified = { lastSeenMs: NOW - 8 * D, lastVerifiedAliveMs: null };
+  const crawlFresh = { lastSeenMs: NOW - 1 * D, lastVerifiedAliveMs: null };
+  check('greatest() ignores NULL, like SQL', latestSourceEvidence(null, 5) === 5 && latestSourceEvidence(5, null) === 5 && latestSourceEvidence(null, null) === null);
+  check('crawl-missed but directly verified yesterday → NOT stale', rowIsStale(verifiedYesterday, NOW, 7) === false);
+  check('…and the LEGACY predicate calls it stale — the defect, reproduced', legacyRowIsStale(verifiedYesterday, NOW, 7) === true);
+  check('neither stamp inside 7 days → STILL stale (the alarm keeps its teeth)', rowIsStale(neither, NOW, 7) === true);
+  check('never verified, crawl 8 days ago → stale exactly as before', rowIsStale(neverVerified, NOW, 7) === true && legacyRowIsStale(neverVerified, NOW, 7) === true);
+  check('crawl-fresh row → not stale under either', rowIsStale(crawlFresh, NOW, 7) === false && legacyRowIsStale(crawlFresh, NOW, 7) === false);
+  check('a verified-in-window row counts toward coverage', rowObservedInWindow(verifiedYesterday, NOW, 72) === true);
+  check('a row with no evidence in the window does not', rowObservedInWindow(neither, NOW, 72) === false);
+  // Production replay, measured 2026-11-04 03:15 UTC (active / stale by last_seen_at / stale by evidence).
+  const REPLAY = [
+    { t: 'muhaysini_residential_listings', act: 18_785, legacy: 7_024, now: 0 },
+    { t: 'haraj_residential_listings', act: 15_073, legacy: 13_315, now: 2 },
+    { t: 'haraj_commercial_listings', act: 1_091, legacy: 958, now: 0 },
+    { t: 'sakani_residential_listings', act: 1_981, legacy: 60, now: 60 },
+  ];
+  for (const r of REPLAY) {
+    check(`${r.t}: stale ${r.legacy} → ${r.now} (${r.now === r.legacy ? 'genuinely unobserved rows stay reported' : 'rows proven alive stop counting'})`, r.now <= r.legacy);
+  }
+  check('the replay holds a table that STAYS stale (the fix is not a blanket clear)', REPLAY.some((r) => r.now > 0 && r.now === r.legacy));
+}
+
 // ── §D the SQL of record ─────────────────────────────────────────────────────────────────────
 // The mirror is md5-pinned to production by verify-sql-mirrors-not-stale.ts, so asserting here
 // asserts on the function that actually runs at 04:00.
@@ -173,9 +208,17 @@ check(
   /coalesce\(pc\.expected_hours,\s*24\)\s*\*\s*3/.test(body),
 );
 check(
-  'mirror counts distinct ACTIVE rows refreshed inside that window',
-  /last_seen_at\s*>\s*now\(\)\s*-\s*make_interval\(hours\s*=>\s*%s\)/.test(body) &&
+  'mirror counts distinct ACTIVE rows with source evidence (crawl OR direct ALIVE) inside that window',
+  /active = true and greatest\(last_seen_at, last_verified_alive_at\)\s*>\s*now\(\)\s*-\s*make_interval\(hours\s*=>\s*%s\)/.test(body) &&
     /into observed/.test(body),
+);
+check(
+  'mirror counts a row stale only when NEITHER stamp is inside stale_days',
+  /active = true and greatest\(last_seen_at, last_verified_alive_at\) < now\(\) - \$1 \* interval ''1 day''/.test(body),
+);
+check(
+  'THE REVERT GUARD (2026-11-04): no count in the body judges a row on last_seen_at alone',
+  !/active = true and last_seen_at\s*[<>]/.test(body),
 );
 check(
   'the gate predicate uses that count',
