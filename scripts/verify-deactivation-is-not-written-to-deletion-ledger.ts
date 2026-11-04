@@ -35,6 +35,9 @@ const check = (name: string, ok: boolean, detail = '') => {
   if (!ok) failures++;
 };
 
+/** A mutation proof: `caught` is true when the predicate flags a deliberately broken input. */
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
+
 /** Strip `-- …` line comments and `/* … *\/` blocks (prose never counts). */
 export function executedSql(sql: string): string {
   return sql.replace(/\/\*[\s\S]*?\*\//g, ' ').split('\n').map((l) => l.replace(/--.*$/, '')).join('\n');
@@ -64,10 +67,10 @@ const COMMENT_DELETE = `insert into cleanup_deletion_log (listing_id) values (1)
 -- delete from public.x_residential_listings where id = 1;`;
 const RELOCATION = `insert into public.ops_stale_inactivation_probe (source_table) select source_table from public.cleanup_deletion_log;
 delete from public.cleanup_deletion_log d where d.run_id is null;`;
-check('a deactivation written into the ledger is RED (the 20261104013008 shape)', writesLedgerWithoutDeleting(OFFENDER_SHAPE));
+mustCatch('a deactivation written into the ledger (the 20261104013008 shape)', writesLedgerWithoutDeleting(OFFENDER_SHAPE));
 check('a real delete with its ledger row is GREEN', !writesLedgerWithoutDeleting(REAL_DELETE));
 check('a ledger insert mentioned only in a comment does not count', !writesLedgerWithoutDeleting(COMMENT_ONLY));
-check('a delete that exists only in a comment does not excuse the insert', writesLedgerWithoutDeleting(COMMENT_DELETE));
+mustCatch('a delete that exists only in a comment, offered as an excuse for the insert', writesLedgerWithoutDeleting(COMMENT_DELETE));
 check('relocating claims OUT of the ledger (read + delete from it) is GREEN', !writesLedgerWithoutDeleting(RELOCATION));
 
 // ── §B the real offenders are caught by this exact predicate ────────────────────────────────
