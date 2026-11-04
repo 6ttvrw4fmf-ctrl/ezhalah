@@ -10,6 +10,11 @@
 > «قابل للتفاوض» (negotiable) no longer counts as «can be fitted» except for public places. Proof: old-vs-new on 115
 > real trigger snippets (34 changes, all right) and 120 «قابل للتفاوض» snippets (4 changes, all right). A kitchen or a
 > lift CAN be a nearby place's, so they keep the near rule. The clear's backup is `ops_prose_box_cleared`.
+> Same day, the café chip: about half of sampled yeses were NEARBY places in a comma list («Close to shops, restaurants,
+> and markets», «قريبة من جميع الخدمات: مسجد، بقالة، مطعم», «بجواره مقهى»). A near word now runs on across commas
+> through PLACE items (`_PLACE_WORDS`) and silences only `_NEAR_PUBLIC_FACTS` (café, mosque, market, park…); it stops
+> at the first non-place item, so DealApp's REGA list «قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» keeps its parking.
+> Proof: 110 real nearby-list snippets → 10 changes, all a wrong yes turned off, no real feature lost.
 
 > **Owner decision — the grill chip (2026-11-03): «grill is grill, microwave isn't a grill».** A «شواية» / «شواء» counts for
 > the grill chip wherever the ad names it, including a kitchen appliance («فرن شواية», «مطبخ … فرن - شواية - ميكرويف»).

@@ -467,7 +467,9 @@ _NEAR = tuple(_n(w) for w in N._PROXIMITY + ("قريب", "قريبه", "قرب",
                                                "بقرب", "قربها", "قربه", "مقابله", "جنب", "بجنب", "دقيقتين", "دقيقتان",
                                                "يبعد", "تبعد", "يطل", "تطل", "مطل", "مطله", "اطلاله", "باطلاله",
                                                "دقائق", "دقايق", "دقيقه", "near", "nearby", "close", "minutes",
-                                               "walking", "overlooking", "views"))
+                                               "walking", "overlooking", "views",
+                                               # «بجواره مقهى دانكن» — «next to it» (🔬 2026-11-04 café audit)
+                                               "بجواره", "بجوارها", "بجانبه", "بجانبها", "جواره", "جوارها"))
 _NEAR_WORDS = frozenset(w for w in _NEAR if " " not in w)
 _NEAR_PHRASES = tuple(w for w in _NEAR if " " in w)
 _PARTIAL = tuple(_n(w) for w in N._PARTIAL_ONLY + N._FLOOR_COVERING)
@@ -606,13 +608,22 @@ _NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "�
 # («خلف شبيلي مول», «تتوفر جنبها … سوبرماركت», «ومقابلها مسجد», 2026-11-03 audit round 2). These words are too common to
 # silence every fact — «غرفة غسيل خلف الحديقة 🔸مطبخ» has a kitchen — so they apply to these public places only.
 _NEAR_PUBLIC = frozenset(_n(w) for w in ("جنبها", "جنبه", "خلف", "خلفها", "خلفه", "امام", "امامها", "امامه", "مقابلها",
-                                         "ظهيره", "كيلو", "كم", "تفتح"))
+                                         "ظهيره", "كيلو", "كم", "تفتح", "behind"))
 _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "restaurant_cafe", "food_allowed", "sports_court",
                                 "football_pitch", "events_hall", "nursery", "garden"})
 # A UNIT FIXTURE is never «nearby» (🔬 2026-11-04 live walk, dealapp): «بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة»,
 # «قريب من المسجد عدد 9 مكيفات راكبه», «20 دقيقة من روشن ❄ تكييف» — the near word belongs to the bullet before, the AC
 # is the unit's. Kept to the AC: a kitchen or a lift CAN be a nearby place's («قريب من مطبخ السلطان», a tower's lifts).
 _NEAR_NEVER_FACTS = frozenset({"air_conditioner"})
+# A NEARBY LIST item names a PLACE (🔬 2026-11-04 café audit): «Close to shops, restaurants, and markets». The list ends at
+# the first item that is not a place — DealApp's REGA list «مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» goes on
+# with the unit's own features — and it only ever silences the public places of _NEAR_PUBLIC_FACTS (never parking).
+_PLACE_WORDS = tuple(_n(w) for w in (
+    "مسجد", "مساجد", "جامع", "جوامع", "مدرس", "مدارس", "مستشفي", "مستشفيات", "مستوصف", "سوق", "اسواق", "مول", "مولات",
+    "مطعم", "مطاعم", "مقهي", "مقاهي", "كافيه", "كافيهات", "كوفي", "حديقه", "حدائق", "بقاله", "بقالات", "سوبرماركت",
+    "صيدليه", "صيدليات", "جامعه", "جامعات", "مركز", "مراكز", "محطه", "بنك", "بنوك", "مغسله", "مغاسل", "فندق", "فنادق",
+    "shop", "school", "hospital", "mall", "market", "restaurant", "cafe", "café", "park", "mosque", "bank", "grocer",
+    "supermarket", "pharmac", "universit", "hotel", "service", "attraction", "coffee"))
 _METER_FACTS = frozenset({"separate_water_meter", "separate_electricity_meter"})
 _DIGITS = "0123456789"
 
@@ -757,7 +768,7 @@ _DISTRICT_WORDS = frozenset(_n(w) for w in ("حي", "بحي", "وحي", "لحي"
 
 
 def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: int,
-           cue_in: bool = False, near_in: bool = False) -> tuple[Optional[bool], int, int]:
+           cue_in: bool = False, near_in: bool = False, list_in: bool = False) -> tuple[Optional[bool], int, int]:
     """The outcome of ONE token hit: (True|False|None, quote start, quote end) in the normalised clause.
     cue_in / near_in: the clause before carried a utility list / a «nearby» heading on into this one."""
     ws, we = _word_bounds(t, s, e)
@@ -804,7 +815,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
                                           or any(p in " ".join(p5) for p in _NEAR_PHRASES)):
         return None, s, e
-    if fact in _NEAR_PUBLIC_FACTS and any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in p5):
+    if fact in _NEAR_PUBLIC_FACTS and (list_in or any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in p5)):
         return None, s, e
     n3 = gn[:3]                                      # English puts it AFTER: «car park nearby», «pool and gym nearby»
     if "nearby" in n3 or "close by" in " ".join(n3):
@@ -1022,19 +1033,28 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         clauses = [(off, c, _blank_place_names(t, place_names), idx) for off, c, t, idx in clauses]
     bool_hits: dict[str, dict[bool, tuple[int, int, int]]] = {}
     num_hits: dict[str, list[Hit]] = {}
-    cue_in = near_in = False
+    cue_in = near_in = near_list = False
+    prev_end = 0
     void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
+        # A NEARBY LIST runs on across commas (🔬 2026-11-04 café audit): «Close to shops, restaurants, and markets»,
+        # «قريبة من جميع الخدمات: مسجد، بقالة، مغسلة، مطعم» — each item is its own clause, so the near word was lost.
+        # Only a comma continues the list: a new line, «.», «•» or «-» starts the ad's own feature list.
+        sep = raw[prev_end:_off].strip()
+        prev_end = _off + len(_c)
+        comma = bool(sep) and set(sep) <= set("،,")
         # a clause that was ONLY the ad's own place name is blanks now (_blank_place_names) — nothing to read, and
         # words[0] below would crash the whole run (2026-11-03: every shard of facts-words died on «… مياه وكهرباء، بيشة»)
         if not t.strip() or ci in void:
+            near_list = False
             continue
         words = t.split()
+        list_in = near_list and comma and len(words) <= 3 and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words)
         n_words = len(words)
         for fact, pats in _PATTERNS.items():
             for rx, forced in pats:
                 for m in rx.finditer(t):
-                    v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in)
+                    v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in, list_in)
                     if v is not None:
                         bool_hits.setdefault(fact, {}).setdefault(v, (ci, qs, qe))
         # what this clause hands to the next one: a cue (or a cued utility list going on), a «nearby» heading
@@ -1043,6 +1063,8 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             or (cue_in and _starts(_strip_wa(words[0]), _UTILITY))
         # a heading ENDS with the nearby word: «خدمات قريبة:», «بالقرب من:», «Nearby:»
         near_in = any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in words[-2:]) or (near_in and n_words <= 3)
+        near_list = list_in or any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in words) \
+            or any(p in t for p in _NEAR_PHRASES)
         for fact in _COUNT_RES:
             num_hits.setdefault(fact, []).extend(_num_hits(fact, t, ci))
         # street width — collected, judged across the whole ad below
@@ -1218,6 +1240,16 @@ def selftest() -> None:
         ("السعر قابل للتفاوض مطبخ راكب", {"kitchen": True}, ()),
         ("مكيفات قابلة للتركيب", {}, ("air_conditioner",)),
         ("خدمات سيرا على الاقدام مثل بقالة ومغسلة ملابس وصالون حلاقة ومقهى السعر قابل للتفاوض", {}, ("restaurant_cafe",)),
+        # a NEARBY LIST runs on across commas through place items — never past a non-place item, never onto parking
+        ("Close to shops, restaurants, and markets", {}, ("restaurant_cafe", "market")),
+        ("قريبة من جميع الخدمات: مسجد، بقالة، مغسلة، مطعم وكافيه", {}, ("restaurant_cafe", "mosque")),
+        ("بالقرب من الجامعة ، مسجد ، مدرسة متوسطة، مركز تسوق ، وحديقة", {}, ("mosque", "garden")),
+        ("بجواره مقهى دانكن", {}, ("restaurant_cafe",)),
+        ("Directly behind Al-Romansiah Restaurant", {}, ("restaurant_cafe",)),
+        ("مميزات العقار : مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات", {"elevator": True, "parking": True}, ()),
+        ("حوش ، قريب من الخدمات ، موقف سيارات", {"parking": True}, ()),
+        ("Recreation center , restaurant, café, library", {"restaurant_cafe": True}, ()),
+        ("قريب من الخدمات\nمسبح خاص\nموقف خاص", {"pool": True, "parking": True}, ()),
         ("مطبخ (SPLIT) (غير راكب)", {"kitchen": False}, ()),
         ("مطبخ راكب ومكيفات راكبة", {"kitchen": True, "air_conditioner": True}, ()),
         ("بدون مكيفات ومطبخ", {"air_conditioner": False, "kitchen": False}, ()),
