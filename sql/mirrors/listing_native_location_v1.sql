@@ -1,8 +1,8 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
--- Re-verified 2026-11-04 (Property Finder launch, migrations 20261104180049 wiring + 20261104180642 replay, 20261104181423 digest):
---   CHANGED. Two propertyfinder arms spliced after the haraj commercial
+-- Re-verified 2026-11-04 after 20261104183209 (Property Finder launch: 20261104180049 wiring, 20261104180642 replay,
+--   20261104181423 digest, 20261104183209 revokes public writes only): CHANGED. Two propertyfinder arms spliced after the haraj commercial
 --   arm; 148,007 -> 149,342 chars. md5 of everything below this header block: 14cd19d8345818bcdb4b9b9ff7591f81 == live,
 --   registered by sql_mirror_expected_catches_up_to_propertyfinder_arms.
 --
