@@ -1,6 +1,10 @@
 # facts-words.yml only (word checker + free CPU embeddings). CPU-only torch wheel: no CUDA download.
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.6.0+cpu
+# KNOWN ALERT, KEPT ON PURPOSE (2026-11-04): 3.4.1 has GHSA-jhr6-gm9c-rqjv / CVE-2026-68770 (a LOCAL model's custom code
+# runs without trust_remote_code). Not reachable here: this file is installed only by hand-started facts-words.yml runs,
+# and the only model is the pinned official intfloat/multilingual-e5-small (no custom code). The fix (5.6.0) is a major
+# jump that could shift the stored listing embeddings, so bump it ONLY together with a facts-words.yml phase=benchmark run.
 sentence-transformers==3.4.1
 transformers==4.48.3
 numpy==2.2.3
