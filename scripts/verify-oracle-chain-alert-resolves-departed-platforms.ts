@@ -50,13 +50,13 @@ const sql = latest ? readFileSync(join(MIGRATIONS, latest), 'utf8') : '';
 const p = problems(sql);
 check(`the latest definition (${latest}) resolves departed platforms`, p.length === 0, p.join('; '));
 
-// Mutation proofs on the real file.
-const cut = sql.replace(/-- A platform that left the judged set[\s\S]*?end loop;\n/, '');
-check('(mutation) dropping the departure sweep is caught', problems(cut).length > 0);
-const noActive = sql.replace(/and c\.active > 0\n(\s*and 'oracle_chain)/, '$1');
-check('(mutation) a sweep that ignores active rows is caught', problems(noActive).length > 0);
-const feed = sql.replace(/\s*and a\.dedup_key <> 'oracle_chain_never_observed:__feed__'/, '');
-check('(mutation) a sweep that would resolve __feed__ is caught', problems(feed).length > 0);
+// Mutation proofs on the real file: the barrier's own predicate must catch each broken variant.
+const mustCatch = (label: string, mutant: string) =>
+  check(`(mutation) ${label} is caught`, problems(mutant).length > 0);
+mustCatch('dropping the departure sweep', sql.replace(/-- A platform that left the judged set[\s\S]*?end loop;\n/, ''));
+mustCatch('a sweep that ignores active rows', sql.replace(/and c\.active > 0\n(\s*and 'oracle_chain)/, '$1'));
+mustCatch('a sweep that would resolve __feed__',
+  sql.replace(/\s*and a\.dedup_key <> 'oracle_chain_never_observed:__feed__'/, ''));
 
 if (failed) { console.log(`\n❌ ${failed} failure(s)`); process.exit(1); }
 console.log('\n✅ oracle_chain_never_observed resolves platforms that left its judged set');
