@@ -335,8 +335,8 @@ const modalProblems = (f: Record<string, string>) => {
   mustCatch('a static circle instead of the live letter', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace('const letter = letterOf(name);', "const letter = '';") }, NS).length > 0);
 }
 
-// ── §8 the celebration is FIREWORKS (owner 2026-10-28, from the moving preview: «make it like fireworks, exploding … a
-//     lot and quick … keep sending»): rockets every ~70 ms for 3.5 s across the whole width, one full-screen canvas,
+// ── §8 the celebration is a PARTY (owner 2026-11-04, from the moving preview: «i want party» → «4 · all together»; it
+//     replaced the 2026-10-28 fireworks): poppers from both corners, balloons and confetti rain, one full-screen canvas,
 //     «نورت» at the FIRST pop and the fact at the END (events), gone by PARTY_MS, never two stacked, no external script;
 //     reduced motion → nothing (EXECUTED) ──────────────────────────────────────────────────────────────────────────────
 {
@@ -352,25 +352,29 @@ const modalProblems = (f: Record<string, string>) => {
     '',
   ].join('\n');
   type PartyMod = { startNameParty: (r: boolean) => void; startNamePartyFromBox: (r: boolean) => void; claimNameParty: () => () => void;
-    launchEveryFor: (w: number) => number; LAUNCH_EVERY_MS: number; fireworksPlan: (rand?: () => number, every?: number) => { at: number; x: number; ty: number; c: string; c2: string }[];
-    PARTY_MS: number; LAUNCH_FOR_MS: number; FIREWORK_COLORS: string[]; PARTY_GAP_MS: number;
+    partyScale: (w: number) => number; partyPlan: (width: number, rand?: () => number) => { at: number; kind: 'popper' | 'balloon' | 'rain'; x: number; i: number }[];
+    PARTY_MS: number; RAIN_FOR_MS: number; PARTY_COLORS: string[]; PARTY_GAP_MS: number;
     PARTY_FIRST_POP_EVENT: string; PARTY_END_EVENT: string; NAME_PARTY_EVENT: string };
   const liftParty = async (code: string) => {
     const tmp = join(mkdtempSync(join(tmpdir(), 'ezh-party-')), 'nameParty.ts');
     writeFileSync(tmp, code);
     return (await liftSymbols(tmp, [
-      { header: 'export const LAUNCH_FOR_MS', endsWith: /;$/ },
-      { header: 'export const LAUNCH_EVERY_MS', endsWith: /;$/ },
-      { header: 'export const launchEveryFor', endsWith: /;$/ },
-      { header: 'export const SPARKS_PER_BURST', endsWith: /;$/ },
+      { header: 'export const PARTY_COLORS', endsWith: /;$/ },
+      { header: 'export const POPPER_PIECES', endsWith: /;$/ },
+      { header: 'export const POPPER_VOLLEYS_MS', endsWith: /;$/ },
+      { header: 'export const RIBBON_EVERY', endsWith: /;$/ },
+      { header: 'export const BALLOONS', endsWith: /;$/ },
+      { header: 'export const BALLOON_EVERY_MS', endsWith: /;$/ },
+      { header: 'export const BALLOON_BURST', endsWith: /;$/ },
+      { header: 'export const balloonFlightFrames', endsWith: /;$/ },
+      { header: 'export const RAIN_PIECES', endsWith: /;$/ },
+      { header: 'export const RAIN_FOR_MS', endsWith: /;$/ },
+      { header: 'export const partyScale', endsWith: /;$/ },
       { header: 'export const PARTY_MS', endsWith: /;$/ },
-      { header: 'export const FIREWORK_COLORS', endsWith: /;$/ },
       { header: 'export const PARTY_FIRST_POP_EVENT', endsWith: /;$/ },
       { header: 'export const PARTY_END_EVENT', endsWith: /;$/ },
-      { header: 'export const ROCKET_GRAVITY', endsWith: /;$/ },
-      { header: 'export const OPENING_MS', endsWith: /;$/ },
-      { header: 'export const OPENING_HOP', endsWith: /;$/ },
-      { header: 'export function fireworksPlan(' },
+      { header: 'export const PARTY_BALLOON_POP_EVENT', endsWith: /;$/ },
+      { header: 'export function partyPlan(' },
       { header: 'export const PARTY_GAP_MS', endsWith: /;$/ },
       { header: 'export const NAME_PARTY_EVENT', endsWith: /;$/ },
       { header: 'let lastParty', endsWith: /;$/ },
@@ -378,8 +382,8 @@ const modalProblems = (f: Record<string, string>) => {
       { header: 'export function claimNameParty(' },
       { header: 'export function startNamePartyFromBox(' },
       { header: 'export function startNameParty(' },
-    ], ['startNameParty', 'startNamePartyFromBox', 'claimNameParty', 'fireworksPlan', 'launchEveryFor', 'LAUNCH_EVERY_MS', 'PARTY_MS', 'LAUNCH_FOR_MS', 'FIREWORK_COLORS', 'PARTY_GAP_MS',
-        'PARTY_FIRST_POP_EVENT', 'PARTY_END_EVENT', 'NAME_PARTY_EVENT', 'ROCKET_GRAVITY', 'OPENING_MS', 'OPENING_HOP'], PRE8)) as PartyMod;
+    ], ['startNameParty', 'startNamePartyFromBox', 'claimNameParty', 'partyPlan', 'partyScale', 'PARTY_MS', 'RAIN_FOR_MS', 'PARTY_COLORS', 'PARTY_GAP_MS',
+        'PARTY_FIRST_POP_EVENT', 'PARTY_END_EVENT', 'NAME_PARTY_EVENT'], PRE8)) as PartyMod;
   };
   // one module instance, parties started at the given clock times; returns what each start drew and said
   const run = async (code: string, starts: { at: number; reduced: boolean; box?: boolean; heroOn?: boolean }[]) => {
@@ -407,22 +411,24 @@ const modalProblems = (f: Record<string, string>) => {
   const P8 = (await run(SRC, [])).P;
   // the launch plan, executed with a seeded random
   let seed = 7; const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  const planOk = (P: PartyMod) => { const r = P.fireworksPlan(rand);
-    return r.length >= 70 && r[r.length - 1].at >= 3000 && r[r.length - 1].at < P.LAUNCH_FOR_MS && r.every((x, i) => i === 0 || x.at >= r[i - 1].at)
-      && r.every((x) => x.x >= 0.06 && x.x <= 0.94 && x.ty >= 0.06 && x.ty <= 0.6) && Math.min(...r.map((x) => x.x)) < 0.2 && Math.max(...r.map((x) => x.x)) > 0.8; };
-  check('§8 a LOT of fireworks, quick and non-stop: 70+ rockets over 3+ seconds, spread across the whole width and height', planOk(P8));
-  const laptopFull = (P: PartyMod) => P.launchEveryFor(1440) < P.LAUNCH_EVERY_MS && P.launchEveryFor(1440) >= 0.6 * P.LAUNCH_EVERY_MS && P.launchEveryFor(390) === P.LAUNCH_EVERY_MS;
-  check('§8 a laptop gets proportionally more rockets than a phone (the full laptop screen fills too), bounded', laptopFull(P8));
-  // SOONER (owner 2026-10-29 «the fireworks come up a bit late»): the first pop within ~0.4 s on a phone — the opening
-  // volley starts OPENING_HOP of the screen below its burst point and climbs at ROCKET_GRAVITY.
-  const firstPopMs = (P: PartyMod) => { const H = 812, d = (P as any).OPENING_HOP * H, g = (P as any).ROCKET_GRAVITY; return Math.sqrt((2 * d) / g) * 16.7; };
-  const soon = (P: PartyMod, src: string) => (P as any).OPENING_MS >= 100 && firstPopMs(P) <= 400
-    && /y: r\.at < OPENING_MS \? \(r\.ty \+ OPENING_HOP\) \* H : H \+ 10/.test(src) && /r\.vy \+= ROCKET_GRAVITY \* dt;/.test(src);
-  check(`§8 the first pop lands fast (${Math.round(firstPopMs(P8))} ms on a phone): an opening volley that starts high, rockets that climb quick`, soon(P8, SRC));
-  const slowSrc = SRC.replace('export const OPENING_HOP = 0.09;', 'export const OPENING_HOP = 0.9;');
-  mustCatch('the first pop coming late again (a full climb from the bottom)', !soon((await run(slowSrc, [])).P, slowSrc));
-  mustCatch('a laptop as sparse as a phone', !laptopFull((await run(SRC.replace('Math.max(0.6, 500 / (width || 500))', 'Math.max(1, 500 / (width || 500))'), [])).P));
-  check('§8 …in party colours (several hues, Ezhalah green and gold among them)', new Set(P8.FIREWORK_COLORS).size >= 6 && P8.FIREWORK_COLORS.includes('#2f7247') && P8.FIREWORK_COLORS.includes('#d8b14a'));
+  const planOk = (P: PartyMod) => { const r = P.partyPlan(390, rand);
+    const poppers = r.filter((x) => x.kind === 'popper'), balloons = r.filter((x) => x.kind === 'balloon'), drops = r.filter((x) => x.kind === 'rain');
+    return poppers.length >= 4 && poppers.some((x) => x.x === 0) && poppers.some((x) => x.x === 1) && new Set(poppers.map((x) => x.at)).size >= 2
+      && balloons.length >= 12 && Math.min(...balloons.map((x) => x.x)) < 0.2 && Math.max(...balloons.map((x) => x.x)) > 0.8 && balloons.every((x) => x.x >= 0.06 && x.x <= 0.94)
+      && drops.length >= 100 && Math.max(...drops.map((x) => x.at)) >= 1200 && drops.every((x) => x.at <= P.RAIN_FOR_MS)
+      && r.every((x, i) => i === 0 || x.at >= r[i - 1].at); };
+  check('§8 a FULL party: poppers from both corners (twice), 12+ balloons and 100+ confetti raindrops across the whole width, in time order', planOk(P8));
+  const laptopFull = (P: PartyMod) => { const lap = P.partyPlan(1440, rand).length, phone = P.partyPlan(390, rand).length;
+    return P.partyScale(390) === 1 && lap > phone && lap <= phone * 1.75; };
+  check('§8 a laptop gets proportionally more balloons and rain than a phone (the full laptop screen fills too), bounded', laptopFull(P8));
+  // AT ONCE (owner 2026-10-29 «the fireworks come up a bit late»): the poppers open the show at 0 ms and that is the first pop.
+  const soon = (P: PartyMod, src: string) => { const r = P.partyPlan(390, rand);
+    return r[0].at === 0 && r[0].kind === 'popper' && /if \(q\.kind === 'popper'\) \{\s*firstPop\(\);/.test(src); };
+  check('§8 the first pop lands at once: the poppers open the show (0 ms) and tell the headline', soon(P8, SRC));
+  const slowSrc = SRC.replace('export const POPPER_VOLLEYS_MS = [0, 450];', 'export const POPPER_VOLLEYS_MS = [600, 1050];');
+  mustCatch('the first pop coming late again (poppers after a wait)', !soon((await run(slowSrc, [])).P, slowSrc));
+  mustCatch('a laptop as sparse as a phone', !laptopFull((await run(SRC.replace('=> Math.min(1.7, Math.max(1, (width || 500) / 500));', '=> 1;'), [])).P));
+  check('§8 …in party colours (several hues, Ezhalah green and gold among them)', new Set(P8.PARTY_COLORS).size >= 6 && P8.PARTY_COLORS.includes('#2f7247') && P8.PARTY_COLORS.includes('#d8b14a'));
   check('§8 a celebration draws ONE full-screen canvas layer and tells the headline: the party started, then the first pop',
     !!one.layer && one.canvas && one.said[0] === P8.NAME_PARTY_EVENT && one.said.includes(P8.PARTY_FIRST_POP_EVENT), JSON.stringify(one.said));
   check('§8 the layer is gone by PARTY_MS at the latest, and going it tells the headline the fireworks are over (→ the fact)',
@@ -438,8 +444,8 @@ const modalProblems = (f: Record<string, string>) => {
   check('§8 no external script, no disco lights, no leftover rain layer in the module', noExternal(SRC));
   mustCatch('fireworks that are never cleared', (await run(SRC.replace('  setTimeout(finish, PARTY_MS);\n', ''), [{ at: 0, reduced: false }])).shots[0].removeAt === null);
   mustCatch('an end the headline never hears (the fact would wait for its fallback)', !(await run(SRC.replace('layer.remove(); say(PARTY_END_EVENT);', 'layer.remove();'), [{ at: 0, reduced: false }])).shots[0].endSaid);
-  mustCatch('a thin show (a rocket every 400 ms)', !planOk((await run(SRC.replace('export const LAUNCH_EVERY_MS = 35;', 'export const LAUNCH_EVERY_MS = 400;'), [])).P));
-  mustCatch('a short burst instead of non-stop (1 s)', !planOk((await run(SRC.replace('export const LAUNCH_FOR_MS = 3500;', 'export const LAUNCH_FOR_MS = 1000;'), [])).P));
+  mustCatch('a thin show (3 balloons)', !planOk((await run(SRC.replace('export const BALLOONS = 14;', 'export const BALLOONS = 3;'), [])).P));
+  mustCatch('a drizzle instead of a rain (10 pieces)', !planOk((await run(SRC.replace('export const RAIN_PIECES = 120;', 'export const RAIN_PIECES = 10;'), [])).P));
   mustCatch('a layer that is not full screen', !fullScreen(SRC.replace('[data-ezh-party]{position:fixed;inset:0;', '[data-ezh-party]{position:absolute;top:0;height:40vh;')));
   mustCatch('fireworks under reduced motion', (await run(SRC.replace('if (reduced || ', 'if ('), [{ at: 0, reduced: true }])).shots[0].drew);
   mustCatch('two celebrations stacking', (await run(SRC.replace('if (now - lastParty < PARTY_GAP_MS) return;', ''), [{ at: 0, reduced: false }, { at: 1000, reduced: false }])).shots[1].drew);
