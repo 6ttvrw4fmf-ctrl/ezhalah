@@ -148,6 +148,15 @@ whose oracle re-reads every row but whose crawl sees a slice read as stale: muha
 stamp in the window is still reported. The sweep never deactivates anything, so no kill rule moved.
 Barrier: `scripts/verify-stale-coverage-gate.ts` §E (both directions) and its §D revert guard.
 
+### 3.2 A deactivation is never written into the DELETION ledger (2026-11-04, migration 20261104033440)
+
+`cleanup_deletion_log` is written before a hard delete, so a row there claims permanent destruction.
+Three hand-written repairs (20260919010944, a 2026-09-19 bulk pass, 20261104013008) deactivated
+wasalt ads on real direct evidence and recorded that in the DELETION ledger — 133 false claims. They
+now live in `ops_stale_inactivation_probe`, and `scripts/verify-deactivation-is-not-written-to-deletion-ledger.ts`
+fails any later migration that inserts into `cleanup_deletion_log` without deleting a listing.
+Record a deactivation in `ops_stale_inactivation_probe` and register it in `ops_adjudicated_retraction`.
+
 ## 4. Every production-searchable platform must declare a strategy
 
 `scrapers/common/liveness_policies.py` is the registry. A platform without an entry raises
