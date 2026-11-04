@@ -83,7 +83,10 @@ jobs:
             # never be robot-mergeable and the drift gate refused every deploy until a person merged it (🔬 #10130: six
             # refused deploys, 09:26–12:13 UTC 2026-11-03; #9791 and #9949 before it). A stamp changes nothing in production.
             outside=$(printf '%s\n' "$files" \
-              | grep -vE '^(scrapers|scripts|e2e|docs|src|public|data|sql/mirrors|\.github/workflows)/' \
+              # sql/*.generated.sql are the taxonomy seeds the build gate REGENERATES from src/data/taxonomy.source.json
+              # (verify-taxonomy layer 1.C demands byte-equality, so they cannot ship apart from the src/ change that
+              # produced them): 🔧's #10508 (a src/ customer fix) sat «for a person» on 2026-11-04 over one such file.
+              | grep -vE '^(scrapers|scripts|e2e|docs|src|public|data|sql/mirrors|\.github/workflows)/|^sql/[^/]+\.generated\.sql$' \
               ; printf '%s\n' "$files" \
               | grep -E '^(\.github/workflows/engineer-automerge\.yml|scripts/safe-pr-merge\.ts|scripts/lib/gateFetch\.mjs|scripts/lib/robotPass\.mjs)$' \
               ; true)
