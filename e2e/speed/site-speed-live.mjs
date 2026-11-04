@@ -8,12 +8,17 @@
 //   2. SEARCH — Riyadh through the real Filter, until the first result card is on screen.
 //   3. TAP    — press the first golden card («اضغط هنا»): the longest freeze (long task) in the 3 s after the tap,
 //               the moment the owner felt as «not smooth» (measured 2026-10-27: 380 ms on a laptop ≈ 1.5 s here).
+//   0. TABS + MAP (owner 2026-11-04: «we need to make sure it's never ever slow … people will run away»), run first:
+//      tap «خريطة» until city names are on the map (first visit), back to «تصفية» until the form answers, «خريطة» again
+//      (the map is kept between visits), two taps on «+» until the closer view's labels show, and «الوسيط الذكي» until
+//      its message box is on screen. Measured the day these were added, on a laptop: map first visit ~4.2 s before the
+//      bridge labels (#10554), return 0.85 s, Filter 0.07 s.
 // Any step over its budget, or any step that cannot complete, fails the run (never a silent pass).
 import '../../scripts/lib/robotPass.mjs';
 import { chromium, devices } from '@playwright/test';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah.com';
-export const BUDGET = { openMs: 12_000, searchMs: 25_000, tapFreezeMs: 1_000 };
+export const BUDGET = { openMs: 12_000, searchMs: 25_000, tapFreezeMs: 1_000, mapFirstMs: 5_000, filterBackMs: 2_500, mapReturnMs: 3_000, zoomMs: 4_000, brokerMs: 4_000 };
 
 const browser = await chromium.launch();
 const results = {};
@@ -35,6 +40,34 @@ try {
 
   // Cookie banner, if shown: essential only (privacy default).
   await page.getByText('الضروري فقط', { exact: true }).click({ timeout: 3_000 }).catch(() => {});
+
+  // 0. TABS + MAP — what a visitor feels when moving around (labels on the map, a form that answers, a box to type in).
+  const tab = (label) => page.locator('[role=tab]', { hasText: label }).first();
+  const until = async (fn, arg) => page.waitForFunction(fn, arg, { timeout: 30_000, polling: 25 });
+  const labelsOnMap = () => location.pathname === '/map' && [...document.querySelectorAll('[data-testid=map-area]')]
+    .some((a) => { const r = a.getBoundingClientRect(); return r.width > 0 && r.top >= 0 && r.top < innerHeight; });
+  const formBack = () => location.pathname === '/' && [...document.querySelectorAll('*')].some((e) => e.childElementCount === 0 && e.textContent === 'بحث' && e.getBoundingClientRect().width > 0);
+  await page.waitForTimeout(5_000);   // a reader's pause: the page settles and the quiet map warm-up runs
+  t = Date.now(); await tab('خريطة').click(); await until(labelsOnMap); results.mapFirstMs = Date.now() - t;
+  say(results.mapFirstMs <= BUDGET.mapFirstMs, 'map: first visit until city names are on the map', results.mapFirstMs, BUDGET.mapFirstMs);
+  await page.waitForTimeout(2_000);
+  t = Date.now(); await tab('تصفية').click(); await until(formBack); results.filterBackMs = Date.now() - t;
+  say(results.filterBackMs <= BUDGET.filterBackMs, 'tabs: back to Filter until the form answers', results.filterBackMs, BUDGET.filterBackMs);
+  await page.waitForTimeout(2_000);
+  t = Date.now(); await tab('خريطة').click(); await until(labelsOnMap); results.mapReturnMs = Date.now() - t;
+  say(results.mapReturnMs <= BUDGET.mapReturnMs, 'map: return visit until city names are on the map', results.mapReturnMs, BUDGET.mapReturnMs);
+  await page.waitForTimeout(1_500);
+  const before = await page.evaluate(() => [...document.querySelectorAll('[data-testid=map-area]')].map((e) => e.textContent).join('|'));
+  const plus = page.getByRole('button', { name: /Zoom in|تكبير/ }).first();
+  t = Date.now(); await plus.click(); await page.waitForTimeout(250); await plus.click();
+  await until((prev) => { const now = [...document.querySelectorAll('[data-testid=map-area]')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.textContent).join('|'); return now.length > 0 && now !== prev; }, before);
+  results.zoomMs = Date.now() - t;
+  say(results.zoomMs <= BUDGET.zoomMs, 'map: two zoom-ins until the closer view is labelled', results.zoomMs, BUDGET.zoomMs);
+  t = Date.now(); await tab('الوسيط الذكي').click();
+  await until(() => location.pathname === '/agent' && [...document.querySelectorAll('textarea')].some((x) => x.getBoundingClientRect().width > 0));
+  results.brokerMs = Date.now() - t;
+  say(results.brokerMs <= BUDGET.brokerMs, 'tabs: Smart Broker until its message box is on screen', results.brokerMs, BUDGET.brokerMs);
+  await tab('تصفية').click(); await until(formBack);
 
   // 2. SEARCH (Riyadh, the real Filter)
   t = Date.now();
@@ -65,4 +98,4 @@ try {
 }
 console.log(`\nmeasured: ${JSON.stringify(results)}`);
 if (failed) { console.error(`❌ site speed watch: ${failed} problem(s) — the engineers get this as an alert.`); process.exit(1); }
-console.log('✅ site speed watch: ezhalah.com opens, searches and answers a tap within budget on a mid-range phone.');
+console.log('✅ site speed watch: ezhalah.com opens, moves between tabs, shows the map, searches and answers a tap within budget on a mid-range phone.');
