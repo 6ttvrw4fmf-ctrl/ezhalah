@@ -17,9 +17,9 @@ Until then every Property Finder ad is **stored and invisible**.
 
 Tell any Claude session: **«Launch Property Finder — follow docs/ops/PROPERTYFINDER_LAUNCH.md.»**
 That session does the steps below in this order, each one self-verifying, and reports the customer proof.
-(Launch PR with the code half: see the PR linked from the staging PR's description.)
+(The code half is the draft launch PR **#10464**, «DO NOT MERGE — owner launch switch».)
 
-1. **Merge the launch PR** (frontend entry + liveness policy). It is inert on its own: with the DB still
+1. **Merge the launch PR #10464** (frontend entry + liveness policy). It is inert on its own: with the DB still
    staged no Property Finder row is in `search_listings_ar`, so there is nothing for the new code to show.
    It adds: `src/data/platforms.ts` entry (`allowsBuy` AND `allowsRent` true — both sides are live at the
    source), SourceBadge / sourceHost / sourceName branches (badge `return null` until the owner supplies the
