@@ -1,8 +1,9 @@
 import type { Deal } from './taxonomy';
 
 // Source listing platforms. (PRD §8.1) allowsRent/allowsBuy gate which deals a source can appear in.
-// PRODUCT RULE: Ezhalah aggregates SAUDI-OWNED platforms only — we don't carry foreign companies
-// operating in the Saudi market (Bayut/EMPG, Property Finder/UAE were removed for this reason).
+// Foreign-owned platforms join only with the owner's explicit approval: Property Finder was approved by
+// the owner on 2026-11-04 (entry below); Bayut/EMPG is pending the site's permission (its pages answer a
+// security check to robots) and stays out until then.
 export type Platform = {
   name: string;
   domain: string;
