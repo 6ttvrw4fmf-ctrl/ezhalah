@@ -58,7 +58,7 @@ function frontDoorFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
   // (a phone on campus Wi-Fi, a home connection) taking the direct retry after one «net» blip. Once the back door
   // locks, that direct retry is refused, so a blip or a gateway hiccup (502/503/504) retries THE DOOR once, 400 ms
   // later; only if that also fails does the old direct retry run (harmless while open, refused once locked).
-  const viaDoor = () => window.fetch(front, init);
+  const viaDoor = () => window.fetch(front, withTurnstileLabel(init));
   const pause = () => new Promise<void>((done) => setTimeout(done, 400));
   const settle = (r: Response, retried: boolean): Response | Promise<Response> => {
     if (!frontDoorAnswered(r.status, r.headers.has('x-ezhalah-bot'))) {
@@ -84,6 +84,26 @@ export function doorHiccup(status: number): boolean {
 /** «ezhalah-fallback=<why>»: the log marker a direct retry carries. */
 export function fallbackLabel(why: string): string {
   return `ezhalah-fallback=${/^[a-z0-9]{1,8}$/i.test(why) ? why : 'other'}`;
+}
+
+// TURNSTILE TELLS US WHY (owner 2026-11-04, «add a second guard … it needs a small repair first»). Measured 2026-11-04
+// (24 h, real browsers, robot=0): iPhones carried the human pass on 1,125 calls (111 without), but desktop browsers on
+// only 29 of 1,157 and Android on 0 of 433 — and the widget's failures were swallowed, so nobody could see why. Every
+// door call now carries «ezhalah-tsc=<state>» in x-client-info (kept in the API logs next to «ts=pass|none»):
+// wait = no outcome yet · ok = pass cookie minted · err<code> = Cloudflare's error code (600010 = flagged as automated,
+// 110200 = domain not allowed…) · srv<status> = /api/human refused the token · load = the script never loaded.
+// Measurement only: nothing waits on it and nobody is refused because of it.
+let turnstileState = 'ezhalah-tsc=wait';
+/** «ezhalah-tsc=err600010»: the client-side Turnstile state, reduced to a short safe token. */
+export function turnstileLabel(kind: string, detail = ''): string {
+  const k = /^(wait|ok|err|srv|load)$/.test(kind) ? kind : 'other';
+  const d = /^[0-9a-z]{1,8}$/i.test(String(detail)) ? String(detail).toLowerCase() : '';
+  return `ezhalah-tsc=${k === 'other' ? 'other' : k + (k === 'err' || k === 'srv' ? d || 'x' : '')}`;
+}
+function withTurnstileLabel(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ${turnstileState}`.trim());
+  return { ...init, headers };
 }
 
 export const NETWORK_BLOCKED_EVENT = 'ezhalah:network-blocked';
@@ -122,17 +142,20 @@ function startTurnstile(): void {
     const s = document.createElement('script');
     s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
     s.async = true;
+    s.onerror = () => { turnstileState = turnstileLabel('load'); };
     s.onload = () => {
       const ts = (window as unknown as { turnstile?: { render: (el: HTMLElement, o: object) => string; reset: (id: string) => void } }).turnstile;
       if (!ts) return;
       const id = ts.render(host, {
         sitekey: TURNSTILE_SITE_KEY,
         callback: (token: string) => {
-          void window.fetch('/api/human', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) }).catch(() => {});
+          void window.fetch('/api/human', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) })
+            .then((r) => { turnstileState = r.ok ? turnstileLabel('ok') : turnstileLabel('srv', String(r.status)); },
+              () => { turnstileState = turnstileLabel('srv', 'net'); });
         },
         'refresh-expired': 'auto',
         // A Turnstile failure must never surface as an uncaught page error: no pass, the call is labelled "none".
-        'error-callback': () => true,
+        'error-callback': (code?: string | number) => { turnstileState = turnstileLabel('err', String(code ?? '')); return true; },
       });
       // The pass lasts an hour; renew at 50 minutes so a long visit never runs without one.
       setInterval(() => { try { ts.reset(id); } catch { /* renew failed: the next call still flows */ } }, 50 * 60 * 1000);
