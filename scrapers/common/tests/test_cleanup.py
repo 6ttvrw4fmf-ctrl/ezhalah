@@ -60,9 +60,33 @@ class _Table:
         return _Res(rows, count=len(rows))
 
 
+class _Rpc:
+    def __init__(self, data): self.data = data
+    def execute(self):
+        import types
+        return types.SimpleNamespace(data=self.data, count=None)
+
+
+def _clock_eligible(row, p):
+    """The fake's copy of deletion_clock_eligible_sql(): the absence floors PLUS a DIRECT verdict
+    (owner decision 2, 2026-11-03). `gone_probe` stands for a GONE row in ops_stale_inactivation_probe."""
+    return (row.get("active") is False
+            and (row.get("missing_count") or 0) >= p["p_min_missing"]
+            and row.get("last_seen_at") is not None and row["last_seen_at"] < p["p_cutoff"]
+            and (row.get("last_verified_alive_at") is not None or bool(row.get("gone_probe"))))
+
+
 class _Client:
     def __init__(self, rows): self.rows, self.deleted, self.updated, self.inserted = rows, {}, {}, {}
     def table(self, name): return _Table(self, name)
+    def rpc(self, name, p):
+        rows = [r for r in self.rows.get(p["p_table"], []) if _clock_eligible(r, p)]
+        rows.sort(key=lambda r: (r.get("last_seen_at") or "", r.get("id")))
+        if name == "deletion_clock_eligible_count":
+            return _Rpc(len(rows))
+        if name == "deletion_clock_candidates":
+            return _Rpc(rows[: p["p_limit"]])
+        raise AssertionError(f"unexpected rpc {name}")
 
 
 def _install(monkey_rows, policy, probe, platform="testp", tables=("testp_listings",), dead_marker=(lambda b: b == "DEAD")):
@@ -84,7 +108,8 @@ def _install(monkey_rows, policy, probe, platform="testp", tables=("testp_listin
 
 POL = lambda **k: {"min_inactive_days": 30, "min_missing_count": 3, "require_source_recheck": True,
                    "max_delete_per_run": 500, "anomaly_floor": 300, "anomaly_factor": 4, "enabled": True, **k}
-def _cand(i): return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": "2026-01-01T00:00:00+00:00", "active": False}
+def _cand(i): return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": "2026-01-01T00:00:00+00:00", "active": False,
+                      "last_verified_alive_at": "2025-12-01T00:00:00+00:00"}
 
 
 def test_live_row_is_reactivated_never_deleted():
@@ -154,7 +179,8 @@ def test_anomaly_abort_stays_quiet_when_the_fraction_gate_would_pass():
 
 
 def _cand_ts(i, ts):
-    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": ts, "active": False}
+    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": ts, "active": False,
+            "last_verified_alive_at": "2025-12-01T00:00:00+00:00"}
 
 
 def test_bounded_cap_never_exceeds_what_unbounded_gates_would_allow():
@@ -316,6 +342,40 @@ def test_below_min_age_never_becomes_a_candidate():
     c = _install({"testp_listings": [struck_but_young]}, POL(), probe=lambda url: (404, ""))
     s = C.run("testp", force=True)
     assert s["eligible_total"] == 0 and s["deleted"] == 0 and c.deleted == {}
+
+
+def test_absence_alone_never_starts_the_deletion_clock():
+    """Owner decision 2 (2026-11-03): a row whose only signal is crawl absence — old enough, struck
+    enough, but with NO direct source verdict (last_verified_alive_at NULL, no GONE probe) — is never
+    a candidate, even when the delete-time probe would say 404. It stays exactly as it is."""
+    absence_only = {**_cand(1), "last_verified_alive_at": None}
+    c = _install({"testp_listings": [absence_only]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["eligible_total"] == 0 and s["deleted"] == 0 and c.deleted == {} and c.updated == {}
+
+
+def test_a_gone_probe_is_a_direct_verdict_that_starts_the_clock():
+    gone = {**_cand(1), "last_verified_alive_at": None, "gone_probe": True}
+    alive_once = _cand(2)
+    absence_only = {**_cand(3), "last_verified_alive_at": None}
+    c = _install({"testp_listings": [gone, alive_once, absence_only]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["eligible_total"] == 2 and sorted(c.deleted["testp_listings"]) == [1, 2]
+
+
+def test_candidates_come_only_from_the_shared_predicate():
+    """A listing-table SELECT cannot express the verdict clause, so the engine must never build its
+    candidate set from one. Every listing-table read raises here; the run still measures and deletes."""
+    c = _install({"testp_listings": [_cand(1)]}, POL(), probe=lambda url: (404, ""))
+    orig = c.table
+    class _NoSelect(_Table):
+        def select(self, *a, **k):
+            if k.get("count") == "exact":        # platform_rows (fraction guard) is allowed
+                return super().select(*a, **k)
+            raise AssertionError("candidate rows read from the listing table, not deletion_clock_candidates")
+    c.table = lambda name: _NoSelect(c, name) if name == "testp_listings" else orig(name)
+    s = C.run("testp", force=True)
+    assert s["eligible_total"] == 1 and s["deleted"] == 1
 
 
 def test_at_exactly_the_thresholds_is_eligible():

@@ -750,6 +750,13 @@ def run(args: argparse.Namespace) -> int:
     rc = 0
     try:
         for i in range(0, len(sample), args.batch):
+            # A TIME BUDGET, not a timeout (2026-11-03): the nightly run planned 10,000 ads on one lane at ~0.3 ads/s and
+            # GitHub killed it at 300 min — «cancelled» every night while the unread pile grew (~3,900 new ads a day vs
+            # ~1,700 read). Stopping between batches keeps every stored row and says plainly what is left.
+            if args.max_minutes and time.time() - t_start > args.max_minutes * 60:
+                print(f"TIME BUDGET: stopped cleanly after {int((time.time() - t_start) / 60)} min with "
+                      f"{len(sample) - i} planned ads left for the next run (nothing lost; each batch is stored as it goes)")
+                break
             process(sample[i:i + args.batch])
             if (i // args.batch) % 5 == 4 or tot["ads"] >= CHECKPOINT_ADS and not checkpointed:
                 checkpoint()
@@ -877,6 +884,8 @@ def main() -> int:
                     help="sample = the fixed 10k plan; silent = ads the reader found nothing in; new = ads first seen ≤ 3 days the AI "
                          "never read (the nightly run); backlog = any active ad the AI never read")
     ap.add_argument("--model", default="", help="OpenRouter only: one of the proxy's allowed cheap models (empty = its default)")
+    ap.add_argument("--max-minutes", type=float, default=float(os.environ.get("MAX_MINUTES") or 0),
+                    help="stop cleanly after this many minutes (0 = no limit); the unread rest waits for the next run")
     ap.add_argument("--shard", default="0/1", help="lane k/n: read only unread ads with id % n = k (new / backlog)")
     ap.add_argument("--fallback-model", default=None,
                     help="backup for ads the main model cannot answer (default: FALLBACK_MODEL on the OpenRouter key; '' = off)")

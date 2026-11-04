@@ -1,7 +1,14 @@
 # Recommendation — absence must never start the irreversible deletion path
 
-**Status:** recommendation only. Nothing here is applied. Incident **#24 (P1)** stays OPEN until the
-owner decides, because every option below changes deletion semantics on a path that ends in a
+**Status (2026-11-03): the owner DECIDED a simpler form of Step 2.** A row enters the deletion
+clock only after at least one DIRECT source verdict (`last_verified_alive_at`, or a GONE probe) —
+not crawl absence alone. Shipped as `deletion_clock_eligible_sql()`; the rule and its callers are in
+`LISTING_LIVENESS.md` §2.1, which is canonical. The `first_dead_evidence_at` column, the
+"two observations 30 days apart" rule and Step 3 below were NOT decided and are not applied; the
+rest of this file is the original recommendation, kept for provenance.
+
+**Original status:** recommendation only. Incident **#24 (P1)** stayed OPEN until the
+owner decided, because every option below changes deletion semantics on a path that ends in a
 permanent, unrecoverable delete.
 
 **Scope discipline.** Nothing in this document weakens a source-truth requirement, and nothing here
