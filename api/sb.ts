@@ -93,17 +93,16 @@ async function handle(request: Request): Promise<Response> {
   url.searchParams.delete('__p');
   url.searchParams.delete('ezsbpath');
 
-  // Our own robots (scripts/lib/robotPass.mjs) carry the gate secret: never refused by BotID, Turnstile or the internal-path rule.
-  const robot = robotPass(request.headers.get('x-ezhalah-robot'), GATE);
-  if (!robot && internalPath(path)) return Response.json({ message: 'not found' }, { status: 404, headers: { 'x-ezhalah-bot': 'skip' } });
-
   let bot = 'unknown';
   try { bot = (await checkBotId()).isBot ? 'bot' : 'human'; } catch { /* the check itself failed: unknown, never a block */ }
   const human = !TURNSTILE_KEY ? 'off'
     : (await humanPassValid(readCookie(request.headers.get('cookie'), HUMAN_COOKIE), Date.now() / 1000, TURNSTILE_KEY)) ? 'pass' : 'none';
+  // Our own robots (scripts/lib/robotPass.mjs) carry the gate secret: never refused by BotID, Turnstile or the internal-path rule.
+  const robot = robotPass(request.headers.get('x-ezhalah-robot'), GATE);
   if (!robot && ((ENFORCE && bot === 'bot') || (TURNSTILE_ENFORCE && human === 'none'))) {
     return Response.json({ message: 'Access denied' }, { status: 403, headers: { 'x-ezhalah-bot': bot, 'x-ezhalah-human': human } });
   }
+  if (!robot && internalPath(path)) return Response.json({ message: 'not found' }, { status: 404, headers: { 'x-ezhalah-bot': bot, 'x-ezhalah-human': human } });
 
   const headers = new Headers();
   for (const k of PASS_REQUEST) { const v = request.headers.get(k); if (v) headers.set(k, v); }
