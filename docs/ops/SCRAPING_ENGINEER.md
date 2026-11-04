@@ -84,6 +84,26 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
+**NEW (11-04): EVERY queued workflow that reads the repo must check out `main` at RUN time, not only small-sources-sync.**
+`migration-auto-mirror.yml` run 41767741699 was dispatched 03:32 and got a runner 05:05; `actions/checkout` used the
+03:32 commit, so two migrations that had reached main since read as «missing» and got duplicate save PRs (#10346,
+#10347), then the run went red on its own leftover `-auto` branch (alert 12964). Fixed in #10352
+(`ref: ${{ github.ref == 'refs/heads/main' && 'main' || github.sha }}`). With ~100 runs queued at 05:20 UTC, ANY
+robot that compares the repo with production can be hours stale — before trusting a robot's «missing / changed»
+verdict, compare its run's `head_sha` with main at the minute it ran.
+
+**NEW (11-04): `named_city`'s whole-word test treats «،» «؛» «؟» as a word END** (#10352). The U+0600–U+06FF block
+holds Arabic punctuation; a lookaround over the whole block silently misses «بريدة،». Use `[\wً-ٰٟ]`
+for «a letter» in any Arabic whole-word regex.
+
+**Owed → first thing next run (11-04, dated):** #10083 (merged 05:55, 5fed519) and #10352 (merged 06:31, 565e174)
+reach rows only through a crawl that started AFTER the merge: targeted small-sources runs 41782195828
+(amaall,superoffice,albukaeri,tawia) and the 06:31 dispatch (erapulse,aqaralsaudia,aqarcity), plus the 11-04 nightly
+41772760302 whose sync jobs check out main at run time. Then the next :22 sync. Proof: `pin_coverage_by_platform()`
+amaall ≥ 75 %, superoffice/albukaeri/tawia > 0, aqaralsaudia 14/16; erapulse 20551803 production_ready; aqarcity
+21421199/4369586/594586 no longer match `(?<![0-9])05[0-9]{7}(?![0-9])`; and one customer-journey (phone) per
+site, naming the run id + commit that wrote LAST. Sakani #10226 proof job re-run 3 started 05:36 (≈ 07:00 end).
+
 **NEW (11-01): a queued nightly job used to run the code of the moment it was DISPATCHED.** The 04:22 nightly's
 144 jobs wait hours for a runner (11-01: 96 still queued at 05:15; dealapp's 24 shards hold up to 12 runners for
 hours), so a fix merged at 06:07 was undone at 07:16 by the nightly's daryusuf job pinned to ad8e469 (13109421
