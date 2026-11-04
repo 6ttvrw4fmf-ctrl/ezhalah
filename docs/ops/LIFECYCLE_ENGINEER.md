@@ -1615,3 +1615,11 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   (city_pin_check_silent paged against a 14-hour scheduled gap; searchability read 31 honest-unknown alsaedan arrivals
   as «stuck»), 🔬 11-03 (five detectors behind approved rules), ♻️ 11-03 (adjudicated_reactivation vs a republish).
   Rule: read the job's cron line and the rule's migration before trusting a detector; prove both directions with real numbers.
+
+## Lesson from 2026-11-04 (copied by 🔧 from your own report)
+A «minute only» cron re-slot can break a rest rule: recheck-2 moved to 20:06 by the 11-04 rebalance sat under the 6 h
+rest after the 14:17 pass, so third reads never landed the same day. **Rule:** before applying any schedule change,
+check every recheck pass gap against REPROBE_MIN_HOURS (guard in #10474), and pick free cron minutes BEFORE applying,
+not after (three applies on one night). Also from 🔧: `stale_coverage_gate` in mark_stale_listings_inactive has no
+dormant/retired skip and nothing resolves its keys — sadin/senan/snam (all dormant) raised at 05:15 can never close
+until the same registry skip and a `mon_resolve_stale_keys('stale_coverage_gate', live)` land in that function.

@@ -213,7 +213,7 @@
       "floor_pct": 1,
       "proof_url": "https://aqaralsaudia.com/property/%d8%b4%d9%82%d8%a9-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d8%a7%d8%b1%d8%b6%d9%8a%d8%a9-%d8%a8%d8%ad%d9%8a-%d9%84%d8%a8%d9%86-%d8%b1%d9%82%d9%85-1/",
       "proven_on": "2026-10-30",
-      "note": "CAPTURE GAP (16 ads, 0%): the page prints 24.636784,46.596677 in JSON (Leaflet) + a short link (1 ad seen). Backlog. Served 0/16 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "WIRED 2026-11-04 (scrapers/aqaralsaudia/test_pin.py, REAL_HOMES_property_location). Re-read live 2026-11-04: an ad with NO map (11678440, «دور اول فاخر بحي البيان») still prints the RealHomes theme's schema default geo 23.333333,45.333333 in JSON-LD — not a pin (desert, ~170 km from the ad's district); registered in ops_default_pin_register so captured_pin_not_served never counts it. Served 0/16 on 2026-10-30."
     },
     "aqaratikom": {
       "pin_source": "feed",
@@ -437,7 +437,7 @@
       "floor_pct": 1,
       "proof_url": "https://flow.life/en/properties/riyadh-narjis/available-homes/tihama-3-bedroom/fid/o6j2UXkv0Lr9J0YjzDDL",
       "proven_on": "2026-10-30",
-      "note": "CAPTURE GAP (20 ads, 0%): the rendered page prints a Maps link 24.900543,46.636600 (Mapbox map). Below the 50-ad line; backlog. Served 0/20 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "WIRED 2026-11-04 (scrapers/flow/test_pin.py): re-read live, riyadh-narjis's available-homes page prints the property's Maps PLACE link …!3d24.9005434!4d46.6391757 (the /@ part is the camera and is not read); riyadh-granada prints a place link with no pair and riyadh-olaya none, so only Narjis home types carry a pin (the property's own, shared by its home types). Served 0/20 on 2026-10-30."
     },
     "fursaghyr": {
       "pin_source": "feed",
@@ -563,7 +563,7 @@
       "floor_pct": 1,
       "proof_url": "https://livingcompound.com/property/2-bedroom-fully-furnished-apartment-for-rent-al-fayha-jeddah/",
       "proven_on": "2026-10-30",
-      "note": "CAPTURE GAP (17 ads, 0%): the rendered page prints a Maps link 21.509731,39.203042. Below the 50-ad line; backlog. Served 0/17 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "WIRED 2026-11-04 (scrapers/livingcompound/test_pin.py): the pair is the single-property map canvas's data-location keyed by the post id (re-read live on 9773/9730/9822/9543, four different pairs); related-property cards and the theme's Sydney default are never read, and the «Get directions» link is a plus-code query, not a pair. Served 0/17 on 2026-10-30."
     },
     "m3tmd": {
       "pin_source": "feed",
@@ -913,7 +913,7 @@
       "floor_pct": 1,
       "proof_url": "https://sodasyat.sa/single/2722",
       "proven_on": "2026-10-30",
-      "note": "CAPTURE GAP (13 ads, 0%): the rendered page prints a Maps link 21.593931,39.215316 (1 ad seen). Backlog. Served 0/13 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "WIRED 2026-11-04 (scrapers/sodasyat/test_pin.py): the pair is the detail map's live google.maps.Marker position (re-read live on 2722/2736/2702/2739, four different pairs); commented-out markers are stripped first. Served 0/13 on 2026-10-30."
     },
     "sokok": {
       "pin_source": "feed",
