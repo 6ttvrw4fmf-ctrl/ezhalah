@@ -68,6 +68,7 @@ function problems(s: string): string[] {
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
+const mustCatch = (label: string, caught: boolean, why = '') => check(`mutant caught: ${label}`, caught, why);
 const live = problems(sql);
 check(`${file} closes a key whose waiver is gone, and still raises a stale standing one`, live.length === 0, live.join('; '));
 const mutants: Array<[string, (s: string) => string]> = [
@@ -77,7 +78,7 @@ const mutants: Array<[string, (s: string) => string]> = [
 ];
 for (const [label, mutate] of mutants) {
   const m = mutate(sql);
-  check(`mutant caught: ${label}`, m !== sql && problems(m).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+  mustCatch(label, m !== sql && problems(m).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 console.log(failed === 0 ? 'OK: the instructed waiver repair closes its own alarm' : `${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);
