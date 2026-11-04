@@ -141,3 +141,53 @@ export function newestScheduleMigration(files: Array<{ name: string; sql: string
     .sort();
   return hits.length ? hits[hits.length - 1] : null;
 }
+
+// ── bundled jobs (20261104043631) ────────────────────────────────────────────────────────────────
+
+/** Step functions of every `cron.schedule('<bundle>', ..., 'select public.ops_run_cron_bundle(...)')`
+ *  in a migration's SQL, keyed by bundle name. Each step is a `$s$select public.fn(...)$s$` literal. */
+export function bundleSteps(sql: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const re = /cron\.schedule\('([a-z0-9-]+)',\s*'[^']+',\s*\$cmd\$([\s\S]*?)\$cmd\$\)/g;
+  for (const m of sql.matchAll(re)) {
+    if (!/ops_run_cron_bundle\(/.test(m[2])) continue;
+    out[m[1]] = [...m[2].matchAll(/\$s\$([\s\S]*?)\$s\$/g)].map((s) => s[1]);
+  }
+  return out;
+}
+
+/** What is wrong with a bundle's steps: a step that is not one `select public.fn(...)` call (the
+ *  runner refuses those at run time — this says so at review time), or a step that takes the
+ *  search_listings_ar single-writer lock (a writer keeps its own job and instant, or two writers end
+ *  up in one transaction and the collision limb cannot see it). */
+export function bundleStepProblems(steps: string[], writerFns: string[]): string[] {
+  const w = new Set(writerFns);
+  const out: string[] = [];
+  if (steps.length === 0) out.push('no steps');
+  for (const s of steps) {
+    const m = /^select public\.([a-z0-9_]+)\([^;]*\)$/.exec(s);
+    if (!m) { out.push(`not a single "select public.fn(...)" call: ${s}`); continue; }
+    if (w.has(m[1])) out.push(`single-writer function bundled: ${m[1]}`);
+  }
+  return out;
+}
+
+// ── starvation evidence (mon_cron_victim_proven_alongside_hog) ───────────────────────────────────
+
+export const STARVATION_EVIDENCE = { onTimeLagS: 60, minCoRuns: 3, missedStartsAllowed: 1 } as const;
+
+/** TRUE only when the victim demonstrably starts at `minute`, on time, even while the hog runs —
+ *  the same rule as public.mon_cron_victim_proven_alongside_hog(): since `sinceMs`, on-time starts
+ *  at that minute >= whole hours elapsed - 1 AND >= 3 of them fell inside a run of the hog. */
+export function provenAlongsideHog(
+  victimStartsMs: number[], hogRunsMs: Array<[number, number]>, minute: number, sinceMs: number, nowMs: number,
+): boolean {
+  const onTime = victimStartsMs.filter((t) => {
+    if (t < sinceMs) return false;
+    const d = new Date(t);
+    return d.getUTCMinutes() === minute && d.getUTCSeconds() * 1000 + d.getUTCMilliseconds() < STARVATION_EVIDENCE.onTimeLagS * 1000;
+  });
+  const coRun = onTime.filter((t) => hogRunsMs.some(([s, e]) => s < t && e > t)).length;
+  const expected = Math.floor((nowMs - sinceMs) / 3_600_000);
+  return coRun >= STARVATION_EVIDENCE.minCoRuns && onTime.length >= expected - STARVATION_EVIDENCE.missedStartsAllowed;
+}

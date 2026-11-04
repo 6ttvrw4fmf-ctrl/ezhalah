@@ -66,9 +66,9 @@
     "refresh-district-display-canon": "14 * * * *",
     "refresh_listing_native_location_v1": "16 * * * *",
     "sync-search-listings-ar": "22 * * * *",
-    "resolve-english-city-overlay": "54 * * * *",
+    "resolve-english-city-overlay": "45 * * * *",
     "refresh-district-list-after-sync": "50 * * * *",
-    "strip-shared-default-pins": "15 * * * *",
+    "strip-shared-default-pins": "12 * * * *",
     "strip-far-from-city-pins": "14 * * * *"
   },
   "_jobids": {

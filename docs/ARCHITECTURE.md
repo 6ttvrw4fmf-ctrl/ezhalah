@@ -1138,9 +1138,39 @@ moved into or out of the 05–17 / 21–23 UTC heavy windows).
   windows growing by one more minute. Re-measure before you add a job near a window edge.
 
 Barrier: `scripts/verify-cron-slot-discipline.ts` over the committed mirror `sql/mirrors/cron_schedule.json`
-(minute 0 empty, no non-exempt job in a hog window, stack ≤ 4 and shrink-only, no two single-writer jobs on one
+(minute 0 empty, no non-exempt job in a hog window, stack ≤ 2 (was 4 until 2026-11-04) and shrink-only, no two single-writer jobs on one
 instant, mirror current with the newest migration that changes a cron schedule). **Any migration that schedules,
 re-slots or unschedules a cron job updates that mirror in the same PR.**
+
+### Bundled cron jobs (owner, 2026-11-04 — «do whatever u can to fix all problems», the YES to merging small jobs)
+
+The "different decision" above was taken: migration `20261104043631` runs **33 small jobs (each p95 < 11 s) as steps of
+four bundle jobs** — `bundle-locations-10min` (aqar/dealapp location resolvers, every 10 min at :01),
+`bundle-quarter-hour` (engineer-locked-out, run-remediation, alert→incident bridge, engineer-automerge dispatch, every
+15 min at :02), `bundle-hourly-resolvers` (:12) and `bundle-hourly-monitors` (:43, 21 monitors and backstop dispatches) —
+and re-slots 18 jobs. Busiest hour 146 → **99 starts, no (hour, minute) above 2, :00 empty**, so `cron_minute_collision`
+cleared on truth and the slot ratchet is now **2** (the live detector's own bar). `mon-p0-fast-lane` is untouched.
+
+- **A bundle step fails as loudly as the job it replaced.** `ops_run_cron_bundle()` runs each step in its own
+  subtransaction, logs it in `ops_cron_bundle_step_run`, raises **P1 `cron_health` `cron_bundle_step_fail:<bundle>:<fn>`**
+  on failure and resolves it on the step's next success. It does not catch `query_canceled`: a statement timeout still
+  fails the whole job where `cron_health` / `cron_timeout_headroom` see it. It restores `lock_timeout` /
+  `statement_timeout` after every step.
+- **Never bundle a single-writer function** (anything taking `search_index_writer_lock(`) — they keep their own job and
+  instant. Steps stay literal `select public.fn(...)` in the cron command so `mon_orphaned_detectors()` and the writer scan
+  still read them. A job referenced by NAME elsewhere stays its own job (`gh-dealapp-liveness`: a scrapers test reads its
+  newest migration) or gets its reader updated in the same migration (`location_pipeline_monitor` now watches
+  `bundle-locations-10min`).
+- **`cron_starvation_risk` is judged on evidence.** A (victim, minute, hog) is cleared only when, since both jobs' current
+  schedules, the victim started < 60 s late at that minute in ≥ expected − 1 hours **and** ≥ 3 of those starts fell inside a
+  run of the hog (`mon_cron_victim_proven_alongside_hog`). Measured: the P0 lane started 168/168 at every flagged minute, 168
+  times during the sweep at :01. A missed or late start, or no observed co-run, still raises. Never clear it by narrowing the
+  window or loosening the rule.
+- **`cron_grace_tight` reads one window.** Its "recent cadence" now starts at `schedule_changed_at`, like the grace it is
+  compared with (jobid 36 went every-other-day → daily and false-alarmed on its old 48 h gaps).
+
+Barrier: `scripts/verify-cron-bundles-stay-honest.ts` (runner isolation/reporting, no writer step, mirror ↔ migration,
+the evidence rule mirrored in `scripts/lib/cronSlots.ts` and mutation-proven, the grace window).
 
 ---
 

@@ -34,9 +34,11 @@ const ROOT = join(import.meta.dirname, '..');
 const MIRROR = 'sql/mirrors/cron_schedule.json';
 const ORDERING = 'sql/mirrors/cron_ordering_contract.json';
 
-// Shrink-only. 8 before the rebalance (2026-11-03); 4 after. "At most one" needs <= 60 starts an
-// hour and this instance has 130-145, so 1 is not reachable by re-slotting alone (see the mirror).
-const MAX_PER_INSTANT = 4;
+// Shrink-only. 8 before the rebalance (2026-11-03); 4 after; 2 after the consolidation of 2026-11-04
+// (20261104043631: 33 small jobs became steps of 4 bundle jobs, busiest hour 146 -> 99 starts). 2 is the
+// live detector's own bar: mon_detect_cron_minute_collision() raises at 3 per (hour, minute), so a
+// ratchet above 2 let a PR pass that production then flagged within 30 minutes.
+const MAX_PER_INSTANT = 2;
 // The only job allowed inside a hog window, and why.
 const STARVATION_EXEMPT: Record<string, string> = {
   'mon-p0-fast-lane': '24 minutes, worst gap 3 — the owner-set 5-minute P0 delivery SLO; no such list can avoid a 34-minute band',
@@ -128,6 +130,7 @@ mustCatch('the sync back on :22 with the matview refresh back on :20',
     .some((p) => p.startsWith('sync-search-listings-ar:')));
 mustCatch('a window that wraps past the top of the hour (:59 + 11 min reaches :05)',
   starvedPairs({ a: '59 * * * *', b: '5 * * * *' }, { a: 650 }).includes('b:5 < a'));
+mustCatch('three jobs on one minute (the live detector raises at 3)', maxPerInstant({ a: '13 * * * *', b: '13 * * * *', c: '13 * * * *' }).max > MAX_PER_INSTANT);
 mustCatch('five jobs stacked on one minute', maxPerInstant({ a: '13 * * * *', b: '13 * * * *', c: '13 * * * *',
   d: '13 * * * *', e: '13 * * * *' }).max > MAX_PER_INSTANT);
 mustCatch('two writers on one instant', writerCollisions({ x: '7-59/10 * * * *', y: '17 * * * *' }, ['x', 'y']).length > 0);
