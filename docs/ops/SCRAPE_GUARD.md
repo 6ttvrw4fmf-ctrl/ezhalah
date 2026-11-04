@@ -81,6 +81,21 @@ about moving our robots, not visitors.
 5. Move our robots off the bare public key (they send the handshake too, from the GitHub secret), then close the back
    door: `robot_gate` refuses the public roles without a valid handshake. Owner present for this step.
 
+## Speed limit (Vercel firewall, owner 2026-11-04: «only let people go at normal human speed»)
+
+One per-IP rate-limit rule on the front door (`/sb/*`, `/api/sb*`): 300 requests per 60 s window, fixed window. Set it
+by dispatching **Vercel rate limit** (`.github/workflows/vercel-rate-limit.yml`, mode `log` | `rate_limit` | `off`); it
+upserts the rule through the Vercel API and fails unless the ACTIVE config shows it. No deploy needed.
+
+- **Start and stay in `log`** (watch only, nobody refused) until the Firewall overview shows who would have hit it.
+- Threshold, measured in edge_logs 2026-11-02/04: busiest real visitor 128 calls/min (p99 91, p50 14); our robots with
+  the robot pass reached 595/min. Per 10 s: busiest human 71, robots 174.
+- **Before `rate_limit` (429):** (1) our own e2e robots need a bypass condition (a dedicated header the firewall can
+  match — not EZ_GATE_SECRET, which would sit in plain text in the firewall config); (2) Saudi mobile carriers share
+  addresses (CGNAT), so many real phones can sit behind one IP — check the log hits first; (3) the owner approves.
+  A 429 is final for the app (it only retries 502/503/504).
+- Undo: dispatch `log` again; off: dispatch `off`.
+
 ## Cloudflare Turnstile (owner 2026-10-21: invisible, "users shouldn't verify every time")
 
 Second guard next to BotID. Site key `0x4AAAAAAFfpkJx1Y3UJ9QLd` (public, in src/lib/supabase.ts), widget "Ezhalah",
