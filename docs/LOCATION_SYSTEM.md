@@ -430,9 +430,16 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
   حائل (2372) as a 1.4 km duplicate of Makkah's «تربه» (2156) because ~90 Hail-pinned homes (28.25 N, 42.93 E) sit under
   2156; the source (aqarcity 29743: addressRegion «منطقة حائل», geo 28.235, 42.910) proves a separate town ~800 km from
   Makkah's Turbah (21.19 N, 41.60 E). `20261104000502` un-retires 2372, so `retired_place_remap_rows()` stops moving its
-  8 homes into منطقة مكة المكرمة; the other ~90 Hail homes under 2156 are still to be moved (routed, not done). All 12 G4
-  retirements are cross-region pairs judged by the same centers — each needs a source read before its homes move.
-  Barrier: `scripts/verify-turbah-hail-is-its-own-town.ts`.
+  8 homes into منطقة مكة المكرمة. All 12 G4 retirements are cross-region pairs judged by the same centers — each needs a
+  source read before its homes move. Barrier: `scripts/verify-turbah-hail-is-its-own-town.ts`.
+- **A same-name town in the PIN's region is a pin-city candidate (2026-11-04, alert 12259).** The Hail homes under
+  2156 stayed there because `refresh_pin_city_correction()` refused them for the very reason the towns are confusable:
+  «مدينة تربة» names OUR city, and 2372 had too few homes to own a governorate. `20261104054033` adds one arm: the
+  filed city's own name, EXACTLY ONE live city of that name in the pin's region, the filed city in another region,
+  and the ad's words name no other city after «مدينة». First run moved 36 (aqar 29, wasalt 7) to 2372 and nothing
+  else fleet-wide; aqar's «…, مدينة الخوير / المهينيه» ads under تربه stay on the owner's conflict list, and dealapp's
+  14 pin-less «تربه» ads stay (no evidence). The moved ads show no district until 2372's district list exists — the
+  pin rule serves only districts on the new city's list. Barrier: `scripts/verify-pin-city-same-name-region.ts`.
 
 ### 🔤 Spelling memory — one district, one search identity (owner 2026-10-25)
 - `loc_district_alias(city_id, from_norm, to_norm)`: a spelling sites use that IS one of our districts. Applied inside
