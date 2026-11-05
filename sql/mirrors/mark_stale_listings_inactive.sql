@@ -1,4 +1,9 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-11-05 (migration 20261105111620_stale_coverage_gate_skips_dormant_and_retired): needle edit.
+--   md5 of everything below this header block (pg_get_functiondef in production, trailing newline): ca461202c32d407088d4506db8ef31eb
+--   Change: the stale_coverage_gate key is resolved, not raised, for a platform_registry status 'dormant' or 'retired'
+--   (sadin, senan, snam held it open since 2026-11-04 05:15 with no event that could close it). Exactly one anchor
+--   asserted; confirmed against production the same hour. Still deactivates nothing.
 -- Refreshed 2026-11-04 (migration 20261104112551_stale_listings_report_skips_dormant_and_retired): needle edit.
 --   md5 of everything below this header block (pg_get_functiondef in production, trailing newline): 8fa91fe42b3c1efd3bbf31c38fa98c87
 --   Change: the stale_listings_detected REPORT key is resolved, not raised, for a platform_registry status 'dormant' or
@@ -120,7 +125,9 @@ begin
       cov_gated := true;
     end if;
 
-    if cov_gated and stale > 0 then
+    if cov_gated and stale > 0 and not exists (
+         select 1 from public.platform_registry pr
+          where pr.platform = plat and pr.status in ('dormant', 'retired')) then
       perform public.mon_raise(
         'P2', 'stale_coverage_gate', plat, 'stale_coverage_gate:' || t,
         jsonb_build_object(
