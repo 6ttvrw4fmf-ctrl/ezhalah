@@ -1277,7 +1277,9 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         cue_in = (any(_starts(w, _CUES) for w in words) and any(_starts(_strip_wa(w), _UTILITY) for w in words)) \
             or (cue_in and _starts(_strip_wa(words[0]), _UTILITY))
         # a heading ENDS with the nearby word: «خدمات قريبة:», «بالقرب من:», «Nearby:»
-        near_in = any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in words[-2:]) or (near_in and n_words <= 3)
+        # …but a VIEW word ending an item («/بلكونة مطلة / موقف خاص», dealapp 17549152) describes that item, not a heading
+        near_in = any((_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS) and not (_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS)
+                      for w in words[-2:]) or (near_in and n_words <= 3)
         near_list = list_in or any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS or _strip_wa(w) in _NEAR_PUBLIC
                                    or w in _NEAR_PUBLIC or _is_boundary(w) for w in words) \
             or any(p in t for p in _NEAR_PHRASES)
@@ -2315,6 +2317,10 @@ def selftest() -> None:
         ("🍽 مطبخ: (لم يُركب وقيمته على المستأجر ) ❄️ مكيفات: (لايوجد) 🚗 موقف سيارة: (نعم ) 🔴( ملاحظة )",
          {"parking": True, "kitchen": False, "air_conditioner": False}, ()),
         ("مصعد: نعم", {"elevator": True}, ()),
+        # an arrow bullet and a spaced «/» are list marks (dealapp 22662869, 17549152 — 2026-11-05 parking recall)
+        ("الدور الارضي ⬅ مجلس ⬅ مطبخ ⬅ حوش مقابل المطبخ ⬅ دورتين مياه ⬅ موقف سيارة # الدور الأول", {"parking": True}, ()),
+        ("ستديو (غرفة نوم) / صالة واسعة بمطبخ / دورة مياه /بلكونة مطلة / موقف خاص مظلل", {"parking": True}, ()),
+        ("عمر العقار/ 5 سنين", {"property_age_years": 5.0}, ()),
         ("مجهزة حسب طلب الدفاع المدني بمضخة الحريق ووسائل السلامة", {}, ("pumps",)),
         ("حديد سابك • صب بمضخة • بلك عازل", {}, ("pumps",)),
         ("محطة وقود 6 مضخات ومغسلة سيارات", {"pumps": True}, ()),
