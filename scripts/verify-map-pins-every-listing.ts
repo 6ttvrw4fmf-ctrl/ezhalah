@@ -100,7 +100,7 @@ mustCatch('the clear-all-then-add-all redraw (the flicker on every pan)', !/clea
 // The layer mounts BEFORE MapKit has loaded and returns early; the map's arrival must re-run it (measured live
 // 2026-11-02: a fresh /map load drew nothing until the deal changed).
 check('AppleMap.web.tsx re-runs the pin layer once the map object exists (mapReady bumped where live.map is set, in the deps)',
-  /live\.map = map;\n\s*setMapReady\(\(n\) => n \+ 1\);/.test(web) && /\}, \[pinsKey, failed, mapReady\]\);/.test(web) && /if \(!mk \|\| !m \|\| !pinFilter\) return;/.test(web));
+  /live\.map = map;\n\s*setMapReady\(\(n\) => n \+ 1\);/.test(web) && /\}, \[pinsKey, failed, mapReady, locale\]\);/.test(web) && /if \(!mk \|\| !m \|\| !pinFilter\) return;/.test(web));
 check('AppleMap.web.tsx adds the biggest count last so it sits on top', /rows\.sort\(\(a, b\) => a\.n - b\.n\);\n\s*setPinCount\(/.test(web));
 // IDENTICAL COPIES FOLD INTO ONE CARD (owner 2026-11-02: «some also have duplicates»): same site + price + area + type +
 // title + photo → one card and «and N identical listings»; anything different stays its own card — no source merged away.
@@ -137,7 +137,7 @@ check('PIN_SHOW_MAX is a few hundred heads, well under the read cap', PIN_SHOW_M
 mustCatch('a view that draws thousands of overlapping heads (the cap gone)', PIN_SHOW_MAX <= 500);
 check('AppleMap.web.tsx reloads on region-change-end and drops a late answer', /addEventListener\('region-change-end', onRegion\)/.test(web) && /if \(my !== seq \|\| rows === 'unknown'/.test(web));
 check('AppleMap.web.tsx keeps the layer on a failed fetch (unknown → return before clear)', web.indexOf("rows === 'unknown'") < web.indexOf('const keyOf = (r: PinRow)'));
-check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape \? '\{n\} listings inside the boundary'/.test(web));
+check('Apply turns the drawn shape into the pin polygon; Remove clears it; the count pill shows inside the boundary', /setPoly\(polygonOf\(shape\.points/.test(web) && /shapeRef\.current = null; setHasShape\(false\); setPoly\(null\);/.test(web) && /poly: poly \?\? pins\.poly \?\? null/.test(web) && /hasShape \? t\('\{n\} listings inside the boundary'/.test(web));
 check('a bubble tap zooms in; a pin tap hands the row up (one shared pick)', /const pick = \(row: PinRow, cell: number\) => \{[\s\S]{0,400}?if \(cell > 0\) \{[\s\S]{0,700}?\} else onPinSelectRef\.current\?\.\(row\);/.test(web));
 // TOUCH: on a phone MapKit's `select` never fired for a tap on a custom annotation (owner 2026-11-02: «when I click it
 // doesn't show»). The head element carries its own pointerdown/pointerup tap (≤ 10 px of movement), and MapKit's
@@ -155,7 +155,7 @@ mustCatch('the big 12 px / 34 px heads', !/font:600 12px/.test(web) && !/height:
 check('a zoomed-out cell is a 14 px dot with no text, coloured by dotColor', /cell > 0 \? dotColor\(row\) : pinColor\(row\)/.test(web) && /border-radius:50%;width:14px;height:14px/.test(web) && /el\.textContent = cell > 0 \? '' : pinHead\(row, loc\)/.test(web));
 check('dotColor is the deal colour, neutral for a mixed cell, never gold', dotColor({ deal: 'buy' }) === PIN_COLOR.buy && dotColor({ deal: 'rent' }) === PIN_COLOR.rent && dotColor({ deal: 'mixed' }) === MIXED_DOT && dotColor({ deal: 'mixed' }) !== GOLD);
 mustCatch('a numbered bubble when zoomed out (the Zillow rule)', !/bubbleText\(row\.n, loc\)/.test(web));
-check('the count pill shows for every view («{n} listings here») and for a drawn boundary', /!drawing && pinCount !== null \?/.test(web) && /hasShape \? '\{n\} listings inside the boundary' : '\{n\} listings here'/.test(web) && /'\{n\} listings here': '\{n\} إعلان في هذه المنطقة'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
+check('the count pill shows for every view («N إعلانات في حي …» / «في هذه المنطقة», viewCountText) and for a drawn boundary', /!drawing && pinCount !== null \?/.test(web) && /hasShape \? t\('\{n\} listings inside the boundary', \{ n: pinCount\.toLocaleString\('en-US'\) \}\) : viewCountText\(pinCount, viewPlace, locale === 'ar' \? 'ar' : 'en'\)/.test(web) && /'\{n\} listings here': '\{n\} إعلان في هذه المنطقة'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
 // (M.MapDealRow / M.countPinsInView since 2026-11-02: the deal row and the MapKit glue load as their own chunk — ALWAYS FAST)
 check('the map screen feeds the deal button into the pins and clears the sheet on a deal change', /<M\.MapDealRow deals=\{deals\} onDeals=\{\(d\) => \{ setDeals\(d\); setPinRow\(null\); \}\} onFilter=/.test(screen) && /pins=\{\{ deals, \.\.\.pinFilterOf\(mapFilter\) \}\}/.test(screen));
 check('the Filter button opens the centered filter card; Apply feeds the pins and counts in view', /onFilter=\{\(\) => setFilterOpen\(true\)\} filterOn=\{isNarrowed\(mapFilter\)\}/.test(screen) && /<MapFilterCard value=\{mapFilter\}/.test(screen) && /countPins=\{\(f\) => M\.countPinsInView\(\{ deals, \.\.\.pinFilterOf\(f\) \}\)\}/.test(screen));

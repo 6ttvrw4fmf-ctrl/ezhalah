@@ -215,6 +215,28 @@ def map_building(b: dict[str, Any]) -> list[tuple[Optional[tuple[dict, str]], st
     return [map_unit(b, u, i, deal, building_type) for i, u in enumerate(units, 1)]
 
 
+# The building's own ticked lists («المواصفات» / «المميزات», each <li> a green fa-check) — 🔬 2026-11-05. Only «مصعد» was
+# read, so 0 of 73 active units carried parking although 23 buildings list «مواقف سيارات» / «مواقف بدروم» (manafe
+# 13707993, re-read live), and none carried AC although they list «تكييف مركزي», «مكيف شباك», «مكيفات اسبليت …».
+# These are BUILDING-wide (like the lift), so every unit of the building has them. A «prepared» item («تسليك التكييف
+# جاهز» = AC wiring only) is not AC; per-unit rooms (maid / driver) stay with the unit table, never the building list.
+_PARKING_ITEMS = ("مواقف سيارات", "مواقف بدروم", "موقف سيارات", "مواقف خاصة", "موقف خاص")
+_AC_ITEM = re.compile(r"^(?:مكيف|مكيفات|تكييف|أنظمة التكييف|انظمة التكييف)")
+_PREPARED = ("تسليك", "تأسيس", "تاسيس", "تمديد", "تمديدات")
+
+
+def _building_amenities(b: dict[str, Any]) -> dict[str, bool]:
+    items = [x.strip() for x in list(b.get("specs") or []) + list(b.get("features") or [])]
+    out: dict[str, bool] = {}
+    if "مصعد" in items:
+        out["elevator"] = True
+    if any(x in _PARKING_ITEMS for x in items):
+        out["parking"] = True
+    if any(_AC_ITEM.match(x) and not any(w in x for w in _PREPARED) for x in items):
+        out["air_conditioner"] = True
+    return out
+
+
 def map_unit(b: dict[str, Any], u: dict[str, Any], idx: int, deal: str,
              building_type: Optional[str]) -> tuple[Optional[tuple[dict, str]], str]:
     raw_type = (u.get("type") or "").strip()
@@ -276,7 +298,8 @@ def map_unit(b: dict[str, Any], u: dict[str, Any], idx: int, deal: str,
         "kitchen": True if _pos(u.get("kitchens")) else None,
         "maid_room": True if maid else None,
         "balcony_terrace": True if balcony else None,
-        "elevator": True if "مصعد" in b["specs"] else None,
+        "elevator": None, "parking": None, "air_conditioner": None,
+        **_building_amenities(b),
         "views_count": _pos(b["views"]),
         "photo_urls": list(b["photos"]),
     })
