@@ -1,0 +1,85 @@
+# Do the cards we serve still open the ad? (2026-11-05, Dwelleo: 4,791 served cards opened «404» for a day and the
+# nightly dead-visible score could only say «void», because the site's controls died with every other link.)
+# Every website with shown ads: home page first, then ~20 served listing_url opened (scrapers/common/served_link_check.py).
+# REPAIR FIRST: a link the site itself redirects to its new address for the same ad is rewritten; when most links are
+# dead or moved, ONE small-sources-sync run is dispatched with those sites as a comma list. One row per website per
+# night goes into ops_served_link_check; mon_detect_served_links_broken (roster, :59) raises P1 for what is left.
+name: Served link check
+
+on:
+  schedule:
+    # 08:20 UTC: after the nightly crawls, before dead-visible-score (09:05) and the ♻️ engineer (11:00).
+    - cron: "20 8 * * *"
+  workflow_dispatch:
+    inputs:
+      sites:
+        description: "Only these websites, comma- or space-separated (empty = every registered one)"
+        type: string
+        default: ""
+      dry_run:
+        description: "Print the rows; rewrite nothing, write nothing, dispatch nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write          # the one re-dispatch of small-sources-sync
+
+concurrency:
+  group: served-link-check
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  check:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium for the wasalt path
+        run: python -m playwright install --with-deps chromium
+      - name: Open tonight's served links on every website
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+          SITES: ${{ inputs.sites }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          exec xvfb-run -a python -m scrapers.common.served_link_check \
+            $([ "$DRY_RUN" = "true" ] && echo --dry-run) \
+            $([ -n "$SITES" ] && echo --sites $SITES)
+      - name: Re-dispatch the crawl of websites whose links mostly broke (one run, comma list)
+        if: success() && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          list=$(cat served-link-redispatch.txt 2>/dev/null || true)
+          if [ -n "$list" ]; then
+            echo "re-dispatching small-sources-sync for: $list"
+            gh workflow run small-sources-sync.yml --ref main -f source="$list"
+          else
+            echo "nothing to re-dispatch"
+          fi
+      # A measurement that fails silently is no measurement (verify-scheduled-checks-alert-on-failure.ts).
+      - name: Raise or resolve the workflow alert
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind lifecycle_check_failed
+          --workflow served-link-check.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
