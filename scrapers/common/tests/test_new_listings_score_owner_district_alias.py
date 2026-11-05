@@ -55,3 +55,24 @@ def test_alias_direction_matters_and_no_aliases_means_letters_only():
     assert S._cmp_district("حي النرجس", S.norm("دور للبيع في حي المعيزيلة")) == S.MISMATCH
     S.OWNER_DISTRICT_ALIASES.clear()
     assert S._cmp_district("حي المعيزلة", S.norm("دور للبيع في حي المعيزيلة")) == S.MISMATCH
+
+
+# ── A home described floor by floor states no total (same night) ─────────────────────────────────────────────────
+def _page(text: str) -> dict:
+    return {"title": "", "meta": {}, "evidence_lines": [], "text_head": text, "jsonld": []}
+
+
+def test_per_floor_room_counts_are_not_a_miss():
+    pf = _page("تفاصيل الأدوار تفاصيل الدور الأرضي | عدد المجالس: 1 ، دورات المياه: 3 ، الصالات: 1 ، غرف النوم: 2")
+    out = S.compare_listing({"living_rooms": None, "majlis_rooms": None, "bathrooms": None}, pf, skip_price=True)
+    assert out["living_rooms"] == S.PAGE_SILENT
+    assert out["majlis_rooms"] == S.PAGE_SILENT
+    assert out["bathrooms"] == S.PAGE_SILENT
+
+
+def test_a_whole_home_count_is_still_a_miss_and_a_stored_value_still_judged():
+    flat = _page("شقة للبيع | 3 دورات مياه | صالة واسعة")
+    assert S.compare_listing({"bathrooms": None}, flat, skip_price=True)["bathrooms"] == S.WE_MISS
+    floors = _page("الدور الارضي: مجلس ودورة مياه | الدور الاول : 3 دورات مياه")
+    # a value we DO store is judged as before; the per-floor rule never turns a stored mismatch into silence
+    assert S.compare_listing({"bathrooms": 7}, floors, skip_price=True)["bathrooms"] != S.PAGE_SILENT

@@ -236,6 +236,14 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
                     and float(stored.get(col)) == 1 and any(SINGLE_HALL.search(x) for x in lines)):
                 out[name] = MATCH
+            # A home described FLOOR BY FLOOR states no total (🆕 2026-11-05): Property Finder's CRM block «تفاصيل الدور
+            # الأرضي عدد المجالس: 1 ، دورات المياه: 3 ، الصالات: 1 ، غرف النوم: 2» (23817495, whose API says 5 bedrooms)
+            # and muhaysini's «الدور الارضي: مجلس ودورة مياه … الدور الاول : غرفتين … دورة مياه» (23814169) count ONE
+            # floor. Summing floors is a calculation we never make, so a NULL room count there is not a miss: the
+            # 05:35 score counted 6 such we_miss on propertyfinder alone. Only a NULL we hold, only these room counts.
+            if (name in PER_FLOOR_COUNTS and out[name] == WE_MISS and stored.get(col) is None
+                    and PER_FLOOR.search(whole)):
+                out[name] = PAGE_SILENT
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
@@ -295,6 +303,8 @@ def facade_stated(lines: list[str], kw: str) -> bool:
     return False
 
 # «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
+PER_FLOOR = re.compile(r"(?:تفاصيل\s+)?الدور\s*:?\s*(?:الارضي|الاول|الثاني|الثالث|العلوي)")
+PER_FLOOR_COUNTS = frozenset({"living_rooms", "majlis_rooms", "bathrooms"})
 SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
 # The facades in English, as a REGA licence block prints them. A compound one too: haraj 22820527 prints
 # «واجهة العقار: South west» and we store «جنوب غرب» (re-score 41406084400, 2026-11-02, scored MISMATCH).
