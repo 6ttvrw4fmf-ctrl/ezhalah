@@ -148,3 +148,16 @@ def test_sakan_deed_border_row_is_not_the_ad():
     out = S.strip_boundary(page, SAKAN_DEED)
     assert out["evidence_lines"] == ["قريب من الخدمات"]
     assert "مصعد" not in out["text_head"]
+
+
+# eastabha 595447, re-read live 2026-11-05: the «next post» link is another ad's title.
+EASTABHA_NAV = ('<div class="nav-next"> <i class="fas fa-angle-right"></i> <a href="https://eastabha.sa/estate_property/33555/" '
+                'rel="next"> 🏡 شقة مفروشة راقية للإيجار الصيفي – مع حوش واسع</a> </div>')
+
+
+def test_next_post_link_is_another_ad():
+    other = "🏡 شقة مفروشة راقية للإيجار الصيفي – مع حوش واسع"
+    page = {"evidence_lines": [other, "شقة للإيجار مطبخ راكب"], "text_head": other + " | شقة للإيجار مطبخ راكب"}
+    out = S.strip_post_nav(page, EASTABHA_NAV)
+    assert out["evidence_lines"] == ["شقة للإيجار مطبخ راكب"]
+    assert "مفروشه" not in S.norm(out["text_head"]) and "مفروشة" not in out["text_head"]

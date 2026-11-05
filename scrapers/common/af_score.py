@@ -553,6 +553,27 @@ NAV_LINK_SITES = {"opensooq"}
 _NAV_LINK = re.compile(r'<a\b[^>]*href="/[^"]*"[^>]*>([^<]{1,60})</a>')
 
 
+# WordPress «next / previous post» links carry ANOTHER ad's title (🔬 2026-11-05): eastabha 595447 was asked
+# «furnished» from «<a href=".../estate_property/33555/" rel="next"> 🏡 شقة مفروشة راقية للإيجار الصيفي …</a>»
+# while its own page names no furniture (re-read 2026-11-05). On every site, a rel=next/prev link is not the ad.
+_POST_NAV = re.compile(r'<a\b[^>]*\brel="(?:next|prev)"[^>]*>([^<]{1,200})</a>')
+
+
+def strip_post_nav(page: dict, body: str) -> dict:
+    nav = {norm(html.unescape(t)) for t in _POST_NAV.findall(body or "") if t.strip()}
+    nav.discard("")
+    if not nav:
+        return page
+
+    def keep_line(x: str) -> bool:
+        nx = norm(x)
+        return not any(nx == n or (len(n) >= 12 and n in nx) for n in nav)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
 def strip_nav(page: dict, body: str) -> dict:
     nav = {norm(t) for t in _NAV_LINK.findall(body or "") if t.strip()}
     if not nav:
@@ -883,7 +904,7 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                 status, body = None, ""
             page = page_evidence(body) if status == 200 and body else None
             if page is not None:
-                page = strip_boundary(page, body)
+                page = strip_post_nav(strip_boundary(page, body), body)
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
             if page is not None and platform in WARRANTY_SITES:
