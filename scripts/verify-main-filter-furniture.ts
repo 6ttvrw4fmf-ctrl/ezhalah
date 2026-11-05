@@ -87,7 +87,9 @@ const mutants: Array<[string, string, RegExp]> = [
   ['the row counts with the user\'s own furniture pick', home.replace('fetchApartmentGuidedCounts(furnBase)', 'fetchApartmentGuidedCounts(query)'), /fetchApartmentGuidedCounts\(furnBase\)/],
   ['a hidden row keeps its filter', home.replace('if (furnRow === null && query.furnishedPref != null)', 'if (false)'), /if \(furnRow === null && query\.furnishedPref != null\)/],
 ];
-for (const [name, src, rx] of mutants) check(`(mutation) caught: ${name}`, !rx.test(src));
+// each mutant is the real source with one defect planted; the guard's own predicate must reject it
+const mustCatch = (name: string, src: string, rx: RegExp) => check(`(mutation) caught: ${name}`, src.length > 0 && !rx.test(src));
+for (const [name, src, rx] of mutants) mustCatch(name, src, rx);
 
 console.log(failures === 0 ? '\n✅ the main filter\'s «الأثاث» row: yearly homes only, live scope counts, asked once.' : `\n❌ ${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
