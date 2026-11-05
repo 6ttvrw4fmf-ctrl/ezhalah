@@ -178,3 +178,10 @@ def test_related_ads_block_is_other_ads():
     out = S.strip_related(page, ALJASSIM_RELATED)
     assert out["evidence_lines"] == [own]
     assert "مطبخ" not in out["text_head"]
+
+
+def test_a_zero_count_chip_is_not_a_yes():
+    # abaad 13214778, re-read live 2026-11-05: «<i class="fa-solid fa-kitchen-set"></i> <strong>0</strong> مطبخ»
+    assert S.page_says_yes([S.norm("0 مطبخ")], "kitchen") is False
+    assert S.page_says_yes([S.norm("1 مطبخ")], "kitchen") is True
+    assert S.page_says_yes([S.norm("مطبخ راكب")], "kitchen") is True

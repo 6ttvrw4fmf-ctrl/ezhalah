@@ -344,7 +344,10 @@ def page_says_yes(lines: list[str], field: str) -> bool:
     kw = BOOL_KW[field]
     lines = [y for y in lines if not DEED_BOUNDARY.search(y)]
     hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
-    return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
+    # a counted chip of ZERO is a stated «none» (🔬 2026-11-05): abaad 13214778 prints «<strong>0</strong> مطبخ» and
+    # was asked «kitchen» from it.
+    zero = r"(?:^|\s)[0٠]\s*(?:" + kw + ")"
+    return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) or re.search(zero, x) for x in hit)
 
 
 def says_yes(lines: list[str], field: str, platform: str = "", page: dict | None = None,
