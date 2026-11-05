@@ -1250,6 +1250,9 @@ export default function Home() {
         const { cohortAllows } = await import('@/lib/afCohorts');
         if (!live) return;
         if (!cohortAllows(furnBase, 'furnished')) { setFurnRow(null); return; }
+        // No city yet → the choices, no numbers (owner 2026-11-05: nationwide numbers before a city read as a surprise, and
+        // «بحث» needs a city anyway). The numbers appear the moment a city is picked.
+        if (!citySelected) { setFurnRow({}); return; }
         const c = await fetchApartmentGuidedCounts(furnBase);
         if (!live) return;
         // A count that failed is UNKNOWN: the choices still show, without numbers — never a made-up 0.
@@ -1262,7 +1265,7 @@ export default function Home() {
     }, 350);
     return () => { live = false; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [furnKey, furnCanAsk]);
+  }, [furnKey, furnCanAsk, citySelected]);
   // A hidden row never leaves a hidden filter behind (Buy, short stays, commercial, a type it does not apply to).
   useEffect(() => {
     if (furnRow === null && query.furnishedPref != null) setQuery((q) => ({ ...q, furnishedPref: null }));
