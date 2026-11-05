@@ -84,6 +84,12 @@
     "grace": 3
   },
   {
+    "platform": "almajdiah",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "almotmkenah",
     "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
@@ -217,6 +223,12 @@
   },
   {
     "platform": "arsh",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "asasmakeen",
     "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
     "grace": 3
@@ -468,6 +480,12 @@
     "grace": 3
   },
   {
+    "platform": "kellerwilliams",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "ksaaqar",
     "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
@@ -542,6 +560,12 @@
   {
     "platform": "moftah",
     "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "mrajhi",
+    "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
     "grace": 3
   },
@@ -793,6 +817,12 @@
   },
   {
     "platform": "squares",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "steam",
     "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
     "grace": 3
