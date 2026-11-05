@@ -513,6 +513,34 @@ def _rate_suspect_rows(c, table: str, base, limit: int) -> list[dict]:
         return []
 
 
+# The mirror image (owner 2026-11-05 «make sure those listings never ever happen again»): a seller typed the plot's TOTAL
+# into wasalt's per-m² box and wasalt multiplied it by the area (5893909: 1,613,001,600 for 504 m², box 3,200,400). The box
+# figure is only on the detail page, so a SALE row served at this many SAR per m² or more is read FIRST; then
+# trg_wrz_land_box_figure (migration 20261105233818) hands it to the owner's meter-box rule. Reading it decides nothing.
+MULTIPLIED_SUSPECT_PPM = 100_000
+
+
+def _multiplied_suspect_rows(c, table: str, base, limit: int) -> list[dict]:
+    """Un-fetched rows of `table` the index serves as a SALE at MULTIPLIED_SUSPECT_PPM SAR/m² or more. Best effort like
+    _rate_suspect_rows: a failed read answers [] and the run keeps its normal order."""
+    try:
+        idx = (c.table("search_listings_ar").select("listing_id,price_total_effective,area_m2").eq("source_table", table)
+               .eq("production_ready", True).eq("deal_ar", "بيع").gte("price_total_effective", 10_000_000)
+               .limit(5000).execute().data or [])
+        ids = [r["listing_id"] for r in idx
+               if r.get("listing_id") is not None and (r.get("area_m2") or 0) > 0
+               and (r.get("price_total_effective") or 0) >= MULTIPLIED_SUSPECT_PPM * r["area_m2"]]
+        out: list[dict] = []
+        for i in range(0, len(ids), 200):
+            if len(out) >= limit:
+                break
+            out += base().in_("id", ids[i:i + 200]).execute().data or []
+        return out[:limit]
+    except Exception as e:  # noqa: BLE001
+        print(f"   ⚠ multiplied-suspect priority read failed ({str(e)[:120]}) — normal order", flush=True)
+        return []
+
+
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
                  max_pending: int = MAX_PENDING_DEFAULT, allow_backfill: bool = False,
                  retry_errs: int = 100, err_backoff_hours: float = 24.0,
@@ -598,12 +626,16 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     # word (it beats any transliteration), so they go to the FRONT of this run, inside the same `limit`.
     nd = _no_district_rows(c, table, _base, limit)
     rs = _rate_suspect_rows(c, table, _base, limit)
-    if nd or rs:
+    ms = _multiplied_suspect_rows(c, table, _base, limit)
+    if nd or rs or ms:
         first = nd + [r for r in rs if r["id"] not in {x["id"] for x in nd}]
+        n_rs = len(first) - len(nd)
+        first += [r for r in ms if r["id"] not in {x["id"] for x in first}]
         ids = {r["id"] for r in first}
         rows = (first + [r for r in rows if r["id"] not in ids])[:limit]
-        print(f"   ⓘ {len(nd)} live rows served with no district + {len(first) - len(nd)} sale rows served under "
-              f"{RATE_SUSPECT_PPM} SAR/m² go first", flush=True)
+        print(f"   ⓘ {len(nd)} live rows served with no district + {n_rs} sale rows served under "
+              f"{RATE_SUSPECT_PPM} SAR/m² + {len(first) - len(nd) - n_rs} sale rows at ≥{MULTIPLIED_SUSPECT_PPM:,} SAR/m² "
+              f"go first", flush=True)
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-fetched rows (cap {limit})", flush=True)
     stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0}
     lock = threading.Lock()
