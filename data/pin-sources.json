@@ -264,6 +264,13 @@
       "proven_on": "2026-10-30",
       "note": "Partial: goo.gl short links per ad, read when present (17 of 21 served). Served 17/21 (81.0%) on 2026-10-30 before today's fixes."
     },
+    "asasmakeen": {
+      "pin_source": "project-page",
+      "floor_pct": 95,
+      "proof_url": "https://asasmakeen.com/ar/مشاريعنا/مكين-90",
+      "proven_on": "2026-11-05",
+      "note": "The unit page has no map; its project page /ar/مشاريعنا/<slug> draws «موقع المشروع» with a directions link destination=<lat>,<lng> — every unit inherits its building's pin (pin_scope project). 502/507 on the first read (#10627), the 4 older projects through sitemap-projects-ar.xml (#10673)."
+    },
     "ashab": {
       "pin_source": "page-json",
       "floor_pct": 95,
@@ -649,6 +656,13 @@
       "proven_on": "2026-10-30",
       "note": "0 served rows on 2026-10-30; classified from the scraper's read path (feed). Floor 1 = «publishes»; measure on relaunch."
     },
+    "mrajhi": {
+      "pin_source": "partial",
+      "floor_pct": 75,
+      "proof_url": "https://mrajhi.com.sa/units/RqVrwO8A",
+      "proven_on": "2026-11-05",
+      "note": "Partial: 22 of 39 unit pages embed maps?q=<lat>,<lng>; 9 more take their project's one pair (رقم المشروع, #10628) = 31/39 (79%). «القصر», «عمارة السليمانية» and «مشروع المنال» show no map on any unit."
+    },
     "muajarh": {
       "pin_source": "feed",
       "floor_pct": 95,
@@ -942,6 +956,13 @@
       "proof_url": "https://squares.com.sa/property/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a%d9%84%d8%a7-%d8%a7%d9%84%d8%a8%d8%b3%d8%a7%d8%aa%d9%8a%d9%86-%d9%81%d9%8a-%d9%85%d8%af%d9%8a%d9%86%d8%a9-%d8%a8%d8%b1%d9%8a%d8%af%d8%a9/",
       "proven_on": "2026-10-30",
       "note": "Silent on 1 rendered ad: Leaflet loaded, no pair, link or frame. 16 ads. Served 0/16 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "steam": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://steam-realestate.com/property/%d8%b4%d9%82%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-steam-residence-102/",
+      "proven_on": "2026-11-05",
+      "note": "No map, no coordinates, no JSON pair on any of the 10 property pages (the only map is the company's office in the footer); the district is the page's own «المنطقة» line."
     },
     "sukna": {
       "pin_source": "feed",

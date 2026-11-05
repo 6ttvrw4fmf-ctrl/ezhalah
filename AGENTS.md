@@ -1,3 +1,8 @@
+# NEW HERE? READ `docs/START_HERE.md` FIRST
+
+A new teammate (or a Claude on another account) starts with `docs/START_HERE.md`: what Ezhalah is, how
+it is built, how to ship safely, and the owner's standing decisions. Then come back to this file.
+
 # Expo HAS CHANGED
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.

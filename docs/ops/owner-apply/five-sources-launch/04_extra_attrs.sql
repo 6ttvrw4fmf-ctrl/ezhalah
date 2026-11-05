@@ -10,7 +10,7 @@ DECLARE base text; arms text; t text; i int; ok boolean := false;
   tables text[] := ARRAY['kellerwilliams_residential_listings','kellerwilliams_commercial_listings','almajdiah_residential_listings','almajdiah_commercial_listings','asasmakeen_residential_listings','asasmakeen_commercial_listings','mrajhi_residential_listings','mrajhi_commercial_listings','steam_residential_listings','steam_commercial_listings'];
 BEGIN
   IF position('kellerwilliams_residential_listings' in pg_get_viewdef('public.listing_extra_attrs'::regclass,true)) > 0 THEN
-    RAISE NOTICE 'listing_extra_attrs already carries the five sources' arms';
+    RAISE NOTICE 'listing_extra_attrs already carries the five sources'' arms';
     RETURN;
   END IF;
   FOR i IN 1..20 LOOP

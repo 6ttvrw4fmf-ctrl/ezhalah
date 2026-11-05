@@ -12,7 +12,8 @@ let failed = 0;
 const check = (name: string, ok: boolean) => { console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}`); if (!ok) failed++; };
 const mustCatch = (name: string, caught: boolean) => check(`(mutation) catches ${name}`, caught);
 
-check('far out (the country, a region) shows one label per CITY', areaLevelFor(17) === 'city' && areaLevelFor(3) === 'city');
+// Owner 2026-11-05: «first thing Saudi, the total number, then region, then city, then district» (the map opens at ~17°).
+check('the opening view (17°) shows ONE country label; a zoom in shows regions, then cities', areaLevelFor(17) === 'country' && areaLevelFor(9) === 'region' && areaLevelFor(3) === 'city');
 check('city zoom shows one label per DISTRICT', areaLevelFor(2.5) === 'district' && areaLevelFor(0.5) === 'district' && areaLevelFor(0.07) === 'district');
 check('close in shows price pins (no label level)', areaLevelFor(0.06) === null && areaLevelFor(0.02) === null);
 mustCatch('pins at city zoom (the clutter the owner\'s father saw)', areaLevelFor(0.3) !== null);
@@ -20,7 +21,7 @@ mustCatch('labels that never hand over to pins', areaLevelFor(0.01) === null);
 check('the thresholds nest: city above district', CITY_LABELS_ABOVE > DISTRICT_LABELS_ABOVE);
 check('counts are short: 245, 3.4 ألف / 3.4K, 1.2 مليون', areaCount(245, 'ar') === '245' && areaCount(3400, 'ar') === '3.4 ألف' && areaCount(3400, 'en') === '3.4K' && areaCount(12400, 'ar') === '12 ألف' && areaCount(1_200_000, 'ar') === '1.2 مليون');
 check('the name is the city at city level and the district (no «حي ») at district level', areaName({ city: 'جدة', district: 'حي النعيم' }, 'city') === 'جدة' && areaName({ city: 'جدة', district: 'حي النعيم' }, 'district') === 'النعيم' && areaName({ city: 'جدة', district: '' }, 'district') === 'جدة');
-check('a tap on a city opens at district level, a tap on a district opens at pin level', areaLevelFor(areaZoomSpan('city')) === 'district' && areaLevelFor(areaZoomSpan('district')) === null);
+check('each tap goes one level closer: country → regions → cities → districts → pins', areaLevelFor(areaZoomSpan('country')) === 'region' && areaLevelFor(areaZoomSpan('region')) === 'city' && areaLevelFor(areaZoomSpan('city')) === 'district' && areaLevelFor(areaZoomSpan('district')) === null);
 mustCatch('a district tap that lands still on labels (the user taps forever)', areaLevelFor(areaZoomSpan('district')) === null);
 check('the count pill is the labels\' total', areasTotal([{ city: 'a', district: '', lat: 1, lng: 1, n: 3 }, { city: 'b', district: '', lat: 1, lng: 1, n: 4 }]) === 7);
 
@@ -45,11 +46,11 @@ const shown = visibleAreas(country).map((a) => a.city);
 check('the country view keeps the big places and drops «الحزم 1», «يدمة 2», «طبرجل 8»', shown.includes('الرياض') && shown.includes('حفر الباطن') && !shown.includes('الحزم') && !shown.includes('يدمة') && !shown.includes('طبرجل'));
 check('zoomed into a small region, its small places show (the floor follows the biggest label in view)', visibleAreas(country.filter((a) => a.n < 400)).map((a) => a.city).includes('العلا'));
 mustCatch('a label of 1 listing drawn next to 98 thousand', !visibleAreas(country).some((a) => a.n === 1));
-check('the drawn labels are the visible ones; the pill still counts every listing in view', (src => /drawAreas\(visibleAreas\(areas\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src) && /drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src))(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+check('the drawn labels are the visible ones; the pill still counts every listing in view', (src => /drawAreas\(visibleAreas\(areas, level\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src) && /drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src))(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const data = readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8');
 check('an un-narrowed view reads the labels for its level first', /const level = narrowed \? null : areaLevelFor\(span\.latitudeDelta\);/.test(web) && /const areas = await fetchMapAreas\(paddedBox\(center, span\), level, pins\.deals\);/.test(web));
-check('labels are drawn keyed, counted in the pill, and a failed read falls back to the dots', /drawAreas\(visibleAreas\(areas\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web) && /if \(areas !== 'unknown'\) \{/.test(web) && /next\.set\(`A\|\$\{level\}\|\$\{a\.city\}\|\$\{a\.district\}\|\$\{a\.n\}`, a\)/.test(web));
+check('labels are drawn keyed, counted in the pill, and a failed read falls back to the dots', /drawAreas\(visibleAreas\(areas, level\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web) && /if \(areas !== 'unknown'\) \{/.test(web) && /next\.set\(`A\|\$\{level\}\|\$\{a\.city\}\|\$\{a\.district\}\|\$\{a\.n\}`, a\)/.test(web));
 check('labels never pile up: MapKit collision hides the smaller neighbour, priority follows the count', /collisionMode: mk\.Annotation\.CollisionMode\?\.Rectangle, displayPriority: 250 \+ Math\.round\(499 \* a\.n \/ maxN\)/.test(web));
 check('the crowded exact-point read shows district names before falling back to the fine grid', /if \(areas !== 'unknown' && denseShowsDistricts\(areas\.filter\(\(a\) => inView\(a, center, span\)\)\.length, span\.latitudeDelta\)\) \{\n\s*drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web));
 check('a close-in crowded bubble shows its count; zoomed-out dots stay plain (owner 2026-11-02)', /if \(counted && cell > 0 && row\.n > 1\) el\.textContent = areaCount\(row\.n, loc\);/.test(web) && /\(\) => element\(row, drawCell, cell === 0 && drawCell > 0\), \{/.test(web));

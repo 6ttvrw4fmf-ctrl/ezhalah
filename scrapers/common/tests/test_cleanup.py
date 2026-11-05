@@ -1294,3 +1294,45 @@ def test_other_hosts_keep_the_shared_session(monkeypatch):
     monkeypatch.setattr(C, "_own_session", lambda host: used.append("own") or None)
     C._probe_route.clear()
     assert _REAL_PROBE("https://x.sa/ad/1")[0] == 200 and used == ["shared"]
+
+
+# ── Every site: a cleanup "live" may not overrule a FRESH own-page GONE in the shared ledger (2026-11-05) ──
+# nowaisiry NW4349: direct 404 at 11-04 12:42 (prune_unseen.verify_gone, recorded by ad_number only),
+# revived by the 06:12 cleanup on a soft 200 — the per-site ledgers (gathern/aqar/dealapp) never covered it.
+def _gone_row(ad, verdict, hours_ago, listing_id=None):
+    return {"source_table": "testp_listings", "listing_id": listing_id, "ad_number": ad,
+            "probed_at": _ago(hours_ago), "verdict": verdict}
+
+
+def _with_gone_ledger(gone_rows, probe):
+    C.DIRECT_LEDGERS.pop("testp", None)
+    return _install({"testp_listings": [_cand(1)], "ops_stale_inactivation_probe": gone_rows}, POL(), probe=probe)
+
+
+def test_cleanup_200_does_not_revive_a_row_whose_own_page_read_gone_hours_ago_any_site():
+    c = _with_gone_ledger([_gone_row("A1", "GONE", 17)], probe=lambda url: (200, "page"))
+    s = C.run("testp", force=True)
+    assert s["reactivated"] == 0 and s["skipped"] == 1
+    assert not c.updated.get("testp_listings")
+    assert "held_live_vs_fresh_direct_dead=1" in (s["note"] or "")
+
+
+def test_gone_ledger_matches_by_listing_id_too():
+    c = _with_gone_ledger([_gone_row("ZZ", "GONE", 5, listing_id=1)], probe=lambda url: (200, "page"))
+    s = C.run("testp", force=True)
+    assert s["reactivated"] == 0 and not c.updated.get("testp_listings")
+
+
+def test_a_newer_alive_or_an_old_gone_still_lets_the_cleanup_revive():
+    for rows in ([_gone_row("A1", "GONE", 20), _gone_row("A1", "ALIVE", 2)],   # came back
+                 [_gone_row("A1", "GONE", 60)],                                  # older than 48 h
+                 [_gone_row("A1", "UNKNOWN", 1)]):                               # says nothing
+        c = _with_gone_ledger(rows, probe=lambda url: (200, "page"))
+        s = C.run("testp", force=True)
+        assert s["reactivated"] == 1, rows
+
+
+def test_a_fresh_gone_never_blocks_a_dead_delete():
+    c = _with_gone_ledger([_gone_row("A1", "GONE", 3)], probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["deleted"] == 1
