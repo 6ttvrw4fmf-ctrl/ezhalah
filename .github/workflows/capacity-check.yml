@@ -1,0 +1,68 @@
+# How many people can search AT THE SAME TIME and still see the first card by 12 s? (owner 2026-11-05: «we don't want
+# the user to get the bug. I want us to catch it before, and focus on the root of the bug»; «12 seconds … part of the
+# journey experience; higher than that is an issue».)
+#
+# Once a week, replays real Filter searches (results RPC + Trending + scale stats + every card fetch, then the counts
+# the browser fires next) at 1 → 2 → 3 → 4 → 6 → 8 simultaneous users, 45 s a step, hard cap 8
+# (scripts/verify-capacity-check-live.ts; decisions in scripts/lib/capacityRamp.ts, proven by verify-capacity-check.ts).
+# Before EVERY step it reads pg_stat_activity and stops if someone else's load is up; it stops at the first step whose
+# data-ready p95 would make the first card late (> 11.5 s from the tap) or whose errors pass 1 %. One row per step goes
+# into ops_capacity_run with p50/p95 per call and the top SQL of the run; mon_detect_capacity_regression (roster, :59)
+# raises P1 when the safe number drops below its floor or when no measured run landed for 8 days.
+#
+# Slot: Wednesday 22:50 UTC, then the script waits for 23:10 — the hour's one gap with no heavy cron job (after the
+# :59 detectors, before :16 native-location refresh), Thursday 02:10 in Riyadh, outside the night engineers' hours
+# (05/07/09/11/13/21 UTC) and the Falcon (Tue + Fri 19:05-00:05 UTC). GitHub-hosted (Microsoft network), which the
+# scrape alarm does not judge (scripts/lib/scrapeAlarm.ts OWN_NETWORKS).
+name: Search capacity check
+
+on:
+  schedule:
+    - cron: "50 22 * * 3"
+  workflow_dispatch:
+    inputs:
+      start_now:
+        description: "Skip the wait for :10 UTC (the database is still checked quiet before every step)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capacity-check
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  ramp:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Ramp 1 → 8 simultaneous searches, stop at the first late or failing step
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # the publishable key the app ships (src/lib/supabase.ts EXPO_PUBLIC_SUPABASE_KEY) — public, like in e2e/qa-coverage/run.mjs
+          EXPO_PUBLIC_SUPABASE_KEY: sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB
+          CAPACITY_START_NOW: ${{ inputs.start_now }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node --experimental-strip-types --no-warnings scripts/verify-capacity-check-live.ts
+      # A measurement that fails silently is no measurement (verify-scheduled-checks-alert-on-failure.ts).
+      - name: Raise or resolve the workflow alert
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind search_live_check_failed
+          --workflow capacity-check.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
