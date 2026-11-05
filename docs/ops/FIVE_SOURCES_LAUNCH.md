@@ -25,8 +25,8 @@ list below.) That session does, in order, each step self-verifying:
    STeam), the `SOURCE_LIST_PRESENCE` policies (removed from `NOT_PRODUCTION_SEARCHABLE` — this is what puts them under
    the liveness monitors AND the facts-words reader), `sql/mirrors/liveness_registry.json`, `scrapers/lifecycle-gaps.txt`
    lines, `data/pin-sources.json` (KW `page-json` list API, Almajdiah `page-json` unit_map_url, Al Rajhi `ad-page` map
-   embed, Asas Makeen `project-page` (proof asasmakeen.com/ar/مشاريعنا/مكين-90, 507 of 507 units' projects draw the
-   building's pin), STeam `none`), `scripts/image-coverage-baseline.json`, the five `small-sources-sync.yml` matrix
+   embed, Asas Makeen `project-page` (proof asasmakeen.com/ar/مشاريعنا/مكين-90, all 14 projects of the 507 units draw the
+   building's pin; 4 older ones are found through sitemap-projects-ar.xml), STeam `none`), `scripts/image-coverage-baseline.json`, the five `small-sources-sync.yml` matrix
    lines, and deletes `five-sources-staged-sync.yml`.
 2. **Apply the launch SQL** `docs/ops/owner-apply/five-sources-launch/` in file order through `apply-migration.yml`
    (01 grants + registry active → 02 wiring, outside :20/:22 → 03 location index → 04 extra attrs → 05 rich attrs →
