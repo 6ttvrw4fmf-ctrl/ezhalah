@@ -10,11 +10,13 @@
 -- the arms at the end failed («each UNION query must have the same number of columns», clean rollback). The
 -- arms are now spliced INSIDE the inner union, right after its last arm (october_commercial_listings, whose
 -- closing «) v_1_1_1_1» must be found exactly once in the live body), so every outer layer reads them unchanged.
+-- RE-READ LIVE 2026-11-05 10:45: the Property Finder arms now close the inner union, so the anchor is propertyfinder_commercial_listings;
+-- the arm columns were compared with the live Property Finder arm and are identical.
 set local client_min_messages = warning;   -- nothing reaches the client mid-transaction: a dropped API connection (524 at ~120 s) cannot abort the commit
 set local statement_timeout = '5min';
 DO $do$
 DECLARE base text; arms text; t text; i int; ok boolean := false;
-  anchor constant text := E'FROM october_commercial_listings x\n  WHERE x.active)';
+  anchor constant text := E'FROM propertyfinder_commercial_listings x\n  WHERE x.active)';   -- the inner union's LAST arm since the Property Finder launch (re-read live 2026-11-05 10:45)
   tables text[] := ARRAY['kellerwilliams_residential_listings','kellerwilliams_commercial_listings','almajdiah_residential_listings','almajdiah_commercial_listings'];
 BEGIN
   IF position('kellerwilliams_residential_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) > 0 THEN
@@ -26,7 +28,7 @@ BEGIN
       SET LOCAL lock_timeout = '3s';
       base := rtrim(rtrim(pg_get_viewdef('public.listing_rich_attrs'::regclass,true)),';');
       IF (length(base) - length(replace(base, anchor, ''))) / length(anchor) <> 1 THEN
-        RAISE EXCEPTION 'listing_rich_attrs inner-union anchor (the october commercial arm) not found exactly once - shape moved, refusing to guess';
+        RAISE EXCEPTION 'listing_rich_attrs inner-union anchor (the propertyfinder commercial arm) not found exactly once - shape moved, refusing to guess';
       END IF;
       arms := '';
       FOREACH t IN ARRAY tables LOOP
