@@ -62,7 +62,7 @@ _SUBTYPE = {"Apartment": "Apartment", "Condominium": "Apartment", "Duplex": "Dup
             "Unimproved Land": "Residential Land"}
 _COMMERCIAL_FILING = ("Commercial", "Business Opportunity")
 RESIDENTIAL = {"Apartment", "Villa", "Floor", "Room", "Building", "Rest House", "Chalet", "Camp", "Residential Land",
-               "تاون هاوس", "Duplex", "Compound"}
+               "Duplex", "Compound", "تاون هاوس"}
 _NO_ROOMS = {"Residential Land", "Commercial Land", "Warehouse", "Shop", "Farm", "Office", "Showroom"}
 _CITY_EN = {"Riyadh": "الرياض", "Jeddah": "جدة", "At Taif": "الطائف", "Taif": "الطائف", "Buraidah": "بريدة",
             "Makkah": "مكة", "Madinah": "المدينة المنورة", "Dammam": "الدمام", "Khobar": "الخبر"}
