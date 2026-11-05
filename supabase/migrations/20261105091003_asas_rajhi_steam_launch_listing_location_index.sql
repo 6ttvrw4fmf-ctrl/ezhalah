@@ -7,6 +7,9 @@
 -- AFTER THIS LANDS the hourly chain refreshes listing_location_index → listing_location_canonical_mv →
 -- listing_native_location_v1 (+ listing_extra_attrs_mv, listing_age_resolved_mv) before the :22 sync.
 set local statement_timeout = '30min';   -- the replay rebuilds listing_location_canonical_mv and v1 (≈4 min each)
+set local client_min_messages = warning;  -- the Management API drops the HTTP call at ~2 min (524); a NOTICE sent
+                                           -- to that gone client kills the backend (Broken pipe, KW 02 2026-11-05) —
+                                           -- so nothing is sent until COMMIT. RAISE EXCEPTION still aborts.
 set local lock_timeout = '15s';   -- the swap below overrides this with 3 s attempts
 do $do$
 declare

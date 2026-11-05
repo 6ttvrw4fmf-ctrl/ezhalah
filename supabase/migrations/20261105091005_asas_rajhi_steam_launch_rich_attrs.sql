@@ -10,6 +10,9 @@
 -- arms are now spliced INSIDE the inner union, right after its last arm (october_commercial_listings, whose
 -- closing «) v_1_1_1_1» must be found exactly once in the live body), so every outer layer reads them unchanged.
 set local statement_timeout = '5min';
+set local client_min_messages = warning;  -- the Management API drops the HTTP call at ~2 min (524); a NOTICE sent
+                                           -- to that gone client kills the backend (Broken pipe, KW 02 2026-11-05) —
+                                           -- so nothing is sent until COMMIT. RAISE EXCEPTION still aborts.
 DO $do$
 DECLARE base text; arms text; t text; i int; ok boolean := false;
   anchor constant text := E'FROM october_commercial_listings x\n  WHERE x.active)';

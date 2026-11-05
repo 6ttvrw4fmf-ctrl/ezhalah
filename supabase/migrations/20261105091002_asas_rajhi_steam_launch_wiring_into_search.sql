@@ -8,6 +8,9 @@
 -- swap in ONE short step retried in 3 s lock attempts, then replay the dependents. Applied outside the
 -- :20/:22 refresh+sync window. A new table only adds rows; no other platform's row changes.
 set local statement_timeout = '30min';
+set local client_min_messages = warning;  -- the Management API drops the HTTP call at ~2 min (524); a NOTICE sent
+                                           -- to that gone client kills the backend (Broken pipe, KW 02 2026-11-05) —
+                                           -- so nothing is sent until COMMIT. RAISE EXCEPTION still aborts.
 set local lock_timeout = '15s';   -- the swap below overrides this with 3 s attempts
 DO $do$
 DECLARE

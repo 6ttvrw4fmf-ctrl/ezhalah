@@ -5,6 +5,9 @@
 -- their listings answers "unknown" to every AF question. Arm shape is batch 6's verbatim, appended to
 -- the body read LIVE at apply time; the same short-lock retry loop.
 set local statement_timeout = '5min';
+set local client_min_messages = warning;  -- the Management API drops the HTTP call at ~2 min (524); a NOTICE sent
+                                           -- to that gone client kills the backend (Broken pipe, KW 02 2026-11-05) —
+                                           -- so nothing is sent until COMMIT. RAISE EXCEPTION still aborts.
 DO $do$
 DECLARE base text; arms text; t text; i int; ok boolean := false;
   tables text[] := ARRAY['asasmakeen_residential_listings','asasmakeen_commercial_listings','mrajhi_residential_listings','mrajhi_commercial_listings','steam_residential_listings','steam_commercial_listings'];
