@@ -17,7 +17,7 @@ DECLARE base text; arms text; t text; i int; ok boolean := false;
   tables text[] := ARRAY['kellerwilliams_residential_listings','kellerwilliams_commercial_listings','almajdiah_residential_listings','almajdiah_commercial_listings'];
 BEGIN
   IF position('kellerwilliams_residential_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) > 0 THEN
-    RAISE NOTICE 'listing_rich_attrs already carries the two sources' arms';
+    RAISE NOTICE 'listing_rich_attrs already carries the two sources arms';
     RETURN;
   END IF;
   FOR i IN 1..20 LOOP
