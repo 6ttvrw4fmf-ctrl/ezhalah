@@ -207,7 +207,7 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "annex": ["^ملحق$", "^ملاحق$", "^ملحقين$", "^annex"],
     "two_entrances": ["^مدخلين$", "^مدخلان$", "re:مدخل (?:لل|ال)?رجال و ?مدخل (?:لل|ال)?نساء", "two entrances",
                       ("re:مدخل واحد", False)],
-    "yard": ["^حوش$", "^حوشين$", "^حوشان$", "^احواش", "^فناء", "^yard", "courtyard"],
+    "yard": ["^حوش$", "^حوشين$", "^حوشان$", "^احواش", "^فناء", "^yard$", "^yards$", "courtyard"],   # «Yardville Compound» is a name
     "electronic_deed": ["re:(?:ال)?صك(?:وك)? (?:ال)?(?:الكتروني|اكتروني)(?:ه|ا)?", "electronic deed",
                         ("re:(?:ال)?صك (?:ال)?(?:يدوي|ورقي)", False)],
     "grill": ["^مشب$", "^مشبات$", "^شوايه$", "^شوايات$", "^شواء$", "^bbq", "barbecue"],
@@ -1526,6 +1526,8 @@ def selftest() -> None:
         ("مستودع للايجار", {}, ("storage",)),
         ("مطبخ مع مستودع", {"storage": True, "kitchen": True}, ()),
         ("حوش + كراج + مدخلين", {"yard": True, "garage": True, "parking": True, "two_entrances": True}, ()),
+        ("For Rent | Yardville Compound Apartments", {}, ("yard",)),        # 🔬 2026-11-05 Property Finder: a compound's name
+        ("villa with a private yard and a pool", {"yard": True}, ()),
         ("مدخل واحد", {"two_entrances": False}, ()),
         ("مكونة من 4 شقق", {"apartments_count": 4.0}, ()),
         ("يوجد في كل دور شقتين", {}, ("apartments_count",)),
