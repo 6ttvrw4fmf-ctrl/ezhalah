@@ -18,7 +18,6 @@ import { colors, darkColors, radius, space, cardShadow } from '@/theme/tokens';
 import { useTheme } from '@/theme/theme';
 import HeroBackground from '@/components/HeroBackground';
 import { SidebarClouds, SkyEagleMark } from '@/components/SidebarSky';
-import TopBarLanguage from '@/components/TopBarLanguage';
 import AccountMenu from '@/components/AccountMenu';
 import { useApp, type HistoryItem } from '@/store';
 import { sanitizeArabicSearch, isSearchableQuery, filterChats, arabicHintAfterInput, boldSpans } from '@/lib/chatSearch';
@@ -895,8 +894,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
             <View style={s.brandRow}>
               <SkyEagleMark lit={!!user} />
               <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
-              {/* Guest: the small «ENG» pill top-right, where a signed-in user's header has its controls (owner 2026-10-31). */}
-              <TopBarLanguage inSidebar />
+              {/* No «ENG» pill here (owner 2026-11-04: «remove this ENG on top, not nice»): the menu's own «English» row below
+                  switches the language; the pill stays only on the page's top bar. */}
             </View>
 
             {/* The upper guest CTA card that used to sit here was the OLD auth prompt (removed
