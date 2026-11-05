@@ -53,7 +53,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.facts.one_reader import amenity_answers  # noqa: E402
-from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
+from scrapers.common.arabic_location import catalog_district, norm_district_tok, resolve  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.propertyfinder import crawl as C  # noqa: E402
@@ -111,6 +111,25 @@ def is_off_plan(p: dict) -> bool:
     return str(p.get("completion_status") or "").startswith("off_plan")
 
 
+# Contract G (owner 2026-10-17): a SPELLING of a catalogued district is MAPPED here, never added to the catalog.
+# 🆕 2026-11-05, unknown_named_districts(3): Property Finder's DISTRICT names that are the same place as a catalogued
+# district of that city, judged by the ads' own pins against the catalogued district's served pins:
+#   الرياض «مطار الملك خالد الدولي» ×7 (24.952N 46.632E)  = «مطار الملك خالد» (served 24.937N 46.640E)
+#   مكة «ريع اذاخر» ×3 (21.444N 39.834E)                  = «حي ريع زاخر»   (served 21.455N 39.837E)
+#   مكة «الهجلة الجديد» ×3 (21.287N 39.827E)              = «حي الهجلة»     (served 21.294N 39.840E)
+# A word not listed here and not on the city's list still stays None (never a guess).
+_DISTRICT_SPELLING = {(3, norm_district_tok("مطار الملك خالد الدولي")): "مطار الملك خالد",
+                      (6, norm_district_tok("ريع اذاخر")): "حي ريع زاخر",
+                      (6, norm_district_tok("الهجلة الجديد")): "حي الهجلة"}
+
+
+def _district(city_id: Optional[int], district: Optional[str]) -> Optional[str]:
+    if not (city_id and district):
+        return None
+    alt = _DISTRICT_SPELLING.get((city_id, norm_district_tok(district)))
+    return catalog_district(city_id, district) or (catalog_district(city_id, alt) if alt else None)
+
+
 def location(p: dict) -> dict[str, Any]:
     tree = {t.get("type"): t for t in (p.get("location_tree") or []) if isinstance(t, dict)}
     region = (tree.get("REGION") or {}).get("name")
@@ -121,7 +140,7 @@ def location(p: dict) -> dict[str, Any]:
     coords = (p.get("location") or {}).get("coordinates") or {}
     return {"region": region, "city_ar": r.get("city_ar") or city, "city_id": city_id,
             "region_id": r.get("region_id"), "neighborhood": district,
-            "district_ar": catalog_district(city_id, district) if (city_id and district) else None,
+            "district_ar": _district(city_id, district),
             "pin": pin_dict(coords.get("lat"), coords.get("lon")),
             "pf_location": {"tree": [{k: t.get(k) for k in ("id", "type", "name", "slug_en")} for t in tree.values()],
                             "full_name": (p.get("location") or {}).get("full_name")}}
