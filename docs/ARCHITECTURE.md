@@ -480,8 +480,22 @@ become like 2 … but same pin … do it for everything they basically merge but
 source_table + deal + price + area + type + bedrooms within ~100 m (DBSCAN 0.0009°) → every copy is DRAWN at the group's
 most-shared spot (`map_pin_snap`, refreshed hourly by `map_pin_snap_refresh_ar()` inside `map_grid_refresh_ar()`;
 `map_pins_ar`'s street-zoom branch reads it). A blank price or size matches a blank («price on request» copies), never a number; an ad with no total price is also matched on its price per metre. Nothing is hidden or deleted and the stored coordinates stay the source's own — only where the pin is drawn moves;
-tapping it lists every ad. Two DIFFERENT sites stay two pins (owner 2026-11-03: same-site copies stay, cross-site is
-normal). Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`, `20261105071552`).
+tapping it lists every ad. Two DIFFERENT sites keep their own spot (owner 2026-11-03: same-site copies stay, cross-site
+is normal) — but see the next rule: their heads never overlap on screen. Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`, `20261105071552`).
+
+**Map tab: no two pins ever sit on each other, and the count pill names the district (owner 2026-11-05, permanent: «we
+can never have this issue … user cannot select what he wants … we need to make sure they are in the same pin close by
+… whenever we get a new listing»; «include the name of the district»).** Before the map draws its street-level heads,
+`mergeOverlapping()` (src/lib/mapPins.ts) joins every pair of heads that would TOUCH ON THIS SCREEN (measured in the
+font they are drawn in, placed through MapKit's projection, 4 px of air) into one gold «N إعلانات» head whose sheet lists
+every ad — any site, any deal. It runs on every settled view, so zooming in pulls heads apart again (Zillow) and a
+listing ingested a minute ago is covered with no batch job; n and ids are always the sums (MATCH FIRST). The count pill
+says «N إعلانات في حي X» when ≥ 60% of the listings in view are in district X (`map_view_place_ar()`), else the city on
+the same rule, else «في هذه المنطقة». Guards: `scripts/verify-map-pins-never-overlap.ts` (per PR: 120 random layouts,
+no touching pair, no id lost, 5 mutations) and the hourly MAP PIN ROBOT `e2e/map/map-pins-live.mjs`
+(`.github/workflows/map-pins-live.yml`: real phone browser on ezhalah.com, densest Jeddah streets — no overlapping pin,
+every pin tappable, district named; red → alert). Never "fix" a red robot by moving its spots, loosening the 1 px
+overlap test or shrinking PIN_GAP_PX.
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.

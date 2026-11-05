@@ -88,6 +88,13 @@ normal filter (city, district, type, rent, monthly), with the card note «اضغ
 price (owner rule 2026-10-02), and its link opens the unit for a customer (test 10 by clicking, phone and laptop). A unit
 whose link does not open is not «live».
 
+
+> **📍 OWNER ORDER 2026-11-05 — NEW LISTINGS LAND ON A TAPPABLE PIN (permanent).** A listing you bring in must show on the
+> map where a user can tap it: the same house on one site shares one spot (`map_pin_snap`, hourly), and on screen no two
+> heads ever overlap — touching heads become one gold count head (`docs/ARCHITECTURE.md`, «Map tab: no two pins ever sit on
+> each other»). When you test new listings by clicking, open one on the Map tab too. A red MAP PIN ROBOT
+> (`map-pins-live.yml`) after your batch is yours to read first; the fix itself belongs to 🔧 Quality & Repair.
+
 ## ⚠️ OWNER 2026-10-13, after a second 5/10 night: «keep doing a better job on every run … improve your job in the next run»
 What went wrong on 10-13 (measured, not guessed): six scorer misreads fixed and proven, but the night still ended
 5/10 because every re-score drew a FRESH sample and a new site fell under 95% (arkaan 87% at 08:06, rakez 93.6% at
