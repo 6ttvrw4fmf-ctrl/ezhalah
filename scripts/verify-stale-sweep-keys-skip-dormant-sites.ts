@@ -47,6 +47,7 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`);
   if (!ok) failed++;
 };
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 
 const real = readFileSync(MIRROR, 'utf8');
 const p = problems(real);
@@ -59,7 +60,7 @@ for (const key of KEYS) {
   const thenAt = real.indexOf(' then', ifAt);
   const cond = real.slice(ifAt, thenAt);
   const mutated = real.slice(0, ifAt) + cond.replace(SKIP, 'true') + real.slice(thenAt);
-  check(`(mutation) catches ${key} losing its skip`, mutated !== real && problems(mutated).length > 0);
+  mustCatch(`${key} losing its skip`, mutated !== real && problems(mutated).length > 0);
 }
 
 if (failed) { console.log(`\n❌ verify-stale-sweep-keys-skip-dormant-sites: ${failed} failure(s)`); process.exit(1); }
