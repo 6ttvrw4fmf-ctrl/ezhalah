@@ -937,3 +937,34 @@ def test_a_total_labelled_figure_is_stored_exactly_as_the_site_shows_it() -> Non
     row, _cat, why = _row(TR_20281)
     assert row is not None, why
     assert row["price_total"] == 1850 and row["price_per_meter"] is None
+
+
+# ── 🆕 2026-11-05: a floor-by-floor description gives no room totals (alshawaf 23746393 / 23746391) ──────────────
+def test_floor_by_floor_rooms_are_not_the_homes_totals() -> None:
+    d393 = ("متوفر امامي وخلفي مسطح البناء 238 متر يتكون من دورين وملحق الدور الارضي: مجلس ودورة مياه وصاله ومطبخ "
+            "ومستودع ودورة مياه وكراج الدور الاول : غرفتين نوم بينهم دورة مياه ووغرفة ماستر الدور الثاني : غرفتين ودورة مياه وسطح")
+    d391 = ("*الدور الارضي:* مجلس - دورة مياه غرفة نساء + دورة مياه صالة + مطبخ *الدور الاول* غرفتين نوم ماستر + دورة مياه "
+            "غرفتين بينهم دورة مياه 2صالة *الدور الثاني* غرفتين نوم + دورة مياه 2 سطح")
+    assert R._rooms(d393, "Duplex") == {}
+    assert R._rooms(d391, "Duplex") == {}
+
+
+def test_one_bathroom_named_once_is_still_one_and_named_twice_is_unknown() -> None:
+    assert R._rooms("شقة غرفتين نوم وصالة ومطبخ ودورة مياه", "Apartment").get("bathrooms") == 1
+    assert R._rooms("شقة غرفتين نوم ودورة مياه وصالة ومطبخ ودورة مياه", "Apartment").get("bathrooms") is None
+    assert R._rooms("شقة غرفتين نوم و3 دورات مياه", "Apartment").get("bathrooms") == 3
+
+
+def test_a_floor_by_floor_duplex_clears_stored_room_counts() -> None:
+    """The source settled «no total»: the row carries AUTHORITATIVE_NULL so an older per-floor 2 / 1 is cleared."""
+    ix = _ix(TR_22205)
+    ix["title_lines"] = ["دبلكس", "للبيع"]
+    ix["capture"]["title_cell"] = "دبلكس للبيع"
+    ix["price"] = {"label": "سعر البيع", "basis": "total", "kind": "asking", "amount": 1050000, "raw": "1,050,000"}
+    detail = {"fields": {"العقار": "دبلكس للبيع"},
+              "description_raw": "*الدور الارضي:* مجلس - دورة مياه *الدور الاول* غرفتين نوم ماستر + دورة مياه "
+                                 "*الدور الثاني* غرفتين نوم + دورة مياه"}
+    row, _cat, why = R.map_listing(ix, detail)
+    assert row is not None, why
+    assert row["bedrooms"] is db.AUTHORITATIVE_NULL
+    assert row["bathrooms"] is db.AUTHORITATIVE_NULL

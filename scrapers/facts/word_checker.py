@@ -155,7 +155,16 @@ FACT_TOKENS: dict[str, list[Any]] = {
     # itself — «بأثاث مودرن / فاخر / مريح / عصري / راقي / أنيق», «بتأثيث فندقي», «متكاملة الأثاث», «مجهزة بالكامل» — 118 of
     # 124 AI furnished rows were this shape and the reader had none of them. A described piece of furniture is the
     # seller naming it; «بدون تأثيث» / «غير مؤثث» stay an explicit no.
-    "furnished": ["^موثث", ("re:(?:بدون|بلا|من غير|غير) (?:ال)?(?:اثاث|تاثيث|موثث)", False), "re:(?:مع|شامل|شامله) (?:ال)?اثاث",
+    "furnished": ["^موثث", ("re:(?:بدون|بلا|من غير|غير) (?:ال)?(?:اثاث|تاثيث|موثث)", False),
+                  # 🔬 2026-11-05 «doesn't say» audit (69,723 yearly ads, the AI reader's 609 answers read by hand):
+                  # typos no other word shares («ماثثة بالكامل», «مأثثه», «مرفروشة», «مفروووووش»), office furniture
+                  # («أثاث مكتبي راقٍ وجاهز»), and a no that names the furniture («لا تتوفر أثاث», «عدم وجود أثاث»,
+                  # «الأثاث غير موجود»). Not «موثق» (= notarised), not «مجهزة» (equipped) — those stay silent.
+                  "^ماثث", "^مرفروش", "re:مفرو{2,}ش", "re:(?:ب|و|وب)?(?:ال)?اثاث (?:ال)?مكتبي",
+                  ("re:(?:لا (?:يتوفر|تتوفر|يوجد|توجد|يشمل|تشمل)|لايوجد|لاتوجد|عدم (?:وجود|توفر)) (?:ال)?(?:اثاث|تاثيث)", False),
+                  ("re:(?:ال)?اثاث غير (?:موجود|متوفر|مشمول)", False),
+                  # «سعرها بدون فرش وتكيف» (🔬 2026-11-05) — «فرش» alone is the furnishing; a floor covering names its floor
+                  ("re:(?:بدون|بلا|من غير) (?:ال)?فرش(?!\S)(?! (?:ال)?(?:ارض|موكيت|بلاط|سيراميك|رخام|باركيه|عشب|نجيل))", False), "re:(?:مع|شامل|شامله) (?:ال)?اثاث",
                   "re:(?:ب|و|وب)?(?:ال)?اثاث (?:مودرن|فاخر|مريح|عصري|راقي|انيق|هادي|كامل|جديد|حديث|فندقي)",
                   "re:(?:ب|و|وب)?تاثيث (?:فندقي|كامل|فاخر|مودرن|عصري|راقي)", "re:متكامل(?:ه)? (?:ال)?اثاث",
                   # AI teacher pass 2026-10-27: «بأثاثها العصري», «أثاث فخم», «فرش راقٍ / فاخر / كامل»
@@ -491,7 +500,7 @@ _PARTIAL = tuple(_n(w) for w in N._PARTIAL_ONLY + N._FLOOR_COVERING)
 _PARTIAL_BEFORE = tuple(_n(w) for w in N._PARTIAL_BEFORE)
 
 # Negators that TOUCH the token. One word («غير», «بدون») or two («لا يوجد», «لا نقبل»).
-_NEG1 = frozenset(_n(w) for w in ("غير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "no", "without", "not",
+_NEG1 = frozenset(_n(w) for w in ("غير", "كغير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "no", "without", "not",
                                    "non", "ليس", "ليست", "عدا", "ماعدا", "باستثناء"))      # «ليست منحة» (owner handoff 2026-11-01)
 _NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتوفر", "لا تتوفر", "ما فيه", "ما في", "لا يشمل",
                                    "لا تشمل", "عدم وجود", "لا نقبل", "لا يقبل", "من غير", "ما يوجد", "is not"))
@@ -577,6 +586,9 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "insulated_panel": ((), ("صوت", "للصوت", "الصوت", "صوتي", "صوتيا")),                             # «عازل للصوت» is soundproof
     "cold_storage": (("تكييف", "تكيف", "مكيف", "مكيفات", "نظام", "انظمه"), ()),                     # «نظام تبريد» is the AC
     "car_wash": (("حمام", "دوره", "بانيو", "جناح", "مرحاض"), ("ملابس", "يد", "ايدي", "رخام", "وشطاف", "شطاف")),
+    # «مجهزة بمضخة الحريق» (a fire pump) and «صب بمضخة» (concrete poured by pump) are not a station's fuel pumps
+    # (aqar 2026-11-05 evidence-phrase review, «بمضخه» on 25 ads; the chip is the 🛢️ station cohort's)
+    "pumps": (("صب", "بالصب", "وصب"), ("حريق", "الحريق", "للحريق", "الاطفاء", "اطفاء")),
     "earning_income": (("بين", "حقوق", "التزامات", "توقيع"), ("والمستاجر", "المستاجر", "ومستاجر")),  # the contract's parties
     # 2026-11-03 audit round 2: a contact line, a hall, a city name, a delivery bike
     "elevator": (("التاسيس", "بالتاسيس", "لتاسيس", "وتاسيس"), ()),                     # «وتم التأسيس للمصعد»
@@ -665,7 +677,8 @@ _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "rest
 # A UNIT FIXTURE is never «nearby» (🔬 2026-11-04 live walk, dealapp): «بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة»,
 # «قريب من المسجد عدد 9 مكيفات راكبه», «20 دقيقة من روشن ❄ تكييف» — the near word belongs to the bullet before, the AC
 # is the unit's. Kept to the AC: a kitchen or a lift CAN be a nearby place's («قريب من مطبخ السلطان», a tower's lifts).
-_NEAR_NEVER_FACTS = frozenset({"air_conditioner"})
+# Furniture is never a nearby place either (🔬 2026-11-05): «قريبة من المروج بدون اثاث» is the flat's own no.
+_NEAR_NEVER_FACTS = frozenset({"air_conditioner", "furnished"})
 # A VIEW is not a distance (🔬 2026-11-05): «صالة معيشة مطلة بلكونة مطبخ أمريكي» has a balcony and a kitchen. A view word only
 # silences what can be outside (a park, a pool, a sea) — never the home's own rooms.
 _VIEW_WORDS = frozenset(_n(w) for w in ("مطل", "مطله", "تطل", "يطل", "اطلاله", "باطلاله", "overlooking", "views"))
@@ -826,6 +839,8 @@ def _billing_not_supply(fact: str, prev: list[str], nxt: list[str]) -> bool:
         if skip and (not nxt or _strip_wa(nxt[0]) in _LIST_WORDS):
             break
         if len(w) >= 2 and _strip_wa(w[0]) == "غير" and _starts(w[1], _BILLING):
+            if fact == "furnished" and len(w) >= 3 and w[2].startswith("ال"):
+                return False                 # «مؤثثة بالكامل غير شامل الجاكوزي» (🔬 2026-11-05): the jacuzzi is billed, not the furniture
             return True
     if fact not in _BILL_FACTS:
         return False
@@ -848,16 +863,22 @@ def _negated_after(nxt: list[str], fact: str) -> int:
             return skip + 2
         if skip and (not nxt or _strip_wa(nxt[0]) in _LIST_WORDS or nxt[0].isdigit() or nxt[0] in _FORM_LABELS):
             break
+        if (fact == "furnished" and len(w) >= 3 and w[0] == "غير" and w[1] in ("شامل", "شامله", "مشمول")
+                and w[2].startswith("ال")):
+            return 0                         # «مؤثثة بالكامل غير شامل الجاكوزي» (🔬 2026-11-05): the jacuzzi is not included
         if len(w) >= 2 and w[0] == "غير" and _starts(w[1], _POST_NOT + tuple(_n(x) for x in _POST_NOT_FACT.get(fact, ()))):
             return skip + 2
         if len(w) >= 1 and w[0] in ("لايوجد", "لاتوجد"):
             return skip + 1
+        # «مطبخ: (لم يُركب وقيمته على المستأجر …)» (dealapp 22700725, 2026-11-05 two-way sample): «not fitted» is a no
+        if len(w) >= 2 and w[0] == "لم" and _starts(w[1], ("يركب", "تركب", "يتم", "يتوفر", "تتوفر", "يوجد", "توجد")):
+            return skip + 2
         if len(w) >= 2 and w[0] == "لا" and w[1] in ("يوجد", "توجد", "يتوفر", "تتوفر"):
             return skip + 2
         if len(w) >= 1 and w[0] == "لا" and (len(w) == 1 or w[1] == "غير"):
             return skip + 1
-        if not skip and w and w[0] in ("0", "no", "none"):
-            return 1
+        if not skip and w and (w[0] in ("0", "no", "none") or (fact == "furnished" and w[0] == "unfurnished")):
+            return 1                         # «Furnished: Unfurnished» (manzo 21173202): the label's value speaks
     return 0
 
 
@@ -965,6 +986,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     for w in gn[:4]:                                 # «مسبح خاص على بعد دقائق من البحر»: the unit's own pool — an ownership
         if _starts(_strip_wa(w), _OWN_CUES):         # word before the distance ends the look-ahead
             break
+        if _strip_wa(w) in ("موقع", "الموقع", "موقعه", "موقعها", "موقعنا"):
+            break                                    # «موقف سياره 🚗 موقع مميز قريب من الخدمات»: a new subject (dealapp 7439621)
         if _starts(w, _NEAR_AFTER):
             near_after = True
             break
@@ -998,6 +1021,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e
     if head in ("un", "غير") or head.endswith("غير"):
         return False, ws, we
+    # A FORM VALUE decides its own label (🔬 2026-11-05, dealapp 22700725 «❄️ مكيفات: (لايوجد) 🚗 موقف سيارة: (نعم )»):
+    # the «لايوجد» belongs to the ACs before, and «نعم» right after the item is the item's own yes.
+    if any(_strip_wa(w) == "نعم" for w in gn[:2]) and not _negated_after(nxt, fact):
+        return True, ws, we + len(" ".join([""] + nxt[:1 + [_strip_wa(w) for w in gn[:2]].index("نعم")]))
     back = _negated_before(prev)
     if back is not None:
         qs = len(" ".join(prev[:len(prev) - back])) + (1 if len(prev) > back else 0)
@@ -1056,6 +1083,9 @@ _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
     # «دورتين مياه». A pool («حمام سباحه»), an outside toilet and a per-unit count are skipped below (_BATH_SKIP_AFTER).
     "bathrooms": (
         re.compile(r"عدد (?:ال)?(?:حمامات|دورات (?:ال)?مياه) ?(\d{1,2})(?!\w)"),
+        # 🔬 2026-11-05 yearly-rent bathroom audit: the label with its value and no «عدد» — wasalt 481847 «الحمامات ٥»,
+        # muhaysini «الحمامات: 3». Not a number that belongs to the next item («الحمامات 3 غرف»).
+        re.compile(r"(?:(?<= )|^)ال(?:حمامات|دورات (?:ال)?مياه) (\d{1,2})(?!\w)(?! ?(?:غرف|غرفه|غرفة|صال|مطبخ|مطابخ|مجلس|مجالس|دور|ادوار|م |متر|شقق|شقه|محل|مكيف))"),
         re.compile(r"(?:(?<= )|^)و?(\d{1,2}) ?(?:دورات|دوره) (?:ال)?مياه(?!\w)"),
         re.compile(r"(?:(?<= )|^)و?(\d{1,2}) ?(?:حمامات|حمام)(?!\w)"),
         re.compile(rf"(?:(?<= )|^)و?{_NUMW} (?:دورات (?:ال)?مياه|حمامات)(?!\w)"),
@@ -1074,6 +1104,8 @@ _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
 _COUNT_RANGE = {"floors": (1, 60), "apartments_count": (2, 500), "shops_count": (1, 300), "bathrooms": (1, 20)}
 # one UN-numbered bathroom («دورة مياه»), singular: alongside a counted one it makes the stated count incomplete
 _BATH_BARE = re.compile(r"(?:(?<= )|^)(?:ال|و|وال|ب|ل)?دوره (?:ال)?مياه(?!\w)")
+# the span of a labelled bathroom total: «عدد دورات المياه 3» / «الحمامات ٥» (the first two bathroom patterns)
+_BATH_LABEL = re.compile(r"(?:عدد |ال(?:حمامات|دورات))")
 # a pool, an outside / annex toilet, or a per-unit / per-room count is not the home's bathroom count
 _BATH_SKIP_AFTER = ("سباح", "خارج", "بالخارج", "ملحق", "بالملحق", "بالحوش", "بالسطح", "للسائق", "السائق", "بكل", "لكل",
                     "في كل", "كل شقه", "كل غرفه", "مشترك")
@@ -1129,7 +1161,34 @@ def _clauses(text: str) -> list[tuple[int, str]]:
     return out
 
 
-def _num_hits(fact: str, t: str, ci: int) -> list[Hit]:
+# A NUMBERED LIST's index is not a count (🔬 2026-11-05). haraj 20997332: «1-مدخل مستقل 2-حـوش طولي 3-غـرفه 4-دورة مـياه»
+# — norm() turns the «-» into a space, so «4-دورة مـياه» read as FOUR bathrooms on a one-bathroom flat, and 740 served
+# bathroom answers on 11-05 were quoted from a «N-» / «N)» list item. An index belongs to a run of three or more
+# consecutive numbers, each written with a list mark, in order through the ad; a number in that run says nothing about
+# how many (silence = unknown, never a guess).
+_LIST_MARK = re.compile(r"(?<![0-9٠-٩\w])([0-9٠-٩]{1,2}) ?(?:[-–)]|\.(?![0-9٠-٩]))")
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _list_index_values(raw: str) -> frozenset[int]:
+    seq = [int(m.group(1).translate(_AR_DIGITS)) for m in _LIST_MARK.finditer(raw)]
+    out: set[int] = set()
+    for i, start in enumerate(seq):
+        chain, want = [start], start + 1
+        for v in seq[i + 1:]:
+            if v == want:
+                chain.append(v)
+                want += 1
+        if len(chain) >= 3:
+            out.update(chain)
+    return frozenset(out)
+
+
+def _is_list_index(v: int, raw_clause: str, idx: frozenset[int]) -> bool:
+    return v in idx and any(int(m.group(1).translate(_AR_DIGITS)) == v for m in _LIST_MARK.finditer(raw_clause))
+
+
+def _num_hits(fact: str, t: str, ci: int, raw_clause: str = "", list_idx: frozenset[int] = frozenset()) -> list[Hit]:
     hits = []
     lo, hi = _COUNT_RANGE[fact]
     for rx in _COUNT_RES[fact]:
@@ -1144,6 +1203,8 @@ def _num_hits(fact: str, t: str, ci: int) -> list[Hit]:
                 continue
             if fact == "bathrooms" and any(after.lstrip().startswith(x) for x in _BATH_SKIP_AFTER):
                 continue
+            if g.isdigit() and _is_list_index(v, raw_clause, list_idx):
+                continue                      # «4-دوره مياه» in «1- … 2- … 3- … 4- …»: the item's number, not a count
             if fact == "bathrooms" and any(_strip_wa(w) in ("كل", "لكل", "بكل") for w in before[-3:]):
                 continue                      # «كل شقه 2 دورات مياه»: a per-unit count, not the home's
             if any(w in _NEAR_WORDS for w in before):
@@ -1156,18 +1217,27 @@ def _num_hits(fact: str, t: str, ci: int) -> list[Hit]:
     return hits
 
 
+_PLACE_KIND_WORDS = tuple(_DISTRICT_WORDS) + tuple(_n(w) for w in ("مدينه", "بمدينه", "مدينة", "محافظه", "بمحافظه", "محافظة"))
+
+
 def _blank_place_names(t: str, names: tuple[str, ...]) -> str:
     """The ad's OWN district / city names, blanked (same length, so quote offsets hold) before any fact is read.
 
     Backlog 1188 (🔬 2026-11-02): «حي X» is caught in _judge, but a title that is a URL slug — abaad 13214542
     «دور-بيشة-الخزان» (type-city-district) — has no «حي» before the name, and district «الخزان» read water_tank = yes.
     The listing already KNOWS its place, so its own names are removed as whole words: no stem list, no guessing.
-    Only the exact normalised name goes («الخزان»); a bare «خزان ماء» in the same ad is still read."""
+    Only the exact normalised name goes («الخزان»); a bare «خزان ماء» in the same ad is still read.
+
+    The kind word right before it goes WITH it (🔬 2026-11-05 yearly-rent furnished audit): blanking only the name left
+    «في حي          مؤثثه بالكامل», and _judge reads any word after «حي» as a district — so the ad's own «مؤثثة بالكامل»,
+    «( مؤثثة)», «مفروش» after «بحي الملقا / حي المعذر / حي المهدية» answered nothing (aqar 14861704, 14852480, 16198971,
+    22605359), and so did every other fact written straight after the ad's own district."""
     for name in names:
         # stored names carry their kind word — abaad's district_ar is «حي الخزان», the slug says «الخزان»
         nn = re.sub(r"^(?:حي|مدينه|مدينة|محافظه|محافظة)\s+", "", norm(name or "").strip())
         if len(nn) >= 3:
-            t = re.sub(r"(?<!\S)" + re.escape(nn) + r"(?!\S)", lambda m: " " * len(m.group(0)), t)
+            t = re.sub(r"(?<!\S)(?:(?:" + "|".join(sorted(_PLACE_KIND_WORDS, key=len, reverse=True)) + r")\s+)?"
+                       + re.escape(nn) + r"(?!\S)", lambda m: " " * len(m.group(0)), t)
     return t
 
 
@@ -1185,6 +1255,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     num_hits: dict[str, list[Hit]] = {}
     cue_in = near_in = near_list = False
     prev_end = 0
+    list_idx = _list_index_values(raw)
     void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
         # A NEARBY LIST runs on across commas (🔬 2026-11-04 café audit): «Close to shops, restaurants, and markets»,
@@ -1213,12 +1284,14 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         cue_in = (any(_starts(w, _CUES) for w in words) and any(_starts(_strip_wa(w), _UTILITY) for w in words)) \
             or (cue_in and _starts(_strip_wa(words[0]), _UTILITY))
         # a heading ENDS with the nearby word: «خدمات قريبة:», «بالقرب من:», «Nearby:»
-        near_in = any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in words[-2:]) or (near_in and n_words <= 3)
+        # …but a VIEW word ending an item («/بلكونة مطلة / موقف خاص», dealapp 17549152) describes that item, not a heading
+        near_in = any((_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS) and not (_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS)
+                      for w in words[-2:]) or (near_in and n_words <= 3)
         near_list = list_in or any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS or _strip_wa(w) in _NEAR_PUBLIC
                                    or w in _NEAR_PUBLIC or _is_boundary(w) for w in words) \
             or any(p in t for p in _NEAR_PHRASES)
         for fact in _COUNT_RES:
-            num_hits.setdefault(fact, []).extend(_num_hits(fact, t, ci))
+            num_hits.setdefault(fact, []).extend(_num_hits(fact, t, ci, _c, list_idx))
         # street width — collected, judged across the whole ad below
         for rx in _STREET_RES:
             for m in rx.finditer(t):
@@ -1279,7 +1352,13 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     # a counted «2 دورة مياه» next to an UN-numbered «دورة مياه» elsewhere (wasalt 5952515: «دورة مياه تخدم القسم
     # الرجالي … 2دورة مياه» — the page totals 3) is two statements that do not add up to a stated count → none
     bath_hits = num_hits.get("bathrooms", [])
-    if bath_hits:
+    # 🔬 2026-11-05: a LABELLED total («عدد دورات المياه 3», «الحمامات ٥») is the home's total — haraj 18924617 «مجلس مستقل
+    # مع دورة مياه … عدد دورات المياه 3» answered nothing because the majlis's own bathroom voided it. Labelled hits win;
+    # an unlabelled count next to an unnumbered one still says nothing (the total may be 3 or 4).
+    labelled = [h for h in bath_hits if _BATH_LABEL.match(clauses[h.clause][2][h.s:h.e])]
+    if labelled:
+        num_hits["bathrooms"] = bath_hits = labelled
+    if bath_hits and not labelled:
         for ci, (_off, _c, t, _idx) in enumerate(clauses):
             if ci in void:
                 continue
@@ -1360,6 +1439,24 @@ def selftest() -> None:
         # (text, must-have {fact: value}, must-NOT-have facts)
         ("فيلا بدون مسبح", {"pool": False}, ()),
         ("شقة غير مفروشة", {"furnished": False}, ()),
+        # 🔬 2026-11-05 yearly-rent furnished audit (126,831 ads)
+        ("وضع التأثيث مذكور كغير مُؤثث؛ ضع في الاعتبار", {"furnished": False}, ()),   # muhaysini 17581075: «كغير» = as un-
+        ("قريبة من المروج بدون اثاث 🌹 عوائل موقع مميز", {"furnished": False}, ()),   # aqar 14849641: the near word is the place's
+        ("غرفة نظيفة سعرها بدون فرش وتكيف 18,000 سنوي", {"furnished": False}, ()),    # aqar 11494692
+        ("الصالة بدون فرش موكيت", {}, ("furnished",)),                                  # a floor covering, not furniture
+        ("قريب من معارض المفروشات", {}, ("furnished",)),
+        ("غرفتين وصاله ومطبخ ماثثة بالكامل يوجد فرن غاز", {"furnished": True}, ()),            # haraj 23236459
+        ("شقق مرفروشة للإيجار الشهري والسنوي", {"furnished": True}, ()),                       # dealapp 21598204
+        ("شقق للإيجار في جدة مفروووووش شقق مكونة من غرفتين", {"furnished": True}, ()),          # dealapp 17640912
+        ("نظافة يومية - أثاث مكتبي راقٍ وجاهز - خصوصية", {"furnished": True}, ()),             # aqar 15113813
+        ("بينما لا تتوفر أثاث في الشقة، فإنها تمنح المستأجرين حرية", {"furnished": False}, ()),  # tuba 13261374
+        ("الحالة: الصور هذي الأثاث غير موجود .", {"furnished": False}, ()),                   # haraj 18784245
+        ("- Furnished: Unfurnished\nAmenities:", {"furnished": False}, ()),                    # manzo 21173202
+        ("استديو للعازبات مؤثثة بالكامل غير شامل الجاكوزي", {"furnished": True}, ()),          # dealapp 19862005
+        ("عقد موثق في الشهر العقاري", {}, ("furnished",)),                                     # «موثق» = notarised
+        ("شقة مجهزة بالكامل", {}, ("furnished",)),                                              # equipped is not furnished
+        ("شقق مؤثثة وغير مؤثثة", {}, ("furnished",)),                                          # both offered: no answer
+        ("مطبخ غير شامل الأجهزة", {}, ()),
         ("لا يوجد مصعد", {"elevator": False}, ()),
         ("ولا يوجد مصعد في المبنى", {"elevator": False}, ()),
         ("مفروشة: لا", {"furnished": False}, ()),
@@ -1494,6 +1591,12 @@ def selftest() -> None:
         ("دورتا مياه (2)", {"bathrooms": 2.0}, ()),
         ("صالة ودورتين مياه ومطبخ", {"bathrooms": 2.0}, ()),
         ("عدد دورات المياه: 4", {"bathrooms": 4.0}, ()),
+        # 🔬 2026-11-05 yearly-rent bathroom audit: a labelled total is the total
+        ("النوم ٤ من ضمنها غرفة ماستر\nالحمامات ٥\nمجلس ، صالة", {"bathrooms": 5.0}, ()),             # wasalt 481847
+        ("عامله1 مجلس مستقل مع دورة مياه 1 مطبخ1 عدد دورات المياه 3 عمر العقار اربع سنوات", {"bathrooms": 3.0}, ()),  # haraj 18924617
+        ("غرفة + ركن مطبخ + دورة مياه عدد دورات المياه : 1 1 مكيف سبيلت راكب", {"bathrooms": 1.0}, ()),  # haraj 18942937
+        ("الحمامات 3 غرف نوم", {}, ("bathrooms",)),                                                       # the 3 is the rooms'
+        ("• مجلس مستقل بدورة مياه • غرفة نوم ماستر • صالة • 3 دورات مياه", {}, ("bathrooms",)),          # 3 or 4: unstated
         ("غرفتين و2 حمام", {"bathrooms": 2.0}, ()),
         ("دورة مياه واحدة", {"bathrooms": 1.0}, ()),
         ("مسبح و حمام سباحة", {}, ("bathrooms",)),
@@ -1503,6 +1606,16 @@ def selftest() -> None:
         ("الدور الاول 3 دورات مياه والارضي دورتين مياه", {}, ("bathrooms",)),
         ("مجلس رجال . دورة مياه تخدم القسم الرجالي . 3 غرف نوم . 2دورة مياه .", {}, ("bathrooms",)),
         ("3 دورات مياه ودورة مياه خارجية", {"bathrooms": 3.0}, ()),
+        # a numbered list's index is not a count (haraj 20997332, 2026-11-05)
+        ("1-مدخل مستقل 2-حـوش طولي 3-غـرفه 4-دورة مـياه", {}, ("bathrooms",)),
+        ("مميزات: 1) مجلس 2) صالة 3) دورات مياه 4) مطبخ", {}, ("bathrooms",)),
+        ("الشقة: 3 غرف نوم - 2 دورات مياه - مطبخ راكب", {"bathrooms": 2.0}, ()),
+        ("4 غرف و3 دورات مياه", {"bathrooms": 3.0}, ()),
+        # …while the Saudi «N- room» style is a COUNT (real aqar ads 24033379, 23720768, 21604430, 23287543)
+        ("مطبخ راكب 3- غرف 2-دورات مياة 1- صالة مكيفه بالكامل اسبلت", {"bathrooms": 2.0}, ()),
+        ("المواصفات: 3-غرف 3-دورات مياه 1-مطبخ 1-صاله 2-خزان سفلي وعلوي مستقل 1-موقف سيارة خاص", {"bathrooms": 3.0}, ()),
+        ("مكونات الشقه : ٣- غرف نوم ( ١ - ماستر) ٤- دورة مياه صاله يوجد منور", {"bathrooms": 4.0}, ()),
+        ("مكونه من 2- غرف نوم 1- صالة 1- مجلس 2- دورة مياة 1- ارتداد خلفي 1- مطبخ مستقل", {"bathrooms": 2.0}, ()),
         ("عرض الشارع: 15", {"street_width_m": 15.0}, ()),
         ("زاوية على شارع 20م شرقي", {}, ("street_width_m",)),
         ("شارع 15 م شمالي، شارع 20 م غربي", {}, ("street_width_m",)),
@@ -1590,6 +1703,8 @@ def selftest() -> None:
         ("عماره زاويه اربع شقق", {"apartments_count": 4.0}, ()),
         ("حاليا ثلاث شقق ماجره", {}, ("apartments_count",)),
         ("عمر العقار/ 5 سنين", {"property_age_years": 5.0}, ()),
+        ("غرفة سائق موقف سياره 🚗 موقع مميز قريب من الخدمات وخلف المروه سنتر", {"parking": True, "driver_room": True}, ()),
+        ("موقف سيارات قريب من البرج", {}, ("parking",)),
         ("عمرها ٦سنوات", {"property_age_years": 6.0}, ()),
         # bench-v2 hand check (facts-words-bench-v2): the lobby, a permit, the wiring brand, the zoning
         ("*مدخل مكيّف* *مصعدين*", {"elevator": True}, ("air_conditioner",)),
@@ -2219,6 +2334,17 @@ def selftest() -> None:
         ("مضخات مياه", {"pumps": True}, ("water_supply",)),
         ("طرمبة ومضخة", {"pumps": True}, ()),
         ("بدون مضخات", {"pumps": False}, ()),
+        # a form value decides its own label; «لم يُركب» is not fitted (dealapp 22700725, 2026-11-05)
+        ("🍽 مطبخ: (لم يُركب وقيمته على المستأجر ) ❄️ مكيفات: (لايوجد) 🚗 موقف سيارة: (نعم ) 🔴( ملاحظة )",
+         {"parking": True, "kitchen": False, "air_conditioner": False}, ()),
+        ("مصعد: نعم", {"elevator": True}, ()),
+        # an arrow bullet and a spaced «/» are list marks (dealapp 22662869, 17549152 — 2026-11-05 parking recall)
+        ("الدور الارضي ⬅ مجلس ⬅ مطبخ ⬅ حوش مقابل المطبخ ⬅ دورتين مياه ⬅ موقف سيارة # الدور الأول", {"parking": True}, ()),
+        ("ستديو (غرفة نوم) / صالة واسعة بمطبخ / دورة مياه /بلكونة مطلة / موقف خاص مظلل", {"parking": True}, ()),
+        ("عمر العقار/ 5 سنين", {"property_age_years": 5.0}, ()),
+        ("مجهزة حسب طلب الدفاع المدني بمضخة الحريق ووسائل السلامة", {}, ("pumps",)),
+        ("حديد سابك • صب بمضخة • بلك عازل", {}, ("pumps",)),
+        ("محطة وقود 6 مضخات ومغسلة سيارات", {"pumps": True}, ()),
         ("مسجد داخل المجمع", {"mosque": True}, ()),
         ("مصلى للرجال والنساء", {"mosque": True}, ()),
         ("قريب من المسجد", {}, ("mosque",)),
@@ -2262,6 +2388,14 @@ def selftest() -> None:
     both = facts_of(clean_text("دور-بيشة-الخزان", "دور للبيع مع خزان ماء"), ("الخزان", "بيشة"))
     assert both.get("water_tank") is True, both          # a real «خزان ماء» in the same ad is still read
     assert facts_of(slug, ("",)) == facts_of(slug) and facts_of(slug, ("ال",)) == facts_of(slug)   # empty / too-short names: no-op
+    # 🔬 2026-11-05: the kind word goes with the name — «حي X مؤثثة» left «حي مؤثثة», and a word after «حي» reads as a district
+    for text, place, fact in (("شقة فاخرة للايجار في حي الياسمين مؤثثة بالكامل", "حي الياسمين", "furnished"),   # aqar 14861704
+                              ("شقة للايجار بحي الملقا ( مؤثثة) في فله دور ثاني", "حي الملقا", "furnished"),      # aqar 14852480
+                              ("فيلا للبيع بحي الملقا مسبح وحديقة", "حي الملقا", "pool"),
+                              ("شقة للايجار حي النرجس مطبخ راكب مكيفات", "حي النرجس", "kitchen"),
+                              ("دور للايجار في حي العارض مدخل خاص", "العارض", "private_entrance")):
+        assert facts_of(clean_text(None, text), (place, "الرياض")).get(fact) is True, (text, facts_of(clean_text(None, text), (place,)))
+    assert "water_tank" not in facts_of(clean_text(None, "ارض للبيع حي الخزان مدينة تربة"), ("حي الخزان", "تربة"))
     print(f"word_checker selftest ok ({len(cases)} phrases)")
 
 

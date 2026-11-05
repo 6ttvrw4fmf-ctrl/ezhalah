@@ -31,4 +31,7 @@ jobs:
     uses: ./.github/workflows/dealapp-liveness.yml
     with:
       apply: true
+      # Three runners = three visitor IPs = three dealapp view quotas (scrapers/dealapp/liveness_run.py
+      # parse_shard). One sweep reached ~10k fresh reads a day for 55,971 rows (65 % in 48 h, 11-05).
+      shards: '["0/3","1/3","2/3"]'
     secrets: inherit

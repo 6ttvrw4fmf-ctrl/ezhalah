@@ -64,6 +64,7 @@ RES_TABLE = "asasmakeen_residential_listings"
 OFFPLAN_TABLE = "asasmakeen_offplan_units"
 SITE = "https://asasmakeen.com"
 SITEMAP = SITE + "/sitemap-units-ar.xml"
+PROJECTS_SITEMAP = SITE + "/sitemap-projects-ar.xml"
 OFFPLAN_PAGES = (SITE + "/ar/" + quote("مشاريعنا") + "/" + quote("بيع-على-الخارطة"),
                  SITE + "/ar/" + quote("مشاريعنا") + "/" + quote("تحت-الإنشاء"))
 UNIT_PATH = "/ar/" + quote("وحدة") + "/"
@@ -81,13 +82,14 @@ _IMG_RE = re.compile(r'href="(https://asasmakeen\.com/uploads/products/[^"]+)"\s
 _MAIN_IMG_RE = re.compile(r'class="apartment-unit-detail__main-img" src="([^"]+)"')
 _SLUG_RE = re.compile(r'data-slug="([^"]+)">\s*([^<]+?)\s*</option>')
 _DEST_RE = re.compile(r'project-location-map__directions"\s+href="[^"]*destination=(-?\d{1,2}\.\d+)%2C(-?\d{1,3}\.\d+)"')
+_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S)
 _ABOUT_RE = re.compile(r'معلومات عن المشروع</h2>\s*<div class="fs-5 lh-lg">(.*?)</div>', re.S)
 _FLOOR = {"الأرضي": 0, "الأول": 1, "الثاني": 2, "الثالث": 3, "الرابع": 4, "الخامس": 5, "الروف": None, "الملحق": None}
 _WORD_BATHS = (("دورتان", 2), ("دورتين", 2), ("دورة", 1))
 
 
 def _allowed(url: str) -> bool:
-    return url == SITEMAP or url in OFFPLAN_PAGES or url.startswith(SITE + UNIT_PATH) or url.startswith(SITE + PROJECT_PATH)
+    return url in (SITEMAP, PROJECTS_SITEMAP) or url in OFFPLAN_PAGES or url.startswith(SITE + UNIT_PATH) or url.startswith(SITE + PROJECT_PATH)
 
 
 def _text(fragment: str) -> str:
@@ -144,7 +146,8 @@ def parse_project(page: str) -> dict:
     """The project page's own pin (directions link) and whether its own description names Riyadh."""
     m = _DEST_RE.search(page)
     about = _text(_g(_ABOUT_RE, page))
-    return {"pin": pin_dict(m.group(1), m.group(2)) if m else {}, "riyadh": "الرياض" in about}
+    return {"pin": pin_dict(m.group(1), m.group(2)) if m else {}, "riyadh": "الرياض" in about,
+            "name": _text(_g(_H1_RE, page))}
 
 
 def offplan_projects(get=H.get_text) -> set[str]:
@@ -206,6 +209,15 @@ def map_unit(uid: str, url: str, u: dict, project: Optional[dict] = None) -> tup
     return row, ""
 
 
+def _project(slug: str) -> Optional[dict]:
+    try:
+        return parse_project(H.get_text(SITE + PROJECT_PATH + quote(slug), allowed=_allowed))
+    except H.Blocked as e:
+        if " 404 " in str(e) or " 410 " in str(e):
+            return None                 # a gone project page: its units carry no pin claim either way
+        raise
+
+
 def walk(limit: int = 0, log=print) -> dict:
     sm = H.get_text(SITEMAP, allowed=_allowed)
     urls = list(dict.fromkeys(_html.unescape(x) for x in re.findall(r"<loc>\s*([^<]+?)\s*</loc>", sm)))
@@ -234,12 +246,23 @@ def walk(limit: int = 0, log=print) -> dict:
         if i % 100 == 0:
             log(f"  {i}/{len(urls)} pages read")
     projects: dict[str, dict] = {}
-    for name in sorted({p["project"] for _, p in units.values()} & slugs.keys()):
-        try:
-            projects[name] = parse_project(H.get_text(SITE + PROJECT_PATH + quote(slugs[name]), allowed=_allowed))
-        except H.Blocked as e:
-            if " 404 " not in str(e) and " 410 " not in str(e):
-                raise                   # a gone project page: its units carry no pin claim either way
+    names = {p["project"] for _, p in units.values()} - {""}
+    if names - slugs.keys():
+        # an older project («مكين 34») is no longer in the picker; the site's project sitemap still lists its page
+        # («مكين-34-شقق-حي-العارض»). A candidate counts only when the page's own <h1> is the project's name.
+        sm = H.get_text(PROJECTS_SITEMAP, allowed=_allowed)
+        listed_slugs = [unquote(x).rsplit("/", 1)[1] for x in re.findall(r"<loc>\s*([^<]+?)\s*</loc>", sm)]
+        for name in sorted(names - slugs.keys()):
+            stem = name.replace(" ", "-")
+            for cand in (x for x in listed_slugs if x == stem or x.startswith(stem + "-")):
+                got = _project(cand)
+                if got and got["name"] == name:
+                    projects[name] = got
+                    break
+    for name in sorted(names & slugs.keys()):
+        got = _project(slugs[name])
+        if got:
+            projects[name] = got
     return {"listed": listed, "read": len(urls), "units": units, "bad": bad, "limited": bool(limit), "projects": projects}
 
 

@@ -147,7 +147,7 @@ def test_asas_sale_and_offplan_split_follows_the_sites_own_list():
     assert row["price_total"] == 55000 and "price_annual" not in row
 
 
-_AS_PROJECT = """<h2 class="mb-5 fw-bold">معلومات عن المشروع</h2>
+_AS_PROJECT = """<h1 class="display-5">مكين 90</h1><h2 class="mb-5 fw-bold">معلومات عن المشروع</h2>
 <div class="fs-5 lh-lg">يأتي مشروع مكين 90 ... في موقع حيوي شرق مدينة الرياض.</div>
 <a class="project-location-map__directions"
    href="https://www.google.com/maps/dir/?api=1&amp;destination=24.7260923%2C46.7651659" target="_blank">
@@ -165,6 +165,8 @@ def test_asas_unit_inherits_its_projects_pin_and_city_never_the_map_centre_or_fo
     info = row["additional_info"]
     assert row["city_ar"] == "الرياض" and (info["latitude"], info["longitude"]) == (24.7260923, 46.7651659)
     assert info["pin_scope"] == "project"
+    assert AS.parse_project(_AS_PROJECT)["name"] == "مكين 90"   # an old project found via the sitemap must match by <h1>
+    assert AS._allowed(AS.PROJECTS_SITEMAP)
     footer_only = AS.parse_project(_AS_PROJECT.replace("شرق مدينة الرياض", "شرق المدينة").replace("destination=", "x="))
     row, _ = AS.map_unit("3076", "https://asasmakeen.com/ar/z", u, footer_only)
     assert row["city_ar"] is None and row["additional_info"]["pin_absent"] is True and "latitude" not in row["additional_info"]
@@ -193,6 +195,19 @@ def test_mrajhi_stated_yearly_price_and_the_guard_is_never_stored():
     assert (row["bathrooms"], row["halls"], row["license_number"]) == (4, 2, "7200809360")
     assert row["district_ar"] == "حي العليا" and row["additional_info"]["latitude"] == pytest.approx(24.6902)
     _no_pii(row)
+
+
+def test_mrajhi_a_silent_unit_takes_its_projects_one_district_and_pin_never_a_split_one():
+    def u(pno, nb=None, pin=None):
+        return {"neighborhood": nb, "district_ar": f"حي {nb.removeprefix('حي ')}" if nb else None,
+                "additional_info": {"project_number": pno, **({"latitude": pin[0], "longitude": pin[1]} if pin else {})}}
+    rows = [u("31", "العليا", (24.69, 46.69)), u("31", "حي العليا"), u("31"),           # one district, one pin
+            u("36", "الملز"), u("36"), u("9", "العليا"), u("9", "الملز", (24.1, 46.1)), u("9")]  # 9: split district
+    MR.inherit_from_project(rows)
+    assert [r["district_ar"] for r in rows[:3]] == ["حي العليا"] * 3 and rows[2]["additional_info"]["pin_scope"] == "project"
+    assert rows[1]["additional_info"]["latitude"] == 24.69 and "district_source" not in rows[1]["additional_info"]
+    assert rows[4]["neighborhood"] == "الملز" and "latitude" not in rows[4]["additional_info"]     # no pin to give
+    assert rows[7]["neighborhood"] is None and rows[7]["additional_info"]["latitude"] == 24.1     # split → no district
 
 
 # ── STeam ────────────────────────────────────────────────────────────────────────────────────────────────────────
