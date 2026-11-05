@@ -52,6 +52,7 @@ from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
@@ -192,9 +193,10 @@ def map_listing(p: dict, deal: str, category: str) -> tuple[Optional[tuple[dict,
     utilities = {_UTILITY[n]: True for n in names if n in _UTILITY}
     title = redact_pii(p.get("title")) or None
     desc = redact_pii(p.get("description"), keep_lines=True) or None
-    prose = {c: v for c, v in N.prose_amenities(f"{title or ''}\n{desc or ''}", skip=("furnished",)).items()
-             if c in ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner",
-                      "private_entrance")}
+    # ONE READER (owner 2026-11-03): prose amenities come from the Advanced Filter's word reader, never the older
+    # normalize.prose_amenities — on 2026-11-05 that matcher had stored «مداخل مكيفة» (a lobby) as unit AC on 76 ads here.
+    prose = amenity_answers(f"{title or ''}\n{desc or ''}", ("kitchen", "parking", "elevator", "maid_room", "driver_room",
+                                                           "air_conditioner", "private_entrance"))
     rnpm = (p.get("rnpm") or {}).get("enabled")
     images = [i.get("medium") or i.get("small") for i in (p.get("images") or []) if isinstance(i, dict)]
     path = p.get("details_path") or ""
