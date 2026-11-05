@@ -671,7 +671,28 @@ for (const scope of SCOPES) {
         M.andCombos++; M.secondRoundChips++;
         if (o.unhandled.length) { skip(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, o.unhandled[0]); return; }
         const v = judgeOption({ label: 'and', chip: chipB, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
-        const it = judgeIntersection(A.ids, B.ids, algebraIds(r, o, v));
+        let it = judgeIntersection(A.ids, B.ids, algebraIds(r, o, v));
+        // A ∩ B is judged with the single-option sets read EARLIER in the run (🔬 2026-11-05). When the run straddles
+        // the hourly index sync, those sets are older than this AND read: job 127100173311 (07:04–07:48 UTC, sync
+        // 07:22) failed six Villa/Buy @جدة pairs with «missing 0, extra 1…9» while every AND result equalled its own
+        // oracle and the singles had already been reconciled as straddling a rebuild. So, when this AND read is itself
+        // consistent (v.ok) and only the algebra disagrees, both singles are re-read NOW and the algebra re-judged;
+        // a real disagreement survives the re-read and still fails.
+        if (!it.ok && v.ok) {
+          const fresh = async (opt: Opt) => {
+            const b = searchBody(base, opt.params);
+            const [r1, o1] = await Promise.all([rpcIds(b), oracle(b, predCols(opt.pred))]);
+            const v1 = judgeOption({ label: 'and-reread', chip: null, applied: null, rpcTotal: r1.total, page: PAGE, rpcIds: r1.ids, oracleIds: o1.ids, oracleRows: o1.rows, pred: opt.pred });
+            return algebraIds(r1, o1, v1);
+          };
+          const [fa, fb] = await Promise.all([fresh(A.opt), fresh(B.opt)]);
+          const again = judgeIntersection(fa, fb, algebraIds(r, o, v));
+          if (again.ok) {
+            M.reconciled++;
+            info(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}: the earlier single-option sets predate this read; re-read now, A ∩ B agrees`);
+          }
+          it = again;
+        }
         M.missing += v.missing.length; M.extra += v.extra.length; M.nullLeaks += v.nullLeaks; M.rowViolations += v.rowViolations;
         if (!it.ok || !v.ok) fail(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, `intersection expected ${it.expected} got ${it.got} (missing ${it.missing.length}, extra ${it.extra.length}); second-round chip ${chipB}; ${v.reasons.join(' | ')}`);
         else pass(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, `${A.chip} ∩ ${B.chip} = ${r.total} (chip-in-round-2 ${chipB} = oracle ${o.ids.length})`);
