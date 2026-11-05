@@ -156,6 +156,13 @@ FACT_TOKENS: dict[str, list[Any]] = {
     # 124 AI furnished rows were this shape and the reader had none of them. A described piece of furniture is the
     # seller naming it; «بدون تأثيث» / «غير مؤثث» stay an explicit no.
     "furnished": ["^موثث", ("re:(?:بدون|بلا|من غير|غير) (?:ال)?(?:اثاث|تاثيث|موثث)", False),
+                  # 🔬 2026-11-05 «doesn't say» audit (69,723 yearly ads, the AI reader's 609 answers read by hand):
+                  # typos no other word shares («ماثثة بالكامل», «مأثثه», «مرفروشة», «مفروووووش»), office furniture
+                  # («أثاث مكتبي راقٍ وجاهز»), and a no that names the furniture («لا تتوفر أثاث», «عدم وجود أثاث»,
+                  # «الأثاث غير موجود»). Not «موثق» (= notarised), not «مجهزة» (equipped) — those stay silent.
+                  "^ماثث", "^مرفروش", "re:مفرو{2,}ش", "re:(?:ب|و|وب)?(?:ال)?اثاث (?:ال)?مكتبي",
+                  ("re:(?:لا (?:يتوفر|تتوفر|يوجد|توجد|يشمل|تشمل)|لايوجد|لاتوجد|عدم (?:وجود|توفر)) (?:ال)?(?:اثاث|تاثيث)", False),
+                  ("re:(?:ال)?اثاث غير (?:موجود|متوفر|مشمول)", False),
                   # «سعرها بدون فرش وتكيف» (🔬 2026-11-05) — «فرش» alone is the furnishing; a floor covering names its floor
                   ("re:(?:بدون|بلا|من غير) (?:ال)?فرش(?!\S)(?! (?:ال)?(?:ارض|موكيت|بلاط|سيراميك|رخام|باركيه|عشب|نجيل))", False), "re:(?:مع|شامل|شامله) (?:ال)?اثاث",
                   "re:(?:ب|و|وب)?(?:ال)?اثاث (?:مودرن|فاخر|مريح|عصري|راقي|انيق|هادي|كامل|جديد|حديث|فندقي)",
@@ -829,6 +836,8 @@ def _billing_not_supply(fact: str, prev: list[str], nxt: list[str]) -> bool:
         if skip and (not nxt or _strip_wa(nxt[0]) in _LIST_WORDS):
             break
         if len(w) >= 2 and _strip_wa(w[0]) == "غير" and _starts(w[1], _BILLING):
+            if fact == "furnished" and len(w) >= 3 and w[2].startswith("ال"):
+                return False                 # «مؤثثة بالكامل غير شامل الجاكوزي» (🔬 2026-11-05): the jacuzzi is billed, not the furniture
             return True
     if fact not in _BILL_FACTS:
         return False
@@ -851,6 +860,9 @@ def _negated_after(nxt: list[str], fact: str) -> int:
             return skip + 2
         if skip and (not nxt or _strip_wa(nxt[0]) in _LIST_WORDS or nxt[0].isdigit() or nxt[0] in _FORM_LABELS):
             break
+        if (fact == "furnished" and len(w) >= 3 and w[0] == "غير" and w[1] in ("شامل", "شامله", "مشمول")
+                and w[2].startswith("ال")):
+            return 0                         # «مؤثثة بالكامل غير شامل الجاكوزي» (🔬 2026-11-05): the jacuzzi is not included
         if len(w) >= 2 and w[0] == "غير" and _starts(w[1], _POST_NOT + tuple(_n(x) for x in _POST_NOT_FACT.get(fact, ()))):
             return skip + 2
         if len(w) >= 1 and w[0] in ("لايوجد", "لاتوجد"):
@@ -859,8 +871,8 @@ def _negated_after(nxt: list[str], fact: str) -> int:
             return skip + 2
         if len(w) >= 1 and w[0] == "لا" and (len(w) == 1 or w[1] == "غير"):
             return skip + 1
-        if not skip and w and w[0] in ("0", "no", "none"):
-            return 1
+        if not skip and w and (w[0] in ("0", "no", "none") or (fact == "furnished" and w[0] == "unfurnished")):
+            return 1                         # «Furnished: Unfurnished» (manzo 21173202): the label's value speaks
     return 0
 
 
@@ -1378,6 +1390,18 @@ def selftest() -> None:
         ("غرفة نظيفة سعرها بدون فرش وتكيف 18,000 سنوي", {"furnished": False}, ()),    # aqar 11494692
         ("الصالة بدون فرش موكيت", {}, ("furnished",)),                                  # a floor covering, not furniture
         ("قريب من معارض المفروشات", {}, ("furnished",)),
+        ("غرفتين وصاله ومطبخ ماثثة بالكامل يوجد فرن غاز", {"furnished": True}, ()),            # haraj 23236459
+        ("شقق مرفروشة للإيجار الشهري والسنوي", {"furnished": True}, ()),                       # dealapp 21598204
+        ("شقق للإيجار في جدة مفروووووش شقق مكونة من غرفتين", {"furnished": True}, ()),          # dealapp 17640912
+        ("نظافة يومية - أثاث مكتبي راقٍ وجاهز - خصوصية", {"furnished": True}, ()),             # aqar 15113813
+        ("بينما لا تتوفر أثاث في الشقة، فإنها تمنح المستأجرين حرية", {"furnished": False}, ()),  # tuba 13261374
+        ("الحالة: الصور هذي الأثاث غير موجود .", {"furnished": False}, ()),                   # haraj 18784245
+        ("- Furnished: Unfurnished\nAmenities:", {"furnished": False}, ()),                    # manzo 21173202
+        ("استديو للعازبات مؤثثة بالكامل غير شامل الجاكوزي", {"furnished": True}, ()),          # dealapp 19862005
+        ("عقد موثق في الشهر العقاري", {}, ("furnished",)),                                     # «موثق» = notarised
+        ("شقة مجهزة بالكامل", {}, ("furnished",)),                                              # equipped is not furnished
+        ("شقق مؤثثة وغير مؤثثة", {}, ("furnished",)),                                          # both offered: no answer
+        ("مطبخ غير شامل الأجهزة", {}, ()),
         ("لا يوجد مصعد", {"elevator": False}, ()),
         ("ولا يوجد مصعد في المبنى", {"elevator": False}, ()),
         ("مفروشة: لا", {"furnished": False}, ()),
