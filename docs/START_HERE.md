@@ -83,6 +83,17 @@ laptop. They are written here so every Claude on the team knows them.
 - **English mirrors the Arabic**; the close button ✕ is top-right in both languages.
 - **Instalment question** in the Advanced Filter shows the five partner logos; the per-ad badge stays EJARI.
 - **AI money:** the AI spend breaker is reset by the owner only.
+- **Filter speed (2026-11-05):** the first card appears about 12 s after «بحث» ON PURPOSE (the logo parade of
+  every site is part of the experience). Keep it; anything LONGER than 12 s is a bug. A weekly capacity robot
+  checks this under load.
+- **Smart Broker later (2026-11-05):** the AI agent waits; effort goes to the Filter search, speed and bugs.
+- **Launch targets (2026-11-05):** Advanced Filter findability 100 % measured over every site (not a sample);
+  normal Filter journeys ≥ 99 %; dead ads hidden on time on every site.
+
+**How we report numbers**
+- **Second check (2026-11-05):** any big, surprising or decision-driving number is measured a second,
+  independent way (another method or a fresh agent) before it is reported or acted on. If the two disagree,
+  say so first.
 
 ## 6. How the owner likes answers
 
