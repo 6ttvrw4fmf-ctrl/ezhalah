@@ -16,8 +16,16 @@ the whole ad:
                     feature lines («3 دورات مياة», «راكب المطبخ», «غرفة خادمة», «شقة مؤثثة», «بلكونة» …). BATHROOMS ARE
                     ONLY IN THESE LINES (no field): «N دورات مياة» / «دورتان مياة» / «دورة مياة». The lines ARE the ad's
                     text → stored as the description (the facts readers read them at launch) and read here too.
-  NO PIN anywhere on the page (no map, no coordinates, no JSON; the only map link is the company's office) and NO
-  REGA licence: pin_source none, licence NULL. The district is the page's own «الحي» line / project district.
+  NO PIN on the unit page and NO REGA licence (licence NULL). The district is the page's own «الحي» line / project
+  district. THE PIN IS THE PARENT PROJECT'S (AGENTS «look in four places», 2026-11-05): every unit page lists the
+  projects as <option data-slug=…>«مكين 90 - حي المنار»</option>, and the project page /ar/مشاريعنا/<slug> (robots
+  allows it; sitemap-projects-ar.xml) draws «موقع المشروع» with a Google directions link «destination=<lat>,<lng>»
+  — the building's own pin (the embed beside it is the map CENTRE, usually +0.0026° east of the pin: never read).
+  The unit inherits it as additional_info latitude/longitude + pin_scope «project» (one pair shared by the whole
+  building is the source's truth — the pin loader keeps treating a shared pair as shared). A project page with no
+  map → no pin (pin_absent). CITY: the title («… بشمال الرياض …») or, when the title names none («شقة 212م بحي
+  المنار», 28 units of مكين 90), the project's own «معلومات عن المشروع» text («… شرق مدينة الرياض») — never the
+  footer's company address.
 OFF-PLAN (owner 2026-10-25: stored, hidden): a unit whose project is listed on the site's own «بيع على الخارطة»
 (/ar/مشاريعنا/بيع-على-الخارطة — «طليعة المشرقية» on 2026-11-05) or «تحت الإنشاء» page goes to
 asasmakeen_offplan_units, never a listing. Both pages are read every run, so the split follows the site.
@@ -44,8 +52,11 @@ from urllib.parse import quote, unquote
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
+PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance", "furnished", "balcony_terrace", "laundry_room")
 SOURCE = "Asas Makeen"
 SLUG = "asasmakeen"
 PREFIX = "ASM"
@@ -56,6 +67,7 @@ SITEMAP = SITE + "/sitemap-units-ar.xml"
 OFFPLAN_PAGES = (SITE + "/ar/" + quote("مشاريعنا") + "/" + quote("بيع-على-الخارطة"),
                  SITE + "/ar/" + quote("مشاريعنا") + "/" + quote("تحت-الإنشاء"))
 UNIT_PATH = "/ar/" + quote("وحدة") + "/"
+PROJECT_PATH = "/ar/" + quote("مشاريعنا") + "/"
 
 _INFO_RE = re.compile(r'class="apartment-unit-detail__info">(.*?)apartment-unit-detail__cta', re.S)
 _BADGE_RE = re.compile(r'<span class="badge [^"]*mb-3">\s*([^<]+?)\s*</span>')
@@ -67,12 +79,15 @@ _SPECS_RE = re.compile(r'<ul class="list-unstyled apartment-unit-detail__specs[^
 _LI_RE = re.compile(r"<li>(.*?)</li>", re.S)
 _IMG_RE = re.compile(r'href="(https://asasmakeen\.com/uploads/products/[^"]+)"\s+data-fancybox="unit-gallery"')
 _MAIN_IMG_RE = re.compile(r'class="apartment-unit-detail__main-img" src="([^"]+)"')
+_SLUG_RE = re.compile(r'data-slug="([^"]+)">\s*([^<]+?)\s*</option>')
+_DEST_RE = re.compile(r'project-location-map__directions"\s+href="[^"]*destination=(-?\d{1,2}\.\d+)%2C(-?\d{1,3}\.\d+)"')
+_ABOUT_RE = re.compile(r'معلومات عن المشروع</h2>\s*<div class="fs-5 lh-lg">(.*?)</div>', re.S)
 _FLOOR = {"الأرضي": 0, "الأول": 1, "الثاني": 2, "الثالث": 3, "الرابع": 4, "الخامس": 5, "الروف": None, "الملحق": None}
 _WORD_BATHS = (("دورتان", 2), ("دورتين", 2), ("دورة", 1))
 
 
 def _allowed(url: str) -> bool:
-    return url == SITEMAP or url in OFFPLAN_PAGES or url.startswith(SITE + UNIT_PATH)
+    return url == SITEMAP or url in OFFPLAN_PAGES or url.startswith(SITE + UNIT_PATH) or url.startswith(SITE + PROJECT_PATH)
 
 
 def _text(fragment: str) -> str:
@@ -120,6 +135,18 @@ def parse_unit(page: str) -> Optional[dict]:
             "rent_badge": "unit-price-rent-badge" in blk, "images": images}
 
 
+def project_slugs(page: str) -> dict[str, str]:
+    """«مكين 90 - حي المنار» → «مكين-90»: the project picker every unit page carries."""
+    return {_text(name).partition(" - ")[0].strip(): _html.unescape(slug) for slug, name in _SLUG_RE.findall(page)}
+
+
+def parse_project(page: str) -> dict:
+    """The project page's own pin (directions link) and whether its own description names Riyadh."""
+    m = _DEST_RE.search(page)
+    about = _text(_g(_ABOUT_RE, page))
+    return {"pin": pin_dict(m.group(1), m.group(2)) if m else {}, "riyadh": "الرياض" in about}
+
+
 def offplan_projects(get=H.get_text) -> set[str]:
     out: set[str] = set()
     for u in OFFPLAN_PAGES:
@@ -128,7 +155,9 @@ def offplan_projects(get=H.get_text) -> set[str]:
     return out
 
 
-def map_unit(uid: str, url: str, u: dict) -> tuple[Optional[dict], str]:
+def map_unit(uid: str, url: str, u: dict, project: Optional[dict] = None) -> tuple[Optional[dict], str]:
+    """`project` = parse_project() of the unit's project page read this crawl (None = not read: no pin
+    claim either way)."""
     deal = {"بيع": "Buy", "تأجير": "Rent"}.get(u["badge"])
     if not deal:
         return None, f"badge_{u['badge'] or 'none'}"
@@ -136,13 +165,14 @@ def map_unit(uid: str, url: str, u: dict) -> tuple[Optional[dict], str]:
     if ptype != "Apartment":
         return None, f"type_{ptype or 'unmapped'}"
     district = (u["labelled"].get("الحي") or u["project_district"].removeprefix("حي ").strip()) or None
-    city = "الرياض" if "الرياض" in u["title"] else None
+    city = "الرياض" if "الرياض" in u["title"] or (project or {}).get("riyadh") else None
     r = resolve(city, district) if city else {}
     cid = r.get("city_id")
     price = N.to_int(u["price_raw"])
     desc = redact_pii("\n".join(u["specs"]), keep_lines=True) or None
     area = N.to_int(re.sub(r"م2|م²", "", u["labelled"].get("المساحة", "")))
-    prose = N.prose_amenities("\n".join(u["features"]))
+    # ONE READER (owner 2026-11-03): prose amenities come from the Advanced Filter's word reader, never normalize.prose_amenities.
+    prose = amenity_answers("\n".join(u["features"]), PROSE_COLS, {"balcony": "balcony_terrace"})
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{uid}", "listing_url": url, "source": SOURCE, "active": True,
         "title": redact_pii(u["title"]) or None, "description": desc,
@@ -166,7 +196,10 @@ def map_unit(uid: str, url: str, u: dict) -> tuple[Optional[dict], str]:
     info = {"source_id": uid, "unit_code": u["code"] or None, "project": u["project"] or None,
             "project_district": u["project_district"] or None, "floor_label": u["labelled"].get("الدور"),
             "area_label": u["labelled"].get("المساحة"), "features": u["features"] or None,
-            "price_label": u["price_raw"] or None, "pin_source": "none (no map or coordinates on the unit page)"}
+            "price_label": u["price_raw"] or None}
+    if project is not None:
+        info.update({**project["pin"], "pin_scope": "project", "pin_source": "parent project page (directions link)"}
+                    if project["pin"] else {"pin_absent": True, "pin_source": "none (the project page draws no map)"})
     row["additional_info"] = {k: v for k, v in info.items() if v not in (None, "", [], {})}
     row["source_capture"] = {"schema": "asasmakeen.unit.v1", "item": {k: v for k, v in u.items() if k != "images"},
                              "images": u["images"]}
@@ -181,6 +214,7 @@ def walk(limit: int = 0, log=print) -> dict:
     if limit:
         urls = urls[:limit]
     units: dict[str, tuple[str, dict]] = {}
+    slugs: dict[str, str] = {}
     bad: Counter = Counter()
     for i, u in enumerate(urls, 1):
         uid = unquote(u)[len(SITE + "/ar/وحدة/"):].split("/")[0]
@@ -191,6 +225,7 @@ def walk(limit: int = 0, log=print) -> dict:
                 bad["gone_404"] += 1
                 continue
             raise
+        slugs.update(project_slugs(page))
         p = parse_unit(page)
         if p is None:
             bad["no_unit_block"] += 1
@@ -198,7 +233,14 @@ def walk(limit: int = 0, log=print) -> dict:
         units[uid] = (u, p)
         if i % 100 == 0:
             log(f"  {i}/{len(urls)} pages read")
-    return {"listed": listed, "read": len(urls), "units": units, "bad": bad, "limited": bool(limit)}
+    projects: dict[str, dict] = {}
+    for name in sorted({p["project"] for _, p in units.values()} & slugs.keys()):
+        try:
+            projects[name] = parse_project(H.get_text(SITE + PROJECT_PATH + quote(slugs[name]), allowed=_allowed))
+        except H.Blocked as e:
+            if " 404 " not in str(e) and " 410 " not in str(e):
+                raise                   # a gone project page: its units carry no pin claim either way
+    return {"listed": listed, "read": len(urls), "units": units, "bad": bad, "limited": bool(limit), "projects": projects}
 
 
 def main() -> int:
@@ -219,11 +261,12 @@ def main() -> int:
                 offplan.append({"ad_number": f"{PREFIX}{uid}", "listing_url": url, "project": u["project"],
                                 "side": u["badge"], "record": u, "last_seen_at": now})
                 continue
-            row, why = map_unit(uid, url, u)
+            row, why = map_unit(uid, url, u, w["projects"].get(u["project"]))
             (rows.append(row) if row else skipped.update([why]))
         ok = not w["limited"] and not w["bad"] and len(w["units"]) == w["listed"] > 0
         cover = {"sitemap": w["listed"], "read": w["read"], "parsed": len(w["units"]), "bad": dict(w["bad"]),
-                 "complete": ok, "offplan_projects": sorted(off)}
+                 "complete": ok, "offplan_projects": sorted(off),
+                 "project_pins": sum(1 for p in w["projects"].values() if p["pin"]), "projects_read": len(w["projects"])}
         print(f"  coverage: {json.dumps(cover, ensure_ascii=False)}\n  mapped: {len(rows)} listings "
               f"({Counter(r['transaction_type'] for r in rows)}); off-plan stored hidden: {len(offplan)}; "
               f"skipped (not guessed): {dict(skipped)}", flush=True)

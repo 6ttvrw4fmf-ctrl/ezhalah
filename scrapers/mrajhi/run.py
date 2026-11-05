@@ -18,6 +18,14 @@ PDPL — NEVER STORED: the page's «أرقام الحراس» block (a building 
 read: the label reader stops at «أرقام الحراس» and resumes at «رقم رخصة الإعلان»; no raw HTML is kept. The company's
 own switchboard numbers and every phone inside the description are redacted by the shared redactor + zz_redact_pii.
 
+THE PROJECT FILLS A SILENT UNIT (AGENTS «look in four places» — the parent project, 2026-11-05): every page prints the
+unit's «رقم المشروع: N». The site has no project page, so the project's own statement is what its OTHER unit pages
+print: when every sibling that names a district names the SAME one, a unit of that project that names none takes it
+(neighborhood + district_ar, `district_source: project`); the same for the map embed's ONE pair (`pin_scope:
+project`). Two different values in one project → nothing is filled. On 2026-11-05: 8 units named no district (7
+filled), 17 had no map (9 filled); «القصر» (one unit), «عمارة السليمانية» (one unit) and «مشروع المنال» (no map on any
+unit) keep what they have.
+
 LIVENESS («own full list = the check»): COMPLETE = every sitemap unit answered 200 with its JSON-LD. Only a complete
 walk prunes; 3 complete misses = inactive.
 
@@ -38,9 +46,11 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
+PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance", "furnished", "balcony_terrace", "laundry_room")
 SOURCE = "Al Rajhi Development"
 SLUG = "mrajhi"
 PREFIX = "MRJ"
@@ -126,7 +136,8 @@ def map_unit(code: str, url: str, u: dict) -> tuple[Optional[tuple[dict, str]], 
     title = redact_pii(u["title"] or ld.get("name")) or None
     period, annual = N.rent_period_and_annual(price, word) if price else (None, None)
     pin = pin_dict(*u["pin"]) if u["pin"] else {}
-    prose = N.prose_amenities(f"{title or ''}\n{desc or ''}")
+    # ONE READER (owner 2026-11-03): prose amenities come from the Advanced Filter's word reader, never normalize.prose_amenities.
+    prose = amenity_answers(f"{title or ''}\n{desc or ''}", PROSE_COLS, {"balcony": "balcony_terrace"})
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{code}", "listing_url": url, "source": SOURCE, "active": True,
         "title": title, "description": desc, "property_type": ptype, "transaction_type": "Rent",
@@ -155,6 +166,25 @@ def map_unit(code: str, url: str, u: dict) -> tuple[Optional[tuple[dict, str]], 
                              "ld": {k: v for k, v in ld.items() if k not in ("provider", "description")},
                              "labels": {k: v for k, v in u.items() if k not in ("ld", "images")}}
     return (row, "residential" if N.category_for_type(ptype) == "Residential" or ptype == "Duplex" else "commercial"), ""
+
+
+def inherit_from_project(rows: list[dict]) -> None:
+    """Fill a unit's missing district / pin from the ONE value its project's other units state (in place)."""
+    by: dict[str, list[dict]] = {}
+    for r in rows:
+        if r["additional_info"].get("project_number"):
+            by.setdefault(r["additional_info"]["project_number"], []).append(r)
+    for pno, units in by.items():
+        dists = {(r["neighborhood"], r["district_ar"]) for r in units if r["neighborhood"]}
+        pins = {(r["additional_info"]["latitude"], r["additional_info"]["longitude"]) for r in units
+                if "latitude" in r["additional_info"]}
+        for r in units:
+            info = r["additional_info"]
+            if not r["neighborhood"] and len({d[1] or d[0] for d in dists}) == 1:
+                r["neighborhood"], r["district_ar"] = next(iter(dists))
+                info["district_source"] = f"project (رقم المشروع {pno}: its other units)"
+            if "latitude" not in info and len(pins) == 1:
+                (info["latitude"], info["longitude"]), info["pin_scope"] = next(iter(pins)), "project"
 
 
 def walk(log=print) -> dict:
@@ -193,6 +223,7 @@ def main() -> int:
                 skipped[why] += 1
                 continue
             (res if got[1] == "residential" else com).append(got[0])
+        inherit_from_project(res + com)
         ok = not w["bad"] and len(w["units"]) == w["listed"] > 0
         cover = {"sitemap_units": w["listed"], "parsed": len(w["units"]), "bad": dict(w["bad"]), "complete": ok}
         print(f"  coverage: {json.dumps(cover)}\n  mapped: {len(res)} residential + {len(com)} commercial; "
