@@ -94,8 +94,9 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # kellerwilliams, almajdiah, asasmakeen, mrajhi, steam (2026-11-05) are STAGED exactly like propertyfinder was: their
 # run.py files store rows in tables no search arm reads, registry 'retired' until the owner launches them
 # (docs/ops/FIVE_SOURCES_LAUNCH.md); each gets its SOURCE_LIST_PRESENCE policy in that launch change.
+# Each LEAVES this set at its own launch (owner switch, docs/ops/FIVE_SOURCES_LAUNCH.md) with SOURCE_LIST_PRESENCE below.
 NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "moj", "facts",
-                                       "kellerwilliams", "almajdiah", "asasmakeen", "mrajhi", "steam"})
+                                       "kellerwilliams", "asasmakeen", "mrajhi", "steam"})
 
 
 class _P(dict):
@@ -1146,6 +1147,10 @@ POLICIES: dict[str, _P] = {
         "prune_unseen unless every detail page was readable.",
         "An oracle is possible — /web/gallery/<id> answers HTTP 404 for an unknown id — but it is "
         "not written yet, so this does not claim a direct check."),
+    "almajdiah": _P(
+        _pol("almajdiah", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's complete rental API (rental-request?page=N to meta.last_page, every project's /rental-request/<id> to its last_page, project count checked against meta.total). run.py prunes only after a complete walk.",
+        "A unit has no page of its own (it is a card on its project page), so the complete list is the reading."),
     "propertyfinder": _P(
         _pol("propertyfinder", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's four COMPLETE category lists (/ar/<side>/عقارات-….html?page=N, "
@@ -1620,6 +1625,8 @@ SOURCE_LIST_DAILY: tuple[str, ...] = (
     "ramzalqasim", "safera", "satel", "shmoualshmal", "shomou", "squares", "vmksa", "wahadat",
     # Property Finder launch (owner 2026-11-04 approved the source; launched by the owner's switch)
     "propertyfinder",
+    # The five sources of 2026-11-05 (owner order; launched by the owner's switch, docs/ops/FIVE_SOURCES_LAUNCH.md)
+    "almajdiah",
 )
 for _p in SOURCE_LIST_DAILY:
     assert POLICIES[_p]["strategy"] == CRAWL_PRESENCE_ONLY, _p      # never demote an oracle tier

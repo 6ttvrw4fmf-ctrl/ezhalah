@@ -164,6 +164,9 @@ export const PLATFORMS: Platform[] = [
   { name: 'حراج', domain: 'haraj.com.sa', brand: 'Haraj', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // propertyfinder: Property Finder Saudi — 4,516 ads + 155 off-plan (hidden) measured 2026-11-04, BOTH sides (3,306 sale + 1,210 rent).
   { name: 'بروبرتي فايندر', domain: 'propertyfinder.sa', brand: 'Property Finder', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // almajdiah: one of the five sources of 2026-11-05 (owner order), launched by
+  // the owner's switch (docs/ops/FIVE_SOURCES_LAUNCH.md). Sides = what each site lists (almajdiah sales ON HOLD).
+  { name: 'الماجدية', domain: 'almajdiah.com', brand: 'Almajdiah', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // shomou: مكتب شموع العقار (Al-Ahsa) — 142 in-date ads of 1,028 listed (835 past their own end date) measured 2026-09-28.
   { name: 'شموع العقار', domain: 'shomoalaqar.com.sa', brand: 'Shomou', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // maktab: منصة مكتب — 11 offices with in-date REGA ad licences (Riyadh + Tabuk) measured 2026-09-28.
