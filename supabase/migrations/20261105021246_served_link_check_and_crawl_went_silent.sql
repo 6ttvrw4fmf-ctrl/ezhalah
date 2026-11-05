@@ -110,12 +110,12 @@ begin
     ), last as (
       select distinct on (label) * from runs order by label, started_at desc
     ), base as (
-      select r.label, percentile_cont(0.5) within group (order by r.rows_seen)::numeric as median_rows, count(*) as runs
-        from runs r join last l using (label)
-       where r.ok and r.rows_seen > 0 and r.started_at < l.started_at
-       group by r.label
+      select x.label, percentile_cont(0.5) within group (order by x.rows_seen)::numeric as median_rows, count(*) as healthy_runs
+        from runs x join last l using (label)
+       where x.ok and x.rows_seen > 0 and x.started_at < l.started_at
+       group by x.label
     )
-    select l.platform, l.label, l.started_at, l.ok, l.rows_seen, l.notes, b.median_rows, b.runs
+    select l.platform, l.label, l.started_at, l.ok, l.rows_seen, l.notes, b.median_rows, b.healthy_runs
       from last l join base b using (label)
      where b.median_rows >= 1000
        and l.rows_seen < 0.05 * b.median_rows
@@ -124,7 +124,7 @@ begin
     live := live || ('crawl_went_silent:' || r.label);
     n := n + public.mon_raise('P1', 'crawl_went_silent', r.platform, 'crawl_went_silent:' || r.label,
       jsonb_build_object('label', r.label, 'last_run_at', r.started_at, 'last_ok', r.ok, 'last_rows_seen', r.rows_seen,
-        'median_rows_8d', r.median_rows, 'healthy_runs_8d', r.runs, 'last_notes', left(r.notes, 300), 'for', '⚡',
+        'median_rows_8d', r.median_rows, 'healthy_runs_8d', r.healthy_runs, 'last_notes', left(r.notes, 300), 'for', '⚡',
         'why', 'This crawl''s latest run saw under 5% of what its own healthy runs see (Dwelleo 6,996 → 0 on '
             || '2026-11-04 paged nobody until the next day). Read last_notes, then the source in a rendered browser '
             || '(four places). If the source really shrank, record it in ops_platform_catalogue_rebase with the '
