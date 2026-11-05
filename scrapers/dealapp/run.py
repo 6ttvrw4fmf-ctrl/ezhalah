@@ -358,7 +358,7 @@ def _active_ids_for_reconfirm(shards: int = 1, shard: int = 0) -> set[str]:
         while True:  # PostgREST caps a select at 1000 rows — page explicitly
             rows = db._execute(
                 db.sb().table(tbl).select("ad_number").eq("active", True).eq("source", SOURCE)
-                  .range(start, start + 999),
+                  .order("id").range(start, start + 999),
                 what=tbl + ".active_ids",
             ).data or []
             for r in rows:
@@ -1588,7 +1588,7 @@ def _strike_confirmed_absent(tbl: str, absent: dict[str, str], verify_gone: Any,
     while True:   # PostgREST caps a select at 1000 rows — page explicitly
         page = db._execute(
             db.sb().table(tbl).select("ad_number").eq("active", True).eq("source", SOURCE)
-              .range(start, start + 999), what=tbl + ".absent_slice").data or []
+              .order("id").range(start, start + 999), what=tbl + ".absent_slice").data or []
         rows += [r["ad_number"] for r in page if r.get("ad_number")]
         if len(page) < 1000:
             break
