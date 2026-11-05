@@ -1,7 +1,7 @@
 -- Keller Williams + Almajdiah launch (owner «launch» 2026-11-05): each site's complete catalogue size in
 -- ops_platform_catalogue_rebase, so silent_partial_success holds the daily crawl to it from the FIRST run (a run under half
 -- raises) — crawl_went_silent only watches crawls with a 1,000-row median, which neither has. Same declaration as the Asas
--- Makeen / Al Rajhi / STeam launch (20261105111008).
+-- Makeen / Al Rajhi / STeam launch makes for its three.
 insert into public.ops_platform_catalogue_rebase
   (platform, rebased_at, expected_rows_per_run, reason, source_rule_url, evidence, decided_by)
 values
