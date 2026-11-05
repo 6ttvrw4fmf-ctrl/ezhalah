@@ -40,11 +40,13 @@ def _kw(**over):
     x = {"_id": 2149160983275828, "list_uuid": "50b060391b4b1c692c8bf5d7", "list_category": "For Sale",
          "list_status": "Active", "prop_type": "Residential", "prop_subtype": "Apartment",
          "listing_title": "شقة للبيع في حي القيروان", "mls_number": "6201037915", "current_list_price": 950000,
-         "list_desc": f"شقة 3 غرف مع مصعد\nللاستفسار:\n{FAKE_PHONE}", "list_desc_en": f"call {FAKE_PHONE}",
+         "list_desc": f"شقة 3 غرف مع مصعد\nللاستفسار:\n{FAKE_PHONE}",
+         "list_desc_en": f"please contact the number provided below\nZaid Fakename.\n{FAKE_PHONE}",
          "total_bed": 3, "total_bath": 2, "living_area": 140, "living_area_units": "sqm",
          "list_address": {"city": "الرياض", "coordinates_gp": {"lat": 24.85, "lon": 46.62}},
          "location": {"region": "الرياض", "neighborhoods": [{"neigh_name": "حي القيروان"}]},
-         "list_agent_office": {"list_agent_full_name": FAKE_NAME, "list_agent_preferred_phone": FAKE_PHONE,
+         "list_agent_office": {"list_agent_full_name": "Zaid Fakename", "list_agent_first_name": "Zaid",
+                               "list_agent_last_name": "Fakename", "list_agent_preferred_phone": FAKE_PHONE,
                                "list_agent_email": FAKE_MAIL},
          "brokerage": {"name": "KW Jasmine", "email": FAKE_MAIL, "phone": FAKE_PHONE},
          "photos": [{"ph_url": "https://storage.googleapis.com/a.jpg"}], "marketing_info": {"display_list_price": True}}
@@ -58,6 +60,7 @@ def test_kw_sale_is_the_source_price_with_licence_pin_and_no_agent():
     assert row["listing_url"] == "https://kwsaudiarabia.com/propertydetails/50b060391b4b1c692c8bf5d7"
     assert row["additional_info"]["latitude"] == pytest.approx(24.85) and row["elevator"] is True
     _no_pii(row)
+    assert "Fakename" not in json.dumps(row, ensure_ascii=False)          # an UNLABELLED signature, removed by value
 
 
 def test_kw_rent_period_only_when_the_text_ties_it_to_the_price():
@@ -142,6 +145,30 @@ def test_asas_sale_and_offplan_split_follows_the_sites_own_list():
     assert u["project"] == "طليعة المشرقية"          # main() routes it to asasmakeen_offplan_units by project
     row, _ = AS.map_unit("1971", "https://asasmakeen.com/ar/y", u)
     assert row["price_total"] == 55000 and "price_annual" not in row
+
+
+_AS_PROJECT = """<h2 class="mb-5 fw-bold">معلومات عن المشروع</h2>
+<div class="fs-5 lh-lg">يأتي مشروع مكين 90 ... في موقع حيوي شرق مدينة الرياض.</div>
+<a class="project-location-map__directions"
+   href="https://www.google.com/maps/dir/?api=1&amp;destination=24.7260923%2C46.7651659" target="_blank">
+<iframe src="https://www.google.com/maps/embed?pb=!1m3!2m1!1s24.7260923%2C46.8032747!6i16"></iframe>
+<footer>الرياض - حي النرجس - طريق انس بن مالك</footer>"""
+
+
+def test_asas_unit_inherits_its_projects_pin_and_city_never_the_map_centre_or_footer():
+    page = _AS_PAGE.replace("شقة 115م بشرق الرياض حي الرمال", "شقة 212م بحي المنار")       # the title names no city
+    page += '<option value="9" data-slug="مكين-90">\n   مكين 90 - حي المنار   </option>'
+    assert AS.project_slugs(page) == {"مكين 90": "مكين-90"}
+    u = AS.parse_unit(page.format(badge="بيع", project="مكين 90", rent=""))
+    assert AS.map_unit("3076", "https://asasmakeen.com/ar/z", u)[0]["city_ar"] is None   # no project read: no claim
+    row, _ = AS.map_unit("3076", "https://asasmakeen.com/ar/z", u, AS.parse_project(_AS_PROJECT))
+    info = row["additional_info"]
+    assert row["city_ar"] == "الرياض" and (info["latitude"], info["longitude"]) == (24.7260923, 46.7651659)
+    assert info["pin_scope"] == "project"
+    footer_only = AS.parse_project(_AS_PROJECT.replace("شرق مدينة الرياض", "شرق المدينة").replace("destination=", "x="))
+    row, _ = AS.map_unit("3076", "https://asasmakeen.com/ar/z", u, footer_only)
+    assert row["city_ar"] is None and row["additional_info"]["pin_absent"] is True and "latitude" not in row["additional_info"]
+    assert AS._allowed(AS.SITE + AS.PROJECT_PATH + "x") and not AS._allowed(AS.SITE + "/api/projects")
 
 
 # ── Al Rajhi ─────────────────────────────────────────────────────────────────────────────────────────────────────
