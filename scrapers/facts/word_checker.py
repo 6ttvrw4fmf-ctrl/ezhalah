@@ -586,6 +586,9 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "insulated_panel": ((), ("صوت", "للصوت", "الصوت", "صوتي", "صوتيا")),                             # «عازل للصوت» is soundproof
     "cold_storage": (("تكييف", "تكيف", "مكيف", "مكيفات", "نظام", "انظمه"), ()),                     # «نظام تبريد» is the AC
     "car_wash": (("حمام", "دوره", "بانيو", "جناح", "مرحاض"), ("ملابس", "يد", "ايدي", "رخام", "وشطاف", "شطاف")),
+    # «مجهزة بمضخة الحريق» (a fire pump) and «صب بمضخة» (concrete poured by pump) are not a station's fuel pumps
+    # (aqar 2026-11-05 evidence-phrase review, «بمضخه» on 25 ads; the chip is the 🛢️ station cohort's)
+    "pumps": (("صب", "بالصب", "وصب"), ("حريق", "الحريق", "للحريق", "الاطفاء", "اطفاء")),
     "earning_income": (("بين", "حقوق", "التزامات", "توقيع"), ("والمستاجر", "المستاجر", "ومستاجر")),  # the contract's parties
     # 2026-11-03 audit round 2: a contact line, a hall, a city name, a delivery bike
     "elevator": (("التاسيس", "بالتاسيس", "لتاسيس", "وتاسيس"), ()),                     # «وتم التأسيس للمصعد»
@@ -2301,6 +2304,9 @@ def selftest() -> None:
         ("مضخات مياه", {"pumps": True}, ("water_supply",)),
         ("طرمبة ومضخة", {"pumps": True}, ()),
         ("بدون مضخات", {"pumps": False}, ()),
+        ("مجهزة حسب طلب الدفاع المدني بمضخة الحريق ووسائل السلامة", {}, ("pumps",)),
+        ("حديد سابك • صب بمضخة • بلك عازل", {}, ("pumps",)),
+        ("محطة وقود 6 مضخات ومغسلة سيارات", {"pumps": True}, ()),
         ("مسجد داخل المجمع", {"mosque": True}, ()),
         ("مصلى للرجال والنساء", {"mosque": True}, ()),
         ("قريب من المسجد", {}, ("mosque",)),
