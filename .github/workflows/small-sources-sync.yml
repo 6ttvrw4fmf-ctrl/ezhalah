@@ -448,6 +448,9 @@ jobs:
             # Scheduled in the SAME change that adds the scraper — the barrier
             # verify-every-scraper-has-a-scheduled-workflow.ts caught this exact omission before merge.
             - { source: rakez, cmd: "python -m scrapers.rakez.run" }
+            # The five sources of 2026-11-05 (owner order), moved here at their launch from five-sources-staged-sync.yml:
+            # honest client (scrapers/common/honest_fetch.py) — NO proxy, NO browser identity; a wall stops that site's run.
+            - { source: mrajhi, cmd: "python -m scrapers.mrajhi.run" }
             # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
             # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
             # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to
