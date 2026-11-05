@@ -409,20 +409,19 @@ def test_an_early_empty_page_makes_the_walk_incomplete_and_a_full_walk_complete(
 
 
 # ============================ main(): the tally reaches end_run ==============================
-def _run_main(monkeypatch, items, *, complete, total, argv=("run.py",)):
+def _run_main(monkeypatch, items, *, complete, total, argv=("run.py",), prune=0):
     calls: dict = {"prune": [], "batches": {}}
     monkeypatch.setattr(sys, "argv", list(argv))
     monkeypatch.setattr(R, "session", lambda: None)
     monkeypatch.setattr(R, "fetch_catalogue", lambda s, limit=0: (items, total, complete))
-    # The site's own sitemap names every listing's public page (new path shape since 2026-10-07).
-    monkeypatch.setattr(R, "fetch_public_urls", lambda s: {
-        it["slug"]: f"{R.BASE}/ar/properties/for-sale/x/y/z/{it['slug']}" for it in items.values() if it.get("slug")})
+    # The site's own 308 names every listing's public page (new path shape since 2026-10-07).
+    monkeypatch.setattr(R, "resolve_public_url", lambda s, slug: f"{R.BASE}/ar/properties/for-sale/x/y/z/{slug}")
     monkeypatch.setattr(R, "fetch_detail", lambda s, key: {**D18630, "id": 18630} if key == R18630["slug"] else None)
     monkeypatch.setattr(R.time, "sleep", lambda *_: None)
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
     monkeypatch.setattr(R.db, "_wasalt_batch", lambda t, rows: calls["batches"].__setitem__(t, rows))
     monkeypatch.setattr(R.db, "retire_superseded_siblings", lambda **k: 0)
-    monkeypatch.setattr(R.db, "prune_unseen", lambda *a, **k: calls["prune"].append(a[0]) or 0)
+    monkeypatch.setattr(R.db, "prune_unseen", lambda *a, **k: calls["prune"].append(a[0]) or prune)
     monkeypatch.setattr(R.db, "end_run", lambda run_id, **k: calls.update(k) or True)
     assert R.main() == 0
     return calls
@@ -448,6 +447,17 @@ def test_a_complete_walk_that_collected_the_sites_total_prunes_both_tables(monke
     assert calls["prune"] == ["dwelleo_residential_listings", "dwelleo_commercial_listings"]
     calls = _run_main(monkeypatch, items, complete=True, total=3)      # 2 of 3 < 98 %
     assert calls["prune"] == []
+
+
+def test_follow_source_runs_only_after_the_guard_refused_a_complete_walk(monkeypatch):
+    items = {r["id"]: r for r in (R18630, R19573)}
+    followed = []
+    monkeypatch.setattr(R, "follow_source_hide", lambda s, tbl, seen, ctl: followed.append(tbl) or (7, 1, "done"))
+    calls = _run_main(monkeypatch, items, complete=True, total=2)           # prune answered 0
+    assert followed == [] and R.OWNER_FOLLOW_SOURCE not in calls["notes"]
+    calls = _run_main(monkeypatch, items, complete=True, total=2, prune=-1)   # the collapse guard refused
+    assert followed == ["dwelleo_residential_listings", "dwelleo_commercial_listings"]
+    assert calls["notes"].startswith(f"pruned=14 {R.OWNER_FOLLOW_SOURCE}: residential hidden=7"), calls["notes"]
 
 
 # ============================ SILENT PERIOD, JUDGED BY PRICE (owner 2026-09-26 / 2026-10-21) =====
