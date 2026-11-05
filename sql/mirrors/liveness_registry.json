@@ -546,6 +546,12 @@
     "grace": 3
   },
   {
+    "platform": "mrajhi",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "muajarh",
     "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
