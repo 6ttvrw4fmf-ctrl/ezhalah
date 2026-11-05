@@ -201,8 +201,8 @@ def main() -> int:
             Path(a.save).write_text(json.dumps(res + com, ensure_ascii=False, default=str))
         if a.dry_run:
             return 0
-        db._wasalt_batch(RES_TABLE, res)
-        db._wasalt_batch(COM_TABLE, com)
+        db.upsert_mrajhi_residential_batch(res)
+        db.upsert_mrajhi_commercial_batch(com)
         notes = [f"coverage {json.dumps(cover)}"]
         sup = db.retire_superseded_siblings(res_table=RES_TABLE, com_table=COM_TABLE, res_ads={r["ad_number"] for r in res},
                                             com_ads={r["ad_number"] for r in com}, source=SOURCE)

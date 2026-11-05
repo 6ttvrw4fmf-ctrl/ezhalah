@@ -1244,7 +1244,7 @@ export function SourceBadge({ source }: { source: string }) {
   if (s.includes('الماجدية') || s.includes('almajdiah')) return null;
   if (s.includes('أساس مكين') || s.includes('asasmakeen') || s.includes('asas makeen')) return null;
   if (s.includes('الراجحي للتنمية') || s.includes('mrajhi') || s.includes('al rajhi development')) return null;
-  if (s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return null;
+  if (raw === 'steam' || s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return null;
   if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={MAKTAB_LOGO} />;
   if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={SIRDAB_LOGO} />;
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;
@@ -1440,7 +1440,7 @@ function sourceHost(source: string): string {
   if (s.includes('الماجدية') || s.includes('almajdiah')) return 'almajdiah.com';
   if (s.includes('أساس مكين') || s.includes('asasmakeen') || s.includes('asas makeen')) return 'asasmakeen.com';
   if (s.includes('الراجحي للتنمية') || s.includes('mrajhi') || s.includes('al rajhi development')) return 'mrajhi.com.sa';
-  if (s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return 'steam-realestate.com';
+  if (raw === 'steam' || s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return 'steam-realestate.com';
   if (s.includes('منصة مكتب') || s.includes('maktab')) return 'maktab.sa';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'marketplace.sirdab.co';
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';

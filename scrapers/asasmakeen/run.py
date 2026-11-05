@@ -231,9 +231,8 @@ def main() -> int:
             Path(a.save).write_text(json.dumps({"rows": rows, "offplan": offplan}, ensure_ascii=False, default=str))
         if a.dry_run:
             return 0
-        db._wasalt_batch(RES_TABLE, rows)
-        for i in range(0, len(offplan), 200):
-            db._execute(db.sb().table(OFFPLAN_TABLE).upsert(offplan[i:i + 200], on_conflict="ad_number"), what=OFFPLAN_TABLE)
+        db.upsert_asasmakeen_residential_batch(rows)
+        db.upsert_asasmakeen_offplan(offplan)
         note = f"coverage {json.dumps(cover, ensure_ascii=False)}; offplan={len(offplan)}; "
         if rows and ok:
             note += f"pruned={db.prune_unseen(RES_TABLE, {r['ad_number'] for r in rows}, source=SOURCE, verify_gone=_gone)}"

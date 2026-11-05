@@ -187,7 +187,7 @@ def main() -> int:
             Path(a.save).write_text(json.dumps(rows, ensure_ascii=False, default=str))
         if a.dry_run:
             return 0
-        db._wasalt_batch(RES_TABLE, rows)
+        db.upsert_almajdiah_residential_batch(rows)
         note = f"coverage {json.dumps(cover)}; "
         if rows and ok:
             note += f"pruned={db.prune_unseen(RES_TABLE, {r['ad_number'] for r in rows}, source=SOURCE, verify_gone=_gone)}"

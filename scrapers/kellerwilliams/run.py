@@ -266,8 +266,8 @@ def main() -> int:
 
 
 def _store(run_id, res, com, complete_walk, cover, *, rows_seen) -> int:
-    db._wasalt_batch(RES_TABLE, res)
-    db._wasalt_batch(COM_TABLE, com)
+    db.upsert_kellerwilliams_residential_batch(res)
+    db.upsert_kellerwilliams_commercial_batch(com)
     notes = [f"coverage {json.dumps(cover)}"]
     sup = db.retire_superseded_siblings(res_table=RES_TABLE, com_table=COM_TABLE, res_ads={r["ad_number"] for r in res},
                                         com_ads={r["ad_number"] for r in com}, source=SOURCE)
