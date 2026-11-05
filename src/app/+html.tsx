@@ -1,6 +1,6 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import { type PropsWithChildren } from 'react';
-import { buildThemeCss } from '../theme/palette';
+import { buildThemeCss, lightColors, darkColors } from '../theme/palette';
 import { THEME_KEY } from '../theme/themeMode';
 import { BUDGET_CSS } from '../lib/scrollCalm';
 
@@ -85,6 +85,14 @@ export default function Root({ children }: PropsWithChildren) {
             page — where the browser reads it as «pull down to reload» and the conversation reloads. `none` on the page
             itself ends the chaining and the gesture; the chat's own scrolling is untouched. */}
         <style dangerouslySetInnerHTML={{ __html: 'html,body{overscroll-behavior-y:none}' }} />
+        {/* SKY, NOT WHITE, BEHIND THE PHONE'S TOP BAR (owner 2026-11-05: «why on top is white? we need blue»). Safari on
+            iPhone tints its top bar from the page's own base layer, and ours was transparent, so it painted white above the
+            sky header. The base layer now carries the header's own sky (it follows the dark theme through the same CSS
+            variable), and theme-color tells the other browsers the same colour. Values come from src/theme/palette.ts only.
+            Guard: scripts/verify-top-bar-is-sky.ts. */}
+        <style dangerouslySetInnerHTML={{ __html: 'html{background-color:var(--ez-skyTop)}' }} />
+        <meta name="theme-color" media="(prefers-color-scheme: light)" content={lightColors.skyTop} />
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content={darkColors.skyTop} />
         {/* Desktop UI scale — REVERTED to 1:1 (owner, 2026-08-14 23:47). A zoom layer (1.1/1.2/1.3
             tiered by viewport) shipped earlier today for the "small and zoomed out" report, but on
             a MacBook it rendered the app "too zoomed in" (owner, with screenshot). Current owner
