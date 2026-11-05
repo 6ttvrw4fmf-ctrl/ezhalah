@@ -3,6 +3,8 @@
 # open ezhalah.com, search Riyadh, tap a golden listing — against per-step budgets. A red run raises an alert
 # (alert_event → GitHub issue via alert-dispatch.yml) for the engineers to fix. Read-only; uses the robot pass.
 # Logic: e2e/speed/site-speed-live.mjs (wiring pinned by scripts/verify-site-speed-watch-wired.ts).
+# STARTED BY pg_cron (2026-11-05): GitHub ran the schedule below only ~3 times a day, so the bundles at :12 and :43
+# trigger this workflow (migration 20261105172415); the GitHub cron stays as a backup.
 name: Site speed watch (live)
 
 on:

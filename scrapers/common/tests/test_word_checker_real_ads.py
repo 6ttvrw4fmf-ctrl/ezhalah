@@ -136,3 +136,17 @@ def test_own_district_takes_its_kind_word_with_it(monkeypatch):
     monkeypatch.setattr(W, "_PLACE_KIND_WORDS", ())
     lost = [t for t, p, f in cases if W.facts_of(W.clean_text(None, t), (p,)).get(f) is not True]
     assert lost, "undoing the kind-word blank changed nothing — this test cannot see the 2026-11-05 bug"
+
+
+def test_a_labelled_bathroom_total_is_the_total(monkeypatch):
+    # 🔬 2026-11-05 yearly-rent bathroom audit (50,906 homes with no bathroom count): «عدد دورات المياه 3» beside a room's
+    # own «مجلس مستقل مع دورة مياه» answered nothing (haraj 18924617), and «الحمامات ٥» was not read (wasalt 481847).
+    import re as _re
+    cases = (("عامله1 مجلس مستقل مع دورة مياه 1 مطبخ1 عدد دورات المياه 3 عمر العقار اربع سنوات", 3.0),
+             ("النوم ٤ من ضمنها غرفة ماستر\nالحمامات ٥\nمجلس ، صالة", 5.0))
+    for text, want in cases:
+        assert W.facts_of(W.clean_text(None, text)).get("bathrooms") == want, text
+    # an unlabelled count beside an unnumbered one stays unstated (the total may be 3 or 4)
+    assert "bathrooms" not in W.facts_of(W.clean_text(None, "• مجلس مستقل بدورة مياه • صالة • 3 دورات مياه"))
+    monkeypatch.setattr(W, "_BATH_LABEL", _re.compile(r"(?!x)x"))
+    assert W.facts_of(W.clean_text(None, cases[0][0])).get("bathrooms") is None, "undoing the labelled-total rule changed nothing"
