@@ -7,6 +7,7 @@
 -- shomou/maktab's 20260928033746 verbatim with the platform list changed.
 -- AFTER THIS LANDS the hourly chain refreshes listing_location_index → listing_location_canonical_mv →
 -- listing_native_location_v1 (+ listing_extra_attrs_mv, listing_age_resolved_mv) before the :22 sync.
+set local client_min_messages = warning;   -- nothing reaches the client mid-transaction: a dropped API connection (524 at ~120 s) cannot abort the commit
 set local statement_timeout = '30min';   -- the replay rebuilds listing_location_canonical_mv and v1 (≈4 min each)
 set local lock_timeout = '15s';   -- the swap below overrides this with 3 s attempts
 do $do$

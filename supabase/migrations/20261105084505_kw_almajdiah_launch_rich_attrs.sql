@@ -10,6 +10,7 @@
 -- the arms at the end failed («each UNION query must have the same number of columns», clean rollback). The
 -- arms are now spliced INSIDE the inner union, right after its last arm (october_commercial_listings, whose
 -- closing «) v_1_1_1_1» must be found exactly once in the live body), so every outer layer reads them unchanged.
+set local client_min_messages = warning;   -- nothing reaches the client mid-transaction: a dropped API connection (524 at ~120 s) cannot abort the commit
 set local statement_timeout = '5min';
 DO $do$
 DECLARE base text; arms text; t text; i int; ok boolean := false;

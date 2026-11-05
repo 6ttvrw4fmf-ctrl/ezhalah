@@ -5,6 +5,7 @@
 -- Property Finder joins listing_extra_attrs (owner 2026-10-16, licensed offers only) — an Advanced-Filter view, so without an arm every one of
 -- their listings answers "unknown" to every AF question. Arm shape is batch 6's verbatim, appended to
 -- the body read LIVE at apply time; the same short-lock retry loop.
+set local client_min_messages = warning;   -- nothing reaches the client mid-transaction: a dropped API connection (524 at ~120 s) cannot abort the commit
 set local statement_timeout = '5min';
 DO $do$
 DECLARE base text; arms text; t text; i int; ok boolean := false;
