@@ -90,7 +90,9 @@ def walk(s: cc.Session, fetch=None) -> tuple[list[dict], int]:
 # ad text (#9404) and feature boxes never reached a row. Ten workers (the API answers ~2 s a record: four still took 7.5 min),
 # each with its own session on the profile and route
 # the probe chose, read the same records in the same order; a record that fails is None, counted unreadable as before.
-DETAIL_WORKERS = 10
+# 2026-11-05 (♻️): ten workers drew HTTP 429 on 432 of 1,062 records (11-04 12:27) and the retries ran the job past its
+# slot three times. Five keep the read inside a 30-min slot (1,062 x ~2 s / 5 ≈ 7 min) with far fewer refusals.
+DETAIL_WORKERS = 5
 
 
 # WHY a detail record could not be read (crawl-health 2026-11-04). The 11-03 run could not read 342 of 856 records and
