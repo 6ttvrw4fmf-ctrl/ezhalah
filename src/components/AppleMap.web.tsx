@@ -31,7 +31,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, COUNTRY_NAME, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
@@ -736,7 +737,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       el.style.cssText = 'font:700 12px/1.15 -apple-system,system-ui,sans-serif;color:#24232B;background:rgba(255,255,255,.96);'
         + 'border:1px solid rgba(36,35,43,.18);border-radius:12px;padding:5px 9px;white-space:nowrap;text-align:center;'
         + 'box-shadow:0 1px 4px rgba(0,0,0,.28);cursor:pointer;touch-action:none';
-      const name = document.createElement('div'); name.textContent = areaName(a, level);
+      const name = document.createElement('div'); name.textContent = areaName(a, level, loc, translitPlace);   // English UI → English names (owner 2026-11-05)
       const count = document.createElement('div'); count.textContent = areaCount(a.n, loc);
       count.style.cssText = `font-weight:800;font-size:11px;color:${PIN_COLOR.buy};margin-top:1px`;
       el.append(name, count);
@@ -749,7 +750,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       return el;
     };
     const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
-      setViewPlace(null);   // area names on screen: the pill keeps «في هذه المنطقة» (several places share the view)
+      // Area names on screen: several places share the view, so the pill keeps «في هذه المنطقة» — except the country
+      // view, which IS one place («424,317 إعلان في السعودية»).
+      setViewPlace(level === 'country' ? COUNTRY_NAME[loc] : null);
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
       for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
@@ -820,7 +823,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (my !== seq || mapRef.current !== m) return;
         if (areas !== 'unknown') {
           hideCanvas(); shown = [];
-          drawAreas(visibleAreas(areas), level);
+          drawAreas(visibleAreas(areas, level), level);
           setPinCount(areasTotal(areas));
           return;
         }
@@ -878,7 +881,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
-      void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc)); });
+      void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc, translitPlace)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
       // head would change (count, deal, price, cell size) is replaced.
@@ -923,8 +926,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       canvas.remove();
       if (mapRef.current === m) clear();
     };
+    // `locale`: a language switch redraws every label and pin head in the new language (owner 2026-11-05).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinsKey, failed, mapReady]);
+  }, [pinsKey, failed, mapReady, locale]);
 
   // Full screen ⇄ compact: MapKit sizes its canvas on window resize; nudge it once the box has changed.
   useEffect(() => {

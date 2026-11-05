@@ -232,12 +232,12 @@ export function mergeOverlapping(rows: PinRow[], at: (lat: number, lng: number) 
  *  rule, else «هذه المنطقة» — never a name most of the view is not in. A failed lookup is null: the plain wording. */
 export const PLACE_SHARE = 0.6;
 export type ViewPlace = { district: string | null; city: string | null; district_share: number | string | null; city_share: number | string | null };
-export function viewPlaceName(p: ViewPlace | null, loc: 'ar' | 'en'): string | null {
+export function viewPlaceName(p: ViewPlace | null, loc: 'ar' | 'en', latin: (s: string) => string = (s) => s): string | null {
   if (!p) return null;
   const bare = (p.district ?? '').trim().replace(/^حي\s+/, '');
-  if (bare && Number(p.district_share) >= PLACE_SHARE) return loc === 'ar' ? `حي ${bare}` : bare;
+  if (bare && Number(p.district_share) >= PLACE_SHARE) return loc === 'ar' ? `حي ${bare}` : latin(bare);
   const city = (p.city ?? '').trim();
-  if (city && Number(p.city_share) >= PLACE_SHARE) return city;
+  if (city && Number(p.city_share) >= PLACE_SHARE) return loc === 'ar' ? city : latin(city);
   return null;
 }
 /** The count pill: «7 إعلانات في حي الشراع» / «7 listings in الشراع»; «… في هذه المنطقة» / «… here» without a place. */

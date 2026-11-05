@@ -100,7 +100,7 @@ mustCatch('the clear-all-then-add-all redraw (the flicker on every pan)', !/clea
 // The layer mounts BEFORE MapKit has loaded and returns early; the map's arrival must re-run it (measured live
 // 2026-11-02: a fresh /map load drew nothing until the deal changed).
 check('AppleMap.web.tsx re-runs the pin layer once the map object exists (mapReady bumped where live.map is set, in the deps)',
-  /live\.map = map;\n\s*setMapReady\(\(n\) => n \+ 1\);/.test(web) && /\}, \[pinsKey, failed, mapReady\]\);/.test(web) && /if \(!mk \|\| !m \|\| !pinFilter\) return;/.test(web));
+  /live\.map = map;\n\s*setMapReady\(\(n\) => n \+ 1\);/.test(web) && /\}, \[pinsKey, failed, mapReady, locale\]\);/.test(web) && /if \(!mk \|\| !m \|\| !pinFilter\) return;/.test(web));
 check('AppleMap.web.tsx adds the biggest count last so it sits on top', /rows\.sort\(\(a, b\) => a\.n - b\.n\);\n\s*setPinCount\(/.test(web));
 // IDENTICAL COPIES FOLD INTO ONE CARD (owner 2026-11-02: «some also have duplicates»): same site + price + area + type +
 // title + photo → one card and «and N identical listings»; anything different stays its own card — no source merged away.
