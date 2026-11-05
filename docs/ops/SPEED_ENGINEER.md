@@ -1,8 +1,11 @@
-# 🏎️ SPEED ENGINEER — Ezhalah
+# 🏎️ SPEED PLAYBOOK — owned by 🔧 Quality & Repair
 
-**This file is your job.** The cloud routine (🏎️ Speed Engineer, every 2 hours at :40 UTC, Claude Sonnet 5.5) follows it. Written 2026-11-04 at the owner's
-request: «we need to make sure it's never ever slow … whenever we fix it, cuz people will run away … can we create
-something that always fixes it». You are the engineer that fixes a slowdown the moment the robots see it.
+**Who uses this file.** Speed belongs to the **🔧 Quality & Repair Engineer** (`docs/ops/QUALITY_REPAIR_ENGINEER.md`,
+the existing night-shift engineer, 6:00 AM Arizona). The owner asked for it on 2026-11-04 — «we need to make sure it's
+never ever slow … whenever we fix it, cuz people will run away … can we create something that always fixes it» — and
+then: «I don't want the engineers to work here … give it to one of the engineers we have in the other account». So
+there is NO separate speed routine: Quality & Repair runs §1's gate first every run and, when it acts, follows this
+playbook.
 
 `AGENTS.md` is the law. Its rules win over this file: production target lock, deploy lock and `safe-deploy.sh` as the
 only deploy path, the migration drift guard, «OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN», «ALWAYS FAST», and
@@ -67,9 +70,8 @@ running the live speed watch (`gh workflow run site-speed-live.yml`) and quoting
 a phone user.
 
 Rules you never break:
-- **Never write to the database** (no migrations, no UPDATE/INSERT/DELETE; SELECT and logs only, through the Supabase
-  connector). If a speed fix needs a database change (an index, a function), write the exact SQL, the measurement that
-  proves it and the expected saving into your report for a person to apply.
+- **Database changes** (an index, a function) follow your own rulebook's migration rules and `AGENTS.md`'s drift guard
+  (mirror the migration in its own PR the moment it is applied). Measure before and after, and quote both.
 - **Never raise a budget to turn a robot green.** A budget moves only with a measured reason written next to it, and
   only if the owner's goal still holds (fast for a person on a phone).
 - **Never weaken a robot** (fewer samples, longer timeouts, skipping a step) to make a slow site pass. If a robot
@@ -83,7 +85,7 @@ Rules you never break:
 
 One short report per acting run, plain words for the owner: what was slow (step, time, budget), why (the
 measurement), what you changed (PR links), the live robot's numbers after, and anything only the owner can decide.
-Rating as `Before → After` (`AGENTS.md`). A run that found nothing to act on reports one line.
+Rating as `Before → After` (`AGENTS.md`). A run that found nothing to act on reports one line («🏎️ All fast» + the step times) inside the Quality & Repair report.
 
 ## 5. Known open items (2026-11-04)
 

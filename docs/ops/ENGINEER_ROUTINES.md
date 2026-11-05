@@ -7,7 +7,6 @@
 > | ⚡ Scraping Engineer | **`docs/ops/SCRAPING_ENGINEER.md`** | live, daily 2:00 AM Arizona |
 > | 🆕 New Listings Engineer | **`docs/ops/NEW_LISTINGS_ENGINEER.md`** | live, daily 3:00 AM Arizona |
 > | ♻️ Lifecycle Engineer | **`docs/ops/LIFECYCLE_ENGINEER.md`** | live, daily 4:00 AM Arizona |
-> | 🏎️ Speed Engineer | **`docs/ops/SPEED_ENGINEER.md`** | live 2026-11-04, every 2 h at :40 UTC (`trig_0154RxDD2d7dzMMNPsStGVMT`, Sonnet 5.5); acts only when the speed robots go red or near budget |
 >
 > Everything below is kept as history (and because barriers still read its roster) until this file is
 > rewritten for the new team. The GLOBAL ENGINEERING POLICY (§G) remains good guidance.
