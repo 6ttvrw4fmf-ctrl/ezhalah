@@ -15,9 +15,12 @@ import { join } from 'node:path';
 const MIGRATIONS = join(import.meta.dirname, '..', 'supabase', 'migrations');
 const FN = 'mon_detect_lifecycle_duplicate_stale_copy';
 const strip = (s: string) => s.replace(/^\s*--.*$/gm, '');
+// A migration that DEFINES the detector (full body) or PATCHES it (needle edit on its own definition);
+// a roster entry or a mere mention is not a change to its loop.
+const CHANGES = new RegExp(String.raw`create\s+or\s+replace\s+function\s+public\.${'mon_detect_lifecycle_duplicate_stale_copy'}\b|pg_get_functiondef\(\s*'public\.${'mon_detect_lifecycle_duplicate_stale_copy'}\b`, 'i');
 
 export function problems(files: Record<string, string>): string[] {
-  const touching = Object.keys(files).filter((f) => strip(files[f]).includes(FN)).sort();
+  const touching = Object.keys(files).filter((f) => CHANGES.test(strip(files[f]))).sort();
   if (touching.length === 0) return [`no committed migration touches public.${FN}`];
   const latest = touching[touching.length - 1];
   const sql = strip(files[latest]);
@@ -41,7 +44,7 @@ const files: Record<string, string> = {};
 for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))) files[f] = readFileSync(join(MIGRATIONS, f), 'utf8');
 const real = problems(files);
 check(`${FN} skips dormant sites`, real.length === 0, real.join('; '));
-const latest = Object.keys(files).filter((f) => strip(files[f]).includes(FN)).sort().pop()!;
+const latest = Object.keys(files).filter((f) => CHANGES.test(strip(files[f]))).sort().pop()!;
 check('(mutation) catches the skip removed',
   problems({ ...files, [latest]: files[latest].replace(/\n\s*where not public\.ops_platform_is_dormant\(d\.platform\)/, '') }).length > 0);
 check('(mutation) a newer change without the skip is judged, not the old one',
