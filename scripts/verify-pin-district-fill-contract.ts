@@ -226,11 +226,11 @@ function candidateProblems(s: string): string[] {
   if (!/\(s\.district_ar is null or btrim\(s\.district_ar\) = ''\)/.test(fn)) fail.push('it offers ads that already show a district');
   if (!/not exists \(select 1 from public\.listing_pin_district p/.test(fn)) fail.push('it re-offers ads that already have a pin row');
   if (!/having count\(\*\) >= 5\)/.test(fn)) fail.push('it offers shared default pins');
-  if (!/\(nullif\(btrim\(v1\.district_ar\), ''\) is null or public\.district_is_own_town\(s\.city_id, v1\.district_ar\)\)/.test(fn)) fail.push('it offers ads whose site names a district');
-  if (!/not public\.district_is_own_town\(s\.city_id, sd\.source_district_ar\)/.test(fn)) fail.push('it offers ads whose source states a district');
+  if (!/public\.district_is_own_town\(t\.city_id, t\.site_district\) as ok/.test(fn) || !/where \(b\.site_district is null or o\.ok\)/.test(fn)) fail.push('it offers ads whose site names a district');
+  if (!/not public\.district_is_own_town\(b\.city_id, sd\.source_district_ar\)/.test(fn)) fail.push('it offers ads whose source states a district');
   if (!/not exists \(select 1 from public\.listing_title_district lt/.test(fn)) fail.push('it offers ads whose title names a district');
   if (!/k\.asked_at < now\(\) - interval '14 days'/.test(fn)) fail.push('it re-asks an ad Apple already answered (the 11-04 starvation)');
-  if (!/order by \(k\.listing_id is null\) desc/.test(fn)) fail.push('never-asked ads are not served first');
+  if (!/k\.listing_id is null as never_asked/.test(fn) || !/order by b\.never_asked desc/.test(fn)) fail.push('never-asked ads are not served first');
   if (!/revoke all on function public\.pin_district_candidates\(integer\) from public, anon, authenticated;/.test(s)) fail.push('the public keys can call it');
   return fail;
 }
@@ -238,9 +238,9 @@ const liveCand = candidateProblems(sqlCand);
 check(`committed migration ${fileCand} holds every candidate filter`, liveCand.length === 0, liveCand.join('; '));
 const candMutants: Array<[string, (s: string) => string]> = [
   ['re-asks answered ads', (s) => s.replace("and (k.listing_id is null or k.asked_at < now() - interval '14 days')", '')],
-  ['site-named ads offered', (s) => s.replace("(nullif(btrim(v1.district_ar), '') is null or public.district_is_own_town(s.city_id, v1.district_ar))", 'true')],
+  ['site-named ads offered', (s) => s.replace('where (b.site_district is null or o.ok)', 'where true')],
   ['shared pins offered', (s) => s.replace(/having count\(\*\) >= 5\),\n  cov/, 'having count(*) >= 500000),\n  cov')],
-  ['never-asked not first', (s) => s.replace('order by (k.listing_id is null) desc, ', 'order by ')],
+  ['never-asked not first', (s) => s.replace('order by b.never_asked desc, ', 'order by ')],
   ['public keys may call it', (s) => s.replace('revoke all on function public.pin_district_candidates(integer) from public, anon, authenticated;', '')],
 ];
 for (const [label, mutate] of candMutants) {
