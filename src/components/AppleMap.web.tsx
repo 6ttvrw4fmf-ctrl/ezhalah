@@ -748,6 +748,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       return el;
     };
     const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
+      setViewPlace(null);   // area names on screen: the pill keeps «في هذه المنطقة» (several places share the view)
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
       for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
@@ -819,7 +820,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (areas !== 'unknown') {
           hideCanvas(); shown = [];
           drawAreas(visibleAreas(areas), level);
-          setPinCount(areasTotal(areas)); setViewPlace(null);
+          setPinCount(areasTotal(areas));
           return;
         }
         // The labels failed to load: the dots below, never an empty map.
@@ -858,7 +859,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (my !== seq || mapRef.current !== m) return;
           if (areas !== 'unknown' && denseShowsDistricts(areas.filter((a) => inView(a, center, span)).length, span.latitudeDelta)) {
             drawAreas(visibleAreas(areas), 'district');
-            setPinCount(areasTotal(areas)); setViewPlace(null);
+            setPinCount(areasTotal(areas));
             return;
           }
         }
