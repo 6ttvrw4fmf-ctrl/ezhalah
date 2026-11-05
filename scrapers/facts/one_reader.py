@@ -22,16 +22,3 @@ def amenity_answers(text: Optional[str], columns: Iterable[str], rename: Optiona
     rename = rename or {}
     said = {rename.get(k, k): v for k, v in W.facts_of(W.clean_text(None, str(text))).items() if isinstance(v, bool)}
     return {c: v for c, v in said.items() if c in cols}
-
-
-# The columns normalize.prose_amenities filled, under the same names (balcony_terrace is the tables' balcony column), so a
-# scraper that called it swaps one line: `prose = listing_amenities(text)` (2026-11-05: Keller Williams, Asas Makeen, Al Rajhi
-# and STeam were staged on the old matcher the day the one-reader guard landed).
-LISTING_COLUMNS = ("air_conditioner", "balcony_terrace", "car_entrance", "driver_room", "elevator", "furnished", "kitchen",
-                   "laundry_room", "maid_room", "optical_fibers", "parking", "private_entrance")
-
-
-def listing_amenities(text: Optional[str], skip: Iterable[str] = ()) -> dict[str, bool]:
-    """The ONE reader's answers for the old matcher's columns; `skip` = columns the site publishes structurally."""
-    skipped = set(skip)
-    return {c: v for c, v in amenity_answers(text, LISTING_COLUMNS, {"balcony": "balcony_terrace"}).items() if c not in skipped}
