@@ -711,6 +711,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         ctx.fill(); ctx.stroke();
       }
       shown = dots; canvas.style.opacity = '1';
+      setViewPlace(null);   // zoomed-out dots: the pill keeps «في هذه المنطقة»
       return true;
     };
     const hideCanvas = () => { canvas.style.opacity = '0'; };
@@ -831,7 +832,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (all !== 'unknown') {
           const inView = dotsInView(all, pins.deals, paddedBox(center, span));
           clear();
-          if (paint(inView)) { setPinCount(dotsTotal(inView)); setViewPlace(null); return; }
+          if (paint(inView)) { setPinCount(dotsTotal(inView)); return; }
         }
         // The feed failed (or the projection could not be calibrated): the live grid path below, never an empty map.
       }

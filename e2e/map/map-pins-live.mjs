@@ -54,7 +54,13 @@ try {
           const dx = Math.min(A.right, B.right) - Math.max(A.left, B.left), dy = Math.min(A.bottom, B.bottom) - Math.max(A.top, B.top);
           if (dx > 1 && dy > 1) overlaps.push(`«${pins[a].t}» × «${pins[b].t}»`);
         }
-        const blocked = pins.filter(({ e, r }) => { const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !hit || !(hit === e || e.contains(hit)); }).map(({ t }) => `«${t}»`);
+        // Tappable = the first PIN in the painted stack at the head's centre is this head (another head drawn over it would
+        // come first). The stack, not the top hit: a transparent layer above the map is not a pin covering a pin.
+        const blocked = pins.filter(({ e, r }) => {
+          const stack = document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          const firstPin = stack.findIndex((x) => !!x.closest('[data-testid=map-pin]'));
+          return firstPin < 0 || stack[firstPin].closest('[data-testid=map-pin]') !== e;
+        }).map(({ t }) => `«${t}»`);
         return { count: pins.length, overlaps, blocked, pill: document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '' };
       });
       const where = `${spot.name} (span ${span}°)`;
