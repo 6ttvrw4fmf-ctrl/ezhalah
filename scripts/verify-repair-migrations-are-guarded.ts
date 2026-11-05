@@ -69,6 +69,11 @@ const WAIVED: Record<string, string> = {
     'be edited to name it (content parity: this is its byte-exact mirror).',
   // 2026-11-03 (backlog 1261/1263). Four guarded row repairs whose applied files name their detector only in comments
   // (content parity: these are byte-exact mirrors of what production executed, so the SQL cannot be edited to name it).
+  // 2026-11-05: a byte-exact mirror that names its detector only in comments (content parity forbids editing it).
+  '20261105042913_dealapp_two_field_integrity_rows_adjudicated_from_their_pages.sql':
+    'one dealapp ad hidden on its own page (redirects home, read twice, live control; adjudicated) and one recorded as ' +
+    'source-published (111,111,111,111 on its page); watched by mon_detect_field_integrity (phone_price / extreme_magnitude ' +
+    're-raise on any unverified return) and registered in ops_repair_guarantee_registry (20261105042932).',
   '20261103170854_wasalt_archive_never_restores_an_impossible_price.sql':
     'five wasalt prices put back to what wasalt publishes today (guarded on the stale value), plus the trigger fix that stops a ' +
     'stale archive restoring them; watched by mon_detect_field_integrity (field_integrity_extreme_magnitude re-raises if the ' +
