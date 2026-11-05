@@ -53,8 +53,8 @@ mustCatch('a pin that folds its ads into one card (ids dropped)', !keepsEveryId(
 
 // ── map_pin_snap_refresh_ar: who counts as a twin ───────────────────────────────────────────────────────────────────
 const refreshFn = fnBody(refresh.body);
-const sameSiteOnly = (sql: string) => /partition by s\.source_table, s\.deal_ar, s\.price, s\.area_m2, s\.type_ar, s\.bedrooms\)/.test(sql)
-  && /group by 1, 2, 3, 4, 5, 6 having count\(distinct \(la, lo\)\) > 1/.test(sql) && /select source_table, deal_ar, price, area_m2, type_ar, bedrooms\s/.test(sql);
+const sameSiteOnly = (sql: string) => /partition by s\.source_table, s\.deal_ar, s\.price, s\.area_m2, s\.type_ar, s\.bedrooms, s\.ppm\)/.test(sql)
+  && /group by 1, 2, 3, 4, 5, 6, 7 having count\(distinct \(la, lo\)\) > 1/.test(sql) && /select source_table, deal_ar, price, area_m2, type_ar, bedrooms, ppm\s/.test(sql);
 const nearOnly = (sql: string) => { const m = /ST_ClusterDBSCAN\([^,]+\([^)]*\), ([0-9.]+), 2\)/.exec(sql); return !!m && Number(m[1]) > 0 && Number(m[1]) <= 0.001; };
 const noPlaceholders = (sql: string) => /not exists \(select 1 from public\.ops_default_pin_register r/.test(sql);
 check('twins are grouped only inside ONE site with the same deal, price, area, type and bedrooms', sameSiteOnly(refreshFn));
@@ -64,6 +64,11 @@ mustCatch('two different sites merged into one pin (source_table dropped from th
 mustCatch('a different price merged (price dropped from the partition)', !sameSiteOnly(refreshFn.replace('s.deal_ar, s.price, s.area_m2', 's.deal_ar, s.area_m2')));
 mustCatch('a 1 km radius (whole neighbourhoods would collapse into one pin)', !nearOnly(refreshFn.replace(/(ST_ClusterDBSCAN\([^,]+\([^)]*\), )[0-9.]+/, '$10.009')));
 mustCatch('placeholder pins allowed to anchor a group', !noPlaceholders(refreshFn.replace('not exists (select 1 from public.ops_default_pin_register r', 'true or exists (select 1 from public.ops_default_pin_register r')));
+
+// Haraj prices land per metre only: 13 neighbouring 504 m² plots (6,944 / 6,250 / 5,952 SAR/m²) shared one pin (2026-11-05).
+const perMetreDecides = (sql: string) => /case when coalesce\(x\.price_total, x\.price_annual\) is null then coalesce\(x\.price_per_meter, -1\) else -1 end ppm/.test(sql) && sameSiteOnly(sql);
+check('an ad with no total price is matched on its price per metre too (neighbouring plots stay apart)', perMetreDecides(refreshFn));
+mustCatch('per-metre price dropped from the twin key (13 different haraj plots on one pin)', !perMetreDecides(refreshFn.replace('s.bedrooms, s.ppm) cid', 's.bedrooms) cid')));
 
 // ── refreshed every hour, inside the grid refresh (no free cron minute of its own — 20261105063813) ─────────────────
 const grid = latestDefining(/create or replace function public\.map_grid_refresh_ar\(/i);
@@ -78,13 +83,13 @@ mustCatch('the snap call outside an exception block', !failureKeepsGrid(gridFn.r
 
 // ── «price on request» copies are twins too: a blank matches a blank, never a number ───────────────────────────────
 const blanksMatch = (sql: string) => /coalesce\(x\.price_total, x\.price_annual, -1\) price, coalesce\(x\.area_m2, -1\) area_m2/.test(sql)
-  && /from s join multi m using \(source_table, deal_ar, price, area_m2, type_ar, bedrooms\)/.test(sql) && !/x\.area_m2 is not null/.test(sql);
+  && /from s join multi m using \(source_table, deal_ar, price, area_m2, type_ar, bedrooms, ppm\)/.test(sql) && !/x\.area_m2 is not null/.test(sql);
 check('ads with no price or no size still pair with their twin (a blank is a sentinel key, matched by a hashable join)', blanksMatch(refreshFn));
 mustCatch('a «price on request» pair left as two pins (the blank stays NULL, and NULL = NULL is never true)', !blanksMatch(refreshFn.replace('coalesce(x.price_total, x.price_annual, -1) price', 'coalesce(x.price_total, x.price_annual) price')));
 // 20261105063813 compared the keys with IS NOT DISTINCT FROM: correct, but unhashable — minutes per refresh.
 const hashable = (sql: string) => !/m\.(price|area_m2|type_ar|bedrooms|deal_ar) is not distinct from s\./.test(sql);
 check('the twin join stays hashable (the minutes-long IS NOT DISTINCT FROM join is gone)', hashable(refreshFn));
-mustCatch('the unhashable IS NOT DISTINCT FROM join brought back', !hashable(refreshFn.replace('from s join multi m using (source_table, deal_ar, price, area_m2, type_ar, bedrooms)', 'from s join multi m on m.source_table = s.source_table and m.price is not distinct from s.price')));
+mustCatch('the unhashable IS NOT DISTINCT FROM join brought back', !hashable(refreshFn.replace('from s join multi m using (source_table, deal_ar, price, area_m2, type_ar, bedrooms, ppm)', 'from s join multi m on m.source_table = s.source_table and m.price is not distinct from s.price')));
 
 if (failed) { console.error(`\n❌ verify-map-twins-share-one-pin: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-map-twins-share-one-pin: same-site twins share one pin, every ad keeps its card');
