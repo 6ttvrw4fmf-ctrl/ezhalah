@@ -196,12 +196,15 @@ begin
     if sqlerrm <> 'ROLLBACK_REVERT' then raise; end if;
   end;
 
+  -- the victim is a crawl whose OWN median healthy run is large (the detector's own yardstick, not one big run)
   select s.platform into victim
     from public.scrape_runs s join public.platform_registry pr on pr.platform = s.platform
    where pr.status = 'active' and pr.kind = 'source' and s.platform <> 'dwelleo'
-     and s.ok and s.rows_seen >= 2000 and s.started_at > now() - interval '7 days' and s.finished_at is not null
+     and s.ok and s.rows_seen > 0 and s.started_at > now() - interval '7 days' and s.finished_at is not null
      and not exists (select 1 from public.ops_platform_catalogue_rebase cr where cr.platform = s.platform)
-   group by s.platform having count(*) >= 3 order by count(*) desc limit 1;
+   group by s.platform
+  having count(*) >= 3 and percentile_cont(0.5) within group (order by s.rows_seen) >= 2000
+   order by percentile_cont(0.5) within group (order by s.rows_seen) desc limit 1;
   if victim is null then raise exception 'PROOF: no healthy platform to plant a silent crawl on'; end if;
   begin
     insert into public.scrape_runs (platform, started_at, finished_at, ok, rows_seen, notes)
