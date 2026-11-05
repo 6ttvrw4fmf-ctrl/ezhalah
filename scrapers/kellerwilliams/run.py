@@ -44,9 +44,11 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
+PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance", "furnished", "balcony_terrace", "laundry_room")
 SOURCE = "Keller Williams"
 SLUG = "kellerwilliams"
 PREFIX = "KW"
@@ -223,7 +225,8 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     rooms = ptype not in _NO_ROOMS
     feats = {col: True for (grp, key), col in _FEATURES.items()
              if (st.get(key) if grp == "structure" else (st.get(grp) or {}).get(key)) is True}
-    prose = {c: v for c, v in N.prose_amenities(f"{title or ''}\n{desc or ''}").items()
+    # ONE READER (owner 2026-11-03): prose amenities come from the Advanced Filter's word reader, never normalize.prose_amenities.
+    prose = {c: v for c, v in amenity_answers(f"{title or ''}\n{desc or ''}", PROSE_COLS, {"balcony": "balcony_terrace"}).items()
              if c not in feats}
     lic = str(x.get("mls_number") or "").strip()
     row: dict[str, Any] = {
