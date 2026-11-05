@@ -16,6 +16,13 @@ export function warmMapSoon(delayMs = WARM_DELAY_MS): void {
     Promise.all([import('@/components/AppleMap'), import('@/components/MapDealRow')])
       .then(([a]) => { a.prewarmMap(); })
       .catch(() => { started = false; });   // a failed chunk fetch may be tried again on the next page
+    // THE OTHER TABS TOO (owner 2026-11-04: «changing between filter, smart broker and map»): each tab is its own
+    // route chunk, fetched on the first tap — on a phone over 4G that download is most of the first switch. Fetch all
+    // three screens' code now (the one already open is a no-op), plus the site list the Smart Broker reads on opening.
+    void import('@/app/agent').catch(() => {});
+    void import('@/app/map').catch(() => {});
+    void import('@/app/index').catch(() => {});
+    void import('@/data/loaderActivePlatforms').then((m) => m.loadHiddenPlatformNames()).catch(() => {});
   };
   const idle = (window as unknown as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
   setTimeout(() => (idle ? idle(go, { timeout: 4000 }) : go()), delayMs);
