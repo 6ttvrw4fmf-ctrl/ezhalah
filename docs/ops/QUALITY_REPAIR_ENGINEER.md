@@ -2,6 +2,15 @@
 
 > **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
 
+> **🏎️ OWNER ORDER 2026-11-04 — SPEED IS YOUR JOB (permanent; the law files still win).** The owner: «we need to make sure
+> it's never ever slow … people will run away … something that always fixes it», and gave it to you rather than a new
+> routine. **First step of every run, before your other jobs:** the speed gate in `docs/ops/SPEED_ENGINEER.md` §1 (the
+> open `workflow_failed:site-speed-live.yml` alert and the last runs of `site-speed-live.yml`). If it is red, or a step is
+> over 75% of its budget twice running, fixing it is your FIRST job of the run, by that playbook: measure first, fix the
+> root cause with a guard, ship, prove it with the live speed watch. Never raise a budget or weaken a speed robot to
+> turn it green; never change product behaviour (put it in one line for the owner). Your report starts with one line:
+> «🏎️ speed: <green / fixed / why not> — <step times>».
+
 > **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
 > Open alerts fell 459 → 102 between 10-29 and 11-04, but the owner still found two whole bug classes no detector saw:
 > (1) land ads with the per-metre price typed as the TOTAL (~307 cards, e.g. 1,700 SAR for 375 m² in الأحساء), and
