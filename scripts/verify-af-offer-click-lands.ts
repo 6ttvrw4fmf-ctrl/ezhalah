@@ -28,7 +28,7 @@
 // It also carries the mutation as a FIRST-CLASS CASE: `legacyOpenAfOffer` below is the pre-fix body,
 // byte-for-byte in behaviour, and the barrier asserts it FAILS the same predicate the shipped one
 // passes. So the predicate is proven to discriminate, not merely to be satisfied.
-import { openAfOffer, CLICK_LEAF_SRC, AF_OFFER_TESTID, AF_OFFER_CTA } from './lib/afOfferLive.ts';
+import { openAfOffer, CLICK_LEAF_SRC, AF_OFFER_TESTID, AF_OFFER_CTA, pointIsReachable } from './lib/afOfferLive.ts';
 import { ARM_CLICK_WITNESS_SRC, READ_CLICK_WITNESS_SRC, STRAY_OVERLAY_SRC, clickWitnessed, isStable } from './lib/liveClick.ts';
 
 let failed = 0;
@@ -52,6 +52,8 @@ console.log('\nAn Advanced Filter tap is only a tap once the page says the CTA t
 // has-turn reader is the only one whose value is read, so the fallback returns `hasTurn`.
 type Stub = {
   page: any;
+  wheels?: () => number;
+  offClicks?: () => number;
   attempts: () => number;
   /** what the click landed on, per attempt (1-based) */
   lands: (n: number) => boolean;
@@ -71,35 +73,45 @@ function stubPage(opts: {
    *  measure it (it sits under a running reveal cascade / below the fold, and `innerText` is empty
    *  for a node the engine has not laid out). Presence true, measurability false. */
   unmeasurable?: boolean;
+  /** simulate the MOBILE 2026-11-05 shape: the CTA is measured far below the viewport until the page is wheel-scrolled */
+  offscreenUntilWheel?: number;
 }): Stub {
   let attempt = 0;
   let drift = 0;
   let armed = false;
   let hit: any = null;
+  let wheels = 0;
+  let offClicks = 0;
   const page = {
     evaluate: async (fn: any, arg?: any) => {
       // ONE scan, two answers — the shape the real CLICK_LEAF_SRC returns. `present` is the DOM
       // question; `point` is the clickability question, and it is null when the CTA is there but
       // has no laid-out box (the #687 state).
-      if (fn === CLICK_LEAF_SRC) return {
-        present: opts.ctaPresent,
-        point: opts.ctaPresent && !opts.unmeasurable ? { x: 100, y: 200 + (opts.movingTarget ? (drift += 40) : 0) } : null,
-      };
+      if (fn === CLICK_LEAF_SRC) {
+        const off = (opts.offscreenUntilWheel ?? 0) > wheels;
+        return {
+          present: opts.ctaPresent,
+          point: opts.ctaPresent && !opts.unmeasurable ? { x: 100, y: off ? 5200 : 200 + (opts.movingTarget ? (drift += 40) : 0) } : null,
+          ...(opts.offscreenUntilWheel != null ? { vh: 812, vw: 375 } : {}),
+        };
+      }
       if (fn === ARM_CLICK_WITNESS_SRC) { armed = true; hit = null; return undefined; }
       if (fn === READ_CLICK_WITNESS_SRC) { const h = hit; hit = null; return h; }
       if (fn === STRAY_OVERLAY_SRC) return false;  // no listing opened over the chat
       return opts.hasTurn;                       // the has-turn reader (and the scroller, ignored)
     },
     mouse: {
-      click: async () => {
+      wheel: async () => { wheels++; },
+      click: async (_x: number, y: number) => {
         attempt++;
+        if (opts.offscreenUntilWheel != null && y > 812) { offClicks++; return; }  // a tap off the screen dispatches nothing
         if (!armed || opts.silentWitness) return;  // a click nobody witnessed leaves `hit` null
         hit = opts.lands(attempt) ? { onTarget: true, tid: AF_OFFER_TESTID, txt: AF_OFFER_CTA } : MISSED;
       },
     },
     waitForTimeout: async (ms: number) => { await new Promise((r) => setTimeout(r, Math.min(ms, 5))); },
   };
-  return { page, attempts: () => attempt, lands: opts.lands };
+  return { page, attempts: () => attempt, lands: opts.lands, wheels: () => wheels, offClicks: () => offClicks };
 }
 
 const FAST = { timeoutMs: 400, pollMs: 5 };
@@ -370,6 +382,20 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
   const r2 = await clickWitnessed(silent as any, { x: 1, y: 2 }, { testid: 'x' });
   mustCatch('a page that reports no click reading as a landing (fail closed)',
     r2.landed === false && r2.hit === '(no click event seen)');
+}
+
+// ── 10. MOBILE 2026-11-05: the CTA is far below the screen while the cards still reveal ─────────────
+{
+  const s = stubPage({ ctaPresent: true, hasTurn: true, lands: () => true, offscreenUntilWheel: 3 });
+  const r = await openAfOffer(s.page, { timeoutMs: 2000, pollMs: 5 });
+  check('an off-screen CTA is scrolled to (wheel) and then opened', r.opened === true && (s.wheels?.() ?? 0) >= 3, JSON.stringify(r));
+  check('…and no tap is ever spent on a point off the screen', (s.offClicks?.() ?? -1) === 0, `offClicks=${s.offClicks?.()}`);
+  // the pre-fix rule: every measured point is tappable
+  const legacyReachable = (f: any) => !!f?.point;
+  mustCatch('the pre-fix rule treating a point 5,000 px below the screen as tappable',
+    legacyReachable({ point: { x: 100, y: 5200 }, vh: 812, vw: 375 }) !== pointIsReachable({ point: { x: 100, y: 5200 }, vh: 812, vw: 375 }));
+  check('a point inside the screen is reachable; an older stub with no viewport size reads reachable',
+    pointIsReachable({ point: { x: 100, y: 400 }, vh: 812, vw: 375 }) && pointIsReachable({ point: { x: 1, y: 9999 } }));
 }
 
 console.log(failed
