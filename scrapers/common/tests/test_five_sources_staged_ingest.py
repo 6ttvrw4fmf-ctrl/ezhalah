@@ -147,7 +147,7 @@ def test_asas_sale_and_offplan_split_follows_the_sites_own_list():
     assert row["price_total"] == 55000 and "price_annual" not in row
 
 
-_AS_PROJECT = """<h2 class="mb-5 fw-bold">معلومات عن المشروع</h2>
+_AS_PROJECT = """<h1 class="display-5">مكين 90</h1><h2 class="mb-5 fw-bold">معلومات عن المشروع</h2>
 <div class="fs-5 lh-lg">يأتي مشروع مكين 90 ... في موقع حيوي شرق مدينة الرياض.</div>
 <a class="project-location-map__directions"
    href="https://www.google.com/maps/dir/?api=1&amp;destination=24.7260923%2C46.7651659" target="_blank">
@@ -165,6 +165,8 @@ def test_asas_unit_inherits_its_projects_pin_and_city_never_the_map_centre_or_fo
     info = row["additional_info"]
     assert row["city_ar"] == "الرياض" and (info["latitude"], info["longitude"]) == (24.7260923, 46.7651659)
     assert info["pin_scope"] == "project"
+    assert AS.parse_project(_AS_PROJECT)["name"] == "مكين 90"   # an old project found via the sitemap must match by <h1>
+    assert AS._allowed(AS.PROJECTS_SITEMAP)
     footer_only = AS.parse_project(_AS_PROJECT.replace("شرق مدينة الرياض", "شرق المدينة").replace("destination=", "x="))
     row, _ = AS.map_unit("3076", "https://asasmakeen.com/ar/z", u, footer_only)
     assert row["city_ar"] is None and row["additional_info"]["pin_absent"] is True and "latitude" not in row["additional_info"]
