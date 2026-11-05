@@ -177,3 +177,73 @@ export function polygonOf(points: unknown[]): PinFilter['poly'] {
   if (x0 !== xn || y0 !== yn) ring.push([x0, y0]);
   return { type: 'Polygon', coordinates: [ring] };
 }
+
+/** PINS NEVER SIT ON EACH OTHER (owner 2026-11-05: «user cannot select what he wants … so so many duplicated listings
+ *  … we need to make sure they are in the same pin close by … whenever we get a new listing»). Measured that day on a
+ *  phone: a «660 ألف» head covered a «2 إعلانان» head, and two «950 ألف» heads sat on each other a few metres apart (the
+ *  same land on two sites) — the one underneath could not be tapped. Heads that would touch ON SCREEN become one gold
+ *  head with their count; tapping it lists every ad (the sheet reads `ids`). Recomputed on every settled view, so
+ *  zooming in pulls them apart again (Zillow), and a listing that arrived a minute ago is covered at once — no batch
+ *  job to wait for. Nothing is added or dropped: the merged head's n and ids are the sums of the heads it took in
+ *  (MATCH FIRST — fewer heads over the same matched set). */
+export const PIN_H_PX = 22;    // 11 px text + 4 px padding above and below + 1.5 px border each side
+export const PIN_GAP_PX = 4;   // the least air left between two heads, so a finger lands on one
+export const PIN_PAD_PX = 17;  // 7 px padding each side + 1.5 px border each side
+/** A head's width when the page cannot measure text (no canvas): ~6.4 px a character at 11 px semibold. */
+export function pinWidthGuess(text: string): number { return Math.ceil(text.length * 6.4) + PIN_PAD_PX; }
+
+type Placed = { row: PinRow; x: number; y: number; w: number };
+/** Two heads touch when their pills, plus the gap, overlap. Both sit centred on x, bottom on y (same height). */
+export function headsTouch(a: { x: number; y: number; w: number }, b: { x: number; y: number; w: number }): boolean {
+  return Math.abs(a.x - b.x) < (a.w + b.w) / 2 + PIN_GAP_PX && Math.abs(a.y - b.y) < PIN_H_PX + PIN_GAP_PX;
+}
+/** Two heads as one: the count and every id of both, at their weighted centre; deal kept only when both agree. */
+export function joinPins(a: PinRow, b: PinRow): PinRow {
+  const n = a.n + b.n;
+  return {
+    lat: (a.lat * a.n + b.lat * b.n) / n, lng: (a.lng * a.n + b.lng * b.n) / n, n,
+    deal: a.deal === b.deal ? a.deal : 'mixed', type_ar: null, platforms: Math.max(a.platforms || 0, b.platforms || 0),
+    ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null, price: null, platform: null,
+  };
+}
+/**
+ * The heads to draw for one view, none touching another. `at` places a coordinate on the screen (px), `widthOf` gives
+ * a head's width for the text it will show (a merged head shows its count, so its width is re-measured). A merged head
+ * is checked again against every other head, so a chain of near neighbours ends as one head, never two that touch.
+ */
+export function mergeOverlapping(rows: PinRow[], at: (lat: number, lng: number) => [number, number], widthOf: (r: PinRow) => number): PinRow[] {
+  const place = (row: PinRow): Placed => { const [x, y] = at(row.lat, row.lng); return { row, x, y, w: widthOf(row) }; };
+  const cs = rows.map(place);
+  let i = 0;
+  while (i < cs.length) {
+    let hit = -1;
+    for (let j = 0; j < cs.length; j++) if (j !== i && headsTouch(cs[i], cs[j])) { hit = j; break; }
+    if (hit < 0) { i++; continue; }
+    const lo = Math.min(i, hit), hi = Math.max(i, hit);
+    cs[lo] = place(joinPins(cs[lo].row, cs[hi].row));
+    cs.splice(hi, 1);
+    i = lo;
+  }
+  return cs.map((c) => c.row);
+}
+
+/** WHERE THE VIEW IS (owner 2026-11-05: «you see how it says هذه المنطقة — include the name of the district»). The
+ *  count pill names the district when at least PLACE_SHARE of the listings in view sit in it, else the city on the same
+ *  rule, else «هذه المنطقة» — never a name most of the view is not in. A failed lookup is null: the plain wording. */
+export const PLACE_SHARE = 0.6;
+export type ViewPlace = { district: string | null; city: string | null; district_share: number | string | null; city_share: number | string | null };
+export function viewPlaceName(p: ViewPlace | null, loc: 'ar' | 'en'): string | null {
+  if (!p) return null;
+  const bare = (p.district ?? '').trim().replace(/^حي\s+/, '');
+  if (bare && Number(p.district_share) >= PLACE_SHARE) return loc === 'ar' ? `حي ${bare}` : bare;
+  const city = (p.city ?? '').trim();
+  if (city && Number(p.city_share) >= PLACE_SHARE) return city;
+  return null;
+}
+/** The count pill: «7 إعلانات في حي الشراع» / «7 listings in الشراع»; «… في هذه المنطقة» / «… here» without a place. */
+export function viewCountText(n: number, place: string | null, loc: 'ar' | 'en'): string {
+  const num = n.toLocaleString('en-US');
+  if (loc === 'en') return place ? `${num} ${n === 1 ? 'listing' : 'listings'} in ${place}` : `${num} listings here`;
+  const noun = n === 2 ? 'إعلانان' : n >= 3 && n <= 10 ? 'إعلانات' : 'إعلان';
+  return `${num} ${noun} في ${place ?? 'هذه المنطقة'}`;
+}
