@@ -870,6 +870,9 @@ def _negated_after(nxt: list[str], fact: str) -> int:
             return skip + 2
         if len(w) >= 1 and w[0] in ("لايوجد", "لاتوجد"):
             return skip + 1
+        # «مطبخ: (لم يُركب وقيمته على المستأجر …)» (dealapp 22700725, 2026-11-05 two-way sample): «not fitted» is a no
+        if len(w) >= 2 and w[0] == "لم" and _starts(w[1], ("يركب", "تركب", "يتم", "يتوفر", "تتوفر", "يوجد", "توجد")):
+            return skip + 2
         if len(w) >= 2 and w[0] == "لا" and w[1] in ("يوجد", "توجد", "يتوفر", "تتوفر"):
             return skip + 2
         if len(w) >= 1 and w[0] == "لا" and (len(w) == 1 or w[1] == "غير"):
@@ -1016,6 +1019,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e
     if head in ("un", "غير") or head.endswith("غير"):
         return False, ws, we
+    # A FORM VALUE decides its own label (🔬 2026-11-05, dealapp 22700725 «❄️ مكيفات: (لايوجد) 🚗 موقف سيارة: (نعم )»):
+    # the «لايوجد» belongs to the ACs before, and «نعم» right after the item is the item's own yes.
+    if any(_strip_wa(w) == "نعم" for w in gn[:2]) and not _negated_after(nxt, fact):
+        return True, ws, we + len(" ".join([""] + nxt[:1 + [_strip_wa(w) for w in gn[:2]].index("نعم")]))
     back = _negated_before(prev)
     if back is not None:
         qs = len(" ".join(prev[:len(prev) - back])) + (1 if len(prev) > back else 0)
@@ -2304,6 +2311,10 @@ def selftest() -> None:
         ("مضخات مياه", {"pumps": True}, ("water_supply",)),
         ("طرمبة ومضخة", {"pumps": True}, ()),
         ("بدون مضخات", {"pumps": False}, ()),
+        # a form value decides its own label; «لم يُركب» is not fitted (dealapp 22700725, 2026-11-05)
+        ("🍽 مطبخ: (لم يُركب وقيمته على المستأجر ) ❄️ مكيفات: (لايوجد) 🚗 موقف سيارة: (نعم ) 🔴( ملاحظة )",
+         {"parking": True, "kitchen": False, "air_conditioner": False}, ()),
+        ("مصعد: نعم", {"elevator": True}, ()),
         ("مجهزة حسب طلب الدفاع المدني بمضخة الحريق ووسائل السلامة", {}, ("pumps",)),
         ("حديد سابك • صب بمضخة • بلك عازل", {}, ("pumps",)),
         ("محطة وقود 6 مضخات ومغسلة سيارات", {"pumps": True}, ()),
