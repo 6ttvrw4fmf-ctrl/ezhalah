@@ -15,7 +15,7 @@ declare
 begin
   if position('kellerwilliams_residential_listings' in
               pg_get_viewdef('public.listing_location_index'::regclass,true)) > 0 then
-    raise notice 'listing_location_index already carries the five sources' arms - nothing to do';
+    raise notice 'listing_location_index already carries the five sources'' arms - nothing to do';
     return;
   end if;
 
