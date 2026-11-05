@@ -6,6 +6,10 @@ so three shards on three GitHub runners read three times as many ads with no pro
 (1) the partition: every row in exactly one shard, never two shards on one row; and (2) the wiring:
 the scheduled path really passes three shards and the sweep really reads --shard (a flag nobody
 passes is a fix that never ran, lesson 2026-11-01).
+
+Proof is the first scheduled hourly run after merge (gh-dealapp-liveness, :40): three dealapp_liveness rows whose
+notes carry shard=0/3, 1/3, 2/3. Never dispatch the sweep from this PR's branch to prove it: its jobs attach to the
+PR's head SHA as check runs, and a sweep the hourly run displaces reads «cancelled» to the merge gate (2026-11-05).
 """
 from __future__ import annotations
 
