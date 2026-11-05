@@ -517,6 +517,36 @@ def _hajer_aliases(whole: str) -> str:
     return " ".join("الضاحيه " + m.group(1) for rx in _HAJER_FORMS for m in rx.finditer(whole))
 
 
+# THE OWNER'S OWN «ONE DISTRICT» DECISIONS ARE THE SAME PLACE (🆕 2026-11-05). loc_district_alias holds the owner's
+# rulings that two spellings are one district («المعيزيلة» → the catalogue's «حي المعيزلة», Riyadh, owner 2026-10-25,
+# Apple Maps names المعيزلة at both centres); the index serves the catalogue name for every ad that writes the other.
+# The 2026-11-05 05:35 score compared letters only and counted akariyoun 23729407 / 24208576 / … and raghdan
+# 23726297 / 23726304 / … («دور للبيع في حي المعيزيلة») as 8 district MISMATCHES, capping both sites at 88.2%.
+# Keys are norm_district_tok() forms (the table's own); a page word matches when ITS key is an alias of OUR key.
+# Loaded once per run by load_owner_district_aliases(); empty (letters only) when nothing is loaded.
+OWNER_DISTRICT_ALIASES: dict[str, frozenset[str]] = {}
+
+
+def load_owner_district_aliases(client) -> None:
+    rows = client.table("loc_district_alias").select("from_norm,to_norm").execute().data or []
+    m: dict[str, set[str]] = defaultdict(set)
+    for r in rows:
+        if r.get("from_norm") and r.get("to_norm"):
+            m[r["to_norm"]].add(r["from_norm"])
+    OWNER_DISTRICT_ALIASES.clear()
+    OWNER_DISTRICT_ALIASES.update({k: frozenset(v) for k, v in m.items()})
+
+
+def _owner_alias_on_page(stored: str, whole: str) -> bool:
+    from scrapers.common.arabic_location import norm_district_tok
+    froms = OWNER_DISTRICT_ALIASES.get(norm_district_tok(stored))
+    if not froms:
+        return False
+    words = re.findall(r"[\u0621-\u064A]+", whole)       # a two- or three-word name is matched whole, never in part
+    return any(norm_district_tok(" ".join(words[i:i + n])) in froms
+               for n in (1, 2, 3, 4) for i in range(len(words) - n + 1))
+
+
 def _cmp_district(stored, whole: str) -> str:
     page_names_one = bool(DISTRICT_ON_PAGE.search(whole))
     if not stored:
@@ -535,6 +565,8 @@ def _cmp_district(stored, whole: str) -> str:
     # Whole words only, so «السدره» never matches inside another name.
     core = d[2:] if d.startswith("ال") else ""
     if len(core) >= 3 and re.search(r"(?<!\S)(?:حي\s+)?" + re.escape(core) + r"(?!\S)", whole):
+        return MATCH
+    if _owner_alias_on_page(stored, whole):
         return MATCH
     return MISMATCH if page_names_one else PAGE_SILENT
 
@@ -1275,6 +1307,7 @@ def main() -> int:
     a = ap.parse_args()
 
     client = sb()
+    load_owner_district_aliases(client)
     rng = random.Random(a.seed)
     night = datetime.now(timezone.utc).date().isoformat()
     explicit = explicit_picks(a.sites or [])
