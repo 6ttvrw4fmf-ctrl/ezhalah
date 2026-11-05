@@ -1238,6 +1238,13 @@ export function SourceBadge({ source }: { source: string }) {
   if (s.includes('حراج') || s.includes('haraj')) return <PlatformLogo source={HARAJ_LOGO} />;
   // Property Finder: NO badge until the owner supplies the official logo file (an explicit null, never the Aqar fallback).
   if (s.includes('بروبرتي فايندر') || s.includes('propertyfinder')) return null;
+  // The five sources staged 2026-11-05: NO badge until the owner supplies each logo (explicit null, never the Aqar
+  // fallback). Inert while staged — no row of theirs is served (docs/ops/FIVE_SOURCES_LAUNCH.md).
+  if (s.includes('كيلر وليامز') || s.includes('kellerwilliams') || s.includes('keller williams')) return null;
+  if (s.includes('الماجدية') || s.includes('almajdiah')) return null;
+  if (s.includes('أساس مكين') || s.includes('asasmakeen') || s.includes('asas makeen')) return null;
+  if (s.includes('الراجحي للتنمية') || s.includes('mrajhi') || s.includes('al rajhi development')) return null;
+  if (raw === 'steam' || s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return null;
   if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={MAKTAB_LOGO} />;
   if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={SIRDAB_LOGO} />;
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;
@@ -1429,6 +1436,11 @@ function sourceHost(source: string): string {
   if (s.includes('شموع العقار') || s.includes('shomou')) return 'shomoalaqar.com.sa';
   if (s.includes('حراج') || s.includes('haraj')) return 'haraj.com.sa';
   if (s.includes('بروبرتي فايندر') || s.includes('propertyfinder')) return 'propertyfinder.sa';
+  if (s.includes('كيلر وليامز') || s.includes('kellerwilliams') || s.includes('keller williams')) return 'kwsaudiarabia.com';
+  if (s.includes('الماجدية') || s.includes('almajdiah')) return 'almajdiah.com';
+  if (s.includes('أساس مكين') || s.includes('asasmakeen') || s.includes('asas makeen')) return 'asasmakeen.com';
+  if (s.includes('الراجحي للتنمية') || s.includes('mrajhi') || s.includes('al rajhi development')) return 'mrajhi.com.sa';
+  if (raw === 'steam' || s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return 'steam-realestate.com';
   if (s.includes('منصة مكتب') || s.includes('maktab')) return 'maktab.sa';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'marketplace.sirdab.co';
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';

@@ -1498,6 +1498,11 @@ const AR: Record<string, string> = {
   'Shomou': 'شموع العقار',         // «مكتب شموع العقار للاستثمار والتطوير العقاري» (shomoalaqar.com.sa footer)
   'Haraj': 'حراج',
   'Property Finder': 'بروبرتي فايندر',
+  'Keller Williams': 'كيلر وليامز',
+  'Almajdiah': 'الماجدية',
+  'Asas Makeen': 'أساس مكين',
+  'Al Rajhi Development': 'الراجحي للتنمية',
+  'STeam Residence': 'ستيم العربية',
   // A reopened history chat's card whose listing was removed at its source since (owner 2026-10-18).
   'Listing ended': 'انتهى الإعلان',
   'No longer available on the source site': 'لم يعد متاحًا على الموقع',                  // the site's own name (haraj.com.sa)

@@ -127,6 +127,9 @@ list). What keeps it from coming back:
   sentences with every answer the reader gives, read by hand. A reader change that changes ONE answer is red and prints
   old → new. Regenerate (`UPDATE_REAL_AD_ANSWERS=1`) only after reading every change, and list them in the PR. Every class
   you fix adds ≥ 5 of its real sentences to the file — it may only grow.
+- **A new scraper reads prose with the ONE reader** — `scrapers/common/tests/test_one_reader_is_used_by_new_scrapers.py`
+  keeps the 78 old-matcher scrapers as a shrink-only list (Property Finder launched on 11-04 with the old matcher a day after
+  the rule; nothing checked it). Migrate one a night and delete its line.
 - **Silence is UNKNOWN, never «no».** Never clear, lower or switch off a stored yes because the reader is silent. Before
   any bulk clear, read ≥ 25 random rows of the set you are about to clear; if 2 or more state the fact, fix the reader
   first and do not clear.
@@ -142,7 +145,10 @@ list). What keeps it from coming back:
   «مرافق المشروع», «متكاملة»), `_AREA_WORDS`, minute words in `_NEAR_AFTER`, and list marks («-», «•») continuing a
   nearby list; and the PLOT'S NEIGHBOUR — a direction / facade / «مباشرة» right before the park or mosque («شارع 20 م
   جنوبي + حديقة», «من جهتين حديقه», «ربع واجهة على جامع») — `_BOUNDARY_STEMS`, unless the ad says it has it («فيها»,
-  «يوجد»); a nearby comma list after «قريب من / close to / دقائق من»; a near word in the PREVIOUS bullet
+  «يوجد»); a «prepared / possible» word reaching its NEIGHBOUR («مطبخ تأسيس مصعد», «تكييف سبليت تأسيس مصعد», «بمصعدين
+  يمكن تأجير») — `_prepared_applies` (11-05); a VIEW word («مطلة», «إطلالة») silencing the home's own rooms — `_UNIT_ROOMS`;
+  the PDPL sanitizer cutting English fixtures («installed» read as «insta») — whole words since 11-05, and the sanitizer's
+  rules are part of the reader version; a nearby comma list after «قريب من / close to / دقائق من»; a near word in the PREVIOUS bullet
   (🔹 ❄ ✅ are not clause breaks); an entrance adjective («مداخل مكيفة» = lobby) vs AC units («مكيفات»); «قابل للتفاوض»;
   DealApp's REGA list «مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» — there «قريب من الخدمات» is one ITEM, not a
   heading, so the parking after it is real.

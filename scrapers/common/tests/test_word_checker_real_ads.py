@@ -80,7 +80,9 @@ def test_lock_catches_a_nearby_list_read_as_the_ads_own(monkeypatch):
 
 
 def test_lock_catches_negotiable_read_as_can_be_fitted(monkeypatch):
+    # since 2026-11-05 «قابل للتفاوض» is held twice: _NEGOTIABLE and the prepared-word scope (_PREP_VERBAL) — undo both
     monkeypatch.setattr(W, "_NEGOTIABLE", ())
+    monkeypatch.setattr(W, "_PREP_VERBAL", ())
     assert _diffs(_rows()), "undoing the «قابل للتفاوض» fix changed nothing — the lock cannot see it"
 
 
@@ -100,3 +102,15 @@ def test_lock_catches_a_public_place_near_or_area_read_as_the_ads_own(monkeypatc
 def test_lock_catches_the_plots_neighbour_read_as_the_ads_own(monkeypatch):
     monkeypatch.setattr(W, "_BOUNDARY_STEMS", ())
     assert _changed_facts(_diffs(_rows())) & {"mosque", "garden"}
+
+
+def test_lock_catches_a_prepared_word_that_reaches_the_neighbour(monkeypatch):
+    # undo the 2026-11-05 scope: any «تأسيس / يمكن» in the window silences the hit again («مطبخ تأسيس مصعد» loses its kitchen)
+    monkeypatch.setattr(W, "_prepared_applies",
+                        lambda before, after, hit="": any(W._starts(w, W._PREPARED) for w in before[-2:] + after[:2]))
+    assert _changed_facts(_diffs(_rows())) & {"kitchen", "maid_room", "air_conditioner", "elevator"}
+
+
+def test_lock_catches_a_view_word_silencing_the_homes_own_rooms(monkeypatch):
+    monkeypatch.setattr(W, "_UNIT_ROOMS", frozenset())
+    assert _changed_facts(_diffs(_rows())) & {"kitchen", "maid_room", "roof", "balcony", "elevator"}

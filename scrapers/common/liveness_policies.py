@@ -91,7 +91,11 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # almuteb joined this set on 2026-11-04 (retired, owner decision 2) and LEFT it the same day: the owner asked
 # for it back as dormant («yeah do that ok», 2026-11-04) so the daily crawl can bring it back by itself if
 # almuteb.sa ever serves its catalogue again. Its CANDIDATE_PLUS_DIRECT policy is back in POLICIES below.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "moj", "facts"})
+# kellerwilliams, almajdiah, asasmakeen, mrajhi, steam (2026-11-05) are STAGED exactly like propertyfinder was: their
+# run.py files store rows in tables no search arm reads, registry 'retired' until the owner launches them
+# (docs/ops/FIVE_SOURCES_LAUNCH.md); each gets its SOURCE_LIST_PRESENCE policy in that launch change.
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "moj", "facts",
+                                       "kellerwilliams", "almajdiah", "asasmakeen", "mrajhi", "steam"})
 
 
 class _P(dict):

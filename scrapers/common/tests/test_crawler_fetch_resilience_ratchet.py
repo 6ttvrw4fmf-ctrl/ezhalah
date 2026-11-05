@@ -35,7 +35,9 @@ SHARED = re.compile(
 # or proxy (Haraj, owner 2026-10-09/10-16: «honest access, never bypass anything»). The shared resilient
 # path is exactly impersonation + a proxy leg, so it is forbidden there; a refused read stays a failed run.
 # Property Finder (owner 2026-11-04): the same rule — honest UA, no impersonation, no proxy, a wall stops the run.
-OWNER_HONEST_CLIENT = frozenset({"haraj", "propertyfinder"})
+# The five sources of 2026-11-05 (owner: «honest UA, ≤ 1 req/s, obey robots, a challenge stops the run») fetch through
+# scrapers/common/honest_fetch.py, the same honest client.
+OWNER_HONEST_CLIENT = frozenset({"haraj", "propertyfinder", "kellerwilliams", "almajdiah", "asasmakeen", "mrajhi", "steam"})
 
 
 def _code(p: Path) -> str:
