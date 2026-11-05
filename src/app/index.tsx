@@ -1229,7 +1229,16 @@ export default function Home() {
   // open, so all three numbers always show. 'pending' = still checking; null = not offered here.
   type FurnRow = { total?: number; yes?: number; no?: number };
   const [furnRow, setFurnRow] = useState<FurnRow | 'pending' | null>(null);
-  const furnBase = { ...query, furnishedPref: null };
+  // THE SEARCH'S OWN QUERY (2026-11-05 live walk): the counts read `query` and lost the city — the home keeps the picked city
+  // in citySelected and only buildFilterBaseQuery() turns it into the scope, so after «الرياض» the scope helper had no city
+  // it could resolve and every number vanished. Built exactly like onSearch (base + the picked districts' matchValues), so
+  // the number on a choice is what «بحث» returns. Before a city is picked: the period-normalised query (nationwide).
+  const furnBase: SearchQuery = (() => {
+    const base = buildFilterBaseQuery();
+    if (!base) return { ...queryForPeriod, furnishedPref: null, furnishedIn: null };
+    const districts = districtsSelected.length ? [...new Set(districtsSelected.flatMap((d) => d.matchValues))] : undefined;
+    return { ...base, districts, furnishedPref: null, furnishedIn: null };
+  })();
   const furnKey = JSON.stringify(furnBase);
   const furnCanAsk = query.deal === 'Rent' && !query.dealCombined && validRentPeriod(query.rentPeriod) === 'annual' && query.category === 'Residential';
   useEffect(() => {
