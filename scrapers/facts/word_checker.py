@@ -752,7 +752,10 @@ def _bare_l(w: str) -> str:
     return w
 
 
-def _prepared_applies(before: list[str], after: list[str]) -> bool:
+def _prepared_applies(before: list[str], after: list[str], hit: str = "") -> bool:
+    # «تمديد نحاس للمكيفات», «تأسيس كامل لمصعد»: a hit that starts with «ل / لل» is the prepared word's own object
+    if hit.startswith("ل") and any(_starts(w, _PREPARED) for w in before[-3:]):
+        return True
     if before:
         if _starts(before[-1], _PREPARED):
             return True
@@ -897,9 +900,14 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     p2, n2 = gp[-2:], gn[:2]
     # a PUBLIC place keeps the old reading: «خدمات سيرا على الاقدام مثل بقالة … ومقهى السعر قابل للتفاوض» is a nearby café
     neg = (lambda ws_: ws_) if fact in _PUBLIC_FACTS or fact in _NEAR_PUBLIC_FACTS else _not_negotiable
+    if fact in _PERMIT_FACTS:                       # «لا يمكن تأجير عزاب» / «مايمكن للعزاب»: «cannot» is an explicit no
+        w3 = [_strip_wa(w) for w in gp[-3:]]
+        if any(w in ("مايمكن", "مايصلح") or (w in ("يمكن", "ممكن", "يصلح") and k > 0 and w3[k - 1] in ("لا", "ما", "غير"))
+               for k, w in enumerate(w3)):
+            return False, ws, we
     public = fact in _PUBLIC_FACTS or fact in _NEAR_PUBLIC_FACTS   # public places keep the strict window (precision first)
     if (any(_starts(w, _PREPARED) for w in gp[-2:] + gn[:2]) if public
-            else _prepared_applies(neg(gp[-2:] + [""])[:-1], neg(gn[:3]))) or "prepared for" in " ".join(n2):
+            else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:3]), t[ws:we])) or "prepared for" in " ".join(n2):
         return None, s, e
     if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) for w in p2):
         return None, s, e
@@ -1436,6 +1444,8 @@ def selftest() -> None:
         ("صاله نساء مطبخ تأسيس مصعد درج داخلي", {"kitchen": True}, ("elevator",)),
         ("مطبخ مع غرفه خادمه تأسيس مصعد", {"kitchen": True, "maid_room": True}, ("elevator",)),
         ("دور 1 بمصعدين يمكن تأجير", {"elevator": True}, ()),
+        ("دور 4 بمصعد لا يمكن تأجير عزاب فقط عوائل", {"elevator": True, "singles": False, "families": True}, ()),
+        ("دور 1 بمصعدين يمكن تأجير عزاب او عوائل", {"elevator": True, "singles": True, "families": True}, ()),
         ("سباكة ( GS أصلي ) تكييف أسبليت ( تأسيس أمريكي )", {}, ("air_conditioner",)),
         ("يمكن عمل مسبح", {}, ("pool",)),
         ("مسبح خارجي مؤسس", {}, ("pool",)),
@@ -1443,6 +1453,7 @@ def selftest() -> None:
         ("سطح واسع مطبخ راكب بدواليب حديثة", {"kitchen": True}, ()),
         ("مطبخ 3 دورات مياه مدخلان للشقة تكييف سبيلت", {"air_conditioner": True}, ()),
         ("مدخل مكيف أنيق", {}, ("air_conditioner",)),
+        ("مصعد راكب - تمديد نحاس للمكيفات - قريب من محطة الميترو", {"elevator": True}, ("air_conditioner",)),
         ("مطبخ (SPLIT) (غير راكب)", {"kitchen": False}, ()),
         ("مطبخ راكب ومكيفات راكبة", {"kitchen": True, "air_conditioner": True}, ()),
         ("بدون مكيفات ومطبخ", {"air_conditioner": False, "kitchen": False}, ()),

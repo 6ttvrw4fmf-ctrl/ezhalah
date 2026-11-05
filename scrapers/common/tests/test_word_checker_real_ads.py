@@ -106,7 +106,8 @@ def test_lock_catches_the_plots_neighbour_read_as_the_ads_own(monkeypatch):
 
 def test_lock_catches_a_prepared_word_that_reaches_the_neighbour(monkeypatch):
     # undo the 2026-11-05 scope: any «تأسيس / يمكن» in the window silences the hit again («مطبخ تأسيس مصعد» loses its kitchen)
-    monkeypatch.setattr(W, "_prepared_applies", lambda before, after: any(W._starts(w, W._PREPARED) for w in before + after[:2]))
+    monkeypatch.setattr(W, "_prepared_applies",
+                        lambda before, after, hit="": any(W._starts(w, W._PREPARED) for w in before[-2:] + after[:2]))
     assert _changed_facts(_diffs(_rows())) & {"kitchen", "maid_room", "air_conditioner", "elevator"}
 
 
