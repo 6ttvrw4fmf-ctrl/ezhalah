@@ -87,7 +87,9 @@ try {
   await tab('تصفية').click(); await until(formBack);
 
   // 2. SEARCH (Riyadh, the real Filter)
+  await page.evaluate(() => { window.__st = []; window.__s0 = 0; new PerformanceObserver((l) => { for (const e of l.getEntries()) if (window.__s0 && /\/rpc\/|\/rest\/|functions\/v1/.test(e.name)) window.__st.push(`${e.name.split('?')[0].split('/').slice(-1)[0]} ${Math.round(e.startTime - window.__s0)}+${Math.round(e.duration)}`); }).observe({ type: 'resource' }); });
   t = Date.now();
+  await page.evaluate(() => { window.__s0 = performance.now(); });
   await page.getByPlaceholder('اختر المدينة', { exact: true }).click({ timeout: 20_000 });
   await page.keyboard.type('الرياض');
   await page.getByText('الرياض', { exact: true }).first().click({ timeout: 20_000 });
@@ -95,6 +97,7 @@ try {
   await page.getByText('اضغط هنا 👆', { exact: false }).first().waitFor({ state: 'visible', timeout: 90_000 });
   results.searchMs = Date.now() - t;
   say(results.searchMs <= BUDGET.searchMs, 'search: Riyadh until the first card is on screen', results.searchMs, BUDGET.searchMs);
+  console.log(`      search timeline: ${(await page.evaluate(() => window.__st)).join(' · ')}`);
 
   // 3. TAP the first golden card and measure the longest freeze right after it.
   await page.evaluate(() => {
