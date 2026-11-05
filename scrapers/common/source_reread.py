@@ -89,6 +89,13 @@ SELECT_BLOCK = re.compile(r"<select\b[^>]*>.*?</select>", re.S | re.I)
 # …and a BUTTON is a control too: sukna prints AI prompt chips on every unit page («خطة تقسيط ميسّرة», «استثمار بـ 3
 # ملايين ريال»), read as the ad offering instalments (installment_available we_miss 10 of 10; unit 711 re-read).
 BUTTON_BLOCK = re.compile(r"<button\b[^>]*>.*?</button>", re.S | re.I)
+# …and a SEARCH FACET is a control: an UNticked checkbox whose label carries a result count. eaqartabuk prints its
+# whole search sidebar on every ad page («<input type="checkbox" id="feature-private-entrance" name="features[]"
+# value="private-entrance" /> مدخل خاص (19)», «مصعد (90)», «كراج (11)»; ad 598475 re-read 2026-11-05) and the score
+# asked those features of ads that never state them. A ticked feature list (the reason checkboxes are otherwise kept)
+# never prints a count after each item, and a checked box is kept.
+FACET_CHECKBOX = re.compile(r'<input\b(?=[^>]*\btype=["\']?checkbox)(?![^>]*\bchecked\b)[^>]*>\s*[^<]{1,60}?\(\s*\d{1,6}\s*\)',
+                            re.I)
 # A WordPress MENU ITEM is the site's navigation, not the ad: aqaralriyadh's menu «شقق مفروشة» on every page read as
 # the ad saying furnished (furnished we_miss 5 of 5, 2026-11-03 re-read). Only the anchor text of a `menu-item` <li>.
 MENU_ITEM_LINK = re.compile(r'(<li\b[^>]*class="[^"]*\bmenu-item\b[^"]*"[^>]*>\s*<a\b[^>]*>)[^<]{0,80}', re.I)
@@ -225,7 +232,7 @@ def _number_first_lines(body: str) -> list[str]:
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     body = HOUZEZ_CARD.sub(" ", RESULT_CARD_TEXT.sub(" ", body or ""))   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
-    body = SELECT_BLOCK.sub(" ", drop_radio_controls(body))   # …nor the site's own search-filter choices
+    body = FACET_CHECKBOX.sub(" ", SELECT_BLOCK.sub(" ", drop_radio_controls(body)))   # …nor the site's own search-filter choices
     body = MENU_ITEM_LINK.sub(r"\1 ", BUTTON_BLOCK.sub(" ", body))  # …nor its buttons and menu links
     jsonld = []
     for block in JSONLD.findall(body or ""):
