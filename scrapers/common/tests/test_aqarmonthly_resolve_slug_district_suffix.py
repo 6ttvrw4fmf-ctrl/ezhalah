@@ -383,3 +383,34 @@ def test_a_district_that_merely_contains_a_street_word_is_untouched(street_catal
     """Anti-overreach: the marker is only ever tested against the capture's FIRST token."""
     r = al.resolve_slug("حي-النرجس-شارع-الرياض-منطقة-الرياض-1")
     assert r["district_ar"] == "حي النرجس شارع"
+
+
+@pytest.fixture
+def governorate_catalog(monkeypatch):
+    """حرمة is one town; المجمعة is a 4-way catalog twin (city_ids 24/1343/1494/1761 on 2026-11-04)."""
+    monkeypatch.setattr(al, "_load", lambda: None)
+    monkeypatch.setattr(al, "_CITY", {
+        "حرمه": [(50, 1)],
+        "المجمعه": [(24, 1), (1343, 4), (1494, 6), (1761, 9)],
+        "خميس مشيط": [(60, 6)],
+        "ابها": [(61, 6)],
+    })
+    monkeypatch.setattr(al, "_CID_AR", {50: "حرمة", 24: "المجمعة", 60: "خميس مشيط", 61: "أبها"})
+    monkeypatch.setattr(al, "_REGION_NORM", {})
+    yield
+
+
+def test_a_governorate_after_the_town_is_stripped_with_the_town(governorate_catalog):
+    # aqarmonthly 761941 (AQM5360678), served «حي الروضة حرمة المجمعة» until 2026-11-05 (alert 12981).
+    r = al.resolve_slug("شارع-عمار-بن-خزيمة-حي-الروضة-حرمة-المجمعة-5360678")
+    assert r["city_ar"] == "حرمة"
+    assert r["district_ar"] == "حي الروضة"
+
+
+def test_a_foreign_city_not_preceded_by_our_city_is_left_as_published(governorate_catalog):
+    assert al.strip_governorate_after_city("حي المطار ابها", "خميس مشيط") == "حي المطار ابها"
+    assert al.strip_governorate_after_city("حي المطار ابها خميس مشيط", "خميس مشيط") == "حي المطار ابها خميس مشيط"
+
+
+def test_the_two_token_floor_still_holds(governorate_catalog):
+    assert al.strip_governorate_after_city("حي حرمة المجمعة", "حرمة") == "حي حرمة المجمعة"
