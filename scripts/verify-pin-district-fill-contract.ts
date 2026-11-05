@@ -45,7 +45,13 @@ function loaderProblems(s: string): string[] {
   const fail: string[] = [];
   if (!/create or replace function public\.pin_district_load\(p_rows jsonb, p_run_id text\)/.test(s)) fail.push('pin_district_load is not defined');
   if (!/select st, lid, cid, list_name, p_run_id, \(verdict = 'middle'\)\s+from _pin_in/.test(s)) fail.push('a home is switched on without the middle verdict');
-  if (!/where list_name is not null and city_ok and blank and not already and not shared\s+and verdict in \('middle', 'edge'\)/.test(s)) fail.push('a guard (list name, city, blank ad, earlier row, shared pin) was dropped from the load');
+  if (!/where list_name is not null and city_ok and blank(?: and not site_named)? and not already and not shared\s+and verdict in \('middle', 'edge'\)/.test(s)) fail.push('a guard (list name, city, blank ad, earlier row, shared pin) was dropped from the load');
+  if (/and not site_named/.test(s) && !/not public\.district_is_own_town\(r\.cid, v\.district_ar\)/.test(s)) fail.push('an own-town district field («حي الدرعية الجديدة» in الدرعية) is counted as the site naming a district');
+  if (/listing_pin_ask/.test(s) || /20261105/.test(s)) {
+    if (!/insert into public\.listing_pin_ask \(/.test(s)) fail.push('refused Apple answers are not logged (the nightly would re-ask the same ads forever)');
+    if (!/c\.city_id = r\.cid and r\.name is not null and c\.retired_at is null/.test(s)) fail.push('a retired district can be a pin answer');
+    if (!/or exists \(select 1 from public\.listing_title_district lt/.test(s)) fail.push('a pin may overrule the district the ad\'s own title names');
+  }
   if (!/c\.district_norm = public\.norm_district_tok\(public\.loc_display_district_ar\(r\.cid, r\.name\)\)/.test(s)) fail.push('the list name is not resolved through the spelling memory');
   if (!/public\.norm_district_tok\(ci\.city_ar\) = public\.norm_district_tok\(coalesce\(r\.locality, ''\)\)/.test(s)) fail.push('the city Apple names is not compared with the served city');
   if (!/having count\(\*\) >= 5/.test(s)) fail.push('the shared default-pin guard is gone');
@@ -164,7 +170,11 @@ for (const [label, mutate] of dataMutants) {
   mustCatch(`data: ${label}`, m !== sqlData && dataProblems(m).length > 0, m === sqlData ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 
-const fileLoader = find(/^\d{14}_pin_district_load_middle_on_edge_held\.sql$/, '*_pin_district_load_middle_on_edge_held.sql');
+find(/^\d{14}_pin_district_load_middle_on_edge_held\.sql$/, '*_pin_district_load_middle_on_edge_held.sql');
+// The loader is judged in the NEWEST migration that redefines it (2026-11-05, 20261105085039: every answer logged to
+// listing_pin_ask, an own-town district field reads as silent, a retired district never answers).
+const LOADER_HEAD = /create or replace function public\.pin_district_load\(p_rows jsonb, p_run_id text\)/;
+const fileLoader = all.filter((f) => LOADER_HEAD.test(readFileSync(join(dir, f), 'utf8'))).at(-1)!;
 const sqlLoader = readFileSync(join(dir, fileLoader), 'utf8');
 const liveLoader = loaderProblems(sqlLoader);
 check(`committed migration ${fileLoader} holds every pin`, liveLoader.length === 0, liveLoader.join('; '));
@@ -176,6 +186,10 @@ const loaderMutants: Array<[string, (s: string) => string]> = [
   ['earlier row overwritten', (s) => s.replace('on conflict (source_table, listing_id) do nothing;', 'on conflict (source_table, listing_id) do update set applied = excluded.applied;')],
   ['public keys may call it', (s) => s.replace('revoke all on function public.pin_district_load(jsonb, text) from public, anon, authenticated;', '')],
   ['any run_id accepted', (s) => s.replace("p_run_id !~ '^apple-(nightly|ring)-", "p_run_id !~ '^")],
+  ['refused answers not logged', (s) => s.replace('insert into public.listing_pin_ask (', 'insert into public.listing_pin_ask_gone (')],
+  ['a retired district answers', (s) => s.replace('c.city_id = r.cid and r.name is not null and c.retired_at is null', 'c.city_id = r.cid and r.name is not null')],
+  ['own-town counted as a site district', (s) => s.replace('and not public.district_is_own_town(r.cid, v.district_ar)', '')],
+  ['the pin overrules the title', (s) => s.replace('or exists (select 1 from public.listing_title_district lt', 'or false and exists (select 1 from public.listing_title_district lt')],
 ];
 for (const [label, mutate] of loaderMutants) {
   const m = mutate(sqlLoader);
@@ -194,11 +208,45 @@ mustCatch('nightly: a job that inserts directly is refused', !jobLoadsOnlyThroug
 mustCatch('nightly: a job that skips the ring is refused', !jobReadsTheRing(job.replace('verdict = "edge"; break;', 'break;')));
 // 🆕 2026-11-02 (backlog 1098): the loader refuses an ad whose SITE names a district and writes no row for it, so a job
 // that asks Apple about those spends its whole cap on them every night (01:17 run: 50 asked, 50 site-named, 0 switched on).
-const jobSkipsSiteNamed = (src: string): boolean =>
-  /listing_native_location_v2\?select=listing_id/.test(src) && /listing_source_district_ar\?select=listing_id/.test(src)
-  && /named\.has\(/.test(src);
-check('the nightly job skips ads whose site names its own district before asking Apple', jobSkipsSiteNamed(job));
-mustCatch('nightly: a job that asks Apple about site-named ads is refused', !jobSkipsSiteNamed(job.replace('named.has(', 'named.size === -1 && named.has(').replace(/listing_source_district_ar\?select=listing_id/g, 'x')));
+// 🆕 2026-11-05: the candidates come from the DATABASE (pin_district_candidates), which applies the loader's own filters
+// and skips an ad asked in the last 14 days; a job that re-derives them here (and asks the same 600 every night) is red.
+const jobUsesCandidates = (src: string): boolean =>
+  /rest\/v1\/rpc\/pin_district_candidates/.test(src) && /if \(!cr\.ok\) \{[^\n]*process\.exit\(1\)/.test(src)
+  && !/rest\/v1\/search_listings_ar\?/.test(src);
+check('the nightly job asks the database for its candidates (pin_district_candidates) and fails closed', jobUsesCandidates(job));
+mustCatch('nightly: a job that picks its own candidates from the index is refused', !jobUsesCandidates(job.replace('rest/v1/rpc/pin_district_candidates', 'rest/v1/search_listings_ar?select=listing_id')));
+mustCatch('nightly: a job that asks blind when the candidate call fails is refused', !jobUsesCandidates(job.replace(/if \(!cr\.ok\) \{[^\n]*\n/, '')));
+const CAND_HEAD = /create or replace function public\.pin_district_candidates\(p_max integer default 600\)/;
+const fileCand = all.filter((f) => CAND_HEAD.test(readFileSync(join(dir, f), 'utf8'))).at(-1);
+const sqlCand = fileCand ? readFileSync(join(dir, fileCand), 'utf8') : '';
+function candidateProblems(s: string): string[] {
+  const fn = s.match(/create or replace function public\.pin_district_candidates[\s\S]*?\$function\$;/)?.[0] ?? '';
+  if (!fn) return ['pin_district_candidates is not defined'];
+  const fail: string[] = [];
+  if (!/\(s\.district_ar is null or btrim\(s\.district_ar\) = ''\)/.test(fn)) fail.push('it offers ads that already show a district');
+  if (!/not exists \(select 1 from public\.listing_pin_district p/.test(fn)) fail.push('it re-offers ads that already have a pin row');
+  if (!/having count\(\*\) >= 5\)/.test(fn)) fail.push('it offers shared default pins');
+  if (!/\(nullif\(btrim\(v1\.district_ar\), ''\) is null or public\.district_is_own_town\(s\.city_id, v1\.district_ar\)\)/.test(fn)) fail.push('it offers ads whose site names a district');
+  if (!/not public\.district_is_own_town\(s\.city_id, sd\.source_district_ar\)/.test(fn)) fail.push('it offers ads whose source states a district');
+  if (!/not exists \(select 1 from public\.listing_title_district lt/.test(fn)) fail.push('it offers ads whose title names a district');
+  if (!/k\.asked_at < now\(\) - interval '14 days'/.test(fn)) fail.push('it re-asks an ad Apple already answered (the 11-04 starvation)');
+  if (!/order by \(k\.listing_id is null\) desc/.test(fn)) fail.push('never-asked ads are not served first');
+  if (!/revoke all on function public\.pin_district_candidates\(integer\) from public, anon, authenticated;/.test(s)) fail.push('the public keys can call it');
+  return fail;
+}
+const liveCand = candidateProblems(sqlCand);
+check(`committed migration ${fileCand} holds every candidate filter`, liveCand.length === 0, liveCand.join('; '));
+const candMutants: Array<[string, (s: string) => string]> = [
+  ['re-asks answered ads', (s) => s.replace("and (k.listing_id is null or k.asked_at < now() - interval '14 days')", '')],
+  ['site-named ads offered', (s) => s.replace("(nullif(btrim(v1.district_ar), '') is null or public.district_is_own_town(s.city_id, v1.district_ar))", 'true')],
+  ['shared pins offered', (s) => s.replace(/having count\(\*\) >= 5\),\n  cov/, 'having count(*) >= 500000),\n  cov')],
+  ['never-asked not first', (s) => s.replace('order by (k.listing_id is null) desc, ', 'order by ')],
+  ['public keys may call it', (s) => s.replace('revoke all on function public.pin_district_candidates(integer) from public, anon, authenticated;', '')],
+];
+for (const [label, mutate] of candMutants) {
+  const m = mutate(sqlCand);
+  mustCatch(`candidates: ${label}`, m !== sqlCand && candidateProblems(m).length > 0, m === sqlCand ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
 
 const files: Array<[string, string]> = all.map((f) => [f, readFileSync(join(dir, f), 'utf8')]);
 const liveFlip = flipProblems(files);
