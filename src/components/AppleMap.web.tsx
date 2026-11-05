@@ -33,7 +33,7 @@ import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
 import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
-import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 import { onSurface } from '@/lib/mapSurface';
@@ -607,6 +607,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const pinFilter: PinFilter | undefined = pins ? { ...pins, poly: poly ?? pins.poly ?? null } : undefined;
   const pinsKey = JSON.stringify(pinFilter ?? null);
   const [pinCount, setPinCount] = useState<number | null>(null);
+  // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
+  const [viewPlace, setViewPlace] = useState<string | null>(null);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
   useEffect(() => {
     const mk = mapkitOf(); const m = mapRef.current;
@@ -617,6 +619,18 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     void fetchAreasFeed(); void fetchMapDots();
     const keyed = new Map<string, unknown>();   // the annotations on the map, by what they show — a pan keeps what stays
     const loc = localeRef.current === 'ar' ? 'ar' : 'en';
+    // PINS NEVER SIT ON EACH OTHER (owner 2026-11-05, src/lib/mapPins.ts mergeOverlapping): heads are measured with the
+    // font they are drawn in and placed through MapKit's own projection, so «touching» means touching on this screen.
+    const measure = document.createElement('canvas').getContext('2d');
+    if (measure) measure.font = '600 11px -apple-system,system-ui,sans-serif';
+    const headWidth = (r: PinRow) => { const tx = pinHead(r, loc); return measure ? Math.ceil(measure.measureText(tx).width) + PIN_PAD_PX : pinWidthGuess(tx); };
+    const onScreen = (lat: number, lng: number): [number, number] => {
+      const conv = (m as unknown as { convertCoordinateToPointOnPage?: (c: unknown) => { x: number; y: number } }).convertCoordinateToPointOnPage;
+      if (conv) { const p = conv.call(m, new mk.Coordinate(lat, lng)); return [p.x, p.y]; }
+      const { center, span } = m.region; const r = (hostRef.current as unknown as HTMLElement | null)?.getBoundingClientRect();
+      const w = r?.width ?? 390, h = r?.height ?? 600;
+      return [((lng - center.longitude) / span.longitudeDelta + 0.5) * w, ((center.latitude - lat) / span.latitudeDelta + 0.5) * h];
+    };
     // What a tap does: a bubble zooms into its cell, a pin hands its row up (the card sheet). Called from the element's
     // OWN pointer handlers — on a phone MapKit's `select` never fired for a touch on a custom annotation (owner
     // 2026-11-02: «when I click it doesn't show»; reproduced with a synthetic touch tap: no sheet) — and from
@@ -805,7 +819,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (areas !== 'unknown') {
           hideCanvas(); shown = [];
           drawAreas(visibleAreas(areas), level);
-          setPinCount(areasTotal(areas));
+          setPinCount(areasTotal(areas)); setViewPlace(null);
           return;
         }
         // The labels failed to load: the dots below, never an empty map.
@@ -816,13 +830,15 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (all !== 'unknown') {
           const inView = dotsInView(all, pins.deals, paddedBox(center, span));
           clear();
-          if (paint(inView)) { setPinCount(dotsTotal(inView)); return; }
+          if (paint(inView)) { setPinCount(dotsTotal(inView)); setViewPlace(null); return; }
         }
         // The feed failed (or the projection could not be calibrated): the live grid path below, never an empty map.
       }
       hideCanvas(); shown = [];
       // SMOOTH (owner 2026-11-03: «I want it to feel smooth»): a close view the dots feed (already on the phone) says holds
       // more than CROWD_ESTIMATE listings is crowded without asking the network; only a view that may fit as pins reads.
+      // The place for the count pill, read alongside the pins (a few ms on the pin index) for the visible view only.
+      const placeRead = cell === 0 ? fetchViewPlace({ s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 }) : Promise.resolve(null);
       const dots = cell === 0 && !narrowed ? await fetchMapDots() : 'unknown';
       if (my !== seq || mapRef.current !== m) return;
       const crowdedByDots = dots !== 'unknown' && dotsTotal(dotsInView(dots, pins.deals, { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 })) > CROWD_ESTIMATE;
@@ -842,7 +858,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (my !== seq || mapRef.current !== m) return;
           if (areas !== 'unknown' && denseShowsDistricts(areas.filter((a) => inView(a, center, span)).length, span.latitudeDelta)) {
             drawAreas(visibleAreas(areas), 'district');
-            setPinCount(areasTotal(areas));
+            setPinCount(areasTotal(areas)); setViewPlace(null);
             return;
           }
         }
@@ -855,9 +871,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
         }
       }
+      // Heads that would touch on this screen become one gold head with their count (src/lib/mapPins.ts).
+      if (drawCell === 0) rows = mergeOverlapping(rows, onScreen, headWidth);
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
+      void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
       // head would change (count, deal, price, cell size) is replaced.
@@ -1114,7 +1133,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {/* Zillow's «Only N matching results»: what the view (or the drawn boundary) holds, since the dots carry no number. */}
       {!drawing && pinCount !== null ? (
-        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{t(hasShape ? '{n} listings inside the boundary' : '{n} listings here', { n: pinCount.toLocaleString('en-US') })}</Text></View>
+        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en')}</Text></View>
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>

@@ -11,6 +11,17 @@
 > turn it green; never change product behaviour (put it in one line for the owner). Your report starts with one line:
 > «🏎️ speed: <green / fixed / why not> — <step times>».
 
+> **📍 OWNER ORDER 2026-11-05 — MAP PINS NEVER OVERLAP (permanent; the law files still win).** The owner: «we can never have
+> this issue … so so many duplicated listings, we need to make sure they are in the same pin close by … user cannot select
+> what he wants … make sure our engineers know about this». The rule and its two guards are in `docs/ARCHITECTURE.md`
+> («Map tab: no two pins ever sit on each other»). **Every run:** read the open `workflow_failed:map-pins-live.yml` alert
+> and the last runs of `map-pins-live.yml` (the MAP PIN ROBOT). If it is red, fixing it is a first job of the run: find
+> why heads overlap or cannot be tapped on the real map (a new head style, a new layer drawn over pins, a projection
+> change, a district name missing from the pill), fix the root cause, keep `scripts/verify-map-pins-never-overlap.ts`
+> green, deploy, and watch the robot go green. Never move the robot's spots, loosen its 1 px test or shrink
+> `PIN_GAP_PX` to turn it green. Same-site twins sharing one spot is the hourly `map_pin_snap_refresh_ar()` (inside
+> `map_grid_refresh_ar()`); if `map_pin_snap` stops refreshing, that is yours too.
+
 > **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
 > Open alerts fell 459 → 102 between 10-29 and 11-04, but the owner still found two whole bug classes no detector saw:
 > (1) land ads with the per-metre price typed as the TOTAL (~307 cards, e.g. 1,700 SAR for 375 m² in الأحساء), and
