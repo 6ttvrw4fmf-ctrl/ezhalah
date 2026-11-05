@@ -193,3 +193,15 @@ def test_a_zero_count_chip_says_nothing():
     assert S.page_says_yes(before, "kitchen") is True          # the old reading: «مطبخ» alone, read as a yes
     assert S.page_says_yes(after, "kitchen") is False
     assert "موقف" in " ".join(after)                           # a counted chip of 1 stays
+
+
+def test_a_search_facet_checkbox_is_not_the_ad():
+    # eaqartabuk 598475, re-read live 2026-11-05: the search sidebar, an unticked checkbox + a result count
+    from scrapers.common.source_reread import page_evidence
+    facet = ('<label><input type="checkbox" id="feature-private-entrance" name="features[]" value="private-entrance" />'
+             ' مدخل خاص (19) </label><label><input type="checkbox" name="features[]" value="elevator" /> مصعد (90) </label>')
+    ticked = '<li><input type="checkbox" checked disabled> مصعد</li>'
+    lines = " ".join(S.page_lines(page_evidence("<html><body>" + facet + "<p>شقة للإيجار</p></body></html>")))
+    assert "مصعد" not in lines and "مدخل خاص" not in lines
+    kept = " ".join(S.page_lines(page_evidence("<html><body>" + ticked + "</body></html>")))
+    assert "مصعد" in kept
