@@ -94,8 +94,9 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # kellerwilliams, almajdiah, asasmakeen, mrajhi, steam (2026-11-05) are STAGED exactly like propertyfinder was: their
 # run.py files store rows in tables no search arm reads, registry 'retired' until the owner launches them
 # (docs/ops/FIVE_SOURCES_LAUNCH.md); each gets its SOURCE_LIST_PRESENCE policy in that launch change.
+# Each LEAVES this set at its own launch (owner switch, docs/ops/FIVE_SOURCES_LAUNCH.md) with SOURCE_LIST_PRESENCE below.
 NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "moj", "facts",
-                                       "kellerwilliams", "almajdiah", "asasmakeen", "mrajhi", "steam"})
+                                       "almajdiah", "asasmakeen", "mrajhi", "steam"})
 
 
 class _P(dict):
@@ -1146,6 +1147,10 @@ POLICIES: dict[str, _P] = {
         "prune_unseen unless every detail page was readable.",
         "An oracle is possible — /web/gallery/<id> answers HTTP 404 for an unknown id — but it is "
         "not written yet, so this does not claim a direct check."),
+    "kellerwilliams": _P(
+        _pol("kellerwilliams", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's complete list API (POST api.kw-saudiarabia.com/api/listings/list/properties, every page to pagination.total_pages, unique ids checked against total_items). run.py prunes only after a complete walk.",
+        "No oracle within the owner's access rule: ad pages are a JS app over the same API, never fetched; the complete list is the reading."),
     "propertyfinder": _P(
         _pol("propertyfinder", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's four COMPLETE category lists (/ar/<side>/عقارات-….html?page=N, "
@@ -1620,6 +1625,8 @@ SOURCE_LIST_DAILY: tuple[str, ...] = (
     "ramzalqasim", "safera", "satel", "shmoualshmal", "shomou", "squares", "vmksa", "wahadat",
     # Property Finder launch (owner 2026-11-04 approved the source; launched by the owner's switch)
     "propertyfinder",
+    # The five sources of 2026-11-05 (owner order; launched by the owner's switch, docs/ops/FIVE_SOURCES_LAUNCH.md)
+    "kellerwilliams",
 )
 for _p in SOURCE_LIST_DAILY:
     assert POLICIES[_p]["strategy"] == CRAWL_PRESENCE_ONLY, _p      # never demote an oracle tier
