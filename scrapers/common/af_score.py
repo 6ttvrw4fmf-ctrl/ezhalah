@@ -574,6 +574,32 @@ def strip_post_nav(page: dict, body: str) -> dict:
     return {**page, "evidence_lines": keep, "text_head": head}
 
 
+# A «related ads» block lists OTHER ads (🔬 2026-11-05): aljassim 4731 (aljassim_residential_listings:12590177, a house
+# for sale) was asked «kitchen» from «3 غرف + وصالة + ومطبخ + ودورتين مياه» — a cell of the Drupal block
+# «block-views-block-related-ads-block-1», i.e. ad 5084, a flat for rent. Text inside such a block is not the ad.
+_RELATED_BLOCK = re.compile(r'<div[^>]*\b(?:id|class)="[^"]*related[-_](?:ads|posts|listings|properties)[^"]*"[^>]*>'
+                            r'(.{0,15000}?)(?=<div[^>]*\bid="block-|<footer|</body>|\Z)', re.S)
+
+
+def strip_related(page: dict, body: str) -> dict:
+    bits: set[str] = set()
+    for block in _RELATED_BLOCK.findall(body or ""):
+        for t in re.split(r"<[^>]+>", block):
+            nt = norm(html.unescape(t))
+            if len(nt) >= 6:
+                bits.add(nt)
+    if not bits:
+        return page
+
+    def keep_line(x: str) -> bool:
+        nx = norm(x)
+        return not any(nx == b or (len(b) >= 12 and b in nx) for b in bits)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
 def strip_nav(page: dict, body: str) -> dict:
     nav = {norm(t) for t in _NAV_LINK.findall(body or "") if t.strip()}
     if not nav:
@@ -904,7 +930,7 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                 status, body = None, ""
             page = page_evidence(body) if status == 200 and body else None
             if page is not None:
-                page = strip_post_nav(strip_boundary(page, body), body)
+                page = strip_related(strip_post_nav(strip_boundary(page, body), body), body)
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
             if page is not None and platform in WARRANTY_SITES:

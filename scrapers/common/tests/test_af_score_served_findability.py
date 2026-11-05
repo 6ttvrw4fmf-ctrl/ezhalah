@@ -161,3 +161,20 @@ def test_next_post_link_is_another_ad():
     out = S.strip_post_nav(page, EASTABHA_NAV)
     assert out["evidence_lines"] == ["شقة للإيجار مطبخ راكب"]
     assert "مفروشه" not in S.norm(out["text_head"]) and "مفروشة" not in out["text_head"]
+
+
+# aljassim 4731 (aljassim_residential_listings:12590177), re-read live 2026-11-05: the related-ads block (ad 5084).
+ALJASSIM_RELATED = ('<div class="views-element-container block block-views block-views-blockrelated-ads-block-1" '
+                    'id="block-views-block-related-ads-block-1"> <div class="content"> <table class="table"><tr>'
+                    '<td headers="view-nothing-1-table-column" class="views-field views-field-nothing-1 views-align-center">'
+                    '<strong> 3 غرف + وصالة + ومطبخ + ودورتين مياه <br>الدور الارضي </strong> </td></tr></table></div></div>'
+                    '<footer>x</footer>')
+
+
+def test_related_ads_block_is_other_ads():
+    own = "كل بيت يتكون من دورين الأول مستودعات ومحلات والدور الثاني بيت"
+    other = "3 غرف + وصالة + ومطبخ + ودورتين مياه"
+    page = {"evidence_lines": [own, other], "text_head": own + " | " + other}
+    out = S.strip_related(page, ALJASSIM_RELATED)
+    assert out["evidence_lines"] == [own]
+    assert "مطبخ" not in out["text_head"]
