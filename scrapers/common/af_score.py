@@ -316,7 +316,11 @@ DEED_BOUNDARY = re.compile(r"تمام\s*الحد|يحده|الحد\s*(?:الشم
 # والمصعد», the Houzez detail list on fursaghyr): the evidence line keeps the VALUE and loses its label, so
 # DEED_BOUNDARY cannot see it. fursaghyr 4367079 was asked elevator from exactly that row on 10-24 (run 40076306911)
 # while its «خدمات العقار» names none. Every value printed under a «… الحد …» label is dropped before the page is read.
-_BOUNDARY_ROW = re.compile(r"<strong>\s*(?:وصف|نوع|طول)\s+(?:ال)?حد[^<:]{0,20}:?\s*</strong>\s*<span[^>]*>([^<]{1,300})</span>")
+# sakan prints the same rows as two spans (🔬 2026-11-05: «<span class="f14">وصف الحد الجنوبي</span> <span class="f16
+# f16-700"> مصعد و ارتدادات 1 و درج …</span>», re-read of sakan 95709): both 11-05 sakan elevator misses (12610753,
+# 12611202) were that deed row while the ad's own «مميزات العقار» names no lift.
+_BOUNDARY_ROW = re.compile(r"<(?:strong|span)[^>]*>\s*(?:وصف|نوع|طول)\s+(?:ال)?حد[^<:]{0,20}:?\s*</(?:strong|span)>"
+                           r"\s*<span[^>]*>([^<]{1,300})</span>")
 
 
 def strip_boundary(page: dict, body: str) -> dict:
@@ -333,6 +337,16 @@ def strip_boundary(page: dict, body: str) -> dict:
     keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
     head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
     return {**page, "evidence_lines": keep, "text_head": head}
+
+
+# A counted chip printing ZERO says nothing (🔬 2026-11-05). abaad prints «<strong>0</strong> حمام», «0 غرف نوم», «0 صالات»,
+# «<strong>0</strong> مطبخ» on ads that never filled them in (13214778, a villa, re-read live); the page reader splits the
+# «0» from its word, so «مطبخ» stood alone and the score asked «kitchen». The chip is dropped before the page is read.
+_ZERO_CHIP = re.compile(r"<strong>\s*[0٠]\s*</strong>\s*[^<]{1,24}")
+
+
+def drop_zero_chips(body: str) -> str:
+    return _ZERO_CHIP.sub(" ", body)
 
 
 def page_says_yes(lines: list[str], field: str) -> bool:
@@ -547,6 +561,53 @@ def sanadak_page(url: str, fetch=None) -> dict | None:
 # internal link is dropped before the page is read.
 NAV_LINK_SITES = {"opensooq"}
 _NAV_LINK = re.compile(r'<a\b[^>]*href="/[^"]*"[^>]*>([^<]{1,60})</a>')
+
+
+# WordPress «next / previous post» links carry ANOTHER ad's title (🔬 2026-11-05): eastabha 595447 was asked
+# «furnished» from «<a href=".../estate_property/33555/" rel="next"> 🏡 شقة مفروشة راقية للإيجار الصيفي …</a>»
+# while its own page names no furniture (re-read 2026-11-05). On every site, a rel=next/prev link is not the ad.
+_POST_NAV = re.compile(r'<a\b[^>]*\brel="(?:next|prev)"[^>]*>([^<]{1,200})</a>')
+
+
+def strip_post_nav(page: dict, body: str) -> dict:
+    nav = {norm(html.unescape(t)) for t in _POST_NAV.findall(body or "") if t.strip()}
+    nav.discard("")
+    if not nav:
+        return page
+
+    def keep_line(x: str) -> bool:
+        nx = norm(x)
+        return not any(nx == n or (len(n) >= 12 and n in nx) for n in nav)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
+# A «related ads» block lists OTHER ads (🔬 2026-11-05): aljassim 4731 (aljassim_residential_listings:12590177, a house
+# for sale) was asked «kitchen» from «3 غرف + وصالة + ومطبخ + ودورتين مياه» — a cell of the Drupal block
+# «block-views-block-related-ads-block-1», i.e. ad 5084, a flat for rent. Text inside such a block is not the ad.
+_RELATED_BLOCK = re.compile(r'<div[^>]*\b(?:id|class)="[^"]*related[-_](?:ads|posts|listings|properties)[^"]*"[^>]*>'
+                            r'(.{0,15000}?)(?=<div[^>]*\bid="block-|<footer|</body>|\Z)', re.S)
+
+
+def strip_related(page: dict, body: str) -> dict:
+    bits: set[str] = set()
+    for block in _RELATED_BLOCK.findall(body or ""):
+        for t in re.split(r"<[^>]+>", block):
+            nt = norm(html.unescape(t))
+            if len(nt) >= 6:
+                bits.add(nt)
+    if not bits:
+        return page
+
+    def keep_line(x: str) -> bool:
+        nx = norm(x)
+        return not any(nx == b or (len(b) >= 12 and b in nx) for b in bits)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
 
 
 def strip_nav(page: dict, body: str) -> dict:
@@ -877,9 +938,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                 status, body = probe(url)
             except Exception:  # noqa: BLE001
                 status, body = None, ""
+            body = drop_zero_chips(body or "")
             page = page_evidence(body) if status == 200 and body else None
             if page is not None:
-                page = strip_boundary(page, body)
+                page = strip_related(strip_post_nav(strip_boundary(page, body), body), body)
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
             if page is not None and platform in WARRANTY_SITES:
@@ -929,6 +991,60 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     return row
 
 
+SERVED_N = 5                 # served-answer findability: ads asked per website (owner 11-05: every site tested)
+SERVED_COLS = (*AMENITY_SLUG, FURNISHED)
+
+
+def served_findability(client, anon, platform: str, rng: random.Random, *, n: int = SERVED_N,
+                       pace: float = PACE_S, hours: int = MIN_AGE_H) -> dict:
+    """The second, independent half of findability (🔬 2026-11-05, owner: «we need this 100», over EVERY site).
+
+    The page-stated half above asks a question only when the score's own page reader sees the answer on the page,
+    so on 2026-11-05 it tried 87 of 142 websites: muhaysini (11,028 served yeses), wasalt (8,990), dwelleo (3,730)
+    and sakani (1,309) were never asked at all — their pages are a shell or their prose is not quoted by that
+    reader. This half needs no page: it takes ads that CARRY a served Advanced Filter yes, picks ONE of those
+    answers the way a customer taps one chip, and asks the PUBLIC anon RPC (deal, city, district, type, period +
+    that answer) whether the ad comes back. A miss is the customer picking an answer we show for an ad and not
+    reaching it: a mapping, an RPC, a pool or a stored-vs-served disagreement. Whether the yes is TRUE is the
+    precision half's question, not this one's. Returns {served_tried, served_found, served_missed_ids}."""
+    out = {"served_tried": 0, "served_found": 0, "served_missed_ids": []}
+    if anon is None:
+        return out
+    before = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    def base():
+        return (client.table("search_listings_ar").select(STORED, count="exact")
+                .eq("platform", platform).eq("production_ready", True).lt("first_seen_at", before)
+                .not_.like("type_ar", "أرض%").or_(",".join(f"{c}.is.true" for c in SERVED_COLS)))
+
+    total = base().limit(1).execute().count or 0
+    if not total:
+        return out
+    last = 0.0
+    for off in rng.sample(range(total), min(n, total)):
+        stored = (base().order("listing_id").range(off, off).execute().data or [{}])[0]
+        answers = offered([c for c in SERVED_COLS if stored.get(c) is True], stored)
+        if not answers:
+            continue
+        pick = [rng.choice(answers)]
+        params = rpc_params(stored, pick)
+        if not params:
+            continue
+        time.sleep(max(0.0, last + pace - time.monotonic()))
+        last = time.monotonic()
+        verdict = findable(ask(anon, params), stored["source_table"], stored["listing_id"])
+        if verdict is None:
+            continue
+        out["served_tried"] += 1
+        if verdict:
+            out["served_found"] += 1
+        else:
+            key = f"{stored['source_table']}:{stored['listing_id']}"
+            out["served_missed_ids"].append(key)
+            print(f"  served-miss {key} asked {pick}", flush=True)
+    return out
+
+
 def findability(row: dict) -> float | None:
     return row["find_found"] / row["find_tried"] if row["find_tried"] else None
 
@@ -941,7 +1057,7 @@ def _line(r: dict) -> str:
     return (f"{r['platform']}: sampled={r['sampled']} findability={_pct(findability(r))} "
             f"({r['find_found']}/{r['find_tried']}) precision={_pct(af_precision(r))} "
             f"capture={_pct(af_recall(r))} parity={r.get('parity_ok', 0)}/{r.get('parity_tried', 0)} "
-            f"misses={len(r['find_missed_ids'])}"
+            f"misses={len(r['find_missed_ids'])} served={r.get('served_found')}/{r.get('served_tried')}"
             + (f" | {r['note']}" if r["note"] else ""))
 
 
@@ -953,6 +1069,8 @@ def write_rows(client, rows: list[dict]) -> str:
         "af_page_states": r["af_page_states"], "af_captured": r["af_captured"],
         "mismatch_ids": r["mismatch_ids"], "find_missed_ids": r["find_missed_ids"], "note": r["note"],
         "parity_tried": r.get("parity_tried") or None, "parity_ok": r.get("parity_ok") if r.get("parity_tried") else None,
+        "served_tried": r.get("served_tried"), "served_found": r.get("served_found"),
+        "served_missed_ids": r.get("served_missed_ids"),
     } for r in rows]
     try:
         client.table(TABLE).upsert(payload, on_conflict="night,platform").execute()
@@ -971,7 +1089,11 @@ def fleet_totals(rows: list[dict]) -> dict:
             "capture": r_(t("af_captured"), t("af_page_states")), "find_tried": t("find_tried"),
             "find_found": t("find_found"), "sampled": t("sampled"),
             "parity_tried": sum(r.get("parity_tried") or 0 for r in rows),
-            "parity_ok": sum(r.get("parity_ok") or 0 for r in rows)}
+            "parity_ok": sum(r.get("parity_ok") or 0 for r in rows),
+            # served-answer half: «X % over N of M sites» — N = websites asked at least once, M = every website
+            "served_tried": sum(r.get("served_tried") or 0 for r in rows),
+            "served_found": sum(r.get("served_found") or 0 for r in rows),
+            "served_sites": sum(1 for r in rows if r.get("served_tried")), "sites": len(rows)}
 
 
 def main() -> int:
@@ -1001,6 +1123,11 @@ def main() -> int:
                              night=night, pace=a.pace)
         except Exception as e:  # noqa: BLE001 — one website failing never stops the fleet
             row = new_row(night, p, note=f"error: {type(e).__name__}: {e}"[:300])
+        try:
+            row.update(served_findability(client, anon, p, rng, pace=a.pace))
+        except Exception as e:  # noqa: BLE001 — a failed read is UNKNOWN (NULL), never a zero
+            row.update(served_tried=None, served_found=None, served_missed_ids=None)
+            print(f"  ! served findability unread for {p}: {type(e).__name__}: {e}"[:300], flush=True)
         rows.append(row)
         print(_line(row), flush=True)
         # WRITE AS YOU GO (🔬 2026-10-11): the 08:00 run of 2026-10-11 hit the job's 60-minute timeout after
@@ -1025,7 +1152,8 @@ def main() -> int:
         f = out["fleet"]
         print(f"fleet: findability={_pct(f['findability'])} ({f['find_found']}/{f['find_tried']}) "
               f"precision={_pct(f['precision'])} capture={_pct(f['capture'])} "
-              f"parity={f['parity_ok']}/{f['parity_tried']}")
+              f"parity={f['parity_ok']}/{f['parity_tried']} "
+              f"served={f['served_found']}/{f['served_tried']} over {f['served_sites']} of {f['sites']} sites")
         print(out["written"])
     return 0
 
