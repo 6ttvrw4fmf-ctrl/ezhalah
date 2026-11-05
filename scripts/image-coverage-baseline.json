@@ -79,6 +79,12 @@
       "today_pct": 96.7,
       "active_rows": 209
     },
+    "almajdiah": {
+      "floor_pct": 95,
+      "today_pct": 100,
+      "active_rows": 59,
+      "note": "Declared 2026-11-05 at launch: 59/59 rent units carry images[] (etmaam-public.almajdiah.com, HTTP 200 image/jpeg)."
+    },
     "almotmkenah": {
       "floor_pct": 60,
       "today_pct": 71.4,
@@ -471,6 +477,12 @@
       "today_pct": 100.0,
       "active_rows": 78,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 78 of 78 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
+    },
+    "kellerwilliams": {
+      "floor_pct": 95,
+      "today_pct": 100,
+      "active_rows": 188,
+      "note": "Declared 2026-11-05 at launch: 188/188 stored rows carry photos[].ph_url (storage.googleapis.com)."
     },
     "ksaaqar": {
       "floor_pct": 79,

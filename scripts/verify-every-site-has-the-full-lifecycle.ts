@@ -25,7 +25,7 @@ import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
 const LEDGER = join(ROOT, 'scrapers', 'lifecycle-gaps.txt');
-const RATCHET_LIMIT = 145; // the committed ledger's size; may only fall (a new gap is a reviewed raise) — +1 haraj 2026-10-16 (onboarding, shadow); +1 almuteb 2026-11-04 (owner put it back from retired to dormant the same day — its old line returns, no new gap)
+const RATCHET_LIMIT = 147; // the committed ledger's size; may only fall (a new gap is a reviewed raise) — +1 haraj 2026-10-16 (onboarding, shadow); +1 almuteb 2026-11-04 (owner put it back from retired to dormant the same day — its old line returns, no new gap); +2 kellerwilliams + almajdiah 2026-11-05 (owner «launch»: SOURCE_LIST_PRESENCE, the own complete list is the check — no own-page oracle exists for either: KW ad pages are a JS app over the list API, an Almajdiah unit has no page)
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

@@ -103,6 +103,13 @@
       "proven_on": "2026-10-30",
       "note": "BUG fixed #9508: «الذهاب إلى موقع الإعلان» → google.com/maps?q=LAT,LNG per ad (3/3 rendered ads, distinct pairs). The JS fallback lat 26.117342 is the same on every ad and is never read. Floor raised to 85 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/209 (0.0%) on 2026-10-30 before today's fixes."
     },
+    "almajdiah": {
+      "pin_source": "page-json",
+      "floor_pct": 85,
+      "proof_url": "https://etmaam.almajdiah.com/api/client/v1/rental-request?page=1",
+      "proven_on": "2026-11-05",
+      "note": "unit_map_url «query=<lat>,<lng>» or the project's location.latitude/longitude; 55/59 stored rows pinned (2 outer units link a maps.app.goo.gl short link only)."
+    },
     "almotmkenah": {
       "pin_source": "none",
       "floor_pct": 0,
@@ -557,6 +564,13 @@
       "proof_url": "https://just.sa/l/727",
       "proven_on": "2026-10-30",
       "note": "Proven silent: 3/3 rendered ads carry no pair, no map library, no short link. Served 0/73 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "kellerwilliams": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://api.kw-saudiarabia.com/api/listings/list/properties",
+      "proven_on": "2026-11-05",
+      "note": "POST {page,limit}: every ad's list_address.coordinates_gp {lat,lon}; 188/188 stored rows pinned on 2026-11-05."
     },
     "ksaaqar": {
       "pin_source": "partial",
