@@ -481,7 +481,7 @@ source_table + deal + price + area + type + bedrooms within ~100 m (DBSCAN 0.000
 most-shared spot (`map_pin_snap`, refreshed hourly by `map_pin_snap_refresh_ar()` inside `map_grid_refresh_ar()`;
 `map_pins_ar`'s street-zoom branch reads it). A blank price or size matches a blank («price on request» copies), never a number. Nothing is hidden or deleted and the stored coordinates stay the source's own — only where the pin is drawn moves;
 tapping it lists every ad. Two DIFFERENT sites stay two pins (owner 2026-11-03: same-site copies stay, cross-site is
-normal). Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`).
+normal). Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`).
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.

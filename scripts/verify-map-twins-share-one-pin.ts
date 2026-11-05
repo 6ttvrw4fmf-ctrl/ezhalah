@@ -77,9 +77,14 @@ mustCatch('the snap call dropped from the grid refresh (twins stop merging for n
 mustCatch('the snap call outside an exception block', !failureKeepsGrid(gridFn.replace(/begin\s+perform public\.map_pin_snap_refresh_ar\(\);\s+exception when others then/, 'perform public.map_pin_snap_refresh_ar(); begin null; exception when others then')));
 
 // ── «price on request» copies are twins too: a blank matches a blank, never a number ───────────────────────────────
-const blanksMatch = (sql: string) => /m\.price is not distinct from s\.price/.test(sql) && /m\.area_m2 is not distinct from s\.area_m2/.test(sql) && !/x\.area_m2 is not null/.test(sql);
-check('ads with no price or no size still pair with their twin (IS NOT DISTINCT FROM)', blanksMatch(refreshFn));
-mustCatch('a «price on request» pair left as two pins (price compared with =)', !blanksMatch(refreshFn.replace('m.price is not distinct from s.price', 'm.price = s.price')));
+const blanksMatch = (sql: string) => /coalesce\(x\.price_total, x\.price_annual, -1\) price, coalesce\(x\.area_m2, -1\) area_m2/.test(sql)
+  && /from s join multi m using \(source_table, deal_ar, price, area_m2, type_ar, bedrooms\)/.test(sql) && !/x\.area_m2 is not null/.test(sql);
+check('ads with no price or no size still pair with their twin (a blank is a sentinel key, matched by a hashable join)', blanksMatch(refreshFn));
+mustCatch('a «price on request» pair left as two pins (the blank stays NULL, and NULL = NULL is never true)', !blanksMatch(refreshFn.replace('coalesce(x.price_total, x.price_annual, -1) price', 'coalesce(x.price_total, x.price_annual) price')));
+// 20261105063813 compared the keys with IS NOT DISTINCT FROM: correct, but unhashable — minutes per refresh.
+const hashable = (sql: string) => !/m\.(price|area_m2|type_ar|bedrooms|deal_ar) is not distinct from s\./.test(sql);
+check('the twin join stays hashable (the minutes-long IS NOT DISTINCT FROM join is gone)', hashable(refreshFn));
+mustCatch('the unhashable IS NOT DISTINCT FROM join brought back', !hashable(refreshFn.replace('from s join multi m using (source_table, deal_ar, price, area_m2, type_ar, bedrooms)', 'from s join multi m on m.source_table = s.source_table and m.price is not distinct from s.price')));
 
 if (failed) { console.error(`\n❌ verify-map-twins-share-one-pin: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-map-twins-share-one-pin: same-site twins share one pin, every ad keeps its card');
