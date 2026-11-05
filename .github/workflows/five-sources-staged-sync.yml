@@ -48,7 +48,6 @@ jobs:
           - { site: almajdiah,      cmd: "python -m scrapers.almajdiah.run" }
           - { site: asasmakeen,     cmd: "python -m scrapers.asasmakeen.run" }
           - { site: mrajhi,         cmd: "python -m scrapers.mrajhi.run" }
-          - { site: steam,          cmd: "python -m scrapers.steam.run" }
     steps:
       - name: Selected?
         id: pick
