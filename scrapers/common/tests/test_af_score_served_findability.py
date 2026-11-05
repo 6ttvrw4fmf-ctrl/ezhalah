@@ -128,3 +128,23 @@ def test_the_row_writer_sends_the_served_columns():
     row = {**S.new_row("2026-11-05", "x"), "served_tried": 3, "served_found": 2, "served_missed_ids": ["t:1"]}
     S.write_rows(C(), [row])
     assert sent[0]["served_tried"] == 3 and sent[0]["served_found"] == 2 and sent[0]["served_missed_ids"] == ["t:1"]
+
+
+# sakan 95709 (sakan_residential_listings:12610753), re-read live 2026-11-05: the REGA deed's border rows as two
+# spans. «مصعد» here is what the unit's southern border touches, not a lift the ad offers.
+SAKAN_DEED = '''<div class="tr">
+                            <span class="f14">نوع الحد الجنوبي</span>
+                            <span class="f16 f16-700">:</span>
+                        </div>
+                                                                                                        <div class="tr">
+                            <span class="f14">وصف الحد الجنوبي</span>
+                            <span class="f16 f16-700"> مصعد  و ارتدادات 1  و درج  و ارتدادات 3 ثم شارع عرض 20 م </span>
+                        </div>'''
+
+
+def test_sakan_deed_border_row_is_not_the_ad():
+    line = "مصعد و ارتدادات 1 و درج و ارتدادات 3 ثم شارع عرض 20 م"
+    page = {"evidence_lines": [line, "قريب من الخدمات"], "text_head": line + " | قريب من الخدمات"}
+    out = S.strip_boundary(page, SAKAN_DEED)
+    assert out["evidence_lines"] == ["قريب من الخدمات"]
+    assert "مصعد" not in out["text_head"]

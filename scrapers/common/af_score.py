@@ -316,7 +316,11 @@ DEED_BOUNDARY = re.compile(r"تمام\s*الحد|يحده|الحد\s*(?:الشم
 # والمصعد», the Houzez detail list on fursaghyr): the evidence line keeps the VALUE and loses its label, so
 # DEED_BOUNDARY cannot see it. fursaghyr 4367079 was asked elevator from exactly that row on 10-24 (run 40076306911)
 # while its «خدمات العقار» names none. Every value printed under a «… الحد …» label is dropped before the page is read.
-_BOUNDARY_ROW = re.compile(r"<strong>\s*(?:وصف|نوع|طول)\s+(?:ال)?حد[^<:]{0,20}:?\s*</strong>\s*<span[^>]*>([^<]{1,300})</span>")
+# sakan prints the same rows as two spans (🔬 2026-11-05: «<span class="f14">وصف الحد الجنوبي</span> <span class="f16
+# f16-700"> مصعد و ارتدادات 1 و درج …</span>», re-read of sakan 95709): both 11-05 sakan elevator misses (12610753,
+# 12611202) were that deed row while the ad's own «مميزات العقار» names no lift.
+_BOUNDARY_ROW = re.compile(r"<(?:strong|span)[^>]*>\s*(?:وصف|نوع|طول)\s+(?:ال)?حد[^<:]{0,20}:?\s*</(?:strong|span)>"
+                           r"\s*<span[^>]*>([^<]{1,300})</span>")
 
 
 def strip_boundary(page: dict, body: str) -> dict:
