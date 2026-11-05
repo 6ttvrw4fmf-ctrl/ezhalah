@@ -42,7 +42,7 @@ function detectorProblems(s: string): string[] {
   if (!/public\.mon_raise\('P2', 'pin_district_name_not_on_list'/.test(fn)) fail.push('Apple names not on the list are not surfaced for review');
   if (/insert into public\.loc_catalog_district|insert into public\.loc_district_alias/.test(fn)) fail.push('the detector adds districts or aliases by itself (owner: pins + maps, owner list only)');
   if (/held_edge'[^)]*then[^;]*mon_raise\('P1'/.test(fn)) fail.push('edge homes raise P1');
-  if (!/select cron\.schedule\('mon-pin-district-gap', '41 13 \* \* \*'/.test(s)) fail.push('the detector has no daily cron');
+  if (!/select cron\.schedule\('mon-pin-district-gap', '\d{1,2} \d{1,2} \* \* \*',\s+\$c\$set statement_timeout to '600s'; select public\.mon_detect_pin_district_gap\(\);\$c\$\);/.test(s)) fail.push('the detector has no daily cron');
   return fail;
 }
 function rowsProblems(s: string): string[] {
@@ -89,7 +89,10 @@ const prove = (label: string, src: string, mutate: (s: string) => string, judge:
   check(`mutant caught: ${label}`, m !== src && judge(m).length > 0, m === src ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 };
 
-let p = detectorProblems(sDet); check(`${fDet}: the detector repairs, then raises only the residue`, p.length === 0, p.join('; '));
+// The cron is judged in the NEWEST migration that schedules it (20261105093108 moved it to 13:03, cron slot discipline).
+const [fCron, sCron] = newest(/select cron\.schedule\('mon-pin-district-gap'/);
+let p = detectorProblems(sDet.replace(/select cron\.schedule\('mon-pin-district-gap'[\s\S]*?\$c\$\);/, '') + '\n' + (sCron.match(/select cron\.schedule\('mon-pin-district-gap'[\s\S]*?\$c\$\);/)?.[0] ?? ''));
+check(`${fDet} + ${fCron}: the detector repairs, then raises only the residue, daily`, p.length === 0, p.join('; '));
 prove('detector raises without repairing', sDet, (s) => s.replace('perform public.refresh_district_recovery_table(st);', 'null;'), detectorProblems);
 prove('detector forgets never-asked ads', sDet, (s) => s.replace("g.state = 'never_asked' and g.first_seen_at < now() - interval '3 days'", "false"), detectorProblems);
 prove('detector never resolves', sDet, (s) => s.replace("perform public.mon_resolve_key('pin_district_gap', 'pin_district_gap:fleet');", 'null;'), detectorProblems);

@@ -488,7 +488,7 @@ district».
      silent: `district_is_own_town()`. Another town's name is NOT silent (a city question, leave it).
    - The nightly asks Apple about `pin_district_candidates()` (never-asked first, re-ask after 14 days); every answer
      is kept in `listing_pin_ask`, so refused ads are not re-asked and the tail is reached.
-   - `mon_detect_pin_district_gap()` (13:41 UTC daily) repairs first, then P1 `pin_district_gap` only for a pin that
+   - `mon_detect_pin_district_gap()` (13:03 UTC daily) repairs first, then P1 `pin_district_gap` only for a pin that
      is not served or an ad never asked in 3 days. Edge, Apple silent, other city, shared pin = city only, not P1.
      P2 `pin_district_name_not_on_list` lists Apple names for review: alias only by rules 9/near-twin, never by letters.
    Barriers: `verify-pin-district-gap-detector.ts`, `verify-pin-district-fill-contract.ts`.
