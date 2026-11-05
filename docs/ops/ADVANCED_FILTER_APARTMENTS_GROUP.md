@@ -134,7 +134,15 @@ billiards 27 · cleaning 27 · soundproof 25 · cameras 125 · roof 134 · bathr
 Both sites: Gathern 15,280 / Aqar Monthly 3,683 ads; Aqar Monthly calls every unit شقة.
 
 ## LOCKED — Annual rent → Apartment (7 questions, 7 chips each, Skip on EVERY question)
-Skip = no filter on that question, count unchanged, next question. Furnished is a chip here, not its own question.
+Skip = no filter on that question, count unchanged, next question.
+
+**Furnished on yearly rent is its own question, «🛋️ مفروشة / غير مفروشة» (owner 2026-11-05: «for yearly we include it in
+the filter»).** It replaced the 2026-10-31 comfort-card chip («Furnished is a chip here»), which could only say «مفروشة».
+Asked right after age (GROUP_ASK_ORDER) on Apartment, Floor, Room, Studio, Villa, Duplex and Residential Building yearly
+rent, and on the «Apartments & Co-living» / «Villas & Houses» boxes; the counts are cnt_furnished / cnt_unfurnished, and the
+ads that do not say are shown as «لم يذكر», never folded into either answer. Commercial «ready» / «cspace» keep the chip;
+Buy never asks it. Before it shipped, every yearly-rent ad was checked (126,831): the stored answer disagreed with the
+ad's own words on ~0.24 %, all reader faults fixed the same day (PR #10630).
 
 **1. 💳 Rent now, pay later?** Yes · Skip (exists: `rnpl`)
 **2. 🚽 Bathrooms?** 1+ · 2+ · 3+ · Skip (exists)

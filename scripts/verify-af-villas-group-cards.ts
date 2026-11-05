@@ -30,7 +30,7 @@ const asks = (q: SearchQuery) => ['rnpl', 'property_age', 'bathrooms', 'street_w
 const BUY = 'space:majlis,women_majlis,dining_majlis,maid_room,driver_room,annex,roof,elevator'
   + ' | outdoors:pool,garden_yard,grill,outdoor_kitchen,outdoor_diwaniya,waterfall,garage,jacuzzi_sauna'
   + ' | papers:warranty,sanitation,water_tank_well,separate_meters,electronic_deed,basement,two_entrances,car_entrance,cameras_smart_home';
-const RENT = 'comfort:kitchen,ac,furnished,parking,car_entrance,private_entrance,laundry_room'
+const RENT = 'comfort:kitchen,ac,parking,car_entrance,private_entrance,laundry_room'   // furnished: its own question (owner 2026-11-05)
   + ' | space:majlis,women_majlis,dining_majlis,maid_room,driver_room,annex,roof'
   + ' | outdoors:pool,garden_yard,grill,irrigation,garage,storage,balcony'
   + ' | smart:elevator,gym,jacuzzi_sauna,sports_court,smart_home_entry,central_gas,cameras';
@@ -42,7 +42,7 @@ check('Buy → Villa: 🏠 space · 🌳 outdoors & fun · 🧱 build, safety & 
 check('Annual rent → Villa: 🔑 comfort · 🏠 space · 🌳 outdoors · ✨ extras & smart', flat(cardPlan(villaRent)) === RENT, flat(cardPlan(villaRent)));
 check('Buy → Villa asks age, bathrooms, street width, direction and the three cards; no installments, no furnished, no kitchen/AC card',
   asks(villaBuy).join() === 'property_age,bathrooms,street_width,direction,space,outdoors,papers', asks(villaBuy).join());
-check('Annual rent → Villa asks installments, bathrooms, age and the four cards; no street width / direction; «furnished» stays certified for the typed sentence',
+check('Annual rent → Villa asks installments, bathrooms, age, the four cards and «مفروشة / غير مفروشة» (owner 2026-11-05); no street width / direction',
   asks(villaRent).join() === 'rnpl,property_age,bathrooms,comfort,space,outdoors,smart,furnished', asks(villaRent).join());
 check('Duplex shares the villa lists on both deals (owner 2026-11-02)',
   COHORT_CARDS.Duplex === COHORT_CARDS.Villa && flat(cardPlan(Q({ deal: 'Buy', types: ['Duplex'] }))) === BUY

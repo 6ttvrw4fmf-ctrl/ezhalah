@@ -385,8 +385,7 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
   id: 'furnished',
   titleKey: 'Do you prefer it furnished?',
   selection: 'single',
-  // Where the comfort card carries «furnished» as a chip (owner 2026-10-31: «Furnished is a chip here, not its own
-  // question»), the separate question is not asked; the typed «مفروشة» keeps its certification through cohortAllows.
+  // A card chip «furnished» (commercial ready / cspace) replaces this question; yearly rent asks it (owner 2026-11-05).
   eligibility: (q) => cohortAllows(q, 'furnished') && !['comfort', 'ready', 'cspace'].some((id) => cardKeys(q, id).includes('furnished')),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
