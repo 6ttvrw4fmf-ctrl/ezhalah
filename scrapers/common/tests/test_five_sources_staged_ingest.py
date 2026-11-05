@@ -40,11 +40,13 @@ def _kw(**over):
     x = {"_id": 2149160983275828, "list_uuid": "50b060391b4b1c692c8bf5d7", "list_category": "For Sale",
          "list_status": "Active", "prop_type": "Residential", "prop_subtype": "Apartment",
          "listing_title": "شقة للبيع في حي القيروان", "mls_number": "6201037915", "current_list_price": 950000,
-         "list_desc": f"شقة 3 غرف مع مصعد\nللاستفسار:\n{FAKE_PHONE}", "list_desc_en": f"call {FAKE_PHONE}",
+         "list_desc": f"شقة 3 غرف مع مصعد\nللاستفسار:\n{FAKE_PHONE}",
+         "list_desc_en": f"please contact the number provided below\nZaid Fakename.\n{FAKE_PHONE}",
          "total_bed": 3, "total_bath": 2, "living_area": 140, "living_area_units": "sqm",
          "list_address": {"city": "الرياض", "coordinates_gp": {"lat": 24.85, "lon": 46.62}},
          "location": {"region": "الرياض", "neighborhoods": [{"neigh_name": "حي القيروان"}]},
-         "list_agent_office": {"list_agent_full_name": FAKE_NAME, "list_agent_preferred_phone": FAKE_PHONE,
+         "list_agent_office": {"list_agent_full_name": "Zaid Fakename", "list_agent_first_name": "Zaid",
+                               "list_agent_last_name": "Fakename", "list_agent_preferred_phone": FAKE_PHONE,
                                "list_agent_email": FAKE_MAIL},
          "brokerage": {"name": "KW Jasmine", "email": FAKE_MAIL, "phone": FAKE_PHONE},
          "photos": [{"ph_url": "https://storage.googleapis.com/a.jpg"}], "marketing_info": {"display_list_price": True}}
@@ -58,6 +60,7 @@ def test_kw_sale_is_the_source_price_with_licence_pin_and_no_agent():
     assert row["listing_url"] == "https://kwsaudiarabia.com/propertydetails/50b060391b4b1c692c8bf5d7"
     assert row["additional_info"]["latitude"] == pytest.approx(24.85) and row["elevator"] is True
     _no_pii(row)
+    assert "Fakename" not in json.dumps(row, ensure_ascii=False)          # an UNLABELLED signature, removed by value
 
 
 def test_kw_rent_period_only_when_the_text_ties_it_to_the_price():
