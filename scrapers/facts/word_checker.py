@@ -986,6 +986,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     for w in gn[:4]:                                 # «مسبح خاص على بعد دقائق من البحر»: the unit's own pool — an ownership
         if _starts(_strip_wa(w), _OWN_CUES):         # word before the distance ends the look-ahead
             break
+        if _strip_wa(w) in ("موقع", "الموقع", "موقعه", "موقعها", "موقعنا"):
+            break                                    # «موقف سياره 🚗 موقع مميز قريب من الخدمات»: a new subject (dealapp 7439621)
         if _starts(w, _NEAR_AFTER):
             near_after = True
             break
@@ -1684,6 +1686,8 @@ def selftest() -> None:
         ("عماره زاويه اربع شقق", {"apartments_count": 4.0}, ()),
         ("حاليا ثلاث شقق ماجره", {}, ("apartments_count",)),
         ("عمر العقار/ 5 سنين", {"property_age_years": 5.0}, ()),
+        ("غرفة سائق موقف سياره 🚗 موقع مميز قريب من الخدمات وخلف المروه سنتر", {"parking": True, "driver_room": True}, ()),
+        ("موقف سيارات قريب من البرج", {}, ("parking",)),
         ("عمرها ٦سنوات", {"property_age_years": 6.0}, ()),
         # bench-v2 hand check (facts-words-bench-v2): the lobby, a permit, the wiring brand, the zoning
         ("*مدخل مكيّف* *مصعدين*", {"elevator": True}, ("air_conditioner",)),
