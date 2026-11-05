@@ -262,6 +262,11 @@ export function sourceName(source: string): string {
   if (s.includes('شموع العقار') || s.includes('shomou')) return 'شموع العقار';
   if (s.includes('حراج') || s.includes('haraj')) return 'حراج';
   if (s.includes('بروبرتي فايندر') || s.includes('propertyfinder')) return 'بروبرتي فايندر';
+  if (s.includes('كيلر وليامز') || s.includes('kellerwilliams') || s.includes('keller williams')) return 'كيلر وليامز';
+  if (s.includes('الماجدية') || s.includes('almajdiah')) return 'الماجدية';
+  if (s.includes('أساس مكين') || s.includes('asasmakeen') || s.includes('asas makeen')) return 'أساس مكين';
+  if (s.includes('الراجحي للتنمية') || s.includes('mrajhi') || s.includes('al rajhi development')) return 'الراجحي للتنمية';
+  if (s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return 'ستيم العربية';
   if (s.includes('منصة مكتب') || s.includes('maktab')) return 'منصة مكتب';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'سرداب';
   if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'عشاب العقارية';
