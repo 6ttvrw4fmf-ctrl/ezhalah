@@ -1083,6 +1083,9 @@ _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
     # «دورتين مياه». A pool («حمام سباحه»), an outside toilet and a per-unit count are skipped below (_BATH_SKIP_AFTER).
     "bathrooms": (
         re.compile(r"عدد (?:ال)?(?:حمامات|دورات (?:ال)?مياه) ?(\d{1,2})(?!\w)"),
+        # 🔬 2026-11-05 yearly-rent bathroom audit: the label with its value and no «عدد» — wasalt 481847 «الحمامات ٥»,
+        # muhaysini «الحمامات: 3». Not a number that belongs to the next item («الحمامات 3 غرف»).
+        re.compile(r"(?:(?<= )|^)ال(?:حمامات|دورات (?:ال)?مياه) (\d{1,2})(?!\w)(?! ?(?:غرف|غرفه|غرفة|صال|مطبخ|مطابخ|مجلس|مجالس|دور|ادوار|م |متر|شقق|شقه|محل|مكيف))"),
         re.compile(r"(?:(?<= )|^)و?(\d{1,2}) ?(?:دورات|دوره) (?:ال)?مياه(?!\w)"),
         re.compile(r"(?:(?<= )|^)و?(\d{1,2}) ?(?:حمامات|حمام)(?!\w)"),
         re.compile(rf"(?:(?<= )|^)و?{_NUMW} (?:دورات (?:ال)?مياه|حمامات)(?!\w)"),
@@ -1101,6 +1104,8 @@ _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
 _COUNT_RANGE = {"floors": (1, 60), "apartments_count": (2, 500), "shops_count": (1, 300), "bathrooms": (1, 20)}
 # one UN-numbered bathroom («دورة مياه»), singular: alongside a counted one it makes the stated count incomplete
 _BATH_BARE = re.compile(r"(?:(?<= )|^)(?:ال|و|وال|ب|ل)?دوره (?:ال)?مياه(?!\w)")
+# the span of a labelled bathroom total: «عدد دورات المياه 3» / «الحمامات ٥» (the first two bathroom patterns)
+_BATH_LABEL = re.compile(r"(?:عدد |ال(?:حمامات|دورات))")
 # a pool, an outside / annex toilet, or a per-unit / per-room count is not the home's bathroom count
 _BATH_SKIP_AFTER = ("سباح", "خارج", "بالخارج", "ملحق", "بالملحق", "بالحوش", "بالسطح", "للسائق", "السائق", "بكل", "لكل",
                     "في كل", "كل شقه", "كل غرفه", "مشترك")
@@ -1347,7 +1352,13 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     # a counted «2 دورة مياه» next to an UN-numbered «دورة مياه» elsewhere (wasalt 5952515: «دورة مياه تخدم القسم
     # الرجالي … 2دورة مياه» — the page totals 3) is two statements that do not add up to a stated count → none
     bath_hits = num_hits.get("bathrooms", [])
-    if bath_hits:
+    # 🔬 2026-11-05: a LABELLED total («عدد دورات المياه 3», «الحمامات ٥») is the home's total — haraj 18924617 «مجلس مستقل
+    # مع دورة مياه … عدد دورات المياه 3» answered nothing because the majlis's own bathroom voided it. Labelled hits win;
+    # an unlabelled count next to an unnumbered one still says nothing (the total may be 3 or 4).
+    labelled = [h for h in bath_hits if _BATH_LABEL.match(clauses[h.clause][2][h.s:h.e])]
+    if labelled:
+        num_hits["bathrooms"] = bath_hits = labelled
+    if bath_hits and not labelled:
         for ci, (_off, _c, t, _idx) in enumerate(clauses):
             if ci in void:
                 continue
@@ -1580,6 +1591,12 @@ def selftest() -> None:
         ("دورتا مياه (2)", {"bathrooms": 2.0}, ()),
         ("صالة ودورتين مياه ومطبخ", {"bathrooms": 2.0}, ()),
         ("عدد دورات المياه: 4", {"bathrooms": 4.0}, ()),
+        # 🔬 2026-11-05 yearly-rent bathroom audit: a labelled total is the total
+        ("النوم ٤ من ضمنها غرفة ماستر\nالحمامات ٥\nمجلس ، صالة", {"bathrooms": 5.0}, ()),             # wasalt 481847
+        ("عامله1 مجلس مستقل مع دورة مياه 1 مطبخ1 عدد دورات المياه 3 عمر العقار اربع سنوات", {"bathrooms": 3.0}, ()),  # haraj 18924617
+        ("غرفة + ركن مطبخ + دورة مياه عدد دورات المياه : 1 1 مكيف سبيلت راكب", {"bathrooms": 1.0}, ()),  # haraj 18942937
+        ("الحمامات 3 غرف نوم", {}, ("bathrooms",)),                                                       # the 3 is the rooms'
+        ("• مجلس مستقل بدورة مياه • غرفة نوم ماستر • صالة • 3 دورات مياه", {}, ("bathrooms",)),          # 3 or 4: unstated
         ("غرفتين و2 حمام", {"bathrooms": 2.0}, ()),
         ("دورة مياه واحدة", {"bathrooms": 1.0}, ()),
         ("مسبح و حمام سباحة", {}, ("bathrooms",)),
