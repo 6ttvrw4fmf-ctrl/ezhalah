@@ -475,6 +475,14 @@ Saudi pair, minus the guards' deliberate strips; a coordinate proven NOT the ad'
 `ops_captured_pin_waiver` with evidence) and `mon_detect_pin_share_drop` (a table losing ≥50 pins and ≥3
 points of pin share between daily snapshots in `ops_platform_pin_daily`).
 
+**Map tab: the same house posted twice on ONE site is ONE pin with a card per ad (owner 2026-11-04, permanent: «they
+become like 2 … but same pin … do it for everything they basically merge but show separately of course»).** Same
+source_table + deal + price + area + type + bedrooms within ~100 m (DBSCAN 0.0009°) → every copy is DRAWN at the group's
+most-shared spot (`map_pin_snap`, hourly `map_pin_snap_refresh_ar()` at :23; `map_pins_ar`'s street-zoom branch reads
+it). Nothing is hidden or deleted and the stored coordinates stay the source's own — only where the pin is drawn moves;
+tapping it lists every ad. Two DIFFERENT sites stay two pins (owner 2026-11-03: same-site copies stay, cross-site is
+normal). Guard: `scripts/verify-map-twins-share-one-pin.ts` (migration `20261105060207`).
+
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
 Preview tabs have no frame history/loading indicator, and reload remounts their content.
