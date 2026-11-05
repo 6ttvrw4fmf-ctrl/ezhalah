@@ -96,6 +96,7 @@
     "mon-land-ppm-typed-as-total": "36 5 * * *",
     "mon-one-sided-platforms": "25 4 * * *",
     "mon-p0-fast-lane": "1,4,7,10,13,15,18,21,24,26,28,31,34,35,38,40,42,44,46,48,51,54,57,58 * * * *",
+    "mon-pin-district-gap": "3 13 * * *",
     "mon-price-fidelity": "47 * * * *",
     "mon-price-magnitude-gate": "17 6 * * *",
     "mon-refresh-coverage": "25 6 * * *",

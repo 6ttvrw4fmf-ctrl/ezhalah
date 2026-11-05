@@ -488,6 +488,17 @@ district».
    Batch 2 (315 homes) was switched on 2026-10-25 by `20261025214336`. The 123 edge homes and the 430 Apple
    couldn't answer are in the nightly Google Maps check: scheduled task `google-maps-district-check`, folder
    `~/Documents/google-maps-key/daily-check/` on the owner's Mac.
+
+   **A PIN IN A DISTRICT CITY NEVER STAYS BLANK BY ACCIDENT (owner 2026-11-05, permanent).** A served ad with a pin, in
+   a city with ≥ 10 districts on our list, whose site is silent, must have been through the pin layer within 3 days.
+   - A district field that only names the ad's OWN town («حي الدرعية الجديدة» in الدرعية, «الطائف» in الطائف) is
+     silent: `district_is_own_town()`. Another town's name is NOT silent (a city question, leave it).
+   - The nightly asks Apple about `pin_district_candidates()` (never-asked first, re-ask after 14 days); every answer
+     is kept in `listing_pin_ask`, so refused ads are not re-asked and the tail is reached.
+   - `mon_detect_pin_district_gap()` (13:03 UTC daily) repairs first, then P1 `pin_district_gap` only for a pin that
+     is not served or an ad never asked in 3 days. Edge, Apple silent, other city, shared pin = city only, not P1.
+     P2 `pin_district_name_not_on_list` lists Apple names for review: alias only by rules 9/near-twin, never by letters.
+   Barriers: `verify-pin-district-gap-detector.ts`, `verify-pin-district-fill-contract.ts`.
 9. **NEVER DUPLICATES, FOR EVERY LISTING (owner 2026-10-25, permanent).** Two things are now automatic, and you must
    never work around them:
    - **The list:** besides rule 7, a name is refused when its LETTERS equal a listed name in that city (spaces, punctuation

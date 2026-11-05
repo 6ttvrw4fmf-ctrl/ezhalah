@@ -41,7 +41,7 @@ if (process.env.PIN_LOAD_FROM) {
 }
 
 const P8 = env("APPLE_MAPS_P8"), KEY_ID = env("APPLE_MAPS_KEY_ID"), TEAM_ID = env("APPLE_MAPS_TEAM_ID");
-const MAX = Number(process.env.PIN_MAX_ADS || 600);
+const MAX = Math.min(Number(process.env.PIN_MAX_ADS || 600), 1000); // PostgREST returns at most 1,000 rows per call
 const DRY = process.env.DRY_RUN === "1";
 const RUN_ID = `apple-nightly-${new Date().toISOString().slice(0, 10)}`;
 
@@ -55,67 +55,17 @@ async function accessToken() {
   return (await r.json()).accessToken;
 }
 
-// 1. candidates: served, blank district, has a pin (the service key reads the same public index)
-// skip ads that already have a pin row (held edge homes would otherwise be re-asked every night)
-const have = new Set();
-for (let from = 0; ; from += 1000) {
-  const r = await fetch(`${SB}/rest/v1/listing_pin_district?select=source_table,listing_id`, { headers: { ...sbHeaders, Range: `${from}-${from + 999}` } });
-  if (!r.ok && r.status !== 206) throw new Error(`pin rows ${r.status}`);
-  const rows = await r.json();
-  for (const x of rows) have.add(`${x.source_table}:${x.listing_id}`);
-  if (rows.length < 1000) break;
-}
-// …and ads whose SITE names a district (rule 1: the site's district wins, the pin never overrules it). The loader
-// refuses those (site_names_its_own_district) and writes no row for them, so without this filter the same ads were
-// asked again every night: 2026-11-02 01:17 asked 50, all 50 site-named, switched on 0, while 1,797 served ads with
-// a pin and no site district were never reached (🆕 backlog 1098). Same two sources pin_district_load reads.
-async function siteNamed(rows) {
-  const out = new Set();
-  const bySt = new Map();
-  for (const c of rows) (bySt.get(c.source_table) ?? bySt.set(c.source_table, []).get(c.source_table)).push(c.listing_id);
-  for (const [st, ids] of bySt) {
-    for (let i = 0; i < ids.length; i += 150) {
-      const inList = ids.slice(i, i + 150).join(",");
-      for (const q of [`listing_native_location_v2?select=listing_id&source_table=eq.${st}&listing_id=in.(${inList})&district_ar=not.is.null`,
-                       `listing_source_district_ar?select=listing_id&source_table=eq.${st}&listing_id=in.(${inList})`]) {
-        const r = await fetch(`${SB}/rest/v1/${q}`, { headers: sbHeaders });
-        if (!r.ok) throw new Error(`site-named ${r.status}: ${(await r.text()).slice(0, 200)}`); // fail closed: never ask blind
-        for (const x of await r.json()) out.add(`${st}:${x.listing_id}`);
-      }
-    }
-  }
-  return out;
-}
-// Every candidate first (≈4k rows, 4 pages), so a pin many blank ads share can be skipped too: the loader refuses a
-// pin ≥ 5 served ads share (a site/office default, not this home's spot) — 215 of the first 300 asked on 2026-11-02.
-const all = [];
-for (let from = 0; ; from += 1000) {
-  const r = await fetch(`${SB}/rest/v1/search_listings_ar?select=source_table,listing_id,city_id,latitude,longitude&production_ready=eq.true&district_ar=is.null&latitude=not.is.null&longitude=not.is.null&city_id=not.is.null&order=last_updated.desc,source_table,listing_id`,
-    { headers: { ...sbHeaders, Range: `${from}-${from + 999}` } });
-  if (!r.ok && r.status !== 206) throw new Error(`candidates ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  const rows = await r.json();
-  all.push(...rows);
-  if (rows.length < 1000) break;
-}
-const pinKey = (c) => `${Number(c.latitude).toFixed(5)},${Number(c.longitude).toFixed(5)}`;
-const pinCount = new Map();
-for (const c of all) pinCount.set(pinKey(c), (pinCount.get(pinKey(c)) ?? 0) + 1);
-const seen = all.length;
-const notHave = all.filter((c) => !have.has(`${c.source_table}:${c.listing_id}`));
-const skippedHave = all.length - notHave.length;
-const unshared = notHave.filter((c) => pinCount.get(pinKey(c)) < 5);
-const skippedShared = notHave.length - unshared.length;
-const todo = [];
-let skippedSite = 0;
-for (let i = 0; i < unshared.length && todo.length < MAX; i += 500) {
-  const chunk = unshared.slice(i, i + 500);
-  const named = await siteNamed(chunk);
-  for (const c of chunk) {
-    if (named.has(`${c.source_table}:${c.listing_id}`)) { skippedSite++; continue; }
-    if (todo.length < MAX) todo.push(c);
-  }
-}
-console.log(`blank ads with a pin ${seen} · already have a pin row ${skippedHave} · shared pin ${skippedShared} · site names its own district ${skippedSite} · asking Apple for ${todo.length} (cap ${MAX}) · ${RUN_ID}${DRY ? " · DRY RUN" : ""}`);
+// 1. candidates: the DATABASE picks them (pin_district_candidates, migration 20261105085039) with the loader's own
+// filters — served, blank, a pin, no pin row yet, not a shared pin (>= 5 ads), the site silent or naming only its own
+// town, no title district — never-asked ads first, cities with a district list first, an ad re-asked only after 14
+// days. Before 2026-11-05 this job re-derived those filters here and the loader logged no refused answer, so the same
+// ~600 newest ads were asked every night (11-04: asked 600, stored 9) and ~3,300 others never were.
+const cr = await fetch(`${SB}/rest/v1/rpc/pin_district_candidates`, {
+  method: "POST", headers: { ...sbHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ p_max: MAX }),
+});
+if (!cr.ok) { console.error(`pin_district_candidates ${cr.status}: ${(await cr.text()).slice(0, 300)}`); process.exit(1); } // fail closed: never ask blind
+const todo = await cr.json();
+console.log(`asking Apple for ${todo.length} (cap ${MAX}) · ${RUN_ID}${DRY ? " · DRY RUN" : ""}`);
 
 // 2. Apple, one answer per 5-dp spot
 let tok = await accessToken(), tokAt = Date.now(), calls = 0, got429 = 0;
