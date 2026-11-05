@@ -68,6 +68,14 @@ def test_kw_rent_period_only_when_the_text_ties_it_to_the_price():
     assert (yearly["rent_period"], yearly["price_annual"]) == ("annual", 55000)
 
 
+def test_kw_area_is_the_unit_for_a_flat_and_the_lot_for_a_villa():
+    (flat, _), _ = KW.map_listing(_kw(living_area=109.33, lot_size_area=607.1, lot_size_units="sqm"))
+    assert flat["area_m2"] == 109
+    (villa, _), _ = KW.map_listing(_kw(listing_title="فيلا للبيع", prop_subtype="Single Family Detached",
+                                       living_area=300, lot_size_area=1225, lot_size_units="sqm"))
+    assert villa["property_type"] == "Villa" and villa["area_m2"] == 1225
+
+
 def test_kw_off_market_and_internal_codes_are_not_guessed():
     assert KW.map_listing(_kw(list_category="Off Market"))[0] is None
     (row, _), _ = KW.map_listing(_kw(mls_number="MA00034"))
@@ -99,6 +107,11 @@ def test_almajdiah_price_is_the_one_payment_figure_and_the_period_stays_silent()
     assert row["listing_url"] == "https://almajdiah.com/rentals/46?platform=web"          # never www. (self-signed)
     assert (row["kitchen"], row["maid_room"], row["floor_number"]) == (True, False, 0)
     _no_pii(row)
+
+
+def test_almajdiah_placeholder_licence_is_no_licence():
+    row, _ = AM.map_unit(_am(rental_license="--"), None)
+    assert row["license_number"] is None and row["additional_info"]["rental_license_raw"] == "--"
 
 
 def test_almajdiah_expired_licence_is_not_listed():

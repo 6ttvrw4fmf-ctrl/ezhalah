@@ -19,8 +19,8 @@ price; «تفاصيل أكثر» shows «دفعة: 70,000 / دفعتين: 72,000
   one_batches_price  the price for ONE payment = the card's price → PRICE = SOURCE. No period word anywhere on the
                      page or in the API: PERIOD = SOURCE = silent → rent_period NULL (judged at launch by the search
                      index's judge_silent_rent_period_ar, flagged judged). two_batches_price + insurance are kept.
-  rental_license     the REGA ad licence (59 of 59 on 2026-11-05; is_rental_license_expired kept, an expired one is
-                     not listed) → license_number.
+  rental_license     the REGA ad licence → license_number when it is 10 digits (54 of 59 on 2026-11-05; 5 carry «--» /
+                     «000» / «...», printed «ترخيص الاعلان:--» on the card → NULL, raw kept). An expired one is not listed.
   bedrooms_count, bathrooms_count, total_area, floor_text, is_furnished, is_has_kitchen, is_has_air_conditioning,
   is_has_maid_room, is_has_storage_room, is_has_roof, is_has_rather (balcony), parking_text, halls_design_text.
   Type: the API has no type word. Every unit is «المبنى : X · الوحدة : N» on a stated floor of a residential building
@@ -118,6 +118,7 @@ def map_unit(u: dict, project: Optional[dict]) -> tuple[Optional[dict], str]:
     ploc = (project or {}).get("location") or {}
     pin = pin_dict(m.group(1), m.group(2)) if m else pin_dict(ploc.get("latitude"), ploc.get("longitude"))
     price = _int(u.get("one_batches_price"))
+    lic = str(u.get("rental_license") or "").strip()
     desc = redact_pii(u.get("unit_description"), keep_lines=True) or None
     title = redact_pii(u.get("unit_name")) or None
     flags = {col: bool(u[k]) for k, col in _FLAGS.items() if u.get(k) in (0, 1)}
@@ -133,7 +134,8 @@ def map_unit(u: dict, project: Optional[dict]) -> tuple[Optional[dict], str]:
         "area_m2": _int(u.get("total_area")), "bedrooms": _int(u.get("bedrooms_count")),
         "bathrooms": _int(u.get("bathrooms_count")), "floor_number": _FLOOR.get(u.get("floor_text") or ""),
         "parking": True if "موقف" in (u.get("parking_text") or "") else None,
-        "license_number": str(u["rental_license"]).strip() if u.get("rental_license") else None,
+        # 54 of 59 carry a 10-digit REGA licence; 5 carry a placeholder («--», «000», «...») — the card prints «--»: none
+        "license_number": lic if re.fullmatch(r"\d{10}", lic) else None,
         "photo_urls": [i for i in (u.get("images") or []) if isinstance(i, str)] or None,
         "project_name": ((u.get("project") or {}).get("display_name") or {}).get("ar") or (project or {}).get("name"),
         # PRICE = SOURCE (the one-payment figure the card shows); PERIOD = SOURCE = silent
@@ -147,7 +149,8 @@ def map_unit(u: dict, project: Optional[dict]) -> tuple[Optional[dict], str]:
     info = {
         "source_id": str(u["id"]), "unit_kind": u.get("type"), "unit_name": u.get("unit_name"),
         "building_name": u.get("building_name"), "unit_number": u.get("unit_number"),
-        "rega_ad_license_number": row["license_number"], "is_rental_license_expired": u.get("is_rental_license_expired"),
+        "rega_ad_license_number": row["license_number"], "rental_license_raw": lic or None,
+        "is_rental_license_expired": u.get("is_rental_license_expired"),
         "price_one_payment": u.get("one_batches_price"), "price_two_payments": u.get("two_batches_price"),
         "insurance": u.get("insurance"), "payment_terms": "دفعة / دفعتين",
         "floor_text": u.get("floor_text"), "halls_design_text": u.get("halls_design_text"),

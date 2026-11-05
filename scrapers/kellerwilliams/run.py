@@ -181,8 +181,12 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     desc = redact_pii(x.get("list_desc"), keep_lines=True) or None
     loc = location(x)
     st = x.get("structure") or {}
+    # The ad page prints the LOT size («Acre 1225 sqm»), the API also carries living_area. A unit inside a building
+    # (Apartment, Floor) is its living area — its «lot» is the whole building's plot (607 m² on a 109 m² flat); every
+    # other type (villa, land, building …) is the lot the page prints. Both are kept in additional_info.
     area = None
-    for k, u in (("living_area", "living_area_units"), ("lot_size_area", "lot_size_units")):
+    order = (("living_area", "living_area_units"), ("lot_size_area", "lot_size_units"))
+    for k, u in (order if ptype in ("Apartment", "Floor") else order[::-1]):
         if (x.get(u) or "sqm") == "sqm" and _int(x.get(k)):
             area = _int(x.get(k))
             break
