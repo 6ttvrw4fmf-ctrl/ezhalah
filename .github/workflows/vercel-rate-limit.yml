@@ -48,7 +48,17 @@ jobs:
           AUTH=(-H "Authorization: Bearer $VERCEL_TOKEN" -H 'content-type: application/json')
           ACT=$([ "$MODE" = off ] && echo log || echo "$MODE")
           ON=$([ "$MODE" = off ] && echo false || echo true)
-          current=$(curl -sS --fail-with-body "${AUTH[@]}" "$API/active?$Q")
+          # A project that never had a firewall rule has no active config yet: Vercel answers 404 (measured on the first
+          # run, 2026-11-04). That is "no rules", not an error; anything else non-200 stops here.
+          read_active() {
+            code=$(curl -sS -o fw.json -w '%{http_code}' "${AUTH[@]}" "$API/active?$Q")
+            case "$code" in
+              200) cat fw.json ;;
+              404) echo '{}' ;;
+              *) echo "reading the active firewall config failed: HTTP $code — $(head -c 300 fw.json)" >&2; return 1 ;;
+            esac
+          }
+          current=$(read_active)
           id=$(jq -r --arg n "$NAME" '[.rules[]? | select(.name == $n) | .id][0] // ""' <<<"$current")
           rule=$(jq -n --arg n "$NAME" --arg a "$ACT" --argjson on "$ON" '{
             name: $n, active: $on,
@@ -62,12 +72,14 @@ jobs:
           }')
           body=$(jq -n --arg id "$id" --argjson v "$rule" 'if $id == "" then {action: "rules.insert", id: null, value: $v} else {action: "rules.update", id: $id, value: $v} end')
           echo "$( [ -z "$id" ] && echo inserting || echo updating ) $NAME → active=$ON action=$ACT"
-          curl -sS --fail-with-body -X PATCH "${AUTH[@]}" "$API?$Q" --data "$body" >/dev/null
-          after=$(curl -sS --fail-with-body "${AUTH[@]}" "$API/active?$Q")
+          code=$(curl -sS -o patch.json -w '%{http_code}' -X PATCH "${AUTH[@]}" "$API?$Q" --data "$body")
+          case "$code" in 2??) echo "PATCH accepted (HTTP $code)" ;; *) echo "PATCH refused: HTTP $code — $(head -c 400 patch.json)"; exit 1 ;; esac
+          after=$(read_active)
           if jq -e --arg n "$NAME" --arg a "$ACT" --argjson on "$ON" '.rules[]? | select(.name == $n and .active == $on and .action.mitigate.rateLimit.action == $a)' <<<"$after" >/dev/null; then
             echo "✓ the ACTIVE firewall config has $NAME with active=$ON, action=$ACT (60 s window, 300 per IP)."
           else
             echo "✗ the change did not appear in the ACTIVE config (it may be a draft, or the token lacks firewall scope)."
             echo "  rules now in the active config: $(jq -c '[.rules[]? | {name, active}]' <<<"$after")"
+            echo "  PATCH answered: $(head -c 400 patch.json)"
             exit 1
           fi
