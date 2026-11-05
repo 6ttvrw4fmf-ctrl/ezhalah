@@ -483,6 +483,14 @@ most-shared spot (`map_pin_snap`, refreshed hourly by `map_pin_snap_refresh_ar()
 tapping it lists every ad. Two DIFFERENT sites keep their own spot (owner 2026-11-03: same-site copies stay, cross-site
 is normal) — but see the next rule: their heads never overlap on screen. Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`, `20261105071552`).
 
+**Map tab: zooming in goes COUNTRY → REGION → CITY → DISTRICT → pins, every name in the UI language (owner 2026-11-05,
+permanent: «first thing Saudi, the total number, then region, then city, and then district»; «I switched to English — why
+does it show Arabic? It should change automatically»).** `areaLevelFor()` (src/lib/mapAreas.ts): > 12° one «السعودية /
+Saudi Arabia» label with every listing, > 5° the 13 regions (always all 13), > 2.5° cities, > 0.06° districts; a tap goes
+one level closer. Regions and the country are SUMMED from the city labels, each of which carries its region in the labels
+feed (9th element, `20261105…_map_labels_carry_region`). English names: REGION_EN for regions, `translitPlace()` for cities
+and districts; a language switch redraws the layer. Guard: `scripts/verify-map-labels-country-region-english.ts`.
+
 **Map tab: no two pins ever sit on each other, and the count pill names the district (owner 2026-11-05, permanent: «we
 can never have this issue … user cannot select what he wants … we need to make sure they are in the same pin close by
 … whenever we get a new listing»; «include the name of the district»).** Before the map draws its street-level heads,
