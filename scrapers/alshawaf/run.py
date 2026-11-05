@@ -220,6 +220,12 @@ _BATH_ONE = re.compile(r"(?<![\d٠-٩]\s)دور(?:ة|ه)\s*مياه")
 # describing the units, not this listing — its first room phrase is one flat's layout, not the
 # property's. Same class as wslnaa's rooms≠bedrooms on a building. Rooms stay NULL there.
 _MULTI_UNIT = re.compile(r"كل\s*شق|شقق|سويت|فتحات|فتحتين|وحدات|أدوار|ادوار|عمارة|مستودعات")
+# A home described FLOOR BY FLOOR («الدور الارضي: مجلس ودورة مياه … الدور الاول : غرفتين نوم … الدور الثاني :
+# غرفتين ودورة مياه») counts each floor, never the home: 🆕 2026-11-05, alshawaf 23746393 / 23746391 stored bedrooms 2
+# and bathrooms 1 from the FIRST floor's words while the duplexes have 4+ bedrooms and 4–5 «دورة مياه» across floors.
+# Summing floors is a calculation we never make, so two or more floor headings → no room counts at all (NULL).
+_FLOOR_HEADING = re.compile(r"الدور\s*(?:الأرضي|الارضي|الأول|الاول|الثاني|الثالث|العلوي)")
+_BATH_NOUN = re.compile(r"دور(?:ات|ة|ه)\s*(?:ال)?مياه|حمام")
 # Types whose room count is genuinely THIS unit's bedroom count.
 _SINGLE_DWELLING = {"Apartment", "Villa", "Duplex", "Floor", "Studio", "Room"}
 
@@ -618,6 +624,10 @@ def _floor_number(raw: Optional[str]) -> Optional[int]:
     return N.to_int(m.group(1)) if m else None
 
 
+def _per_floor(text: Optional[str]) -> bool:
+    return len(set(m.group(0) for m in _FLOOR_HEADING.finditer(_digits(text or "")))) >= 2
+
+
 def _rooms(text: Optional[str], property_type: Optional[str]) -> dict[str, Any]:
     """Bedrooms/halls/bathrooms from the source's own room prose — only for a SINGLE dwelling, and
     never from text that itemises several units (that count is one flat's, not this listing's)."""
@@ -626,14 +636,16 @@ def _rooms(text: Optional[str], property_type: Optional[str]) -> dict[str, Any]:
     t = _digits(text)
     if _MULTI_UNIT.search(t):
         return {}
+    if _per_floor(t):
+        return {}
     out: dict[str, Any] = dict(N.rooms_from_phrase(t))       # shared, tested: bedrooms + halls
     m = _BATH.search(t)
     if m:
         n = N.to_int(m.group(1))
         if n is not None and 1 <= n <= 20:
             out["bathrooms"] = n
-    elif _BATH_ONE.search(t):
-        out["bathrooms"] = 1
+    elif _BATH_ONE.search(t) and len(_BATH_NOUN.findall(t)) == 1:   # «دورة مياه» named once = one; named
+        out["bathrooms"] = 1                                       # several times = a count we do not add up
     return out
 
 
@@ -710,6 +722,10 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     direction = _direction(fields.get("الواجهة والإتجاه")) or (
         street_facade if fields.get("الواجهة والإتجاه") is None else None)
     rooms = _rooms(fields.get("الغرف") or description, property_type)
+    if property_type in _SINGLE_DWELLING and _per_floor(fields.get("الغرف") or description):
+        # The source SETTLED it: a floor-by-floor home states no total. AUTHORITATIVE_NULL clears the per-floor
+        # count an older read stored (a plain None is dropped by the no-clobber upsert — 🆕 lesson 2026-10-17).
+        rooms = {k: db.AUTHORITATIVE_NULL for k in ("bedrooms", "bathrooms", "halls")}
 
     photos = list(detail.get("photo_urls") or [])
     if not photos and ix["thumb"] and PLACEHOLDER_IMG not in ix["thumb"]:
