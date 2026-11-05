@@ -37,11 +37,12 @@ from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
-from scrapers.facts.one_reader import listing_amenities  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
+PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance", "furnished", "balcony_terrace", "laundry_room")
 SOURCE = "Al Rajhi Development"
 SLUG = "mrajhi"
 PREFIX = "MRJ"
@@ -127,7 +128,8 @@ def map_unit(code: str, url: str, u: dict) -> tuple[Optional[tuple[dict, str]], 
     title = redact_pii(u["title"] or ld.get("name")) or None
     period, annual = N.rent_period_and_annual(price, word) if price else (None, None)
     pin = pin_dict(*u["pin"]) if u["pin"] else {}
-    prose = listing_amenities(f"{title or ''}\n{desc or ''}")
+    # ONE READER (owner 2026-11-03): prose amenities come from the Advanced Filter's word reader, never normalize.prose_amenities.
+    prose = amenity_answers(f"{title or ''}\n{desc or ''}", PROSE_COLS, {"balcony": "balcony_terrace"})
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{code}", "listing_url": url, "source": SOURCE, "active": True,
         "title": title, "description": desc, "property_type": ptype, "transaction_type": "Rent",

@@ -10,6 +10,9 @@
 //   * 20260919010944 — six wasalt rows (repaired by 20260919144320, which wrote a detector, not a guard);
 //   * a 2026-09-19 manual bulk pass — 131 wasalt rows ('manual_bulk_verified');
 //   * 20261104013008 — two wasalt rows, 46 days after the first repair.
+//   * 20261105042913 — one dealapp row (DA620694), the next day, by the same hand; relocated by the migration that
+//     follows it (dealapp_620694_deactivation_leaves_the_deletion_ledger). It was already applied before this guard ran
+//     on its mirror PR, which is why the cut-off moves rather than the file changing (applied SQL is byte-exact).
 // A detector catches it after production carries the false claim. This catches it at PR time.
 //
 // The ledger a deactivation belongs in is ops_stale_inactivation_probe (and, to keep it from being
@@ -27,7 +30,7 @@ import { join } from 'node:path';
 const ROOT = join(import.meta.dirname, '..');
 const MIGRATIONS = join(ROOT, 'supabase', 'migrations');
 /** The last offender; everything after it is checked. Applied migrations cannot be rewritten. */
-const LAST_KNOWN_OFFENDER = '20261104013008';
+const LAST_KNOWN_OFFENDER = '20261105042913';
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {

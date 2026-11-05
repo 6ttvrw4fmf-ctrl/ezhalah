@@ -43,10 +43,11 @@ from urllib.parse import quote, unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
-from scrapers.facts.one_reader import listing_amenities  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
+PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance", "furnished", "balcony_terrace", "laundry_room")
 SOURCE = "Asas Makeen"
 SLUG = "asasmakeen"
 PREFIX = "ASM"
@@ -143,7 +144,8 @@ def map_unit(uid: str, url: str, u: dict) -> tuple[Optional[dict], str]:
     price = N.to_int(u["price_raw"])
     desc = redact_pii("\n".join(u["specs"]), keep_lines=True) or None
     area = N.to_int(re.sub(r"م2|م²", "", u["labelled"].get("المساحة", "")))
-    prose = listing_amenities("\n".join(u["features"]))
+    # ONE READER (owner 2026-11-03): prose amenities come from the Advanced Filter's word reader, never normalize.prose_amenities.
+    prose = amenity_answers("\n".join(u["features"]), PROSE_COLS, {"balcony": "balcony_terrace"})
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{uid}", "listing_url": url, "source": SOURCE, "active": True,
         "title": redact_pii(u["title"]) or None, "description": desc,
