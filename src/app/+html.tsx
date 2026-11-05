@@ -35,6 +35,9 @@ export default function Root({ children }: PropsWithChildren) {
         <link rel="dns-prefetch" href="https://dealapp.sa" />
         <link rel="dns-prefetch" href="https://api.dealapp.sa" />
         <link rel="dns-prefetch" href="https://uploads.deal-app.com" />
+        {/* MAP SPEED (owner 2026-11-05): Apple's MapKit script is the map's first download; opening the connection
+            early saves the DNS + TLS round trips on a phone when «خريطة» is tapped. Connection only, no download. */}
+        <link rel="preconnect" href="https://cdn.apple-mapkit.com" />
 
         {/* ICONS. Expo emits exactly ONE tag — <link rel="icon" href="/favicon.ico"> — from
             app.json's `favicon`. That is not enough, and the gap is visible:
