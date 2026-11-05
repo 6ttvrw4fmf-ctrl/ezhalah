@@ -60,9 +60,12 @@ export function areaName(a: Pick<AreaRow, 'city' | 'district'>, level: AreaLevel
 }
 
 /** Where a tap on a label takes the map: one level closer — country → regions, region → cities, city → districts,
- *  district → pins. Each span sits inside the next level's band of areaLevelFor(). */
+ *  district → pins. MapKit WIDENS a requested span to the screen's shape: measured live 2026-11-05 on a 390×844 phone,
+ *  a region tap asking 4° landed at 5.17° — still the region band — so the user tapped and nothing changed. Each target
+ *  therefore sits deep enough inside the next band that up to TAP_WIDEN × the request still lands there. */
+export const TAP_WIDEN = 1.6;
 export function areaZoomSpan(level: AreaLevel): number {
-  return level === 'country' ? 9 : level === 'region' ? 4 : level === 'city' ? 0.4 : 0.015;
+  return level === 'country' ? 7 : level === 'region' ? 3 : level === 'city' ? 0.3 : 0.015;
 }
 
 /** A view too crowded for price pins shows district names while two or more districts share it; once one district
