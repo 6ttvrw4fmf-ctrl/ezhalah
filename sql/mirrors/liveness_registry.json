@@ -798,6 +798,12 @@
     "grace": 3
   },
   {
+    "platform": "steam",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "sukna",
     "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
