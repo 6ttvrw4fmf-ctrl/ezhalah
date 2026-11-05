@@ -564,6 +564,19 @@ Report each of those four as its own number. `0` proven is a result; "not measur
 - All searches are **read-only** and hit **only Ezhalah's own index — never a source platform**, at
   any scale. A certification must never generate source-platform traffic.
 
+### 40.6a First card by 12 s, and the weekly capacity check (owner, 2026-11-05 — permanent)
+The owner: «12 seconds … part of the journey experience; higher than that is an issue». From the tap on «بحث» to the
+first Filter card, ~12 s is deliberate (the logo strip) and stays; LONGER is a defect. The card waits for the results
+data (results RPC + card reads) and for the strip, whichever ends later; the guided counts fire after and do not gate
+it. So the results data must be in by ≈ 11.5 s at p95 (`DATA_READY_LIMIT_MS`, warning over 8 s;
+`scripts/lib/capacityRamp.ts`, `FIRST_CARD_LIMIT_S = 12`). `.github/workflows/capacity-check.yml` measures how many
+people can search at once and still meet it: weekly (Wed 23:10 UTC), 1 → 8 simultaneous real Filter searches, 45 s a
+step, stops on foreign load / a late step / > 1 % errors, rows in `ops_capacity_run`, P1 from
+`mon_detect_capacity_regression` below the floor or after 8 silent days. It is the one robot allowed past the
+"never exceed concurrency 6" line above (cap 8, auto-stop), and the one that does not queue in `robot_gate()`'s two
+robot lanes — measured through the lanes, 8 users read as 6 waiting in `pg_sleep`, not as the database. Changing either
+is a reviewed edit to `capacityRamp.ts`.
+
 ### 40.7 Evidence — machine-readable ledger, every major run
 Persist one record per search: intended search · actual request · result count · rows validated ·
 unique listing IDs · latency · violations · PASS/FAIL · **bug classification**. Budget ~3.8 KB per
