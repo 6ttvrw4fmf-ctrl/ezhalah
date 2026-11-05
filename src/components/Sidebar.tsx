@@ -898,14 +898,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                   switches the language; the pill stays only on the page's top bar. */}
             </View>
 
-            {/* The upper guest CTA card that used to sit here was the OLD auth prompt (removed
-                with the SignInDock, owner 2026-08-28): the large AuthModal now raises itself for
-                signed-out visitors. ONE minimal affordance remains below — in the same bottom slot
-                as the signed-in profile row — so login/signup is always one click away and reopens
-                that same popup. */}
-            <View style={{ flex: 1, minHeight: 30 }} />
-            <View style={[s.divider, dark && dks.divider]} />
-            {NavLinks}
+            {/* SIGN UP / LOG IN AT THE TOP (owner 2026-11-04: «add it on top and let the user click it»): the first thing a guest
+                sees when the menu opens, right under the brand; one tap opens the same sign-in popup. */}
+            <View style={{ height: 14 }} />
             <Pressable
               style={(st) => [s.cta, WEB_SMOOTH, isOn(st) && s.ctaHover]}
               onPress={openSignIn}
@@ -918,6 +913,12 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 <Text style={s.ctaSub}>{t('Get more. Sign up free.')}</Text>
               </View>
             </Pressable>
+
+            {/* The OLD upper auth prompt card was removed with the SignInDock (owner 2026-08-28); the ONE sign-in card left is
+                the one above, under the brand (moved up from the bottom slot 2026-11-04). */}
+            <View style={{ flex: 1, minHeight: 30 }} />
+            <View style={[s.divider, dark && dks.divider]} />
+            {NavLinks}
           </ScrollView>
         )}
     </>
