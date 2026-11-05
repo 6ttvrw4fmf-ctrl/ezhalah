@@ -81,7 +81,9 @@ const PROBE_ROOT = 'scrapers.common.cleanup';
 // 2026-10-05: `scrapers.common.af_robot` (the 🔬 hourly robot customer) imports af_score's request
 // builder and so joins the cohort (8). It never opens a page, but af-robot.yml carries the same
 // transport anyway — the rule is per invocation, not per intent.
-const COHORT_FLOOR = 8;
+// 2026-11-05: `scrapers.common.served_link_check` (the daily served-link check) imports cleanup's `_probe`
+// for wasalt links (9). served-link-check.yml runs it under xvfb with WASALT_BROWSER and Chromium.
+const COHORT_FLOOR = 9;
 
 const ls = (glob: string) =>
   execFileSync('git', ['ls-files', glob], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
