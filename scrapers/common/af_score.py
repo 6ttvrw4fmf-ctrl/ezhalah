@@ -339,15 +339,22 @@ def strip_boundary(page: dict, body: str) -> dict:
     return {**page, "evidence_lines": keep, "text_head": head}
 
 
+# A counted chip printing ZERO says nothing (🔬 2026-11-05). abaad prints «<strong>0</strong> حمام», «0 غرف نوم», «0 صالات»,
+# «<strong>0</strong> مطبخ» on ads that never filled them in (13214778, a villa, re-read live); the page reader splits the
+# «0» from its word, so «مطبخ» stood alone and the score asked «kitchen». The chip is dropped before the page is read.
+_ZERO_CHIP = re.compile(r"<strong>\s*[0٠]\s*</strong>\s*[^<]{1,24}")
+
+
+def drop_zero_chips(body: str) -> str:
+    return _ZERO_CHIP.sub(" ", body)
+
+
 def page_says_yes(lines: list[str], field: str) -> bool:
     """The ad itself names the amenity and does not negate it («مصعد» yes, «لا يوجد مصعد» no)."""
     kw = BOOL_KW[field]
     lines = [y for y in lines if not DEED_BOUNDARY.search(y)]
     hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
-    # a counted chip of ZERO is a stated «none» (🔬 2026-11-05): abaad 13214778 prints «<strong>0</strong> مطبخ» and
-    # was asked «kitchen» from it.
-    zero = r"(?:^|\s)[0٠]\s*(?:" + kw + ")"
-    return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) or re.search(zero, x) for x in hit)
+    return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
 
 
 def says_yes(lines: list[str], field: str, platform: str = "", page: dict | None = None,
@@ -931,6 +938,7 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                 status, body = probe(url)
             except Exception:  # noqa: BLE001
                 status, body = None, ""
+            body = drop_zero_chips(body or "")
             page = page_evidence(body) if status == 200 and body else None
             if page is not None:
                 page = strip_related(strip_post_nav(strip_boundary(page, body), body), body)

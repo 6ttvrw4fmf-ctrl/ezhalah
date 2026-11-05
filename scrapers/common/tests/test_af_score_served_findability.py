@@ -180,8 +180,16 @@ def test_related_ads_block_is_other_ads():
     assert "مطبخ" not in out["text_head"]
 
 
-def test_a_zero_count_chip_is_not_a_yes():
-    # abaad 13214778, re-read live 2026-11-05: «<i class="fa-solid fa-kitchen-set"></i> <strong>0</strong> مطبخ»
-    assert S.page_says_yes([S.norm("0 مطبخ")], "kitchen") is False
-    assert S.page_says_yes([S.norm("1 مطبخ")], "kitchen") is True
-    assert S.page_says_yes([S.norm("مطبخ راكب")], "kitchen") is True
+ABAAD_CHIPS = ('<div class="chips"><div class="chip"><i class="fa-solid fa-shower"></i>\n<strong>0</strong> حمام\n</div>'
+               '<div class="chip"><i class="fa-solid fa-kitchen-set"></i>\n<strong>0</strong> مطبخ\n</div>'
+               '<div class="chip"><i class="fa-solid fa-car"></i>\n<strong>1</strong> موقف\n</div></div>')
+
+
+def test_a_zero_count_chip_says_nothing():
+    # abaad 13214778, re-read live 2026-11-05: every unfilled chip prints «<strong>0</strong> …»
+    from scrapers.common.source_reread import page_evidence
+    before = S.page_lines(page_evidence("<html><body>" + ABAAD_CHIPS + "</body></html>"))
+    after = S.page_lines(page_evidence("<html><body>" + S.drop_zero_chips(ABAAD_CHIPS) + "</body></html>"))
+    assert S.page_says_yes(before, "kitchen") is True          # the old reading: «مطبخ» alone, read as a yes
+    assert S.page_says_yes(after, "kitchen") is False
+    assert "موقف" in " ".join(after)                           # a counted chip of 1 stays
