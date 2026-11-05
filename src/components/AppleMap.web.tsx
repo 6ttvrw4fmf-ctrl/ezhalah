@@ -729,7 +729,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const pickArea = (a: AreaRow, level: AreaLevel) => {
       live.history.push(m.region);
       const sp = areaZoomSpan(level);
-      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(a.lat, a.lng), new mk.CoordinateSpan(sp, sp)), true);
+      // SHAPED LIKE THE SCREEN (measured live 2026-11-05, 390×844): a square span on a tall map is widened by MapKit to
+      // fit the width — a 3° region tap landed at 5.17°, still the region band, so the tap changed nothing. Asking a
+      // longitude span no wider than the screen's width/height share keeps the latitude span what areaZoomSpan says.
+      const box = (hostRef.current as unknown as HTMLElement | null)?.getBoundingClientRect();
+      const aspect = box && box.height > 0 ? Math.min(1, box.width / box.height) : 1;
+      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(a.lat, a.lng), new mk.CoordinateSpan(sp, sp * aspect)), true);
     };
     const areaElement = (a: AreaRow, level: AreaLevel) => {
       const el = document.createElement('div');

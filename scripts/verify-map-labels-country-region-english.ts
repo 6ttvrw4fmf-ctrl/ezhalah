@@ -89,6 +89,7 @@ mustCatch('an old feed drawing an empty map at region zoom', emptyOld !== real &
 // Wiring: the map names labels in the UI language through the real transliterator, and redraws on a language switch.
 const map = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 check('the map names each label with areaName(a, level, loc, translitPlace)', /name\.textContent = areaName\(a, level, loc, translitPlace\)/.test(map) && /import \{ translitPlace \} from '@\/lib\/translitPlace';/.test(map));
+check('a label tap asks a span shaped like the screen (a tall phone never widens it back into the same level)', /new mk\.CoordinateSpan\(sp, sp \* aspect\)/.test(map) && /Math\.min\(1, box\.width \/ box\.height\)/.test(map));
 check('a language switch redraws the labels (locale is in the pin layer\'s deps)', /\}, \[pinsKey, failed, mapReady, locale\]\);/.test(map));
 check('the count pill names the place in English too (viewPlaceName with translitPlace)', /viewPlaceName\(p, loc, translitPlace\)/.test(map));
 // The server half: city labels carry their region, and the feed sends it as the 9th element.
