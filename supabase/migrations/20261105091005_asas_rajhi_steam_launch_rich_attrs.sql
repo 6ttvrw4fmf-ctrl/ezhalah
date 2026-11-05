@@ -15,7 +15,9 @@ set local client_min_messages = warning;  -- the Management API drops the HTTP c
                                            -- so nothing is sent until COMMIT. RAISE EXCEPTION still aborts.
 DO $do$
 DECLARE base text; arms text; t text; i int; ok boolean := false;
-  anchor constant text := E'FROM october_commercial_listings x\n  WHERE x.active)';
+  -- The Property Finder commercial arm (the October arm stopped being the last one at the PF launch): matched WITHOUT
+  -- the closing paren and the new arms inserted right after it, so it holds whether or not KW/Almajdiah came after PF.
+  anchor constant text := E'FROM propertyfinder_commercial_listings x\n  WHERE x.active';
   tables text[] := ARRAY['asasmakeen_residential_listings','asasmakeen_commercial_listings','mrajhi_residential_listings','mrajhi_commercial_listings','steam_residential_listings','steam_commercial_listings'];
 BEGIN
   IF position('asasmakeen_residential_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) > 0 THEN
@@ -27,7 +29,7 @@ BEGIN
       SET LOCAL lock_timeout = '3s';
       base := rtrim(rtrim(pg_get_viewdef('public.listing_rich_attrs'::regclass,true)),';');
       IF (length(base) - length(replace(base, anchor, ''))) / length(anchor) <> 1 THEN
-        RAISE EXCEPTION 'listing_rich_attrs inner-union anchor (the october commercial arm) not found exactly once - shape moved, refusing to guess';
+        RAISE EXCEPTION 'listing_rich_attrs inner-union anchor (the propertyfinder commercial arm) not found exactly once - shape moved, refusing to guess';
       END IF;
       arms := '';
       FOREACH t IN ARRAY tables LOOP
@@ -77,7 +79,7 @@ UNION ALL
   WHERE x.active$f$, t);
       END LOOP;
       EXECUTE 'CREATE OR REPLACE VIEW public.listing_rich_attrs AS ' ||
-        replace(base, anchor, left(anchor, length(anchor) - 1) || arms || ')');
+        replace(base, anchor, anchor || arms);
       EXECUTE 'GRANT ALL ON public.listing_rich_attrs TO postgres, anon, authenticated, service_role';
       ok := true;
       EXIT;
