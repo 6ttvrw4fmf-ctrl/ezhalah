@@ -59,6 +59,7 @@
 import { join } from 'node:path';
 import { certifiedAmenityKeys, COHORT_CARDS } from '../src/lib/afCohorts.ts';
 import type { SearchQuery } from '../src/data/search.ts';
+import { shippedScriptsText } from '../e2e/lib/shippedBundle.mjs';
 import { liftSymbols } from './lib/liftSymbols.ts';
 
 const PROD = 'https://ezhalah-app.vercel.app';
@@ -270,15 +271,18 @@ const groups: LiteralGroup[] = [
         .map(([card, tokens]) => ({ name: `COHORT_CARDS.${type}.${deal}.${card}`, tokens: tokens as readonly string[] })))),
 ];
 
-const html = await fetchText(`${PROD}/`, 'production HTML');
-const entryMatch = /\/_expo\/static\/js\/web\/entry-[a-f0-9]+\.js/.exec(html);
-check('production HTML references an Expo web entry bundle', !!entryMatch, 'the app may have moved off Expo web — update this script\'s bundle discovery');
-if (!entryMatch) {
+// The web build is SPLIT (2026-11-02): entry-*.js is a small runtime and the amenity code rides in hashed route chunks.
+// Reading entry-*.js alone made this check red on every run after the split while production carried main's
+// certification (2026-11-05). Read the whole served build — every script the page loads and every chunk they name.
+const served = await shippedScriptsText(PROD);
+check('production HTML references the Expo web build and every chunk it names is readable',
+  served.files > 0 && served.missing === 0, `read ${served.files} file(s), ${served.missing} unreadable — a failed read is never a pass`);
+if (served.files === 0) {
   console.error(`\n✗ ${++failed} check(s) FAILED — cannot locate the live bundle to check`);
   process.exit(1);
 }
-console.log(`Live entry bundle: ${entryMatch[0]}`);
-const bundle = await fetchText(`${PROD}${entryMatch[0]}`, 'live entry bundle');
+console.log(`Live build: ${served.files} script file(s)`);
+const bundle = served.text;
 check('fetched a non-trivial bundle (sanity floor, catches an empty/error response passing as 200)',
   bundle.length > 500_000, `got ${bundle.length} bytes`);
 
