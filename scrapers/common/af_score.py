@@ -929,6 +929,60 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     return row
 
 
+SERVED_N = 5                 # served-answer findability: ads asked per website (owner 11-05: every site tested)
+SERVED_COLS = (*AMENITY_SLUG, FURNISHED)
+
+
+def served_findability(client, anon, platform: str, rng: random.Random, *, n: int = SERVED_N,
+                       pace: float = PACE_S, hours: int = MIN_AGE_H) -> dict:
+    """The second, independent half of findability (🔬 2026-11-05, owner: «we need this 100», over EVERY site).
+
+    The page-stated half above asks a question only when the score's own page reader sees the answer on the page,
+    so on 2026-11-05 it tried 87 of 142 websites: muhaysini (11,028 served yeses), wasalt (8,990), dwelleo (3,730)
+    and sakani (1,309) were never asked at all — their pages are a shell or their prose is not quoted by that
+    reader. This half needs no page: it takes ads that CARRY a served Advanced Filter yes, picks ONE of those
+    answers the way a customer taps one chip, and asks the PUBLIC anon RPC (deal, city, district, type, period +
+    that answer) whether the ad comes back. A miss is the customer picking an answer we show for an ad and not
+    reaching it: a mapping, an RPC, a pool or a stored-vs-served disagreement. Whether the yes is TRUE is the
+    precision half's question, not this one's. Returns {served_tried, served_found, served_missed_ids}."""
+    out = {"served_tried": 0, "served_found": 0, "served_missed_ids": []}
+    if anon is None:
+        return out
+    before = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    def base():
+        return (client.table("search_listings_ar").select(STORED, count="exact")
+                .eq("platform", platform).eq("production_ready", True).lt("first_seen_at", before)
+                .not_.like("type_ar", "أرض%").or_(",".join(f"{c}.is.true" for c in SERVED_COLS)))
+
+    total = base().limit(1).execute().count or 0
+    if not total:
+        return out
+    last = 0.0
+    for off in rng.sample(range(total), min(n, total)):
+        stored = (base().order("listing_id").range(off, off).execute().data or [{}])[0]
+        answers = offered([c for c in SERVED_COLS if stored.get(c) is True], stored)
+        if not answers:
+            continue
+        pick = [rng.choice(answers)]
+        params = rpc_params(stored, pick)
+        if not params:
+            continue
+        time.sleep(max(0.0, last + pace - time.monotonic()))
+        last = time.monotonic()
+        verdict = findable(ask(anon, params), stored["source_table"], stored["listing_id"])
+        if verdict is None:
+            continue
+        out["served_tried"] += 1
+        if verdict:
+            out["served_found"] += 1
+        else:
+            key = f"{stored['source_table']}:{stored['listing_id']}"
+            out["served_missed_ids"].append(key)
+            print(f"  served-miss {key} asked {pick}", flush=True)
+    return out
+
+
 def findability(row: dict) -> float | None:
     return row["find_found"] / row["find_tried"] if row["find_tried"] else None
 
@@ -941,7 +995,7 @@ def _line(r: dict) -> str:
     return (f"{r['platform']}: sampled={r['sampled']} findability={_pct(findability(r))} "
             f"({r['find_found']}/{r['find_tried']}) precision={_pct(af_precision(r))} "
             f"capture={_pct(af_recall(r))} parity={r.get('parity_ok', 0)}/{r.get('parity_tried', 0)} "
-            f"misses={len(r['find_missed_ids'])}"
+            f"misses={len(r['find_missed_ids'])} served={r.get('served_found')}/{r.get('served_tried')}"
             + (f" | {r['note']}" if r["note"] else ""))
 
 
@@ -953,6 +1007,8 @@ def write_rows(client, rows: list[dict]) -> str:
         "af_page_states": r["af_page_states"], "af_captured": r["af_captured"],
         "mismatch_ids": r["mismatch_ids"], "find_missed_ids": r["find_missed_ids"], "note": r["note"],
         "parity_tried": r.get("parity_tried") or None, "parity_ok": r.get("parity_ok") if r.get("parity_tried") else None,
+        "served_tried": r.get("served_tried"), "served_found": r.get("served_found"),
+        "served_missed_ids": r.get("served_missed_ids"),
     } for r in rows]
     try:
         client.table(TABLE).upsert(payload, on_conflict="night,platform").execute()
@@ -971,7 +1027,11 @@ def fleet_totals(rows: list[dict]) -> dict:
             "capture": r_(t("af_captured"), t("af_page_states")), "find_tried": t("find_tried"),
             "find_found": t("find_found"), "sampled": t("sampled"),
             "parity_tried": sum(r.get("parity_tried") or 0 for r in rows),
-            "parity_ok": sum(r.get("parity_ok") or 0 for r in rows)}
+            "parity_ok": sum(r.get("parity_ok") or 0 for r in rows),
+            # served-answer half: «X % over N of M sites» — N = websites asked at least once, M = every website
+            "served_tried": sum(r.get("served_tried") or 0 for r in rows),
+            "served_found": sum(r.get("served_found") or 0 for r in rows),
+            "served_sites": sum(1 for r in rows if r.get("served_tried")), "sites": len(rows)}
 
 
 def main() -> int:
@@ -1001,6 +1061,11 @@ def main() -> int:
                              night=night, pace=a.pace)
         except Exception as e:  # noqa: BLE001 — one website failing never stops the fleet
             row = new_row(night, p, note=f"error: {type(e).__name__}: {e}"[:300])
+        try:
+            row.update(served_findability(client, anon, p, rng, pace=a.pace))
+        except Exception as e:  # noqa: BLE001 — a failed read is UNKNOWN (NULL), never a zero
+            row.update(served_tried=None, served_found=None, served_missed_ids=None)
+            print(f"  ! served findability unread for {p}: {type(e).__name__}: {e}"[:300], flush=True)
         rows.append(row)
         print(_line(row), flush=True)
         # WRITE AS YOU GO (🔬 2026-10-11): the 08:00 run of 2026-10-11 hit the job's 60-minute timeout after
@@ -1025,7 +1090,8 @@ def main() -> int:
         f = out["fleet"]
         print(f"fleet: findability={_pct(f['findability'])} ({f['find_found']}/{f['find_tried']}) "
               f"precision={_pct(f['precision'])} capture={_pct(f['capture'])} "
-              f"parity={f['parity_ok']}/{f['parity_tried']}")
+              f"parity={f['parity_ok']}/{f['parity_tried']} "
+              f"served={f['served_found']}/{f['served_tried']} over {f['served_sites']} of {f['sites']} sites")
         print(out["written"])
     return 0
 
