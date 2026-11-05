@@ -163,3 +163,31 @@ export function areasFromFeed(feed: AreaFeedRow[], level: AreaLevel, deals: stri
 
 /** A close view estimated (from the dots feed) to hold more listings than this skips the exact read: it is crowded. */
 export const CROWD_ESTIMATE = 1500;
+
+/** THE COUNT NAMES WHERE THE VIEW IS, AT EVERY ZOOM (owner 2026-11-05: «when the user zooms in this needs to change —
+ *  it shows the city name, then the district, depending where the user is»; it said «… in Saudi Arabia» at every
+ *  label zoom below the country). From the labels on screen: the country view is the country; otherwise the label
+ *  holding at least AREA_PLACE_SHARE of the listings in view — a region, a city, a district; at district zoom, failing
+ *  one district, the city most of those districts are in; else null, the plain «في هذه المنطقة». Never a name most of
+ *  the view is not in. */
+export const AREA_PLACE_SHARE = 0.6;
+export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
+  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): string | null {
+  if (level === 'country') return COUNTRY_NAME[loc];
+  const onScreen = rows.filter((a) => inView(a, center, span));
+  const seen = onScreen.length ? onScreen : rows;
+  const total = seen.reduce((t, a) => t + a.n, 0);
+  if (!total) return null;
+  const top = seen.reduce((b, a) => (a.n > b.n ? a : b));
+  if (top.n / total >= AREA_PLACE_SHARE) {
+    const name = areaName(top, level, loc, latin);
+    return level === 'district' && loc === 'ar' ? `حي ${name}` : name;
+  }
+  if (level === 'district') {
+    const byCity = new Map<string, number>();
+    for (const a of seen) byCity.set(a.city, (byCity.get(a.city) ?? 0) + a.n);
+    const [city, n] = [...byCity].reduce((b, x) => (x[1] > b[1] ? x : b));
+    if (city && n / total >= AREA_PLACE_SHARE) return areaName({ city, district: '' }, 'city', loc, latin);
+  }
+  return null;
+}

@@ -77,6 +77,22 @@ const lands = (l: Lib) => (['country', 'region', 'city', 'district'] as const).e
 check('every label tap lands one level closer, even widened ×1.6 by a tall phone screen', lands(lib));
 const oldSpans = real.replace("level === 'region' ? 3 :", "level === 'region' ? 4 :");
 mustCatch('the 4° region tap that stayed on regions on a phone (5.17° live)', oldSpans !== real && !lands(await load(oldSpans)));
+// The count names where the view is at every zoom (owner 2026-11-05: «it shows the city name, then the district»).
+const V = (lat: number, lng: number, d: number) => [{ latitude: lat, longitude: lng }, { latitudeDelta: d, longitudeDelta: d }] as const;
+const riyadhRegion = lib.areasFromFeed(feed, 'region', ALL, KSA);
+check('region zoom over Riyadh Region → «منطقة الرياض» / «Riyadh Region»', lib.areaPlaceName(riyadhRegion, 'region', 'ar', latin, ...V(24.7, 46.7, 2)) === 'منطقة الرياض' && lib.areaPlaceName(riyadhRegion, 'region', 'en', latin, ...V(24.7, 46.7, 2)) === 'Riyadh Region');
+const cities = lib.areasFromFeed(feed, 'city', ALL, KSA);
+check('city zoom over Jeddah → «جدة» / «Jeddah»', lib.areaPlaceName(cities, 'city', 'ar', latin, ...V(21.5, 39.2, 1)) === 'جدة' && lib.areaPlaceName(cities, 'city', 'en', latin, ...V(21.5, 39.2, 1)) === 'Jeddah');
+const dists = [{ city: 'جدة', district: 'حي الشراع', lat: 21.76, lng: 39.08, n: 700 }, { city: 'جدة', district: 'حي أبحر', lat: 21.77, lng: 39.1, n: 200 }];
+check('district zoom inside one district → «حي الشراع»', lib.areaPlaceName(dists, 'district', 'ar', latin, ...V(21.765, 39.09, 0.1)) === 'حي الشراع');
+const split = [{ city: 'جدة', district: 'حي أ', lat: 21.76, lng: 39.08, n: 300 }, { city: 'جدة', district: 'حي ب', lat: 21.77, lng: 39.1, n: 300 }, { city: 'جدة', district: 'حي ج', lat: 21.75, lng: 39.09, n: 300 }];
+check('district zoom across several districts of one city → the city («جدة»)', lib.areaPlaceName(split, 'district', 'ar', latin, ...V(21.76, 39.09, 0.1)) === 'جدة');
+check('no place holds most of the view → null (the plain «في هذه المنطقة»)', lib.areaPlaceName(regions, 'region', 'ar', latin, ...V(24, 45, 30)) === null);
+check('the country view names the country', lib.areaPlaceName(country, 'country', 'en', latin, ...V(23.9, 45.1, 17)) === 'Saudi Arabia');
+const anyTop = real.replace('  if (top.n / total >= AREA_PLACE_SHARE) {', '  if (true) {');
+mustCatch('a place named when it holds only a minority of the view', anyTop !== real && (await load(anyTop)).areaPlaceName(regions, 'region', 'ar', latin, ...V(24, 45, 30)) !== null);
+check('the map hands every label view to areaPlaceName (not a fixed «في هذه المنطقة» below the country)', /setViewPlace\(areaPlaceName\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span\)\)/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+
 const noCountry = real.replace("  if (latitudeDelta > COUNTRY_LABELS_ABOVE) return 'country';\n", '');
 mustCatch('the opening view drawing regions or cities instead of the one Saudi total', noCountry !== real && (await load(noCountry)).areaLevelFor(17) !== 'country');
 const shareRegions = real.replace("  if (level === 'country' || level === 'region') return rows;\n", '');
