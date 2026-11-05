@@ -50,6 +50,11 @@ def _reader_version() -> str:
     for path in (W.__file__, N.__file__):
         with open(path, "rb") as fh:
             h.update(fh.read())
+    # …and the PDPL sanitizer's text rules the reader runs first (2026-11-05: a sanitizer fix that changes what the reader
+    # sees must re-read old ads, yet extract.py's AI-only edits must not)
+    from scrapers.facts import extract as E
+    for rx in (E._CONTACT_CLAUSE_RE, E._URL_RE, E._KUNYA_RE, E._CLAUSE_SPLIT_RE):
+        h.update(rx.pattern.encode("utf-8"))
     return h.hexdigest()[:16]
 
 

@@ -207,7 +207,7 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "annex": ["^ملحق$", "^ملاحق$", "^ملحقين$", "^annex"],
     "two_entrances": ["^مدخلين$", "^مدخلان$", "re:مدخل (?:لل|ال)?رجال و ?مدخل (?:لل|ال)?نساء", "two entrances",
                       ("re:مدخل واحد", False)],
-    "yard": ["^حوش$", "^حوشين$", "^حوشان$", "^احواش", "^فناء", "^yard", "courtyard"],
+    "yard": ["^حوش$", "^حوشين$", "^حوشان$", "^احواش", "^فناء", "^yard$", "^yards$", "courtyard"],   # «Yardville Compound» is a name
     "electronic_deed": ["re:(?:ال)?صك(?:وك)? (?:ال)?(?:الكتروني|اكتروني)(?:ه|ا)?", "electronic deed",
                         ("re:(?:ال)?صك (?:ال)?(?:يدوي|ورقي)", False)],
     "grill": ["^مشب$", "^مشبات$", "^شوايه$", "^شوايات$", "^شواء$", "^bbq", "barbecue"],
@@ -538,7 +538,7 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "separate_water_meter": (("خزان", "دور", "حمام", "مغسل", "سخان", "تحلي", "فلتر", "مضخ", "بئر", "بير"), ()),
     "separate_electricity_meter": (("غرف", "لوح", "مولد", "تمديد", "خزان"), ()),
     "laundry_room": ((), ("سيار", "السيار", "صحون", "الصحون", "اطباق", "الاطباق", "مواعين")),   # «غسالة صحون» is a dishwasher
-    "kitchen": (("ادوات", "سطح"), ()),
+    "kitchen": (("ادوات",), ()),          # «سطح مطبخ» (a countertop) is checked adjacent only — «سطح واسع مطبخ راكب» has both
     "pool": (("ادوات", "مستلزمات"), ("table",)),                 # «pool table» is billiards
     # bench-v2: «مدخل مكيّف», «مداخل مكيفة», «ممرات مكيفة» — the building's lobby, not the unit's AC
     "air_conditioner": (("مدخل", "مداخل", "ممر", "لوبي", "ردهه", "بهو", "مصلي"), ()),
@@ -666,6 +666,11 @@ _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "rest
 # «قريب من المسجد عدد 9 مكيفات راكبه», «20 دقيقة من روشن ❄ تكييف» — the near word belongs to the bullet before, the AC
 # is the unit's. Kept to the AC: a kitchen or a lift CAN be a nearby place's («قريب من مطبخ السلطان», a tower's lifts).
 _NEAR_NEVER_FACTS = frozenset({"air_conditioner"})
+# A VIEW is not a distance (🔬 2026-11-05): «صالة معيشة مطلة بلكونة مطبخ أمريكي» has a balcony and a kitchen. A view word only
+# silences what can be outside (a park, a pool, a sea) — never the home's own rooms.
+_VIEW_WORDS = frozenset(_n(w) for w in ("مطل", "مطله", "تطل", "يطل", "اطلاله", "باطلاله", "overlooking", "views"))
+_UNIT_ROOMS = frozenset({"kitchen", "balcony", "maid_room", "driver_room", "laundry_room", "majlis", "dining_majlis", "elevator",
+                         "storage", "roof", "annex", "furnished", "two_entrances", "private_entrance", "car_entrance"})
 # A NEARBY LIST item names a PLACE (🔬 2026-11-04 café audit): «Close to shops, restaurants, and markets». The list ends at
 # the first item that is not a place — DealApp's REGA list «مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» goes on
 # with the unit's own features — and it only ever silences the public places of _NEAR_PUBLIC_FACTS (never parking).
@@ -723,6 +728,49 @@ _NEGOTIABLE = ("للتفاوض", "للتفاهم", "للنقاش", "للسوم",
 def _not_negotiable(words: list[str]) -> list[str]:
     return [w for k, w in enumerate(words)
             if not (_strip_wa(w) in ("قابل", "قابله") and words[k + 1:k + 2] and words[k + 1].startswith(_NEGOTIABLE))]
+
+
+# A «prepared / possible» word governs ITS OWN object (🔬 2026-11-05, Property Finder review): «تكييف سبليت تأسيس مصعد»
+# has a split AC and a prepared lift; «مطبخ موسس مصعد», «غرفه خادمه تأسيس مصعد», «بمصعدين يمكن تأجير» keep their kitchen,
+# maid room and lifts. BEFORE the hit it applies when adjacent («تأسيس مصعد») or one qualifier / make-verb away («تأسيس كامل
+# للتكييف», «يمكن عمل مسبح»); AFTER the hit it applies («مصعد مؤسس», «مسبح خارجي مؤسس») unless it governs the next word
+# («… تأسيس مصعد», «موسس مصعد») — and a make-verb next («مسبح يمكن عمله») still belongs to the hit.
+_PREP_QUALIFIERS = tuple(_n(w) for w in ("كامل", "كامله", "بالكامل", "جاهز", "جاهزه", "فقط", "لجميع", "جميع", "لكل", "كل"))
+_PREP_MAKE = tuple(_n(w) for w in ("عمل", "انشاء", "اضافه", "تركيب", "بناء", "تحويل", "استخدام", "استغلال", "تجهيز", "توفير"))
+# «يمكن / قابل …» take a VERB after them («يمكن تأجير», «قابل للتفاوض») — they govern it unless it is a make-verb («يمكن عمله»);
+# «تأسيس / مؤسس …» govern the next word only when it is itself a fixture («تأسيس مصعد»), not «تأسيس أمريكي».
+_PREP_VERBAL = tuple(_n(w) for w in ("يمكن", "ممكن", "امكانيه", "بالامكان", "يصلح", "قابل", "قابليه"))
+_PREPARABLE = tuple(_n(w) for w in ("مصعد", "مصاعد", "اصنصير", "مسبح", "تكييف", "تكيف", "مكيف", "مكيفات", "فايبر", "الياف",
+                                     "كهرباء", "سخان", "مطبخ", "كاميرات", "انتركم", "غاز", "شاحن"))
+
+
+def _bare_l(w: str) -> str:
+    """«للاستخدام» → «استخدام», «لعمل» → «عمل»: the object after «قابل / يمكن» often carries «ل»."""
+    for p_ in ("وال", "لل", "ال", "ل", "و"):
+        if w.startswith(p_) and len(w) > len(p_) + 2:
+            return w[len(p_):]
+    return w
+
+
+def _prepared_applies(before: list[str], after: list[str], hit: str = "") -> bool:
+    # «تمديد نحاس للمكيفات», «تأسيس كامل لمصعد»: a hit that starts with «ل / لل» is the prepared word's own object
+    if hit.startswith("ل") and any(_starts(w, _PREPARED) for w in before[-3:]):
+        return True
+    if before:
+        if _starts(before[-1], _PREPARED):
+            return True
+        if len(before) > 1 and _starts(before[-2], _PREPARED) and (
+                _starts(_bare_l(before[-1]), _PREP_QUALIFIERS) or _starts(_bare_l(before[-1]), _PREP_MAKE)):
+            return True
+    for k, w in enumerate(after[:2]):
+        if not _starts(w, _PREPARED):
+            continue
+        nxt = after[k + 1] if k + 1 < len(after) else ""
+        if nxt and (_starts(_bare_l(nxt), _PREPARABLE)
+                    or (_starts(_strip_wa(w), _PREP_VERBAL) and not _starts(_bare_l(nxt), _PREP_MAKE))):
+            continue                                # it governs the next word, not this hit
+        return True
+    return False
 
 
 def _strip_wa(w: str) -> str:
@@ -852,8 +900,14 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     p2, n2 = gp[-2:], gn[:2]
     # a PUBLIC place keeps the old reading: «خدمات سيرا على الاقدام مثل بقالة … ومقهى السعر قابل للتفاوض» is a nearby café
     neg = (lambda ws_: ws_) if fact in _PUBLIC_FACTS or fact in _NEAR_PUBLIC_FACTS else _not_negotiable
-    if any(_starts(w, _PREPARED) for w in neg(gp[-2:] + [""])[:-1] + neg(gn[:3])[:2]) \
-            or "prepared for" in " ".join(n2):
+    if fact in _PERMIT_FACTS:                       # «لا يمكن تأجير عزاب» / «مايمكن للعزاب»: «cannot» is an explicit no
+        w3 = [_strip_wa(w) for w in gp[-3:]]
+        if any(w in ("مايمكن", "مايصلح") or (w in ("يمكن", "ممكن", "يصلح") and k > 0 and w3[k - 1] in ("لا", "ما", "غير"))
+               for k, w in enumerate(w3)):
+            return False, ws, we
+    public = fact in _PUBLIC_FACTS or fact in _NEAR_PUBLIC_FACTS   # public places keep the strict window (precision first)
+    if (any(_starts(w, _PREPARED) for w in gp[-2:] + gn[:2]) if public
+            else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:3]), t[ws:we])) or "prepared for" in " ".join(n2):
         return None, s, e
     if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) for w in p2):
         return None, s, e
@@ -875,6 +929,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         at = max((k for k, w in enumerate(p5) if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS), default=-1)
         if at >= 0 and any(_strip_wa(w) in _SERVICES_OBJECT or _strip_wa(w) in _UNIT_AGAIN for w in p5[at + 1:]):
             p5 = p5[at + 1:]
+    near5 = [w for w in p5 if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS]
+    if fact in _UNIT_ROOMS and near5 and all(_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS for w in near5):
+        p5 = [w for w in p5 if w not in near5]       # a view word next to the home's own room says nothing about the room
     if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
                                           or any(p in " ".join(p5) for p in _NEAR_PHRASES)
                                           or _DISTANCE_TO.search(" ".join(gp[-8:]))):
@@ -916,8 +973,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     ex_before, ex_after = _EXCLUDE.get(fact, ((), ()))
     if fact in _METER_FACTS and "عداد" in t[ws:e]:
         ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
-    if fact == "air_conditioner" and "مكيفات" in t[ws:we]:
-        ex_before = ()                               # «مدخلان🔹 مكيفات راكبة»: AC UNITS are the home's; a lobby is «مدخل مكيف»
+    if fact == "kitchen" and p2 and _starts(_strip_wa(p2[-1]), ("سطح", "اسطح")):
+        return None, s, e                            # «سطح مطبخ» / «أسطح المطبخ» is a countertop
+    if fact == "air_conditioner" and ("مكيفات" in t[ws:we] or _strip_wa(t[ws:we]) in ("تكييف", "تكيف")):
+        ex_before = ()                               # «مدخلان🔹 مكيفات راكبة», «مدخلان للشقة تكييف سبيلت»: the home's; a lobby is «مدخل مكيف»
     if fact in _NEEDS_CUE and p2 and _starts(p2[-1], _CUES):
         ex_before, ex0 = (), ex_before               # «3 غرف واصل كهرباء»: the cue sits between (AI teacher pass 2026-10-27)
         if _starts(p2[-1], ("عداد",)):
@@ -1380,6 +1439,21 @@ def selftest() -> None:
         ("ربع واجهة على جامع حديث", {}, ("mosque",)),
         ("موقع مباشر: مباشرة على مسجد وحديقة", {}, ("mosque", "garden")),
         ("الواجهة شمالية + حديقة خاصة", {"garden": True}, ()),
+        # a prepared / possible word governs its own object; a view word never silences the home's own rooms (🔬 2026-11-05)
+        ("مميزات إضافية: تكييف سبليت تأسيس مصعد تأسيس فايبر", {"air_conditioner": True}, ("elevator",)),
+        ("صاله نساء مطبخ تأسيس مصعد درج داخلي", {"kitchen": True}, ("elevator",)),
+        ("مطبخ مع غرفه خادمه تأسيس مصعد", {"kitchen": True, "maid_room": True}, ("elevator",)),
+        ("دور 1 بمصعدين يمكن تأجير", {"elevator": True}, ()),
+        ("دور 4 بمصعد لا يمكن تأجير عزاب فقط عوائل", {"elevator": True, "singles": False, "families": True}, ()),
+        ("دور 1 بمصعدين يمكن تأجير عزاب او عوائل", {"elevator": True, "singles": True, "families": True}, ()),
+        ("سباكة ( GS أصلي ) تكييف أسبليت ( تأسيس أمريكي )", {}, ("air_conditioner",)),
+        ("يمكن عمل مسبح", {}, ("pool",)),
+        ("مسبح خارجي مؤسس", {}, ("pool",)),
+        ("صالة معيشة مطلة بلكونة مطبخ أمريكي", {"kitchen": True, "balcony": True}, ()),
+        ("سطح واسع مطبخ راكب بدواليب حديثة", {"kitchen": True}, ()),
+        ("مطبخ 3 دورات مياه مدخلان للشقة تكييف سبيلت", {"air_conditioner": True}, ()),
+        ("مدخل مكيف أنيق", {}, ("air_conditioner",)),
+        ("مصعد راكب - تمديد نحاس للمكيفات - قريب من محطة الميترو", {"elevator": True}, ("air_conditioner",)),
         ("مطبخ (SPLIT) (غير راكب)", {"kitchen": False}, ()),
         ("مطبخ راكب ومكيفات راكبة", {"kitchen": True, "air_conditioner": True}, ()),
         ("بدون مكيفات ومطبخ", {"air_conditioner": False, "kitchen": False}, ()),
@@ -1463,6 +1537,8 @@ def selftest() -> None:
         ("مستودع للايجار", {}, ("storage",)),
         ("مطبخ مع مستودع", {"storage": True, "kitchen": True}, ()),
         ("حوش + كراج + مدخلين", {"yard": True, "garage": True, "parking": True, "two_entrances": True}, ()),
+        ("For Rent | Yardville Compound Apartments", {}, ("yard",)),        # 🔬 2026-11-05 Property Finder: a compound's name
+        ("villa with a private yard and a pool", {"yard": True}, ()),
         ("مدخل واحد", {"two_entrances": False}, ()),
         ("مكونة من 4 شقق", {"apartments_count": 4.0}, ()),
         ("يوجد في كل دور شقتين", {}, ("apartments_count",)),
