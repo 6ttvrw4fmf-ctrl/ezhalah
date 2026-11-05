@@ -222,6 +222,12 @@
     "grace": 3
   },
   {
+    "platform": "asasmakeen",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "ashab",
     "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
