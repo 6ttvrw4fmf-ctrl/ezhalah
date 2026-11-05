@@ -1144,7 +1144,34 @@ def _clauses(text: str) -> list[tuple[int, str]]:
     return out
 
 
-def _num_hits(fact: str, t: str, ci: int) -> list[Hit]:
+# A NUMBERED LIST's index is not a count (🔬 2026-11-05). haraj 20997332: «1-مدخل مستقل 2-حـوش طولي 3-غـرفه 4-دورة مـياه»
+# — norm() turns the «-» into a space, so «4-دورة مـياه» read as FOUR bathrooms on a one-bathroom flat, and 740 served
+# bathroom answers on 11-05 were quoted from a «N-» / «N)» list item. An index belongs to a run of three or more
+# consecutive numbers, each written with a list mark, in order through the ad; a number in that run says nothing about
+# how many (silence = unknown, never a guess).
+_LIST_MARK = re.compile(r"(?<![0-9٠-٩\w])([0-9٠-٩]{1,2}) ?(?:[-–)]|\.(?![0-9٠-٩]))")
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _list_index_values(raw: str) -> frozenset[int]:
+    seq = [int(m.group(1).translate(_AR_DIGITS)) for m in _LIST_MARK.finditer(raw)]
+    out: set[int] = set()
+    for i, start in enumerate(seq):
+        chain, want = [start], start + 1
+        for v in seq[i + 1:]:
+            if v == want:
+                chain.append(v)
+                want += 1
+        if len(chain) >= 3:
+            out.update(chain)
+    return frozenset(out)
+
+
+def _is_list_index(v: int, raw_clause: str, idx: frozenset[int]) -> bool:
+    return v in idx and any(int(m.group(1).translate(_AR_DIGITS)) == v for m in _LIST_MARK.finditer(raw_clause))
+
+
+def _num_hits(fact: str, t: str, ci: int, raw_clause: str = "", list_idx: frozenset[int] = frozenset()) -> list[Hit]:
     hits = []
     lo, hi = _COUNT_RANGE[fact]
     for rx in _COUNT_RES[fact]:
@@ -1159,6 +1186,8 @@ def _num_hits(fact: str, t: str, ci: int) -> list[Hit]:
                 continue
             if fact == "bathrooms" and any(after.lstrip().startswith(x) for x in _BATH_SKIP_AFTER):
                 continue
+            if g.isdigit() and _is_list_index(v, raw_clause, list_idx):
+                continue                      # «4-دوره مياه» in «1- … 2- … 3- … 4- …»: the item's number, not a count
             if fact == "bathrooms" and any(_strip_wa(w) in ("كل", "لكل", "بكل") for w in before[-3:]):
                 continue                      # «كل شقه 2 دورات مياه»: a per-unit count, not the home's
             if any(w in _NEAR_WORDS for w in before):
@@ -1209,6 +1238,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     num_hits: dict[str, list[Hit]] = {}
     cue_in = near_in = near_list = False
     prev_end = 0
+    list_idx = _list_index_values(raw)
     void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
         # A NEARBY LIST runs on across commas (🔬 2026-11-04 café audit): «Close to shops, restaurants, and markets»,
@@ -1242,7 +1272,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
                                    or w in _NEAR_PUBLIC or _is_boundary(w) for w in words) \
             or any(p in t for p in _NEAR_PHRASES)
         for fact in _COUNT_RES:
-            num_hits.setdefault(fact, []).extend(_num_hits(fact, t, ci))
+            num_hits.setdefault(fact, []).extend(_num_hits(fact, t, ci, _c, list_idx))
         # street width — collected, judged across the whole ad below
         for rx in _STREET_RES:
             for m in rx.finditer(t):
@@ -1545,6 +1575,16 @@ def selftest() -> None:
         ("الدور الاول 3 دورات مياه والارضي دورتين مياه", {}, ("bathrooms",)),
         ("مجلس رجال . دورة مياه تخدم القسم الرجالي . 3 غرف نوم . 2دورة مياه .", {}, ("bathrooms",)),
         ("3 دورات مياه ودورة مياه خارجية", {"bathrooms": 3.0}, ()),
+        # a numbered list's index is not a count (haraj 20997332, 2026-11-05)
+        ("1-مدخل مستقل 2-حـوش طولي 3-غـرفه 4-دورة مـياه", {}, ("bathrooms",)),
+        ("مميزات: 1) مجلس 2) صالة 3) دورات مياه 4) مطبخ", {}, ("bathrooms",)),
+        ("الشقة: 3 غرف نوم - 2 دورات مياه - مطبخ راكب", {"bathrooms": 2.0}, ()),
+        ("4 غرف و3 دورات مياه", {"bathrooms": 3.0}, ()),
+        # …while the Saudi «N- room» style is a COUNT (real aqar ads 24033379, 23720768, 21604430, 23287543)
+        ("مطبخ راكب 3- غرف 2-دورات مياة 1- صالة مكيفه بالكامل اسبلت", {"bathrooms": 2.0}, ()),
+        ("المواصفات: 3-غرف 3-دورات مياه 1-مطبخ 1-صاله 2-خزان سفلي وعلوي مستقل 1-موقف سيارة خاص", {"bathrooms": 3.0}, ()),
+        ("مكونات الشقه : ٣- غرف نوم ( ١ - ماستر) ٤- دورة مياه صاله يوجد منور", {"bathrooms": 4.0}, ()),
+        ("مكونه من 2- غرف نوم 1- صالة 1- مجلس 2- دورة مياة 1- ارتداد خلفي 1- مطبخ مستقل", {"bathrooms": 2.0}, ()),
         ("عرض الشارع: 15", {"street_width_m": 15.0}, ()),
         ("زاوية على شارع 20م شرقي", {}, ("street_width_m",)),
         ("شارع 15 م شمالي، شارع 20 م غربي", {}, ("street_width_m",)),
