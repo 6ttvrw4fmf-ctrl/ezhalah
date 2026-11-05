@@ -48,8 +48,14 @@ check('the row is gated on yearly rent + residential before anything is fetched'
 check('the row asks cohortAllows(…, \'furnished\') through a LAZY import',
   /await import\('@\/lib\/afCohorts'\)/.test(home) && /cohortAllows\(furnBase, 'furnished'\)/.test(home));
 check('index.tsx never imports afCohorts statically (first-download weight)', !/^import[^\n]*afCohorts/m.test(home));
-check('counts are the scope\'s own with furniture left open (furnBase = query minus furnishedPref)',
-  /const furnBase = \{ \.\.\.query, furnishedPref: null \};/.test(home) && /fetchApartmentGuidedCounts\(furnBase\)/.test(home));
+// The counts must be built from the SEARCH's own query (buildFilterBaseQuery + the picked districts), never from `query`:
+// the home keeps the picked city in citySelected, so `query` alone lost it and every number vanished after «الرياض»
+// (2026-11-05 live walk). Same construction as onSearch → the number on a choice is what «بحث» returns.
+check('counts use the search\'s own scope: buildFilterBaseQuery() + the picked districts, furniture left open',
+  /const base = buildFilterBaseQuery\(\);\s*\n\s*if \(!base\) return \{ \.\.\.queryForPeriod, furnishedPref: null, furnishedIn: null \};/.test(home)
+  && /districtsSelected\.flatMap\(\(d\) => d\.matchValues\)/.test(home)
+  && /return \{ \.\.\.base, districts, furnishedPref: null, furnishedIn: null \};/.test(home)
+  && /fetchApartmentGuidedCounts\(furnBase\)/.test(home) && !/const furnBase = \{ \.\.\.query,/.test(home));
 check('a failed count shows the choices WITHOUT numbers (never a 0)',
   /c && !isProbeFailure\(c\)[\s\S]{0,140}: \{\}\);/.test(home) && /if \(live\) setFurnRow\(\{\}\);/.test(home)
   && /n == null \? null :/.test(home));
@@ -86,6 +92,7 @@ const mutants: Array<[string, string, RegExp]> = [
   ['the question asks twice', furnQ.replace(' && q.furnishedPref == null', ''), /eligibility: \(q\) => cohortAllows\(q, 'furnished'\) && q\.furnishedPref == null/],
   ['the row counts with the user\'s own furniture pick', home.replace('fetchApartmentGuidedCounts(furnBase)', 'fetchApartmentGuidedCounts(query)'), /fetchApartmentGuidedCounts\(furnBase\)/],
   ['a hidden row keeps its filter', home.replace('if (furnRow === null && query.furnishedPref != null)', 'if (false)'), /if \(furnRow === null && query\.furnishedPref != null\)/],
+  ['the counts lose the picked city again', home.replace('const base = buildFilterBaseQuery();', 'const base = null as SearchQuery | null;'), /const base = buildFilterBaseQuery\(\);/],
 ];
 // each mutant is the real source with one defect planted; the guard's own predicate must reject it
 const mustCatch = (name: string, src: string, rx: RegExp) => check(`(mutation) caught: ${name}`, src.length > 0 && !rx.test(src));
