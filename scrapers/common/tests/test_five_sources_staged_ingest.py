@@ -147,6 +147,30 @@ def test_asas_sale_and_offplan_split_follows_the_sites_own_list():
     assert row["price_total"] == 55000 and "price_annual" not in row
 
 
+_AS_PROJECT = """<h2 class="mb-5 fw-bold">معلومات عن المشروع</h2>
+<div class="fs-5 lh-lg">يأتي مشروع مكين 90 ... في موقع حيوي شرق مدينة الرياض.</div>
+<a class="project-location-map__directions"
+   href="https://www.google.com/maps/dir/?api=1&amp;destination=24.7260923%2C46.7651659" target="_blank">
+<iframe src="https://www.google.com/maps/embed?pb=!1m3!2m1!1s24.7260923%2C46.8032747!6i16"></iframe>
+<footer>الرياض - حي النرجس - طريق انس بن مالك</footer>"""
+
+
+def test_asas_unit_inherits_its_projects_pin_and_city_never_the_map_centre_or_footer():
+    page = _AS_PAGE.replace("شقة 115م بشرق الرياض حي الرمال", "شقة 212م بحي المنار")       # the title names no city
+    page += '<option value="9" data-slug="مكين-90">\n   مكين 90 - حي المنار   </option>'
+    assert AS.project_slugs(page) == {"مكين 90": "مكين-90"}
+    u = AS.parse_unit(page.format(badge="بيع", project="مكين 90", rent=""))
+    assert AS.map_unit("3076", "https://asasmakeen.com/ar/z", u)[0]["city_ar"] is None   # no project read: no claim
+    row, _ = AS.map_unit("3076", "https://asasmakeen.com/ar/z", u, AS.parse_project(_AS_PROJECT))
+    info = row["additional_info"]
+    assert row["city_ar"] == "الرياض" and (info["latitude"], info["longitude"]) == (24.7260923, 46.7651659)
+    assert info["pin_scope"] == "project"
+    footer_only = AS.parse_project(_AS_PROJECT.replace("شرق مدينة الرياض", "شرق المدينة").replace("destination=", "x="))
+    row, _ = AS.map_unit("3076", "https://asasmakeen.com/ar/z", u, footer_only)
+    assert row["city_ar"] is None and row["additional_info"]["pin_absent"] is True and "latitude" not in row["additional_info"]
+    assert AS._allowed(AS.SITE + AS.PROJECT_PATH + "x") and not AS._allowed(AS.SITE + "/api/projects")
+
+
 # ── Al Rajhi ─────────────────────────────────────────────────────────────────────────────────────────────────────
 _MR_PAGE = """<script type="application/ld+json">{ld}</script><div>
 <p>إيجار سنوي</p><p>فيلا</p><p>عنوان الإعلان العقاري</p><p>فيلا 3 غرف وصالتين</p><p>مشروع الواحة</p><p>•</p>
