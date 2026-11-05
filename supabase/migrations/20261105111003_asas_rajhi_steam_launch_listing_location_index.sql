@@ -105,7 +105,7 @@ UNION ALL
   -- retry loop as the AF-view migrations: each attempt gets a SHORT 3 s lock_timeout and the loop
   -- retries into a natural gap; the DROP and the dependents' replay are one subtransaction, so a
   -- lost race leaves the live objects untouched.
-  for i in 1..20 loop
+  for i in 1..120 loop   -- 20 attempts lost twice to app reads on 2026-11-05; ~10 min of 3 s tries
     begin
       set local lock_timeout = '3s';
       execute 'DROP MATERIALIZED VIEW public.listing_location_index CASCADE';
@@ -132,7 +132,7 @@ UNION ALL
     end;
   end loop;
   if not ok then
-    raise exception 'could not acquire ACCESS EXCLUSIVE on listing_location_index after 20 short attempts - retry later';
+    raise exception 'could not acquire ACCESS EXCLUSIVE on listing_location_index after 120 short attempts - retry later';
   end if;
   raise notice 'listing_location_index swapped on attempt %', i;
 end
