@@ -48,6 +48,13 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 🆕 2026-11-05. 19 Property Finder arrivals whose own DISTRICT word is a catalogued place got that district.
+  '20261105072253_propertyfinder_19_arrivals_get_their_catalogued_district.sql':
+    'watched by the standing daily detector mon_detect_unknown_named_district (cron 04:41 UTC, created in ' +
+    '20261018035154): any active row whose own district word is not on its city\'s list re-raises it, and the writer is ' +
+    'fixed (_DISTRICT_SPELLING in scrapers/propertyfinder/run.py, test_propertyfinder_district_spellings_1105.py). Also ' +
+    'enrolled in ops_repair_guarantee_registry (propertyfinder_unknown_named_districts_1105). The applied file cannot be ' +
+    'edited to name the detector (content parity: byte-exact mirror).',
   // 2026-11-03 owner session. Hid 371 billion-plus prices; the owner reversed it 20 minutes later (PRICE = SOURCE).
   '20261103230546_hide_billion_price_typos.sql':
     'undone by 20261103232309_revert_hide_billion_price_typos.sql the same hour (owner: «dont hide, show me» — a source\'s ' +
