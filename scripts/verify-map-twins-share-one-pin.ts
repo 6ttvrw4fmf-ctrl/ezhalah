@@ -65,9 +65,21 @@ mustCatch('a different price merged (price dropped from the partition)', !sameSi
 mustCatch('a 1 km radius (whole neighbourhoods would collapse into one pin)', !nearOnly(refreshFn.replace(/(ST_ClusterDBSCAN\([^,]+\([^)]*\), )[0-9.]+/, '$10.009')));
 mustCatch('placeholder pins allowed to anchor a group', !noPlaceholders(refreshFn.replace('not exists (select 1 from public.ops_default_pin_register r', 'true or exists (select 1 from public.ops_default_pin_register r')));
 
-// ── scheduled ────────────────────────────────────────────────────────────────────────────────────────────────────────
-const scheduled = files.some((f) => /cron\.schedule\('map_pin_snap_refresh_ar',\s*'\d+ \* \* \* \*'/.test(readFileSync(join(dir, f), 'utf8')));
-check('the snap refresh is scheduled hourly', scheduled);
+// ── refreshed every hour, inside the grid refresh (no free cron minute of its own — 20261105063813) ─────────────────
+const grid = latestDefining(/create or replace function public\.map_grid_refresh_ar\(/i);
+const gridFn = grid ? fnBody(grid.body) : '';
+const runsWithGrid = (sql: string) => /perform public\.map_pin_snap_refresh_ar\(\);/.test(sql);
+const failureKeepsGrid = (sql: string) => /begin\s+perform public\.map_pin_snap_refresh_ar\(\);\s+exception when others then/.test(sql);
+const gridScheduled = files.some((f) => /cron\.schedule\('map_grid_refresh_ar',\s*'\d+ \* \* \* \*'/.test(readFileSync(join(dir, f), 'utf8')));
+check(`the hourly grid refresh runs the snap refresh (${grid?.f ?? 'none'})`, gridScheduled && runsWithGrid(gridFn));
+check('a failed snap refresh never costs the map its grid refresh (own exception block)', failureKeepsGrid(gridFn));
+mustCatch('the snap call dropped from the grid refresh (twins stop merging for new ads)', !runsWithGrid(gridFn.replace('perform public.map_pin_snap_refresh_ar();', '')));
+mustCatch('the snap call outside an exception block', !failureKeepsGrid(gridFn.replace(/begin\s+perform public\.map_pin_snap_refresh_ar\(\);\s+exception when others then/, 'perform public.map_pin_snap_refresh_ar(); begin null; exception when others then')));
+
+// ── «price on request» copies are twins too: a blank matches a blank, never a number ───────────────────────────────
+const blanksMatch = (sql: string) => /m\.price is not distinct from s\.price/.test(sql) && /m\.area_m2 is not distinct from s\.area_m2/.test(sql) && !/x\.area_m2 is not null/.test(sql);
+check('ads with no price or no size still pair with their twin (IS NOT DISTINCT FROM)', blanksMatch(refreshFn));
+mustCatch('a «price on request» pair left as two pins (price compared with =)', !blanksMatch(refreshFn.replace('m.price is not distinct from s.price', 'm.price = s.price')));
 
 if (failed) { console.error(`\n❌ verify-map-twins-share-one-pin: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-map-twins-share-one-pin: same-site twins share one pin, every ad keeps its card');
