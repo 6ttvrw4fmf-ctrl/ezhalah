@@ -7,7 +7,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useThemePalette } from '@/lib/appearance';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
-import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
+import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG, FURN_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
 import HeroFalconer from '@/components/HeroFalconer';
 import CloudWisp from '@/components/CloudWisp';
@@ -27,7 +27,7 @@ import { cityNameEn, regionNameEn, districtNameEn, ensureLocationIndex, ensureCi
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, emptyQuery, type SearchQuery } from '@/data/search';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
-import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam } from '@/data/remote';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam, fetchApartmentGuidedCounts } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
 import { reconcileCommittedAf, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
@@ -1223,6 +1223,47 @@ export default function Home() {
   // A غرفة (Room) is a single room → bedrooms are locked to exactly 1. When Room is the SOLE selected
   // type the bedroom chips collapse to just "1" (and the strict beds filter → bedrooms=1). (owner 2026-07-06.)
   const roomOnly = query.types?.length === 1 && query.types[0] === 'Room';
+  // «الأثاث» — furnished / unfurnished on YEARLY RENT homes (owner 2026-11-05: «put it in the main filter»). The row shows
+  // where the furnished question is certified (afCohorts.cohortAllows — loaded lazily, so the first download does not
+  // grow), with live counts over exactly this scope (city, districts, type, bedrooms, area, price) and furniture left
+  // open, so all three numbers always show. 'pending' = still checking; null = not offered here.
+  type FurnRow = { total?: number; yes?: number; no?: number };
+  const [furnRow, setFurnRow] = useState<FurnRow | 'pending' | null>(null);
+  const furnBase = { ...query, furnishedPref: null };
+  const furnKey = JSON.stringify(furnBase);
+  const furnCanAsk = query.deal === 'Rent' && !query.dealCombined && validRentPeriod(query.rentPeriod) === 'annual' && query.category === 'Residential';
+  useEffect(() => {
+    if (!furnCanAsk) { setFurnRow(null); return; }
+    let live = true;
+    setFurnRow((r) => (r && r !== 'pending' ? r : 'pending'));
+    const timer = setTimeout(async () => {
+      try {
+        const { cohortAllows } = await import('@/lib/afCohorts');
+        if (!live) return;
+        if (!cohortAllows(furnBase, 'furnished')) { setFurnRow(null); return; }
+        const c = await fetchApartmentGuidedCounts(furnBase);
+        if (!live) return;
+        // A count that failed is UNKNOWN: the choices still show, without numbers — never a made-up 0.
+        setFurnRow(c && !isProbeFailure(c)
+          ? { total: c.cnt_total_base, yes: c.cnt_furnished, no: c.cnt_unfurnished }
+          : {});
+      } catch {
+        if (live) setFurnRow({});
+      }
+    }, 350);
+    return () => { live = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [furnKey, furnCanAsk]);
+  // A hidden row never leaves a hidden filter behind (Buy, short stays, commercial, a type it does not apply to).
+  useEffect(() => {
+    if (furnRow === null && query.furnishedPref != null) setQuery((q) => ({ ...q, furnishedPref: null }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [furnRow, query.furnishedPref]);
+  const furnShown = furnRow !== null && furnRow !== 'pending';
+  const furnCounts = furnShown ? (furnRow as FurnRow) : {};
+  const furnBadge = (n?: number) => (n == null ? null : `${n.toLocaleString('en-US')} ${t('ads')}`);
+  const furnUnknown = furnCounts.total != null && furnCounts.yes != null && furnCounts.no != null
+    ? Math.max(0, furnCounts.total - furnCounts.yes - furnCounts.no) : null;
   // Whatever the user chose (a size band) or typed (a custom number) is mirrored INTO the size box so
   // they can see it and tap in to edit it. A band shows its label minus the trailing unit (the box
   // renders "m²" on the side); a custom number shows as-is.
@@ -2194,6 +2235,30 @@ export default function Home() {
                           />
                         ))}
                       </View>
+                    </>
+                  )}
+
+                  {/* FURNITURE — «الكل / مفروشة / غير مفروشة», yearly rent homes only (owner 2026-11-05). */}
+                  {furnShown && (
+                    <>
+                      <Text style={[s.ctxSubLabel, x.ctxSubLabel, ctx.showBeds ? { marginTop: 14 } : null]}>{t('Furniture')}</Text>
+                      <View style={[s.wrap, { marginBottom: 4 }]} testID="filter-furniture">
+                        {([['any', null, 'Furniture: all', furnCounts.total], ['yes', true, 'Furniture: furnished', furnCounts.yes],
+                           ['no', false, 'Furniture: unfurnished', furnCounts.no]] as const).map(([key, pref, labelKey, n]) => (
+                          <OptionBox
+                            key={key}
+                            label={t(labelKey)}
+                            img={FURN_IMG[key]}
+                            badge={furnBadge(n)}
+                            selected={(query.furnishedPref ?? null) === pref}
+                            onPress={() => { setQuery((q) => ({ ...q, furnishedPref: pref, furnishedIn: null })); }}
+                            style={s.wrapCell}
+                          />
+                        ))}
+                      </View>
+                      {furnUnknown ? (
+                        <Text style={[s.ctxSub, x.ctxSub, { marginTop: 6 }]}>{t('{n} listings did not mention furniture; they all show under All', { n: furnUnknown.toLocaleString('en-US') })}</Text>
+                      ) : null}
                     </>
                   )}
 
