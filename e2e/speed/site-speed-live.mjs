@@ -18,7 +18,7 @@ import '../../scripts/lib/robotPass.mjs';
 import { chromium, devices } from '@playwright/test';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah.com';
-export const BUDGET = { openMs: 12_000, searchMs: 25_000, tapFreezeMs: 1_000, mapFirstMs: 5_000, filterBackMs: 2_500, mapReturnMs: 3_000, zoomMs: 4_000, brokerMs: 4_000 };
+export const BUDGET = { openMs: 12_000, searchMs: 25_000, tapFreezeMs: 1_000, mapFirstMs: 5_000, filterBackMs: 2_500, mapReturnMs: 3_000, zoomMs: 4_000, brokerMs: 4_000, panMs: 3_000, panFreezeMs: 500, mapColdTapMs: 5_000 };
 
 const browser = await chromium.launch();
 const results = {};
@@ -80,6 +80,24 @@ try {
   results.zoomMs = Date.now() - t;
   say(results.zoomMs <= BUDGET.zoomMs, 'map: zoom in (pinch-like, ¼ span) until the closer view is labelled', results.zoomMs, BUDGET.zoomMs);
   if (results.zoomMs > BUDGET.zoomMs) console.log(`      zoom timeline: ${(await page.evaluate(() => window.__zt)).join(' · ')}`);
+  // DRAG (owner 2026-11-05: «so slow changing and moving … gets stuck»): move the map half a screen east, the way a
+  // finger drag does, until the newly shown area is labelled — and the longest frame gap (stutter) while it moves.
+  await page.waitForTimeout(1_500);
+  const beforePan = await page.evaluate(() => [...document.querySelectorAll('[data-testid=map-area]')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.textContent).join('|'));
+  t = Date.now();
+  await page.evaluate(() => {
+    window.__fg = []; let last = performance.now(); const stop = last + 3_000;
+    const f = (now) => { window.__fg.push(now - last); last = now; if (now < stop) requestAnimationFrame(f); };
+    requestAnimationFrame(f);
+    const mk = window.mapkit; const m = mk.maps[mk.maps.length - 1]; const r = m.region;
+    m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(r.center.latitude, r.center.longitude + r.span.longitudeDelta / 2), r.span), true);
+  });
+  await until((prev) => { const now = [...document.querySelectorAll('[data-testid=map-area]')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.textContent).join('|'); return now.length > 0 && now !== prev; }, beforePan);
+  results.panMs = Date.now() - t;
+  say(results.panMs <= BUDGET.panMs, 'map: drag half a screen until the new area is labelled', results.panMs, BUDGET.panMs);
+  await page.waitForTimeout(Math.max(0, 3_100 - results.panMs));
+  results.panFreezeMs = Math.round(await page.evaluate(() => Math.max(0, ...window.__fg.slice(1))));
+  say(results.panFreezeMs <= BUDGET.panFreezeMs, 'map: longest stutter (frame gap) while dragging', results.panFreezeMs, BUDGET.panFreezeMs);
   t = Date.now(); await tab('الوسيط الذكي').click();
   await until(() => location.pathname === '/agent' && [...document.querySelectorAll('textarea')].some((x) => x.getBoundingClientRect().width > 0));
   results.brokerMs = Date.now() - t;
@@ -107,6 +125,25 @@ try {
   results.tapFreezeMs = Math.round(await page.evaluate(() => Math.max(0, ...window.__ezLong.filter(([s]) => s >= window.__ezTap - 50 && s <= window.__ezTap + 3_000).map(([, d]) => d))));
   say(results.tapFreezeMs <= BUDGET.tapFreezeMs, 'tap: longest freeze after pressing a golden listing', results.tapFreezeMs, BUDGET.tapFreezeMs);
   await ctx.close();
+
+  // 4. IMPATIENT MAP TAP (owner 2026-11-05): a visitor who taps «خريطة» the moment the page answers — no reader's
+  // pause, so the quiet warm-up has not run. Step 0 waits 5 s first and read 1.2 s while a straight tap showed a grey
+  // screen for ~8–10 s on a phone (2026-11-05). Fresh phone, same CPU and network.
+  const ctx2 = await browser.newContext({ ...devices['iPhone 13'], locale: 'ar' });
+  const p2 = await ctx2.newPage();
+  const cdp2 = await ctx2.newCDPSession(p2);
+  await cdp2.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 1_500_000, uploadThroughput: 375_000 });
+  await cdp2.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  await p2.goto(`${BASE}/?speedwatch=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await p2.getByText('بحث', { exact: true }).first().waitFor({ state: 'visible', timeout: 60_000 });
+  await p2.getByText('الضروري فقط', { exact: true }).click({ timeout: 3_000 }).catch(() => {});
+  t = Date.now();
+  await p2.locator('[role=tab]', { hasText: 'خريطة' }).first().click();
+  await p2.waitForFunction(() => location.pathname === '/map' && [...document.querySelectorAll('[data-testid=map-area]')]
+    .some((a) => { const r = a.getBoundingClientRect(); return r.width > 0 && r.top >= 0 && r.top < innerHeight; }), null, { timeout: 30_000, polling: 25 });
+  results.mapColdTapMs = Date.now() - t;
+  say(results.mapColdTapMs <= BUDGET.mapColdTapMs, 'map: tapped at once (no pause) until city names are on the map', results.mapColdTapMs, BUDGET.mapColdTapMs);
+  await ctx2.close();
 } catch (e) {
   console.error(`FAIL  the journey could not complete: ${e.message}`);
   failed++;
