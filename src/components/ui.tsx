@@ -247,7 +247,8 @@ export function Segmented({ options, value, onChange, icons }: { options: string
 }
 
 // Tappable option box (category / type / detail) — selection fades in, press dips slightly.
-export function OptionBox({ label, selected, onPress, style, img, compact = false }: { label: string; selected: boolean; onPress: () => void; style?: ViewStyle; img?: any; compact?: boolean }) {
+// `badge` (owner 2026-11-05, the main filter's «الأثاث» row): a light count pill under the label — «7,274 إعلان».
+export function OptionBox({ label, selected, onPress, style, img, compact = false, badge }: { label: string; selected: boolean; onPress: () => void; style?: ViewStyle; img?: any; compact?: boolean; badge?: string | null }) {
   // Literal palette — same var()-cannot-be-interpolated reason as SegButton above.
   const pal = useThemePalette();
   const en = useI18n().locale === 'en'; // English type: one weight lighter, tiles a touch tighter (see boxTextEn)
@@ -293,6 +294,9 @@ export function OptionBox({ label, selected, onPress, style, img, compact = fals
     >
       {img ? <CrossfadeTintIcon source={img} p={p} off={pal.ink} on={pal.onFill} size={compact ? s.optIconCompact : s.optIcon} /> : null}
       <Animated.Text ref={noTranslateRef} style={[s.boxText, selected && s.boxTextOn, en && (compact ? s.boxTextEnCompact : s.boxTextEn), en && selected && s.boxTextOnEn, txt, NO_MIDWORD_BREAK]} numberOfLines={2}>{label}</Animated.Text>
+      {badge ? (
+        <Text style={[s.boxBadge, selected ? { backgroundColor: 'rgba(255,255,255,0.18)', color: pal.onFill } : { backgroundColor: pal.chipFill, color: pal.muted }]} numberOfLines={1}>{badge}</Text>
+      ) : null}
     </AnimatedPressable>
   );
 }
@@ -366,6 +370,7 @@ const s = StyleSheet.create({
   // Softer, larger, green-tinted elevation for the selected chip (premium depth vs the old hard shadow).
   boxShadow: { shadowColor: colors.primary, shadowOpacity: 0.24, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 5 },
   boxText: { fontSize: 12.5, fontWeight: '600', lineHeight: 16, textAlign: 'center' },
+  boxBadge: { marginTop: 5, fontSize: 11, fontWeight: '600', lineHeight: 15, paddingHorizontal: 8, paddingVertical: 1, borderRadius: 999, overflow: 'hidden', textAlign: 'center' },
   boxTextOn: { fontWeight: '700' }, // selected state reinforced by weight, not colour alone (skill a11y rule)
   // ENGLISH (owner 2026-10-09: ChatGPT-sized, not heavy). Latin at 12.5/600 reads louder than the Arabic and
   // «Apartments» (~73px) overflowed the ~67px column of a 3-per-row tile into «Apartmen…»: 12/500 with 6px side

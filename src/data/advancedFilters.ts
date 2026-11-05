@@ -383,15 +383,15 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
 // retail box «space» (2026-11-02); the typed sentence stays certified through cohortAllows.
 const FURNISHED_QUESTION: AdvancedQuestion = {
   id: 'furnished',
-  titleKey: 'Do you prefer it furnished?',
+  titleKey: 'Furnished or unfurnished?',
   selection: 'single',
-  // Where the comfort card carries «furnished» as a chip (owner 2026-10-31: «Furnished is a chip here, not its own
-  // question»), the separate question is not asked; the typed «مفروشة» keeps its certification through cohortAllows.
-  eligibility: (q) => cohortAllows(q, 'furnished') && !['comfort', 'ready', 'cspace'].some((id) => cardKeys(q, id).includes('furnished')),
+  // A card chip «furnished» (commercial ready / cspace) replaces this question; yearly rent asks it (owner 2026-11-05)
+  // ONLY when the main filter's «الأثاث» row was left on «الكل» (furnishedPref null) — never twice.
+  eligibility: (q) => cohortAllows(q, 'furnished') && q.furnishedPref == null && !['comfort', 'ready', 'cspace'].some((id) => cardKeys(q, id).includes('furnished')),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
-      { key: 'yes', labelKey: 'Furnished',   count: (c) => c.cnt_furnished },
-      { key: 'no',  labelKey: 'Unfurnished', count: (c) => c.cnt_unfurnished },
+      { key: 'yes', labelKey: 'Furniture: furnished',   count: (c) => c.cnt_furnished },
+      { key: 'no',  labelKey: 'Furniture: unfurnished', count: (c) => c.cnt_unfurnished },
     ], (c) => c.cnt_total_base - c.cnt_furnished - c.cnt_unfurnished);
   },
   // One tap (owner 2026-10-05): «مفروش» or «غير مفروش»; Skip = doesn't matter. The first key wins if a
