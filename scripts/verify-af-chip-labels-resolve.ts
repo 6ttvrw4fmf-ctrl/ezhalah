@@ -20,10 +20,15 @@ check('women_majlis reads «مجلس نساء»', chipArabicLabel('women_majlis'
 const dict = arabicDictionary(`const ar = { 'Kitchen': 'المطبخ', "Women's majlis": 'مجلس نساء', 'Pool': 'Pool' };`);
 const defs = { kitchen: { labelKey: 'Kitchen' }, women_majlis: { labelKey: "Women's majlis" },
   pool: { labelKey: 'Pool' }, sauna: { labelKey: 'Sauna' } };
-const caught = unlabelledChips(dict, defs);
-check('mustCatch: a chip with no dictionary entry', caught.includes('sauna'), caught.join(','));
-check('mustCatch: a dictionary value that is not Arabic', caught.includes('pool'), caught.join(','));
-check('mustNotCatch: translated chips', !caught.includes('kitchen') && !caught.includes('women_majlis'), caught.join(','));
+// mustCatch(label, defsMutant): the predicate must name the mutant chip as unlabelled
+const mustCatch = (name: string, mutant: Record<string, { labelKey: string }>, token: string) => {
+  const caught = unlabelledChips(dict, mutant);
+  check(`mutation caught: ${name}`, caught.includes(token), caught.join(','));
+};
+mustCatch('a chip with no dictionary entry', defs, 'sauna');
+mustCatch('a dictionary value that is not Arabic', defs, 'pool');
+const clean = unlabelledChips(dict, defs);
+check('translated chips are not flagged', !clean.includes('kitchen') && !clean.includes('women_majlis'), clean.join(','));
 
 if (fails) { console.error(`\n✗ ${fails} check(s) FAILED`); process.exit(1); }
 console.log('\n✓ every Advanced Filter chip has its Arabic label');
