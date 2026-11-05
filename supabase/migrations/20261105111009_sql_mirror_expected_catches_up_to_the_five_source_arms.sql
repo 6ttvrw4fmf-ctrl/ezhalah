@@ -1,5 +1,5 @@
 -- Regenerating a mirror is a TWO-PLACE edit (verify-mirror-md5-is-registered). The five-source launch wiring rebuilt
--- listing_native_location_v1 twice (Keller Williams + Almajdiah 20261105084502, Asas Makeen + Al Rajhi + STeam
+-- listing_native_location_v1 twice (the Keller Williams + Almajdiah wiring, then Asas Makeen + Al Rajhi + STeam
 -- 20261105111002; both replayed by their listing_location_index step), so this row is caught up in the same change as
 -- the wiring, not after the drift alarm. ONE registration for all five (agreed between the two launch sessions).
 --
