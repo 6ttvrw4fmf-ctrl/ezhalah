@@ -1252,7 +1252,7 @@ export default function Home() {
         if (!cohortAllows(furnBase, 'furnished')) { setFurnRow(null); return; }
         // No city yet → the choices, no numbers (owner 2026-11-05: nationwide numbers before a city read as a surprise, and
         // «بحث» needs a city anyway). The numbers appear the moment a city is picked.
-        if (!citySelected) { setFurnRow({}); return; }
+        if (citySelected == null) { setFurnRow({}); return; }   // («!citySelected» is the search gate's own text — verify-city-rehydration)
         const c = await fetchApartmentGuidedCounts(furnBase);
         if (!live) return;
         // A count that failed is UNKNOWN: the choices still show, without numbers — never a made-up 0.
