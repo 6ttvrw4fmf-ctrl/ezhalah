@@ -37,6 +37,7 @@ from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
+from scrapers.facts.one_reader import listing_amenities  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
@@ -126,7 +127,7 @@ def map_unit(code: str, url: str, u: dict) -> tuple[Optional[tuple[dict, str]], 
     title = redact_pii(u["title"] or ld.get("name")) or None
     period, annual = N.rent_period_and_annual(price, word) if price else (None, None)
     pin = pin_dict(*u["pin"]) if u["pin"] else {}
-    prose = N.prose_amenities(f"{title or ''}\n{desc or ''}")
+    prose = listing_amenities(f"{title or ''}\n{desc or ''}")
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{code}", "listing_url": url, "source": SOURCE, "active": True,
         "title": title, "description": desc, "property_type": ptype, "transaction_type": "Rent",

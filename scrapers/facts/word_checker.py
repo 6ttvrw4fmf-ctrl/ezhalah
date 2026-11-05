@@ -155,7 +155,9 @@ FACT_TOKENS: dict[str, list[Any]] = {
     # itself — «بأثاث مودرن / فاخر / مريح / عصري / راقي / أنيق», «بتأثيث فندقي», «متكاملة الأثاث», «مجهزة بالكامل» — 118 of
     # 124 AI furnished rows were this shape and the reader had none of them. A described piece of furniture is the
     # seller naming it; «بدون تأثيث» / «غير مؤثث» stay an explicit no.
-    "furnished": ["^موثث", ("re:(?:بدون|بلا|من غير|غير) (?:ال)?(?:اثاث|تاثيث|موثث)", False), "re:(?:مع|شامل|شامله) (?:ال)?اثاث",
+    "furnished": ["^موثث", ("re:(?:بدون|بلا|من غير|غير) (?:ال)?(?:اثاث|تاثيث|موثث)", False),
+                  # «سعرها بدون فرش وتكيف» (🔬 2026-11-05) — «فرش» alone is the furnishing; a floor covering names its floor
+                  ("re:(?:بدون|بلا|من غير) (?:ال)?فرش(?!\S)(?! (?:ال)?(?:ارض|موكيت|بلاط|سيراميك|رخام|باركيه|عشب|نجيل))", False), "re:(?:مع|شامل|شامله) (?:ال)?اثاث",
                   "re:(?:ب|و|وب)?(?:ال)?اثاث (?:مودرن|فاخر|مريح|عصري|راقي|انيق|هادي|كامل|جديد|حديث|فندقي)",
                   "re:(?:ب|و|وب)?تاثيث (?:فندقي|كامل|فاخر|مودرن|عصري|راقي)", "re:متكامل(?:ه)? (?:ال)?اثاث",
                   # AI teacher pass 2026-10-27: «بأثاثها العصري», «أثاث فخم», «فرش راقٍ / فاخر / كامل»
@@ -491,7 +493,7 @@ _PARTIAL = tuple(_n(w) for w in N._PARTIAL_ONLY + N._FLOOR_COVERING)
 _PARTIAL_BEFORE = tuple(_n(w) for w in N._PARTIAL_BEFORE)
 
 # Negators that TOUCH the token. One word («غير», «بدون») or two («لا يوجد», «لا نقبل»).
-_NEG1 = frozenset(_n(w) for w in ("غير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "no", "without", "not",
+_NEG1 = frozenset(_n(w) for w in ("غير", "كغير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "no", "without", "not",
                                    "non", "ليس", "ليست", "عدا", "ماعدا", "باستثناء"))      # «ليست منحة» (owner handoff 2026-11-01)
 _NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتوفر", "لا تتوفر", "ما فيه", "ما في", "لا يشمل",
                                    "لا تشمل", "عدم وجود", "لا نقبل", "لا يقبل", "من غير", "ما يوجد", "is not"))
@@ -665,7 +667,8 @@ _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "rest
 # A UNIT FIXTURE is never «nearby» (🔬 2026-11-04 live walk, dealapp): «بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة»,
 # «قريب من المسجد عدد 9 مكيفات راكبه», «20 دقيقة من روشن ❄ تكييف» — the near word belongs to the bullet before, the AC
 # is the unit's. Kept to the AC: a kitchen or a lift CAN be a nearby place's («قريب من مطبخ السلطان», a tower's lifts).
-_NEAR_NEVER_FACTS = frozenset({"air_conditioner"})
+# Furniture is never a nearby place either (🔬 2026-11-05): «قريبة من المروج بدون اثاث» is the flat's own no.
+_NEAR_NEVER_FACTS = frozenset({"air_conditioner", "furnished"})
 # A VIEW is not a distance (🔬 2026-11-05): «صالة معيشة مطلة بلكونة مطبخ أمريكي» has a balcony and a kitchen. A view word only
 # silences what can be outside (a park, a pool, a sea) — never the home's own rooms.
 _VIEW_WORDS = frozenset(_n(w) for w in ("مطل", "مطله", "تطل", "يطل", "اطلاله", "باطلاله", "overlooking", "views"))
@@ -1156,18 +1159,27 @@ def _num_hits(fact: str, t: str, ci: int) -> list[Hit]:
     return hits
 
 
+_PLACE_KIND_WORDS = tuple(_DISTRICT_WORDS) + tuple(_n(w) for w in ("مدينه", "بمدينه", "مدينة", "محافظه", "بمحافظه", "محافظة"))
+
+
 def _blank_place_names(t: str, names: tuple[str, ...]) -> str:
     """The ad's OWN district / city names, blanked (same length, so quote offsets hold) before any fact is read.
 
     Backlog 1188 (🔬 2026-11-02): «حي X» is caught in _judge, but a title that is a URL slug — abaad 13214542
     «دور-بيشة-الخزان» (type-city-district) — has no «حي» before the name, and district «الخزان» read water_tank = yes.
     The listing already KNOWS its place, so its own names are removed as whole words: no stem list, no guessing.
-    Only the exact normalised name goes («الخزان»); a bare «خزان ماء» in the same ad is still read."""
+    Only the exact normalised name goes («الخزان»); a bare «خزان ماء» in the same ad is still read.
+
+    The kind word right before it goes WITH it (🔬 2026-11-05 yearly-rent furnished audit): blanking only the name left
+    «في حي          مؤثثه بالكامل», and _judge reads any word after «حي» as a district — so the ad's own «مؤثثة بالكامل»,
+    «( مؤثثة)», «مفروش» after «بحي الملقا / حي المعذر / حي المهدية» answered nothing (aqar 14861704, 14852480, 16198971,
+    22605359), and so did every other fact written straight after the ad's own district."""
     for name in names:
         # stored names carry their kind word — abaad's district_ar is «حي الخزان», the slug says «الخزان»
         nn = re.sub(r"^(?:حي|مدينه|مدينة|محافظه|محافظة)\s+", "", norm(name or "").strip())
         if len(nn) >= 3:
-            t = re.sub(r"(?<!\S)" + re.escape(nn) + r"(?!\S)", lambda m: " " * len(m.group(0)), t)
+            t = re.sub(r"(?<!\S)(?:(?:" + "|".join(sorted(_PLACE_KIND_WORDS, key=len, reverse=True)) + r")\s+)?"
+                       + re.escape(nn) + r"(?!\S)", lambda m: " " * len(m.group(0)), t)
     return t
 
 
@@ -1360,6 +1372,12 @@ def selftest() -> None:
         # (text, must-have {fact: value}, must-NOT-have facts)
         ("فيلا بدون مسبح", {"pool": False}, ()),
         ("شقة غير مفروشة", {"furnished": False}, ()),
+        # 🔬 2026-11-05 yearly-rent furnished audit (126,831 ads)
+        ("وضع التأثيث مذكور كغير مُؤثث؛ ضع في الاعتبار", {"furnished": False}, ()),   # muhaysini 17581075: «كغير» = as un-
+        ("قريبة من المروج بدون اثاث 🌹 عوائل موقع مميز", {"furnished": False}, ()),   # aqar 14849641: the near word is the place's
+        ("غرفة نظيفة سعرها بدون فرش وتكيف 18,000 سنوي", {"furnished": False}, ()),    # aqar 11494692
+        ("الصالة بدون فرش موكيت", {}, ("furnished",)),                                  # a floor covering, not furniture
+        ("قريب من معارض المفروشات", {}, ("furnished",)),
         ("لا يوجد مصعد", {"elevator": False}, ()),
         ("ولا يوجد مصعد في المبنى", {"elevator": False}, ()),
         ("مفروشة: لا", {"furnished": False}, ()),
@@ -2262,6 +2280,14 @@ def selftest() -> None:
     both = facts_of(clean_text("دور-بيشة-الخزان", "دور للبيع مع خزان ماء"), ("الخزان", "بيشة"))
     assert both.get("water_tank") is True, both          # a real «خزان ماء» in the same ad is still read
     assert facts_of(slug, ("",)) == facts_of(slug) and facts_of(slug, ("ال",)) == facts_of(slug)   # empty / too-short names: no-op
+    # 🔬 2026-11-05: the kind word goes with the name — «حي X مؤثثة» left «حي مؤثثة», and a word after «حي» reads as a district
+    for text, place, fact in (("شقة فاخرة للايجار في حي الياسمين مؤثثة بالكامل", "حي الياسمين", "furnished"),   # aqar 14861704
+                              ("شقة للايجار بحي الملقا ( مؤثثة) في فله دور ثاني", "حي الملقا", "furnished"),      # aqar 14852480
+                              ("فيلا للبيع بحي الملقا مسبح وحديقة", "حي الملقا", "pool"),
+                              ("شقة للايجار حي النرجس مطبخ راكب مكيفات", "حي النرجس", "kitchen"),
+                              ("دور للايجار في حي العارض مدخل خاص", "العارض", "private_entrance")):
+        assert facts_of(clean_text(None, text), (place, "الرياض")).get(fact) is True, (text, facts_of(clean_text(None, text), (place,)))
+    assert "water_tank" not in facts_of(clean_text(None, "ارض للبيع حي الخزان مدينة تربة"), ("حي الخزان", "تربة"))
     print(f"word_checker selftest ok ({len(cases)} phrases)")
 
 

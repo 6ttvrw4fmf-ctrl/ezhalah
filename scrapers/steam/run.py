@@ -41,6 +41,7 @@ from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
+from scrapers.facts.one_reader import listing_amenities  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
@@ -117,7 +118,7 @@ def map_property(slug: str, url: str, p: dict) -> tuple[Optional[tuple[dict, str
     feats = {col: True for word, col in _FEATURE_COL.items() if any(word in f for f in p["features"])}
     if N.to_int(d.get("كراج")):
         feats["parking"] = True
-    prose = {c: v for c, v in N.prose_amenities(f"{title or ''}\n{desc or ''}").items() if c not in feats}
+    prose = listing_amenities(f"{title or ''}\n{desc or ''}", skip=feats)
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{p['post_id'] or slug}", "listing_url": url, "source": SOURCE, "active": True,
         "title": title, "description": desc, "property_type": ptype, "transaction_type": "Rent" if deal == "Rent" else "Buy",
