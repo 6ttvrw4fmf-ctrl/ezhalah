@@ -628,6 +628,37 @@ def _spec_table(body: str) -> dict[str, str]:
     return out
 
 
+# The «Specifications» table's TICKED rows (🔬 2026-11-05, re-read live on /1303/x, /1106/x and 8 more ads):
+#   <tr><th>مكيفات</th><td> <i class="fa fa-check-square text-dark" …></i></td></tr>
+# A row is printed only when the advertiser ticked it, so a tick is a structured YES and an absent row is
+# SILENCE (NULL, never «no»). Until tonight none of these reached a column: 0 of 42 active ads carried AC, car
+# entrance or private entrance although the pages tick them, so a customer filtering for them never found one.
+# Only labels seen on live pages, onto columns that exist; «سطح خاص», «في فيلا», «سكن جماعي», «مشب» have no
+# column with that meaning and stay unmapped.
+SPEC_CHECK_COLS = {
+    "مكيفات": "air_conditioner", "مدخل سيارة": "car_entrance", "مدخل خاص": "private_entrance",
+}
+_CHECK_ROW_RE = re.compile(r"<th>\s*([^<]{1,40}?)\s*</th>\s*<td>\s*<i\s+class=\"[^\"]*fa-check-square", re.S)
+# Counted rows the site prints with a number («عدد دورات المياة 2», «عدد الصالات 1»; a stated 0 is a 0).
+SPEC_COUNT_COLS = {"عدد دورات المياة": "bathrooms", "عدد دورات المياه": "bathrooms", "عدد الصالات": "halls"}
+
+
+def _spec_facts(body: str, specs: dict[str, str]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for label in _CHECK_ROW_RE.findall(body):
+        col = SPEC_CHECK_COLS.get(_clean(label))
+        if col:
+            out[col] = True
+    for label, col in SPEC_COUNT_COLS.items():
+        n = normalize.to_int(specs.get(label)) if (specs.get(label) or "").strip() else None
+        if n is not None and 0 <= n <= 30 and col not in out:
+            out[col] = n
+    w = re.search(r"(\d{1,3}(?:\.\d+)?)\s*م", specs.get("عرض الشارع") or "")
+    if w and 2 <= float(w.group(1)) <= 120:
+        out["street_width_m"] = float(w.group(1))
+    return out
+
+
 def _deal(body: str, realestate_name: str) -> str:
     """Return 'Rent' or 'Buy'. Source of truth: the deal word in the share/heading line."""
     m = re.search(r"(للبيع|للإيجار|للايجار|للتقبيل)\s*في", body)
@@ -762,8 +793,8 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     specs = _spec_table(body)
     area = _to_float(specs.get("المساحة"))
     area = round(area) if area else None
-    # "عدد الغرف" is a generic total-room-count label, never bedroom-specific — souq24 has no
-    # separate bathroom field either (no sibling signal the site distinguishes room types at all).
+    # "عدد الغرف" is a generic total-room-count label, never bedroom-specific. (The old note that souq24 has
+    # no bathroom field was wrong by 2026-11-05: «عدد دورات المياة» is printed — read by _spec_facts below.)
     # Live-confirmed 2026-07-28: 0/3 sampled pages carry a "غرف النوم" label. Owner decision: null
     # rather than store an unverifiable total-room figure as bedroom count.
     beds = None
@@ -853,6 +884,7 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     }
     row["additional_info"].update(ad_pin(body) or {"pin_absent": True})
     row.update(_services(body))
+    row.update(_spec_facts(body, specs))
     return row, category
 
 
