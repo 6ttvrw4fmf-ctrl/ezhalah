@@ -44,9 +44,11 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
+PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance", "furnished", "balcony_terrace", "laundry_room")
 SOURCE = "Keller Williams"
 SLUG = "kellerwilliams"
 PREFIX = "KW"
@@ -168,6 +170,35 @@ def price_fields(x: dict, deal: str, text: str) -> dict[str, Any]:
     return out
 
 
+def agent_names(x: dict) -> list[str]:
+    """The ad's OWN agent / co-agent names (full, and first + last), read from the person objects before they are dropped.
+    An agent signs the free text without a label («…contact the number provided below\nRabie Akkad.», found 2026-11-05
+    in 2 stored English descriptions) — the shared redactor only removes LABELLED names, so these are removed by value."""
+    out: set[str] = set()
+    for key, pre in (("list_agent_office", "list_agent_"), ("co_list_agent_office", "co_list_agent_"),
+                     ("sell_agent_office", "sell_agent_"), ("co_sell_agent_office", "co_sell_agent_")):
+        o = x.get(key) or {}
+        full = (o.get(pre + "full_name") or "").strip()
+        fl = f"{(o.get(pre + 'first_name') or '').strip()} {(o.get(pre + 'last_name') or '').strip()}".strip()
+        out |= {n for n in (full, fl) if len(n) >= 4 and " " in n}
+    return sorted(out, key=len, reverse=True)
+
+
+def scrub_names(v: Any, names: list[str]) -> Any:
+    """Every string in v with each of the ad's own agent names replaced by «[redacted]» (case-insensitive). Idempotent."""
+    if not names:
+        return v
+    if isinstance(v, str):
+        for n in names:
+            v = re.sub(re.escape(n), "[redacted]", v, flags=re.I)
+        return v
+    if isinstance(v, dict):
+        return {k: scrub_names(w, names) for k, w in v.items()}
+    if isinstance(v, list):
+        return [scrub_names(w, names) for w in v]
+    return v
+
+
 def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     deal = _DEAL.get(x.get("list_category") or "")
     if not deal:
@@ -177,6 +208,7 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     ptype = type_of(x)
     if not ptype:
         return None, f"type_unmapped_{x.get('prop_type')}/{x.get('prop_subtype')}"
+    x = scrub_names(x, agent_names(x))          # the agents' own names out of EVERY free text, before anything is read
     title = redact_pii(x.get("listing_title") or (x.get("list_address") or {}).get("unit_number")) or None
     desc = redact_pii(x.get("list_desc"), keep_lines=True) or None
     loc = location(x)
@@ -193,7 +225,8 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     rooms = ptype not in _NO_ROOMS
     feats = {col: True for (grp, key), col in _FEATURES.items()
              if (st.get(key) if grp == "structure" else (st.get(grp) or {}).get(key)) is True}
-    prose = {c: v for c, v in N.prose_amenities(f"{title or ''}\n{desc or ''}").items()
+    # ONE READER (owner 2026-11-03): prose amenities come from the Advanced Filter's word reader, never normalize.prose_amenities.
+    prose = {c: v for c, v in amenity_answers(f"{title or ''}\n{desc or ''}", PROSE_COLS, {"balcony": "balcony_terrace"}).items()
              if c not in feats}
     lic = str(x.get("mls_number") or "").strip()
     row: dict[str, Any] = {
