@@ -24,7 +24,17 @@ const [fTown, sTown] = newest(/create or replace function public\.district_is_ow
 const [fArm, sArm] = newest(/refresh_district_recovery_table: pin arm patch did not land/);
 const [fV2, sV2] = newest(/listing_native_location_v2: pin_governorate patch did not land/);
 
-const body = (s: string, name: string) => s.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\$function\\$;`))?.[0] ?? '';
+// The body runs from the create to the close of WHATEVER dollar tag opened it ($function$, $$, $body$ …); no close → ''
+// (verify-function-body-windows-fail-closed: a hardcoded tag reads a `$$` body as missing or as the rest of the file).
+const body = (s: string, name: string) => {
+  const at = s.search(new RegExp(`create or replace function public\\.${name}\\(`));
+  if (at < 0) return '';
+  const rest = s.slice(at);
+  const open = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
+  if (!open) return '';
+  const close = rest.indexOf(open[0], open.index + open[0].length);
+  return close < 0 ? '' : rest.slice(0, close + open[0].length + 1);
+};
 
 function detectorProblems(s: string): string[] {
   const fn = body(s, 'mon_detect_pin_district_gap');
@@ -84,9 +94,10 @@ function v2Problems(s1: string, s2: string): string[] {
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
+const mustCatch = (label: string, caught: boolean, why = '') => check(`mutant caught: ${label}`, caught, why);
 const prove = (label: string, src: string, mutate: (s: string) => string, judge: (s: string) => string[]) => {
   const m = mutate(src);
-  check(`mutant caught: ${label}`, m !== src && judge(m).length > 0, m === src ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+  mustCatch(label, m !== src && judge(m).length > 0, m === src ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 };
 
 // The cron is judged in the NEWEST migration that schedules it (20261105093108 moved it to 13:03, cron slot discipline).
