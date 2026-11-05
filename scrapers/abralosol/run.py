@@ -500,7 +500,7 @@ def _known_districts(city: str) -> frozenset[str]:
         for tbl in ("abralosol_residential_listings", "abralosol_commercial_listings"):
             for lo in range(0, 50_000, 1000):          # PostgREST serves at most 1,000 rows a page
                 page = db._execute(db.sb().table(tbl).select("neighborhood").eq("city", city)
-                                   .range(lo, lo + 999), what=f"{tbl}.known_districts").data or []
+                                   .order("id").range(lo, lo + 999), what=f"{tbl}.known_districts").data or []
                 keys.update(AL.norm_district_tok(r["neighborhood"]) for r in page if r.get("neighborhood"))
                 if len(page) < 1000:
                     break

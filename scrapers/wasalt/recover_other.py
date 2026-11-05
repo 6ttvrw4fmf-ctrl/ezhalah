@@ -81,7 +81,7 @@ def _other_rows() -> list[dict]:
         while True:
             batch = (c.table(tbl).select("ad_number,listing_url")
                      .eq("source", "Wasalt").eq("active", True).eq("city", "Other")
-                     .range(off, off + 999).execute().data) or []
+                     .order("id").range(off, off + 999).execute().data) or []
             for b in batch:
                 b["_tbl"] = tbl
             rows += batch
