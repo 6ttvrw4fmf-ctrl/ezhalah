@@ -2215,6 +2215,53 @@ def upsert_propertyfinder_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("propertyfinder_commercial_listings", rows)
 
 
+def upsert_kellerwilliams_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("kellerwilliams_residential_listings", rows)
+
+
+def upsert_kellerwilliams_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("kellerwilliams_commercial_listings", rows)
+
+
+def upsert_almajdiah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("almajdiah_residential_listings", rows)
+
+
+def upsert_almajdiah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("almajdiah_commercial_listings", rows)
+
+
+def upsert_asasmakeen_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("asasmakeen_residential_listings", rows)
+
+
+def upsert_asasmakeen_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("asasmakeen_commercial_listings", rows)
+
+
+def upsert_mrajhi_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("mrajhi_residential_listings", rows)
+
+
+def upsert_mrajhi_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("mrajhi_commercial_listings", rows)
+
+
+def upsert_steam_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("steam_residential_listings", rows)
+
+
+def upsert_steam_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("steam_commercial_listings", rows)
+
+
+def upsert_asasmakeen_offplan(rows: list[dict[str, Any]]) -> None:
+    """Asas Makeen's off-plan units → their own hidden table (never a *_listings row; owner 2026-10-25)."""
+    for i in range(0, len(rows), 200):
+        _execute(sb().table("asasmakeen_offplan_units").upsert(rows[i:i + 200], on_conflict="ad_number"),
+                 what="asasmakeen_offplan_units")
+
+
 def upsert_propertyfinder_offplan(rows: list[dict[str, Any]]) -> None:
     """Off-plan Property Finder ads → their own hidden table (never a *_listings row; owner 2026-10-25)."""
     for i in range(0, len(rows), 200):
