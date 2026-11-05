@@ -168,6 +168,35 @@ def price_fields(x: dict, deal: str, text: str) -> dict[str, Any]:
     return out
 
 
+def agent_names(x: dict) -> list[str]:
+    """The ad's OWN agent / co-agent names (full, and first + last), read from the person objects before they are dropped.
+    An agent signs the free text without a label («…contact the number provided below\nRabie Akkad.», found 2026-11-05
+    in 2 stored English descriptions) — the shared redactor only removes LABELLED names, so these are removed by value."""
+    out: set[str] = set()
+    for key, pre in (("list_agent_office", "list_agent_"), ("co_list_agent_office", "co_list_agent_"),
+                     ("sell_agent_office", "sell_agent_"), ("co_sell_agent_office", "co_sell_agent_")):
+        o = x.get(key) or {}
+        full = (o.get(pre + "full_name") or "").strip()
+        fl = f"{(o.get(pre + 'first_name') or '').strip()} {(o.get(pre + 'last_name') or '').strip()}".strip()
+        out |= {n for n in (full, fl) if len(n) >= 4 and " " in n}
+    return sorted(out, key=len, reverse=True)
+
+
+def scrub_names(v: Any, names: list[str]) -> Any:
+    """Every string in v with each of the ad's own agent names replaced by «[redacted]» (case-insensitive). Idempotent."""
+    if not names:
+        return v
+    if isinstance(v, str):
+        for n in names:
+            v = re.sub(re.escape(n), "[redacted]", v, flags=re.I)
+        return v
+    if isinstance(v, dict):
+        return {k: scrub_names(w, names) for k, w in v.items()}
+    if isinstance(v, list):
+        return [scrub_names(w, names) for w in v]
+    return v
+
+
 def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     deal = _DEAL.get(x.get("list_category") or "")
     if not deal:
@@ -177,6 +206,7 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     ptype = type_of(x)
     if not ptype:
         return None, f"type_unmapped_{x.get('prop_type')}/{x.get('prop_subtype')}"
+    x = scrub_names(x, agent_names(x))          # the agents' own names out of EVERY free text, before anything is read
     title = redact_pii(x.get("listing_title") or (x.get("list_address") or {}).get("unit_number")) or None
     desc = redact_pii(x.get("list_desc"), keep_lines=True) or None
     loc = location(x)
