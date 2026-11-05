@@ -39,6 +39,12 @@ if (b) {
   mustCatch('radius widened to the cross-site 200 m', !foldsSameSiteRepost(b.s.replace(/cos\(radians\(x\.lat\)\), 2\) < 100;/, 'cos(radians(x.lat)), 2) < 40000;'), 'x', 'y'));
   mustCatch('rule removed from the builder', !foldsSameSiteRepost(b.s.replace(/x\.platform = y\.platform/g, 'x.platform <> y.platform'), 'x', 'y'));
 }
+// the recount keeps listing_id as TEXT; comparing it as text ('999' > '1000') kept a different copy than the builder
+// and failed 100 facts on 2026-11-05 12:02. The governing recount text must compare the ids as numbers.
+const recountNumeric = (src: string) => /y\.listing_id::bigint < x\.listing_id::bigint/.test(src);
+const recountLast = files.filter(({ s }) => s.includes(A_MARK) || /y\.listing_id::bigint < x\.listing_id::bigint/.test(s) || /create or replace function public\.audit_welcome_insights\s*\(/i.test(s)).at(-1);
+check(`the recount (${recountLast?.f ?? 'none'}) compares same-site ids as numbers, like the builder`, !!recountLast && recountNumeric(recountLast.s));
+if (recountLast) mustCatch('ids compared as text again', !recountNumeric(recountLast.s.replace(/y\.listing_id::bigint < x\.listing_id::bigint/g, 'y.listing_id < x.listing_id')));
 if (a) mustCatch('rule removed from the recount', !foldsSameSiteRepost(a.s.replace(/y\.platform = x\.platform/g, 'y.platform <> x.platform'), 'y', 'x'));
 
 if (failed) { console.error(`\n❌ verify-welcome-same-site-repost-counts-once: ${failed} check(s) failed.`); process.exit(1); }
