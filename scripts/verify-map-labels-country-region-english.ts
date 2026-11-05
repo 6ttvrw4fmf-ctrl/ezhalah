@@ -69,6 +69,14 @@ check('English UI: every label at every level is in English (no Arabic letters)'
 check('English region names are real names, not transliterations (every one of the 13 has an entry)', REGIONS13.every((r) => !!lib.REGION_EN[r]) && lib.areaName({ city: 'المنطقة الشرقية', district: '' }, 'region', 'en', latin) === 'Eastern Province');
 check('English city/district names go through the transliterator; Arabic stays Arabic', lib.areaName({ city: 'جدة', district: 'حي الشراع' }, 'district', 'en', latin) === 'Al Shara' && lib.areaName({ city: 'جدة', district: 'حي الشراع' }, 'district', 'ar', latin) === 'الشراع');
 
+// A tap must land one level closer even after MapKit widens the span to the screen (5.17° for a 4° ask, 2026-11-05).
+const lands = (l: Lib) => (['country', 'region', 'city', 'district'] as const).every((lv, i) => {
+  const next = (['region', 'city', 'district', null] as const)[i];
+  return l.areaLevelFor(l.areaZoomSpan(lv)) === next && l.areaLevelFor(l.areaZoomSpan(lv) * l.TAP_WIDEN) === next;
+});
+check('every label tap lands one level closer, even widened ×1.6 by a tall phone screen', lands(lib));
+const oldSpans = real.replace("level === 'region' ? 3 :", "level === 'region' ? 4 :");
+mustCatch('the 4° region tap that stayed on regions on a phone (5.17° live)', oldSpans !== real && !lands(await load(oldSpans)));
 const noCountry = real.replace("  if (latitudeDelta > COUNTRY_LABELS_ABOVE) return 'country';\n", '');
 mustCatch('the opening view drawing regions or cities instead of the one Saudi total', noCountry !== real && (await load(noCountry)).areaLevelFor(17) !== 'country');
 const shareRegions = real.replace("  if (level === 'country' || level === 'region') return rows;\n", '');
