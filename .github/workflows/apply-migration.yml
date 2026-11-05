@@ -48,7 +48,9 @@ env:
 jobs:
   apply:
     name: Apply ${{ inputs.file }}
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # GitHub-hosted on purpose (owner session 2026-11-05): an apply is a ~1 min job, and on the shared
+    # self-hosted pool it queued 20+ min behind ~80 crawl runs, stalling a launch mid-sequence.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
