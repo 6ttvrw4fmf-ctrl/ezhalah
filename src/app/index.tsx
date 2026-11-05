@@ -1270,7 +1270,8 @@ export default function Home() {
   }, [furnRow, query.furnishedPref]);
   const furnShown = furnRow !== null && furnRow !== 'pending';
   const furnCounts = furnShown ? (furnRow as FurnRow) : {};
-  const furnBadge = (n?: number) => (n == null ? null : `${n.toLocaleString('en-US')} ${t('ads')}`);
+  // the number alone: «49,596 إعلان» was cut to «… 49,596» on a 578 px screen (live walk 2026-11-05); the row's note says what it counts
+  const furnBadge = (n?: number) => (n == null ? null : n.toLocaleString('en-US'));
   const furnUnknown = furnCounts.total != null && furnCounts.yes != null && furnCounts.no != null
     ? Math.max(0, furnCounts.total - furnCounts.yes - furnCounts.no) : null;
   // Whatever the user chose (a size band) or typed (a custom number) is mirrored INTO the size box so
