@@ -195,6 +195,19 @@ def test_mrajhi_stated_yearly_price_and_the_guard_is_never_stored():
     _no_pii(row)
 
 
+def test_mrajhi_a_silent_unit_takes_its_projects_one_district_and_pin_never_a_split_one():
+    def u(pno, nb=None, pin=None):
+        return {"neighborhood": nb, "district_ar": f"حي {nb.removeprefix('حي ')}" if nb else None,
+                "additional_info": {"project_number": pno, **({"latitude": pin[0], "longitude": pin[1]} if pin else {})}}
+    rows = [u("31", "العليا", (24.69, 46.69)), u("31", "حي العليا"), u("31"),           # one district, one pin
+            u("36", "الملز"), u("36"), u("9", "العليا"), u("9", "الملز", (24.1, 46.1)), u("9")]  # 9: split district
+    MR.inherit_from_project(rows)
+    assert [r["district_ar"] for r in rows[:3]] == ["حي العليا"] * 3 and rows[2]["additional_info"]["pin_scope"] == "project"
+    assert rows[1]["additional_info"]["latitude"] == 24.69 and "district_source" not in rows[1]["additional_info"]
+    assert rows[4]["neighborhood"] == "الملز" and "latitude" not in rows[4]["additional_info"]     # no pin to give
+    assert rows[7]["neighborhood"] is None and rows[7]["additional_info"]["latitude"] == 24.1     # split → no district
+
+
 # ── STeam ────────────────────────────────────────────────────────────────────────────────────────────────────────
 _ST_PAGE = """<body class="postid-17969"><h1>للايجار شقة جديده حي لبن</h1>
 <a href="x" class="label-status label status-color-28"> للايجار </a><li class="item-price item-price-text"></li>

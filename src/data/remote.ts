@@ -1873,31 +1873,11 @@ export async function fetchListingsForQuery(
     // matches the source site — never the English original. GROUPING/diversity still keys on the canonical
     // value (canonCity/canonDistrict) so spelling variants collapse. Layout + filters unchanged.
     const ar = arLoc.get(`${c.source_table}:${c.listing_id}`);
-    const rawCity = l.city, rawDistrict = l.district;
-    const canonCity = (ar?.city) || rawCity || '';
+    // GROUPING/diversity keys on the canonical value (canonCity/canonDistrict) so spelling variants collapse; the
+    // card's own Arabic place is set by applyArabicLocation() — the same call fetchListingCards() makes.
+    const canonCity = (ar?.city) || l.city || '';
     const canonDistrict = (ar?.district) || '';
-    // English raw city (aqar stores "Abha"/"Riyadh"…): prefer the resolved canonical, else map it to Arabic
-    // via CITY_AR (arCity) so the card NEVER shows Latin when a mapping is known; only truly-unmapped cities
-    // fall through to the raw value. (owner 2026-07-07: no Latin city/region on cards.) Fixes the ~41 cards
-    // whose canonical was null (unresolved) and were showing raw Latin (أبها/محايل/بلسمر/أبو عريش/…).
-    // JUNK_LOCATION_TOKENS guard (2026-07-10): a scraper-injected sentinel like the literal word
-    // "Other" has no Arabic chars, so it falls into this (non-Arabic) branch same as a real English
-    // city would — without the guard it rides the final `|| rawCity` all the way to the card. Swap
-    // it for '' up front so every fallback below (arCity's own `|| en`, and this line's own
-    // `|| rawCity`) sees an empty string instead of the junk token, and the card ends up honestly
-    // unresolved (ResultCard/agent.tsx render the neutral «الموقع غير محدد») rather than "Other". A
-    // genuine, if unmapped, raw city name is untouched — this only fires for a known junk token.
-    const safeRawCity = isJunkLocationToken(rawCity) ? '' : rawCity;
-    l.city = /[ء-ي]/.test(rawCity || '') ? rawCity : ((ar?.city) || arCity(safeRawCity) || safeRawCity || '');
-    // Gathern Tier-1: when the canonical index has NO district and the raw neighborhood isn't Arabic,
-    // fall back to the source's own Arabic district token (l.districtArFallback, Gathern-only &
-    // city-name-guarded in finalize). null for every other source → `|| ''` keeps them byte-identical.
-    l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || l.districtArFallback || '');
-    // MATCH-truth companion to the display-oriented `l.district` above — never overridden by raw
-    // text, so the strict district filter (listingInDistricts) has a value it can trust regardless
-    // of how the source spelled its own free-text neighborhood. See the field's own doc comment.
-    l.districtCanonical = canonDistrict;
-    l.regionAr = (ar?.region) || l.regionAr || '';
+    applyArabicLocation(l, ar);
     // §12A: the AF-canonical row travels with the listing so ResultCard can prove, per card, that
     // this row really satisfies each active predicate — read from the SAME row the filter ran on,
     // never from l.features/l.bathrooms (finalize() collapses their NULLs to 0/false).
@@ -2011,6 +1991,29 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   return null;
 }
 
+/**
+ * The card's place in ARABIC, from the index's canonical row (region_ar/city_ar/district_ar). Shared by the search
+ * results and fetchListingCards() (map pin sheet, ad-page siblings), so a card reads the same wherever it opens —
+ * owner 2026-11-05: an aqar card opened from a map pin said «حي جبرة, الموقع غير محدد» because that path skipped
+ * this step and aqar stores the city in English («Taif»), which the card refuses to print.
+ *
+ * #1 (owner 2026-07-06, source-accurate): the CARD shows the RAW scraped location when it is already Arabic
+ * (dealapp/wasalt); for English-raw sources (aqar) it shows the Arabic-canonical value that matches the source site —
+ * never the English original. No Latin city/region on cards (owner 2026-07-07): prefer the canonical, else map it via
+ * CITY_AR (arCity); only truly-unmapped cities fall through to the raw value. JUNK_LOCATION_TOKENS (2026-07-10): a
+ * sentinel like the literal "Other" becomes '' so the card is honestly unresolved («الموقع غير محدد»), never "Other".
+ * Gathern Tier-1: no canonical district and a non-Arabic raw neighbourhood → the source's own Arabic district token.
+ * districtCanonical is the MATCH-truth companion (never overridden by raw text) for listingInDistricts.
+ */
+export function applyArabicLocation(l: Listing, ar: { region: string; city: string; district: string } | undefined): void {
+  const rawCity = l.city, rawDistrict = l.district;
+  const safeRawCity = isJunkLocationToken(rawCity) ? '' : rawCity;
+  l.city = /[ء-ي]/.test(rawCity || '') ? rawCity : ((ar?.city) || arCity(safeRawCity) || safeRawCity || '');
+  l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || l.districtArFallback || '');
+  l.districtCanonical = (ar?.district) || '';
+  l.regionAr = (ar?.region) || l.regionAr || '';
+}
+
 // The in-app ad page's «same ad on other sites» row (owner 2026-10-10) loads each sibling's REAL card
 // through the same finalize() path, by its own (table, id) — never fetchListingById, whose id walk
 // across DEEPLINK_TABLES could hand back another table's row that merely shares the id.
@@ -2019,7 +2022,15 @@ export async function fetchListingCards(table: string, ids: number[]): Promise<L
   const { data, error } = await bounded(supabase.from(table).select(listSelectFor(table)).in('id', ids).eq('active', true).limit(ids.length));
   if (error || !data) return [];
   const rows = finalize(data, table.includes('_commercial') ? 'com' : 'res');
-  for (const r of rows) r.sourceTable = table;
+  // The same Arabic place the search results print (applyArabicLocation). A failed read keeps the CITY_AR mapping
+  // below it — never worse than before, and never a blank-for-error.
+  const loc = await bounded(supabase.from('search_listings_ar').select('listing_id,region_ar,city_ar,district_ar')
+    .eq('source_table', table).in('listing_id', ids).limit(ids.length));
+  const arById = new Map<number, { region: string; city: string; district: string }>();
+  for (const x of ((loc.error ? null : loc.data) ?? []) as { listing_id: number; region_ar: string | null; city_ar: string | null; district_ar: string | null }[]) {
+    arById.set(Number(x.listing_id), { region: x.region_ar || '', city: x.city_ar || '', district: x.district_ar || '' });
+  }
+  for (const r of rows) { r.sourceTable = table; applyArabicLocation(r, arById.get(Number(r.id))); }
   return rows;
 }
 
