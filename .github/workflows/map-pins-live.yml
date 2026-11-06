@@ -40,6 +40,13 @@ jobs:
         env:
           BASE_URL: https://ezhalah.com
         run: node e2e/map/map-pins-live.mjs
+      - name: Diag screenshots (🔧 2026-11-06 branch only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: map-diag
+          path: diag-*.png
+          if-no-files-found: ignore
 
       # Unattended: a red run must reach a human. One open alert per workflow file; the next green run resolves it.
       - name: Bridge this run's result to alert_event

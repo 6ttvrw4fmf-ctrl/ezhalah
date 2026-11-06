@@ -39,6 +39,19 @@ try {
         const mk = window.mapkit; const m = mk.maps[mk.maps.length - 1];
         m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(lat, lng), new mk.CoordinateSpan(span, span)), false);
       }, { lat: spot.lat, lng: spot.lng, span });
+      // DIAG (🔧 2026-11-06, alert 13321): what the page really holds after the move — region, annotations, DOM heads, pill.
+      await page.waitForTimeout(4000);
+      const diag = await page.evaluate(() => {
+        const mk = window.mapkit; const m = mk?.maps?.[mk.maps.length - 1];
+        const r = m?.region; const anns = m?.annotations ?? [];
+        return { path: location.pathname, maps: mk?.maps?.length ?? 0, center: r ? [r.center.latitude.toFixed(5), r.center.longitude.toFixed(5)] : null,
+          span: r ? [r.span.latitudeDelta.toFixed(5), r.span.longitudeDelta.toFixed(5)] : null, annotations: anns.length,
+          annSample: anns.slice(0, 3).map((a) => ({ lat: a.coordinate?.latitude?.toFixed(5), lng: a.coordinate?.longitude?.toFixed(5), el: a.element?.outerHTML?.slice(0, 160) })),
+          domPins: document.querySelectorAll('[data-testid=map-pin]').length, anyTestids: [...new Set([...document.querySelectorAll('[data-testid]')].map((e) => e.getAttribute('data-testid')))].slice(0, 40),
+          pill: document.querySelector('[data-testid=map-pin-count]')?.textContent ?? null, bodyText: document.body.innerText.replace(/\s+/g, ' ').slice(0, 400) };
+      });
+      console.log(`DIAG ${spot.name} span ${span}: ${JSON.stringify(diag)}`);
+      await page.screenshot({ path: `diag-${spot.district}-${span}.png`, fullPage: false }).catch(() => {});
       // Settled = the set of heads has not changed for 1.5 s (the map reads, merges and draws after the move ends).
       await page.waitForFunction(() => {
         const sig = [...document.querySelectorAll('[data-testid=map-pin]')].map((e) => e.textContent).join('|') + '#' + (document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '');
