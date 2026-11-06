@@ -910,6 +910,16 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260914190653_rakez_off_plan_resurrection_detector.sql, which '
     + 'creates mon_detect_rakez_off_plan_resurrection(), needle-edits it into the '
     + 'mon_run_all_detectors() roster, runs it green, and proves the predicate is not vacuous',
+  // Blind spot 1356 (new-listings engineer, 2026-11-06). NOT a data repair: the migration needle-edits
+  // trg_aqar_parse to prefer source_capture.ad_license_number. Its only UPDATE is the check block's
+  // self-test, which fires the trigger on one row inside a sub-transaction it then rolls back by raising
+  // (chk_rollback) — no listing row changes. The class it fixes is watched by its companion
+  // 20261106215350_arrivals_licence_dip_declares_aqar_publisher.sql, which declares aqar a proven licence
+  // publisher in arrivals_pin_licence_coverage() (read by the rostered mon_detect_arrivals_pin_or_licence_dip())
+  // and executes the predicate to prove aqar is flagged. Open both to verify this reason.
+  '20261106214548_aqar_trigger_keeps_payload_ad_licence.sql':
+    'not a repair: the only UPDATE is a self-test rolled back inside its check block; the class is '
+    + 'watched by companion 20261106215350 via rostered mon_detect_arrivals_pin_or_licence_dip()',
 };
 
 // Enforcement starts here — the day this rule landed.
