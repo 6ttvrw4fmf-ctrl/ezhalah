@@ -568,6 +568,10 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
         # The ad's own text was read and states no period: that silence is the source's answer, so a period stored
         # by an earlier crawl must not stay paired with this figure (the upsert drops a plain None).
         rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
+    elif is_rent and rent_period is None and price_annual is not None:
+        # Detail page NOT read (failed fetch): the period is unknown, so this crawl writes neither the figure nor the
+        # period — the stored pair stays together (a monthly 14,400 must never become 1,200 still labelled monthly).
+        price_annual = None
     elif is_rent and _stated_rent_period(_period_text) == "both":
         # Monthly AND yearly terms: the ad itself is ambiguous, so an older stored price/period must not linger.
         price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)

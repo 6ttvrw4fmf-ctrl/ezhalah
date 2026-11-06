@@ -50,7 +50,7 @@ def test_natural_ventilation_is_not_a_sale_word():
 
 
 def test_a_rental_keeps_its_published_figure_when_the_period_is_silent():
-    row, _ = map_listing(_item("هنجر للايجار حي المصيف"), _mp("investment", "استثمار"), None, [])
+    row, _ = map_listing(_item("هنجر للايجار حي المصيف"), _mp("investment", "استثمار"), "<p>هنجر</p>", [])
     assert row["price_annual"] == 200000, "the published figure was dropped"
     from scrapers.common import db
     assert row.get("rent_period") in (None, db.AUTHORITATIVE_NULL), "a period was invented"
@@ -102,6 +102,16 @@ def test_a_failed_detail_fetch_never_clears_a_stored_period():
     from scrapers.common import db
     row, _ = map_listing(_item("شقة للايجار"), _mp("rent", "إيجار"), None, [])
     db._unknown_must_not_overwrite_known(row)
-    assert "rent_period" not in row, "an unread detail page was taken as silence"
+    assert "rent_period" not in row and "price_annual" not in row, "an unread detail page split the stored pair"
     row, _ = map_listing(_item("شقة للايجار"), _mp("rent", "إيجار"), "<p>الإيجار شهري</p>", [])
     assert row["rent_period"] == "monthly", "the detail text's own period was ignored"
+
+
+def test_a_failed_detail_fetch_keeps_the_stored_price_and_period_together():
+    from scrapers.common import db
+    stored = {}
+    for desc in ("<p>الإيجار شهري</p>", None):            # crawl 1 reads «شهري»; crawl 2's detail fetch fails
+        row, _ = map_listing(_item("شقة للايجار"), _mp("rent", "إيجار"), desc, [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
+    assert stored == {"price_annual": 2400000, "rent_period": "monthly"}, stored
