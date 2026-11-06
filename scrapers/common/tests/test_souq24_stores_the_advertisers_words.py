@@ -55,3 +55,12 @@ def test_padding_after_a_contact_cue_does_not_save_the_name():
             ' <div id="Specifications">')
     out = R._advertiser_text(body)
     assert "أحمد" not in (out or "") and "شقة واسعة" in out
+
+
+def test_a_blank_line_or_unicode_padding_does_not_save_the_name():
+    b1 = '<div class="responsive-text x">شقة واسعة<br>للتواصل<br>\n<br>أحمد محمد</div> <div id="Specifications">'
+    b2 = ('<div class="responsive-text x">شقة واسعة<br>للتواصل:' + ' ' * 60 + 'أحمد محمد</div>'
+          ' <div id="Specifications">')
+    for b in (b1, b2):
+        out = R._advertiser_text(b)
+        assert "أحمد" not in (out or "") and "شقة واسعة" in out
