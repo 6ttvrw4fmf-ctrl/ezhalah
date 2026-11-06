@@ -117,6 +117,59 @@ def listing_urls_from_sitemap(xml: str) -> list[str]:
     return [u for u in locs if u.rstrip("/") != ARCHIVE.rstrip("/") and "/property/" in u]
 
 
+def _try(s: cc.Session, url: str) -> tuple[Optional[int], str]:
+    try:
+        r = s.get(url, timeout=60)
+        return r.status_code, (r.text if r.status_code == 200 else "")
+    except Exception as e:  # noqa: BLE001 — reported, never read as an empty catalogue
+        print(f"  probe {url}: {type(e).__name__}: {e}", flush=True)
+        return None, ""
+
+
+def sitemap_candidates(robots_txt: str) -> list[str]:
+    """Where a WordPress site lists its sitemaps: robots.txt «Sitemap:» lines first, then the
+    usual indexes of Rank Math / Yoast / core WordPress."""
+    found = [u.strip() for u in re.findall(r"(?im)^\s*sitemap:\s*(\S+)", robots_txt or "")]
+    for u in (f"{BASE}/sitemap_index.xml", f"{BASE}/wp-sitemap.xml", f"{BASE}/sitemap.xml"):
+        if u not in found:
+            found.append(u)
+    return found
+
+
+def discover_listing_urls(s: cc.Session) -> tuple[list[str], str]:
+    """The listing URLs and where they came from. property-sitemap.xml answered 404 from
+    2026-11-04 08:36 (4 runs, rows 0); a WordPress site that renames or splits its sitemap still
+    lists it in robots.txt / its sitemap index, so read those before calling the catalogue gone.
+    Every URL tried is printed. Raises only when no sitemap anywhere names a /property/ page."""
+    st, body = _try(s, SITEMAP)
+    print(f"  probe {SITEMAP}: {st}", flush=True)
+    if st == 200 and listing_urls_from_sitemap(body):
+        return listing_urls_from_sitemap(body), SITEMAP
+    _, robots = _try(s, f"{BASE}/robots.txt")
+    seen: set[str] = set()
+    queue = sitemap_candidates(robots)
+    while queue and len(seen) < 25:
+        u = queue.pop(0)
+        if u in seen:
+            continue
+        seen.add(u)
+        st, body = _try(s, u)
+        print(f"  probe {u}: {st}", flush=True)
+        if st != 200 or "<loc>" not in body:
+            continue
+        locs = [ihtml.unescape(x) for x in re.findall(r"<loc>\s*(.*?)\s*</loc>", body)]
+        if "<sitemapindex" in body:
+            # children whose name suggests listings first (property / listing / estate / unit)
+            kids = sorted(locs, key=lambda x: 0 if re.search(r"propert|listing|estate|unit|aqar", x, re.I) else 1)
+            queue = kids + queue
+            continue
+        urls = listing_urls_from_sitemap(body)
+        if urls:
+            return urls, u
+    raise RuntimeError(f"no sitemap names a /property/ page (tried {len(seen) + 1}: "
+                       f"{SITEMAP}, {', '.join(sorted(seen))})"[:280])
+
+
 def listing_urls_from_archive(page_html: str) -> set[str]:
     """The archive's own listing links (taxonomy pages pro-cat/pro-city/pro-type excluded)."""
     return {u for u in re.findall(r'href="(https://alqasem\.com\.sa/property/[^"/]+/)"', page_html)
@@ -330,9 +383,8 @@ def main() -> int:
     com: list[dict] = []
     skipped: dict[str, int] = {}
     try:
-        urls = listing_urls_from_sitemap(fetch(s, SITEMAP))
-        if not urls:
-            raise RuntimeError("property-sitemap.xml lists no listings")
+        urls, sitemap_used = discover_listing_urls(s)
+        print(f"{SOURCE}: sitemap {sitemap_used}", flush=True)
         time.sleep(_PAUSE)
         archive = listing_urls_from_archive(fetch(s, ARCHIVE))
         complete = archive == set(urls)
