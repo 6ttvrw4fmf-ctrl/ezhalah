@@ -559,9 +559,12 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     # The period text eaqartabuk actually prints. Built from the raw title/excerpt/status available
     # here (the redacted `title`/`description` are computed further down); redaction only strips
     # phone numbers, so it cannot remove a period word.
-    _period_text = " ".join(str(x or "") for x in (item.get("title"), item.get("excerpt"), status_ar))
+    _period_text = " ".join(str(x or "") for x in (item.get("title"), item.get("excerpt"), status_ar,
+                                                    _strip_tags(desc_html) if desc_html else ""))
     price_total, price_annual, rent_period = _price(meta.get("price"), is_rent, _period_text)
-    if is_rent and rent_period is None and price_annual is not None:
+    # Silence is the source's answer only when the whole ad (its detail text too) was read; a failed detail fetch
+    # leaves the stored period alone (the upsert drops the plain None).
+    if is_rent and rent_period is None and price_annual is not None and desc_html:
         # The ad's own text was read and states no period: that silence is the source's answer, so a period stored
         # by an earlier crawl must not stay paired with this figure (the upsert drops a plain None).
         rent_period = getattr(db, "AUTHORITATIVE_NULL", None)

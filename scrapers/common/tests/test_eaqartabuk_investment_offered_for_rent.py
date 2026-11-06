@@ -75,7 +75,7 @@ def test_a_re_scrape_never_pairs_a_new_figure_with_a_stale_period():
     stored = {}
 
     def crawl(title):
-        row, _ = map_listing(_item(title), _mp("rent", "إيجار"), None, [])
+        row, _ = map_listing(_item(title), _mp("rent", "إيجار"), "<p>شقة</p>", [])
         db._unknown_must_not_overwrite_known(row)
         for k in ("price_annual", "rent_period"):
             if k in row:
@@ -96,3 +96,12 @@ def test_a_priced_rental_that_turns_on_request_clears_its_figure_and_period():
         db._unknown_must_not_overwrite_known(row)
         stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
     assert stored == {"price_annual": None, "rent_period": None}, stored
+
+
+def test_a_failed_detail_fetch_never_clears_a_stored_period():
+    from scrapers.common import db
+    row, _ = map_listing(_item("شقة للايجار"), _mp("rent", "إيجار"), None, [])
+    db._unknown_must_not_overwrite_known(row)
+    assert "rent_period" not in row, "an unread detail page was taken as silence"
+    row, _ = map_listing(_item("شقة للايجار"), _mp("rent", "إيجار"), "<p>الإيجار شهري</p>", [])
+    assert row["rent_period"] == "monthly", "the detail text's own period was ignored"
