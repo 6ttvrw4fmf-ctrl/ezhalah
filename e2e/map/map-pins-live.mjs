@@ -27,6 +27,7 @@ const browser = await chromium.launch();
 try {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], locale: 'ar' });
   const page = await ctx.newPage();
+  page.on('console', (msg) => { if (msg.text().startsWith('DIAGBLOCK')) console.log(msg.text()); });
   await page.goto(`${BASE}/?pinwatch=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.getByText('بحث', { exact: true }).first().waitFor({ state: 'visible', timeout: 60_000 });
   await page.getByText('الضروري فقط', { exact: true }).click({ timeout: 3_000 }).catch(() => {});
@@ -72,7 +73,9 @@ try {
         const blocked = pins.filter(({ e, r }) => {
           const stack = document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2);
           const firstPin = stack.findIndex((x) => !!x.closest('[data-testid=map-pin]'));
-          return firstPin < 0 || stack[firstPin].closest('[data-testid=map-pin]') !== e;
+          const bad = firstPin < 0 || stack[firstPin].closest('[data-testid=map-pin]') !== e;
+          if (bad) console.log('DIAGBLOCK', JSON.stringify({ head: e.textContent, rect: [r.left | 0, r.top | 0, r.width | 0, r.height | 0], stack: stack.slice(0, 4).map((x) => ({ tag: x.tagName, testid: x.getAttribute('data-testid'), cls: x.className?.toString().slice(0, 40), text: x.textContent?.slice(0, 20), rect: (() => { const q = x.getBoundingClientRect(); return [q.left | 0, q.top | 0, q.width | 0, q.height | 0]; })() })) }));
+          return bad;
         }).map(({ t }) => `«${t}»`);
         return { count: pins.length, overlaps, blocked, pill: document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '' };
       });
