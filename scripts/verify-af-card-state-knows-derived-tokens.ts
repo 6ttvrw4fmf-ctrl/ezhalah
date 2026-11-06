@@ -22,7 +22,8 @@ const keysIncludeDerived = (c: string) =>
 const expectedLabelKeys = (c: string): Set<string> => {
   const m = c.match(/const EXPECTED_LABEL: Record<string, string\[\]> = \{([\s\S]*?)\n\};/);
   assert.ok(m, `${FILE}: EXPECTED_LABEL is not readable`);
-  return new Set([...m![1].matchAll(/(?:^|[\s,{])'?([A-Za-z_][\w]*|[^\s',:]+)'?\s*:\s*\[/g)].map((x) => x[1]));
+  // a key counts only with a NON-EMPTY label list: «apts8: []» would still exit the live run FATAL
+  return new Set([...m![1].matchAll(/(?:^|[\s,{])'?([A-Za-z_][\w]*|[^\s',:]+)'?\s*:\s*\[\s*'[^']+'/g)].map((x) => x[1]));
 };
 const unlabelled = (c: string) => {
   const hand = expectedLabelKeys(c);
@@ -34,6 +35,8 @@ const mustCatch = (label: string, caught: boolean) => { if (!caught) { console.e
 
 mustCatch('AMENITY_KEYS built from AMENITY_TOKEN_COL only (the 11-06 shape)',
   !keysIncludeDerived(code.replace(', ...Object.keys(AMENITY_TOKEN_DERIVED)]', ']')));
+mustCatch('a derived token’s hand label emptied (apts8: [] → FATAL)',
+  unlabelled(code.replace("apts8: ['٨ شقق فأكثر']", 'apts8: []')).includes('apts8'));
 mustCatch('a derived token’s hand label removed (apts4 → FATAL)',
   unlabelled(code.replace("apts4: ['٤ شقق فأكثر'], ", '')).includes('apts4'));
 
@@ -41,4 +44,4 @@ assert.ok(keysIncludeDerived(code), `${FILE}: AMENITY_KEYS no longer includes AM
 const miss = unlabelled(code);
 assert.deepEqual(miss, [], `${FILE}: derived token(s) with no Arabic label (the run would exit FATAL): ${miss.join(', ')}`);
 assert.equal(fails, 0, 'a mutation was not caught');
-console.log(`✓ af-card-state knows all ${Object.keys(AMENITY_TOKEN_DERIVED).length} derived amenity tokens, each with a label (2 mutations caught)`);
+console.log(`✓ af-card-state knows all ${Object.keys(AMENITY_TOKEN_DERIVED).length} derived amenity tokens, each with a label (3 mutations caught)`);
