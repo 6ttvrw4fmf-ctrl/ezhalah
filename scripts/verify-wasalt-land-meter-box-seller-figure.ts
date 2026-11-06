@@ -29,8 +29,18 @@ const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`
 const mustCatch = (label: string, caught: boolean) => check(`catches: ${label}`, caught);
 
 // ── 1. the migration's guards ────────────────────────────────────────────────────────────────────────────────────────
-const fnBody = (sql: string, name: string) =>
-  sql.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\$function\\$;`))?.[0] ?? '';
+/** One function's text, read with its ACTUAL dollar tag; '' (→ every guard fails) when the header or the closing tag is
+ *  missing — never the rest of the file (scripts/verify-function-body-windows-fail-closed.ts). */
+const fnBody = (sql: string, name: string): string => {
+  const h = sql.search(new RegExp(`create or replace function public\\.${name}\\(`));
+  if (h < 0) return '';
+  const rest = sql.slice(h);
+  const open = /\bas\s+(\$[A-Za-z_]*\$)/i.exec(rest);
+  if (!open) return '';
+  const tag = open[1];
+  const end = rest.indexOf(tag, open.index + open[0].length);
+  return end < 0 ? '' : rest.slice(0, end + tag.length);
+};
 
 export function guardProblems(sql: string): string[] {
   const p: string[] = [];
@@ -75,6 +85,8 @@ const MUTANTS: [string, string, string][] = [
   ['the detector only shouts', 'update public.search_listings_ar s set price_per_meter', 'select 1 from public.search_listings_ar s where price_per_meter'],
   ['the detector is off the roster', "'mon_detect_served_billion_price_unproven', 'mon_detect_wasalt_land_box_typo',", "'mon_detect_served_billion_price_unproven',"],
 ];
+mustCatch('a function whose closing tag is missing reads as empty, never as the rest of the file',
+  fnBody('create or replace function public.x() returns int as $q$ select 1; update t set a = 1;', 'x') === '');
 for (const [label, from, to] of MUTANTS) {
   const m = SQL.split(from).join(to);
   mustCatch(label, m !== SQL && guardProblems(m).length > 0);
