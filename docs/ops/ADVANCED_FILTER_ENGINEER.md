@@ -595,3 +595,22 @@ A fixture must be pasted from the RE-READ page — #10132 passed on invented mar
 survived it. And a migration applied late in the slot with runners jammed cannot be mirrored in time (deploy
 41812835256 refused at 10:14 with four of your migrations unmirrored behind 91 queued runs): **apply before minute 30
 or not at all**, and open the mirror-only PR the same minute (the 11-03 rule above).
+
+## 🛋️ Furniture lives in the MAIN filter; bathrooms in yours (owner 2026-11-05 — read before touching either)
+**What shipped (PRs #10631, #10801, #10807, all live):** yearly-rent homes get a «الأثاث» row in the main filter's «خصص بحثك
+أكثر», right under «غرف النوم»: **الكل · مفروشة · غير مفروشة**, each with a light count pill (the number alone). It shows only
+where the furnished question is certified (`cohortAllows(…, 'furnished')`: yearly residential rent — never Buy, short stays,
+commercial); **no numbers until a city is picked** (owner: nationwide numbers read as a surprise); the counts are built with
+**the search's own builder** (`buildFilterBaseQuery()` + the picked districts — `query` alone lost the city once and every
+number vanished), so the number on a choice is what «بحث» returns. A failed count shows the choices with no number — never 0.
+**Your side:** left on «الكل», your furnished question asks «مفروشة أو غير مفروشة؟» (eligibility `furnishedPref == null`);
+answered in the row, it never asks twice. Labels are «مفروشة / غير مفروشة» in BOTH places. Guard:
+`scripts/verify-main-filter-furniture.ts` (31 checks + mutations). Live-verified 2026-11-05: Riyadh yearly apartments
+«غير مفروشة» 18,772 = af_eligible_count 18,772; cards carry «مطابق لطلبك · غير مفروشة»; aqaralmuhaysini 29806 says «مفروش: لا».
+**Accuracy behind it:** all 126,831 yearly ads checked — stated furnished/unfurnished agrees with the ad's words ~99.8 %; the
+reader faults (own-district blank hid the next word, «كغير مؤثث», «بدون فرش», near-word, typos, «Furnished: Unfurnished») were
+fixed in #10630. Aqar's «غير مفروشة» is Aqar's own form field (its page lists only ticked features).
+**Bathrooms (your question «كم دورة مياه؟», 1+…4+, villas 2+…5+) are ~53 % known on yearly homes.** #10731 reads a labelled
+total («عدد دورات المياه 3», «الحمامات ٥») even beside a room's own «بدورة مياه». **Open owner decisions — do NOT ship without
+the owner:** (1) «3 دورات مياه» + «مجلس بدورة مياه» (~1,300 ads) → show «3+»? (2) a single «دورة مياه» on apartments / studios
+/ rooms (~7,350 ads) → read as 1, after reading 25+ real ads?
