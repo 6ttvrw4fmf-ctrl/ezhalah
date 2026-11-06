@@ -17,3 +17,8 @@ def test_the_district_pair_is_silent_after_blanking():
 
 def test_a_real_laundry_room_in_the_same_district_is_still_read():
     assert _laundry("شقة في حي العدل فيها غرفة غسيل") is True
+
+
+def test_the_address_does_not_carry_a_later_negation_to_the_pool():
+    f = W.facts_of(W.clean_text(None, "مسبح حي العدل - الغسالة لا يوجد مصعد"), ("العدل",))
+    assert f.get("pool") is True and f.get("elevator") is False and f.get("laundry_room") is None

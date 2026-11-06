@@ -1252,7 +1252,7 @@ def _blank_place_names(t: str, names: tuple[str, ...]) -> str:
 
 
 _ADL_PAIR = re.compile(r"(العدل\s+)(ال?غسال\S*)")
-_ADL_GHASSALA = re.compile(r"(العدل)[ \t]*[-–—،,|/]+[ \t]*(?=ال?غس[اٱ]ل)")
+_ADL_GHASSALA = re.compile(r"(العدل)([ \t]*[-–—،,|/]+[ \t]*)(ال?غس[اٱ]ل\S*)( ?)")
 
 
 def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
@@ -1263,7 +1263,9 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     raw = unicodedata.normalize("NFKC", text)
     # «حي العدل - الغسالة» / «العدل، الغسالة»: one Makkah address, not a clause break before a washing machine — the
     # separator becomes blanks of the same length (quotes keep their offsets) so _judge sees «العدل» before it.
-    raw = _ADL_GHASSALA.sub(lambda m: m.group(1) + " " * (len(m.group(0)) - len(m.group(1))), raw)
+    raw = _ADL_GHASSALA.sub(lambda m: m.group(1) + " " * len(m.group(2)) + m.group(3) + ("،" if m.group(4) else ""), raw)
+    # …and the clause break moves to AFTER the address, so «مسبح حي العدل - الغسالة لا يوجد مصعد» keeps «لا يوجد» with
+    # the lift, not the pool (CodeRabbit on #10943)
     full_norm = norm(raw)
     clauses = [(off, c) + norm_map(c) for off, c in _clauses(raw)]
     if place_names:
