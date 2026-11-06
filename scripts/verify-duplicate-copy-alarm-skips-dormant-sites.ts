@@ -14,7 +14,8 @@ import { join } from 'node:path';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'supabase', 'migrations');
 const FN = 'mon_detect_lifecycle_duplicate_stale_copy';
-const strip = (s: string) => s.replace(/^\s*--.*$/gm, '');
+// Executable SQL only: block comments and every `--` comment (inline too) are removed.
+const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--.*$/gm, '');
 // A migration that DEFINES the detector (full body) or PATCHES it (needle edit on its own definition);
 // a roster entry or a mere mention is not a change to its loop.
 const CHANGES = new RegExp(String.raw`create\s+or\s+replace\s+function\s+public\.${'mon_detect_lifecycle_duplicate_stale_copy'}\b|pg_get_functiondef\(\s*'public\.${'mon_detect_lifecycle_duplicate_stale_copy'}\b`, 'i');
@@ -66,6 +67,8 @@ mustCatch('the skip moved out of the replacement b1 into an unused string',
     .replace('begin\n', "begin\n  perform 'where not public.ops_platform_is_dormant(d.platform)';\n") }).length > 0);
 mustCatch('the skip commented out with a block comment inside b1',
   problems({ ...files, [latest]: files[latest].replace(/(where not public\.ops_platform_is_dormant\(d\.platform\))/, '/* $1 */') }).length > 0);
+mustCatch('the skip hidden behind an inline -- comment inside b1',
+  problems({ ...files, [latest]: files[latest].replace(/(\n)(\s*)(where not public\.ops_platform_is_dormant\(d\.platform\))/, ' -- $3$1$2') }).length > 0);
 mustCatch('a newer change without the skip, judged instead of the old one',
   problems({ ...files, '29990101000000_x.sql': `create or replace function public.${FN}() returns int language sql as $$ select 1 $$;` }).length > 0);
 

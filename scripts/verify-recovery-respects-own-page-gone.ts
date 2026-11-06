@@ -25,7 +25,9 @@ export function problems(files: Record<string, string>): string[] {
   const defs = Object.keys(files).filter((f) => DEF.test(files[f])).sort();
   if (defs.length === 0) return ['no committed migration defines public.auto_recover_false_inactive'];
   const latest = defs[defs.length - 1];
-  const sql = files[latest].replace(/^\s*--.*$/gm, '');
+  // Judge only executable SQL: block comments and every `--` comment (inline too) are removed first,
+  // so a commented-out predicate can never satisfy a check.
+  const sql = files[latest].replace(/\/\*[\s\S]*?\*\//g, '').replace(/--.*$/gm, '');
   const out: string[] = [];
   const need = (label: string, re: RegExp) => { if (!re.test(sql)) out.push(`${latest}: ${label}`); };
   need('the recovery predicate no longer reads the own-page evidence ledger', /not\s+exists\s*\(\s*select\s+1\s+from\s+public\.ops_stale_inactivation_probe/i);
@@ -75,6 +77,7 @@ mutation('only the ad_number clause losing its GONE verdict', /and p\.verdict = 
 mutation('only one clause losing its newer-than-ALIVE condition', /and p\.probed_at >= coalesce\(t\.last_verified_alive_at, ''-infinity''::timestamptz\)\) ', t\);\n    end if;/, ") ', t);\n    end if;");
 mutation('only the ad_number clause losing its source_table match', /p\.source_table = %L and p\.listing_id is null/, 'p.listing_id is null');
 mutation('the listing_id clause bound to the sibling table', /(p\.listing_id = t\.id[\s\S]*?\) ', )t\);/, '$1sib);');
+mutation('the source_table match of the ad_number clause hidden in a block comment', /p\.source_table = %L and p\.listing_id is null/, '/* p.source_table = %L and */ p.listing_id is null');
 mustCatch('a newer redefinition without the clause, judged instead of the old one',
   problems({ ...files, '29990101000000_x.sql': 'create or replace function public.auto_recover_false_inactive() returns void language sql as $$ select 1 $$;' }).length > 0);
 
