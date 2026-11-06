@@ -129,6 +129,21 @@ COMMERCIAL_TYPES = {
 _TITLE_DISTRICT_RE = re.compile(r"(?:^|(?<=\s))ب?ح[يى]\s+([^\s,،.)\]]+)")
 
 
+
+_RENT_WORD = re.compile(r"(?:لل|ل)?[إا]يجار")
+_SALE_WORD = re.compile(r"(?:لل)?بيع")
+
+
+def investment_offered_for_rent(op: str, status_ar: str, title, excerpt) -> bool:
+    """eaqartabuk's «استثمار» (operation=investment) states neither sale nor rent. When the ad's OWN words
+    say rent and never sale («هنجر للايجار حي المصيف», 24206284, 200,000), it is a rental; filing it as Buy was
+    our mapper's guess (backlog 1358, 2026-11-06: 4 investment ads, 2 titles say rent, 0 say sale). Anything
+    else keeps the old reading — never the reading that adds rows to a filter."""
+    if op != "investment" and "استثمار" not in (status_ar or ""):
+        return False
+    words = " ".join(str(x or "") for x in (title, excerpt))
+    return bool(_RENT_WORD.search(words)) and not _SALE_WORD.search(words)
+
 def _district_from_title(title: Optional[str]) -> Optional[str]:
     m = _TITLE_DISTRICT_RE.search(title or "")
     return m.group(1) if m else None
@@ -531,6 +546,8 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     op = (mp.get("operation") or "").strip().lower()
     status_ar = (mp.get("status") or "").strip()
     is_rent = op == "rent" or "إيجار" in status_ar or "ايجار" in status_ar
+    if not is_rent and investment_offered_for_rent(op, status_ar, item.get("title"), item.get("excerpt")):
+        is_rent = True
 
     # The period text eaqartabuk actually prints. Built from the raw title/excerpt/status available
     # here (the redacted `title`/`description` are computed further down); redaction only strips
