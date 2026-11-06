@@ -39,3 +39,12 @@ def test_the_parser_stores_it():
     import inspect
     src = inspect.getsource(R)
     assert "description = _advertiser_text(body)" in src
+
+
+def test_a_name_on_the_line_after_a_bare_contact_cue_is_dropped():
+    """«للتواصل<br>أحمد محمد»: the cue alone on its line, the name on the next (PDPL); other lines stay."""
+    body = ('<div class="responsive-text x">شقة واسعة<br>مطبخ راكب<br>للتواصل :<br>أحمد محمد<br>غرفة خادمة</div>'
+            ' <div id="Specifications">')
+    out = R._advertiser_text(body)
+    assert "أحمد" not in out and "للتواصل" not in out
+    assert out == "شقة واسعة\nمطبخ راكب\nغرفة خادمة"

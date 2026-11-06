@@ -194,10 +194,10 @@ _PHONE_RE = re.compile(
 )
 _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3}")
 # A contact call-to-action + the ~40 chars after it (phone / WhatsApp / a seller alias).
-_CONTACT_LINE_RE = re.compile(
-    r"(?:للتواصل|للحجز|للاستفسار|للاتصال|اتصل(?:\s*(?:بنا|على))?|"
-    r"رقم\s*(?:الجوال|الجوّال|التواصل|الهاتف|الواتس|المعلن)|جوال|موبايل|المعلن|الوسيط|المسوق|"
-    r"مسؤول\s*الإعلان|واتس\S*|whats\s*app|whatsapp)[^\n]{0,40}", re.I)
+_CONTACT_CUES = (r"للتواصل|للحجز|للاستفسار|للاتصال|اتصل(?:\s*(?:بنا|على))?|"
+                 r"رقم\s*(?:الجوال|الجوّال|التواصل|الهاتف|الواتس|المعلن)|جوال|موبايل|المعلن|الوسيط|المسوق|"
+                 r"مسؤول\s*الإعلان|واتس\S*|whats\s*app|whatsapp")
+_CONTACT_LINE_RE = re.compile(r"(?:" + _CONTACT_CUES + r")[^\n]{0,40}", re.I)
 
 # ── Per-listing field regexes ──────────────────────────────────────────────────
 REALESTATE_NAME_RE = re.compile(r'realestate_name\s*=\s*"([^"]*)"')
@@ -433,13 +433,25 @@ _DESC_RE = re.compile(
     r"""<div class="responsive-text[^"]*">(.*?)</div>\s*<div[^>]*id=['"]Specifications['"]""", re.S)
 
 
+# A line holding nothing but a contact cue («للتواصل», «رقم الجوال :») — the name or number follows on the next line.
+_CONTACT_CUE_ONLY_RE = re.compile(r"^[\W_]*(?:" + _CONTACT_CUES + r")[\W_]*$", re.I)
+
+
 def _advertiser_text(body: str) -> Optional[str]:
     m = _DESC_RE.search(body or "")
     if not m:
         return None
     t = re.sub(r"<br\s*/?>", "\n", m.group(1), flags=re.I)
     t = re.sub(r"<[^>]+>", " ", t)
-    lines = [ln for ln in (_redact(x) for x in t.split("\n")) if ln]   # each line on its own: the reader's clause breaks
+    lines, carry = [], False
+    for x in t.split("\n"):
+        if carry and len(x.strip()) <= 40:
+            carry = False                # «للتواصل<br>أحمد محمد»: the line after a bare contact cue is the contact (PDPL)
+            continue
+        carry = bool(_CONTACT_CUE_ONLY_RE.match(ihtml.unescape(x)))   # a line that is ONLY the cue: the name is on the next
+        ln = _redact(x)
+        if ln:
+            lines.append(ln)             # each line on its own: the reader's clause breaks
     t = "\n".join(lines)
     return t[:4000] if t else None
 
