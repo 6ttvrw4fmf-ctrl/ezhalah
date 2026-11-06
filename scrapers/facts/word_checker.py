@@ -663,6 +663,7 @@ _PURE_PUBLIC_FACTS = frozenset({"mosque", "market", "restaurant_cafe", "in_mall"
 # «مباشرة» just before a public place makes it the neighbour — unless the ad says it has it («فيلا شمالية فيها حديقة»).
 _BOUNDARY_STEMS = tuple(_n(w) for w in ("شمال", "جنوب", "شرق", "غرب", "جهه", "جهتين", "جهات", "واجهه", "واجهتين",
                                          "واجهات", "يحد", "حدود", "مباشر"))
+_OWN_AFTER = frozenset(_n(w) for w in ("خاص", "خاصه", "مستقل", "مستقله", "لسكان", "للسكان"))
 _HAS_CUES = tuple(_n(w) for w in ("فيها", "فيه", "بها", "به", "تحتوي", "يحتوي", "يوجد", "توجد", "يضم", "تضم", "داخل"))
 
 
@@ -972,7 +973,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if fact in _NEAR_PUBLIC_FACTS:
         w4 = gp[-4:]
         at = max((k for k, w in enumerate(w4) if _is_boundary(w)), default=-1)
-        if at >= 0 and not any(_starts(w, _HAS_CUES) or _starts(_strip_wa(w), _HAS_CUES) for w in w4[at + 1:]):
+        if at >= 0 and not any(_starts(w, _HAS_CUES) or _starts(_strip_wa(w), _HAS_CUES) for w in w4[at + 1:]) \
+                and not any(_strip_wa(w) in _OWN_AFTER for w in gn[:2]):   # «واجهة شمالية ونادي رياضي خاص» is the home's
             return None, s, e
     if fact in _PURE_PUBLIC_FACTS:
         w8 = [_strip_wa(w) for w in gp[-8:]]
@@ -1281,7 +1283,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # جامع، ونادي صحي خدمات الموقع القريبة: * مدارس» (aqar 15128626, 🔬 2026-11-06 — the view's gym served as the unit's)
         list_in = near_list and comma and (len(words) <= 5 or _starts(_strip_wa(words[0]), _PLACE_WORDS)) \
             and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words) \
-            and not any(_starts(_strip_wa(w), _OWN_CUES) for w in words)
+            and not any(_starts(_strip_wa(w), _OWN_CUES) or _strip_wa(w) in _HAS_CUES for w in words)
         n_words = len(words)
         for fact, pats in _PATTERNS.items():
             for rx, forced in pats:
@@ -1843,6 +1845,8 @@ def selftest() -> None:
         # a view list's gym is not the unit's (P2 13085, aqar 15128626 / 15017191, 2026-11-06)
         ("* إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس تعليمية", {}, ("gym", "mosque", "garden")),
         ("✓ تأثيث فاخر ومتكامل ✓ مطبخ مجهز بالكامل ✓ خدمات فندقية ونادي صحي ومسبح ✓ أمن وحراسة", {"gym": True}, ()),
+        ("قريب من الخدمات، مدرسة كبيرة للبنات والشقة بها نادي رياضي", {"gym": True}, ()),
+        ("واجهة شمالية ونادي رياضي خاص", {"gym": True}, ()),
         ("البرج جديد ويوجد به نادي رياضي وكذلك مسبح", {"gym": True}, ()),
         ("قريب من الخدمات، نادي رياضي لسكان المبنى", {"gym": True}, ()),
         ("قريب من الخدمات، مدرسة، جيم، مسجد", {}, ("gym", "mosque")),
