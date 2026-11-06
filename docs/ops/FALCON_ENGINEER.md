@@ -349,6 +349,16 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    (11-03 20:12 UTC): from then on the run cannot apply SQL. Write every database fix as a reviewed file under
    `docs/ops/pending-sql/` in its own PR and put it in LINE 1, rather than leaving it in the transcript.
 
+30. A field the scraper stores is not a field the card shows (11-06): the card's «رقم رخصة الإعلان» reads
+   `additional_info.rega_ad_license_number`, and ~37,000 live ads on ~45 sites kept the licence only in
+   `license_number` (muhaysini 20,371 of 20,371). The owner found ONE site on 11-04 and it was fixed for one site.
+   For every field the owner names, measure every table, not the site he named, and put the fix in the shared
+   writer (`scrapers/common/db.py _ensure_capture`), never in one scraper. `mon_detect_licence_not_on_card` guards it.
+31. A robot's red is often the robot (11-06): card photos «broken» on 7 sites were a label check, not Chrome
+   (ORB sniffs `binary/octet-stream` and mislabelled AVIF and paints them); «moved» links on dallali/erapulse
+   were the same ad under a new pretty URL. Before fixing the product, open three of the failures the way the
+   browser does. A detector that cries wolf hides the real bug next to it (justsa's real 404 photos).
+
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,
   the quick searches show 0 missing / extra / duplicates / count mismatches, ≥ 99 of 100 real listings were found in each

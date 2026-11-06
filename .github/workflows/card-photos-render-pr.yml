@@ -1,0 +1,38 @@
+# THE CARD-PHOTO RENDER CHECK, ON THE PR THAT CHANGES IT (falcon 2026-11-06).
+#
+# scripts/verify-card-photos-render-live.ts lives in af-live-truth-check.yml, a ~4 h browser run
+# with no pull_request trigger, so a change to how it judges a photo could only be proven the next
+# day. This runs the same script alone (~3 min, anon reads + image-host GETs, no browser, no npm
+# install, no secrets) whenever the script or the card's photo-url logic changes, and on demand.
+name: Card photos render (live, per PR)
+
+on:
+  pull_request:
+    paths:
+      - scripts/verify-card-photos-render-live.ts
+      - src/lib/photoUrl.ts
+      - .github/workflows/card-photos-render-pr.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Our own robots pass the API front door with this header (scripts/lib/gateFetch.mjs).
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  photos:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Evidence, not a gate: the verdict depends on third-party image hosts (justsa's 404s are a real
+      # scraper bug in another lane), and a red non-required check would stop the merge robot on an
+      # unrelated PR. Read the log; af-live-truth-check.yml is where this check fails the build.
+      - name: Every active platform's DB photo renders the way a browser decides it
+        continue-on-error: true
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-card-photos-render-live.ts

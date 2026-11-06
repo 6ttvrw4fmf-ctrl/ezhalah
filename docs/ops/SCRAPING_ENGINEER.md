@@ -97,6 +97,21 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
+**NEW (11-05): «served_price_never_rechecked» is a COVERAGE alarm, and each table had a different root.** Read
+the sample rows, then the site's own run log line, before touching code:
+- **tuba** — the map feed (`mapProperties`) omits ads with no pin, so «records = declared» read INCOMPLETE every
+  night from 09-30 and prune never ran (3,289 cards / 3,287 records). Fixed in #10611: the LIST decides completeness.
+- **dealapp** — zero-padded twins («DA089639» beside «DA89639»): the crawl canonicalises ids, so the padded row is
+  never re-written. Retired by `20261105054500` + `mon_detect_dealapp_zero_padded_twin()` (repairs, then raises).
+- **safa commercial** — the table's crawl seen-set is EMPTY (all units are residential or off-plan), so
+  `prune_unseen` returns -1 («site down») and the 1 row can never be struck. Open (backlog, «SAFA»).
+- **maqrat** — documented: no removal signal at source (probe 37618176662); absence never hides. Not a scraper bug.
+- **sakani** — the detail route walls the proxy (backlog 1277).
+**BLIND SPOT (11-05): Aqar licence 0.6 %** (179k cards; dealapp / Property Finder 100 %). `license_number` is
+written only by `trg_aqar_parse` from the stored visible text, and the licence block is not in it. Find where the
+rendered page carries it (`source-reread.yml around=rega_` on aqar 96046, licence 7200958887 in its own text), then
+read it in `enrich_residential` AND make `aqar_parse` keep it (the trigger overwrites `license_number` every write).
+
 **NEW (11-04): EVERY queued workflow that reads the repo must check out `main` at RUN time, not only small-sources-sync.**
 `migration-auto-mirror.yml` run 41767741699 was dispatched 03:32 and got a runner 05:05; `actions/checkout` used the
 03:32 commit, so two migrations that had reached main since read as «missing» and got duplicate save PRs (#10346,

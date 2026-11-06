@@ -475,7 +475,12 @@ jobs:
     # local run of the region sweep alone passed 800+ checks and was still going at 55 minutes
     # through the cloud egress proxy, which is why neither a 60-minute shared budget nor a bigger
     # guess is the answer: the sizes are not knowable in advance, so they must not share.
-    timeout-minutes: 90
+    # 90 → 150 (🦅 2026-11-06, backlog 324): measured on the scheduled runs, this job took 45 min (10-30),
+    # 48 min (10-31) and 85 min (11-01), then was CANCELLED at the 90-minute cap on 11-02, 11-05 and 11-06
+    # (13:27 → 14:57) — so the whole robot ended red/cancelled and proved nothing about the region surface
+    # for five days. The walk is load-sensitive (the 16:00-18:00 Riyadh hour); 150 gives the slowest
+    # measured day 1.75× room. A cancelled sweep is still RED through the attendance job below.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

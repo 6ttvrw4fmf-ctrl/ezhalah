@@ -48,6 +48,14 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 🔧 2026-11-06. One aqarmonthly row («بحرة», pin 21.4669 N) left under Jazan city 3504 after the owner's 10-22 Bahrah twin
+  // repair (20261022004255 ran before that row was captured); refiled to بحرة المجاهدين (city 1882, منطقة مكة المكرمة).
+  '20261106135341_bahrah_leftover_refiled_to_makkah.sql':
+    'watched by the standing detector that found it, mon_detect_jazan_label_pin_far_north (alert jazan_label_pin_far_north, ' +
+    'in the roster since 20261022004255): any production_ready row served under region_id 10 whose own pin is north of 19.5 N ' +
+    're-raises it — the exact shape this repair removes (alert 13409). Also enrolled in ops_repair_guarantee_registry ' +
+    '(bahrah_leftover_refiled_to_makkah_1106). The applied file cannot be edited to name the detector (content parity: ' +
+    'byte-exact mirror).',
   // 🆕 2026-11-05. 19 Property Finder arrivals whose own DISTRICT word is a catalogued place got that district.
   '20261105072253_propertyfinder_19_arrivals_get_their_catalogued_district.sql':
     'watched by the standing daily detector mon_detect_unknown_named_district (cron 04:41 UTC, created in ' +

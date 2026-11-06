@@ -796,3 +796,47 @@ def test_liveness_oracle_reuses_one_session_for_every_read(monkeypatch):
     verify = R._make_verify_gone({"ad_number": "T1"})
     assert [verify(a)[0] for a in ("T1", "T2", "T3")] == ["live"] * 3
     assert len(made) == 1 and len(used) == 3 and set(used) == set(made)
+
+
+class _MapGap(_FakeSession):
+    """The list serves every card; the map feed never carries `gap` of them (measured 2026-11-05:
+    3,289 cards = listPropertiesCount, 3,287 records — complete=False every night since 09-30)."""
+
+    def __init__(self, total: int, gap: set[int]):
+        super().__init__(total)
+        self.gap = gap
+
+    def get(self, url, timeout=0):
+        r = super().get(url, timeout)
+        r._payload["mapProperties"] = [e for e in r._payload["mapProperties"] if e["id"] not in self.gap]
+        return r
+
+
+def test_a_listed_ad_missing_from_the_map_feed_does_not_make_the_whole_site_incomplete():
+    items, complete, card_only = R.walk_catalogue(_MapGap(3289, {2622, 3001}))
+    assert len(items) == 3287
+    assert complete is True, "two records missing from the map feed froze every tuba removal for 5 weeks"
+    assert card_only == {"2622", "3001"}, "the listed-but-unmapped ads must be handed to the prune as SEEN"
+
+
+def test_a_map_feed_that_loses_many_records_is_still_an_incomplete_read():
+    gap = set(range(100, 100 + R.MAX_CARDS_WITHOUT_RECORD + 1))
+    _items, complete, _card_only = R.walk_catalogue(_MapGap(3289, gap))
+    assert complete is False
+
+
+def test_the_prune_treats_a_card_only_ad_as_seen(monkeypatch):
+    """main() must pass card-only ads to prune_unseen as seen, or a LISTED ad becomes a candidate."""
+    calls = []
+    monkeypatch.setattr(R, "session", lambda: _MapGap(60, {7}))
+    monkeypatch.setattr(R, "map_listing", lambda rec: (
+        {"ad_number": f"TBA{rec['id']}", "transaction_type": "Buy"}, "residential", ""))
+    monkeypatch.setattr(R.db, "begin_run", lambda slug: 1)
+    monkeypatch.setattr(R.db, "_wasalt_batch", lambda tbl, rows: None)
+    monkeypatch.setattr(R.db, "retire_superseded_siblings", lambda **k: 0)
+    monkeypatch.setattr(R.db, "prune_unseen", lambda tbl, seen, **k: calls.append((tbl, set(seen))) or 0)
+    monkeypatch.setattr(R.db, "end_run", lambda *a, **k: True)
+    monkeypatch.setattr(R, "_make_verify_gone", lambda control: (lambda ad: ("unknown", "")))
+    monkeypatch.setattr("sys.argv", ["tuba"])
+    assert R.main() == 0
+    assert calls and all("TBA7" in seen for _tbl, seen in calls)

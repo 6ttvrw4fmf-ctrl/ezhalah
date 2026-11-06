@@ -33,6 +33,31 @@ export function dotsInView(dots: MapDot[], deals: PinDeal[] | string[], box: { s
 /** How many listings the kept dots stand for — the count pill's number. */
 export const dotsTotal = (dots: MapDot[]): number => dots.reduce((a, d) => a + d.n, 0);
 
+/** The feed's cell: every dot stands for the listings of one 0.01° square around it (map_dots_ar). */
+export const DOT_CELL = 0.01;
+
+/**
+ * How many listings a VIEW is estimated to hold: each dot's count weighted by the share of its cell that lies inside
+ * the box. dotsTotal(dotsInView()) counted a whole cell the moment its centre was in view — at the deepest zoom a
+ * 280 m view sat inside 1 km cells holding 1,501 listings and read «crowded» (over CROWD_ESTIMATE) although the index
+ * held 177 points there, so the map drew two bubbles the user could never zoom into (🔧 2026-11-06, map-pins-live red
+ * since 2026-11-05 on the حي البوادي scheme). A cell partly in view counts partly; a cell whose centre is just outside
+ * but which overlaps the view counts its overlap too.
+ */
+export function dotsEstimateInBox(dots: MapDot[], deals: PinDeal[] | string[], box: { s: number; w: number; n: number; e: number }, cell = DOT_CELL): number {
+  const keep = new Set(deals as string[]);
+  const h = cell / 2;
+  let total = 0;
+  for (const d of dots) {
+    if (!keep.has(d.deal)) continue;
+    const dy = Math.min(d.lat + h, box.n) - Math.max(d.lat - h, box.s);
+    const dx = Math.min(d.lng + h, box.e) - Math.max(d.lng - h, box.w);
+    if (dy <= 0 || dx <= 0) continue;
+    total += d.n * Math.min(1, dy / cell) * Math.min(1, dx / cell);
+  }
+  return total;
+}
+
 /** Web-Mercator y for a latitude (radians-free form, monotonic north → smaller). */
 export function mercY(lat: number): number {
   const c = Math.max(-85.05, Math.min(85.05, lat)) * Math.PI / 180;

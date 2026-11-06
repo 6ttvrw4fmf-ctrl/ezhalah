@@ -479,6 +479,19 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   byte-exact mirror can differ from main by ONE trailing newline (#10267/#10278 vs main, md5 against
   `array_to_string(statements,'')`) — compare md5s before calling a CONFLICTING mirror PR wrong.
 
+- **2026-11-06:** the night's deploys died on a six-line migration: an owner-session cron job applied at 06:04 had no
+  git copy, its auto-mirror #10856 went red because `sql/mirrors/cron_schedule.json` must travel with a schedule change,
+  and from 06:43 the drift gate refused every frontend deploy (five runs 07:09–07:36) until a person merges a PR the
+  robot cannot take (`sql/` is outside its lanes). The whole repair was a 3-line JSON edit pushed to the mirror branch at
+  13:19 — do it in the first ten minutes of the run, not after the review: **read `migration_drift` and the auto-mirror
+  PR's red check before anything else, and when the red check is `verify-cron-slot-discipline`, push the cron mirror
+  to that branch and LINE 1 it at once.** Second: a map robot red on every run since it was born is first a question
+  about what the page really holds — one dispatch of the SAME robot from a branch that prints region / annotations /
+  DOM heads / the painted stack under each «covered» head (runs 42225384902, 42226056422) found two different defects
+  in ten minutes (a whole-cell crowd estimate that read a 280 m view as 1,501 listings and drew unzoomable bubbles; a
+  tap test that counted heads under the map's own control strip as «covered») — where a day of reading
+  `AppleMap.web.tsx` would have found neither. Dispatch the robot from a diagnostic branch before theorising.
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -599,3 +612,29 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   made #10132 pass on nothing (sakan's radio «label for»). 🆕 11-03: a value the recovery step found was thrown
   away by a later CASE arm (pin_governorate) in the serving view. Rule: one real record, the consuming rule and the
   serving arm before the first line of code — and a fixture is pasted from the re-read page, never typed.
+
+## 📚 FLEET LESSONS 2026-11-06 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A cron-schedule change inside a night migration turns its auto-mirror into a PERSON-only PR, and every frontend
+  deploy is refused until a human merges it.** 🆕 11-05: #10654 (mirror 20261105072102 + `sql/mirrors/cron_schedule.json`)
+  sat in LINE 1 because `verify-cron-slot-discipline` demands the cron mirror in the same PR and `sql/` is outside the
+  robot's lanes. 🔧 11-06, the same shape again: 20261106060445 (`gh-checks-that-cry-wolf`) was applied at 06:04, its
+  auto-mirror #10856 went red at 06:37 on exactly that check, `migration_drift` opened at 06:43, five `Deploy frontend`
+  runs were REFUSED 07:09–07:36 (`missing_in_git 20261106060445`) and `auto-deploy-merged-fixes` tripped its
+  three-failure breaker at 12:43 — the map and legal fixes of the night could not ship. Second night → a rule: **never
+  schedule, re-slot or unschedule a cron job in a night migration.** If it cannot wait, push the cron mirror to the
+  mirror branch within 30 minutes and put the PR in LINE 1 the same minute; a red auto-mirror is bug #1 of the merge queue.
+- **② An oracle's NAME is not an oracle — read its body; and a new reader must survive a re-read before it feeds
+  anything.** ♻️ 11-06: six new-source crawlers passed `prune_unseen` a `verify_gone` that answered «gone» without
+  reading (#10885 holds them UNKNOWN; barrier `test_verify_gone_never_kills_on_absence.py` executes every bare-name
+  `verify_gone` with the network blocked); the Keller Williams record reader read 4 of 14 list-absent ads «gone» and a
+  re-read minutes later read 3 of them «live», so #10890 was closed unmerged. Rule: before a reader feeds a score or a
+  kill, read the same ids three times, paced, and compare with a real browser; 3/3 agreement or it stays shadow.
+- **③ A workflow dispatch with an empty `run_id` shares one concurrency group, so a later dispatch silently cancels a
+  pending one.** 🔬 11-05: `facts-words` run 42012742355 (dispatched 10:41) was `cancelled` at 10:43 by the next
+  dispatch, and the reader re-read it carried never ran. Rule: a `facts-words` dispatch carries a unique `run_id` (the
+  facts readers `facts-words.yml` / `facts-extract.yml` declare that input — `map-pins-live.yml` / `apply-migration.yml`
+  reject it), and because a unique id is
+  its own concurrency group, let an earlier incremental reader on older code FINISH before dispatching a replacement
+  that can write the same listings (an older reader would overwrite the newer facts); before dating a proof, open the
+  run that replaced yours and check its commit contains your fix.
