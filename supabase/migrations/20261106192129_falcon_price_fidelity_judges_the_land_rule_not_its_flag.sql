@@ -39,3 +39,6 @@ update public.search_listings_ar s
    and s.price_total = v.price_total * s.area_m2
    and s.price_total = public.land_ppm_typed_as_total_served_ar(s.source_table, s.listing_id, v.price_total, s.area_m2,
                                                                 v.price_per_meter, s.type_ar, s.city_ar, s.district_ar);
+
+comment on function public.price_fidelity() is
+  'Price drift oracle read by mon_detect_price_fidelity (alert price_drift). A land per-metre figure typed as the total is exempt when the served total equals land_ppm_typed_as_total_served_ar() for the source figure, flagged or not (falcon 2026-11-06).';
