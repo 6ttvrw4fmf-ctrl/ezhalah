@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlaceName, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
@@ -610,6 +610,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const [pinCount, setPinCount] = useState<number | null>(null);
   // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
   const [viewPlace, setViewPlace] = useState<string | null>(null);
+  // The named place's OWN count (owner 2026-11-05): beside «في حي النرجس» the pill prints النرجس's number, not the view's.
+  const [placeCount, setPlaceCount] = useState<number | null>(null);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
   useEffect(() => {
     const mk = mapkitOf(); const m = mapRef.current;
@@ -712,7 +714,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         ctx.fill(); ctx.stroke();
       }
       shown = dots; canvas.style.opacity = '1';
-      setViewPlace(null);   // zoomed-out dots: the pill keeps «في هذه المنطقة»
+      setViewPlace(null); setPlaceCount(null);   // zoomed-out dots: the pill keeps «في هذه المنطقة»
       return true;
     };
     const hideCanvas = () => { canvas.style.opacity = '0'; };
@@ -757,7 +759,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
       // The pill names where the view is at every zoom (owner 2026-11-05): the country, then the region, the city, the
       // district most of the view's listings are in — «في هذه المنطقة» only when no one place holds most of them.
-      setViewPlace(areaPlaceName(areas, level, loc, translitPlace, m.region.center, m.region.span));
+      const place = areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
+      setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
       for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
@@ -886,6 +889,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
+      setPlaceCount(null);
       void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc, translitPlace)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
@@ -1144,7 +1148,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {/* Zillow's «Only N matching results»: what the view (or the drawn boundary) holds, since the dots carry no number. */}
       {!drawing && pinCount !== null ? (
-        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en')}</Text></View>
+        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en')}</Text></View>
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
