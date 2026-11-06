@@ -121,11 +121,13 @@ mustCatch('a region select that fires while the outline is invisible', !/if \(!r
 // NEVER A PARTIAL SET OF PINS: an exact-point read that hit PIN_LIMIT is re-read as a fine bubble grid (every listing
 // counted), and the bubbles are drawn with THAT cell (element, data and anchor all follow drawCell).
 check('AppleMap.web.tsx falls back to a fine bubble grid when the exact read hit its cap (after district names, when 2+ districts share the view), and draws with that cell',
-  /if \(cell === 0 && \(crowdedByDots \|\| rows\.length > PIN_SHOW_MAX\)\) \{[\s\S]{0,900}?\n\s*drawCell = fineCellForSpan\(span\.latitudeDelta\);[\s\S]{0,500}?rows = await fetchMapPins\(paddedBox\(center, span\), drawCell, pins\);/.test(web)
+  // `dense` = the cap was hit; the deepest-zoom read (bubblesCanZoomIn false → every exact point) runs first, and a view
+  // where bubbles still make sense keeps this fallback (🔧 2026-11-06, verify-deepest-zoom-shows-heads-not-bubbles.ts).
+  /let dense = cell === 0 && \(crowdedByDots \|\| rows\.length > PIN_SHOW_MAX\);[\s\S]{0,700}?if \(dense\) \{[\s\S]{0,900}?\n\s*drawCell = fineCellForSpan\(span\.latitudeDelta\);[\s\S]{0,500}?rows = await fetchMapPins\(paddedBox\(center, span\), drawCell, pins\);/.test(web)
   && /element\(row, drawCell(, [^)]*)?\)/.test(web) && /data: \{ pin: row, cell: drawCell \}/.test(web) && /anchorOffset: drawCell > 0/.test(web));
 // SMOOTH (owner 2026-11-03): the crowded view is decided from the dots feed and drawn from it — no network wait —
 // and only successful pin reads are remembered (a failed read is never cached as an answer).
-check('a crowded close view is decided by the dots feed (> CROWD_ESTIMATE) and skips the exact read', /const crowdedByDots = dots !== 'unknown' && dotsTotal\(dotsInView\(dots, pins\.deals, /.test(web) && /> CROWD_ESTIMATE;/.test(web) && /crowdedByDots \? \[\] : await fetchMapPins\(/.test(web));
+check('a crowded close view is decided by the dots feed (weighted estimate > CROWD_ESTIMATE) and skips the exact read', /const crowdedByDots = dots !== 'unknown' && dotsEstimateInBox\(dots, pins\.deals, /.test(web) && /> CROWD_ESTIMATE;/.test(web) && /crowdedByDots \? \[\] : await fetchMapPins\(/.test(web));
 check('the crowded bubbles come from the dots feed when it is the same 0.01° grid', /if \(dots !== 'unknown' && drawCell === 0\.01\) \{[\s\S]{0,200}?bubblesFromDots\(dotsInView\(dots, pins\.deals, paddedBox\(center, span\)\)\)/.test(web));
 check('a failed pin read is never remembered', /if \(rows !== 'unknown'\) \{\n\s*recent\.delete\(key\); recent\.set\(key, \{ at: Date\.now\(\), rows \}\);/.test(data));
 check('the fine grid is ~14 rows on the ladder, floor 0.01°, and finer than the normal grid', fineCellForSpan(0.14) === 0.01 && fineCellForSpan(0.001) === 0.01 && fineCellForSpan(1) === 0.02 && fineCellForSpan(1) < cellForSpan(1));

@@ -87,6 +87,17 @@ export function fineCellForSpan(latitudeDelta: number): number {
   return ladderCell(latitudeDelta / 32);
 }
 
+/**
+ * Whether a fine bubble grid still makes sense for this view: a bubble must be at most half the view tall, so a tap
+ * on it (bubbleTapSpan: a third of the view) can zoom INTO it. At the deepest zoom MapKit allows on a phone
+ * (≈ 0.0056° tall) the finest cell (0.01°) is bigger than the view and a tap changes nothing: bubbles there hide the
+ * listings behind a number forever (🔧 2026-11-06: حي البوادي, 2 bubbles «218» / «1.3 ألف», 0 pins, map-pins-live red
+ * every run since 2026-11-05). Such a view draws its exact points, merged into counted heads, instead.
+ */
+export function bubblesCanZoomIn(latitudeDelta: number): boolean {
+  return fineCellForSpan(latitudeDelta) * 2 <= latitudeDelta;
+}
+
 export function cellForSpan(latitudeDelta: number): number {
   if (latitudeDelta <= 0.12) return 0;
   // ~7 dot rows across the visible height, snapped to the ladder. Measured live 2026-11-02 with /30: the country view
