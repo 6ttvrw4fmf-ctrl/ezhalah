@@ -44,15 +44,17 @@ try {
       // move ends (854 ms measured 14:23 UTC 2026-11-06 under the hourly index sync) — run 42233389216 read «0 pins» on
       // every view 0.3 s before the first answer arrived, then sped through the next views on the previous view's clock.
       // So: the clock restarts for every view, and what was painted BEFORE the move (the previous view's heads and pill
-      // stay until the new read lands) does not count — the signature must change at least once, or 12 s must pass.
-      const readSig = () => [...document.querySelectorAll('[data-testid=map-pin], [data-testid=map-bubble]')].map((e) => e.textContent).join('|') + '#' + (document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '');
-      await page.evaluate((readSig) => { const w = window; w.__pinBefore = eval(readSig)(); w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); }, readSig.toString());
-      await page.waitForFunction((readSig) => {
-        const sig = eval(readSig)();
+      // stay until the new read lands) does not count — the HEADS must change at least once, or 12 s must pass. The
+      // heads alone are the signal: the count pill is written by a separate place read and can move on its own.
+      const readHeads = () => [...document.querySelectorAll('[data-testid=map-pin], [data-testid=map-bubble]')].map((e) => e.textContent).join('|');
+      const readPill = () => document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '';
+      await page.evaluate((readHeads) => { const w = window; w.__headsBefore = eval(readHeads)(); w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); }, readHeads.toString());
+      await page.waitForFunction(({ readHeads, readPill }) => {
+        const heads = eval(readHeads)(); const sig = heads + '#' + eval(readPill)();
         const w = window; if (w.__pinSig !== sig) { w.__pinSig = sig; w.__pinAt = performance.now(); return false; }
-        if (sig === w.__pinBefore && performance.now() - w.__pinT0 < 12_000) return false;
+        if (heads === w.__headsBefore && performance.now() - w.__pinT0 < 12_000) return false;
         return performance.now() - w.__pinAt > 1500;
-      }, readSig.toString(), { timeout: 25_000, polling: 100 }).catch(() => {});
+      }, { readHeads: readHeads.toString(), readPill: readPill.toString() }, { timeout: 25_000, polling: 100 }).catch(() => {});
       const seen = await page.evaluate(() => {
         // THE VISIBLE MAP, not the viewport (🔧 2026-11-06, diag 42226056422): MapKit draws heads under the map's own
         // control strip («شراء» / «تصفية», above the canvas) and past its right edge; those a user cannot see or reach
