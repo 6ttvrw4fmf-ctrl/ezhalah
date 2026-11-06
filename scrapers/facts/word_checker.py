@@ -927,6 +927,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                for k, w in enumerate(w3)):
             return False, ws, we
     public = fact in _PUBLIC_FACTS or fact in _NEAR_PUBLIC_FACTS   # public places keep the strict window (precision first)
+    # …except the POOL, which reads «prepared» like the home's own facts: in «مسبح تأسيس مصعد» / «مسبح مؤسس مصعد» the
+    # «تأسيس» governs the elevator after it, not the pool before (🔬 2026-11-06 two-way sample, aqar 17595 / 83389)
+    public = public and fact != "pool"
     if (any(_starts(w, _PREPARED) for w in gp[-2:] + gn[:2]) if public
             else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:3]), t[ws:we])) or "prepared for" in " ".join(n2):
         return None, s, e
@@ -1843,6 +1846,9 @@ def selftest() -> None:
         ("الصاله مفتوحه على الدرج . * ملحق كبير مطل على المسبح . * مواقف سيارات", {"pool": True}, ()),
         ("دوبلكس للبيع تصميم عصري مع صالات واسعة وإطلالة على المسبح!", {"pool": True}, ()),
         ("قريب من مسبح الأولمبي", {}, ("pool",)),
+        ("موقف سياره يتسع لسيارتين مسبح تأسيس مصعد تكييف دكت", {"pool": True}, ("elevator",)),   # aqar 17595
+        ("حوش امامي وخلفي فيه مسبح مؤسس", {}, ("pool",)),
+        ("امكانية اضافة مسبح السعر", {}, ("pool",)),
         ("دور كامل للإيجار", {"whole_floor": True}, ()),
         ("شقة في الدور الأول", {}, ("whole_floor",)),
         ("للعزاب فقط", {"singles": True}, ()),
