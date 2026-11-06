@@ -1224,3 +1224,12 @@ nor `"result":"PASS"` in notes, so `ops_engineer_fix_rate` read your night as 0 
   its own concurrency group, let an earlier incremental reader on older code FINISH before dispatching a replacement
   that can write the same listings (an older reader would overwrite the newer facts); before dating a proof, open the
   run that replaced yours and check its commit contains your fix.
+
+## Lesson from 2026-11-06 (🦅 Falcon)
+A launch is finished only when the WHOLE launch landed, not its client half. asasmakeen, mrajhi and steam went live
+11-05 (556 listings) with no `ops_liveness_registry` row, still in `NOT_PRODUCTION_SEARCHABLE` and with no daily
+crawl, because their launch PRs #10677–#10679 stayed drafts while #10897 shipped only `platforms.ts`. The detector
+`platform_monitoring_scope_gap` said so for 30 hours. Before you call a launch done:
+`select platform from platform_registry where status = 'active' and platform not in (select platform from ops_liveness_registry)`
+must return nothing, and the site must be in a scheduled crawl (fixed in PR 10913 + 20261106192630).
+
