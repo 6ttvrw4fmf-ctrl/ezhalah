@@ -86,3 +86,13 @@ def test_a_re_scrape_never_pairs_a_new_figure_with_a_stale_period():
     assert crawl("شقة للايجار") == {"price_annual": 200000, "rent_period": None}, "a stale «monthly» survived"
     crawl("شقة للايجار شهري")
     assert crawl("شقة للايجار شهري أو سنوي") == {"price_annual": None, "rent_period": None}, "an old price lingered"
+
+
+def test_a_priced_rental_that_turns_on_request_clears_its_figure_and_period():
+    from scrapers.common import db
+    stored = {}
+    for title, excerpt in (("شقة للايجار شهري", ""), ("شقة للايجار شهري", "السعر حسب مدة العقد")):
+        row, _ = map_listing(_item(title, excerpt), _mp("rent", "إيجار"), None, [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
+    assert stored == {"price_annual": None, "rent_period": None}, stored

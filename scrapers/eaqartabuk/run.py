@@ -575,6 +575,9 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     # (a separate, reliable field) so we keep that — only the price itself is unknown.
     if _price_on_request(_strip_tags(desc_html), _strip_tags(item.get("excerpt"))):
         price_total = price_annual = rent_period = None
+        if is_rent:
+            # «السعر حسب …» is the source's own statement: a rental's earlier figure and period must not linger.
+            price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
     if flipped_to_rent:
         # The row was stored as a sale with this figure in price_total; a rental holds it in price_annual only.
         price_total = getattr(db, "AUTHORITATIVE_NULL", None)

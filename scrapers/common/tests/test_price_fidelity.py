@@ -117,7 +117,11 @@ def test_eaqartabuk_bug3_on_request_price_not_fabricated():
     mp = {"usage": "", "type": "العقارات التجارية", "operation": "", "status": "إيجار",
           "city": "", "district": "", "lat": 28.47, "lng": 36.56}
     row, _cat = map_listing(item, mp, content_7917)
-    assert row["price_total"] is None and row["price_annual"] is None and row["rent_period"] is None, row
+    # «السعر حسب» is the source's own statement, so a rental's figure/period are AUTHORITATIVE_NULL (2026-11-06: an
+    # earlier crawl's price must not linger) — still no price, never a fabricated one.
+    from scrapers.common import db as _db
+    unset = (None, _db.AUTHORITATIVE_NULL)
+    assert row["price_total"] is None and row["price_annual"] in unset and row["rent_period"] in unset, row
 
 
 if __name__ == "__main__":
