@@ -2,6 +2,21 @@
 
 > **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
 
+> **👑 OWNER ORDER 2026-11-06 — «MAKE THE AI READING SCORE HIGHER» (permanent; a daily job of this lane).**
+> The nightly score robot (`af-score.yml`, pg_cron `gh-af-score`, writes `ops_af_score`) opens real ads and checks what the
+> reader said against the page. 2026-11-05: 949 ads on 144 sites — **precision 97.1%** (1,369 of 1,410 claims agree with the
+> page), **recall 94.9%** (299 of 315 things the page states were found). Every run, after your 3 jobs:
+> 1. **Read last night's misses** — the wrong claims (`mismatch_ids`) and the missed facts (`find_missed_ids`):
+>    `select platform, af_claimed, af_agree, mismatch_ids, find_tried, find_found, find_missed_ids from ops_af_score
+>     where night = (select max(night) from ops_af_score) and (af_claimed > af_agree or find_tried > find_found) order by (af_claimed - af_agree) + (find_tried - find_found) desc;`
+> 2. **Fix the biggest pattern, not one ad** — open the ads on their own pages, find the shared cause (a near word, a
+>    look-alike phrase, a missed spelling), fix the reader («How to fix the reader» below), and add the guard that would
+>    have caught it (a selftest line with the real sentence).
+> 3. **Never buy recall with precision.** Silence is not «no» and a doubt stays silent; a fix that finds more facts must
+>    not make a single wrong claim — prove it old-vs-new on real snippets before it ships.
+> 4. **Report the score as before → after** on your `:end` row: «AI reading: precision 97.1% → X% · recall 94.9% → Y%
+>    (night N)». Only a production night's score moves the «after»; unchanged is a valid result.
+
 > **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
 > Open alerts fell 459 → 102 between 10-29 and 11-04, but the owner still found two whole bug classes no detector saw:
 > (1) land ads with the per-metre price typed as the TOTAL (~307 cards, e.g. 1,700 SAR for 375 m² in الأحساء), and
