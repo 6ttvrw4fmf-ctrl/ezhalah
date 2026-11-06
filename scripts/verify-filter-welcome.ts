@@ -14,6 +14,7 @@ import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, PREPARED_MAX_MS, FACTLESS_ANYTIME_IDS,
   MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, GREET_LINES, GREET_HOLD_MS, greetIndex, greetingFor, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, tabLine, TAB_KEY, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
+import { windowBetween, windowUpTo } from './lib/sourceWindow.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -463,21 +464,16 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
 // ONCE; it never hides the headline while today's fact is read. The pack read happens in the background for the next
 // open. The behaviour on a real phone is executed by scripts/verify-web-welcome-never-late.mjs (web-runtime-smoke).
 {
-  const mountOf = (src: string) => {
-    const a = src.indexOf('// ONCE PER PAGE LOAD');
-    const b = src.indexOf('// BACKGROUND, for later visits.', a);
-    return a > 0 && b > a ? src.slice(a, b) : '';
-  };
-  const neverLate = (src: string) => {
-    const mount = mountOf(src);
+  const neverLate = (src: string) => { try {
+    const mount = windowBetween(src, '// ONCE PER PAGE LOAD', '// BACKGROUND, for later visits.', 'useFilterWelcome.ts');
     return src.includes('const isFact = (l: { id: number | null } | null | undefined) => !!l && l.id != null && isInsightLineId(l.id);')
       && src.includes('cache: isFact(cache) ? cache : null,')
       && /if \(!greet && session\.present && inst && !isFact\(inst\)\) \{\s*const today = isFact\(cache\) && cache && sameRiyadhDay\(cache\.at, now\.getTime\(\)\) \? cache : null;\s*if \(today\) inst = \{ id: today\.id/.test(src)
       // the mount decision never waits on the network: no race, no timer, no early return before the headline settles
       && mount.length > 0 && !/Promise\.race\(|setTimeout\(|await /.test(mount)
       && /setShown\(inst \? \{ settled: true/.test(mount)
-      && !/\n\s*return;\n/.test(mount.slice(0, mount.indexOf('setShown(inst ? { settled: true')));
-  };
+      && !/\n\s*return;\n/.test(windowUpTo(mount, 'setShown(inst ? { settled: true', 'useFilterWelcome.ts mount'));
+  } catch { return false; } };
   check('never late: the first visit of a day shows today\'s last fact or the plain line at once; nothing at mount waits on the network', neverLate(hookSrc));
   check('the 2.5 s hidden wait is gone (no FACT_WAIT_MS anywhere in the hook)', !/FACT_WAIT_MS/.test(hookSrc));
   mustCatch('a held plain line blocking the fact again', !neverLate(hookSrc.replace('cache: isFact(cache) ? cache : null,', 'cache,')));
