@@ -252,6 +252,8 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             out[name] = _cmp_valued(stored.get(col), SITE_DEAL_MENU.sub("", whole), DEAL_KW)
         else:
             out[name] = _cmp_word(stored.get(col), whole, kw)
+            if name == "direction_ar":
+                lines = label_value_lines(lines, kw)
             if name == "direction_ar" and out[name] == WE_MISS and not facade_stated(lines, kw):
                 out[name] = PAGE_SILENT
             # haraj's REGA licence block prints the facade in English («واجهة العقار: Eastern», 21831096, backlog 1090).
@@ -316,6 +318,19 @@ for _ar, _en in (("شمال شرق", "north[\\s-]*east"), ("شمال غرب", "n
 
 
 _FACADE_BASES = ("شمال", "جنوب", "شرق", "غرب")
+
+
+def label_value_lines(lines: list[str], kw: str) -> list[str]:
+    """A label printed as its own line joins the value line after it. vmksa's feature block «<h2>واجهة العقار</h2>
+    <span>جنوبية شرقية</span>» reaches us as «واجهة العقار | جنوبية شرقية», two lines, so a facade that equals ours
+    (14110686 stores «جنوب شرق») scored MISMATCH and a stated one read as «not stated» (🔬 2026-11-06, ops_af_score
+    vmksa 3 direction mismatches). Only a BARE label (at most one short word left beside the keyword) is joined."""
+    out = list(lines)
+    for i, x in enumerate(lines[:-1]):
+        m = re.search(kw, x)
+        if m and len(re.sub(kw, "", x).split()) <= 1 and len(x) <= 24:
+            out[i] = x + " : " + lines[i + 1]
+    return out
 
 
 def facade_adjectives(stored) -> Optional[str]:
