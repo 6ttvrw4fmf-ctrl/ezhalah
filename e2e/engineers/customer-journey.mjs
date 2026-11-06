@@ -41,7 +41,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   normUrl, isMainSearch, afTargetsFor, carriedOnRequest, typeUi, TYPE_UI,
-  priceOf, rangeAround, clampToPriceBox, pickSpread, idKey,
+  priceOf, rangeAround, clampToPriceBox, pickSpread, seededShuffle, idKey,
 } from './journey-lib.mjs';
 // The AF's own card lists (backlog 1268): targets are chips the product really shows for the listing's type × deal.
 // A plain static import — if the module cannot load the run fails loudly, never falls back to guessing.
@@ -136,7 +136,12 @@ const sampleListings = async (n) => {
   }
   const rows = (await Promise.all(platforms.map((p) =>
     rest(`search_listings_ar?select=${ROW_COLS}&${base}&platform=eq.${encodeURIComponent(p)}&order=first_seen_at.desc&limit=30`)))).flat();
-  const usable = rows.filter((r) => typeUi(r.type_ar, r.source_table) && (MODE !== 'af' || afTargetsFor(r, 2, COHORT_CARDS).length));
+  // RANDOM, as the workflow input promises (🦅 2026-11-06): shuffle before the round-robin spread, so each
+  // run samples different listings and a different site order. JOURNEY_SEED reproduces a run; it is printed.
+  const seed = Number(process.env.JOURNEY_SEED) || (Date.now() % 2147483647);
+  console.log(`sample seed ${seed} (JOURNEY_SEED=${seed} reproduces this pick)`);
+  const usable = seededShuffle(rows, seed)
+    .filter((r) => typeUi(r.type_ar, r.source_table) && (MODE !== 'af' || afTargetsFor(r, 2, COHORT_CARDS).length));
   if (MODE !== 'af') return pickSpread(usable, n);
   // The app offers the guided interview only above 25 results, so an AF sample prefers listings
   // whose city + deal + type scope is comfortably larger (one cheap exact-count request each).
