@@ -68,6 +68,11 @@ RES_TABLE = "shomou_residential_listings"
 COM_TABLE = "shomou_commercial_listings"
 MAX_PAGES = 60              # safety stop; the catalogue is 26 pages
 PAUSE = 0.4
+# THE RUN ENDS ITSELF BEFORE ITS JOB IS KILLED (⚡ 2026-11-06, backlog 1345, alert run_killed_by_timeout:shomou). ~1,039
+# ad pages are read one after another through the proxy; normal runs take 10–23 min, but a slow proxy night took 28 min
+# and the 30-min job killed it before end_run() THREE times (10-30, 11-04, 11-05: rows 0, nothing stamped). Past this
+# budget the run stops reading, saves what it read, and ends as an INCOMPLETE walk (no prune) inside its slot.
+SOFT_DEADLINE_S = 22 * 60
 
 _NID_RE = re.compile(r'href="/(?:index\.php/)?(\d+)"')
 _ARTICLE_RE = re.compile(r'<article data-history-node-id="(\d+)".*?</article>', re.S)
@@ -261,6 +266,11 @@ def map_detail(d: dict[str, Any], today: Any = None) -> tuple[Optional[dict], st
     return row, category, ""
 
 
+def _clock() -> float:
+    """Seam for the deadline test."""
+    return time.monotonic()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -302,8 +312,14 @@ def main() -> int:
     com: list[dict] = []
     skipped: dict[str, int] = {}
     unreadable = 0
+    t0 = _clock()
+    cut = 0
     try:
-        for nid in nids:
+        for i, nid in enumerate(nids):
+            if _clock() - t0 > SOFT_DEADLINE_S:
+                cut = len(nids) - i
+                print(f"  ⏱ soft deadline ({SOFT_DEADLINE_S // 60} min): {cut} ad page(s) left unread this run", flush=True)
+                break
             try:
                 page = get(s, f"{BASE}/{nid}")
                 d = parse_detail(nid, page) if page else None
@@ -332,7 +348,7 @@ def main() -> int:
         db.retire_superseded_siblings(res_table=RES_TABLE, com_table=COM_TABLE, res_ads={r["ad_number"] for r in res},
                                       com_ads={r["ad_number"] for r in com}, source=SOURCE)
         # Complete walk only: an expired ad is on the index but not in the kept set → pruned today.
-        complete = unreadable == 0 and len(nids) > 0 and not a.limit
+        complete = unreadable == 0 and cut == 0 and len(nids) > 0 and not a.limit
         for tbl, rr in ((RES_TABLE, res), (COM_TABLE, com)):
             if complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
@@ -341,9 +357,11 @@ def main() -> int:
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
-            print(f"  NOT pruning: {unreadable} of {len(nids)} page(s) unreadable", flush=True)
+            print(f"  NOT pruning: {unreadable} of {len(nids)} page(s) unreadable, {cut} not reached", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(nids), rows_upserted=len(res) + len(com),
-                             check_tables=["shomou_residential_listings", "shomou_commercial_listings"])
+                             check_tables=["shomou_residential_listings", "shomou_commercial_listings"],
+                             notes=(None if complete else
+                                    f"walk incomplete: unreadable={unreadable} deadline_cut={cut} of {len(nids)}"))
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)
             return 1
