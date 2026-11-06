@@ -951,7 +951,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         if at >= 0 and any(_strip_wa(w) in _SERVICES_OBJECT or _strip_wa(w) in _UNIT_AGAIN for w in p5[at + 1:]):
             p5 = p5[at + 1:]
     near5 = [w for w in p5 if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS]
-    if fact in _UNIT_ROOMS and near5 and all(_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS for w in near5):
+    # …and the POOL a room overlooks is the home's (🔬 2026-11-06 two-way sample: 8 of 25 aqar villas that say «صالة كبيرة
+    # مطلة على المسبح», «إطلالة مباشرة على المسبح», «ملحق كبير مطل على المسبح» served no pool) — a public pool is rare;
+    # a public SEA / PARK / mosque view stays nearby, those facts are not here.
+    if (fact in _UNIT_ROOMS or fact == "pool") and near5 and all(_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS for w in near5):
         p5 = [w for w in p5 if w not in near5]       # a view word next to the home's own room says nothing about the room
     if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
                                           or any(p in " ".join(p5) for p in _NEAR_PHRASES)
@@ -1835,6 +1838,11 @@ def selftest() -> None:
         ("غسالة ملابس", {"laundry_room": True}, ()),
         ("washing machine", {"laundry_room": True}, ()),
         ("غسالة صحون", {}, ("laundry_room",)),
+        # the pool a room overlooks is the home's (🔬 2026-11-06 two-way sample, aqar 6645260 / 8036456 / 14871554)
+        ("الدور الأرضي مجلس رجال 🔘 صاله كبيره مطله على المسبح🔘 مطبخ 🔘 دورات مياة", {"pool": True}, ()),
+        ("الصاله مفتوحه على الدرج . * ملحق كبير مطل على المسبح . * مواقف سيارات", {"pool": True}, ()),
+        ("دوبلكس للبيع تصميم عصري مع صالات واسعة وإطلالة على المسبح!", {"pool": True}, ()),
+        ("قريب من مسبح الأولمبي", {}, ("pool",)),
         ("دور كامل للإيجار", {"whole_floor": True}, ()),
         ("شقة في الدور الأول", {}, ("whole_floor",)),
         ("للعزاب فقط", {"singles": True}, ()),
