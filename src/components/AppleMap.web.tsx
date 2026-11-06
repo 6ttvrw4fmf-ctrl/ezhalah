@@ -33,8 +33,8 @@ import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
 import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
-import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
-import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
+import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 import { onSurface } from '@/lib/mapSurface';
@@ -864,7 +864,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const placeRead = cell === 0 ? fetchViewPlace({ s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 }) : Promise.resolve(null);
       const dots = cell === 0 && !narrowed ? await fetchMapDots() : 'unknown';
       if (my !== seq || mapRef.current !== m) return;
-      const crowdedByDots = dots !== 'unknown' && dotsTotal(dotsInView(dots, pins.deals, { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 })) > CROWD_ESTIMATE;
+      // Weighted by how much of each 1 km cell is in view (src/lib/mapDots.ts dotsEstimateInBox): a whole-cell count
+      // read a 280 m view as 1,501 listings (177 real) and drew bubbles over the حي البوادي scheme (🔧 2026-11-06).
+      const crowdedByDots = dots !== 'unknown' && dotsEstimateInBox(dots, pins.deals, { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 }) > CROWD_ESTIMATE;
       // Exact points are read with a small cap: one row over PIN_SHOW_MAX is enough to know the view is too dense.
       let rows: PinRow[] | 'unknown' = crowdedByDots ? [] : await fetchMapPins(paddedBox(center, span), cell, pins, cell === 0 ? PIN_SHOW_MAX + 1 : PIN_LIMIT);
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
@@ -872,7 +874,16 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // Riyadh holds thousands in one city-zoom view). Never a partial set — read the same view again as a fine bubble
       // grid, where every listing is counted, and draw bubbles until the user zooms closer.
       let drawCell = cell;
-      if (cell === 0 && (crowdedByDots || rows.length > PIN_SHOW_MAX)) {
+      // DEEPEST ZOOM (🔧 2026-11-06, owner 2026-11-05 «user cannot select what he wants»): where a bubble would be bigger
+      // than the view, a tap on it cannot zoom closer, so the listings would stay hidden behind a number. Read every
+      // exact point of the view instead and let mergeOverlapping fold the touching heads into counted gold heads.
+      let dense = cell === 0 && (crowdedByDots || rows.length > PIN_SHOW_MAX);
+      if (dense && !bubblesCanZoomIn(span.latitudeDelta)) {
+        const every = await fetchMapPins(paddedBox(center, span), 0, pins, PIN_LIMIT);
+        if (my !== seq || mapRef.current !== m) return;
+        if (every !== 'unknown' && every.length < PIN_LIMIT) { rows = every; dense = false; }
+      }
+      if (dense) {
         // Too crowded for price pins (owner's father, 2026-11-03: «at this zoom level show the names of the districts
         // only and the number of listings»): district names while two or more districts share the view; once one
         // district fills the screen, the fine count grid until the user zooms closer.

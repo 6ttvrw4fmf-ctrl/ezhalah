@@ -223,6 +223,32 @@ def strip_city_suffix(district_ar: Optional[str], city_ar: Optional[str]) -> Opt
     return " ".join(dist_tokens)
 
 
+def strip_governorate_after_city(district_ar: Optional[str], city_ar: Optional[str]) -> Optional[str]:
+    """«حي الروضة حرمة المجمعة» in حرمة → «حي الروضة» (⚡ 2026-11-05, backlog 1331, aqarmonthly 761941).
+
+    Some slugs name the town AND then its governorate: «…-حي-الروضة-حرمة-المجمعة-5360678». The city
+    resolves to حرمة (المجمعة is a 4-way catalog twin the resolver refuses), so strip_city_suffix() sees a
+    trailing «المجمعة» that is not this row's city and — correctly, by its own rule — leaves it.
+
+    This removes a trailing catalog city name ONLY when this row's resolved city sits right before it, so
+    what is stripped is «‹our city› ‹a catalog city›», both names the catalog carries. Anything else is
+    untouched: a foreign city token not preceded by our city («حي المطار ابها» in خميس مشيط) stays, and
+    strip_city_suffix()'s two-token floor still holds.
+    """
+    if not district_ar or not city_ar:
+        return district_ar
+    toks = district_ar.split()
+    key = trailing_catalog_city_norm(district_ar)
+    if not key:
+        return district_ar
+    k = len(key.split())
+    head = " ".join(toks[:-k])
+    if len(toks) - k < 3:
+        return district_ar
+    stripped = strip_city_suffix(head, city_ar)
+    return stripped if stripped != head else district_ar
+
+
 def trailing_catalog_city_norm(district_ar: Optional[str]) -> Optional[str]:
     """The catalog `city_norm` that the district's TRAILING 1-3 tokens spell (longest window wins),
     else None.
@@ -354,6 +380,7 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
     cid, rid = best
     city_ar_val = _CID_AR.get(cid)
     district_ar = strip_city_suffix(district_ar, city_ar_val)
+    district_ar = strip_governorate_after_city(district_ar, city_ar_val)
     return {"city_ar": city_ar_val, "city_id": cid, "region_id": rid or region_id,
             "district_ar": district_ar, "confidence": "slug"}
 

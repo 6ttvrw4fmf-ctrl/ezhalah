@@ -1198,3 +1198,25 @@ fix is served only by the 09:22 sync and counted as «dated», and 6 of your 11 
 nor `"result":"PASS"` in notes, so `ops_engineer_fix_rate` read your night as 0 proven. **Rule:** a proof row is
 `push_ok = true` with `"result":"PASS"` in its notes JSON (the 10-30 coach rule), and a proof crawl is dispatched before
 :20 of the hour or its proof is dated to the NEXT :22 sync in the row itself. End every report with a «📚 Lesson» line.
+
+## 📚 FLEET LESSONS 2026-11-06 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A cron-schedule change inside a night migration turns its auto-mirror into a PERSON-only PR, and every frontend
+  deploy is refused until a human merges it.** 🆕 11-05: #10654 (mirror 20261105072102 + `sql/mirrors/cron_schedule.json`)
+  sat in LINE 1 because `verify-cron-slot-discipline` demands the cron mirror in the same PR and `sql/` is outside the
+  robot's lanes. 🔧 11-06, the same shape again: 20261106060445 (`gh-checks-that-cry-wolf`) was applied at 06:04, its
+  auto-mirror #10856 went red at 06:37 on exactly that check, `migration_drift` opened at 06:43, five `Deploy frontend`
+  runs were REFUSED 07:09–07:36 (`missing_in_git 20261106060445`) and `auto-deploy-merged-fixes` tripped its
+  three-failure breaker at 12:43 — the map and legal fixes of the night could not ship. Second night (🆕 11-05 was the first) → YOUR rule: **never
+  schedule, re-slot or unschedule a cron job in a night migration.** If it cannot wait, push the cron mirror to the
+  mirror branch within 30 minutes and put the PR in LINE 1 the same minute; a red auto-mirror is bug #1 of the merge queue.
+- **② An oracle's NAME is not an oracle — read its body; and a new reader must survive a re-read before it feeds
+  anything.** ♻️ 11-06: six new-source crawlers passed `prune_unseen` a `verify_gone` that answered «gone» without
+  reading (#10885 holds them UNKNOWN; barrier `test_verify_gone_never_kills_on_absence.py` executes every bare-name
+  `verify_gone` with the network blocked); the Keller Williams record reader read 4 of 14 list-absent ads «gone» and a
+  re-read minutes later read 3 of them «live», so #10890 was closed unmerged. Rule: before a reader feeds a score or a
+  kill, read the same ids three times, paced, and compare with a real browser; 3/3 agreement or it stays shadow.
+- **③ A workflow dispatch with an empty `run_id` shares one concurrency group, so a later dispatch silently cancels a
+  pending one.** 🔬 11-05: `facts-words` run 42012742355 (dispatched 10:41) was `cancelled` at 10:43 by the next
+  dispatch, and the reader re-read it carried never ran. Rule: every dispatch carries a unique `run_id`; before dating a
+  proof, open the run that replaced yours and check its commit contains your fix.

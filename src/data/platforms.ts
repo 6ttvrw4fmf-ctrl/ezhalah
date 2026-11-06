@@ -164,6 +164,19 @@ export const PLATFORMS: Platform[] = [
   { name: 'حراج', domain: 'haraj.com.sa', brand: 'Haraj', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // propertyfinder: Property Finder Saudi — 4,516 ads + 155 off-plan (hidden) measured 2026-11-04, BOTH sides (3,306 sale + 1,210 rent).
   { name: 'بروبرتي فايندر', domain: 'propertyfinder.sa', brand: 'Property Finder', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // The three sources of 2026-11-05 still missing here while the owner's launch PRs (#10677 / #10678 / #10679) are drafts:
+  // their rows are ALREADY served by search_listings_ar (asasmakeen 507, mrajhi 39, steam 10 on 2026-11-06), so a customer
+  // saw their count but could never reach their cards (customer-journey 42227257631: asasmakeen total 965, mrajhi 33,
+  // steam 30 — card absent; the 2026-10-30 Sakani/Wajaf shape). Entries copied verbatim from those PRs (🔧 2026-11-06).
+  // asasmakeen: one of the five sources of 2026-11-05 (owner order), launched by the owner's switch
+  // (docs/ops/FIVE_SOURCES_LAUNCH.md). BOTH sides (sale + rent; off-plan stays hidden in asasmakeen_offplan_units).
+  { name: 'أساس مكين', domain: 'asasmakeen.com', brand: 'Asas Makeen', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // mrajhi: one of the five sources of 2026-11-05 (owner order), launched by the owner's switch
+  // (docs/ops/FIVE_SOURCES_LAUNCH.md). RENT only (39 yearly rents; the site lists no sale).
+  { name: 'الراجحي للتنمية', domain: 'mrajhi.com.sa', brand: 'Al Rajhi Development', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // steam: one of the five sources of 2026-11-05 (owner order), launched by the owner's switch
+  // (docs/ops/FIVE_SOURCES_LAUNCH.md). RENT only (the site lists no sale).
+  { name: 'ستيم العربية', domain: 'steam-realestate.com', brand: 'STeam Residence', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // kellerwilliams / almajdiah: two of the five sources of 2026-11-05 (owner order), launched by
   // the owner's switch (docs/ops/FIVE_SOURCES_LAUNCH.md). Sides = what each site lists (almajdiah sales ON HOLD).
   { name: 'كيلر وليامز', domain: 'kwsaudiarabia.com', brand: 'Keller Williams', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },

@@ -660,8 +660,45 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
 _CARD_ID_RE = re.compile(r'data-id="(\d+)"')
 
 
+# A card the list serves whose record never appears in ANY mapProperties window (measured
+# 2026-11-05 on the 11-04 nightly: 3,289 cards = listPropertiesCount 3,289, but 3,287 records).
+# Before this, `len(records) == declared` read the whole site as INCOMPLETE every night from
+# 2026-09-30 to 2026-11-04 — so prune_unseen never ran on tuba for five weeks and 2 villas were
+# served at a price nobody had re-read since September (alert served_price_never_rechecked:tuba).
+# The LIST is the catalogue (one card per ad, its count is the site's own total); the map is a
+# side feed. A handful of records missing from it is tolerated — those ads are still LISTED, so
+# they count as seen and are never pruned — but a map feed that loses more than this is a broken
+# read and keeps the walk incomplete.
+MAX_CARDS_WITHOUT_RECORD = 10
+
+
+def walk_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool, set[str]]:
+    """(records, complete, ids the list served but no map window carried).
+
+    complete means the list's DISTINCT card ids equal `listPropertiesCount` and at most
+    MAX_CARDS_WITHOUT_RECORD of them lack a record. Card-only ids are returned so the prune treats
+    them as seen (they are on the site) without inventing a row for them.
+    """
+    items, card_ids, declared = _walk(s, limit)
+    if limit:
+        return items, False, set()
+    card_only = card_ids - {str(_clean(i.get("id"))) for i in items}
+    complete = (bool(declared) and len(card_ids) == declared
+                and len(card_only) <= MAX_CARDS_WITHOUT_RECORD)
+    print(f"{SOURCE}: {len(items)} records; {len(card_ids)} distinct cards; "
+          f"listPropertiesCount={declared}; card-only={sorted(card_only)[:20]} "
+          f"complete={complete}", flush=True)
+    return items, complete, card_only
+
+
 def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
-    """Every property record, plus whether the catalogue was served COMPLETE.
+    """(records, complete) — see walk_catalogue."""
+    items, complete, _card_only = walk_catalogue(s, limit)
+    return items, complete
+
+
+def _walk(s: cc.Session, limit: int = 0) -> tuple[list[dict], set[str], Optional[int]]:
+    """Every property record, every distinct card id, and the platform's declared count.
 
     `page` advances the LIST by 20 while `mapProperties` is a 50-row window from the same offset
     (verified — see the docstring), so the walk follows the cards and harvests the records. Only a
@@ -673,6 +710,7 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
     anything be pruned.
     """
     rows: dict[str, dict] = {}
+    card_ids: set[str] = set()
     declared: Optional[int] = None
     cards = 0
     page = 1
@@ -696,19 +734,18 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
         if not page_cards:
             break                       # past the last page of the list
         cards += len(page_cards)
+        card_ids.update(page_cards)
         for e in body.get("mapProperties") or []:
             if isinstance(e, dict) and (key := _clean(e.get("id"))):
                 rows.setdefault(key, e)
         if limit and len(rows) >= limit:
-            return list(rows.values())[:limit], False
+            return list(rows.values())[:limit], card_ids, declared
         page += 1
         if page > 2000:                 # a pagination that never ends is a bug, not a catalogue
             raise RuntimeError(f"{API} still served cards at page {page} — refusing to loop")
     items = list(rows.values())
-    complete = bool(declared) and len(items) == declared
-    print(f"{SOURCE}: {len(items)} listings over {page - 1} page(s); {cards} cards; "
-          f"listPropertiesCount={declared} complete={complete}", flush=True)
-    return items, complete
+    print(f"{SOURCE}: {len(items)} listings over {page - 1} page(s); {cards} cards", flush=True)
+    return items, card_ids, declared
 
 
 # ── LIVENESS (measured 2026-09-25; see the docstring — a 200 is NOT proof of life) ────────────────
@@ -765,7 +802,7 @@ def main() -> int:
     com: list[dict] = []
     skipped: dict[str, int] = {}
     try:
-        items, complete = fetch_catalogue(s, limit=args.limit)
+        items, complete, card_only = walk_catalogue(s, limit=args.limit)
         if not items:
             raise RuntimeError(f"{API} returned no property records")
         for rec in items:
@@ -804,8 +841,9 @@ def main() -> int:
         if args.type == "all" and complete:
             verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
             for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
-                                    verify_gone=verify_gone)
+                # Card-only ads are LISTED on the site: seen, never a removal candidate.
+                seen = {r["ad_number"] for r in rows} | {f"{PREFIX}{c}" for c in card_only}
+                n = db.prune_unseen(tbl, seen, source=SOURCE, verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:

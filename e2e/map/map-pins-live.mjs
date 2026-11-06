@@ -46,8 +46,13 @@ try {
         return performance.now() - w.__pinAt > 1500;
       }, null, { timeout: 25_000, polling: 100 }).catch(() => {});
       const seen = await page.evaluate(() => {
+        // THE VISIBLE MAP, not the viewport (🔧 2026-11-06, diag 42226056422): MapKit draws heads under the map's own
+        // control strip («شراء» / «تصفية», above the canvas) and past its right edge; those a user cannot see or reach
+        // by design, and their centre is not a tap target. The dots canvas fills exactly the map's host box.
+        const mapBox = document.querySelector('[data-testid=map-dots-canvas]')?.getBoundingClientRect()
+          ?? { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
         const pins = [...document.querySelectorAll('[data-testid=map-pin]')].map((e) => ({ e, r: e.getBoundingClientRect(), t: e.textContent }))
-          .filter(({ r }) => r.width > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth);
+          .filter(({ r }) => r.width > 0 && r.top >= mapBox.top && r.bottom <= mapBox.bottom && r.left >= mapBox.left && r.right <= mapBox.right);
         const overlaps = [];
         for (let a = 0; a < pins.length; a++) for (let b = a + 1; b < pins.length; b++) {
           const A = pins[a].r, B = pins[b].r;
@@ -56,10 +61,12 @@ try {
         }
         // Tappable = the first PIN in the painted stack at the head's centre is this head (another head drawn over it would
         // come first). The stack, not the top hit: a transparent layer above the map is not a pin covering a pin.
+        // «Covered» means covered BY ANOTHER PIN (the rule in the header): a head whose centre is not in the painted stack
+        // at all is outside the visible map (filtered above), never a pin-on-pin defect (🔧 2026-11-06).
         const blocked = pins.filter(({ e, r }) => {
           const stack = document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2);
           const firstPin = stack.findIndex((x) => !!x.closest('[data-testid=map-pin]'));
-          return firstPin < 0 || stack[firstPin].closest('[data-testid=map-pin]') !== e;
+          return firstPin >= 0 && stack[firstPin].closest('[data-testid=map-pin]') !== e;
         }).map(({ t }) => `«${t}»`);
         return { count: pins.length, overlaps, blocked, pill: document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '' };
       });
