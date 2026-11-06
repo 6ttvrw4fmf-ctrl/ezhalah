@@ -1218,5 +1218,9 @@ nor `"result":"PASS"` in notes, so `ops_engineer_fix_rate` read your night as 0 
   kill, read the same ids three times, paced, and compare with a real browser; 3/3 agreement or it stays shadow.
 - **③ A workflow dispatch with an empty `run_id` shares one concurrency group, so a later dispatch silently cancels a
   pending one.** 🔬 11-05: `facts-words` run 42012742355 (dispatched 10:41) was `cancelled` at 10:43 by the next
-  dispatch, and the reader re-read it carried never ran. Rule: every dispatch carries a unique `run_id`; before dating a
-  proof, open the run that replaced yours and check its commit contains your fix.
+  dispatch, and the reader re-read it carried never ran. Rule: a `facts-words` dispatch carries a unique `run_id` (the
+  facts readers `facts-words.yml` / `facts-extract.yml` declare that input — `map-pins-live.yml` / `apply-migration.yml`
+  reject it), and because a unique id is
+  its own concurrency group, let an earlier incremental reader on older code FINISH before dispatching a replacement
+  that can write the same listings (an older reader would overwrite the newer facts); before dating a proof, open the
+  run that replaced yours and check its commit contains your fix.
