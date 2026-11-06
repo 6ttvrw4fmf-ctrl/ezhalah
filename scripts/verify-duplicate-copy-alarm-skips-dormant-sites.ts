@@ -27,7 +27,8 @@ export function problems(files: Record<string, string>): string[] {
   const out: string[] = [];
   // For a needle patch, the skip must live in the replacement text b1 itself, not anywhere in the file.
   const b1 = /b1\s+text\s*:=\s*\$b\$([\s\S]*?)\$b\$/i.exec(sql);
-  const guarded = b1 ? b1[1] : sql;
+  // SQL block comments are not code: a commented-out predicate must not count.
+  const guarded = (b1 ? b1[1] : sql).replace(/\/\*[\s\S]*?\*\//g, '');
   if (!/where\s+not\s+public\.ops_platform_is_dormant\(\s*d\.platform\s*\)/i.test(guarded)) {
     out.push(`${latest}: the newest change to ${FN} does not skip dormant platforms in its loop`);
   }
@@ -63,6 +64,8 @@ mustCatch('the skip moved out of the replacement b1 into an unused string',
   problems({ ...files, [latest]: files[latest]
     .replace(/\n\s*where not public\.ops_platform_is_dormant\(d\.platform\)/, '')
     .replace('begin\n', "begin\n  perform 'where not public.ops_platform_is_dormant(d.platform)';\n") }).length > 0);
+mustCatch('the skip commented out with a block comment inside b1',
+  problems({ ...files, [latest]: files[latest].replace(/(where not public\.ops_platform_is_dormant\(d\.platform\))/, '/* $1 */') }).length > 0);
 mustCatch('a newer change without the skip, judged instead of the old one',
   problems({ ...files, '29990101000000_x.sql': `create or replace function public.${FN}() returns int language sql as $$ select 1 $$;` }).length > 0);
 
