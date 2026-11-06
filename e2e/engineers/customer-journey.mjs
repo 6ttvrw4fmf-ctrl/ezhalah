@@ -100,7 +100,7 @@ const log = (...m) => { if (!JSON_ONLY) console.log(...m); };
 const ROW_COLS = 'platform,source_table,listing_id,city_ar,district_ar,region_ar,deal_ar,type_ar,' +
   'rent_period_ar,price_total,price_annual,price_total_effective,area_m2,furnished,elevator,kitchen,' +
   'parking,air_conditioner,private_entrance,maid_room,driver_room,balcony,pool,garden,gym,' +
-  'laundry_room,optical_fibers,car_entrance,sanitation,electricity,water_supply,first_seen_at,production_ready';
+  'laundry_room,optical_fibers,car_entrance,sanitation,electricity,water_supply,first_seen_at,production_ready,license_number';
 
 const fetchRow = async (l) => {
   const rows = await rest(`search_listings_ar?select=${ROW_COLS}` +
@@ -379,6 +379,12 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       const text = ((await card.first().innerText()) || (await card.first().textContent()) || '')
         .replace(/\s*\n+\s*/g, ' | ');
       result.evidence.card = text.slice(0, 300);
+      // 🦅 2026-11-06: ~37,000 cards stored a REGA ad licence the card never printed. Record whether THIS card
+      // shows the listing's own licence (Arabic-Indic digits folded), from the card's full text, not the 300-char cut.
+      if (row.license_number) {
+        const ascii = text.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+        result.evidence.licenceOnCard = ascii.includes(String(row.license_number).trim());
+      }
       step('click card');
       const link = card.first().getByRole('link').first();
       if (await link.count()) await link.click(); else await card.first().click();
