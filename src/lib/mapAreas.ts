@@ -60,9 +60,12 @@ export function areaName(a: Pick<AreaRow, 'city' | 'district'>, level: AreaLevel
 }
 
 /** Where a tap on a label takes the map: one level closer — country → regions, region → cities, city → districts,
- *  district → pins. Each span sits inside the next level's band of areaLevelFor(). */
+ *  district → pins. MapKit WIDENS a requested span to the screen's shape: measured live 2026-11-05 on a 390×844 phone,
+ *  a region tap asking 4° landed at 5.17° — still the region band — so the user tapped and nothing changed. Each target
+ *  therefore sits deep enough inside the next band that up to TAP_WIDEN × the request still lands there. */
+export const TAP_WIDEN = 1.6;
 export function areaZoomSpan(level: AreaLevel): number {
-  return level === 'country' ? 9 : level === 'region' ? 4 : level === 'city' ? 0.4 : 0.015;
+  return level === 'country' ? 7 : level === 'region' ? 3 : level === 'city' ? 0.3 : 0.015;
 }
 
 /** A view too crowded for price pins shows district names while two or more districts share it; once one district
@@ -97,7 +100,10 @@ export function visibleAreas(rows: AreaRow[], level: AreaLevel = 'district'): Ar
   // (Al Jouf's ~400 listings are 0.2% of Riyadh Region's — the share rule would hide it).
   if (level === 'country' || level === 'region') return rows;
   const max = rows.reduce((m, r) => Math.max(m, r.n), 0);
-  const floor = Math.max(LABEL_MIN, max * LABEL_SHARE);
+  // A SMALL TOWN SHOWS ITS PLACES (owner 2026-11-05, Umluj: «0 listings» — its districts hold 1-2 listings each, so the
+  // LABEL_MIN floor hid every one of them and the map over Umluj was empty while the pill counted 6). The floor exists
+  // to hide tiny places BESIDE big ones; when nothing in view reaches LABEL_MIN there is nothing to hide them beside.
+  const floor = max < LABEL_MIN ? 1 : Math.max(LABEL_MIN, max * LABEL_SHARE);
   return rows.filter((r) => r.n >= floor);
 }
 
@@ -160,3 +166,40 @@ export function areasFromFeed(feed: AreaFeedRow[], level: AreaLevel, deals: stri
 
 /** A close view estimated (from the dots feed) to hold more listings than this skips the exact read: it is crowded. */
 export const CROWD_ESTIMATE = 1500;
+
+/** THE COUNT NAMES WHERE THE VIEW IS, AT EVERY ZOOM (owner 2026-11-05: «when the user zooms in this needs to change —
+ *  it shows the city name, then the district, depending where the user is»; it said «… in Saudi Arabia» at every
+ *  label zoom below the country). From the labels on screen: the country view is the country; otherwise the label
+ *  holding at least AREA_PLACE_SHARE of the listings in view — a region, a city, a district; at district zoom, failing
+ *  one district, the city most of those districts are in; else null, the plain «في هذه المنطقة». Never a name most of
+ *  the view is not in. */
+export const AREA_PLACE_SHARE = 0.6;
+export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
+  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): string | null {
+  return areaPlace(rows, level, loc, latin, center, span)?.name ?? null;
+}
+/** The named place AND its own count. The pill prints THIS count beside the name — measured live 2026-11-05 it said
+ *  «14,531 إعلان في حي النرجس» (every district in view) where النرجس alone holds ~5,900, and «127,013 … في منطقة
+ *  الرياض» where the region holds 108K. A number beside a name is that place's number. */
+export function areaPlace(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
+  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): { name: string; n: number } | null {
+  if (level === 'country') { const n = rows.reduce((t, a) => t + a.n, 0); return n > 0 ? { name: COUNTRY_NAME[loc], n } : null; }
+  const onScreen = rows.filter((a) => inView(a, center, span));
+  const seen = onScreen.length ? onScreen : rows;
+  const total = seen.reduce((t, a) => t + a.n, 0);
+  if (!total) return null;
+  const top = seen.reduce((b, a) => (a.n > b.n ? a : b));
+  if (top.n / total >= AREA_PLACE_SHARE) {
+    const name = areaName(top, level, loc, latin);
+    return { name: level === 'district' && loc === 'ar' ? `حي ${name}` : name, n: top.n };
+  }
+  if (level === 'district') {
+    const byCity = new Map<string, number>();
+    for (const a of seen) byCity.set(a.city, (byCity.get(a.city) ?? 0) + a.n);
+    const [city, n] = [...byCity].reduce((b, x) => (x[1] > b[1] ? x : b));
+    if (city && n / total >= AREA_PLACE_SHARE) {
+      return { name: areaName({ city, district: '' }, 'city', loc, latin), n: rows.filter((a) => a.city === city).reduce((t, a) => t + a.n, 0) };
+    }
+  }
+  return null;
+}

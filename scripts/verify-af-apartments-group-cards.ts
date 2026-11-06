@@ -28,10 +28,11 @@ const keysOf = (p: Plan) => new Set(p.flatMap((c) => c.keys));
 
 console.log('\n§1 single legs are the owner\'s lists, verbatim\n');
 const aptAnnual = cardPlan(Q({ deal: 'Rent', types: ['Apartment'] }));
-check('Annual rent → Apartment: comfort · space · safety · perks, 7 chips each, in the owner\'s order',
-  flat(aptAnnual) === 'comfort:kitchen,ac,parking,elevator,furnished,private_entrance,bills_included | space:majlis,maid_room,driver_room,roof,two_entrances,balcony,garden | safety:cameras,guard,smart_entry,smart_home,central_gas,optical_fibers,separate_meters | perks:gym,pool,sauna,kids_play_area,nursery,cleaning_service,free_maintenance', flat(aptAnnual));
-check('Annual rent → Apartment asks installments, bathrooms and age; «furnished» is a chip, so its question is still certified for the typed sentence',
-  ['rnpl', 'bathrooms', 'property_age', 'furnished'].every((id) => cohortAllows(Q({ deal: 'Rent', types: ['Apartment'] }), id)));
+check('Annual rent → Apartment: comfort · space · safety · perks, in the owner\'s order (furnished left comfort for its own question, owner 2026-11-05)',
+  flat(aptAnnual) === 'comfort:kitchen,ac,parking,elevator,private_entrance,bills_included | space:majlis,maid_room,driver_room,roof,two_entrances,balcony,garden | safety:cameras,guard,smart_entry,smart_home,central_gas,optical_fibers,separate_meters | perks:gym,pool,sauna,kids_play_area,nursery,cleaning_service,free_maintenance', flat(aptAnnual));
+check('Annual rent → Apartment asks installments, bathrooms, age and «🛋️ مفروشة / غير مفروشة» as its OWN question — no card carries the chip (owner 2026-11-05)',
+  ['rnpl', 'bathrooms', 'property_age', 'furnished'].every((id) => cohortAllows(Q({ deal: 'Rent', types: ['Apartment'] }), id))
+  && !keysOf(aptAnnual).has('furnished'));
 check('Buy → Apartment: comfort · space · safety · build; no installments, no furnished question',
   flat(cardPlan(Q({ deal: 'Buy', types: ['Apartment'] }))).startsWith('comfort:kitchen,ac,parking,elevator,private_entrance,roof,two_entrances | space:majlis,maid_room,driver_room,balcony,storage,garden,whole_floor | safety:')
   && !cohortAllows(Q({ deal: 'Buy', types: ['Apartment'] }), 'rnpl') && !cohortAllows(Q({ deal: 'Buy', types: ['Apartment'] }), 'furnished'));
@@ -63,14 +64,14 @@ check('Raw Land is untouched (no cards; its own cohort list still asks)',
 
 console.log('\n§2 the owner\'s worked examples (intersection, never union)\n');
 const aptFloor = cardPlan(Q({ deal: 'Rent', types: ['Apartment', 'Floor'] }));
-check('Annual rent → Apartment + Floor: kitchen/AC/parking/elevator/furnished/private entrance; majlis/maid/driver/roof/two entrances/balcony; cameras/smart entry/central gas/fiber/meters',
-  flat(aptFloor).startsWith('comfort:kitchen,ac,parking,elevator,furnished,private_entrance | space:majlis,maid_room,driver_room,roof,two_entrances,balcony | safety:cameras,smart_entry,smart_home,central_gas,optical_fibers,separate_meters'), flat(aptFloor));
+check('Annual rent → Apartment + Floor: kitchen/AC/parking/elevator/private entrance; majlis/maid/driver/roof/two entrances/balcony; cameras/smart entry/central gas/fiber/meters',
+  flat(aptFloor).startsWith('comfort:kitchen,ac,parking,elevator,private_entrance | space:majlis,maid_room,driver_room,roof,two_entrances,balcony | safety:cameras,smart_entry,smart_home,central_gas,optical_fibers,separate_meters'), flat(aptFloor));
 check('  …gone: bills included, car entrance, annex, garage (each certified by one side only)',
   ['bills_included', 'car_entrance', 'annex', 'garage'].every((k) => !keysOf(aptFloor).has(k)));
 const aptRoom = Q({ deal: 'Rent', types: ['Apartment', 'Room'] });
-check('Annual rent → Apartment + Room: NO bathrooms (rooms don\'t know it); installments, AC, furnished, kitchen, bills included, private entrance, parking, cameras, fiber, elevator remain',
-  !cohortAllows(aptRoom, 'bathrooms') && cohortAllows(aptRoom, 'rnpl')
-  && ['ac', 'furnished', 'kitchen', 'bills_included', 'private_entrance', 'parking', 'cameras', 'optical_fibers', 'elevator'].every((k) => keysOf(cardPlan(aptRoom)).has(k)));
+check('Annual rent → Apartment + Room: NO bathrooms (rooms don\'t know it); installments and the furnished question; AC, kitchen, bills included, private entrance, parking, cameras, fiber, elevator remain',
+  !cohortAllows(aptRoom, 'bathrooms') && cohortAllows(aptRoom, 'rnpl') && cohortAllows(aptRoom, 'furnished')
+  && ['ac', 'kitchen', 'bills_included', 'private_entrance', 'parking', 'cameras', 'optical_fibers', 'elevator'].every((k) => keysOf(cardPlan(aptRoom)).has(k)));
 const three = Q({ deal: 'Rent', dealCombined: true, types: ['Apartment'] });
 check('Apartment with Buy + Annual rent + Short stays: bathrooms; comfort = parking, elevator, private entrance, majlis, balcony, roof; extras = cameras, pool, gym',
   cohortAllows(three, 'bathrooms') && flat(cardPlan(three)) === 'comfort:parking,elevator,private_entrance,majlis,roof,balcony | extras:cameras,gym,pool', flat(cardPlan(three)));
@@ -78,8 +79,9 @@ check('  …not shown there: installments, age, direction, self check-in, Wi-Fi,
   !cohortAllows(three, 'rnpl') && !cohortAllows(three, 'property_age') && !cohortAllows(three, 'direction')
   && ['self_checkin', 'wifi', 'warranty'].every((k) => !keysOf(cardPlan(three)).has(k)));
 const group = cardPlan(Q({ deal: 'Rent', typeGroups: ['Apartments & Co-living'] }));
-check('Whole group box, annual rent: the small shared set only (≈ 6 chips)', keysOf(group).size === 6
-  && ['ac', 'parking', 'elevator', 'furnished', 'cameras', 'optical_fibers'].every((k) => keysOf(group).has(k)), flat(group));
+check('Whole group box, annual rent: the small shared set only (5 chips) + the «مفروشة / غير مفروشة» question (owner 2026-11-05)', keysOf(group).size === 5
+  && ['ac', 'parking', 'elevator', 'cameras', 'optical_fibers'].every((k) => keysOf(group).has(k)) && !keysOf(group).has('furnished')
+  && cohortAllows(Q({ deal: 'Rent', typeGroups: ['Apartments & Co-living'] }), 'furnished'), flat(group));
 const floorBoth = Q({ deal: 'Rent', dealCombined: true, types: ['Floor'] });
 check('Floor with Rent + Buy: bathrooms · age · comfort · space · extras (Rent ∩ Buy; Floor has no short-stay leg)',
   cohortAllows(floorBoth, 'bathrooms') && cohortAllows(floorBoth, 'property_age') && !cohortAllows(floorBoth, 'rnpl') && !cohortAllows(floorBoth, 'direction')

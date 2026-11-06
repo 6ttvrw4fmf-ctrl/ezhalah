@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, COUNTRY_NAME, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
@@ -610,6 +610,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const [pinCount, setPinCount] = useState<number | null>(null);
   // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
   const [viewPlace, setViewPlace] = useState<string | null>(null);
+  // The named place's OWN count (owner 2026-11-05): beside «في حي النرجس» the pill prints النرجس's number, not the view's.
+  const [placeCount, setPlaceCount] = useState<number | null>(null);
+  // The deals NOT chosen that do have listings in view — so an empty deal says where the listings are (owner 2026-11-05).
+  const [otherDeals, setOtherDeals] = useState<string[]>([]);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
   useEffect(() => {
     const mk = mapkitOf(); const m = mapRef.current;
@@ -712,7 +716,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         ctx.fill(); ctx.stroke();
       }
       shown = dots; canvas.style.opacity = '1';
-      setViewPlace(null);   // zoomed-out dots: the pill keeps «في هذه المنطقة»
+      setViewPlace(null); setPlaceCount(null);   // zoomed-out dots: the pill keeps «في هذه المنطقة»
       return true;
     };
     const hideCanvas = () => { canvas.style.opacity = '0'; };
@@ -729,7 +733,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const pickArea = (a: AreaRow, level: AreaLevel) => {
       live.history.push(m.region);
       const sp = areaZoomSpan(level);
-      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(a.lat, a.lng), new mk.CoordinateSpan(sp, sp)), true);
+      // SHAPED LIKE THE SCREEN (measured live 2026-11-05, 390×844): a square span on a tall map is widened by MapKit to
+      // fit the width — a 3° region tap landed at 5.17°, still the region band, so the tap changed nothing. Asking a
+      // longitude span no wider than the screen's width/height share keeps the latitude span what areaZoomSpan says.
+      const box = (hostRef.current as unknown as HTMLElement | null)?.getBoundingClientRect();
+      const aspect = box && box.height > 0 ? Math.min(1, box.width / box.height) : 1;
+      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(a.lat, a.lng), new mk.CoordinateSpan(sp, sp * aspect)), true);
     };
     const areaElement = (a: AreaRow, level: AreaLevel) => {
       const el = document.createElement('div');
@@ -750,9 +759,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       return el;
     };
     const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
-      // Area names on screen: several places share the view, so the pill keeps «في هذه المنطقة» — except the country
-      // view, which IS one place («424,317 إعلان في السعودية»).
-      setViewPlace(level === 'country' ? COUNTRY_NAME[loc] : null);
+      // The pill names where the view is at every zoom (owner 2026-11-05): the country, then the region, the city, the
+      // district most of the view's listings are in — «في هذه المنطقة» only when no one place holds most of them.
+      const place = areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
+      setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
       for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
@@ -813,9 +823,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (box.querySelector('[data-testid=map-area]') || Date.now() - born > 6000) clearBridge();
       }, 50);
     };
+    // Which other deals have pinned listings in the visible view (the dots feed, already on the phone, every deal).
+    const noteOtherDeals = async (center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }, my: number) => {
+      const all = await fetchMapDots();
+      if (all === 'unknown' || my !== seq || mapRef.current !== m) return;
+      const box = { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 };
+      setOtherDeals((['buy', 'rent', 'short'] as const).filter((d) => !pins.deals.includes(d) && dotsTotal(dotsInView(all, [d], box)) > 0));
+    };
     const load = async () => {
       const my = ++seq;
       const { center, span } = m.region;
+      void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
       const level = narrowed ? null : areaLevelFor(span.latitudeDelta);
       if (level) {
@@ -881,6 +899,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
+      setPlaceCount(null);
       void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc, translitPlace)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
@@ -1139,7 +1158,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {/* Zillow's «Only N matching results»: what the view (or the drawn boundary) holds, since the dots carry no number. */}
       {!drawing && pinCount !== null ? (
-        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en')}</Text></View>
+        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}</Text></View>
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>

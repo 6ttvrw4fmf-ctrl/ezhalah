@@ -1,0 +1,111 @@
+-- KELLER WILLIAMS + ALMAJDIAH LAUNCH (owner «launch» 2026-11-05, docs/ops/FIVE_SOURCES_LAUNCH.md) — owner-apply 05_rich_attrs.sql
+-- with the list narrowed to these two sites (Asas Makeen / Al Rajhi / STeam launch separately, after).
+-- Generated 2026-11-05 from the APPLIED Property Finder launch migration 20261104181148 (the newest shape of this step) with the
+-- platform list changed to the two sources. It refuses if the live shape moved: re-generate, never force.
+-- Property Finder joins listing_rich_attrs (owner 2026-10-16, licensed offers only; its pin is additional_info.latitude/longitude) — an Advanced-Filter view, so without an arm every one of
+-- their listings answers "unknown" to every AF question. Arm shape is batch 6's verbatim, appended to
+-- the body read LIVE at apply time; the same short-lock retry loop.
+-- ADAPTED AT LAUNCH (2026-11-04): the live view is no longer one flat UNION — since 2026-10-26 the AF amenity
+-- columns (majlis … building_rules) are computed in outer layers over an INNER 31-column union, so appending
+-- the arms at the end failed («each UNION query must have the same number of columns», clean rollback). The
+-- arms are now spliced INSIDE the inner union, right after its last arm (october_commercial_listings, whose
+-- closing «) v_1_1_1_1» must be found exactly once in the live body), so every outer layer reads them unchanged.
+-- RE-READ LIVE 2026-11-05 10:45: the Property Finder arms now close the inner union, so the anchor is propertyfinder_commercial_listings;
+-- the arm columns were compared with the live Property Finder arm and are identical.
+set local client_min_messages = warning;   -- nothing reaches the client mid-transaction: a dropped API connection (524 at ~120 s) cannot abort the commit
+set local statement_timeout = '5min';
+DO $do$
+DECLARE base text; arms text; t text; i int; ok boolean := false;
+  anchor constant text := E'FROM propertyfinder_commercial_listings x\n  WHERE x.active)';   -- the inner union's LAST arm since the Property Finder launch (re-read live 2026-11-05 10:45)
+  tables text[] := ARRAY['kellerwilliams_residential_listings','kellerwilliams_commercial_listings','almajdiah_residential_listings','almajdiah_commercial_listings'];
+BEGIN
+  IF position('kellerwilliams_residential_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) > 0 THEN
+    RAISE NOTICE 'listing_rich_attrs already carries the two sources arms';
+    RETURN;
+  END IF;
+  FOR i IN 1..20 LOOP
+    BEGIN
+      SET LOCAL lock_timeout = '3s';
+      base := rtrim(rtrim(pg_get_viewdef('public.listing_rich_attrs'::regclass,true)),';');
+      IF (length(base) - length(replace(base, anchor, ''))) / length(anchor) <> 1 THEN
+        RAISE EXCEPTION 'listing_rich_attrs inner-union anchor (the propertyfinder commercial arm) not found exactly once - shape moved, refusing to guess';
+      END IF;
+      arms := '';
+      FOREACH t IN ARRAY tables LOOP
+        arms := arms || format($f$
+UNION ALL
+ SELECT %1$L::text AS source_table,
+    x.id AS listing_id,
+    NULL::text AS ac_type,
+    NULL::text AS kitchen_status,
+    NULL::text AS furnishing_level,
+    NULL::smallint AS parking_count,
+    NULL::text AS parking_type,
+    x.rent_now_pay_later AS installment_available,
+        CASE
+            WHEN x.rent_now_pay_later THEN x.rent_now_pay_later_monthly::numeric
+            ELSE NULL::numeric
+        END AS installment_amount,
+    NULL::smallint AS installment_count,
+    x.separate_electricity_meter,
+    x.separate_water_meter,
+    x.electricity,
+    x.water_supply,
+    x.sanitation,
+    x.balcony_terrace AS balcony,
+    x.laundry_room,
+    NULL::boolean AS pool,
+    NULL::boolean AS gym,
+    NULL::boolean AS garden,
+    x.halls AS living_rooms,
+    x.reception_rooms_majlis AS majlis_rooms,
+    NULL::smallint AS total_floors,
+    NULL::smallint AS frontage_count,
+        CASE
+            WHEN COALESCE(x.additional_info ->> 'latitude'::text, x.additional_info ->> 'lat'::text) ~ '^-?[0-9.]+$'::text THEN COALESCE(x.additional_info ->> 'latitude'::text, x.additional_info ->> 'lat'::text)::numeric
+            ELSE NULL::numeric
+        END AS latitude,
+        CASE
+            WHEN COALESCE(x.additional_info ->> 'longitude'::text, x.additional_info ->> 'lng'::text) ~ '^-?[0-9.]+$'::text THEN COALESCE(x.additional_info ->> 'longitude'::text, x.additional_info ->> 'lng'::text)::numeric
+            ELSE NULL::numeric
+        END AS longitude,
+    NULL::text AS rega_license_status,
+    NULLIF(btrim(COALESCE(x.zip_code, ''::text)), ''::text) AS postal_code,
+    NULL::text AS deed_location_text,
+    x.car_entrance,
+    x.optical_fibers
+   FROM %1$I x
+  WHERE x.active$f$, t);
+      END LOOP;
+      EXECUTE 'CREATE OR REPLACE VIEW public.listing_rich_attrs AS ' ||
+        replace(base, anchor, left(anchor, length(anchor) - 1) || arms || ')');
+      EXECUTE 'GRANT ALL ON public.listing_rich_attrs TO postgres, anon, authenticated, service_role';
+      ok := true;
+      EXIT;
+    EXCEPTION WHEN lock_not_available THEN
+      PERFORM pg_sleep(2);
+    END;
+  END LOOP;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'could not acquire ACCESS EXCLUSIVE on listing_rich_attrs after 20 short attempts - traffic never gapped; retry later';
+  END IF;
+  RAISE NOTICE 'listing_rich_attrs rebuilt with the two sources on attempt %', i;
+END
+$do$;
+
+DO $verify$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['kellerwilliams','almajdiah'] LOOP
+    IF position(t || '_residential_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) = 0
+       OR position(t || '_commercial_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) = 0 THEN
+      RAISE EXCEPTION '% did not land in listing_rich_attrs', t;
+    END IF;
+  END LOOP;
+  IF position('maktab_commercial_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) = 0
+     OR position('holoul_residential_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) = 0
+     OR position('tuba_residential_listings' in pg_get_viewdef('public.listing_rich_attrs'::regclass,true)) = 0 THEN
+    RAISE EXCEPTION 'an existing platform arm was dropped while adding the new ones';
+  END IF;
+  RAISE NOTICE 'the two sources are in listing_rich_attrs';
+END $verify$;

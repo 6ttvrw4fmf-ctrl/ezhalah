@@ -44,8 +44,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { site: kellerwilliams, cmd: "python -m scrapers.kellerwilliams.run" }
-          - { site: almajdiah,      cmd: "python -m scrapers.almajdiah.run" }
           - { site: asasmakeen,     cmd: "python -m scrapers.asasmakeen.run" }
           - { site: mrajhi,         cmd: "python -m scrapers.mrajhi.run" }
           - { site: steam,          cmd: "python -m scrapers.steam.run" }

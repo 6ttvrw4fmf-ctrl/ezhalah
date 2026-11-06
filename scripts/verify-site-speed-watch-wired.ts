@@ -27,5 +27,17 @@ mustCatch('a journey that swallows its own failure', !loud(js.replace('process.e
 check('it uses the robot pass (never blocked by our own guards) and a phone with a slowed CPU',
   /import '\.\.\/\.\.\/scripts\/lib\/robotPass\.mjs'/.test(js) && /setCPUThrottlingRate', \{ rate: 4 \}/.test(js) && /devices\['iPhone 13'\]/.test(js));
 
+// MOVING THE MAP AND AN IMPATIENT TAP (owner 2026-11-05: «so slow changing and moving … gets stuck»): the robot drags
+// the map, times the new area's labels and the longest stutter, and taps «خريطة» at once on a fresh phone (no pause).
+const moves = (s: string) => /panMs: 3_000, panFreezeMs: 500, mapColdTapMs: 5_000/.test(s)
+  && /say\(results\.panMs <= BUDGET\.panMs/.test(s) && /say\(results\.panFreezeMs <= BUDGET\.panFreezeMs/.test(s)
+  && /say\(results\.mapColdTapMs <= BUDGET\.mapColdTapMs/.test(s);
+check('it drags the map (time + stutter) and taps the map at once on a fresh phone, each against a budget', moves(js));
+mustCatch('the drag step removed', !moves(js.replace(/say\(results\.panMs <= BUDGET\.panMs/, 'void (0')));
+mustCatch('the impatient tap removed', !moves(js.replace(/say\(results\.mapColdTapMs <= BUDGET\.mapColdTapMs/, 'void (0')));
+// pg_cron starts it (GitHub ran the schedule ~3×/day): two bundle steps ~30 min apart in the newest bundle migration
+const trig = readFileSync(new URL('../supabase/migrations/20261105172415_speed_robot_started_by_pg_cron.sql', import.meta.url), 'utf8');
+check('pg_cron starts the robot from both hourly bundles (:12 and :43)', (trig.match(/trigger_gh_workflow\('site-speed-live\.yml'\)/g) ?? []).length === 2 && /'12 \* \* \* \*'/.test(trig) && /'43 \* \* \* \*'/.test(trig));
+
 if (failed) { console.error(`\n❌ verify-site-speed-watch-wired: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-site-speed-watch-wired: the phone speed journey runs every 30 min and after deploys, and alerts when it fails.');

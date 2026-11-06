@@ -408,6 +408,30 @@ def alive_since_read(stamp, read_iso: str) -> bool:
         return False
 
 
+def parse_shard(spec: str) -> tuple[int, int]:
+    """'i/N' -> (i, N). '' or '0/1' = the whole worklist. Pure.
+
+    WHY SHARDS (2026-11-05, owner order «dealapp ≥ 90 % in SLA»). dealapp's view quota is per
+    anonymous visitor IP (~9 origin renders a minute, measured 2026-09-28), and one hourly sweep on
+    one runner reads ~600 ads in ~50 minutes, ~420 of them verified: ~10k stamps a day for 55,971
+    active rows, so the fleet sat at 65 % inside 48 h. Every GitHub-hosted runner is its own IP, so
+    N shards of one hourly run multiply the reads N times without the proxy (no proxy bill) and
+    without reading any ad faster than dealapp allows one visitor."""
+    if not spec:
+        return 0, 1
+    i, _, n = spec.partition("/")
+    idx, total = int(i), int(n)
+    if total < 1 or not 0 <= idx < total:
+        raise ValueError(f"bad --shard {spec!r}: want i/N with 0 <= i < N")
+    return idx, total
+
+
+def in_shard(row: dict, idx: int, total: int) -> bool:
+    """A row belongs to exactly one shard (by its own table id), so two shards never read, strike
+    or stamp the same row in one hour. Pure."""
+    return total <= 1 or int(row["id"]) % total == idx
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Dealapp liveness sweep (candidate + direct confirm)")
     ap.add_argument("--limit", type=int, default=300, help="probe at most N candidates")
@@ -420,7 +444,11 @@ def main() -> int:
     ap.add_argument("--max-requests", type=int, default=0,
                     help="hard ceiling on TOTAL requests (sitemap + probes + retries). "
                          "0 = unlimited. Required in practice for any proxy run.")
+    ap.add_argument("--shard", default="",
+                    help="i/N: read only rows with id %% N == i (one runner IP per shard, see "
+                         "parse_shard). Empty = the whole worklist.")
     args = ap.parse_args()
+    shard_idx, shard_n = parse_shard(args.shard)
 
     proxy_url = os.environ.get("WASALT_PROXY_URL", "").strip() if args.proxy else ""
     if args.proxy and not proxy_url:
@@ -450,7 +478,9 @@ def main() -> int:
         if canary["bogus_alive"]:
             print(f"✗ CANARY: bogus id {BOGUS_ADID} read ALIVE — nothing will be written", flush=True)
 
-        cands = _collect_candidates(client, args.limit)
+        # Each shard keeps a full-size window of its own: collect N windows, keep this shard's.
+        cands = [r for r in _collect_candidates(client, args.limit * shard_n)
+                 if in_shard(r, shard_idx, shard_n)]
         # Within the least-recently-probed window, sitemap-PRESENT first. dealapp gives no death
         # signal on the ad URL (a removed ad renders the same shell as a bogus id, which is
         # UNKNOWN), so leading with sitemap-absent rows only spent the budget on answers that can
@@ -603,6 +633,7 @@ def main() -> int:
               f"{' '.join(bracketed)}", flush=True)
         note = (f"{'APPLY' if args.apply else 'DRY-RUN'} "
                 f"egress={'proxy' if proxy_url else 'ci'} "
+                f"{f'shard={shard_idx}/{shard_n} ' if shard_n > 1 else ''}"
                 f"requests={budget.used}{f'/{budget.cap}' if budget.cap else ''} "
                 f"scanned={stats['scanned']} "
                 f"alive={stats['alive']} dead={stats['dead']} unknown={stats['unknown']} "

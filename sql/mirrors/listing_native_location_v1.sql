@@ -1,6 +1,12 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-11-05 after 20261105111009 (five-source launch: Keller Williams + Almajdiah 20261105084502/84503; Asas Makeen + Al
+--   Rajhi + STeam 20261105111002 wiring, 20261105111003 replay): CHANGED. Ten arms spliced after the propertyfinder
+--   commercial arm (asasmakeen, mrajhi, steam, then kellerwilliams, almajdiah); 149,342 -> 155,497 chars. md5 of everything
+--   below this header block: 2af9ead54b06f713aa85e08b0e9eaf00 == live, registered by
+--   20261105111009_sql_mirror_expected_catches_up_to_the_five_source_arms.
+--
 -- Re-verified 2026-11-04 after 20261104183209 (Property Finder launch: 20261104180049 wiring, 20261104180642 replay,
 --   20261104181423 digest, 20261104183209 revokes public writes only): CHANGED. Two propertyfinder arms spliced after the haraj commercial
 --   arm; 148,007 -> 149,342 chars. md5 of everything below this header block: 14cd19d8345818bcdb4b9b9ff7591f81 == live,
@@ -645,6 +651,126 @@
             propertyfinder_commercial_listings.transaction_type
            FROM propertyfinder_commercial_listings
           WHERE propertyfinder_commercial_listings.active
+        UNION ALL
+         SELECT 'asasmakeen'::text AS platform,
+            'asasmakeen_residential_listings'::text AS source_table,
+            asasmakeen_residential_listings.id AS listing_id,
+            asasmakeen_residential_listings.city_ar,
+            asasmakeen_residential_listings.city_id,
+            asasmakeen_residential_listings.district_ar,
+            asasmakeen_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            asasmakeen_residential_listings.transaction_type
+           FROM asasmakeen_residential_listings
+          WHERE asasmakeen_residential_listings.active
+        UNION ALL
+         SELECT 'asasmakeen'::text AS platform,
+            'asasmakeen_commercial_listings'::text AS source_table,
+            asasmakeen_commercial_listings.id AS listing_id,
+            asasmakeen_commercial_listings.city_ar,
+            asasmakeen_commercial_listings.city_id,
+            asasmakeen_commercial_listings.district_ar,
+            asasmakeen_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            asasmakeen_commercial_listings.transaction_type
+           FROM asasmakeen_commercial_listings
+          WHERE asasmakeen_commercial_listings.active
+        UNION ALL
+         SELECT 'mrajhi'::text AS platform,
+            'mrajhi_residential_listings'::text AS source_table,
+            mrajhi_residential_listings.id AS listing_id,
+            mrajhi_residential_listings.city_ar,
+            mrajhi_residential_listings.city_id,
+            mrajhi_residential_listings.district_ar,
+            mrajhi_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            mrajhi_residential_listings.transaction_type
+           FROM mrajhi_residential_listings
+          WHERE mrajhi_residential_listings.active
+        UNION ALL
+         SELECT 'mrajhi'::text AS platform,
+            'mrajhi_commercial_listings'::text AS source_table,
+            mrajhi_commercial_listings.id AS listing_id,
+            mrajhi_commercial_listings.city_ar,
+            mrajhi_commercial_listings.city_id,
+            mrajhi_commercial_listings.district_ar,
+            mrajhi_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            mrajhi_commercial_listings.transaction_type
+           FROM mrajhi_commercial_listings
+          WHERE mrajhi_commercial_listings.active
+        UNION ALL
+         SELECT 'steam'::text AS platform,
+            'steam_residential_listings'::text AS source_table,
+            steam_residential_listings.id AS listing_id,
+            steam_residential_listings.city_ar,
+            steam_residential_listings.city_id,
+            steam_residential_listings.district_ar,
+            steam_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            steam_residential_listings.transaction_type
+           FROM steam_residential_listings
+          WHERE steam_residential_listings.active
+        UNION ALL
+         SELECT 'steam'::text AS platform,
+            'steam_commercial_listings'::text AS source_table,
+            steam_commercial_listings.id AS listing_id,
+            steam_commercial_listings.city_ar,
+            steam_commercial_listings.city_id,
+            steam_commercial_listings.district_ar,
+            steam_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            steam_commercial_listings.transaction_type
+           FROM steam_commercial_listings
+          WHERE steam_commercial_listings.active
+        UNION ALL
+         SELECT 'kellerwilliams'::text AS platform,
+            'kellerwilliams_residential_listings'::text AS source_table,
+            kellerwilliams_residential_listings.id AS listing_id,
+            kellerwilliams_residential_listings.city_ar,
+            kellerwilliams_residential_listings.city_id,
+            kellerwilliams_residential_listings.district_ar,
+            kellerwilliams_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            kellerwilliams_residential_listings.transaction_type
+           FROM kellerwilliams_residential_listings
+          WHERE kellerwilliams_residential_listings.active
+        UNION ALL
+         SELECT 'kellerwilliams'::text AS platform,
+            'kellerwilliams_commercial_listings'::text AS source_table,
+            kellerwilliams_commercial_listings.id AS listing_id,
+            kellerwilliams_commercial_listings.city_ar,
+            kellerwilliams_commercial_listings.city_id,
+            kellerwilliams_commercial_listings.district_ar,
+            kellerwilliams_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            kellerwilliams_commercial_listings.transaction_type
+           FROM kellerwilliams_commercial_listings
+          WHERE kellerwilliams_commercial_listings.active
+        UNION ALL
+         SELECT 'almajdiah'::text AS platform,
+            'almajdiah_residential_listings'::text AS source_table,
+            almajdiah_residential_listings.id AS listing_id,
+            almajdiah_residential_listings.city_ar,
+            almajdiah_residential_listings.city_id,
+            almajdiah_residential_listings.district_ar,
+            almajdiah_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            almajdiah_residential_listings.transaction_type
+           FROM almajdiah_residential_listings
+          WHERE almajdiah_residential_listings.active
+        UNION ALL
+         SELECT 'almajdiah'::text AS platform,
+            'almajdiah_commercial_listings'::text AS source_table,
+            almajdiah_commercial_listings.id AS listing_id,
+            almajdiah_commercial_listings.city_ar,
+            almajdiah_commercial_listings.city_id,
+            almajdiah_commercial_listings.district_ar,
+            almajdiah_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            almajdiah_commercial_listings.transaction_type
+           FROM almajdiah_commercial_listings
+          WHERE almajdiah_commercial_listings.active
         UNION ALL
          SELECT 'superoffice'::text AS platform,
             'superoffice_residential_listings'::text AS source_table,
