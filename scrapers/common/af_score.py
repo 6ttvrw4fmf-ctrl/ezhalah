@@ -170,7 +170,11 @@ PROJECT_PAGE_UNIT_TRAITS: dict[str, tuple[str, ...]] = {
 # of cards for every N (CI re-read 39228340160: 14146 and 13181 print the identical cards). Its «مفروشة بالكامل» chip
 # belongs to another unit's card; all 4 safa misses on 10-19 asked furnished from it. Such a page is not this ad:
 # unreadable, never counted as wrong.
-SHARED_LIST_PAGE_SITES = {"safa"}
+# nufouth (🔬 2026-11-06): every one of its 331 listing_urls is «/latest-offers?ads-<code>=1», and the server returns the
+# SAME 399,743-byte list of 14 other offers for every code (ads-N4670 and ads-N5007 byte-identical; the ad's own code
+# is not in the HTML — the popup is drawn by script). All 4 nufouth bathroom «mismatches» of 11-06 read another
+# offer's «دورات مياه»; the stored 3/3/3/4 equal each ad's own description.
+SHARED_LIST_PAGE_SITES = {"safa", "nufouth"}
 # WordPress «WP Residence» sites: the ticked checklist is the structured statement (wpresidence_props).
 WP_RESIDENCE_SITES = {"eastabha"}
 COL = {n: c for n, _, c, _ in FIELDS}
