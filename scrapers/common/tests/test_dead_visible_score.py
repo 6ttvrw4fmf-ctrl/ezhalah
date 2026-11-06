@@ -190,7 +190,9 @@ def test_negative_control_url_replaces_the_trailing_id():
     n = S.negative_control_url
     assert n("https://kwsaudiarabia.com/propertydetails/6707227ff8bc59395742594e") == \
         "https://kwsaudiarabia.com/propertydetails/000000000000000000000000"
-    assert n("https://almajdiah.com/rentals/207?platform=web") is None          # 3 digits: too short to trust
+    assert n("https://almajdiah.com/rentals/207?platform=web") == \
+        "https://almajdiah.com/rentals/9999999?platform=web"                 # a whole-digit segment is an id
+    assert n("https://x.sa/ads/flat-3b2") is None                              # a short mixed token is not
     assert n("https://arkaanalaqar.com/property/2377") == "https://arkaanalaqar.com/property/99999999"
     assert n("https://wasalt.sa/en/property/apartment-600-sqm-5896910") == \
         "https://wasalt.sa/en/property/apartment-600-sqm-99999999999"

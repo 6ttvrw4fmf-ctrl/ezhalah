@@ -169,9 +169,13 @@ def negative_control_url(url: str | None) -> str | None:
     stem, dash, tail = last.rpartition("-")
     tok_src = tail if dash else last
     m = _ID_TOKEN.search(tok_src)
-    if not m or len(m.group(1)) < 4 or m.group(1) != tok_src:
+    if not m or m.group(1) != tok_src:
         return None
     tok = m.group(1)
+    # A whole path segment of digits is an id at any length (almajdiah /rentals/207); a mixed token needs 4+
+    # characters so a word with one digit in it is never mistaken for an id.
+    if len(tok) < 4 and not (tok.isdigit() and not dash):
+        return None
     fake = "9" * (len(tok) + 4) if tok.isdigit() else "0" * len(tok)
     new_last = (stem + dash + fake) if dash else fake
     path = head + "/" + new_last + ("/" if sp.path.endswith("/") else "")
