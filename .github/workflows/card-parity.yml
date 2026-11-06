@@ -70,15 +70,16 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_BROWSER: "1"        # the imported cleanup transport (verify-wasalt-probing-workflows-carry-the-browser.ts)
           SITES: ${{ inputs.sites }}
           ALL: ${{ inputs.all }}
           DRY_RUN: ${{ inputs.dry_run }}
           JOURNEY_OUT_DIR: ${{ runner.temp }}/card-parity
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            exec python -m scrapers.common.card_parity --dry-run --sites "dwelleo,muhaysini,propertyfinder"
+            exec xvfb-run -a python -m scrapers.common.card_parity --dry-run --sites "dwelleo,muhaysini,propertyfinder"
           fi
-          exec python -m scrapers.common.card_parity \
+          exec xvfb-run -a python -m scrapers.common.card_parity \
             $([ "$DRY_RUN" = "true" ] && echo --dry-run) \
             $([ "$ALL" = "true" ] && echo --all) \
             --sites "$SITES"
