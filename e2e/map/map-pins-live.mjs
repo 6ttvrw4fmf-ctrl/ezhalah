@@ -39,10 +39,18 @@ try {
         const mk = window.mapkit; const m = mk.maps[mk.maps.length - 1];
         m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(lat, lng), new mk.CoordinateSpan(span, span)), false);
       }, { lat: spot.lat, lng: spot.lng, span });
-      // Settled = the set of heads has not changed for 1.5 s (the map reads, merges and draws after the move ends).
+      // Settled = the map has DRAWN something (a head, a bubble or the count pill) and the set has not changed for 1.5 s.
+      // A blank map is not settled: its signature is stable from the first frame, and the pins RPC answers only after the
+      // move ends (854 ms measured 14:23 UTC 2026-11-06 under the hourly index sync) — run 42233389216 read «0 pins» on
+      // every view 0.3 s before the first answer arrived, then sped through the next views on the previous view's clock.
+      // So: the clock restarts for every view, and a blank map gets 12 s to read before «nothing» counts as the answer.
+      await page.evaluate(() => { const w = window; w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); });
       await page.waitForFunction(() => {
-        const sig = [...document.querySelectorAll('[data-testid=map-pin]')].map((e) => e.textContent).join('|') + '#' + (document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '');
+        const heads = [...document.querySelectorAll('[data-testid=map-pin], [data-testid=map-bubble]')].map((e) => e.textContent).join('|');
+        const pill = document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '';
+        const sig = heads + '#' + pill;
         const w = window; if (w.__pinSig !== sig) { w.__pinSig = sig; w.__pinAt = performance.now(); return false; }
+        if (!heads && !pill && performance.now() - w.__pinT0 < 12_000) return false;
         return performance.now() - w.__pinAt > 1500;
       }, null, { timeout: 25_000, polling: 100 }).catch(() => {});
       const seen = await page.evaluate(() => {
