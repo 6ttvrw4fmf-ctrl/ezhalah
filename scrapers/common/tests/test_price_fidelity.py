@@ -69,8 +69,11 @@ def test_eaqartabuk_bug2_still_fixed():
     from scrapers.eaqartabuk.run import _price
     # period STATED monthly -> the 2026-07-14 annualisation still applies (and round-trips via ÷12)
     assert _price("2700", True, "شقة للايجار الشهري") == (None, 32400, "monthly")
-    # period NOT stated -> unknown; we do not claim an annual figure from a magnitude hunch
-    assert _price("2700", True, "شقة للايجار") == (None, None, None)
+    # period NOT stated -> the period stays UNKNOWN (no magnitude hunch here); since 2026-11-06 the published
+    # figure is kept so the search index can judge it (owner rule 2026-10-31, judge_silent_rent_period_ar:
+    # 300–7,999 → per-month, served ×12; ≥ 15,000 → سنوي; else unlabelled) — measured on kellerwilliams rows
+    # stored the same way (rent_period_judged = true). The card/index, never the scraper, decides the period.
+    assert _price("2700", True, "شقة للايجار") == (None, 2700, None)
     # Buy: verbatim. 580 is 580 — the ×1000 guess is gone.
     assert _price("580", False) == (580, None, None)
     assert _price("1350000", False) == (1350000, None, None)

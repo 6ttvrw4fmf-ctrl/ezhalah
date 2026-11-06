@@ -131,7 +131,8 @@ _TITLE_DISTRICT_RE = re.compile(r"(?:^|(?<=\s))ب?ح[يى]\s+([^\s,،.)\]]+)")
 
 
 _RENT_WORD = re.compile(r"(?:لل|ل)?[إا]يجار")
-_SALE_WORD = re.compile(r"(?:لل)?بيع")
+# «بيع» only at a word start: «طبيعية» (natural ventilation) is not a sale (review on #10940).
+_SALE_WORD = re.compile(r"(?<![\u0621-\u064A])(?:و)?(?:لل|ال)?بيع")
 
 
 def investment_offered_for_rent(op: str, status_ar: str, title, excerpt) -> bool:
@@ -505,7 +506,9 @@ def _price(raw: Any, is_rent: bool, raw_text: Optional[str] = None) -> tuple[Opt
         return None, normalize.annualize_rent(v, "monthly"), "monthly"
     if period == "annual":
         return None, v, "annual"
-    return None, None, None
+    # Period SILENT (owner rule 2026-10-31, «judge_silent_rent_period_ar»): keep the figure as published, period
+    # unknown — the search index labels it from the price and flags it judged. Same as asasmakeen / kellerwilliams.
+    return None, v, None
 
 
 # Some listings quote no real figure at all: the description literally says the price depends on
@@ -546,14 +549,18 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     op = (mp.get("operation") or "").strip().lower()
     status_ar = (mp.get("status") or "").strip()
     is_rent = op == "rent" or "إيجار" in status_ar or "ايجار" in status_ar
+    flipped_to_rent = False
     if not is_rent and investment_offered_for_rent(op, status_ar, item.get("title"), item.get("excerpt")):
-        is_rent = True
+        is_rent = flipped_to_rent = True
 
     # The period text eaqartabuk actually prints. Built from the raw title/excerpt/status available
     # here (the redacted `title`/`description` are computed further down); redaction only strips
     # phone numbers, so it cannot remove a period word.
     _period_text = " ".join(str(x or "") for x in (item.get("title"), item.get("excerpt"), status_ar))
     price_total, price_annual, rent_period = _price(meta.get("price"), is_rent, _period_text)
+    if flipped_to_rent:
+        # The row was stored as a sale with this figure in price_total; a rental holds it in price_annual only.
+        price_total = getattr(db, "AUTHORITATIVE_NULL", None)
 
     # On-request pricing: the number in meta.price is a placeholder, not a real quote (see
     # _price_on_request docstring above). Null the price rather than store a fabricated figure;

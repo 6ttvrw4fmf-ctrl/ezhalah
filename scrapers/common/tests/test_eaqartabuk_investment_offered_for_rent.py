@@ -7,11 +7,9 @@ An investment ad whose own title/excerpt says rent (and not sale) is a Rent; any
 Run: python -m pytest scrapers/common/tests/test_eaqartabuk_investment_offered_for_rent.py -v
 """
 import sys
-import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
 
 from scrapers.eaqartabuk.run import investment_offered_for_rent, map_listing  # noqa: E402
 
@@ -42,3 +40,15 @@ def test_investment_ad_without_rent_words_keeps_the_old_reading():
 def test_a_sale_ad_never_becomes_a_rental():
     row, _ = map_listing(_item("هنجر للايجار سابقا"), _mp("sale", "بيع"), None, [])
     assert row["transaction_type"] == "Buy"
+
+
+def test_natural_ventilation_is_not_a_sale_word():
+    assert investment_offered_for_rent("investment", "استثمار", "هنجر للايجار بتهوية طبيعية", "")
+    assert not investment_offered_for_rent("investment", "استثمار", "هنجر للايجار وللبيع", "")
+    assert not investment_offered_for_rent("investment", "استثمار", "هنجر للايجار أو البيع", "")
+
+
+def test_a_rental_keeps_its_published_figure_when_the_period_is_silent():
+    row, _ = map_listing(_item("هنجر للايجار حي المصيف"), _mp("investment", "استثمار"), None, [])
+    assert row["price_annual"] == 200000, "the published figure was dropped"
+    assert row.get("rent_period") is None, "a period was invented"
