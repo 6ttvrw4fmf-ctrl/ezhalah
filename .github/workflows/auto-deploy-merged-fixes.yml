@@ -2,6 +2,12 @@
 # This file only DISPATCHES deploy-frontend.yml, so the deploy lock, the preflight and the 10% canary (it rolls back
 # by itself when a guardian journey regresses) all still decide. It runs once for a given main commit, so a failed
 # deploy is not retried until something new lands, and it stops and goes red after 3 failed deploys in a row.
+# 2026-11-06 (🔧): the stop RE-ARMS after a 3-hour cool-off. It used to be permanent: on 11-06 three deploys at
+# 07:09-07:35 UTC were refused by the drift gate (an unmirrored migration, nothing shipped), the gate cleared later,
+# and this robot still refused every hourly pass for 13+ hours because nothing could ever produce a 4th run — a
+# breaker that only a person can reset is a deadlock, not a guard. Three hours after the NEWEST failure it dispatches ONE deploy for
+# the new main commit (the «already tried» rule above keeps it to one per commit); every gate in deploy-frontend.yml
+# (lock, preflight, drift, 10% canary with auto-rollback) still decides. Guard: scripts/verify-auto-deploy-breaker-rearms.ts.
 name: Auto-deploy merged app fixes
 
 on:
@@ -35,7 +41,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          runs=$(gh run list -w deploy-frontend.yml --branch main --limit 30 --json status,conclusion,headSha)
+          runs=$(gh run list -w deploy-frontend.yml --branch main --limit 30 --json status,conclusion,headSha,createdAt)
           head=$(git rev-parse HEAD)
           if [ "$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")" != 0 ]; then
             echo "A deploy is running — next pass."; exit 0
@@ -47,8 +53,9 @@ jobs:
           [ -n "$good" ] || { echo "::error::no successful deploy in the last 30 runs"; exit 1; }
           changed=$(git diff --name-only "$good" "$head" -- src public assets api middleware.ts app.json babel.config.js metro.config.js package.json package-lock.json vercel.json)
           [ -n "$changed" ] || { echo "No app files changed since $good."; exit 0; }
-          if [ "$(jq '[limit(3; .[])] | all(.conclusion == "failure")' <<<"$runs")" = true ]; then
-            echo "::error::the last 3 deploys failed — not dispatching a 4th."; exit 1
+          cooloff=$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          if [ "$(jq --arg c "$cooloff" '([limit(3; .[])] | all(.conclusion == "failure")) and (.[0].createdAt > $c)' <<<"$runs")" = true ]; then
+            echo "::error::the last 3 deploys failed in a row, the newest under 3 hours ago — not dispatching another (re-arms 3 h after the newest failure)."; exit 1
           fi
           printf '%s\n' "$changed"
           gh workflow run deploy-frontend.yml --ref main -f confirm=DEPLOY -f "reason=auto: app files changed since ${good:0:7}"

@@ -998,6 +998,11 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
     if fact == "kitchen" and p2 and _starts(_strip_wa(p2[-1]), ("سطح", "اسطح")):
         return None, s, e                            # «سطح مطبخ» / «أسطح المطبخ» is a countertop
+    if fact == "pumps" and _n(t[ws:we]).lstrip("و").startswith("بمضخه"):
+        return None, s, e                            # «بمضخة» = equipped WITH a pump: the pool's, well's, tank's or fire
+                                                     # system's («مسبح … بمضخه وفلتر», «بئر ارتوازي بمضخة», «خزان … مزود
+                                                     # بمضخة سكالا», «نظام إطفاء … بمضخة») — never a station's fuel pumps
+                                                     # (P1 13301, 7 served ads, 2026-11-06; a station says «N مضخات»)
     if fact == "air_conditioner" and ("مكيفات" in t[ws:we] or _strip_wa(t[ws:we]) in ("تكييف", "تكيف")):
         ex_before = ()                               # «مدخلان🔹 مكيفات راكبة», «مدخلان للشقة تكييف سبيلت»: the home's; a lobby is «مدخل مكيف»
     if fact in _NEEDS_CUE and p2 and _starts(p2[-1], _CUES):
@@ -2345,6 +2350,14 @@ def selftest() -> None:
         ("مجهزة حسب طلب الدفاع المدني بمضخة الحريق ووسائل السلامة", {}, ("pumps",)),
         ("حديد سابك • صب بمضخة • بلك عازل", {}, ("pumps",)),
         ("محطة وقود 6 مضخات ومغسلة سيارات", {"pumps": True}, ()),
+        # «بمضخة» (with a pump) is another thing's equipment — real served sentences, P1 13301 (2026-11-06)
+        ("مسبح ٩ في ٤ عمق من متر الی ۲ متر مغلق ابواب على القسمين بمضخه وفلتر وغرفة الفلتر", {}, ("pumps",)),
+        ("مسوره بالكامل ويوجد بئر ارتوازي بمضخة وتعمل والكهرباء واصله", {}, ("pumps",)),
+        ("خزان أرضي سعة 6000 لتر مزود بمضخة سكالا 2 وحساس قبل انتهاء الماء", {}, ("pumps",)),
+        ("بئر جديد بعمق 120م، حجب كامل، بمضخة 3.5 حصان، ويصب في خزان دائري", {}, ("pumps",)),
+        ("🔥 نظام إطفاء متوسط الخطورة بمضخة عالية الأداء وخزان إطفاء 35,000 لتر", {}, ("pumps",)),
+        ("مستودع مرخص من بلدي ومن الدفاع المدني مجهز بمضخة كبيره ونظام الرش الالي وخراطيم", {}, ("pumps",)),
+        ("بالإضافة إلى مسبح خارجي بمضخة هواء لدفع الماء، وجلسة خارجية مع ركن شواء", {}, ("pumps",)),
         ("مسجد داخل المجمع", {"mosque": True}, ()),
         ("مصلى للرجال والنساء", {"mosque": True}, ()),
         ("قريب من المسجد", {}, ("mosque",)),
