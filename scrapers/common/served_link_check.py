@@ -144,6 +144,10 @@ def check_site(client, platform: str, shown: int, *, rng: random.Random, night: 
         kind = classify(r["listing_url"], status, landed)
         row["sampled"] += 1
         row[kind] += 1
+        if kind == "moved":
+            # falcon 2026-11-06: the alert names dead_sample only, so a site whose links all «moved»
+            # (dallali 16/17, erapulse 20/20) gave nobody the landing page to act on. Print it.
+            print(f"  moved {platform}: {r['listing_url']} -> {landed}", flush=True)
         if kind == "dead" and len(row["dead_sample"]) < 5:
             row["dead_sample"].append(r["listing_url"])
         if kind == "moved" and repairable(r["listing_url"], landed):
