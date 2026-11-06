@@ -48,3 +48,10 @@ def test_a_name_on_the_line_after_a_bare_contact_cue_is_dropped():
     out = R._advertiser_text(body)
     assert "أحمد" not in out and "للتواصل" not in out
     assert out == "شقة واسعة\nمطبخ راكب\nغرفة خادمة"
+
+
+def test_padding_after_a_contact_cue_does_not_save_the_name():
+    body = ('<div class="responsive-text x">شقة واسعة<br>للتواصل:' + ' ' * 60 + 'أحمد محمد</div>'
+            ' <div id="Specifications">')
+    out = R._advertiser_text(body)
+    assert "أحمد" not in (out or "") and "شقة واسعة" in out

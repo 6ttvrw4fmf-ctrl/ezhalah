@@ -462,6 +462,7 @@ def _redact(text: Optional[str]) -> Optional[str]:
         return text
     t = ihtml.unescape(text)
     t = _deobfuscate(t)            # o5o… → 050… so the phone patterns below catch it
+    t = re.sub(r"[ \t\u00a0]{2,}", " ", t)   # «للتواصل:      أحمد» — padding must not push the name past the 40-char reach
     t = _CONTACT_LINE_RE.sub(" ", t)
     t = _PHONE_LOOSE.sub(" ", t)
     t = _PHONE_RE.sub(" ", t)
