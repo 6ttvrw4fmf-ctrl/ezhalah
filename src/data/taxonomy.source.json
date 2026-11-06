@@ -164,7 +164,8 @@
           "Building",
           "مجمع سكني",
           "مجمع",
-          "برج"
+          "برج",
+          "Compound"
         ],
         "kinds": [
           "res"
@@ -517,7 +518,8 @@
       "serviceFacility": false,
       "query": {
         "rawTypes": [
-          "سكن عمال"
+          "سكن عمال",
+          "Staff Housing"
         ],
         "kinds": [
           "res",
