@@ -1,5 +1,15 @@
 # 🔬 Advanced Filter Engineer (owner, 2026-10-04)
 
+> **👑 OWNER ORDER 2026-11-06 — «LET THE ENGINEERS SEE WHAT CODERABBIT SAYS» (permanent).** CodeRabbit reviews every PR.
+> In the last 40 PRs it flagged 17 MAJOR issues (e.g. «Update the cron schedule mirror in this change», «Handle array-shaped
+> `additional_info`», «Do not treat the latest date as a complete run»), but only 3 were marked addressed. So, on every PR of yours:
+> 1. **Read CodeRabbit's comments before you merge** (`gh api repos/6ttvrw4fmf-ctrl/ezhalah/pulls/<N>/comments`, author `coderabbitai`).
+> 2. **Every Major/Critical comment is FIXED in the PR, or answered on its thread with the reason it is wrong.** Never merge over
+>    a silent Major. Minor/nitpick: fix when cheap, otherwise reply once.
+> 3. **Review «skipped»?** Comment `@coderabbitai review` on the PR and wait for it. Do not loosen the merge gate.
+> 4. **Your `:end` row adds one line:** «CodeRabbit: N major (F fixed · A answered · 0 silent)».
+> 5. **Once a week (🔧 Monday run):** sweep merged PRs from the last 7 days for silent Majors, and fix or route each one as a bug.
+
 > **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
 
 > **👑 OWNER ORDER 2026-11-06 — «MAKE THE AI READING SCORE HIGHER» (permanent; a daily job of this lane).**
