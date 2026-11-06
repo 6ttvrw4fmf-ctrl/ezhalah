@@ -561,6 +561,13 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     # phone numbers, so it cannot remove a period word.
     _period_text = " ".join(str(x or "") for x in (item.get("title"), item.get("excerpt"), status_ar))
     price_total, price_annual, rent_period = _price(meta.get("price"), is_rent, _period_text)
+    if is_rent and rent_period is None and price_annual is not None:
+        # The ad's own text was read and states no period: that silence is the source's answer, so a period stored
+        # by an earlier crawl must not stay paired with this figure (the upsert drops a plain None).
+        rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
+    elif is_rent and _stated_rent_period(_period_text) == "both":
+        # Monthly AND yearly terms: the ad itself is ambiguous, so an older stored price/period must not linger.
+        price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
 
     # On-request pricing: the number in meta.price is a placeholder, not a real quote (see
     # _price_on_request docstring above). Null the price rather than store a fabricated figure;
