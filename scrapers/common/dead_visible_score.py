@@ -34,9 +34,11 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
 
 from scrapers.common.cleanup import PLATFORMS
 from scrapers.common.db import sb
@@ -147,6 +149,35 @@ def sample(client, platform: str, shown: int, n: int, rng: random.Random) -> lis
     return list(out.values())
 
 
+# ── A status read must be able to SEE a dead ad (♻️ 2026-11-06) ────────────────────────────────────
+# kellerwilliams and almajdiah serve a JS shell: the same 200 page title for a live ad, for 14 ads their
+# own list had dropped, and for anything else (spot-check 42209305892, source-reread 42209642588). Read
+# «status-only», they scored 5/5 live every night — blindness counted as health (lesson 2026-10-31). So a
+# status-only website also opens one ad that cannot exist (its control's own URL with the id replaced);
+# if that reads live, the reader cannot see death there and the row is VOID: not measured, never clean.
+
+_ID_TOKEN = re.compile(r"([0-9a-fA-F]*\d[0-9a-zA-Z]*)$")
+
+
+def negative_control_url(url: str | None) -> str | None:
+    """The control's own URL with its trailing id token replaced by one that cannot be a real ad.
+    None when the URL ends in no id-like token (an Arabic slug, a bare path): no negative control."""
+    if not url:
+        return None
+    sp = urlsplit(url)
+    head, _, last = sp.path.rstrip("/").rpartition("/")
+    stem, dash, tail = last.rpartition("-")
+    tok_src = tail if dash else last
+    m = _ID_TOKEN.search(tok_src)
+    if not m or len(m.group(1)) < 4 or m.group(1) != tok_src:
+        return None
+    tok = m.group(1)
+    fake = "9" * (len(tok) + 4) if tok.isdigit() else "0" * len(tok)
+    new_last = (stem + dash + fake) if dash else fake
+    path = head + "/" + new_last + ("/" if sp.path.endswith("/") else "")
+    return urlunsplit((sp.scheme, sp.netloc, path, sp.query, ""))
+
+
 def reader_for(platform: str, control: dict | None):
     """(method, read(row) -> ALIVE / DEAD / UNKNOWN): the website's own hiding check, strongest first."""
     site = _reader_for(platform)
@@ -203,6 +234,12 @@ def score_site(client, platform: str, shown: int, *, n: int, rng: random.Random,
             row["note"] = (f"void: known-live controls {alive}/{len(ctl)} alive, nothing decided"
                            + (f" | {why}" if why else ""))[:300]
             return row
+        if row["method"] == "status-only":
+            neg = negative_control_url(ctl[0].get("listing_url"))
+            if neg and opened({"listing_url": neg, "ad_number": "NEGATIVE-CONTROL"}) == ALIVE:
+                row["note"] = (f"void: status-only reader reads an ad that cannot exist as live ({neg}) — "
+                               f"it cannot see a dead ad here, nothing decided")[:300]
+                return row
     else:
         row["note"] = f"no control gate: fewer than {CANARIES} known-live ads"
     for r in picked:
