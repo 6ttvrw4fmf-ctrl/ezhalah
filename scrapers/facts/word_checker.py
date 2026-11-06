@@ -1283,7 +1283,9 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # جامع، ونادي صحي خدمات الموقع القريبة: * مدارس» (aqar 15128626, 🔬 2026-11-06 — the view's gym served as the unit's)
         list_in = near_list and comma and (len(words) <= 5 or _starts(_strip_wa(words[0]), _PLACE_WORDS)) \
             and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words) \
-            and not any(_starts(_strip_wa(w), _OWN_CUES) or _strip_wa(w) in _HAS_CUES for w in words)
+            and not any(_starts(_strip_wa(w), _OWN_CUES)
+                        or (_strip_wa(w) in _HAS_CUES and not (k and _starts(_strip_wa(words[k - 1]), _PLACE_WORDS)))
+                        for k, w in enumerate(words))   # «مدرسة فيها نادي»: the school's, the list goes on
         n_words = len(words)
         for fact, pats in _PATTERNS.items():
             for rx, forced in pats:
@@ -1846,6 +1848,7 @@ def selftest() -> None:
         ("* إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس تعليمية", {}, ("gym", "mosque", "garden")),
         ("✓ تأثيث فاخر ومتكامل ✓ مطبخ مجهز بالكامل ✓ خدمات فندقية ونادي صحي ومسبح ✓ أمن وحراسة", {"gym": True}, ()),
         ("قريب من الخدمات، مدرسة كبيرة للبنات والشقة بها نادي رياضي", {"gym": True}, ()),
+        ("قريب من الخدمات، مدرسة فيها نادي رياضي، مسجد", {}, ("gym", "mosque")),
         ("واجهة شمالية ونادي رياضي خاص", {"gym": True}, ()),
         ("البرج جديد ويوجد به نادي رياضي وكذلك مسبح", {"gym": True}, ()),
         ("قريب من الخدمات، نادي رياضي لسكان المبنى", {"gym": True}, ()),
