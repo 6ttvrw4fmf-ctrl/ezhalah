@@ -52,8 +52,9 @@ try {
       await page.waitForFunction(({ readHeads, readPill }) => {
         const heads = eval(readHeads)(); const sig = heads + '#' + eval(readPill)();
         const w = window; if (w.__pinSig !== sig) { w.__pinSig = sig; w.__pinAt = performance.now(); return false; }
-        if (heads === w.__headsBefore && performance.now() - w.__pinT0 < 12_000) return false;
-        return performance.now() - w.__pinAt > 1500;
+        // Unchanged heads: the 1.5 s stability clock starts when the 12 s gate opens, not at the first poll.
+        const since = heads === w.__headsBefore ? Math.max(w.__pinAt, w.__pinT0 + 12_000) : w.__pinAt;
+        return performance.now() - since > 1500;
       }, { readHeads: readHeads.toString(), readPill: readPill.toString() }, { timeout: 25_000, polling: 100 }).catch(() => {});
       const seen = await page.evaluate(() => {
         // THE VISIBLE MAP, not the viewport (🔧 2026-11-06, diag 42226056422): MapKit draws heads under the map's own
