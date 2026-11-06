@@ -134,6 +134,20 @@ try {
   // Every script chunk the page asked for, by file name — so a --fail-once that planted nothing says what it COULD have
   // matched instead of leaving the next run to guess the chunk's name (🔧 11-03: run 41643230975 planted nothing on /agent).
   page.on('request', (r) => { const u = r.url(); if (u.includes('/_expo/static/js/web/')) chunksSeen.push(u.split('/').pop().split('?')[0].slice(0, 80)); });
+  // A SOURCE page (not ours): log the data calls it makes, so a JS-shell listing site shows which per-ad API its
+  // page reads (♻️ 2026-11-06: kwsaudiarabia.com serves one shell for live and removed ads; its own-ad oracle has to
+  // read the record the page fetches). Capped, read-only, and off for ezhalah's own pages.
+  const SOURCE_PAGE = !/ezhalah/.test(new URL(URL_).hostname);
+  let xhrLogged = 0;
+  if (SOURCE_PAGE) {
+    page.on('response', (r) => {
+      const t = r.request().resourceType();
+      if ((t === 'xhr' || t === 'fetch') && xhrLogged < 40) {
+        xhrLogged++;
+        log(`    · data call: ${r.status()} ${r.request().method()} ${r.url().slice(0, 220)}`);
+      }
+    });
+  }
   if (FAIL_ONCE) {
     // The stale-tab shape: the FIRST request for the named chunk fails (as a renamed chunk does after a deploy);
     // every later request goes through. The fix must reload the page once; what it threw before the reload is
@@ -166,6 +180,11 @@ try {
   loaded = !!resp && resp.status() < 400;
   if (!loaded) errors.push(`load: HTTP ${resp ? resp.status() : 'no response'} on ${URL_}`);
   await page.waitForTimeout(4000); // the app shell mounts and the first screen renders
+  if (SOURCE_PAGE) {
+    await page.waitForTimeout(4000);
+    const shown = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 500)).catch(() => '');
+    log(`    · source page text: «${shown}»`);
+  }
   if (FAIL_ONCE) {
     await page.waitForFunction(() => performance.getEntriesByType('navigation')[0]?.type === 'reload', null, { timeout: 20000 })
       .then(() => { reloaded = true; }).catch(() => {});

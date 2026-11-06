@@ -23,6 +23,12 @@
 > only, stopped by ownership words («داخل المجمع», «مرافق المشروع», «خدمات متكاملة»). Proof: 35 changes over 405 samples,
 > all right after one fix (a project's own «خدمات متكاملة: ممشى وحديقة» kept). The plot's neighbour («شارع 20 م جنوبي +
 > حديقة», «ربع واجهة على جامع», «مباشرة على مسجد وحديقة») — 70 real snippets, 5 changes, all right.
+> **Property Finder review (2026-11-05).** All 4,541 launch ads were read the same day. Its scraper filled AC / lift / kitchen
+> from prose with the OLD matcher (76 lobby-AC yeses) — switched to `one_reader.amenity_answers`, with a shrink-only guard.
+> Reading its unbacked yeses found reader misses: a prepared word reaching its neighbour («مطبخ تأسيس مصعد»), a view word
+> silencing own rooms, «سطح واسع مطبخ» as a countertop, «مدخلان للشقة تكييف» as lobby AC — and the PDPL sanitizer cutting
+> «installed …» as «insta». Fixed; old-vs-new on all samples: 16 + 15 new yeses, all read right (one false «تأسيس أمريكي»
+> caught and fixed). Parking misses near nearby-words remain (public fact, kept strict).
 > **Locked since (owner: «I never want this to happen ever again»):** those ~630 real sentences and every answer the
 > reader gives on them are `scrapers/facts/testdata/real_ads_golden.jsonl`, checked on every scrapers PR by
 > `scrapers/common/tests/test_word_checker_real_ads.py` (undoing either fix turns it red). Reader silence is UNKNOWN:

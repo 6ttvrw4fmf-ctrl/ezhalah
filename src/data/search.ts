@@ -246,6 +246,7 @@ export type SortKey =
 export { emptyQuery } from '@/lib/searchDefaults';
 // Imported for use INSIDE this module (the re-export below only republishes them to callers).
 import { effectiveTypes, effectiveGroups } from '@/lib/searchDefaults';
+import { furnishingLabelKey } from '@/lib/furnishingWords';
 
 export const locationPhrase = (q: SearchQuery) => q.location.trim() || 'Saudi Arabia';
 const placeText = (q: SearchQuery) => {
@@ -418,11 +419,15 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
   // Filter search of the session (this search still uses whatever pickFilterGreetingOpening() has
   // right now: the fallback on that very first call, the live pool on every one after).
   primeFilterGreetings();
+  // The main filter's «الأثاث» pick is part of what the user asked for: «شقة غير مفروشة» / «Unfurnished Apartment».
+  const furnKey = furnishingLabelKey(q.furnishedPref);
+  const whatWithFurniture = !furnKey ? whatPhrase
+    : getLocale() === 'ar' ? `${whatPhrase} ${t(furnKey)}` : `${t(furnKey)} ${whatPhrase}`;
   const bubble = t("I'm looking for {what}{detail} {verb} in {place}{price}", {
     // Rotating opening (owner rule 2026-09-18) — the ONLY variable part; everything from "what"
     // onward is the filter-generated sentence and stays exactly as it already is.
     opening: pickFilterGreetingOpening(),
-    what: whatPhrase,
+    what: whatWithFurniture,
     detail: detailPhrase,
     verb,
     place,
@@ -712,6 +717,10 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
     else if (/^([1-4]|5\+?)$/.test(q.detail)) lines.push(`• ${t('Bedrooms')}: ${q.detail}`);
     else lines.push(`• ${t('Size')}: ${q.detail} ${t('m²')}`);
   }
+  // «الأثاث» from the main filter, in the same words the Advanced Filter's own line uses («التأثيث: غير مفروشة»).
+  // The AF never asks it when this is set (FURNISHED_QUESTION's eligibility), so the two lines cannot both appear.
+  const furnLine = furnishingLabelKey(q.furnishedPref);
+  if (furnLine) lines.push(`• ${t('Furnishing')}: ${t(furnLine)}`);
   // The features the search REALLY requires (certified tokens only — an uncertified one never reaches q.amenities), so the
   // user sees «غرفة خادمة» in the restatement of «بيت مع غرفة للخادمة», not only as a tag on each card (owner 2026-10-11).
   const wantedAmenities = (q.amenities ?? []).filter((a) => a in AMENITY_LABEL);

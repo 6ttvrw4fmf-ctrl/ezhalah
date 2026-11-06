@@ -1059,7 +1059,11 @@ def html_block_lines(fragment: Optional[str]) -> str:
 
 # A clause break ends a fact. «الشقة غير مؤثثة\nمطبخ مغلق» is two statements, and the «غير» of the
 # first must not reach the «مطبخ» of the second (bossbih, live 2026-09-20: kitchen came back False).
-_CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+]+|\s-\s")
+# Arrow bullets and a «/» between words are list marks too (🔬 2026-11-05 parking two-way sample, dealapp 22662869
+# «حوش مقابل المطبخ ⬅ دورتين مياه ⬅ موقف سيارة», 17549152 «/بلكونة مطلة / موقف خاص مظلل»: the near / view word of an
+# earlier item silenced the unit's own parking). Only a «/» with a space before it starts an item:
+# «مسجد/بقالة/مطاعم» is one nearby list, «6/12» a date, «عمر العقار/ 5 سنين» a label and its value.
+_CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+⬅➡←→⇐⇒➤▶◀]+|\s-\s|(?<=\s)/(?!\s*[0-9٠-٩])")
 
 # A negator counts only as its own word: `_norm_ar` folds «صغيرة» to «صغيره», whose letters ARE «غير»,
 # so «بركة صغيرة موقف خاص» read parking=False (moftah ids 30274/30247, 2026-09-20). It may abut the

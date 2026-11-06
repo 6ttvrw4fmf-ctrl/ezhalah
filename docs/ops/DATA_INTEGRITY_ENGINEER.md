@@ -885,6 +885,12 @@ in bulk on a hunch.
 claim as "unverifiable".* A divide-by-N that lands on pretty numbers is never evidence; the source's
 own per-unit field and its own prose are.
 
+**Superseded for one class, 2026-11-05 (owner: «make sure those listings never ever happen again» → «Show the real price»).**
+A wasalt LAND sale whose own per-m² box (`averageSalePricePerSqm`) equals price ÷ area at an impossible rate is the seller's
+total typed into the box: the index and the card now serve the box figure through the owner's 2026-10-28 meter-box rule
+(migration `20261105233818`, `docs/ARCHITECTURE.md` meter-box entry). The platform table still holds wasalt's figure. Being in
+`ops_price_source_verified` does not exempt a row from this — the rule runs before the exemption, by design.
+
 ## 27. Three adjudications from run 2026-08-29 — do not re-derive any of them
 
 **27a. A row with a city that is not `production_ready` is served to NOBODY, and now something asks.**

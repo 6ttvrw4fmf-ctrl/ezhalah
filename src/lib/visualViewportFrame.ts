@@ -44,6 +44,30 @@ export function coversVisibleWindow(frame: Frame, v: { visualHeight: number; vis
 }
 
 /**
+ * WHEN NOBODY IS TYPING, THE APP FILLS THE WHOLE WINDOW (owner 2026-11-05, iPhone screenshot: the page ended ~60% down,
+ * the form cut at «District», bare sky below). That is the keyboard-open height: iOS does not always report the
+ * visual viewport growing back after the keyboard closes (or after the toolbar settles / the user returns to the tab),
+ * so a root pinned to visualViewport.height stayed short. The visual viewport only matters while a field has focus;
+ * otherwise — and whenever the page is pinch-zoomed, where the visual viewport is smaller on purpose — the root takes
+ * the full layout viewport (window.innerHeight) at the top.
+ */
+export function liveFrame(v: { visualHeight: number; visualOffsetTop: number; layoutHeight: number; editing: boolean; scale: number }): Frame {
+  if (!v.editing || v.scale > 1.01) return { top: 0, height: Math.max(0, Math.round(v.layoutHeight)) };
+  return rootFrame(v);
+}
+
+/** True when the focused element takes typing (the only time the on-screen keyboard is up). */
+export function isEditing(el: unknown): boolean {
+  const e = el as { tagName?: string; isContentEditable?: boolean; type?: string } | null;
+  if (!e || !e.tagName) return false;
+  if (e.isContentEditable) return true;
+  const t = e.tagName.toUpperCase();
+  if (t === 'TEXTAREA') return true;
+  if (t !== 'INPUT') return false;
+  return !/^(button|checkbox|radio|range|color|file|submit|reset|image|hidden)$/i.test(e.type ?? '');
+}
+
+/**
  * The extra bottom padding a SCREEN must add for the keyboard. Zero on web, because the root already
  * excludes the keyboard — a screen adding its own would lift the composer twice. Kept as a function
  * so the rule is stated in one place and a screen cannot quietly reintroduce its own arithmetic.
@@ -71,7 +95,8 @@ export function useVisualViewportRoot(): void {
     if (!vv || !root) return;
 
     const apply = () => {
-      const f = rootFrame({ visualHeight: vv.height, visualOffsetTop: vv.offsetTop });
+      const f = liveFrame({ visualHeight: vv.height, visualOffsetTop: vv.offsetTop, layoutHeight: window.innerHeight,
+        editing: isEditing(document.activeElement), scale: vv.scale || 1 });
       root.style.position = 'fixed';
       root.style.left = '0';
       root.style.right = '0';
@@ -87,10 +112,21 @@ export function useVisualViewportRoot(): void {
     root.style.transition = 'height 200ms ease-out';
     vv.addEventListener('resize', apply);
     vv.addEventListener('scroll', apply);
+    // iOS reports the keyboard closing, the toolbar settling and a return to the tab late or not at all: re-measure
+    // on each of those moments, again after the animation has had time to finish.
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const settle = () => { apply(); for (const ms of [120, 350, 800]) timers.push(setTimeout(apply, ms)); };
+    const onVisible = () => { if (document.visibilityState === 'visible') settle(); };
+    const winEvents = ['focusin', 'focusout', 'resize', 'orientationchange', 'pageshow'] as const;
+    for (const ev of winEvents) window.addEventListener(ev, settle);
+    document.addEventListener('visibilitychange', onVisible);
     apply();
     return () => {
       vv.removeEventListener('resize', apply);
       vv.removeEventListener('scroll', apply);
+      for (const ev of winEvents) window.removeEventListener(ev, settle);
+      document.removeEventListener('visibilitychange', onVisible);
+      for (const t of timers) clearTimeout(t);
       // Restore, so a hot reload or an unmount cannot strand the app at a stale height.
       root.style.position = ''; root.style.left = ''; root.style.right = '';
       root.style.top = ''; root.style.height = ''; root.style.transition = '';

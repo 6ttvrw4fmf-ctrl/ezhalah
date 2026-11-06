@@ -134,7 +134,19 @@ billiards 27 · cleaning 27 · soundproof 25 · cameras 125 · roof 134 · bathr
 Both sites: Gathern 15,280 / Aqar Monthly 3,683 ads; Aqar Monthly calls every unit شقة.
 
 ## LOCKED — Annual rent → Apartment (7 questions, 7 chips each, Skip on EVERY question)
-Skip = no filter on that question, count unchanged, next question. Furnished is a chip here, not its own question.
+Skip = no filter on that question, count unchanged, next question.
+
+**Furnished on yearly rent lives in the MAIN filter: a «الأثاث» row under «غرف النوم» — «الكل / مفروشة / غير مفروشة»
+(owner 2026-11-05: «put it in the main filter … the number depending on the district and city they choose … in case the user
+doesn't select it show it again in the advanced filter»).** Each choice carries a light count over the current scope (city,
+districts, type, bedrooms, area, price; furniture left open), the ads that do not say are named under the row, and a count
+that failed shows no number (never 0). It shows only where the furnished question is certified (cohortAllows — yearly
+residential rent; never Buy, short stays or commercial) and a hidden row clears furnishedPref. Left on «الكل», the filter
+questions ask «مفروشة أو غير مفروشة؟» afterwards (FURNISHED_QUESTION eligibility: furnishedPref == null); answered in the
+row, they never ask twice. It replaced the 2026-10-31 comfort-card chip («Furnished is a chip here»), which could only say
+«مفروشة». Commercial «ready» / «cspace» keep the chip. Before it shipped, every yearly-rent ad was checked (126,831): the
+stored answer disagreed with the ad's own words on ~0.24 %, all reader faults fixed the same day (PR #10630).
+Guard: scripts/verify-main-filter-furniture.ts.
 
 **1. 💳 Rent now, pay later?** Yes · Skip (exists: `rnpl`)
 **2. 🚽 Bathrooms?** 1+ · 2+ · 3+ · Skip (exists)

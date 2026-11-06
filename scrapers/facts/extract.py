@@ -186,7 +186,10 @@ def norm(s: str) -> str:
 # ── PDPL: what leaves the building ────────────────────────────────────────────────────────────────
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+|\b\S+\.(?:com|sa|net|org|me)(?:/\S*)?", re.IGNORECASE)
 _KUNYA_RE = re.compile(r"(?<![\w])(?:أبو|ابو|أم|ام|بو)\s+[ء-ي]{2,}")
-_CONTACT_CLAUSE_RE = re.compile(r"واتس|whats|wa\.me|تلغرام|telegram|للتواصل|للاستفسار|اتصال|جوال|snap|سناب|انستا|insta", re.IGNORECASE)
+# «insta» / «snap» are WHOLE words (🔬 2026-11-05, Property Finder): as bare prefixes they matched «installed» / «snapshot»,
+# and «Fully installed kitchen with appliances * Curtains installed» was cut to «Fully» — every English ad lost its fixtures.
+_CONTACT_CLAUSE_RE = re.compile(r"واتس|whats|wa\.me|تلغرام|telegram|للتواصل|للاستفسار|اتصال|جوال|\bsnap(?:chat)?\b|سناب|انستا"
+                                r"|\binsta(?:gram)?\b", re.IGNORECASE)
 _CLAUSE_SPLIT_RE = re.compile(r"([\n\r،,.;؛|•*\-]+)")
 _PHONEISH_RE = re.compile(r"(?:[0-9٠-٩][\s\-.]?){7,}")
 # Wasalt stores the advertiser's text as HTML (<div><p>…</p><br></div>): measured 2026-10-30, 84,395 of 87,263 active

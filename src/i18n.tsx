@@ -1498,6 +1498,11 @@ const AR: Record<string, string> = {
   'Shomou': 'شموع العقار',         // «مكتب شموع العقار للاستثمار والتطوير العقاري» (shomoalaqar.com.sa footer)
   'Haraj': 'حراج',
   'Property Finder': 'بروبرتي فايندر',
+  'Keller Williams': 'كيلر وليامز',
+  'Almajdiah': 'الماجدية',
+  'Asas Makeen': 'أساس مكين',
+  'Al Rajhi Development': 'الراجحي للتنمية',
+  'STeam Residence': 'ستيم العربية',
   // A reopened history chat's card whose listing was removed at its source since (owner 2026-10-18).
   'Listing ended': 'انتهى الإعلان',
   'No longer available on the source site': 'لم يعد متاحًا على الموقع',                  // the site's own name (haraj.com.sa)
@@ -1604,6 +1609,12 @@ const AR: Record<string, string> = {
   'Total Floors':                       'إجمالي الطوابق',
   'Property Floor':                     'الطابق',
   'Furniture':                          'الأثاث',
+  // the main filter's «الأثاث» row and the furnished question (owner 2026-11-05): one wording in both places
+  'Furniture: all':                     'الكل',
+  'Furniture: furnished':               'مفروشة',
+  'Furniture: unfurnished':             'غير مفروشة',
+  'Furnished or unfurnished?':          'مفروشة أو غير مفروشة؟',
+  '{n} listings did not mention furniture; they all show under All': '{n} إعلان ما ذكر الأثاث، وتظهر لك كلها عند اختيار «الكل»',
   'Number of Parkings':                 'عدد المواقف',
   'Building age (years)':               'عمر البناء (بالسنوات)',
   'Ad license number':                  'رقم رخصة الإعلان',
@@ -2136,6 +2147,9 @@ const EN: Record<string, string> = {
   'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.':
     'Ezhalah is an AI-powered real-estate search engine for properties across Saudi Arabia.',
   'Any count': 'Any', // «أي عدد»
+  'Furniture: all': 'All',
+  'Furniture: furnished': 'Furnished',
+  'Furniture: unfurnished': 'Unfurnished',
   'SAR currency': 'SAR', // «ريال»
   'ads': 'listings', // «إعلان», after a count
   // Source-published Arabic deed/licence labels and closed values (owner 2026-10-24: the English card showed Arabic labels).

@@ -79,6 +79,12 @@
       "today_pct": 96.7,
       "active_rows": 209
     },
+    "almajdiah": {
+      "floor_pct": 95,
+      "today_pct": 100,
+      "active_rows": 59,
+      "note": "Declared 2026-11-05 at launch: 59/59 rent units carry images[] (etmaam-public.almajdiah.com, HTTP 200 image/jpeg)."
+    },
     "almotmkenah": {
       "floor_pct": 60,
       "today_pct": 71.4,
@@ -224,6 +230,12 @@
       "today_pct": 0.0,
       "active_rows": 21,
       "note": "Declared 2026-09-27 (wave-3 batch 6). IMAGELESS AT SOURCE: the site has no photo of any plot — its og:image is the project LOGO (one row briefly carried «malfa allulu logo», cleared) and the page images are stock pictures, maps and plans. photo_urls is deliberately NULL; 0 of 21."
+    },
+    "asasmakeen": {
+      "floor_pct": 99,
+      "today_pct": 100.0,
+      "active_rows": 507,
+      "note": "Declared 2026-11-05 at launch from the staged crawl (run 41989287535): 507 of 507 listings carry the unit gallery (uploads/products). Floor one listing below."
     },
     "ashab": {
       "floor_pct": 57,
@@ -466,6 +478,12 @@
       "active_rows": 78,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 78 of 78 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
     },
+    "kellerwilliams": {
+      "floor_pct": 95,
+      "today_pct": 100,
+      "active_rows": 188,
+      "note": "Declared 2026-11-05 at launch: 188/188 stored rows carry photos[].ph_url (storage.googleapis.com)."
+    },
     "ksaaqar": {
       "floor_pct": 79,
       "today_pct": 81.9,
@@ -548,6 +566,12 @@
       "today_pct": 100.0,
       "active_rows": 13,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 13 of 13 rows carried photo_urls (the whole catalogue). TINY: one listing is ~8 points; floor set one listing below the observation."
+    },
+    "mrajhi": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 39,
+      "note": "Declared 2026-11-05 at launch from the staged crawl: 39 of 39 units carry the gallery (Supabase storage /units/). TINY: one unit is ~2.6 points; floor one unit below."
     },
     "muajarh": {
       "floor_pct": 90,
@@ -799,6 +823,12 @@
       "today_pct": 100.0,
       "active_rows": 16,
       "note": "Declared 2026-09-26 (missed at onboarding in PR #4578). MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: 16 of 16 active rows carry photo_urls (100%). TINY: one listing is ~6 points; floor set one listing below the observation."
+    },
+    "steam": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 10,
+      "note": "Declared 2026-11-05 at launch from the staged crawl: 10 of 10 property pages carry photos. TINY: one listing is 10 points; floor one listing below."
     },
     "sukna": {
       "floor_pct": 69,

@@ -459,6 +459,83 @@ def _held_by_direct_ledger(client, platform: str, cands: list, now: datetime) ->
     return held
 
 
+GONE_LEDGER = "ops_stale_inactivation_probe"
+
+
+def fresh_gone_in_shared_ledger(history: list[dict], cands: list[dict], now: datetime,
+                                hours: int = FRESH_DEAD_HOURS) -> set:
+    """ids of `cands` whose NEWEST own-page reading in the shared evidence ledger is a GONE no older
+    than `hours`. Pure. `history` rows: listing_id (may be None), ad_number, probed_at, verdict.
+    A row is matched by listing_id, or by ad_number when the oracle recorded no id (follow-source,
+    prune_unseen.verify_gone). A newer ALIVE reading wins, so an ad that came back is never held.
+
+    WHY (♻️ 2026-11-05). _held_by_direct_ledger() only knew three per-site ledgers (gathern, aqar,
+    dealapp). On every other site a cleanup «200, no dead marker» revived a hidden ad whatever its
+    own page had answered hours before: nowaisiry NW4349 read a direct 404 at 2026-11-04 12:42
+    (prune_unseen.verify_gone) and the 06:12 cleanup set it active again 17.5 h later, back on
+    customers' screens (alert false_resurrection 13203). Same class as the 05:20 recovery job undoing
+    4,369 dwelleo follow-source hides that night (20261105110916)."""
+    since = now - timedelta(hours=hours)
+    by_id = {c["id"]: c for c in cands}
+    by_ad = {c.get("ad_number"): c["id"] for c in cands if c.get("ad_number")}
+    newest: dict = {}
+    for h in history:
+        v = (h.get("verdict") or "").upper()
+        if v not in ("GONE", "ALIVE"):
+            continue                     # UNKNOWN says nothing either way
+        rid = h.get("listing_id")
+        if rid is None:
+            rid = by_ad.get(h.get("ad_number"))
+        if rid not in by_id:
+            continue
+        at = h.get("probed_at") or ""
+        if at > newest.get(rid, ("", ""))[0]:
+            newest[rid] = (at, v)
+    out = set()
+    for rid, (at, v) in newest.items():
+        if v != "GONE":
+            continue
+        try:
+            ts = datetime.fromisoformat(at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if ts >= since:
+            out.add(rid)
+    return out
+
+
+def _held_by_gone_ledger(client, cands: list, now: datetime) -> set:
+    """{(table, id)} of candidates whose own page read GONE recently (shared ledger, every site).
+    Fails CLOSED like _held_by_direct_ledger: an unreadable ledger holds every candidate."""
+    if not cands:
+        return set()
+    since = (now - timedelta(hours=FRESH_DEAD_HOURS)).isoformat()
+    by_table: dict = {}
+    for t, r in cands:
+        by_table.setdefault(t, []).append(r)
+    held = set()
+    for t, rows in by_table.items():
+        ids = [r["id"] for r in rows]
+        ads = [r["ad_number"] for r in rows if r.get("ad_number")]
+        try:
+            hist = []
+            for i in range(0, len(ids), 200):
+                hist += (client.table(GONE_LEDGER).select("listing_id, ad_number, probed_at, verdict")
+                         .eq("source_table", t).in_("listing_id", ids[i:i + 200]).gte("probed_at", since)
+                         .limit(10000).execute().data or [])
+            for i in range(0, len(ads), 200):
+                hist += (client.table(GONE_LEDGER).select("listing_id, ad_number, probed_at, verdict")
+                         .eq("source_table", t).in_("ad_number", ads[i:i + 200]).gte("probed_at", since)
+                         .limit(10000).execute().data or [])
+        except Exception as exc:  # noqa: BLE001 — unreadable ledger revives nothing
+            print(f"⚠ cleanup: {GONE_LEDGER} unreadable for {t} ({str(exc)[:120]}); no row of it is revived "
+                  f"this run", flush=True)
+            held |= {(t, i) for i in ids}
+            continue
+        held |= {(t, i) for i in fresh_gone_in_shared_ledger(hist, rows, now)}
+    return held
+
+
 def verdict_detail(status: int | None, body: str, dead_marker) -> tuple[str, str]:
     """The verdict AND the branch that produced it. ONE decision, stated twice.
 
@@ -860,7 +937,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 # inflate the rate and could freeze a perfectly healthy run.
                 inconclusive = 0
                 now = datetime.now(timezone.utc)
-                held_live = _held_by_direct_ledger(client, platform, cands, now)
+                held_live = (_held_by_direct_ledger(client, platform, cands, now)
+                             | _held_by_gone_ledger(client, cands, now))
                 held_contradicted = 0
                 for t, r in cands:
                     url = (r.get("listing_url") or "").strip()

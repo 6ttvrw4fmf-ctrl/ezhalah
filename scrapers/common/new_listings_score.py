@@ -236,6 +236,14 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
                     and float(stored.get(col)) == 1 and any(SINGLE_HALL.search(x) for x in lines)):
                 out[name] = MATCH
+            # A home described FLOOR BY FLOOR states no total (🆕 2026-11-05): Property Finder's CRM block «تفاصيل الدور
+            # الأرضي عدد المجالس: 1 ، دورات المياه: 3 ، الصالات: 1 ، غرف النوم: 2» (23817495, whose API says 5 bedrooms)
+            # and muhaysini's «الدور الارضي: مجلس ودورة مياه … الدور الاول : غرفتين … دورة مياه» (23814169) count ONE
+            # floor. Summing floors is a calculation we never make, so a NULL room count there is not a miss: the
+            # 05:35 score counted 6 such we_miss on propertyfinder alone. Only a NULL we hold, only these room counts.
+            if (name in PER_FLOOR_COUNTS and out[name] == WE_MISS and stored.get(col) is None
+                    and PER_FLOOR.search(whole)):
+                out[name] = PAGE_SILENT
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
@@ -295,6 +303,8 @@ def facade_stated(lines: list[str], kw: str) -> bool:
     return False
 
 # «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
+PER_FLOOR = re.compile(r"(?:تفاصيل\s+)?الدور\s*:?\s*(?:الارضي|الاول|الثاني|الثالث|العلوي)")
+PER_FLOOR_COUNTS = frozenset({"living_rooms", "majlis_rooms", "bathrooms"})
 SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
 # The facades in English, as a REGA licence block prints them. A compound one too: haraj 22820527 prints
 # «واجهة العقار: South west» and we store «جنوب غرب» (re-score 41406084400, 2026-11-02, scored MISMATCH).
@@ -517,6 +527,36 @@ def _hajer_aliases(whole: str) -> str:
     return " ".join("الضاحيه " + m.group(1) for rx in _HAJER_FORMS for m in rx.finditer(whole))
 
 
+# THE OWNER'S OWN «ONE DISTRICT» DECISIONS ARE THE SAME PLACE (🆕 2026-11-05). loc_district_alias holds the owner's
+# rulings that two spellings are one district («المعيزيلة» → the catalogue's «حي المعيزلة», Riyadh, owner 2026-10-25,
+# Apple Maps names المعيزلة at both centres); the index serves the catalogue name for every ad that writes the other.
+# The 2026-11-05 05:35 score compared letters only and counted akariyoun 23729407 / 24208576 / … and raghdan
+# 23726297 / 23726304 / … («دور للبيع في حي المعيزيلة») as 8 district MISMATCHES, capping both sites at 88.2%.
+# Keys are norm_district_tok() forms (the table's own); a page word matches when ITS key is an alias of OUR key.
+# Loaded once per run by load_owner_district_aliases(); empty (letters only) when nothing is loaded.
+OWNER_DISTRICT_ALIASES: dict[str, frozenset[str]] = {}
+
+
+def load_owner_district_aliases(client) -> None:
+    rows = client.table("loc_district_alias").select("from_norm,to_norm").execute().data or []
+    m: dict[str, set[str]] = defaultdict(set)
+    for r in rows:
+        if r.get("from_norm") and r.get("to_norm"):
+            m[r["to_norm"]].add(r["from_norm"])
+    OWNER_DISTRICT_ALIASES.clear()
+    OWNER_DISTRICT_ALIASES.update({k: frozenset(v) for k, v in m.items()})
+
+
+def _owner_alias_on_page(stored: str, whole: str) -> bool:
+    from scrapers.common.arabic_location import norm_district_tok
+    froms = OWNER_DISTRICT_ALIASES.get(norm_district_tok(stored))
+    if not froms:
+        return False
+    words = re.findall(r"[\u0621-\u064A]+", whole)       # a two- or three-word name is matched whole, never in part
+    return any(norm_district_tok(" ".join(words[i:i + n])) in froms
+               for n in (1, 2, 3, 4) for i in range(len(words) - n + 1))
+
+
 def _cmp_district(stored, whole: str) -> str:
     page_names_one = bool(DISTRICT_ON_PAGE.search(whole))
     if not stored:
@@ -535,6 +575,8 @@ def _cmp_district(stored, whole: str) -> str:
     # Whole words only, so «السدره» never matches inside another name.
     core = d[2:] if d.startswith("ال") else ""
     if len(core) >= 3 and re.search(r"(?<!\S)(?:حي\s+)?" + re.escape(core) + r"(?!\S)", whole):
+        return MATCH
+    if _owner_alias_on_page(stored, whole):
         return MATCH
     return MISMATCH if page_names_one else PAGE_SILENT
 
@@ -1275,6 +1317,7 @@ def main() -> int:
     a = ap.parse_args()
 
     client = sb()
+    load_owner_district_aliases(client)
     rng = random.Random(a.seed)
     night = datetime.now(timezone.utc).date().isoformat()
     explicit = explicit_picks(a.sites or [])

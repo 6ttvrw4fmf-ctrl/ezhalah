@@ -76,6 +76,13 @@ export const BED_IMG: Record<string, any> = {
   '5+':  require('../../assets/icons/bed-5plus.png'),
 };
 
+// The main filter's «الأثاث» row (owner 2026-11-05): line drawings in the bedroom icons' style, tinted by OptionBox.
+export const FURN_IMG: Record<'any' | 'yes' | 'no', any> = {
+  any: require('../../assets/icons/furn-any.png'),
+  yes: require('../../assets/icons/furn-yes.png'),
+  no:  require('../../assets/icons/furn-no.png'),
+};
+
 export const groupImg = (group: string): any => GROUP_IMG[group];
 export const typeImg = (cleanType: string): any => TYPE_IMG[cleanType];
 export const categoryImg = (cat: string): any => CATEGORY_IMG[cat];

@@ -2,6 +2,21 @@
 
 > **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
 
+> **👑 OWNER ORDER 2026-11-06 — «MAKE THE AI READING SCORE HIGHER» (permanent; a daily job of this lane).**
+> The nightly score robot (`af-score.yml`, pg_cron `gh-af-score`, writes `ops_af_score`) opens real ads and checks what the
+> reader said against the page. 2026-11-05: 949 ads on 144 sites — **precision 97.1%** (1,369 of 1,410 claims agree with the
+> page), **recall 94.9%** (299 of 315 things the page states were found). Every run, after your 3 jobs:
+> 1. **Read last night's misses** — the wrong claims (`mismatch_ids`) and the missed facts (`find_missed_ids`):
+>    `select platform, af_claimed, af_agree, mismatch_ids, find_tried, find_found, find_missed_ids from ops_af_score
+>     where night = (select max(night) from ops_af_score) and (af_claimed > af_agree or find_tried > find_found) order by (af_claimed - af_agree) + (find_tried - find_found) desc;`
+> 2. **Fix the biggest pattern, not one ad** — open the ads on their own pages, find the shared cause (a near word, a
+>    look-alike phrase, a missed spelling), fix the reader («How to fix the reader» below), and add the guard that would
+>    have caught it (a selftest line with the real sentence).
+> 3. **Never buy recall with precision.** Silence is not «no» and a doubt stays silent; a fix that finds more facts must
+>    not make a single wrong claim — prove it old-vs-new on real snippets before it ships.
+> 4. **Report the score as before → after** on your `:end` row: «AI reading: precision 97.1% → X% · recall 94.9% → Y%
+>    (night N)». Only a production night's score moves the «after»; unchanged is a valid result.
+
 > **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
 > Open alerts fell 459 → 102 between 10-29 and 11-04, but the owner still found two whole bug classes no detector saw:
 > (1) land ads with the per-metre price typed as the TOTAL (~307 cards, e.g. 1,700 SAR for 375 m² in الأحساء), and
@@ -10,7 +25,7 @@
 > 2. **Blind-spot hunt.** Pick 3 random LIVE cards from different sites. At least one must be from a site that went live in the last 14 days.
 >    Compare every field the card shows with the source page, the way a customer does: price + period, area, rooms, baths, district, pin, licence, and the AF facts your lane owns.
 >    Anything wrong that no detector flagged is a **blind spot**. Build its detector in the same run, or file it with evidence in the owning lane's `ops_engineer_backlog`.
-> 3. **New-site parity.** For 14 days after a site goes live (Property Finder: live 2026-11-04), check its cards against the parity standard: licence, rent period, district, pin, AF facts and liveness, at Aqar/Haraj level. A missing field is a bug of the lane that owns it.
+> 3. **New-site parity.** For 14 days after a site goes live (Property Finder: live 2026-11-04; Keller Williams + Almajdiah: live 2026-11-05), check its cards against the parity standard: licence, rent period, district, pin, AF facts and liveness, at Aqar/Haraj level. A missing field is a bug of the lane that owns it.
 > 4. **The count must fall.** Your `:end` row adds one line: «blind spots found N · guards added N · open alerts start→end (alert_event, resolved_at is null)».
 
 > **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
@@ -127,6 +142,9 @@ list). What keeps it from coming back:
   sentences with every answer the reader gives, read by hand. A reader change that changes ONE answer is red and prints
   old → new. Regenerate (`UPDATE_REAL_AD_ANSWERS=1`) only after reading every change, and list them in the PR. Every class
   you fix adds ≥ 5 of its real sentences to the file — it may only grow.
+- **A new scraper reads prose with the ONE reader** — `scrapers/common/tests/test_one_reader_is_used_by_new_scrapers.py`
+  keeps the 78 old-matcher scrapers as a shrink-only list (Property Finder launched on 11-04 with the old matcher a day after
+  the rule; nothing checked it). Migrate one a night and delete its line.
 - **Silence is UNKNOWN, never «no».** Never clear, lower or switch off a stored yes because the reader is silent. Before
   any bulk clear, read ≥ 25 random rows of the set you are about to clear; if 2 or more state the fact, fix the reader
   first and do not clear.
@@ -142,7 +160,10 @@ list). What keeps it from coming back:
   «مرافق المشروع», «متكاملة»), `_AREA_WORDS`, minute words in `_NEAR_AFTER`, and list marks («-», «•») continuing a
   nearby list; and the PLOT'S NEIGHBOUR — a direction / facade / «مباشرة» right before the park or mosque («شارع 20 م
   جنوبي + حديقة», «من جهتين حديقه», «ربع واجهة على جامع») — `_BOUNDARY_STEMS`, unless the ad says it has it («فيها»,
-  «يوجد»); a nearby comma list after «قريب من / close to / دقائق من»; a near word in the PREVIOUS bullet
+  «يوجد»); a «prepared / possible» word reaching its NEIGHBOUR («مطبخ تأسيس مصعد», «تكييف سبليت تأسيس مصعد», «بمصعدين
+  يمكن تأجير») — `_prepared_applies` (11-05); a VIEW word («مطلة», «إطلالة») silencing the home's own rooms — `_UNIT_ROOMS`;
+  the PDPL sanitizer cutting English fixtures («installed» read as «insta») — whole words since 11-05, and the sanitizer's
+  rules are part of the reader version; a nearby comma list after «قريب من / close to / دقائق من»; a near word in the PREVIOUS bullet
   (🔹 ❄ ✅ are not clause breaks); an entrance adjective («مداخل مكيفة» = lobby) vs AC units («مكيفات»); «قابل للتفاوض»;
   DealApp's REGA list «مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» — there «قريب من الخدمات» is one ITEM, not a
   heading, so the parking after it is real.
@@ -589,3 +610,22 @@ A fixture must be pasted from the RE-READ page — #10132 passed on invented mar
 survived it. And a migration applied late in the slot with runners jammed cannot be mirrored in time (deploy
 41812835256 refused at 10:14 with four of your migrations unmirrored behind 91 queued runs): **apply before minute 30
 or not at all**, and open the mirror-only PR the same minute (the 11-03 rule above).
+
+## 🛋️ Furniture lives in the MAIN filter; bathrooms in yours (owner 2026-11-05 — read before touching either)
+**What shipped (PRs #10631, #10801, #10807, all live):** yearly-rent homes get a «الأثاث» row in the main filter's «خصص بحثك
+أكثر», right under «غرف النوم»: **الكل · مفروشة · غير مفروشة**, each with a light count pill (the number alone). It shows only
+where the furnished question is certified (`cohortAllows(…, 'furnished')`: yearly residential rent — never Buy, short stays,
+commercial); **no numbers until a city is picked** (owner: nationwide numbers read as a surprise); the counts are built with
+**the search's own builder** (`buildFilterBaseQuery()` + the picked districts — `query` alone lost the city once and every
+number vanished), so the number on a choice is what «بحث» returns. A failed count shows the choices with no number — never 0.
+**Your side:** left on «الكل», your furnished question asks «مفروشة أو غير مفروشة؟» (eligibility `furnishedPref == null`);
+answered in the row, it never asks twice. Labels are «مفروشة / غير مفروشة» in BOTH places. Guard:
+`scripts/verify-main-filter-furniture.ts` (31 checks + mutations). Live-verified 2026-11-05: Riyadh yearly apartments
+«غير مفروشة» 18,772 = af_eligible_count 18,772; cards carry «مطابق لطلبك · غير مفروشة»; aqaralmuhaysini 29806 says «مفروش: لا».
+**Accuracy behind it:** all 126,831 yearly ads checked — stated furnished/unfurnished agrees with the ad's words ~99.8 %; the
+reader faults (own-district blank hid the next word, «كغير مؤثث», «بدون فرش», near-word, typos, «Furnished: Unfurnished») were
+fixed in #10630. Aqar's «غير مفروشة» is Aqar's own form field (its page lists only ticked features).
+**Bathrooms (your question «كم دورة مياه؟», 1+…4+, villas 2+…5+) are ~53 % known on yearly homes.** #10731 reads a labelled
+total («عدد دورات المياه 3», «الحمامات ٥») even beside a room's own «بدورة مياه». **Open owner decisions — do NOT ship without
+the owner:** (1) «3 دورات مياه» + «مجلس بدورة مياه» (~1,300 ads) → show «3+»? (2) a single «دورة مياه» on apartments / studios
+/ rooms (~7,350 ads) → read as 1, after reading 25+ real ads?

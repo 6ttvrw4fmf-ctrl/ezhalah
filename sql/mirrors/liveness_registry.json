@@ -84,6 +84,12 @@
     "grace": 3
   },
   {
+    "platform": "almajdiah",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "almotmkenah",
     "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
@@ -464,6 +470,12 @@
   {
     "platform": "justsa",
     "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "kellerwilliams",
+    "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
     "grace": 3
   },

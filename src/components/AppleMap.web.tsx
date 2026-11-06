@@ -31,9 +31,10 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
-import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 import { onSurface } from '@/lib/mapSurface';
@@ -607,6 +608,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const pinFilter: PinFilter | undefined = pins ? { ...pins, poly: poly ?? pins.poly ?? null } : undefined;
   const pinsKey = JSON.stringify(pinFilter ?? null);
   const [pinCount, setPinCount] = useState<number | null>(null);
+  // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
+  const [viewPlace, setViewPlace] = useState<string | null>(null);
+  // The named place's OWN count (owner 2026-11-05): beside «في حي النرجس» the pill prints النرجس's number, not the view's.
+  const [placeCount, setPlaceCount] = useState<number | null>(null);
+  // The deals NOT chosen that do have listings in view — so an empty deal says where the listings are (owner 2026-11-05).
+  const [otherDeals, setOtherDeals] = useState<string[]>([]);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
   useEffect(() => {
     const mk = mapkitOf(); const m = mapRef.current;
@@ -617,6 +624,18 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     void fetchAreasFeed(); void fetchMapDots();
     const keyed = new Map<string, unknown>();   // the annotations on the map, by what they show — a pan keeps what stays
     const loc = localeRef.current === 'ar' ? 'ar' : 'en';
+    // PINS NEVER SIT ON EACH OTHER (owner 2026-11-05, src/lib/mapPins.ts mergeOverlapping): heads are measured with the
+    // font they are drawn in and placed through MapKit's own projection, so «touching» means touching on this screen.
+    const measure = document.createElement('canvas').getContext('2d');
+    if (measure) measure.font = '600 11px -apple-system,system-ui,sans-serif';
+    const headWidth = (r: PinRow) => { const tx = pinHead(r, loc); return measure ? Math.ceil(measure.measureText(tx).width) + PIN_PAD_PX : pinWidthGuess(tx); };
+    const onScreen = (lat: number, lng: number): [number, number] => {
+      const conv = (m as unknown as { convertCoordinateToPointOnPage?: (c: unknown) => { x: number; y: number } }).convertCoordinateToPointOnPage;
+      if (conv) { const p = conv.call(m, new mk.Coordinate(lat, lng)); return [p.x, p.y]; }
+      const { center, span } = m.region; const r = (hostRef.current as unknown as HTMLElement | null)?.getBoundingClientRect();
+      const w = r?.width ?? 390, h = r?.height ?? 600;
+      return [((lng - center.longitude) / span.longitudeDelta + 0.5) * w, ((center.latitude - lat) / span.latitudeDelta + 0.5) * h];
+    };
     // What a tap does: a bubble zooms into its cell, a pin hands its row up (the card sheet). Called from the element's
     // OWN pointer handlers — on a phone MapKit's `select` never fired for a touch on a custom annotation (owner
     // 2026-11-02: «when I click it doesn't show»; reproduced with a synthetic touch tap: no sheet) — and from
@@ -697,6 +716,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         ctx.fill(); ctx.stroke();
       }
       shown = dots; canvas.style.opacity = '1';
+      setViewPlace(null); setPlaceCount(null);   // zoomed-out dots: the pill keeps «في هذه المنطقة»
       return true;
     };
     const hideCanvas = () => { canvas.style.opacity = '0'; };
@@ -713,7 +733,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const pickArea = (a: AreaRow, level: AreaLevel) => {
       live.history.push(m.region);
       const sp = areaZoomSpan(level);
-      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(a.lat, a.lng), new mk.CoordinateSpan(sp, sp)), true);
+      // SHAPED LIKE THE SCREEN (measured live 2026-11-05, 390×844): a square span on a tall map is widened by MapKit to
+      // fit the width — a 3° region tap landed at 5.17°, still the region band, so the tap changed nothing. Asking a
+      // longitude span no wider than the screen's width/height share keeps the latitude span what areaZoomSpan says.
+      const box = (hostRef.current as unknown as HTMLElement | null)?.getBoundingClientRect();
+      const aspect = box && box.height > 0 ? Math.min(1, box.width / box.height) : 1;
+      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(a.lat, a.lng), new mk.CoordinateSpan(sp, sp * aspect)), true);
     };
     const areaElement = (a: AreaRow, level: AreaLevel) => {
       const el = document.createElement('div');
@@ -721,7 +746,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       el.style.cssText = 'font:700 12px/1.15 -apple-system,system-ui,sans-serif;color:#24232B;background:rgba(255,255,255,.96);'
         + 'border:1px solid rgba(36,35,43,.18);border-radius:12px;padding:5px 9px;white-space:nowrap;text-align:center;'
         + 'box-shadow:0 1px 4px rgba(0,0,0,.28);cursor:pointer;touch-action:none';
-      const name = document.createElement('div'); name.textContent = areaName(a, level);
+      const name = document.createElement('div'); name.textContent = areaName(a, level, loc, translitPlace);   // English UI → English names (owner 2026-11-05)
       const count = document.createElement('div'); count.textContent = areaCount(a.n, loc);
       count.style.cssText = `font-weight:800;font-size:11px;color:${PIN_COLOR.buy};margin-top:1px`;
       el.append(name, count);
@@ -734,6 +759,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       return el;
     };
     const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
+      // The pill names where the view is at every zoom (owner 2026-11-05): the country, then the region, the city, the
+      // district most of the view's listings are in — «في هذه المنطقة» only when no one place holds most of them.
+      const place = areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
+      setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
       for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
@@ -794,9 +823,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (box.querySelector('[data-testid=map-area]') || Date.now() - born > 6000) clearBridge();
       }, 50);
     };
+    // Which other deals have pinned listings in the visible view (the dots feed, already on the phone, every deal).
+    const noteOtherDeals = async (center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }, my: number) => {
+      const all = await fetchMapDots();
+      if (all === 'unknown' || my !== seq || mapRef.current !== m) return;
+      const box = { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 };
+      setOtherDeals((['buy', 'rent', 'short'] as const).filter((d) => !pins.deals.includes(d) && dotsTotal(dotsInView(all, [d], box)) > 0));
+    };
     const load = async () => {
       const my = ++seq;
       const { center, span } = m.region;
+      void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
       const level = narrowed ? null : areaLevelFor(span.latitudeDelta);
       if (level) {
@@ -804,7 +841,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (my !== seq || mapRef.current !== m) return;
         if (areas !== 'unknown') {
           hideCanvas(); shown = [];
-          drawAreas(visibleAreas(areas), level);
+          drawAreas(visibleAreas(areas, level), level);
           setPinCount(areasTotal(areas));
           return;
         }
@@ -823,6 +860,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       hideCanvas(); shown = [];
       // SMOOTH (owner 2026-11-03: «I want it to feel smooth»): a close view the dots feed (already on the phone) says holds
       // more than CROWD_ESTIMATE listings is crowded without asking the network; only a view that may fit as pins reads.
+      // The place for the count pill, read alongside the pins (a few ms on the pin index) for the visible view only.
+      const placeRead = cell === 0 ? fetchViewPlace({ s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 }) : Promise.resolve(null);
       const dots = cell === 0 && !narrowed ? await fetchMapDots() : 'unknown';
       if (my !== seq || mapRef.current !== m) return;
       const crowdedByDots = dots !== 'unknown' && dotsTotal(dotsInView(dots, pins.deals, { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 })) > CROWD_ESTIMATE;
@@ -855,9 +894,13 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
         }
       }
+      // Heads that would touch on this screen become one gold head with their count (src/lib/mapPins.ts).
+      if (drawCell === 0) rows = mergeOverlapping(rows, onScreen, headWidth);
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
+      setPlaceCount(null);
+      void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc, translitPlace)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
       // head would change (count, deal, price, cell size) is replaced.
@@ -902,8 +945,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       canvas.remove();
       if (mapRef.current === m) clear();
     };
+    // `locale`: a language switch redraws every label and pin head in the new language (owner 2026-11-05).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinsKey, failed, mapReady]);
+  }, [pinsKey, failed, mapReady, locale]);
 
   // Full screen ⇄ compact: MapKit sizes its canvas on window resize; nudge it once the box has changed.
   useEffect(() => {
@@ -1114,7 +1158,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {/* Zillow's «Only N matching results»: what the view (or the drawn boundary) holds, since the dots carry no number. */}
       {!drawing && pinCount !== null ? (
-        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{t(hasShape ? '{n} listings inside the boundary' : '{n} listings here', { n: pinCount.toLocaleString('en-US') })}</Text></View>
+        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}</Text></View>
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
