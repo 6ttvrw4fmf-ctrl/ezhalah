@@ -100,7 +100,10 @@ export function visibleAreas(rows: AreaRow[], level: AreaLevel = 'district'): Ar
   // (Al Jouf's ~400 listings are 0.2% of Riyadh Region's — the share rule would hide it).
   if (level === 'country' || level === 'region') return rows;
   const max = rows.reduce((m, r) => Math.max(m, r.n), 0);
-  const floor = Math.max(LABEL_MIN, max * LABEL_SHARE);
+  // A SMALL TOWN SHOWS ITS PLACES (owner 2026-11-05, Umluj: «0 listings» — its districts hold 1-2 listings each, so the
+  // LABEL_MIN floor hid every one of them and the map over Umluj was empty while the pill counted 6). The floor exists
+  // to hide tiny places BESIDE big ones; when nothing in view reaches LABEL_MIN there is nothing to hide them beside.
+  const floor = max < LABEL_MIN ? 1 : Math.max(LABEL_MIN, max * LABEL_SHARE);
   return rows.filter((r) => r.n >= floor);
 }
 

@@ -46,6 +46,10 @@ const shown = visibleAreas(country).map((a) => a.city);
 check('the country view keeps the big places and drops «الحزم 1», «يدمة 2», «طبرجل 8»', shown.includes('الرياض') && shown.includes('حفر الباطن') && !shown.includes('الحزم') && !shown.includes('يدمة') && !shown.includes('طبرجل'));
 check('zoomed into a small region, its small places show (the floor follows the biggest label in view)', visibleAreas(country.filter((a) => a.n < 400)).map((a) => a.city).includes('العلا'));
 mustCatch('a label of 1 listing drawn next to 98 thousand', !visibleAreas(country).some((a) => a.n === 1));
+// Umluj, 2026-11-05: districts of 1-2 listings each, nothing bigger in view — the map was empty while the pill said 6.
+const umluj = [{ city: 'املج', district: 'حي الدقم', lat: 25.07, lng: 37.25, n: 2 }, { city: 'املج', district: 'حي الضويحي', lat: 25.12, lng: 37.26, n: 2 }, { city: 'املج', district: 'حي البلد', lat: 25.02, lng: 37.26, n: 1 }];
+check('a small town with no big place in view shows all its places (Umluj: 3 districts of 1-2 listings)', visibleAreas(umluj).length === 3);
+mustCatch('the LABEL_MIN floor hiding every label of a small town (the empty Umluj map)', visibleAreas(umluj).length > 0);
 check('the drawn labels are the visible ones; the pill still counts every listing in view', (src => /drawAreas\(visibleAreas\(areas, level\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src) && /drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src))(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const data = readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8');
