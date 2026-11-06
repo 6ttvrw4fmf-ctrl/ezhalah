@@ -1,7 +1,7 @@
 // A PRICE TYPED IN THOUSANDS (owner 2026-11-06, option A: «≈ figure × 1000 + a small note, keep the source figure»).
 //
 // Asas Makeen «سنا مكين — حي القيروان» shows «75 ﷼» for a yearly flat (= 75,000); Haraj land ads write «السوم 750 ألف»
-// and type 750. The index decides (migration 20261106224500: price_in_thousands_served_ar in enforce_price_size_sanity)
+// and type 750. The index decides (migration 20261106224834: price_in_thousands_served_ar in enforce_price_size_sanity)
 // and the card follows the index's verdict (src/lib/priceInThousands.ts) — so the card, the client budget net and the
 // four count RPCs carry ONE number.
 //
@@ -22,7 +22,7 @@ import { liftSymbols } from './lib/liftSymbols.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const MIG = join(ROOT, 'supabase', 'migrations');
-const FILE = '20261106224500_price_typed_in_thousands_served_and_guarded.sql';
+const FILE = '20261106224834_price_typed_in_thousands_served_and_guarded.sql';
 const SQL = readFileSync(join(MIG, FILE), 'utf8');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 

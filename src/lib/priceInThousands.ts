@@ -2,7 +2,7 @@
 // figure visible»). Asas Makeen «سنا مكين — حي القيروان» shows «75 ﷼» for a yearly flat (= 75,000); Haraj land ads write
 // «السوم 750 ألف» and type 750. The SEARCH INDEX decides (public.price_in_thousands_served_ar in enforce_price_size_sanity:
 // the deal/type/district price bands and the ad's own words — data the client does not have) and serves figure × 1000,
-// flagged price_in_thousands (migration 20261106224500). The card does NOT re-decide: it reads the index's verdict from
+// flagged price_in_thousands (migration 20261106224834). The card does NOT re-decide: it reads the index's verdict from
 // the results RPC's effective_price, so the card, the client budget net and the count are one number. The platform table
 // keeps the source figure (PRICE = SOURCE); the card keeps it visible too («الموقع كتب 75 — قرأناه بالألف»).
 // Zero-dep on purpose: scripts/verify-price-typed-in-thousands.ts executes this file directly.
