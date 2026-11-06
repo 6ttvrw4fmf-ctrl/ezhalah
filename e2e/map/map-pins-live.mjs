@@ -43,16 +43,16 @@ try {
       // A blank map is not settled: its signature is stable from the first frame, and the pins RPC answers only after the
       // move ends (854 ms measured 14:23 UTC 2026-11-06 under the hourly index sync) — run 42233389216 read «0 pins» on
       // every view 0.3 s before the first answer arrived, then sped through the next views on the previous view's clock.
-      // So: the clock restarts for every view, and a blank map gets 12 s to read before «nothing» counts as the answer.
-      await page.evaluate(() => { const w = window; w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); });
-      await page.waitForFunction(() => {
-        const heads = [...document.querySelectorAll('[data-testid=map-pin], [data-testid=map-bubble]')].map((e) => e.textContent).join('|');
-        const pill = document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '';
-        const sig = heads + '#' + pill;
+      // So: the clock restarts for every view, and what was painted BEFORE the move (the previous view's heads and pill
+      // stay until the new read lands) does not count — the signature must change at least once, or 12 s must pass.
+      const readSig = () => [...document.querySelectorAll('[data-testid=map-pin], [data-testid=map-bubble]')].map((e) => e.textContent).join('|') + '#' + (document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '');
+      await page.evaluate((readSig) => { const w = window; w.__pinBefore = eval(readSig)(); w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); }, readSig.toString());
+      await page.waitForFunction((readSig) => {
+        const sig = eval(readSig)();
         const w = window; if (w.__pinSig !== sig) { w.__pinSig = sig; w.__pinAt = performance.now(); return false; }
-        if (!heads && !pill && performance.now() - w.__pinT0 < 12_000) return false;
+        if (sig === w.__pinBefore && performance.now() - w.__pinT0 < 12_000) return false;
         return performance.now() - w.__pinAt > 1500;
-      }, null, { timeout: 25_000, polling: 100 }).catch(() => {});
+      }, readSig.toString(), { timeout: 25_000, polling: 100 }).catch(() => {});
       const seen = await page.evaluate(() => {
         // THE VISIBLE MAP, not the viewport (🔧 2026-11-06, diag 42226056422): MapKit draws heads under the map's own
         // control strip («شراء» / «تصفية», above the canvas) and past its right edge; those a user cannot see or reach
