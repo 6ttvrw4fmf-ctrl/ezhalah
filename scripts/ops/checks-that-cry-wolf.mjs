@@ -1,7 +1,8 @@
 // Weekly: list every check robot whose verdict flips on unchanged code (scripts/lib/flipFlops.mjs). Goes RED when one
 // flips >= FLIP_LIMIT times in 7 days, so the run reaches alert_event through raise-workflow-alert.mjs. A failed GitHub
 // read is a FAILURE, never «no wolves».
-import { flipFlops } from '../lib/flipFlops.mjs';
+import { flipFlops, dispatchTakesInputs, comparableRuns } from '../lib/flipFlops.mjs';
+import { readFileSync, existsSync } from 'node:fs';
 const REPO = process.env.GITHUB_REPOSITORY || '6ttvrw4fmf-ctrl/ezhalah';
 const TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
 const FLIP_LIMIT = 3;
@@ -21,7 +22,9 @@ for (const w of wfs) {
     runs.push(...got.filter((r) => r.event === 'schedule' || r.event === 'workflow_dispatch'));
     if (got.length < 100) break;
   }
-  const flips = flipFlops(runs);
+  const yamlPath = w.path;
+  const takesInputs = existsSync(yamlPath) ? dispatchTakesInputs(readFileSync(yamlPath, 'utf8')) : true;  // unknown file → only schedules count
+  const flips = flipFlops(comparableRuns(runs, takesInputs));
   if (flips) rows.push({ flips, red: runs.filter((r) => r.conclusion === 'failure').length, runs: runs.length, file: w.path.split('/').pop() });
 }
 rows.sort((a, b) => b.flips - a.flips);

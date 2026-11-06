@@ -19,3 +19,16 @@ export function flipFlops(runs, windowMs = 2 * 3600e3) {
   }
   return flips;
 }
+
+/** A workflow whose manual dispatch takes inputs (a platform, a sample size…) runs a DIFFERENT check each time, so two of
+ *  its dispatches on one commit may legitimately disagree — lifecycle-spot-check run for sakani, then for another site,
+ *  read as 11 «flips» on 2026-11-06. For such a workflow only its scheduled runs are comparable. */
+export function dispatchTakesInputs(yaml) {
+  // the indented lines right under `workflow_dispatch:` — its own block, nothing after it
+  const block = /^[ \t]*workflow_dispatch:[^\n]*\n((?:[ \t]{4,}[^\n]*\n?)*)/m.exec(yaml);
+  return !!block && /^[ \t]+inputs:\s*$/m.test(block[1]);
+}
+/** The runs whose verdicts are comparable for flip counting. */
+export function comparableRuns(runs, takesInputs) {
+  return runs.filter((r) => r.event === 'schedule' || (r.event === 'workflow_dispatch' && !takesInputs));
+}
