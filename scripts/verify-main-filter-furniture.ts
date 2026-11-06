@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { cohortAllows } from '../src/lib/afCohorts.ts';
 import { sanitizeForFilterRestore, HOME_DEFAULT_QUERY } from '../src/lib/searchDefaults.ts';
 import type { SearchQuery } from '../src/data/search.ts';
+import { furnishingLabelKey } from '../src/lib/furnishingWords.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -89,12 +90,26 @@ for (const f of ['furn-any', 'furn-yes', 'furn-no']) {
   check(`assets/icons/${f}.png exists and is small (${size} B ≤ 12 KB)`, size > 0 && size <= 12_000);
 }
 
+// ── 7. the chat repeats the pick back (owner 2026-11-05: «confirm that it matches what the user wants») ──
+check('«الكل» says nothing; مفروشة / غير مفروشة say their own word (executed)',
+  furnishingLabelKey(null) === null && furnishingLabelKey(undefined) === null
+  && furnishingLabelKey(true) === 'Furniture: furnished' && furnishingLabelKey(false) === 'Furniture: unfurnished');
+const searchSrc = read('src/data/search.ts');
+const summaryRx = /const furnLine = furnishingLabelKey\(q\.furnishedPref\);\s*if \(furnLine\) lines\.push\(`• \$\{t\('Furnishing'\)\}: \$\{t\(furnLine\)\}`\);/;
+const bubbleRx = /const furnKey = furnishingLabelKey\(q\.furnishedPref\);[\s\S]{0,900}what: whatWithFurniture,/;
+check('«ملخص البحث» lists «التأثيث: …» when the main filter picked it', summaryRx.test(searchSrc));
+check('the opening bubble says it too («شقة غير مفروشة»)', bubbleRx.test(searchSrc));
+check('the summary line uses the SAME label as the Advanced Filter line (Furnishing)',
+  /furnished: 'Furnishing'/.test(read('src/lib/afSummary.ts')));
+
 // ── mutation proofs: the source checks above must FAIL on the defect they name ───────────────────────
 const mutants: Array<[string, string, RegExp]> = [
   ['the question asks twice', furnQ.replace(' && q.furnishedPref == null', ''), /eligibility: \(q\) => cohortAllows\(q, 'furnished'\) && q\.furnishedPref == null/],
   ['the row counts with the user\'s own furniture pick', home.replace('fetchApartmentGuidedCounts(furnBase)', 'fetchApartmentGuidedCounts(query)'), /fetchApartmentGuidedCounts\(furnBase\)/],
   ['a hidden row keeps its filter', home.replace('if (furnRow === null && query.furnishedPref != null)', 'if (false)'), /if \(furnRow === null && query\.furnishedPref != null\)/],
   ['nationwide numbers show before a city is picked', home.replace('if (citySelected == null) { setFurnRow({}); return; }', ''), /if \(citySelected == null\) \{ setFurnRow\(\{\}\); return; \}/],
+  ['the summary forgets the furniture pick', searchSrc.replace('if (furnLine) lines.push', 'if (false) lines.push'), summaryRx],
+  ['the bubble forgets the furniture pick', searchSrc.replace('what: whatWithFurniture,', 'what: whatPhrase,'), bubbleRx],
   ['the counts lose the picked city again', home.replace('const base = buildFilterBaseQuery();', 'const base = null as SearchQuery | null;'), /const base = buildFilterBaseQuery\(\);/],
 ];
 // each mutant is the real source with one defect planted; the guard's own predicate must reject it
