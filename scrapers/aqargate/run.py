@@ -560,7 +560,13 @@ def map_marketplace(rec: dict, legacy_by_licence: Optional[dict[str, str]] = Non
     rent_annual, rent_period = _rent_annualize(
         _price_int(rec.get("price")), has_annual_field=land_rent not in (None, ""),
         title_text=title or "") if is_rent else (None, None)
-    per_metre = (not is_rent) and land_total not in (None, "")
+    # On a Buy LAND ad the marketplace `price` is the REGA unit rate («سعر الوحدة»), never the asking total:
+    # measured 2026-11-06 on all 41 land sale ads, 40-6,500 SAR on plots of 169-106,474 m² (AG52441: 40 for
+    # 106,474 m²); the WordPress page said the same (AG55663 «سعر الوحدة 2817», «2817 ريال للمتر»). The import
+    # dropped landTotalPrice from most records, so its presence cannot be the test. Rate → price_per_meter,
+    # total UNKNOWN (never rate × area). The first marketplace crawl (11-06 21:57) served 16 such rates as totals.
+    is_land = property_type in ("Residential Land", "Commercial Land")
+    per_metre = (not is_rent) and (land_total not in (None, "") or is_land)
 
     city_ar = (rec.get("city") or "").strip() or None
     district_ar = (rec.get("district") or "").strip() or None
