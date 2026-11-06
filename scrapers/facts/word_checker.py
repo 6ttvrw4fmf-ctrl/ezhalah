@@ -1251,12 +1251,18 @@ def _blank_place_names(t: str, names: tuple[str, ...]) -> str:
     return t
 
 
+_ADL_GHASSALA = re.compile(r"(العدل)[ \t]*[-–—،,|/]+[ \t]*(?=ال?غس[اٱ]ل)")
+
+
 def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     """Facts the ad's text states: [{fact, value_bool|value_num|value_text, quote}], quote = the ad's own span.
     place_names: the listing's own district / city — never read as a fact (_blank_place_names)."""
     if not text:
         return []
     raw = unicodedata.normalize("NFKC", text)
+    # «حي العدل - الغسالة» / «العدل، الغسالة»: one Makkah address, not a clause break before a washing machine — the
+    # separator becomes blanks of the same length (quotes keep their offsets) so _judge sees «العدل» before it.
+    raw = _ADL_GHASSALA.sub(lambda m: m.group(1) + " " * (len(m.group(0)) - len(m.group(1))), raw)
     full_norm = norm(raw)
     clauses = [(off, c) + norm_map(c) for off, c in _clauses(raw)]
     if place_names:
@@ -1843,6 +1849,8 @@ def selftest() -> None:
         # P2 13085 (2026-11-06), real served sentences
         ("فرصة استثماريه للبيع عمارة مكه المكرمة حي العدل الغسالة العقار عمره 21 سنه", {}, ("laundry_room",)),
         ("شقة للإيجار بمكة المكرمة حي العدل الغساله العليا ٤ غرف الدور الاول ركنيه مصعد", {}, ("laundry_room",)),
+        ("عمارة للبيع مكة حي العدل - الغسالة عمرها 10 سنوات", {}, ("laundry_room",)),
+        ("شقة للإيجار مكة العدل، الغسالة الدور الثاني", {}, ("laundry_room",)),
         ("ستوديو غرفة مع بوفية ودورة مياه مؤثث بالكامل مع توفر الغسالة والثلاجة", {"laundry_room": True}, ()),
         ("السعر مليون 700 الف للزاويه مليون 650 الف للبطن قابل للتفاوض", {}, ("corner_plot",)),
         ("السعر مليون و ٢٥٠ للبطون ومليون و٣٥٠ للزاوية", {}, ("corner_plot",)),
