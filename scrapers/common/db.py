@@ -611,6 +611,7 @@ def _ensure_capture(r: dict[str, Any]) -> None:
         cap.setdefault("schema", "unspecified")
     _fold_price_evidence(r)
     _fold_images_evidence(r)
+    _licence_on_card(r)
     # PDPL capture barrier (owner rule 2026-08-09). The capture is PRIVATE (anon has no SELECT on
     # it), but "private" is not "allowed to accumulate contact details" — hidden PII is still PII,
     # and 614 sanadak rows proved it accumulates silently. redact_capture() scrubs FREE TEXT only:
@@ -618,6 +619,28 @@ def _ensure_capture(r: dict[str, Any]) -> None:
     # byte-identical, because destroying regulatory data to fix a privacy bug is not a fix.
     if isinstance(r.get("source_capture"), (dict, list)):
         r["source_capture"] = redact_capture(r["source_capture"])
+
+
+_MISSING = object()
+_REGA_AD_LICENCE = re.compile(r"^\d{10}$")
+
+
+def _licence_on_card(r: dict[str, Any]) -> None:
+    """The card's «رقم رخصة الإعلان» row reads additional_info.rega_ad_license_number (src/data/remote.ts
+    ADDL_FIELDS). Many scrapers store the REGA ad licence only in license_number, so the card never showed
+    it: 🦅 2026-11-06 measured ~37,000 live ads on ~45 sites (muhaysini 20,371, tuba 3,131, sakani 1,962 …),
+    the fleet-wide form of the owner's 11-04 Property Finder finding. Copy the stored licence verbatim
+    (10 digits, the REGA ad-licence shape) into the card's key when the row writes additional_info and
+    does not already carry the key. A row that does not write additional_info is left alone: an upsert
+    replaces the whole column, so inventing one here would erase the stored panel."""
+    lic = r.get("license_number")
+    info = r.get("additional_info", _MISSING)
+    if info is _MISSING or not isinstance(lic, str) or not _REGA_AD_LICENCE.match(lic.strip()):
+        return
+    if info is None:
+        r["additional_info"] = {"rega_ad_license_number": lic.strip()}
+    elif isinstance(info, dict) and not str(info.get("rega_ad_license_number") or "").strip():
+        info["rega_ad_license_number"] = lic.strip()
 
 
 def _fold_price_evidence(r: dict[str, Any]) -> None:
