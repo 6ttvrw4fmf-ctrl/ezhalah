@@ -50,5 +50,9 @@ def test_a_redirect_to_the_same_ads_new_address_is_ok():
     assert S.classify(dal, 200, "https://dallali.com/advertisements/villa-for-sale-x-9a9b9c9d") == "moved"
     assert S.classify(dal, 200, "https://other.com/x-7f22c416") == "moved"
     assert S.classify(era, 200, "https://erapulse.sa/%D8%A7%D9%84%D8%B9%D9%82%D8%A7%D8%B1%D8%A7%D8%AA") == "moved"
+    # erapulse's reference whose first part has no digit, measured on run 42278591016
+    era2 = "https://erapulse.sa/property/26401234-land-sale-ref-mlpbkvag-6hus9"
+    assert S.classify(era2, 200, "https://erapulse.sa/x/%D9%82-REF-MLPBKVAG-6HUS9") == "ok"
+    assert S.classify(era2, 200, "https://erapulse.sa/x/%D9%82-REF-AAAABBBB-6HUS9") == "moved"
     # slug words are not ids: dwelleo's slug move is still a repairable «moved»
     assert S.classify(OLD, 200, NEW) == "moved"

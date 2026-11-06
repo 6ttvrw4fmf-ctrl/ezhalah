@@ -72,7 +72,13 @@ def same_ad_redirect(url: str, landed: str | None) -> bool:
     if not landed or _host(landed) != _host(url):
         return False
     tail = _last_segment(landed).lower()
-    return any(t in tail for t in _ad_id_tokens(url))
+    if any(t in tail for t in _ad_id_tokens(url)):
+        return True
+    # a two-part reference whose first part has no digit (erapulse «ref-mlpbkvag-6hus9»): the last two tokens
+    # joined, 10+ characters with a digit, must appear whole in the landing's last segment.
+    parts = [t for t in re.split(r"[-_.]", _last_segment(url).lower()) if t]
+    pair = "-".join(parts[-2:]) if len(parts) >= 2 else ""
+    return len(pair) >= 10 and bool(re.search(r"\d", pair)) and pair in tail
 
 
 def classify(url: str, status: int | None, landed: str | None) -> str:
