@@ -40,3 +40,8 @@ def test_only_a_bare_label_is_joined():
     assert label_value_lines(["واجهه العقار", "جنوبيه"], kw) == ["واجهه العقار : جنوبيه", "جنوبيه"]
     prose = "فيلا واجهه بحريه على شارعين مع حديقه"
     assert label_value_lines([prose, "شرقيه"], kw) == [prose, "شرقيه"]
+
+
+def test_a_district_after_the_label_is_not_its_value():
+    kw = r"واجهه|الاتجاه"
+    assert label_value_lines(["واجهه العقار", "الحي الشرقي"], kw) == ["واجهه العقار", "الحي الشرقي"]

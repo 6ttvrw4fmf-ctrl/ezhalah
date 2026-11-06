@@ -320,6 +320,11 @@ for _ar, _en in (("شمال شرق", "north[\\s-]*east"), ("شمال غرب", "n
 _FACADE_BASES = ("شمال", "جنوب", "شرق", "غرب")
 
 
+# The next line is joined only when it IS a facade value (a bearing first): «الحي الشرقي» (a district) or another
+# source's text never becomes the label's value (CodeRabbit on #10939).
+_FACADE_VALUE_START = re.compile(r"^\s*(?:ال)?(?:شمال|جنوب|شرق|غرب)|^\s*(?:north|south|east|west)", re.I)
+
+
 def label_value_lines(lines: list[str], kw: str) -> list[str]:
     """A label printed as its own line joins the value line after it. vmksa's feature block «<h2>واجهة العقار</h2>
     <span>جنوبية شرقية</span>» reaches us as «واجهة العقار | جنوبية شرقية», two lines, so a facade that equals ours
@@ -328,7 +333,7 @@ def label_value_lines(lines: list[str], kw: str) -> list[str]:
     out = list(lines)
     for i, x in enumerate(lines[:-1]):
         m = re.search(kw, x)
-        if m and len(re.sub(kw, "", x).split()) <= 1 and len(x) <= 24:
+        if m and len(re.sub(kw, "", x).split()) <= 1 and len(x) <= 24 and _FACADE_VALUE_START.match(lines[i + 1]):
             out[i] = x + " : " + lines[i + 1]
     return out
 
