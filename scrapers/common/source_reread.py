@@ -484,6 +484,13 @@ def main() -> int:
                 print(f"   pin {table}:{rid}: maps-link={page_pin.pin_from_html(body) or 'none'} | "
                       f"embed={page_pin.pin_from_embed(body) or 'none'} | short={page_pin.short_maps_link(body) or 'none'} | "
                       f"json-lat/lng={jll.groups() if jll else 'none'}", flush=True)
+            if a.around == "__aqar_keys__" and body:
+                from scrapers.aqar.enrich_residential import _listing_json
+                _o = _listing_json(body) or {}
+                print(f"   KEYS {table}:{rid}: {sorted(_o.keys())}", flush=True)
+                for _k, _v in _o.items():
+                    if re.search(r"licen|rega|adv|permit|fal|auth", _k, re.I):
+                        print(f"   KEY {rid} {_k} = {str(_v)[:300]!r}", flush=True)
             if a.around and body:
                 # Searched in the DECODED markup: alsaedan and arkaan write their Arabic as HTML entities, so a raw
                 # search for «موقف» or «ثلاث دورات» found nothing on pages that print it (🔬 2026-10-17).
