@@ -1518,7 +1518,10 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   `return "gone", "absent from 3 consecutive COMPLETE walks"` — an absence-only kill that every keyword barrier
   counted as protected. 32 shown kellerwilliams ads (dropped from the site's list 164 → 140) and 7 propertyfinder ads
   were 1–2 walks from being hidden on absence alone, and a CI status read of 14 of the kellerwilliams ones answered
-  200 to all 14, controls 5/5 (spot-check 42209305892): the old code would have hidden ads nobody proved dead. Now
+  200 to all 14, controls 5/5 (spot-check 42209305892), and their own record (the API the page itself calls,
+  found with page-probe 42214711491) showed at least 10 of the 14 «Active»: the old code would have hidden live ads.
+  The first own-record reader also flipped (4 «gone» → 3 «live» on a re-read minutes later), so it stayed shadow
+  and its PR was closed unmerged: a new reader proves itself on a re-read before it feeds the score. Now
   held UNKNOWN (#10885) and pinned by `scrapers/common/tests/test_verify_gone_never_kills_on_absence.py`, which
   EXECUTES every bare-name `verify_gone` with the network blocked. When a new site goes live, read its oracle's
   body, not its keyword.
