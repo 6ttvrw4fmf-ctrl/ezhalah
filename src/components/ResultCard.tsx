@@ -333,6 +333,11 @@ export function ResultCard({
               {t('The ad put {n} SAR in the price box — read as the price per m²', { n: Number(listing.typedTotalAsPerMeter).toLocaleString('en-US') })}
             </Text>
           ) : null}
+          {listing.typedInThousands != null ? (
+            <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-in-thousands">
+              {t('The site wrote {n} — we read it in thousands', { n: Number(listing.typedInThousands).toLocaleString('en-US') })}
+            </Text>
+          ) : null}
 
           <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
             {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
@@ -547,6 +552,13 @@ export function ResultCard({
         {listing.typedTotalAsPerMeter != null ? (
           <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-total-as-ppm">
             {t('The ad put {n} SAR in the price box — read as the price per m²', { n: Number(listing.typedTotalAsPerMeter).toLocaleString('en-US') })}
+          </Text>
+        ) : null}
+        {/* A PRICE TYPED IN THOUSANDS (owner 2026-11-06): the index serves «≈ figure × 1000» (src/lib/priceInThousands.ts);
+            the site's own figure stays visible next to it. */}
+        {listing.typedInThousands != null ? (
+          <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-in-thousands">
+            {t('The site wrote {n} — we read it in thousands', { n: Number(listing.typedInThousands).toLocaleString('en-US') })}
           </Text>
         ) : null}
         {/* Guest rating — renders ONLY when the listing carries one (Gathern). e.g. ★ 9.9 (59 تقييم) */}
