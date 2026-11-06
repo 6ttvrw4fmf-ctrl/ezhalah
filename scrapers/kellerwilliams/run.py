@@ -37,6 +37,7 @@ import argparse
 import json
 import re
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
@@ -75,8 +76,66 @@ _NEVER_STORE = ("list_agent_office", "co_list_agent_office", "sell_agent_office"
 _FEATURES = {("interior_features", "has_elevator"): "elevator", ("structure", "has_parking"): "parking"}
 
 
+PROPERTY_API = "https://api.kw-saudiarabia.com/api/listings/property/"
+_UUID = re.compile(r"[0-9a-f]{24}")
+
+
 def _allowed(url: str) -> bool:
-    return url == API
+    if url == API:
+        return True
+    # the ad's OWN record, the one its public page reads (♻️ 2026-11-06, page-probe 42214711491): robots has no rule
+    rest = url[len(PROPERTY_API):] if url.startswith(PROPERTY_API) else ""
+    return bool(_UUID.fullmatch(rest.split("?", 1)[0]))
+
+
+def uuid_of(listing_url: str | None) -> str | None:
+    """The list_uuid at the end of /propertydetails/<uuid> (the stored listing_url)."""
+    tail = (listing_url or "").rstrip("/").rsplit("/", 1)[-1]
+    return tail if _UUID.fullmatch(tail) else None
+
+
+def record_verdict(status: int | None, payload: Any) -> tuple[str, str]:
+    """('live' | 'gone' | 'unknown', why) from the ad's own record. SHADOW reader (2026-11-06): measured so far
+    only that a present ad answers 200 «Active» and a missing uuid answers 404; any other status word is UNKNOWN
+    with the word in the evidence until a night of reads has measured it. Never a kill from a wall or a guess."""
+    if status == 404:
+        return "gone", "own record GET /listings/property/<uuid> answered 404"
+    if status != 200 or not isinstance(payload, dict):
+        return "unknown", f"own record answered HTTP {status}"
+    doc = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if doc.get("is_deleted") is True:
+        return "gone", "own record is_deleted=true"
+    st = doc.get("list_status")
+    if st == "Active":
+        return "live", "own record list_status=Active"
+    return "unknown", f"own record list_status={st!r} (not yet measured) keys={sorted(doc)[:12]}"
+
+
+def read_own_record(listing_url: str | None, *, session: Any = None) -> tuple[str, str]:
+    """One honest read (our bot UA, request starts >= MIN_GAP_S apart) of the ad's own record."""
+    uid = uuid_of(listing_url)
+    if not uid:
+        return "unknown", "no list_uuid in the stored url"
+    url = f"{PROPERTY_API}{uid}?fields=basic"
+    if not _allowed(url):
+        return "unknown", "url not allowed"
+    wait = H.MIN_GAP_S - (time.time() - H._last[0])
+    if wait > 0:
+        time.sleep(wait)
+    H._last[0] = time.time()
+    try:
+        from curl_cffi import requests as cc
+        r = (session or cc).get(url, headers={"User-Agent": H.UA, "Accept": "application/json"}, timeout=45)
+    except Exception as e:  # noqa: BLE001 — no answer is no verdict
+        return "unknown", f"{type(e).__name__}"
+    low = (r.text or "")[:4000].lower()
+    if r.status_code in (401, 403, 429, 503) or any(w in low for w in H.WALL_WORDS):
+        return "unknown", f"wall HTTP {r.status_code}"
+    try:
+        payload = r.json() if r.status_code == 200 else None
+    except ValueError:
+        payload = None
+    return record_verdict(r.status_code, payload)
 
 
 def walk(log=print) -> dict:

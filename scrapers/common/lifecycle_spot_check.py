@@ -201,6 +201,16 @@ def _reader_for(platform: str):
                 return UNKNOWN, "landed on gathern's home page (no verdict)"
             return (DEAD if gl.looks_dead(status) else UNKNOWN), f"HTTP {status or 'none after retries'}"
         return read
+    if platform == "kellerwilliams":
+        # 2026-11-06: one JS shell answers 200 for live and removed ads alike (spot-check 42209305892 read 14
+        # list-absent ads «live»); the page itself reads GET /api/listings/property/<uuid>. SHADOW: this reader
+        # informs the score and the spot check only; the crawl's prune still holds absence as UNKNOWN (#10885).
+        from scrapers.kellerwilliams import run as kw
+
+        def read_kw(url: str):
+            v, why = kw.read_own_record(url)
+            return {"live": ALIVE, "gone": DEAD}.get(v, UNKNOWN), why
+        return read_kw
     if platform == "muktamel":
         # A withdrawn ad is a 200 hollow shell and a removed one 302s to a 200 /404 page, so a status
         # read can only ever say "live" (2026-10-09: 10/10 live three nights while 512 shown rows were
