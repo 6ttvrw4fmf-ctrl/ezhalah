@@ -34,6 +34,12 @@ export function problems(files: Record<string, string>): string[] {
   need('the evidence clause no longer matches by ad_number (follow-source records only the ad number)', /p\.ad_number\s*=\s*t\.ad_number/i);
   need('a later ALIVE stamp no longer lets a row recover (reading must be newer than last_verified_alive_at)',
     /p\.probed_at\s*>=\s*coalesce\(\s*t\.last_verified_alive_at/i);
+  // Each of the two exclusions (by listing_id, by ad_number) must carry its OWN verdict and
+  // newer-than-ALIVE condition: counted, so one complete clause cannot mask a stripped sibling.
+  const count = (re: RegExp) => (sql.match(re) || []).length;
+  if (count(/p\.verdict\s*=\s*''GONE''/gi) < 2) out.push(`${latest}: one of the two exclusions lost its GONE verdict`);
+  if (count(/p\.probed_at\s*>=\s*coalesce\(\s*t\.last_verified_alive_at/gi) < 2) out.push(`${latest}: one of the two exclusions lost its newer-than-ALIVE condition`);
+  if (count(/p\.probed_at\s*>=\s*now\(\)\s*-\s*\$1/gi) < 2) out.push(`${latest}: one of the two exclusions lost its time window`);
   need('the evidence clause is built but never spliced into the UPDATE', /%s\s*\$f\$\s*,\s*t\s*,\s*t\s*,\s*sib_clause\s*,\s*gone_clause/i);
   return out;
 }
@@ -43,6 +49,7 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`);
   if (!ok) failed++;
 };
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 
 const files: Record<string, string> = {};
 for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))) files[f] = readFileSync(join(MIGRATIONS, f), 'utf8');
@@ -51,15 +58,17 @@ check('auto_recover_false_inactive() honours a fresh own-page GONE reading', rea
 
 // Mutations on the latest definition: each must turn the check red.
 const latest = Object.keys(files).filter((f) => DEF.test(files[f])).sort().pop()!;
-const mutate = (label: string, from: RegExp, to: string) => {
+const mutation = (label: string, from: RegExp, to: string) => {
   const m = { ...files, [latest]: files[latest].replace(from, to) };
-  check(`(mutation) catches ${label}`, m[latest] !== files[latest] && problems(m).length > 0);
+  mustCatch(label, m[latest] !== files[latest] && problems(m).length > 0);
 };
-mutate('the ledger clause removed', /public\.ops_stale_inactivation_probe/g, 'public.some_other_table');
-mutate('the GONE verdict dropped', /p\.verdict = ''GONE''/g, 'true');
-mutate('the alive-stamp comparison dropped', /p\.probed_at >= coalesce\(t\.last_verified_alive_at/g, 'true or (p.probed_at');
-mutate('the clause never spliced in', /sib_clause, gone_clause\)/, 'sib_clause, \'\')');
-check('(mutation) a newer redefinition without the clause is judged, not the old one',
+mutation('the ledger clause removed', /public\.ops_stale_inactivation_probe/g, 'public.some_other_table');
+mutation('the GONE verdict dropped', /p\.verdict = ''GONE''/g, 'true');
+mutation('the alive-stamp comparison dropped', /p\.probed_at >= coalesce\(t\.last_verified_alive_at/g, 'true or (p.probed_at');
+mutation('the clause never spliced in', /sib_clause, gone_clause\)/, 'sib_clause, \'\')');
+mutation('only the ad_number clause losing its GONE verdict', /and p\.verdict = ''GONE'' and p\.probed_at >= now\(\) - \$1/, 'and p.probed_at >= now() - $1');
+mutation('only one clause losing its newer-than-ALIVE condition', /and p\.probed_at >= coalesce\(t\.last_verified_alive_at, ''-infinity''::timestamptz\)\) ', t\);\n    end if;/, ") ', t);\n    end if;");
+mustCatch('a newer redefinition without the clause, judged instead of the old one',
   problems({ ...files, '29990101000000_x.sql': 'create or replace function public.auto_recover_false_inactive() returns void language sql as $$ select 1 $$;' }).length > 0);
 
 if (failed) { console.log(`\n❌ verify-recovery-respects-own-page-gone: ${failed} failure(s)`); process.exit(1); }

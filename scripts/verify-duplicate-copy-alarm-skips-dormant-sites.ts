@@ -39,15 +39,16 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`);
   if (!ok) failed++;
 };
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 
 const files: Record<string, string> = {};
 for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))) files[f] = readFileSync(join(MIGRATIONS, f), 'utf8');
 const real = problems(files);
 check(`${FN} skips dormant sites`, real.length === 0, real.join('; '));
 const latest = Object.keys(files).filter((f) => CHANGES.test(strip(files[f]))).sort().pop()!;
-check('(mutation) catches the skip removed',
+mustCatch('the skip removed',
   problems({ ...files, [latest]: files[latest].replace(/\n\s*where not public\.ops_platform_is_dormant\(d\.platform\)/, '') }).length > 0);
-check('(mutation) a newer change without the skip is judged, not the old one',
+mustCatch('a newer change without the skip, judged instead of the old one',
   problems({ ...files, '29990101000000_x.sql': `create or replace function public.${FN}() returns int language sql as $$ select 1 $$;` }).length > 0);
 
 if (failed) { console.log(`\n❌ verify-duplicate-copy-alarm-skips-dormant-sites: ${failed} failure(s)`); process.exit(1); }
