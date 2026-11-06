@@ -27,6 +27,7 @@ def test_the_live_facet_is_dropped():
 
 def test_a_ticked_feature_is_kept():
     assert "مسبح" in _text('<div><input type="checkbox" checked /> <label>مسبح</label></div>')
+    assert "مسبح" in _text('<div><input type="checkbox" checked /> <label>مسبح <small>(0)</small></label></div>')
 
 
 def test_the_old_shape_is_still_dropped():
