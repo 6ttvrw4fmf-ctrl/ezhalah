@@ -962,7 +962,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # …and the POOL a room overlooks is the home's (🔬 2026-11-06 two-way sample: 8 of 25 aqar villas that say «صالة كبيرة
     # مطلة على المسبح», «إطلالة مباشرة على المسبح», «ملحق كبير مطل على المسبح» served no pool) — a public pool is rare;
     # a public SEA / PARK / mosque view stays nearby, those facts are not here.
-    if (fact in _UNIT_ROOMS or (fact in _POOL_FACTS and not any(w in _VIEW_NEG for w in p5)
+    if (fact in _UNIT_ROOMS or (fact in _POOL_FACTS and not any(p5[k] in _VIEW_NEG and (_strip_wa(p5[k + 1]) in _VIEW_WORDS or p5[k + 1] in _VIEW_WORDS)
+                                                 for k in range(len(p5) - 1))
                                 and not any(_strip_wa(w) in _PUBLIC_POOL for w in gn[:2]))) \
             and near5 and all(_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS for w in near5):
         p5 = [w for w in p5 if w not in near5]       # a view word next to the home's own room says nothing about the room
@@ -1753,6 +1754,7 @@ def selftest() -> None:
         ("مسبح خاص", {"pool": True}, ()),
         ("حوض سباحه", {"pool": True}, ()),
         ("الشقة لا تطل على مسبح", {}, ("pool",)),
+        ("شقة بدون مصعد تطل على مسبح", {"pool": True}, ()),
         ("الشقة مطلة على المسبح البلدي", {}, ("pool",)),
         ("فيلا مطلة على مسبح مدفأ", {"pool": True, "heated_pool": True}, ()),
         ("المسبح موسس والمصعد راكب", {}, ("pool",)),
