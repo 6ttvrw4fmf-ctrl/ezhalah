@@ -1251,6 +1251,7 @@ def _blank_place_names(t: str, names: tuple[str, ...]) -> str:
     return t
 
 
+_ADL_PAIR = re.compile(r"(العدل\s+)(ال?غسال\S*)")
 _ADL_GHASSALA = re.compile(r"(العدل)[ \t]*[-–—،,|/]+[ \t]*(?=ال?غس[اٱ]ل)")
 
 
@@ -1266,7 +1267,10 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     full_norm = norm(raw)
     clauses = [(off, c) + norm_map(c) for off, c in _clauses(raw)]
     if place_names:
-        clauses = [(off, c, _blank_place_names(t, place_names), idx) for off, c, t, idx in clauses]
+        # «حي العدل الغسالة»: the Makkah address goes WITH the district name — blanking «العدل» alone left «الغساله»
+        # for the reader to take as a washing machine (CodeRabbit on #10943)
+        clauses = [(off, c, _blank_place_names(_ADL_PAIR.sub(lambda m: m.group(1) + " " * len(m.group(2)), t),
+                                               place_names), idx) for off, c, t, idx in clauses]
     bool_hits: dict[str, dict[bool, tuple[int, int, int]]] = {}
     num_hits: dict[str, list[Hit]] = {}
     cue_in = near_in = near_list = False
