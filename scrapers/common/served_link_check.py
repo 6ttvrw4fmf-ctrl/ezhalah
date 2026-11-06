@@ -56,6 +56,31 @@ def _last_segment(u: str) -> str:
     return unquote(urlsplit(u).path.rstrip("/").rsplit("/", 1)[-1])
 
 
+def _ad_id_tokens(u: str) -> set[str]:
+    """The ad's own id tokens in its last path segment: 8+ characters mixing letters and digits
+    (dallali «7f22c416» from a UUID, erapulse «mlu12xet» from REF-MLU12XET-CD3SX). Slug words and
+    short numbers are not ids (pure)."""
+    return {t for t in re.split(r"[-_.]", _last_segment(u).lower())
+            if len(t) >= 8 and re.search(r"\d", t) and re.search(r"[a-z]", t)}
+
+
+def same_ad_redirect(url: str, landed: str | None) -> bool:
+    """The site redirected the stored link to its new pretty address FOR THE SAME AD: same site and
+    the landing's last segment carries one of the ad's own id tokens (falcon 2026-11-06: dallali
+    UUID → «…-7f22c416», erapulse «…-ref-mlu12xet-cd3sx» → «…-REF-MLU12XET-CD3SX»). The customer
+    lands on the ad, so the card works (pure)."""
+    if not landed or _host(landed) != _host(url):
+        return False
+    tail = _last_segment(landed).lower()
+    if any(t in tail for t in _ad_id_tokens(url)):
+        return True
+    # a two-part reference whose first part has no digit (erapulse «ref-mlpbkvag-6hus9»): the last two tokens
+    # joined, 10+ characters with a digit, must appear whole in the landing's last segment.
+    parts = [t for t in re.split(r"[-_.]", _last_segment(url).lower()) if t]
+    pair = "-".join(parts[-2:]) if len(parts) >= 2 else ""
+    return len(pair) >= 10 and bool(re.search(r"\d", pair)) and pair in tail
+
+
 def classify(url: str, status: int | None, landed: str | None) -> str:
     """ok / moved / dead / unknown for one opened link (pure)."""
     if status in (404, 410):
@@ -64,6 +89,8 @@ def classify(url: str, status: int | None, landed: str | None) -> str:
         return "unknown"
     if not landed or unquote(urlsplit(landed).path.rstrip("/")) == unquote(urlsplit(url).path.rstrip("/")):
         return "ok"
+    if same_ad_redirect(url, landed):
+        return "ok"                 # redirected to the same ad's new address: the card opens the ad
     if _landed_on_home(url, landed):
         return "unknown"            # sent home: no answer about the ad
     return "moved"
@@ -123,6 +150,10 @@ def check_site(client, platform: str, shown: int, *, rng: random.Random, night: 
         kind = classify(r["listing_url"], status, landed)
         row["sampled"] += 1
         row[kind] += 1
+        if kind == "moved":
+            # falcon 2026-11-06: the alert names dead_sample only, so a site whose links all «moved»
+            # (dallali 16/17, erapulse 20/20) gave nobody the landing page to act on. Print it.
+            print(f"  moved {platform}: {r['listing_url']} -> {landed}", flush=True)
         if kind == "dead" and len(row["dead_sample"]) < 5:
             row["dead_sample"].append(r["listing_url"])
         if kind == "moved" and repairable(r["listing_url"], landed):
