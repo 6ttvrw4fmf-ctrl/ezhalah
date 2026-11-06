@@ -454,6 +454,9 @@ jobs:
             # honest client (scrapers/common/honest_fetch.py) — NO proxy, NO browser identity; a wall stops that site's run.
             - { source: kellerwilliams, cmd: "python -m scrapers.kellerwilliams.run" }
             - { source: almajdiah, cmd: "python -m scrapers.almajdiah.run" }
+            - { source: asasmakeen, cmd: "python -m scrapers.asasmakeen.run" }
+            - { source: mrajhi, cmd: "python -m scrapers.mrajhi.run" }
+            - { source: steam, cmd: "python -m scrapers.steam.run" }
             # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
             # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
             # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to
