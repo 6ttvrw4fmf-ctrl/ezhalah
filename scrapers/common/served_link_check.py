@@ -56,6 +56,25 @@ def _last_segment(u: str) -> str:
     return unquote(urlsplit(u).path.rstrip("/").rsplit("/", 1)[-1])
 
 
+def _ad_id_tokens(u: str) -> set[str]:
+    """The ad's own id tokens in its last path segment: 8+ characters mixing letters and digits
+    (dallali «7f22c416» from a UUID, erapulse «mlu12xet» from REF-MLU12XET-CD3SX). Slug words and
+    short numbers are not ids (pure)."""
+    return {t for t in re.split(r"[-_.]", _last_segment(u).lower())
+            if len(t) >= 8 and re.search(r"\d", t) and re.search(r"[a-z]", t)}
+
+
+def same_ad_redirect(url: str, landed: str | None) -> bool:
+    """The site redirected the stored link to its new pretty address FOR THE SAME AD: same site and
+    the landing's last segment carries one of the ad's own id tokens (falcon 2026-11-06: dallali
+    UUID → «…-7f22c416», erapulse «…-ref-mlu12xet-cd3sx» → «…-REF-MLU12XET-CD3SX»). The customer
+    lands on the ad, so the card works (pure)."""
+    if not landed or _host(landed) != _host(url):
+        return False
+    tail = _last_segment(landed).lower()
+    return any(t in tail for t in _ad_id_tokens(url))
+
+
 def classify(url: str, status: int | None, landed: str | None) -> str:
     """ok / moved / dead / unknown for one opened link (pure)."""
     if status in (404, 410):
@@ -64,6 +83,8 @@ def classify(url: str, status: int | None, landed: str | None) -> str:
         return "unknown"
     if not landed or unquote(urlsplit(landed).path.rstrip("/")) == unquote(urlsplit(url).path.rstrip("/")):
         return "ok"
+    if same_ad_redirect(url, landed):
+        return "ok"                 # redirected to the same ad's new address: the card opens the ad
     if _landed_on_home(url, landed):
         return "unknown"            # sent home: no answer about the ad
     return "moved"

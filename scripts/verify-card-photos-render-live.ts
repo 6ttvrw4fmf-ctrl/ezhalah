@@ -41,8 +41,9 @@ function corpBlocksCrossOrigin(corpHeader: string): boolean {
 //   • html / json / xml labels are blocked outright; text/plain is blocked when nosniff is set;
 //   • anything else (octet-stream, binary/octet-stream, no label, text/plain without nosniff) is
 //     SNIFFED: it renders only if the first bytes are an image signature from the mimesniff table
-//     (JPEG, PNG, GIF, WEBP, BMP, ICO). AVIF is deliberately NOT in that table, so a mislabelled
-//     AVIF stays a block: strict where the spec is silent.
+//     (JPEG, PNG, GIF, WEBP, BMP, ICO) or an ISO-BMFF image brand (AVIF/HEIC «ftyp» box), which
+//     Chromium's ORB lets through (it blocks only bodies that sniff as html/xml/json) and decodes —
+//     masar and squares serve WordPress .avif files as text/plain (card-photos-render-pr run on PR 10912, 2026-11-06).
 export function orbImageVerdict(contentType: string, nosniff: boolean, head: Uint8Array): string | null {
   const ct = (contentType || '').toLowerCase().split(';')[0].trim();
   if (ct.startsWith('image/')) return null;
@@ -54,7 +55,9 @@ export function orbImageVerdict(contentType: string, nosniff: boolean, head: Uin
   const at = (i: number, ...xs: number[]) => xs.every((x, k) => b[i + k] === x);
   const isImage = at(0, 0xff, 0xd8, 0xff) || at(0, 0x89, 0x50, 0x4e, 0x47) || at(0, 0x47, 0x49, 0x46, 0x38)
     || (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) || at(0, 0x42, 0x4d)
-    || at(0, 0x00, 0x00, 0x01, 0x00);
+    || at(0, 0x00, 0x00, 0x01, 0x00)
+    || (at(4, 0x66, 0x74, 0x79, 0x70) && ['avif', 'avis', 'heic', 'heix', 'mif1']
+      .includes(String.fromCharCode(b[8] ?? 0, b[9] ?? 0, b[10] ?? 0, b[11] ?? 0)));
   return isImage ? null : 'body does not sniff as an image';
 }
 // PURE. A platform passes when the MAJORITY of its sampled listings render (a platform-wide block
@@ -254,6 +257,11 @@ mustCatch('text/plain + nosniff over a JPEG scored as rendering (ORB blocks it)'
   orbImageVerdict('text/plain; charset=utf-8', true, JPEG) === null);
 mustCatch('an HTML error page labelled octet-stream scored as rendering',
   orbImageVerdict('application/octet-stream', false, HTML) === null);
+const AVIF = new Uint8Array([0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66]);
+const MP4 = new Uint8Array([0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+mustCatch('masar/squares: a WordPress AVIF labelled text/plain (no nosniff) scored broken',
+  orbImageVerdict('text/plain', false, AVIF) !== null);
+mustCatch('an mp4 «ftyp isom» box scored as an image', orbImageVerdict('', false, MP4) === null);
 mustCatch('a text/html label scored as rendering', orbImageVerdict('text/html', false, JPEG) === null);
 
 console.log(`\n${measured} platform(s) with photos checked, ${noPhoto} without photos skipped, `

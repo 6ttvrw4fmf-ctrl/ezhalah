@@ -33,3 +33,22 @@ def test_broken_is_most_decided_links_and_needs_five():
 
 def test_dwelleo_is_a_small_source():
     assert "dwelleo" in S.small_sources()
+
+
+def test_a_redirect_to_the_same_ads_new_address_is_ok():
+    """falcon 2026-11-06, run 42277626207: dallali 16/17 and erapulse 20/20 read «moved» and raised
+    P1 served_links_broken, yet every one landed on the SAME ad under the site's new pretty URL."""
+    dal = "https://dallali.com/advertisements/property/7f22c416-6857-44cc-988b-0a143507bc1d"
+    dal_new = ("https://dallali.com/advertisements/villa-for-sale-%D8%A8%D8%AF%D8%B1-"
+               "%D8%A7%D9%84%D8%B1%D9%8A%D8%A7%D8%B6-7f22c416")
+    era = "https://erapulse.sa/property/hy-alsfa-duplex-rent-ref-mlu12xet-cd3sx"
+    era_new = ("https://erapulse.sa/%D8%A7%D9%84%D8%B9%D9%82%D8%A7%D8%B1%D8%A7%D8%AA/"
+               "x-REF-MLU12XET-CD3SX")
+    assert S.classify(dal, 200, dal_new) == "ok"
+    assert S.classify(era, 200, era_new) == "ok"
+    # another ad's address on the same site, another site, or a page with no id stays «moved»
+    assert S.classify(dal, 200, "https://dallali.com/advertisements/villa-for-sale-x-9a9b9c9d") == "moved"
+    assert S.classify(dal, 200, "https://other.com/x-7f22c416") == "moved"
+    assert S.classify(era, 200, "https://erapulse.sa/%D8%A7%D9%84%D8%B9%D9%82%D8%A7%D8%B1%D8%A7%D8%AA") == "moved"
+    # slug words are not ids: dwelleo's slug move is still a repairable «moved»
+    assert S.classify(OLD, 200, NEW) == "moved"
