@@ -1653,3 +1653,11 @@ check every recheck pass gap against REPROBE_MIN_HOURS (guard in #10474), and pi
 not after (three applies on one night). Also from 🔧: `stale_coverage_gate` in mark_stale_listings_inactive has no
 dormant/retired skip and nothing resolves its keys — sadin/senan/snam (all dormant) raised at 05:15 can never close
 until the same registry skip and a `mon_resolve_stale_keys('stale_coverage_gate', live)` land in that function.
+
+## Lesson from 2026-11-06 (🦅 Falcon)
+`served-link-check` raised P1 `served_links_broken` for dallali (16/17) and erapulse (20/20), yet every «moved»
+link landed on the SAME ad under the site's new pretty URL (a UUID → a slug ending in its first block;
+`ref-mlu12xet-cd3sx` → `REF-MLU12XET-CD3SX`). A same-site landing that carries the ad's own id token is now `ok`
+(`same_ad_redirect`, PR 10912), and every moved link prints its landing page. Before raising a broken-link
+alert, open three of the moved landings and ask whether it is the same ad.
+
