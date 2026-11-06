@@ -369,6 +369,11 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    were the same ad under a new pretty URL. Before fixing the product, open three of the failures the way the
    browser does. A detector that cries wolf hides the real bug next to it (justsa's real 404 photos).
 
+32. Count DISTINCT listings, never runs (11-06): ten `customer-journey --sample 8` runs reported 80 PASS and had
+   tested 10 listings per mode, because the sample was each site's newest rows in a fixed order. PR 10953 makes it
+   a seeded shuffle (the seed is printed). Before you write «N/100 real listings found», count the distinct
+   `listing` keys across your runs' logs.
+
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,
   the quick searches show 0 missing / extra / duplicates / count mismatches, ≥ 99 of 100 real listings were found in each
