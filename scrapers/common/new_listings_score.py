@@ -333,7 +333,9 @@ def label_value_lines(lines: list[str], kw: str) -> list[str]:
     out = list(lines)
     for i, x in enumerate(lines[:-1]):
         m = re.search(kw, x)
-        if m and len(re.sub(kw, "", x).split()) <= 1 and len(x) <= 24 and _FACADE_VALUE_START.match(lines[i + 1]):
+        rest = re.sub(r"[:：\-–|]", " ", re.sub(kw, "", x)).split()      # «واجهة العقار :» — the colon is not a word
+        if m and len(rest) <= 1 and len(x) <= 24 and not (rest and _FACADE_VALUE_START.match(rest[0])) \
+                and _FACADE_VALUE_START.match(lines[i + 1]):           # «واجهة جنوبية» already holds its value
             out[i] = x + " : " + lines[i + 1]
     return out
 

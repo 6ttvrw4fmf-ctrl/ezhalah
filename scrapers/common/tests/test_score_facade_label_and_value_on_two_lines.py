@@ -45,3 +45,14 @@ def test_only_a_bare_label_is_joined():
 def test_a_district_after_the_label_is_not_its_value():
     kw = r"واجهه|الاتجاه"
     assert label_value_lines(["واجهه العقار", "الحي الشرقي"], kw) == ["واجهه العقار", "الحي الشرقي"]
+
+
+def test_a_label_with_a_trailing_colon_is_still_bare():
+    kw = r"واجهه|الاتجاه"
+    assert label_value_lines(["واجهه العقار :", "جنوبيه"], kw) == ["واجهه العقار : : جنوبيه", "جنوبيه"]
+    assert _v(None, "جنوبية") == "we_miss"
+
+
+def test_a_label_that_already_holds_its_value_is_not_joined():
+    kw = r"واجهه|الاتجاه"
+    assert label_value_lines(["واجهه جنوبيه", "شماليه"], kw) == ["واجهه جنوبيه", "شماليه"]
