@@ -70,7 +70,7 @@ ROOT = Path(__file__).resolve().parents[2]
 JOURNEY = ROOT / "e2e/engineers/customer-journey.mjs"
 # The REGA AD licence (7xxxxxxxxx), never the broker's FAL licence (1xxxxxxxxx) printed beside it: muhaysini 34988
 # prints «رقم رخصة فال: 1200025871 رقم ترخيص الاعلان: 7200990751» (smoke run 2026-11-06).
-AD_LICENCE = re.compile(r"(?:ترخيص (?:ال)?[اإ]علان|رخص[ةه] (?:ال)?[اإ]علان|رقم الترخيص|رقم ترخيص|"
+AD_LICENCE = re.compile(r"(?:ترخيص (?:ال)?[اإ]علان|رخص[ةه] (?:ال)?[اإ]علان|رقم الترخيص(?!\s*فال)|رقم ترخيص(?!\s*فال)|"
                         r"ad(?:vertis\w*)? licen[cs]e|advertising licen[cs]e)[^\d\n]{0,30}(\d{10})(?!\d)", re.I)
 LICENCE = re.compile(r"(?:رخص|ترخيص|licen[cs]e|rega)[^\d\n]{0,40}(7\d{9})(?!\d)", re.I)
 _DIG = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
@@ -151,8 +151,8 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
         v = src.get(f, UNREADABLE if page is None else PAGE_SILENT)
         if f == "price" and platform in SKIP_PRICE:
             v = PAGE_SILENT          # owner 10-02: stays are priced by length, the card shows a note, never a figure
-        elif card is not None and v != UNREADABLE and card_shows(f, stored, card.get("text", "")) is False:
-            v = CARD_MISSING         # we store it (and the page may agree), the customer does not see it
+        elif card is not None and v == MATCH and card_shows(f, stored, card.get("text", "")) is False:
+            v = CARD_MISSING         # the page and our row agree, the customer does not see it
         out[f] = v
     # licence: the page's 10-digit REGA ad licence must be ours and on the card
     lic, plic = stored_licence(stored), (licence_on_page(page.get("_text", "")) if page else None)
@@ -160,7 +160,7 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
     if page is None:
         out["licence"] = UNREADABLE
     elif not plic:
-        out["licence"] = CARD_MISSING if (lic and shown is False) else PAGE_SILENT
+        out["licence"] = PAGE_SILENT
     elif not lic:
         out["licence"] = WE_MISS
     elif lic != plic:
@@ -169,7 +169,7 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
         out["licence"] = CARD_MISSING if shown is False else MATCH
     # photo: the source shows photos; the card must paint one
     has = card.get("photo") if card is not None else bool(stored.get("has_photo"))
-    if page is None:
+    if page is None or has is None:     # has None = the card photo was still loading: unknown, never missing
         out["photo"] = UNREADABLE
     elif not page_photo:
         out["photo"] = PAGE_SILENT
@@ -304,13 +304,17 @@ def run_journeys(picks: list[dict], log=print) -> dict[str, dict]:
         for line in lines:
             if not line.startswith("{"):
                 continue
-            r = json.loads(line)
+            try:
+                r = json.loads(line)
+            except ValueError:
+                log(f"  journey line cut short: {line[:120]}")
+                continue
             ev = r.get("evidence") or {}
             if ev.get("cardFull") is None:
                 log(f"  card unread {r.get('listing')}: {r.get('status')} {str(r.get('failedStep'))[:160]}")
                 continue
             fs = str(r.get("failedStep") or "")
-            out[r["listing"]] = {"text": ev["cardFull"], "photo": bool(ev.get("cardPhoto")),
+            out[r["listing"]] = {"text": ev["cardFull"], "photo": ev.get("cardPhoto"),
                                  "opened_ok": True if r.get("status") == "PASS" else (False if "≠ stored" in fs else None)}
     return out
 
@@ -336,10 +340,10 @@ class SourceReader:
             rp = robotparser.RobotFileParser()
             try:   # through the browser's own client: same honest UA, the browser's TLS trust store
                 resp = self._ctx.request.get(f"{u.scheme}://{host}/robots.txt", timeout=15000)
-                if resp.status in (401, 403):
-                    rp.disallow_all = True
+                if resp.status in (401, 403) or resp.status >= 500:
+                    rp.disallow_all = True    # RFC 9309: unreachable robots.txt (5xx) = complete disallow
                 elif resp.status >= 400:
-                    rp.allow_all = True       # no robots.txt (404/5xx) = no rule, the RFC 9309 default
+                    rp.allow_all = True       # no robots.txt (4xx) = no rule
                 else:
                     rp.parse(resp.text().splitlines())
             except Exception:  # noqa: BLE001 — robots unreadable: we do not guess, we do not read
@@ -400,54 +404,58 @@ def check(client, picks: list[dict], cards: dict[str, dict], reader: SourceReade
         plat, table, rid = p["platform"], p["source_table"], int(p["listing_id"])
         key = f"{table}:{rid}"
         row = rows.setdefault(plat, empty_row(night, plat))
-        stored, url = stored_of(client, table, rid)
-        card = cards.get(key)
-        row["card_read"] += card is not None
-        page, photo, link_kind, repaired, note = None, None, None, False, None
-        if p.get("pf"):
-            page, photo = pf_page(p["pf"])
-            link_kind = "ok"                      # picked FROM the source's own list at this very URL
-        elif url:
-            why, status, landed, body = reader.read(url)
-            if why == "ok":
-                link_kind = classify(url, status, landed)
-                if link_kind == "moved" and repairable(url, landed):
-                    repaired = True
-                    if write:
-                        client.table(table).update({"listing_url": landed}).eq("id", rid).execute()
-                if status == 200 and body and not closed_ad_page(plat, status, body):
-                    scoped = scope_to_its_ad(url, body)
-                    ev = page_evidence(scoped)
-                    if not (is_other_ads_page(stored, ev) or page_lacks_its_ad(url, scoped)):
-                        text = re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", scoped))
-                        page = {**ev, "_text": re.sub(r"\s+", " ", _html.unescape(text))}
-                        photo = bool(page_image_count(ev)) or bool((ev.get("meta") or {}).get("og:image"))
-            else:
-                note = why
-                print(f"  source not read {key}: {why}", flush=True)
-        if page is not None:
-            row["source_read"] += 1
-        v = judge(stored, card, page, platform=plat, link_kind=link_kind, link_repaired=repaired, page_photo=photo)
-        # REPAIR: the page and our row agree on the licence, only the card key lacks it → copy it (db.py's rule).
-        lic = stored_licence(stored)
-        if v["licence"] == CARD_MISSING and lic and not stored.get("card_licence") and write:
-            info = (client.table(table).select("additional_info").eq("id", rid).limit(1).execute().data or [{}])[0]
-            ai = info.get("additional_info")
-            if isinstance(ai, dict) or ai is None:
-                client.table(table).update({"additional_info": {**(ai or {}), "rega_ad_license_number": lic}}) \
-                    .eq("id", rid).execute()
-                v["licence"] = REPAIRED
-        row["repaired"] += sum(1 for x in v.values() if x == REPAIRED)
-        evidence = {f: {"stored": stored.get(c)}
-                    for f, c in (("price", "price_total"), ("area", "area_m2"), ("bedrooms", "bedrooms"),
-                                 ("bathrooms", "bathrooms"), ("city", "city_ar"), ("district", "district_ar"),
-                                 ("rent_period", "rent_period_ar"))}
-        evidence["licence"] = {"stored": lic, "page": licence_on_page(page.get("_text", "")) if page else None}
-        evidence["link"] = {"url": url}
-        fold(row, key, v, evidence)
-        if note:
-            row["note"] = f"source not read: {note}"
-        print(f"  {key}: " + " ".join(f"{f}={x}" for f, x in v.items() if x not in (MATCH, PAGE_SILENT)), flush=True)
+        try:
+            stored, url = stored_of(client, table, rid)
+            card = cards.get(key)
+            row["card_read"] += card is not None
+            page, photo, link_kind, repaired, note = None, None, None, False, None
+            if p.get("pf"):
+                page, photo = pf_page(p["pf"])
+                link_kind = "ok"                      # picked FROM the source's own list at this very URL
+            elif url:
+                why, status, landed, body = reader.read(url)
+                if why == "ok":
+                    link_kind = classify(url, status, landed)
+                    if link_kind == "moved" and repairable(url, landed):
+                        repaired = True
+                        if write:
+                            client.table(table).update({"listing_url": landed}).eq("id", rid).execute()
+                    if status == 200 and body and not closed_ad_page(plat, status, body):
+                        scoped = scope_to_its_ad(url, body)
+                        ev = page_evidence(scoped)
+                        if not (is_other_ads_page(stored, ev) or page_lacks_its_ad(url, scoped)):
+                            text = re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", scoped))
+                            page = {**ev, "_text": re.sub(r"\s+", " ", _html.unescape(text))}
+                            photo = bool(page_image_count(ev)) or bool((ev.get("meta") or {}).get("og:image"))
+                else:
+                    note = why
+                    print(f"  source not read {key}: {why}", flush=True)
+            if page is not None:
+                row["source_read"] += 1
+            v = judge(stored, card, page, platform=plat, link_kind=link_kind, link_repaired=repaired, page_photo=photo)
+            # REPAIR: the page and our row agree on the licence, only the card key lacks it → copy it (db.py's rule).
+            lic = stored_licence(stored)
+            if v["licence"] == CARD_MISSING and lic and not stored.get("card_licence") and write:
+                info = (client.table(table).select("additional_info").eq("id", rid).limit(1).execute().data or [{}])[0]
+                ai = info.get("additional_info")
+                if isinstance(ai, dict) or ai is None:
+                    client.table(table).update({"additional_info": {**(ai or {}), "rega_ad_license_number": lic}}) \
+                        .eq("id", rid).execute()
+                    v["licence"] = REPAIRED
+            row["repaired"] += sum(1 for x in v.values() if x == REPAIRED)
+            evidence = {f: {"stored": stored.get(c)}
+                        for f, c in (("price", "price_total"), ("area", "area_m2"), ("bedrooms", "bedrooms"),
+                                     ("bathrooms", "bathrooms"), ("city", "city_ar"), ("district", "district_ar"),
+                                     ("rent_period", "rent_period_ar"))}
+            evidence["licence"] = {"stored": lic, "page": licence_on_page(page.get("_text", "")) if page else None}
+            evidence["link"] = {"url": url}
+            fold(row, key, v, evidence)
+            if note:
+                row["note"] = f"source not read: {note}"
+            print(f"  {key}: " + " ".join(f"{f}={x}" for f, x in v.items() if x not in (MATCH, PAGE_SILENT)), flush=True)
+        except Exception as e:  # noqa: BLE001 — one ad failing never loses the chunk; its row says so
+            row["note"] = f"error on {key}: {type(e).__name__}: {e}"[:300]
+            print(f"  {key}: error {type(e).__name__}: {e}", flush=True)
     return rows
 
 
@@ -473,7 +481,7 @@ def main() -> int:
     sites = wanted or (active if a.all else [p for p in active if slot_of(p) == slot])
     print(f"card parity: {len(sites)} website(s) (slot {slot}/{SLOTS}, {len(active)} active)", flush=True)
 
-    types, totals = tappable_types(), {"ads": 0, "cards": 0, "sources": 0, "sites": 0}
+    types, totals = tappable_types(), {"ads": 0, "cards": 0, "sources": 0, "sites": 0, "pick_errors": 0}
     reader = SourceReader()
     try:
         # One chunk = one journey batch (<= 12 ads): pick, check the database is quiet, open the cards, read the
@@ -487,6 +495,7 @@ def main() -> int:
                            else pick(client, p, rng, types, a.per_site))
                 except Exception as e:  # noqa: BLE001 — one website failing never stops the fleet
                     got, rows[p] = [], empty_row(night, p, note=f"pick error: {type(e).__name__}: {e}"[:300])
+                    totals["pick_errors"] += 1
                 if not got and p not in rows:
                     rows[p] = empty_row(night, p, note="no served ad the Filter can reach (city + district + tappable type)")
                 picks += got
@@ -512,6 +521,8 @@ def main() -> int:
         reader.close()
     print(f"{len(sites)} website(s), {totals['ads']} ad(s), {totals['cards']} card(s) read, "
           f"{totals['sources']} source page(s) read", flush=True)
+    if totals["pick_errors"] and not totals["ads"]:
+        return 1                  # nothing sampled because picking failed: a red run, never a quiet green
     return 0 if totals["sites"] or not totals["ads"] else 1
 
 

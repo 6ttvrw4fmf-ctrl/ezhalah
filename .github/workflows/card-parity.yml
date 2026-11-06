@@ -31,6 +31,7 @@ on:
   pull_request:
     paths:
       - scrapers/common/card_parity.py
+      - e2e/engineers/customer-journey.mjs
       - .github/workflows/card-parity.yml
 
 permissions:

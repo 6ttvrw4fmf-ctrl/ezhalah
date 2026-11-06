@@ -80,3 +80,21 @@ def test_the_ad_licence_is_read_never_the_brokers_fal_licence():
     page = "معلومات موثوقة من الهيئة العامة للعقار: رقم رخصة فال: 1200025871 رقم ترخيص الاعلان: 7200990751 تاريخ"
     assert cp.licence_on_page(page) == "7200990751"
     assert cp.licence_on_page("رخصة فال: 1200025871") is None
+
+
+def test_a_fal_label_with_the_word_tarkhees_is_not_the_ad_licence():
+    assert cp.licence_on_page("رقم ترخيص فال: 1200025871") is None
+
+
+def test_card_missing_only_when_the_source_agrees():
+    bare = {**CARD, "text": "SAR 850,000"}                     # the card prints no area / district / licence
+    silent = {**PAGE, "evidence_lines": ["شقة"], "text_head": "شقة", "_text": "شقة"}
+    v = _judge(card=bare, page=silent, photo=False)
+    assert v["licence"] == PAGE_SILENT and v["area"] != cp.CARD_MISSING
+    lines = [x.replace("140", "300") for x in LINES]
+    v = _judge(card=bare, page={**PAGE, "evidence_lines": lines, "text_head": " | ".join(lines)})
+    assert v["area"] == MISMATCH                                # a source disagreement stays in its own lane
+
+
+def test_a_photo_still_loading_is_unknown_not_missing():
+    assert _judge(card={**CARD, "photo": None})["photo"] == UNREADABLE

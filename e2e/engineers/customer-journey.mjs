@@ -390,8 +390,17 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       // its photo painted (a loaded <img> wider than an icon, and no «لا توجد صورة» placeholder).
       if (CARD_FULL) {
         result.evidence.cardFull = text.slice(0, 4000);
-        result.evidence.cardPhoto = !text.includes('لا توجد صورة') && await card.first().evaluate((el) =>
-          [...el.querySelectorAll('img')].some((i) => i.complete && i.naturalWidth > 64));
+        // Photos load lazily: bring the card into view and wait (<= 8 s) for a painted photo or the placeholder.
+        // Still neither → null (unknown), never «missing».
+        await card.first().scrollIntoViewIfNeeded().catch(() => {});
+        result.evidence.cardPhoto = await card.first().evaluate(async (el) => {
+          for (let t = 0; t < 16; t++) {
+            if (/لا توجد صورة/.test(el.textContent || '')) return false;
+            if ([...el.querySelectorAll('img')].some((i) => i.complete && i.naturalWidth > 64)) return true;
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          return null;
+        }).catch(() => null);
       }
       step('click card');
       const link = card.first().getByRole('link').first();
