@@ -347,7 +347,7 @@ def facade_adjectives(stored) -> Optional[str]:
     bases = [w[:-1] if w.endswith("ي") else w for w in words]
     if not bases or len(bases) > 2 or any(b not in _FACADE_BASES for b in bases):
         return None
-    return (r"(?<![\u0621-\u064A])" + r"\s*[-–/،,]?\s*(?:و)?".join(b + r"(?:يه|ي)?" for b in bases)
+    return (r"(?<![\u0621-\u064A])" + r"\s*[-–/،,]?\s*(?:و)?".join(r"(?:ال)?" + b + r"(?:يه|ي)?" for b in bases)
             + r"(?![\u0621-\u064A])")
 
 

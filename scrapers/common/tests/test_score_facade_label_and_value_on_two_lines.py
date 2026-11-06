@@ -56,3 +56,7 @@ def test_a_label_with_a_trailing_colon_is_still_bare():
 def test_a_label_that_already_holds_its_value_is_not_joined():
     kw = r"واجهه|الاتجاه"
     assert label_value_lines(["واجهه جنوبيه", "شماليه"], kw) == ["واجهه جنوبيه", "شماليه"]
+
+
+def test_a_definite_bearing_value_matches():
+    assert _v("جنوب شرق", "الجنوبية الشرقية") == "match"
