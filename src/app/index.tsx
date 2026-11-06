@@ -1250,6 +1250,9 @@ export default function Home() {
         const { cohortAllows } = await import('@/lib/afCohorts');
         if (!live) return;
         if (!cohortAllows(furnBase, 'furnished')) { setFurnRow(null); return; }
+        // No city yet → the choices, no numbers (owner 2026-11-05: nationwide numbers before a city read as a surprise, and
+        // «بحث» needs a city anyway). The numbers appear the moment a city is picked.
+        if (citySelected == null) { setFurnRow({}); return; }   // («!citySelected» is the search gate's own text — verify-city-rehydration)
         const c = await fetchApartmentGuidedCounts(furnBase);
         if (!live) return;
         // A count that failed is UNKNOWN: the choices still show, without numbers — never a made-up 0.
@@ -1262,7 +1265,7 @@ export default function Home() {
     }, 350);
     return () => { live = false; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [furnKey, furnCanAsk]);
+  }, [furnKey, furnCanAsk, citySelected]);
   // A hidden row never leaves a hidden filter behind (Buy, short stays, commercial, a type it does not apply to).
   useEffect(() => {
     if (furnRow === null && query.furnishedPref != null) setQuery((q) => ({ ...q, furnishedPref: null }));
@@ -1270,7 +1273,8 @@ export default function Home() {
   }, [furnRow, query.furnishedPref]);
   const furnShown = furnRow !== null && furnRow !== 'pending';
   const furnCounts = furnShown ? (furnRow as FurnRow) : {};
-  const furnBadge = (n?: number) => (n == null ? null : `${n.toLocaleString('en-US')} ${t('ads')}`);
+  // the number alone: «49,596 إعلان» was cut to «… 49,596» on a 578 px screen (live walk 2026-11-05); the row's note says what it counts
+  const furnBadge = (n?: number) => (n == null ? null : n.toLocaleString('en-US'));
   const furnUnknown = furnCounts.total != null && furnCounts.yes != null && furnCounts.no != null
     ? Math.max(0, furnCounts.total - furnCounts.yes - furnCounts.no) : null;
   // Whatever the user chose (a size band) or typed (a custom number) is mirrored INTO the size box so

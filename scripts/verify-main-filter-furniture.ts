@@ -59,6 +59,8 @@ check('counts use the search\'s own scope: buildFilterBaseQuery() + the picked d
 check('a failed count shows the choices WITHOUT numbers (never a 0)',
   /c && !isProbeFailure\(c\)[\s\S]{0,140}: \{\}\);/.test(home) && /if \(live\) setFurnRow\(\{\}\);/.test(home)
   && /n == null \? null :/.test(home));
+check('before a city is picked the row shows its choices WITHOUT numbers (no surprising nationwide counts)',
+  /if \(citySelected == null\) \{ setFurnRow\(\{\}\); return; \}/.test(home));
 check('a hidden row clears furnishedPref (no invisible filter)',
   /if \(furnRow === null && query\.furnishedPref != null\) setQuery\(\(q\) => \(\{ \.\.\.q, furnishedPref: null \}\)\);/.test(home));
 check('the three choices write furnishedPref null / true / false',
@@ -92,6 +94,7 @@ const mutants: Array<[string, string, RegExp]> = [
   ['the question asks twice', furnQ.replace(' && q.furnishedPref == null', ''), /eligibility: \(q\) => cohortAllows\(q, 'furnished'\) && q\.furnishedPref == null/],
   ['the row counts with the user\'s own furniture pick', home.replace('fetchApartmentGuidedCounts(furnBase)', 'fetchApartmentGuidedCounts(query)'), /fetchApartmentGuidedCounts\(furnBase\)/],
   ['a hidden row keeps its filter', home.replace('if (furnRow === null && query.furnishedPref != null)', 'if (false)'), /if \(furnRow === null && query\.furnishedPref != null\)/],
+  ['nationwide numbers show before a city is picked', home.replace('if (citySelected == null) { setFurnRow({}); return; }', ''), /if \(citySelected == null\) \{ setFurnRow\(\{\}\); return; \}/],
   ['the counts lose the picked city again', home.replace('const base = buildFilterBaseQuery();', 'const base = null as SearchQuery | null;'), /const base = buildFilterBaseQuery\(\);/],
 ];
 // each mutant is the real source with one defect planted; the guard's own predicate must reject it

@@ -370,7 +370,7 @@ const s = StyleSheet.create({
   // Softer, larger, green-tinted elevation for the selected chip (premium depth vs the old hard shadow).
   boxShadow: { shadowColor: colors.primary, shadowOpacity: 0.24, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 5 },
   boxText: { fontSize: 12.5, fontWeight: '600', lineHeight: 16, textAlign: 'center' },
-  boxBadge: { marginTop: 5, fontSize: 11, fontWeight: '600', lineHeight: 15, paddingHorizontal: 8, paddingVertical: 1, borderRadius: 999, overflow: 'hidden', textAlign: 'center' },
+  boxBadge: { marginTop: 5, fontSize: 11, fontWeight: '600', lineHeight: 15, paddingHorizontal: 7, paddingVertical: 1, borderRadius: 999, overflow: 'hidden', textAlign: 'center', maxWidth: '100%' },
   boxTextOn: { fontWeight: '700' }, // selected state reinforced by weight, not colour alone (skill a11y rule)
   // ENGLISH (owner 2026-10-09: ChatGPT-sized, not heavy). Latin at 12.5/600 reads louder than the Arabic and
   // «Apartments» (~73px) overflowed the ~67px column of a 3-per-row tile into «Apartmen…»: 12/500 with 6px side
