@@ -62,7 +62,7 @@ import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { classifySkip, NOT_APPLICABLE, runFails, unknownColumnFilter } from './lib/afLiveSkipLedger.ts';
-import { buildOracleQS, AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
+import { buildOracleQS, AMENITY_TOKEN_COL, AMENITY_TOKEN_DERIVED } from './lib/afOracleFilter.ts';
 import { chipArabicLabel } from './lib/afChipLabels.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
@@ -140,6 +140,9 @@ const EXPECTED_LABEL: Record<string, string[]> = {
   gym: ['صالة رياضية'], pool: ['مسبح'], garden: ['حديقة'], balcony: ['بلكونة'],
   laundry_room: ['غرفة غسيل'], optical_fibers: ['ألياف بصرية'],
   separate_electricity_meter: ['عداد كهرباء مستقل'], separate_water_meter: ['عداد ماء مستقل'],
+  // the building-size derived tokens (src/data/advancedFilters.ts «🏢 كم عدد الشقق؟» / «🏪 فيه محلات»), not in CHIP_DEFS;
+  // labels read from src/i18n.tsx (🔬 2026-11-06)
+  apts4: ['٤ شقق فأكثر'], apts8: ['٨ شقق فأكثر'], apts12: ['١٢ شقة فأكثر'], apts20: ['٢٠ شقة فأكثر'], has_shops: ['فيه محلات'],
   '1': ['+1', '1+'], '2': ['+2', '2+'], '3': ['+3', '3+'], '4': ['+4', '4+'],
   '15': ['15 م فأكثر'], '20': ['20 م فأكثر'], '25': ['25 م فأكثر'], '30': ['30 م فأكثر'],
   'شمال': ['شمال'], 'جنوب': ['جنوب'], 'شرق': ['شرق'], 'غرب': ['غرب'],
@@ -162,7 +165,12 @@ type Rpc = 'guided' | 'age';
 // definition for all 20 tokens — so the mapping is a rule, not a list, and CANNOT drift again.
 // `rent_now_pay_later` is an ALIAS the clause accepts, never an option key the card renders; the
 // card's key is `rnpl`, which is in the map on its own.
-const AMENITY_KEYS = new Set(Object.keys(AMENITY_TOKEN_COL).filter((k) => k !== 'rent_now_pay_later'));
+// The DERIVED tokens (separate_meters, apts4…20, has_shops, the merged villa chips — one p_amenities slug over OTHER
+// columns) are options the card renders too, each with its own `cnt_<token>` (verified 2026-11-06 for all 14 against
+// apartment_guided_counts_ar). Missing here, «separate_meters» failed every run as an unknown key (af-card-state
+// 2.Q7, run 42216168119, alert 11763) — on a correct production. The oracle already builds their predicate.
+const AMENITY_KEYS = new Set([...Object.keys(AMENITY_TOKEN_COL), ...Object.keys(AMENITY_TOKEN_DERIVED)]
+  .filter((k) => k !== 'rent_now_pay_later'));
 const AMENITY_OPTION_COL = Object.fromEntries(
   [...AMENITY_KEYS].map((k) => [k, { rpc: 'guided' as Rpc, col: `cnt_${k}` }]),
 );
