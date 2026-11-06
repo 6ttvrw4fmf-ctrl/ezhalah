@@ -195,9 +195,15 @@ check(base.wired?.hard_deleted === 'gone', "_verify_gone: a deleted wp post is '
 //    would silently restore the original defect (absence alone deactivating).
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 const src = readFileSync(RUN_PY, 'utf8');
-check(/db\.prune_unseen\([\s\S]{0,200}?verify_gone=_verify_gone/.test(src),
-  'prune_unseen is called WITH verify_gone=_verify_gone',
+// Since 2026-11-06 (aqargate moved to its marketplace app) prune_unseen receives verify_gone_any,
+// which asks the marketplace record route for an ad with a marketplace id and falls back to the
+// WordPress oracle above for every other row. Both names are accepted; the fallback is pinned.
+check(/db\.prune_unseen\([\s\S]{0,200}?verify_gone=(_verify_gone|verify_gone_any)\b/.test(src),
+  'prune_unseen is called WITH verify_gone=_verify_gone (or verify_gone_any)',
   'the oracle exists but nothing passes it to prune_unseen — absence would deactivate again');
+check(!/verify_gone=verify_gone_any/.test(src) ||
+      /def verify_gone_any[\s\S]{0,600}?return _verify_gone\(ad_number\)/.test(src),
+  'verify_gone_any falls back to the WordPress oracle for an ad with no marketplace id');
 check(!/any Aqargate row not seen this run\s*\n?\s*#?\s*is gone/.test(src),
   'the "not seen this run ⇒ gone" rationale is gone from the prune comment');
 
