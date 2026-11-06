@@ -1002,6 +1002,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
             break
         if _strip_wa(w) in ("موقع", "الموقع", "موقعه", "موقعها", "موقعنا"):
             break                                    # «موقف سياره 🚗 موقع مميز قريب من الخدمات»: a new subject (dealapp 7439621)
+        if _strip_wa(w) in ("سعر", "السعر", "سوم", "السوم", "بيع", "البيع", "للبيع", "ايجار", "الايجار", "للايجار"):
+            break                                    # «ومسبح السوم مليون والبيع قريب»: the price / sale is the new subject (🔬 11-06)
         if _starts(w, _NEAR_AFTER):
             near_after = True
             break
@@ -1862,6 +1864,9 @@ def selftest() -> None:
         ("دقيقتين عن المول موقف خاص بالشقة", {"parking": True}, ()),
         ("قريب من مواقف خاصة بالمول", {}, ("parking",)),
         ("قريب من موقف خاص", {}, ("parking",)),
+        # a price / sale word starts a new subject: «والبيع قريب» is the sale, not a nearby pool (aqar 41587, 2026-11-06)
+        ("ونخل وبير ماء ومسبح السوم مليون والبيع قريب مكتب اتحاد النجاح للعقارات", {"pool": True}, ()),
+        ("وبالقرب من الجامع السوم ١٨٥ والبيع قريب باذن الله", {}, ("mosque",)),
         ("✅ لا يوجد مصعد. ✅ لا يوجد موقف خاص داخل العقار.", {"parking": False}, ()),
         ("دور كامل للإيجار", {"whole_floor": True}, ()),
         ("شقة في الدور الأول", {}, ("whole_floor",)),
