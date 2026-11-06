@@ -1,0 +1,30 @@
+# THE CARD-PHOTO RENDER CHECK, ON THE PR THAT CHANGES IT (falcon 2026-11-06).
+#
+# scripts/verify-card-photos-render-live.ts lives in af-live-truth-check.yml, a ~4 h browser run
+# with no pull_request trigger, so a change to how it judges a photo could only be proven the next
+# day. This runs the same script alone (~3 min, anon reads + image-host GETs, no browser, no npm
+# install, no secrets) whenever the script or the card's photo-url logic changes, and on demand.
+name: Card photos render (live, per PR)
+
+on:
+  pull_request:
+    paths:
+      - scripts/verify-card-photos-render-live.ts
+      - src/lib/photoUrl.ts
+      - .github/workflows/card-photos-render-pr.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  photos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Every active platform's DB photo renders the way a browser decides it
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-card-photos-render-live.ts
