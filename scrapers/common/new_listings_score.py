@@ -267,7 +267,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 # …and in JSON-LD, which never reaches `lines`: aqarcity 31207 (17802282, score 2026-11-06) publishes
                 # {"name": "الواجهة", "value": "جنوبية شرقية"} and we store «جنوب شرق». The label and its OWN value only
                 # (normalised: «"name": "الواجهه", "value": "جنوبيه شرقيه"») — never a bearing in another property's value.
-                if out[name] == MISMATCH and ar and re.search(r"(?:" + kw + r")[\"'\s,:]*(?:value[\"'\s,:]*)?" + ar, norm(whole)):
+                if out[name] == MISMATCH and ar and re.search(r"(?:" + kw + r")[\"' \t,:]*(?:value[\"' \t,:]*)?" + ar, norm(whole)):
                     out[name] = MATCH
     return out
 
