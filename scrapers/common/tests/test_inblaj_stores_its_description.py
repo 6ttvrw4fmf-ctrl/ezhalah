@@ -41,3 +41,16 @@ def test_the_old_matcher_no_longer_reads_the_prose():
     src = inspect.getsource(I.map_listing)
     assert "amenity_answers(desc" in src and 'row["description"] = desc' in src
     assert "amenities_from_text(dm" not in src
+
+
+def test_line_breaks_survive_into_the_stored_description():
+    """«بدون مكيفات<br>ومطبخ»: two lines, two facts — the break must reach the reader and the stored text."""
+    html = "<div>الوصف<br>شقة بدون مكيفات<br>ومطبخ راكب</div><div>المميزات</div>"
+    d = I.description_of(I.lines_text(html))
+    assert d == "شقة بدون مكيفات\nومطبخ راكب"
+    assert I.amenity_answers(d, I.PROSE_COLS, {}).get("kitchen") is True
+
+
+def test_short_prose_stops_at_the_first_section():
+    d = I.description_of(I.lines_text("<p>الوصف</p><p>فيلا مع مسبح</p><p>Playlist Sample Video</p>"))
+    assert d == "فيلا مع مسبح"

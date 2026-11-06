@@ -77,6 +77,17 @@ def visible_text(page_html: str) -> str:
     return t[:m.start()] if m else t
 
 
+def lines_text(page_html: str) -> str:
+    """visible_text with the page's own line breaks kept («<br>», block ends): the description is stored and re-read
+    line by line, and a break is a clause break to the reader («بدون مكيفات<br>ومطبخ» is two facts, not one negation)."""
+    b = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ", page_html, flags=re.S | re.I)
+    b = re.sub(r"<br\s*/?>|</(?:p|div|li|h[1-6])\s*>", "\n", b, flags=re.I)
+    t = ihtml.unescape(re.sub(r"<[^>]+>", " ", b))
+    t = "\n".join(ln for ln in (re.sub(r"[ \t\r\f\v]+", " ", x).strip() for x in t.split("\n")) if ln)
+    m = _SIMILAR_RE.search(t)
+    return t[:m.start()] if m else t
+
+
 # ── the labelled «تفاصيل العقار» fields ──────────────────────────────────────────────────────────
 # Variant A writes «نوع العرض: للبيع» (colon, next field also colon-terminated).
 # Variant B writes «نوع العقار استراحة المساحة 2144 م2» — NO colons at all, one field running
@@ -277,7 +288,7 @@ def photos(page_html: str) -> Optional[list[str]]:
 # The amenity columns the «الوصف» prose may answer (the same set the old matcher wrote).
 PROSE_COLS = ("air_conditioner", "balcony_terrace", "car_entrance", "driver_room", "elevator", "furnished", "kitchen",
               "laundry_room", "maid_room", "optical_fibers", "parking", "private_entrance")
-_DESC_RE = re.compile(r"الوصف\s*(.{20,2500}?)(?=Playlist|المميزات|عروض مشابهه|احجز|اتصل بنا|$)", re.S)
+_DESC_RE = re.compile(r"الوصف\s*(.{0,2500}?)(?=Playlist|المميزات|عروض مشابهه|احجز|اتصل بنا|$)", re.S)
 
 
 def description_of(text: str) -> Optional[str]:
@@ -406,7 +417,7 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
     # listings were blind to every filter question until this. The description is read only up to
     # the next section heading so a «عروض مشابهه» block can never leak another listing's features
     # in, and an amenity already stated by «المرافق» is not overwritten by the prose.
-    desc = description_of(text)
+    desc = description_of(lines_text(page_html))
     if desc:
         # ONE READER (owner 2026-11-03): the prose is read by the Advanced Filter's word reader, never the older
         # normalize.amenities_from_text; and the text itself is STORED (🔬 2026-11-06) — every safera row had
