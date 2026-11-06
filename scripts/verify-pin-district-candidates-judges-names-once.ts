@@ -28,7 +28,7 @@ export function problems(sql: string): string[] {
     let depth = 1, i = start;
     while (i < body.length && depth > 0) { if (body[i] === '(') depth++; else if (body[i] === ')') depth--; i++; }
     const cte = body.slice(start, i);
-    const needs = /district_is_own_town\s*\(/i.test(cte) || name === 'blank' || name === 'shared';
+    const needs = /district_is_own_town\s*\(/i.test(cte) || name === 'own_town' || name === 'blank' || name === 'shared';
     if (needs && !m[2]) out.push(`CTE «${name}» is not MATERIALIZED`);
   }
   return out;
@@ -52,5 +52,6 @@ function mutation(name: string, sql: string): void {
 const prefix = defining.find((f) => f.startsWith('20261105093525'));
 if (prefix) mutation('the pre-fix definition 20261105093525', readFileSync(join(DIR, prefix), 'utf8'));
 mutation('shared renamed (and not MATERIALIZED)', readFileSync(join(DIR, latest), 'utf8').replace(/shared\s+as\s+materialized/i, 'shared2 as').replace(/from shared x/i, 'from shared2 x'));
+mutation('own_town not MATERIALIZED after its call moved out', readFileSync(join(DIR, latest), 'utf8').replace(/own_town\s+as\s+materialized/i, 'own_town as').replace(/public\.district_is_own_town\(t\.city_id, t\.site_district\) as ok/i, 'true as ok'));
 mutation('own_town without MATERIALIZED', readFileSync(join(DIR, latest), 'utf8').replace(/own_town\s+as\s+materialized/i, 'own_town as'));
 console.log('verify-pin-district-candidates-judges-names-once: OK');
