@@ -38,10 +38,14 @@ const bad = problems(readFileSync(join(DIR, latest), 'utf8'));
 if (bad.length) { console.error(`✗ ${latest}: ${bad.join('; ')}`); process.exit(1); }
 console.log(`✓ ${latest}: own_town, blank and shared are MATERIALIZED`);
 
-const prefix = defining.find((f) => f.startsWith('20261105093525'));
-if (prefix) {
-  const old = problems(readFileSync(join(DIR, prefix), 'utf8'));
-  if (!old.length) { console.error('✗ mutation proof: the pre-fix definition (20261105093525) passes — the check is blind'); process.exit(1); }
-  console.log(`✓ mutation proof: the pre-fix definition fails (${old.join('; ')})`);
+// Mutation proof: the barrier's own predicate must CATCH the pre-fix definition (CTEs not MATERIALIZED) and a
+// synthetic mutant that strips MATERIALIZED from the current one.
+function mutation(name: string, sql: string): void {
+  const found = problems(sql);
+  if (!found.length) { console.error(`✗ mutation not caught: ${name}`); process.exit(1); }
+  console.log(`✓ mutation caught: ${name} (${found.join('; ')})`);
 }
+const prefix = defining.find((f) => f.startsWith('20261105093525'));
+if (prefix) mutation('the pre-fix definition 20261105093525', readFileSync(join(DIR, prefix), 'utf8'));
+mutation('own_town without MATERIALIZED', readFileSync(join(DIR, latest), 'utf8').replace(/own_town\s+as\s+materialized/i, 'own_town as'));
 console.log('verify-pin-district-candidates-judges-names-once: OK');
