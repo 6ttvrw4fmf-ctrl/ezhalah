@@ -39,12 +39,23 @@ try {
         const mk = window.mapkit; const m = mk.maps[mk.maps.length - 1];
         m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(lat, lng), new mk.CoordinateSpan(span, span)), false);
       }, { lat: spot.lat, lng: spot.lng, span });
-      // Settled = the set of heads has not changed for 1.5 s (the map reads, merges and draws after the move ends).
-      await page.waitForFunction(() => {
-        const sig = [...document.querySelectorAll('[data-testid=map-pin]')].map((e) => e.textContent).join('|') + '#' + (document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '');
+      // Settled = the map has DRAWN something (a head, a bubble or the count pill) and the set has not changed for 1.5 s.
+      // A blank map is not settled: its signature is stable from the first frame, and the pins RPC answers only after the
+      // move ends (854 ms measured 14:23 UTC 2026-11-06 under the hourly index sync) — run 42233389216 read «0 pins» on
+      // every view 0.3 s before the first answer arrived, then sped through the next views on the previous view's clock.
+      // So: the clock restarts for every view, and what was painted BEFORE the move (the previous view's heads and pill
+      // stay until the new read lands) does not count — the HEADS must change at least once, or 12 s must pass. The
+      // heads alone are the signal: the count pill is written by a separate place read and can move on its own.
+      const readHeads = () => [...document.querySelectorAll('[data-testid=map-pin], [data-testid=map-bubble]')].map((e) => e.textContent).join('|');
+      const readPill = () => document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '';
+      await page.evaluate((readHeads) => { const w = window; w.__headsBefore = eval(readHeads)(); w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); }, readHeads.toString());
+      await page.waitForFunction(({ readHeads, readPill }) => {
+        const heads = eval(readHeads)(); const sig = heads + '#' + eval(readPill)();
         const w = window; if (w.__pinSig !== sig) { w.__pinSig = sig; w.__pinAt = performance.now(); return false; }
-        return performance.now() - w.__pinAt > 1500;
-      }, null, { timeout: 25_000, polling: 100 }).catch(() => {});
+        // Unchanged heads: the 1.5 s stability clock starts when the 12 s gate opens, not at the first poll.
+        const since = heads === w.__headsBefore ? Math.max(w.__pinAt, w.__pinT0 + 12_000) : w.__pinAt;
+        return performance.now() - since > 1500;
+      }, { readHeads: readHeads.toString(), readPill: readPill.toString() }, { timeout: 25_000, polling: 100 }).catch(() => {});
       const seen = await page.evaluate(() => {
         // THE VISIBLE MAP, not the viewport (🔧 2026-11-06, diag 42226056422): MapKit draws heads under the map's own
         // control strip («شراء» / «تصفية», above the canvas) and past its right edge; those a user cannot see or reach
