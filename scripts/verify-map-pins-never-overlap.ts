@@ -124,7 +124,7 @@ const map = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const mergeAt = map.indexOf('if (drawCell === 0) rows = mergeOverlapping(rows, onScreen, headWidth);');
 check('the map merges touching heads BEFORE it draws them (street zoom)', mergeAt > 0 && mergeAt < map.indexOf('const next = new Map<string, PinRow>(); for (const row of rows) next.set(keyOf(row), row);'));
 check('heads are measured in the font they are drawn in, through MapKit\'s own projection', /measure\.font = '600 11px -apple-system,system-ui,sans-serif'/.test(map) && /convertCoordinateToPointOnPage/.test(map.slice(map.indexOf('const onScreen'), map.indexOf('const onScreen') + 600)));
-check('the count pill reads viewCountText() with the view\'s place', /viewCountText\(pinCount, viewPlace, locale === 'ar' \? 'ar' : 'en'\)/.test(map) && /setViewPlace\(viewPlaceName\(p, loc, translitPlace\)\)/.test(map));
+check('the count pill reads viewCountText() with the view\'s place', /viewCountText\(placeCount \?\? pinCount, viewPlace, locale === 'ar' \? 'ar' : 'en'\)/.test(map) && /setViewPlace\(viewPlaceName\(p, loc, translitPlace\)\)/.test(map));
 
 if (failed) { console.error(`\n❌ verify-map-pins-never-overlap: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-map-pins-never-overlap: no two pins sit on each other, and the pill names the district');

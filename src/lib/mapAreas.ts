@@ -173,7 +173,14 @@ export const CROWD_ESTIMATE = 1500;
 export const AREA_PLACE_SHARE = 0.6;
 export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
   center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): string | null {
-  if (level === 'country') return COUNTRY_NAME[loc];
+  return areaPlace(rows, level, loc, latin, center, span)?.name ?? null;
+}
+/** The named place AND its own count. The pill prints THIS count beside the name — measured live 2026-11-05 it said
+ *  «14,531 إعلان في حي النرجس» (every district in view) where النرجس alone holds ~5,900, and «127,013 … في منطقة
+ *  الرياض» where the region holds 108K. A number beside a name is that place's number. */
+export function areaPlace(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
+  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): { name: string; n: number } | null {
+  if (level === 'country') { const n = rows.reduce((t, a) => t + a.n, 0); return n > 0 ? { name: COUNTRY_NAME[loc], n } : null; }
   const onScreen = rows.filter((a) => inView(a, center, span));
   const seen = onScreen.length ? onScreen : rows;
   const total = seen.reduce((t, a) => t + a.n, 0);
@@ -181,13 +188,15 @@ export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en
   const top = seen.reduce((b, a) => (a.n > b.n ? a : b));
   if (top.n / total >= AREA_PLACE_SHARE) {
     const name = areaName(top, level, loc, latin);
-    return level === 'district' && loc === 'ar' ? `حي ${name}` : name;
+    return { name: level === 'district' && loc === 'ar' ? `حي ${name}` : name, n: top.n };
   }
   if (level === 'district') {
     const byCity = new Map<string, number>();
     for (const a of seen) byCity.set(a.city, (byCity.get(a.city) ?? 0) + a.n);
     const [city, n] = [...byCity].reduce((b, x) => (x[1] > b[1] ? x : b));
-    if (city && n / total >= AREA_PLACE_SHARE) return areaName({ city, district: '' }, 'city', loc, latin);
+    if (city && n / total >= AREA_PLACE_SHARE) {
+      return { name: areaName({ city, district: '' }, 'city', loc, latin), n: rows.filter((a) => a.city === city).reduce((t, a) => t + a.n, 0) };
+    }
   }
   return null;
 }

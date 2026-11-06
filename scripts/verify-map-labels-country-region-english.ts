@@ -89,9 +89,17 @@ const split = [{ city: 'جدة', district: 'حي أ', lat: 21.76, lng: 39.08, n:
 check('district zoom across several districts of one city → the city («جدة»)', lib.areaPlaceName(split, 'district', 'ar', latin, ...V(21.76, 39.09, 0.1)) === 'جدة');
 check('no place holds most of the view → null (the plain «في هذه المنطقة»)', lib.areaPlaceName(regions, 'region', 'ar', latin, ...V(24, 45, 30)) === null);
 check('the country view names the country', lib.areaPlaceName(country, 'country', 'en', latin, ...V(23.9, 45.1, 17)) === 'Saudi Arabia');
+// The number beside a name is that place's number (live 2026-11-05: «14,531 … في حي النرجس» where النرجس holds ~5,900).
+const narjis = [{ city: 'الرياض', district: 'حي النرجس', lat: 24.83, lng: 46.64, n: 9000 }, { city: 'الرياض', district: 'حي العارض', lat: 24.86, lng: 46.6, n: 3000 }, { city: 'الرياض', district: 'حي الملقا', lat: 24.8, lng: 46.6, n: 1000 }];
+const pn = lib.areaPlace(narjis, 'district', 'ar', latin, ...V(24.83, 46.62, 0.2));
+check('a named district carries ITS count (9,000), not the whole view\'s (13,000)', pn?.name === 'حي النرجس' && pn?.n === 9000, JSON.stringify(pn));
+check('a named region carries its own total', lib.areaPlace(riyadhRegion, 'region', 'ar', latin, ...V(24.7, 46.7, 2))?.n === 99000);
+const viewCount = real.replace('n: top.n };', 'n: total };');
+mustCatch('the whole view\'s count printed beside one district\'s name', viewCount !== real && (await load(viewCount)).areaPlace(narjis, 'district', 'ar', latin, ...V(24.83, 46.62, 0.2))?.n !== 9000);
+check('the pill prints the named place\'s count when there is one', /viewCountText\(placeCount \?\? pinCount, viewPlace/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 const anyTop = real.replace('  if (top.n / total >= AREA_PLACE_SHARE) {', '  if (true) {');
 mustCatch('a place named when it holds only a minority of the view', anyTop !== real && (await load(anyTop)).areaPlaceName(regions, 'region', 'ar', latin, ...V(24, 45, 30)) !== null);
-check('the map hands every label view to areaPlaceName (not a fixed «في هذه المنطقة» below the country)', /setViewPlace\(areaPlaceName\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span\)\)/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+check('the map hands every label view to areaPlaceName (not a fixed «في هذه المنطقة» below the country)', /const place = areaPlace\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span\);\n\s*setViewPlace\(place\?\.name \?\? null\); setPlaceCount\(place\?\.n \?\? null\);/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 
 const noCountry = real.replace("  if (latitudeDelta > COUNTRY_LABELS_ABOVE) return 'country';\n", '');
 mustCatch('the opening view drawing regions or cities instead of the one Saudi total', noCountry !== real && (await load(noCountry)).areaLevelFor(17) !== 'country');
