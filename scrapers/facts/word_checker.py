@@ -422,7 +422,7 @@ FACT_TOKENS: dict[str, list[Any]] = {
                     "car service"],
     "meeting_room": ["re:(?:قاعه|غرفه|قاعات|غرف) (?:ال)?اجتماعات", "meeting room"],
     "reception": ["^استقبال", "^ريسبشن", "^رسبشن", "reception"],
-    "coworking": ["re:مساح(?:ه|ات) (?:ال)?عمل(?: مشتركه)?", "re:مكاتب مشتركه", "^كوركنج", "^كوركينج", "coworking", "co working"],
+    "coworking": ["re:مساحات (?:ال)?عمل(?: مشتركه)?", "re:مساحه عمل(?: مشتركه)?", "re:مساحه العمل (?:ال)?مشتركه", "re:مكاتب مشتركه", "^كوركنج", "^كوركينج", "coworking", "co working"],
     "private_office": ["re:مكتب (?:خاص|اداري)", "re:مكاتب (?:خاصه|اداريه)", "private office"],
     "central_ac": ["re:(?:تكييف|تكيف|مكيف|مكيفات) (?:مركزي|مركزيه)", "central ac", "central air"],
     # contents of a building: a holding word or a count before the plural
@@ -998,6 +998,11 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
     if fact == "kitchen" and p2 and _starts(_strip_wa(p2[-1]), ("سطح", "اسطح")):
         return None, s, e                            # «سطح مطبخ» / «أسطح المطبخ» is a countertop
+    if fact == "corner_plot" and _n(t[ws:we]).lstrip("و").startswith("للزاوي"):
+        return None, s, e                            # «مليون و٣٥٠ للزاوية», «سعر موحد للزاوية والشارع»: the price of a
+                                                     # project's corner unit, not this ad's plot (P2 13085, 2026-11-06)
+    if fact == "laundry_room" and p2 and p2[-1] in ("حي", "بحي", "العدل"):
+        return None, s, e                            # «حي العدل الغسالة»: a Makkah district, not a washing machine
     if fact == "air_conditioner" and ("مكيفات" in t[ws:we] or _strip_wa(t[ws:we]) in ("تكييف", "تكيف")):
         ex_before = ()                               # «مدخلان🔹 مكيفات راكبة», «مدخلان للشقة تكييف سبيلت»: the home's; a lobby is «مدخل مكيف»
     if fact in _NEEDS_CUE and p2 and _starts(p2[-1], _CUES):
@@ -1830,6 +1835,17 @@ def selftest() -> None:
         ("غسالة ملابس", {"laundry_room": True}, ()),
         ("washing machine", {"laundry_room": True}, ()),
         ("غسالة صحون", {}, ("laundry_room",)),
+        # P2 13085 (2026-11-06), real served sentences
+        ("فرصة استثماريه للبيع عمارة مكه المكرمة حي العدل الغسالة العقار عمره 21 سنه", {}, ("laundry_room",)),
+        ("شقة للإيجار بمكة المكرمة حي العدل الغساله العليا ٤ غرف الدور الاول ركنيه مصعد", {}, ("laundry_room",)),
+        ("ستوديو غرفة مع بوفية ودورة مياه مؤثث بالكامل مع توفر الغسالة والثلاجة", {"laundry_room": True}, ()),
+        ("السعر مليون 700 الف للزاويه مليون 650 الف للبطن قابل للتفاوض", {}, ("corner_plot",)),
+        ("السعر مليون و ٢٥٠ للبطون ومليون و٣٥٠ للزاوية", {}, ("corner_plot",)),
+        ("💰 السعر: 390,000 ريال (سعر موحد للزاوية والشارع)", {}, ("corner_plot",)),
+        ("🏢 اختر مساحة العمل التي تناسب نجاحك ابدأ أعمالك من مكتب جاهز", {}, ("coworking",)),
+        ("3- مساحة العمل ( Workspace ) مساحة : ٨٦.٢٩م2", {}, ("coworking",)),
+        ("مساحات عمل مشتركة ومكاتب خاصة", {"coworking": True}, ()),
+        ("مساحة عمل مشتركة", {"coworking": True}, ()),
         ("دور كامل للإيجار", {"whole_floor": True}, ()),
         ("شقة في الدور الأول", {}, ("whole_floor",)),
         ("للعزاب فقط", {"singles": True}, ()),
