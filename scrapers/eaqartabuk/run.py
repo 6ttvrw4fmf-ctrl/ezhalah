@@ -459,7 +459,7 @@ def _stated_rent_period(text: Optional[str]) -> Optional[str]:
     monthly = bool(_PERIOD_MONTHLY_RE.search(text))
     annual = bool(_PERIOD_ANNUAL_RE.search(text))
     if monthly and annual:
-        return None  # the ad offers both -> we cannot say which this price is
+        return "both"  # the ad offers both -> we cannot say which this price is (never judged as silent)
     if monthly:
         return "monthly"
     if annual:
@@ -506,6 +506,9 @@ def _price(raw: Any, is_rent: bool, raw_text: Optional[str] = None) -> tuple[Opt
         return None, normalize.annualize_rent(v, "monthly"), "monthly"
     if period == "annual":
         return None, v, "annual"
+    if period == "both":
+        # Monthly AND yearly terms, price tied to neither: ambiguous, not silent — the index must not judge it.
+        return None, None, None
     # Period SILENT (owner rule 2026-10-31, «judge_silent_rent_period_ar»): keep the figure as published, period
     # unknown — the search index labels it from the price and flags it judged. Same as asasmakeen / kellerwilliams.
     return None, v, None

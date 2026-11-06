@@ -60,3 +60,9 @@ def test_a_flipped_row_clears_its_stale_sale_total_even_when_the_price_is_on_req
     row, _ = map_listing(_item("هنجر للايجار حي المصيف", "السعر حسب النشاط"), _mp("investment", "استثمار"), None, [])
     assert row["transaction_type"] == "Rent"
     assert row["price_total"] is db.AUTHORITATIVE_NULL, "the stored sale figure would survive on a rental"
+
+
+def test_conflicting_periods_are_ambiguous_not_silent():
+    from scrapers.eaqartabuk.run import _price
+    assert _price("3000", True, "شقة للايجار شهري أو سنوي") == (None, None, None), "a two-period ad was judged as silent"
+    assert _price("3000", True, "شقة للايجار") == (None, 3000, None)
