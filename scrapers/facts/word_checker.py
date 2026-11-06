@@ -667,6 +667,7 @@ _POOL_FACTS = frozenset({"pool", "heated_pool", "kids_pool"})
 # «لا تطل على مسبح» denies the view and says nothing of a pool; «مطلة على المسبح البلدي» is the town's
 _VIEW_NEG = frozenset(_n(w) for w in ("لا", "ليس", "ليست", "غير", "بدون", "بلا", "ما", "مو", "مش"))
 _PUBLIC_POOL = frozenset(_n(w) for w in ("البلدي", "بلدي", "العام", "عام", "العامه", "عامه", "الاولمبي", "اولمبي"))
+_GOVERNS_NEAR = frozenset(_n(w) for w in ("بجوار", "جوار", "بجانب", "جنب", "مقابل", "امام", "قرب", "قريب", "قريبه", "بالقرب"))
 _HAS_CUES = tuple(_n(w) for w in ("فيها", "فيه", "بها", "به", "تحتوي", "يحتوي", "يوجد", "توجد", "يضم", "تضم", "داخل"))
 
 
@@ -783,7 +784,7 @@ def _prepared_applies(before: list[str], after: list[str], hit: str = "") -> boo
         if not _starts(w, _PREPARED):
             continue
         nxt = after[k + 1] if k + 1 < len(after) else ""
-        if nxt and (_starts(_bare_l(nxt), _PREPARABLE)
+        if nxt and ((_starts(_bare_l(nxt), _PREPARABLE) and not (nxt.startswith("و") and _strip_wa(nxt) != nxt))
                     or (_starts(_strip_wa(w), _PREP_VERBAL) and not _starts(_bare_l(nxt), _PREP_MAKE))):
             continue                                # it governs the next word, not this hit
         return True
@@ -968,7 +969,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # «… محطة المترو ٧ دقائق موقف خاص» (dealapp 23282670, 🔬 2026-11-06): «خاص» right after the parking makes it the
     # home's own — the distance list before it no longer reaches it. Parking only; «موقف عام» stays nearby.
     own_parking = (fact == "parking" and bool(gn[:1]) and _strip_wa(gn[0]) in ("خاص", "خاصه", "مستقل", "مستقله", "مخصص")
-                   and not (gp[-1:] and gp[-1] in ("من", "عن"))                 # «قريب من موقف خاص»: still the near word's object
+                   and not (gp[-1:] and (gp[-1] in ("من", "عن")                # «قريب من موقف خاص»: still the near word's object
+                                         or _n(gp[-1]) in _GOVERNS_NEAR))   # «بجوار موقف خاص»; «٧ دقائق موقف خاص» stays own
                    and not (gn[1:2] and gn[1].startswith(("بال", "لل"))          # «مواقف خاصة بالمول»: another place's,
                             and not _starts(_bare_l(gn[1][1:] if gn[1].startswith("ب") else gn[1]),
                                             ("شقه", "فيلا", "فله", "وحده", "عماره", "مبني", "دور", "منزل", "بيت", "سكن",
@@ -1752,6 +1754,8 @@ def selftest() -> None:
         ("الشقة لا تطل على مسبح", {}, ("pool",)),
         ("الشقة مطلة على المسبح البلدي", {}, ("pool",)),
         ("فيلا مطلة على مسبح مدفأ", {"pool": True, "heated_pool": True}, ()),
+        ("المسبح موسس والمصعد راكب", {}, ("pool",)),
+        ("بجوار موقف خاص", {}, ("parking",)),
         # AI teacher pass 2026-10-27 — the phrasings the paid reader found on ads the word reader had no row for
         ("مكونة من: 3 غرف واصل كهرباء واصل مياه", {"electricity": True, "water_supply": True}, ()),
         ("ماء وكهرب راكب", {"electricity": True, "water_supply": True}, ()),
