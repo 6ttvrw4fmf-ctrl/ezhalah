@@ -51,6 +51,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
@@ -272,6 +274,23 @@ def photos(page_html: str) -> Optional[list[str]]:
     return urls[:20] or None
 
 
+# The amenity columns the «الوصف» prose may answer (the same set the old matcher wrote).
+PROSE_COLS = ("air_conditioner", "balcony_terrace", "car_entrance", "driver_room", "elevator", "furnished", "kitchen",
+              "laundry_room", "maid_room", "optical_fibers", "parking", "private_entrance")
+_DESC_RE = re.compile(r"الوصف\s*(.{20,2500}?)(?=Playlist|المميزات|عروض مشابهه|احجز|اتصل بنا|$)", re.S)
+
+
+def description_of(text: str) -> Optional[str]:
+    """Variant B's «الوصف» prose up to the next section (never the «عروض مشابهه» tail), PII-redacted; None when absent
+    (variant A has no prose — its «تفاصيل العقار» block is all there is)."""
+    m = _DESC_RE.search(text or "")
+    if not m:
+        return None
+    d = redact_pii(ihtml.unescape(m.group(1)).strip(), keep_lines=True)
+    d = re.sub(r"(?:رقم\s*)?(?:ال)?ترخيص\s*:?\s*\d{6,}", " ", d).strip()   # the licence is stored on its own
+    return d[:2500] or None
+
+
 def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). row None → skipped for skip_reason."""
     text = visible_text(page_html)
@@ -387,10 +406,14 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
     # listings were blind to every filter question until this. The description is read only up to
     # the next section heading so a «عروض مشابهه» block can never leak another listing's features
     # in, and an amenity already stated by «المرافق» is not overwritten by the prose.
-    dm = re.search(r"الوصف\s*(.{20,2500}?)(?=المميزات|عروض مشابهه|احجز|اتصل بنا|$)", text, re.S)
-    if dm:
-        for col, val in normalize.amenities_from_text(dm.group(1)).items():
+    desc = description_of(text)
+    if desc:
+        # ONE READER (owner 2026-11-03): the prose is read by the Advanced Filter's word reader, never the older
+        # normalize.amenities_from_text; and the text itself is STORED (🔬 2026-11-06) — every safera row had
+        # description = NULL, so the nightly text reader never saw «غرفة سائق», «غرفه للغسيل», «مطبخ».
+        for col, val in amenity_answers(desc, PROSE_COLS, {"balcony": "balcony_terrace"}).items():
             row.setdefault(col, val)
+        row["description"] = desc
 
     if deal == "Rent":
         rent_period, price_annual = normalize.rent_period_and_annual(price, text)
