@@ -47,10 +47,14 @@ for (const [name, runs, want] of cases) {
   else console.log(`✓ ${name}: trips=${got}`);
 }
 
-// Mutation: the pre-11-06 permanent breaker must be caught by the «re-armed» case.
-const old = `[limit(3; .[])] | all(.conclusion == "failure")`;
-if (run(old, cases[1][1]) !== true) { console.error('✗ mutation proof: the old predicate no longer reproduces the deadlock'); bad++; }
-else console.log('✓ mutation proof: the old permanent breaker trips on the re-armed case (the 11-06 deadlock)');
+// Mutation proof: the pre-11-06 permanent breaker must be CAUGHT by the «re-armed» case (it still trips there).
+function mutation(name: string, pred: string): void {
+  const caught = run(pred, cases[1][1]) !== cases[1][2];
+  if (!caught) { console.error(`✗ mutation not caught: ${name}`); bad++; }
+  else console.log(`✓ mutation caught: ${name} (it still trips 5 h after the last failure — the 11-06 deadlock)`);
+}
+mutation('the old permanent breaker', `[limit(3; .[])] | all(.conclusion == "failure")`);
+mutation('cool-off dropped from the live predicate', predicate.replace(/ and \(\.\[0\]\.createdAt > \$c\)/, ''));
 
 if (bad) process.exit(1);
 console.log('verify-auto-deploy-breaker-rearms: OK');
