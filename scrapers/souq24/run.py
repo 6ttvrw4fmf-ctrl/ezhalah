@@ -445,9 +445,9 @@ def _advertiser_text(body: str) -> Optional[str]:
     t = re.sub(r"<[^>]+>", " ", t)
     lines, carry = [], False
     for x in t.split("\n"):
-        if carry and not x.strip():
+        if carry and not ihtml.unescape(x).strip():   # «&nbsp;» spacer lines count as blank too
             continue                     # «للتواصل<br>\n أحمد»: a blank line does not use up the pending skip
-        if carry and len(x.strip()) <= 40:
+        if carry and len(ihtml.unescape(x).strip()) <= 40:
             carry = False                # «للتواصل<br>أحمد محمد»: the line after a bare contact cue is the contact (PDPL)
             continue
         carry = bool(_CONTACT_CUE_ONLY_RE.match(ihtml.unescape(x)))   # a line that is ONLY the cue: the name is on the next

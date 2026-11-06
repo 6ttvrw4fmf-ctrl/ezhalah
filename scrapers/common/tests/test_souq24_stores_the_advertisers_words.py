@@ -64,3 +64,9 @@ def test_a_blank_line_or_unicode_padding_does_not_save_the_name():
     for b in (b1, b2):
         out = R._advertiser_text(b)
         assert "أحمد" not in (out or "") and "شقة واسعة" in out
+
+
+def test_an_entity_only_spacer_line_does_not_save_the_name():
+    b = '<div class="responsive-text x">شقة واسعة<br>للتواصل<br>&nbsp;<br>أحمد محمد</div> <div id="Specifications">'
+    out = R._advertiser_text(b)
+    assert "أحمد" not in (out or "") and "شقة واسعة" in out
