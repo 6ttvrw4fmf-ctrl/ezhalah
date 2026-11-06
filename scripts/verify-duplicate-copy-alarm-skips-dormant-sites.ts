@@ -25,7 +25,10 @@ export function problems(files: Record<string, string>): string[] {
   const latest = touching[touching.length - 1];
   const sql = strip(files[latest]);
   const out: string[] = [];
-  if (!/where\s+not\s+public\.ops_platform_is_dormant\(\s*d\.platform\s*\)/i.test(sql)) {
+  // For a needle patch, the skip must live in the replacement text b1 itself, not anywhere in the file.
+  const b1 = /b1\s+text\s*:=\s*\$b\$([\s\S]*?)\$b\$/i.exec(sql);
+  const guarded = b1 ? b1[1] : sql;
+  if (!/where\s+not\s+public\.ops_platform_is_dormant\(\s*d\.platform\s*\)/i.test(guarded)) {
     out.push(`${latest}: the newest change to ${FN} does not skip dormant platforms in its loop`);
   }
   // A needle patch applies the skip only through its replacement: the guarded text must be what is
@@ -56,6 +59,10 @@ mustCatch('the skip removed',
 mustCatch('a patch that executes the untouched definition instead of its replacement',
   problems({ ...files, [latest]: files[latest].replace(/execute replace\(v_def, a1, b1\)/, 'execute v_def') }).length > 0
   && files[latest].includes('execute replace(v_def, a1, b1)'));
+mustCatch('the skip moved out of the replacement b1 into an unused string',
+  problems({ ...files, [latest]: files[latest]
+    .replace(/\n\s*where not public\.ops_platform_is_dormant\(d\.platform\)/, '')
+    .replace('begin\n', "begin\n  perform 'where not public.ops_platform_is_dormant(d.platform)';\n") }).length > 0);
 mustCatch('a newer change without the skip, judged instead of the old one',
   problems({ ...files, '29990101000000_x.sql': `create or replace function public.${FN}() returns int language sql as $$ select 1 $$;` }).length > 0);
 
