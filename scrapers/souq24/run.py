@@ -425,6 +425,25 @@ def _deobfuscate(t: str) -> str:
     return _OBFUSC_RUN_RE.sub(fix, t)
 
 
+# The advertiser's own words (🔬 2026-11-06, backlog 1386; re-read live on /389/x, /374/x, /1303/x): the
+# «responsive-text» block printed right BEFORE the «Specifications» table. The old note «24 Souq detail pages carry no
+# advertiser-written description block» was wrong — 648168 says «غرفة شغالة … ومطبخ … المدخل مستقل» there, and the
+# word reader saw none of it. Anchored on the Specifications id so a template block elsewhere can never be read.
+_DESC_RE = re.compile(
+    r"""<div class="responsive-text[^"]*">(.*?)</div>\s*<div[^>]*id=['"]Specifications['"]""", re.S)
+
+
+def _advertiser_text(body: str) -> Optional[str]:
+    m = _DESC_RE.search(body or "")
+    if not m:
+        return None
+    t = re.sub(r"<br\s*/?>", "\n", m.group(1), flags=re.I)
+    t = re.sub(r"<[^>]+>", " ", t)
+    lines = [ln for ln in (_redact(x) for x in t.split("\n")) if ln]   # each line on its own: the reader's clause breaks
+    t = "\n".join(lines)
+    return t[:4000] if t else None
+
+
 def _redact(text: Optional[str]) -> Optional[str]:
     """Strip phones / wa.me / contact CTAs / seller aliases from free text (PDPL)."""
     if not text:
@@ -824,10 +843,9 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     plan_m = INFO_PLAN_RE.search(body)
     parcel_m = INFO_PARCEL_RE.search(body)
 
-    # ── PDPL-safe text ── (heading/title only; the listing has no free-text description field —
-    # the descriptive copy is the share line, which we redact defensively).
+    # ── PDPL-safe text ── the title and the advertiser's own block, both through _redact.
     title = _redact(title_text.split("|")[0]) if title_text else None
-    description = None  # 24 Souq detail pages carry no advertiser-written description block
+    description = _advertiser_text(body)
 
     # ── photos ──
     photos: list[str] = []
