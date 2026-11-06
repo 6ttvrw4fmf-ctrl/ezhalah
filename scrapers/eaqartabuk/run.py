@@ -132,7 +132,7 @@ _TITLE_DISTRICT_RE = re.compile(r"(?:^|(?<=\s))ب?ح[يى]\s+([^\s,،.)\]]+)")
 
 _RENT_WORD = re.compile(r"(?:لل|ل)?[إا]يجار")
 # «بيع» only at a word start: «طبيعية» (natural ventilation) is not a sale (review on #10940).
-_SALE_WORD = re.compile(r"(?<![\u0621-\u064A])(?:و)?(?:لل|ال)?بيع")
+_SALE_WORD = re.compile(r"(?<![\u0621-\u064A])(?:و)?(?:لل|بال|ال)?بيع")
 
 
 def investment_offered_for_rent(op: str, status_ar: str, title, excerpt) -> bool:
@@ -558,9 +558,6 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     # phone numbers, so it cannot remove a period word.
     _period_text = " ".join(str(x or "") for x in (item.get("title"), item.get("excerpt"), status_ar))
     price_total, price_annual, rent_period = _price(meta.get("price"), is_rent, _period_text)
-    if flipped_to_rent:
-        # The row was stored as a sale with this figure in price_total; a rental holds it in price_annual only.
-        price_total = getattr(db, "AUTHORITATIVE_NULL", None)
 
     # On-request pricing: the number in meta.price is a placeholder, not a real quote (see
     # _price_on_request docstring above). Null the price rather than store a fabricated figure;
@@ -568,6 +565,9 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     # (a separate, reliable field) so we keep that — only the price itself is unknown.
     if _price_on_request(_strip_tags(desc_html), _strip_tags(item.get("excerpt"))):
         price_total = price_annual = rent_period = None
+    if flipped_to_rent:
+        # The row was stored as a sale with this figure in price_total; a rental holds it in price_annual only.
+        price_total = getattr(db, "AUTHORITATIVE_NULL", None)
 
     # Area fallback chain: structured meta.area → candles-map area → parse the description text
     # (where most eaqartabuk listings actually put it, e.g. "مساحة 796").

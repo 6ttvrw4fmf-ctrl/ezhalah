@@ -46,9 +46,17 @@ def test_natural_ventilation_is_not_a_sale_word():
     assert investment_offered_for_rent("investment", "استثمار", "هنجر للايجار بتهوية طبيعية", "")
     assert not investment_offered_for_rent("investment", "استثمار", "هنجر للايجار وللبيع", "")
     assert not investment_offered_for_rent("investment", "استثمار", "هنجر للايجار أو البيع", "")
+    assert not investment_offered_for_rent("investment", "استثمار", "هنجر للإيجار أو بالبيع", "")
 
 
 def test_a_rental_keeps_its_published_figure_when_the_period_is_silent():
     row, _ = map_listing(_item("هنجر للايجار حي المصيف"), _mp("investment", "استثمار"), None, [])
     assert row["price_annual"] == 200000, "the published figure was dropped"
     assert row.get("rent_period") is None, "a period was invented"
+
+
+def test_a_flipped_row_clears_its_stale_sale_total_even_when_the_price_is_on_request():
+    from scrapers.common import db
+    row, _ = map_listing(_item("هنجر للايجار حي المصيف", "السعر حسب النشاط"), _mp("investment", "استثمار"), None, [])
+    assert row["transaction_type"] == "Rent"
+    assert row["price_total"] is db.AUTHORITATIVE_NULL, "the stored sale figure would survive on a rental"
