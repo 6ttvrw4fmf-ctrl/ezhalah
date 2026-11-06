@@ -144,7 +144,7 @@ try {
       const t = r.request().resourceType();
       if ((t === 'xhr' || t === 'fetch') && xhrLogged < 40) {
         xhrLogged++;
-        log(`    · data call: ${r.status()} ${r.request().method()} ${r.url().slice(0, 220).replace(/##\[/g, '#\u200b#[')}`);
+        log(`    · data call: ${r.status()} ${r.request().method()} ${r.url().slice(0, 220)}`);
       }
     });
   }
@@ -183,7 +183,7 @@ try {
   if (SOURCE_PAGE) {
     await page.waitForTimeout(4000);
     const shown = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 500)).catch(() => '');
-    log(`    · source page text: «${shown.replace(/##\[/g, '#\u200b#[').replace(/^::/gm, ':\u200b:')}»`); // a runner never reads page text as a command
+    log(`    · source page text: «${shown}»`);
   }
   if (FAIL_ONCE) {
     await page.waitForFunction(() => performance.getEntriesByType('navigation')[0]?.type === 'reload', null, { timeout: 20000 })
