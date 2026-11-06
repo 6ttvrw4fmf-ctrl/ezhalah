@@ -39,6 +39,7 @@ export function problems(files: Record<string, string>): string[] {
   const count = (re: RegExp) => (sql.match(re) || []).length;
   if (count(/p\.verdict\s*=\s*''GONE''/gi) < 2) out.push(`${latest}: one of the two exclusions lost its GONE verdict`);
   if (count(/p\.probed_at\s*>=\s*coalesce\(\s*t\.last_verified_alive_at/gi) < 2) out.push(`${latest}: one of the two exclusions lost its newer-than-ALIVE condition`);
+  if (count(/p\.source_table\s*=\s*%L/gi) < 2) out.push(`${latest}: one of the two exclusions no longer matches the row's own source_table`);
   if (count(/p\.probed_at\s*>=\s*now\(\)\s*-\s*\$1/gi) < 2) out.push(`${latest}: one of the two exclusions lost its time window`);
   need('the evidence clause is built but never spliced into the UPDATE', /%s\s*\$f\$\s*,\s*t\s*,\s*t\s*,\s*sib_clause\s*,\s*gone_clause/i);
   return out;
@@ -68,6 +69,7 @@ mutation('the alive-stamp comparison dropped', /p\.probed_at >= coalesce\(t\.las
 mutation('the clause never spliced in', /sib_clause, gone_clause\)/, 'sib_clause, \'\')');
 mutation('only the ad_number clause losing its GONE verdict', /and p\.verdict = ''GONE'' and p\.probed_at >= now\(\) - \$1/, 'and p.probed_at >= now() - $1');
 mutation('only one clause losing its newer-than-ALIVE condition', /and p\.probed_at >= coalesce\(t\.last_verified_alive_at, ''-infinity''::timestamptz\)\) ', t\);\n    end if;/, ") ', t);\n    end if;");
+mutation('only the ad_number clause losing its source_table match', /p\.source_table = %L and p\.listing_id is null/, 'p.listing_id is null');
 mustCatch('a newer redefinition without the clause, judged instead of the old one',
   problems({ ...files, '29990101000000_x.sql': 'create or replace function public.auto_recover_false_inactive() returns void language sql as $$ select 1 $$;' }).length > 0);
 

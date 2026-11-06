@@ -28,6 +28,11 @@ export function problems(files: Record<string, string>): string[] {
   if (!/where\s+not\s+public\.ops_platform_is_dormant\(\s*d\.platform\s*\)/i.test(sql)) {
     out.push(`${latest}: the newest change to ${FN} does not skip dormant platforms in its loop`);
   }
+  // A needle patch applies the skip only through its replacement: the guarded text must be what is
+  // executed (`execute replace(v_def, a1, b1)`), never the untouched definition.
+  if (/v_def/.test(sql) && !/execute\s+replace\(\s*v_def\s*,\s*a1\s*,\s*b1\s*\)/i.test(sql)) {
+    out.push(`${latest}: the patch does not execute its replacement, so the dormant skip never reaches production`);
+  }
   if (!/ops_lifecycle_duplicate_stale_copy\(\)\s+d/i.test(sql)) {
     out.push(`${latest}: the dormant skip is not attached to the ops_lifecycle_duplicate_stale_copy() loop`);
   }
@@ -48,6 +53,9 @@ check(`${FN} skips dormant sites`, real.length === 0, real.join('; '));
 const latest = Object.keys(files).filter((f) => CHANGES.test(strip(files[f]))).sort().pop()!;
 mustCatch('the skip removed',
   problems({ ...files, [latest]: files[latest].replace(/\n\s*where not public\.ops_platform_is_dormant\(d\.platform\)/, '') }).length > 0);
+mustCatch('a patch that executes the untouched definition instead of its replacement',
+  problems({ ...files, [latest]: files[latest].replace(/execute replace\(v_def, a1, b1\)/, 'execute v_def') }).length > 0
+  && files[latest].includes('execute replace(v_def, a1, b1)'));
 mustCatch('a newer change without the skip, judged instead of the old one',
   problems({ ...files, '29990101000000_x.sql': `create or replace function public.${FN}() returns int language sql as $$ select 1 $$;` }).length > 0);
 
