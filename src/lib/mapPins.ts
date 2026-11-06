@@ -241,9 +241,28 @@ export function viewPlaceName(p: ViewPlace | null, loc: 'ar' | 'en', latin: (s: 
   return null;
 }
 /** The count pill: «7 إعلانات في حي الشراع» / «7 listings in الشراع»; «… في هذه المنطقة» / «… here» without a place. */
-export function viewCountText(n: number, place: string | null, loc: 'ar' | 'en'): string {
+export const DEAL_WORD: Record<'ar' | 'en', Record<string, string>> = {
+  ar: { buy: 'للبيع', rent: 'للإيجار', short: 'للإقامة القصيرة' },
+  en: { buy: 'for sale', rent: 'for rent', short: 'for short stays' },
+};
+/**
+ * The pill SAYS WHICH DEAL it counts, and an empty deal points at the others (owner 2026-11-05, a full-screen map over
+ * Umluj: «0 listings here» — the map was on Buy, where Umluj has no pinned listing, while its 12 pinned listings are
+ * rentals and short stays; full screen hides the deal button, so «0» read as «Ezhalah has nothing here»). With one deal
+ * chosen: «12 إعلان للإيجار في أملج»; with none of it in view but others present (`others`): «لا يوجد للبيع في أملج ·
+ * يوجد للإيجار». Several deals chosen: no deal word, as before.
+ */
+export function viewCountText(n: number, place: string | null, loc: 'ar' | 'en', deals?: readonly string[], others: readonly string[] = []): string {
   const num = n.toLocaleString('en-US');
-  if (loc === 'en') return place ? `${num} ${n === 1 ? 'listing' : 'listings'} in ${place}` : `${num} listings here`;
+  const one = deals && deals.length === 1 ? deals[0] : null;
+  const w = DEAL_WORD[loc];
+  if (n === 0 && one && others.length) {
+    return loc === 'en'
+      ? `None ${w[one]} ${place ? `in ${place}` : 'here'} · some ${others.map((d) => w[d]).join(' and ')}`
+      : `لا يوجد ${w[one]} في ${place ?? 'هذه المنطقة'} · يوجد ${others.map((d) => w[d]).join(' و')}`;
+  }
+  const dealWord = one ? ` ${w[one]}` : '';
+  if (loc === 'en') return `${num} ${n === 1 ? 'listing' : 'listings'}${dealWord} ${place ? `in ${place}` : 'here'}`;
   const noun = n === 2 ? 'إعلانان' : n >= 3 && n <= 10 ? 'إعلانات' : 'إعلان';
-  return `${num} ${noun} في ${place ?? 'هذه المنطقة'}`;
+  return `${num} ${noun}${dealWord} في ${place ?? 'هذه المنطقة'}`;
 }

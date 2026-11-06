@@ -612,6 +612,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const [viewPlace, setViewPlace] = useState<string | null>(null);
   // The named place's OWN count (owner 2026-11-05): beside «في حي النرجس» the pill prints النرجس's number, not the view's.
   const [placeCount, setPlaceCount] = useState<number | null>(null);
+  // The deals NOT chosen that do have listings in view — so an empty deal says where the listings are (owner 2026-11-05).
+  const [otherDeals, setOtherDeals] = useState<string[]>([]);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
   useEffect(() => {
     const mk = mapkitOf(); const m = mapRef.current;
@@ -821,9 +823,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (box.querySelector('[data-testid=map-area]') || Date.now() - born > 6000) clearBridge();
       }, 50);
     };
+    // Which other deals have pinned listings in the visible view (the dots feed, already on the phone, every deal).
+    const noteOtherDeals = async (center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }, my: number) => {
+      const all = await fetchMapDots();
+      if (all === 'unknown' || my !== seq || mapRef.current !== m) return;
+      const box = { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 };
+      setOtherDeals((['buy', 'rent', 'short'] as const).filter((d) => !pins.deals.includes(d) && dotsTotal(dotsInView(all, [d], box)) > 0));
+    };
     const load = async () => {
       const my = ++seq;
       const { center, span } = m.region;
+      void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
       const level = narrowed ? null : areaLevelFor(span.latitudeDelta);
       if (level) {
@@ -1148,7 +1158,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {/* Zillow's «Only N matching results»: what the view (or the drawn boundary) holds, since the dots carry no number. */}
       {!drawing && pinCount !== null ? (
-        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en')}</Text></View>
+        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}</Text></View>
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
