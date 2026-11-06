@@ -17,6 +17,10 @@ on:
 permissions:
   contents: read
 
+# Our own robots pass the API front door with this header (scripts/lib/gateFetch.mjs).
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   photos:
     runs-on: ubuntu-latest
