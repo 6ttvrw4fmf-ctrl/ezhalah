@@ -326,8 +326,10 @@ def _store(run_id, res, com, complete_walk, cover, *, rows_seen) -> int:
 
 
 def _gone(ad_number: str) -> tuple[str, str]:
-    """prune_unseen's oracle at grace: called only after a COMPLETE walk of the site's own full list (main gates it)."""
-    return "gone", "absent from 3 consecutive COMPLETE walks of the site's own full list"
+    """prune_unseen's answer at grace. Absence from a list is a CANDIDATE, never a kill (LISTING_LIVENESS.md §2:
+    only a DIRECT reading of the ad's own page may deactivate). Until this site has a measured own-page oracle the
+    strike is held: UNKNOWN. ♻️ 2026-11-06 — it used to return «gone» here, an absence-only kill."""
+    return "unknown", "absent from 3 consecutive COMPLETE walks of the site's own full list; no own-page oracle yet — held (absence never kills)"
 
 
 if __name__ == "__main__":
