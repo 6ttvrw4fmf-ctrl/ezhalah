@@ -969,6 +969,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # «… محطة المترو ٧ دقائق موقف خاص» (dealapp 23282670, 🔬 2026-11-06): «خاص» right after the parking makes it the
     # home's own — the distance list before it no longer reaches it. Parking only; «موقف عام» stays nearby.
     own_parking = (fact == "parking" and bool(gn[:1]) and _strip_wa(gn[0]) in ("خاص", "خاصه", "مستقل", "مستقله", "مخصص")
+                   and not any(_strip_wa(w) in ("تابع", "تابعه", "يتبع", "تتبع") for w in gn[1:3])   # «… تابع للمسجد»: the place's
                    and not (gp[-1:] and (gp[-1] in ("من", "عن")                # «قريب من موقف خاص»: still the near word's object
                                          or _n(gp[-1]) in _GOVERNS_NEAR))   # «بجوار موقف خاص»; «٧ دقائق موقف خاص» stays own
                    and not (gn[1:2] and gn[1].startswith(("بال", "لل"))          # «مواقف خاصة بالمول»: another place's,
@@ -1010,7 +1011,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
             break
         if _strip_wa(w) in ("موقع", "الموقع", "موقعه", "موقعها", "موقعنا"):
             break                                    # «موقف سياره 🚗 موقع مميز قريب من الخدمات»: a new subject (dealapp 7439621)
-        if _strip_wa(w) in ("سعر", "السعر", "سوم", "السوم", "بيع", "البيع", "للبيع", "ايجار", "الايجار", "للايجار"):
+        if _strip_wa(w) in ("سعر", "السعر", "سعرها", "سعره", "سوم", "السوم", "بيع", "البيع", "للبيع", "ايجار", "الايجار", "للايجار"):
             break                                    # «ومسبح السوم مليون والبيع قريب»: the price / sale is the new subject (🔬 11-06)
         if _starts(w, _NEAR_AFTER):
             near_after = True
@@ -1756,6 +1757,8 @@ def selftest() -> None:
         ("فيلا مطلة على مسبح مدفأ", {"pool": True, "heated_pool": True}, ()),
         ("المسبح موسس والمصعد راكب", {}, ("pool",)),
         ("بجوار موقف خاص", {}, ("parking",)),
+        ("فيلا بمسبح سعرها قريب من مليون", {"pool": True}, ()),
+        ("شقة قريبة من مسجد فيه موقف خاص تابع للمسجد", {}, ("parking",)),
         # AI teacher pass 2026-10-27 — the phrasings the paid reader found on ads the word reader had no row for
         ("مكونة من: 3 غرف واصل كهرباء واصل مياه", {"electricity": True, "water_supply": True}, ()),
         ("ماء وكهرب راكب", {"electricity": True, "water_supply": True}, ()),
