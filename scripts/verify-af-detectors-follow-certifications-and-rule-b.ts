@@ -20,7 +20,9 @@ const files = readdirSync(DIR).filter((f) => f.endsWith('.sql')).sort();
 const read = (f: string) => readFileSync(join(DIR, f), 'utf8');
 const noComments = (s: string) => s.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
 const newestDefining = (fn: string) => {
-  const f = files.filter((x) => read(x).includes(`function public.${fn}(`)).pop();
+  // case-insensitive: «CREATE OR REPLACE FUNCTION public.x(» is a definition too — matching only lower case read
+  // the 11-03 body while 20261104091942 (upper case) was live (🔬 2026-11-06)
+  const f = files.filter((x) => read(x).toLowerCase().includes(`function public.${fn.toLowerCase()}(`)).pop();
   assert.ok(f, `no committed migration defines ${fn}`);
   return noComments(read(f!));
 };
@@ -74,15 +76,21 @@ assert.ok(/v_guided is distinct from v_results/.test(parity) && /v_age is distin
   'check (6) no longer compares BOTH count surfaces with the results RPC');
 console.log('✓ filter parity compares the guided and age counts with the results RPC total_count');
 
-// ── 4. the sadiqeltajer checker reads the two sources the parser reads, with the parser's two exclusions ───────
+// ── 4. the sadiqeltajer checker reads the two sources the parser reads, minus nearby phrases, on SERVED rows ───
+// (20261104091942 moved the neighbour cut into sadiqeltajer_own_text; 20261106214103 judges active rows only —
+// the 10 rows of alert 11153 were all inactive and unserved, backlog 1384)
 const sadiq = newestDefining('sadiqeltajer_af_outside_room_list');
-const judgesLikeParser = (c: string) =>
-  /regexp_split_to_table\(r\.description/.test(c)
-  && /cl !~ 'يلي\|مقابل\|بجوار/.test(c)
+const ownText = newestDefining('sadiqeltajer_own_text');
+const judgesLikeParser = (c: string, own: string) =>
+  /else public\.sadiqeltajer_own_text\(r\.description\) end/.test(c)
+  && /\(يلي\|مقابل\|بجوار/.test(own)
   && /'Residential Land','Commercial Land','Raw Land','Agricultural Land','Farm'\) then ''/.test(c)
-  && /kitchen and c !~ 'مطبخ' and d !~ 'مطبخ'/.test(c);
-mustCatch('neighbour clauses («يليه مواقف») counted as the ad’s own', !judgesLikeParser(sadiq.replace(/cl !~ 'يلي\|مقابل\|بجوار/g, "cl !~ 'zzz")));
-mustCatch('a plot’s description allowed to answer', !judgesLikeParser(sadiq.replace(/'Farm'\) then ''/g, "'Farm') then r.description")));
-mustCatch('the description no longer required to be silent too', !judgesLikeParser(sadiq.replace(" and d !~ 'مطبخ'", '')));
-assert.ok(judgesLikeParser(sadiq), 'sadiqeltajer_af_outside_room_list no longer judges like the parser (room list + built-unit description, minus neighbour clauses)');
+  && /kitchen and c !~ 'مطبخ' and d !~ 'مطبخ'/.test(c)
+  && (c.match(/\n\s*where r\.active\b/gi) ?? []).length >= 2;
+mustCatch('neighbour phrases («يليه مواقف») counted as the ad’s own', !judgesLikeParser(sadiq, ownText.replace(/\(يلي\|مقابل\|بجوار/g, '(zzz')));
+mustCatch('the raw description read instead of its own text', !judgesLikeParser(sadiq.replace(/public\.sadiqeltajer_own_text\(r\.description\)/g, 'r.description'), ownText));
+mustCatch('a plot’s description allowed to answer', !judgesLikeParser(sadiq.replace(/'Farm'\) then ''/g, "'Farm') then r.description"), ownText));
+mustCatch('the description no longer required to be silent too', !judgesLikeParser(sadiq.replace(" and d !~ 'مطبخ'", ''), ownText));
+mustCatch('inactive, unserved rows judged again (alert 11153)', !judgesLikeParser(sadiq.replace(/\n\s*where r\.active/gi, ''), ownText));
+assert.ok(judgesLikeParser(sadiq, ownText), 'sadiqeltajer_af_outside_room_list no longer judges like the parser (room list + built-unit own text, active rows only)');
 console.log('✓ the sadiqeltajer checker judges a yes against the room list and the built unit’s own description clauses');
