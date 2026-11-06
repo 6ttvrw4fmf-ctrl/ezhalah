@@ -43,11 +43,21 @@ def test_unsharded_reads_everything():
     assert all(in_shard({"id": rid}, 0, 1) for rid in range(1, 500))
 
 
-def test_scheduled_path_runs_three_shards():
+def test_scheduled_path_runs_a_full_partition_of_at_least_four_shards():
+    # 3 shards plateaued at 84-85 % in SLA on 2026-11-06 (56,844 rows); 4 is the measured floor now.
+    import json
     cron = (ROOT / ".github/workflows/dealapp-liveness-cron.yml").read_text()
     m = re.search(r"shards:\s*'(\[.*?\])'", cron)
     assert m, "dealapp-liveness-cron.yml must pass a shards list"
-    assert m.group(1) == '["0/3","1/3","2/3"]'
+    shards = [parse_shard(s) for s in json.loads(m.group(1))]
+    n = shards[0][1]
+    assert n >= 4, f"only {n} shards: dealapp's 48 h window needs >= 4 view quotas (11-06)"
+    assert sorted(shards) == [(i, n) for i in range(n)], "every shard i/N of ONE N, each exactly once"
+
+
+def test_partition_check_rejects_a_hole():
+    shards = [parse_shard(s) for s in ("0/4", "1/4", "3/4")]
+    assert sorted(shards) != [(i, 4) for i in range(4)]
 
 
 def test_sweep_reads_its_matrix_shard():

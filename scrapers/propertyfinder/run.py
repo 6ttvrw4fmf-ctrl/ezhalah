@@ -373,10 +373,11 @@ def main() -> int:
 
 
 def _absent_from_complete_list(ad_number: str) -> tuple[str, str]:
-    """prune_unseen's oracle at grace: it is only ever called after this run walked every side feeding the table
-    completely (main() gates it), and the ad's own page is robots-403 — so 3 complete lists without the ad are
-    the source's own statement that it is gone."""
-    return "gone", "absent from 3 consecutive COMPLETE category-list walks (single-ad pages are never fetched)"
+    """prune_unseen's answer at grace. The ad's own page is robots-403, so we cannot read it — and absence from the
+    category lists is a CANDIDATE, never a kill (LISTING_LIVENESS.md §2; the only list-presence exception, wasalt's,
+    changes what counts as verified, never what counts as dead). The strike is held: UNKNOWN. ♻️ 2026-11-06 — it used
+    to return «gone» here, an absence-only kill; a removal signal for this site is an owner decision."""
+    return "unknown", "absent from 3 consecutive COMPLETE category-list walks; own page is robots-403 — held (absence never kills)"
 
 
 if __name__ == "__main__":

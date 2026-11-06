@@ -647,6 +647,35 @@ def coverage_ok(current_rows: int, history_rows: list[int], frac: float) -> bool
     return current_rows >= frac * median
 
 
+# The AR enricher's own-page evidence (ar_data._err ∈ ENRICHER_DEAD_ERRS on BOTH /ar and /en, _errn ≥ 2 reads
+# at least 24 h apart — the same arm mon_detect_wasalt_dead_but_active raises on). ♻️ 2026-11-06: 8 such rows
+# were shown at missing_count 1 because the confirm cohort read only rows at ≥ grace enum misses, so a dead ad
+# waited ~2 more nightly enums. They now join the FRONT of the cohort; the kill rule is unchanged — the
+# confirm's own GET must still read dead (with the controls healthy), so a row is hidden on its third direct
+# reading, never on the enricher's word alone.
+ENRICHER_DEAD_ERRS = frozenset({"nodetail", "404", "410"})
+
+
+def pick_enricher_dead(rows: list[dict], grace: int) -> list[dict]:
+    """Rows absent from at least one enum (missing_count ≥ 1) and still below grace, whose enricher read no
+    listing at least twice. Rows already at ≥ grace are in the normal cohort; missing_count 0 = the enum
+    just saw it, so it is not a candidate at all."""
+    out = []
+    for x in rows:
+        mc = int(x.get("missing_count") or 0)
+        ar = x.get("ar_data") or {}
+        if not isinstance(ar, dict) or not (1 <= mc < grace) or not (x.get("listing_url") or "").strip():
+            continue
+        try:
+            errn = int(ar.get("_errn") or 0)
+        except (TypeError, ValueError):
+            errn = 0
+        if ar.get("_err") in ENRICHER_DEAD_ERRS and errn >= 2:
+            out.append(x)
+    return out
+
+
+
 def plan_confirm_budget(available: list[int], cap: int) -> list[int]:
     """Split `cap` confirm slots across TABLES so a saturated table can never starve another.
 
@@ -898,6 +927,21 @@ def run_enum_strike(args) -> int:
     picked = [p[:k] for p, k in zip(per_table, take)]
     cohort: list[tuple[str, int, str, int]] = [
         r for grp in zip_longest(*picked) for r in grp if r is not None]
+    # Enricher-proven-dead candidates go FIRST (see pick_enricher_dead): small, almost always dead, and
+    # otherwise shown ~2 more days. Bounded (200 per table) and inside the same cap and clock.
+    early: list[tuple[str, int, str, int]] = []
+    for tbl in TABLES:
+        rows = db._execute(
+            db.sb().table(tbl).select("id, listing_url, missing_count, ar_data")
+            .eq("active", True).gte("missing_count", 1).lt("missing_count", args.grace)
+            .in_("ar_data->>_err", sorted(ENRICHER_DEAD_ERRS)).limit(200),
+            what=f"{tbl}.enum_confirm_enricher_dead",
+        ).data or []
+        early += [(tbl, x["id"], x["listing_url"].strip(), int(x.get("missing_count") or 0))
+                  for x in pick_enricher_dead(rows, args.grace)]
+    if early:
+        print(f"  confirm cohort: +{len(early)} enricher-proven-dead candidates read first", flush=True)
+        cohort = (early + cohort)[:max(args.confirm_limit, len(early))]
     if any(len(p) > k for p, k in zip(per_table, take)):
         print("  confirm budget split " +
               ", ".join(f"{t}: {k}/{len(p)}" for t, p, k in zip(TABLES, per_table, take)) +
