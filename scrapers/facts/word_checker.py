@@ -959,7 +959,15 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # a public SEA / PARK / mosque view stays nearby, those facts are not here.
     if (fact in _UNIT_ROOMS or fact == "pool") and near5 and all(_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS for w in near5):
         p5 = [w for w in p5 if w not in near5]       # a view word next to the home's own room says nothing about the room
-    if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
+    # «… محطة المترو ٧ دقائق موقف خاص» (dealapp 23282670, 🔬 2026-11-06): «خاص» right after the parking makes it the
+    # home's own — the distance list before it no longer reaches it. Parking only; «موقف عام» stays nearby.
+    own_parking = (fact == "parking" and bool(gn[:1]) and _strip_wa(gn[0]) in ("خاص", "خاصه", "مستقل", "مستقله", "مخصص")
+                   and not (gp[-1:] and gp[-1] in ("من", "عن"))                 # «قريب من موقف خاص»: still the near word's object
+                   and not (gn[1:2] and gn[1].startswith(("بال", "لل"))          # «مواقف خاصة بالمول»: another place's,
+                            and not _starts(_bare_l(gn[1][1:] if gn[1].startswith("ب") else gn[1]),
+                                            ("شقه", "فيلا", "فله", "وحده", "عماره", "مبني", "دور", "منزل", "بيت", "سكن",
+                                             "عقار", "سكان", "ساكن", "مستاجر"))))  # but «موقف خاص بالشقة» is the home's
+    if not own_parking and fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
                                           or any(p in " ".join(p5) for p in _NEAR_PHRASES)
                                           or _DISTANCE_TO.search(" ".join(gp[-8:]))):
         return None, s, e
@@ -1849,6 +1857,12 @@ def selftest() -> None:
         ("موقف سياره يتسع لسيارتين مسبح تأسيس مصعد تكييف دكت", {"pool": True}, ("elevator",)),   # aqar 17595
         ("حوش امامي وخلفي فيه مسبح مؤسس", {}, ("pool",)),
         ("امكانية اضافة مسبح السعر", {}, ("pool",)),
+        # «خاص» right after the parking: the home's, whatever distance list came before (dealapp 23282670, 2026-11-06)
+        ("وعن محطة المترو المسار الازرق (بنك ساب) ٧ دقائق موقف خاص جميع الخدمات متوفره", {"parking": True}, ()),
+        ("دقيقتين عن المول موقف خاص بالشقة", {"parking": True}, ()),
+        ("قريب من مواقف خاصة بالمول", {}, ("parking",)),
+        ("قريب من موقف خاص", {}, ("parking",)),
+        ("✅ لا يوجد مصعد. ✅ لا يوجد موقف خاص داخل العقار.", {"parking": False}, ()),
         ("دور كامل للإيجار", {"whole_floor": True}, ()),
         ("شقة في الدور الأول", {}, ("whole_floor",)),
         ("للعزاب فقط", {"singles": True}, ()),
