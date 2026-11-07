@@ -664,6 +664,20 @@ _PURE_PUBLIC_FACTS = frozenset({"mosque", "market", "restaurant_cafe", "in_mall"
 _BOUNDARY_STEMS = tuple(_n(w) for w in ("شمال", "جنوب", "شرق", "غرب", "جهه", "جهتين", "جهات", "واجهه", "واجهتين",
                                          "واجهات", "يحد", "حدود", "مباشر"))
 _OWN_AFTER = frozenset(_n(w) for w in ("خاص", "خاصه", "مستقل", "مستقله", "لسكان", "للسكان"))
+# …unless the very next words name the NEIGHBOURHOOD as the owner: «ملعب كرة قدم خاص بالحي», «نادي لسكان الحي» are the
+# district's, not the home's (CodeRabbit on #10948: the lift above turned «واجهة على ملعب خاص بالحي» into football_pitch)
+_NBHD_OWNER = frozenset(_n(w) for w in ("الحي", "بالحي", "للحي", "حي", "المخطط", "بالمخطط", "للمخطط", "المنطقة",
+                                         "بالمنطقة", "للمنطقة", "المدينة", "بالمدينة", "للمدينة", "لاهل", "لأهل", "للجميع",
+                                         "للعموم", "عام", "عامة"))
+
+
+def _owned_after(gn: list[str]) -> bool:
+    """True when an ownership word («خاص», «مستقل», «لسكان») follows the place within two words and does not
+    hand it to the neighbourhood («خاص بالحي», «لسكان الحي»)."""
+    for k, w in enumerate(gn[:2]):
+        if _strip_wa(w) in _OWN_AFTER:
+            return not any(_strip_wa(x) in _NBHD_OWNER for x in gn[k + 1:k + 3])
+    return False
 _HAS_CUES = tuple(_n(w) for w in ("فيها", "فيه", "بها", "به", "تحتوي", "يحتوي", "يوجد", "توجد", "يضم", "تضم", "داخل"))
 
 
@@ -974,7 +988,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         w4 = gp[-4:]
         at = max((k for k, w in enumerate(w4) if _is_boundary(w)), default=-1)
         if at >= 0 and not any(_starts(w, _HAS_CUES) or _starts(_strip_wa(w), _HAS_CUES) for w in w4[at + 1:]) \
-                and not any(_strip_wa(w) in _OWN_AFTER for w in gn[:2]):   # «واجهة شمالية ونادي رياضي خاص» is the home's
+                and not _owned_after(gn):   # «واجهة شمالية ونادي رياضي خاص» is the home's; «خاص بالحي» is not
             return None, s, e
     if fact in _PURE_PUBLIC_FACTS:
         w8 = [_strip_wa(w) for w in gp[-8:]]
@@ -1850,6 +1864,9 @@ def selftest() -> None:
         ("قريب من الخدمات، مدرسة كبيرة للبنات والشقة بها نادي رياضي", {"gym": True}, ()),
         ("قريب من الخدمات، مدرسة فيها نادي رياضي، مسجد", {}, ("gym", "mosque")),
         ("واجهة شمالية ونادي رياضي خاص", {"gym": True}, ()),
+        ("واجهة شمالية على ملعب كرة قدم خاص بالحي", {}, ("football_pitch", "sports_court")),
+        ("واجهة شمالية ونادي رياضي لسكان الحي", {}, ("gym",)),
+        ("واجهة شمالية ونادي رياضي مستقل للفيلا", {"gym": True}, ()),
         ("البرج جديد ويوجد به نادي رياضي وكذلك مسبح", {"gym": True}, ()),
         ("قريب من الخدمات، نادي رياضي لسكان المبنى", {"gym": True}, ()),
         ("قريب من الخدمات، مدرسة، جيم، مسجد", {}, ("gym", "mosque")),
