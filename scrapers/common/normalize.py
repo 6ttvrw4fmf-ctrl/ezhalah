@@ -617,16 +617,24 @@ def stated_rent_period(price: Optional[int], text: Optional[str]) -> Optional[st
     == price → 'annual'. re's \\d and to_int read Arabic-Indic digits too."""
     if not price or not text:
         return None
+    # THE NEAREST period word to THIS price wins (2026-11-07, haraj 24760182): «الإيجار الشهري 2500ريال
+    # الإيجار السنوي 28000ريال» has «الشهري» within 40 chars of 28000 too, and the first-word-wins loop
+    # read the yearly 28,000 as monthly and served 336,000 a year. Ties keep the old order (monthly first).
+    best: Optional[tuple[int, int, str]] = None
     found: Optional[str] = None
-    for word_re, period in ((_MONTHLY_WORD_RE, "monthly"), (_YEARLY_WORD_RE, "annual")):
+    for order, (word_re, period) in enumerate(((_MONTHLY_WORD_RE, "monthly"), (_YEARLY_WORD_RE, "annual"))):
         for m in word_re.finditer(text):
-            for n in _NUMBER_RE.findall(text[max(0, m.start() - 40): m.end() + 40]):
-                v = to_int(n.replace("٬", ","))
+            lo = max(0, m.start() - 40)
+            for nm in _NUMBER_RE.finditer(text[lo: m.end() + 40]):
+                v = to_int(nm.group(0).replace("٬", ","))
                 if v == price:
-                    return period
-                if period == "monthly" and v and v * 12 == price:
+                    a, b = lo + nm.start(), lo + nm.end()
+                    gap = a - m.end() if a >= m.end() else (m.start() - b if b <= m.start() else 0)
+                    if best is None or (gap, order) < best[:2]:
+                        best = (gap, order, period)
+                elif period == "monthly" and v and v * 12 == price:
                     found = found or "annual"
-    return found
+    return best[2] if best else found
 
 
 def rent_period_from_ad(price: Optional[int], text: Optional[str], card_period: Optional[str],
