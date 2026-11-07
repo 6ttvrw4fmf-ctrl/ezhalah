@@ -103,7 +103,14 @@ check(`the proof block has served AND untouched cases (${cases.length})`, cases.
 for (const c of cases) {
   const p = Number(c[1]), deal = c[3] === 'true' ? 'Rent' : 'Buy';
   if (c[5]) check(`SQL case ${deal} «${p}» → ${Number(c[5]).toLocaleString('en')}: the card recognises it`, servedFromThousands(deal, p, Number(c[5])) === Number(c[5]));
-  else check(`SQL case ${deal} «${p}» stays as published: the card leaves it`, servedFromThousands(deal, p, p) === null);
+  else {
+    // The index serves the SOURCE figure: the card, built from that row, must come out unchanged.
+    const l = deal === 'Rent'
+      ? { deal, price: `SAR ${p}`, priceAnnual: p, rentPeriod: null, priceIsDerived: false }
+      : { deal, price: `SAR ${p}`, salePriceTotal: p, priceIsDerived: false };
+    const before = JSON.stringify(l);
+    check(`SQL case ${deal} «${p}» stays as published: the card leaves it`, !followIndexThousandsVerdict(l, p) && JSON.stringify(l) === before);
+  }
 }
 
 // ── 4. the round trip through the client nets ────────────────────────────────────────────────────────────────────────
@@ -143,10 +150,14 @@ check('finalize() carries the raw rent figure the verdict is recognised against'
   /priceAnnual: deal === 'Rent' && typeof servedAnnual === 'number' \? servedAnnual : null,/.test(REMOTE));
 check('both card layouts show the site\'s own figure', (CARD.match(/listing\.typedInThousands != null \?/g) ?? []).length === 2);
 check('the Arabic line exists', I18N.includes("'The site wrote {n} — we read it in thousands': 'الموقع كتب {n} — قرأناه بالألف'"));
+// Any later redefinition (any case, spacing, schema prefix or dollar tag) must carry every guard; one this check cannot
+// read FAILS, it is never skipped.
 check('no later migration redefines the rule without its guards',
   readdirSync(MIG).filter((f) => f > FILE && f.endsWith('.sql'))
-    .every((f) => { const m = readFileSync(join(MIG, f), 'utf8').match(/create or replace function public\.price_in_thousands_ar\([\s\S]*?\$function\$;/);
-      return !m || ruleGuardsOk(m[0]); }));
+    .every((f) => { const s = readFileSync(join(MIG, f), 'utf8');
+      if (!/create\s+or\s+replace\s+function\s+(public\.)?price_in_thousands_ar\s*\(/i.test(s)) return true;
+      const m = s.match(/create\s+or\s+replace\s+function\s+(?:public\.)?price_in_thousands_ar\s*\([\s\S]*?(\$[A-Za-z_]*\$)[\s\S]*?\1/i);
+      return !!m && ruleGuardsOk(m[0].replace(/\s+/g, ' ')); }));
 
 console.log(failed === 0 ? '\n✓ price typed in thousands: rule guarded, index and card agree, budget search finds the ad'
                          : `\n✗ ${failed} check(s) failed`);
