@@ -58,7 +58,7 @@ export function pickName(
   }
   // English UI: prefer the Latin spelling; if we only have Arabic, fall back to the as-typed value.
   // Each word starts with a capital (owner 2026-11-07: «Yusuf not yusuf», every user); the rest stays as typed (McAllister).
-  return (en || (scriptOf(base) === 'en' ? base : '') || base).replace(/(^|\s)(\p{Ll})/gu, (_, sp: string, c: string) => sp + c.toLocaleUpperCase('en'));
+  return (en || (scriptOf(base) === 'en' ? base : '') || base).replace(/(^|\s)(\p{Ll})/gu, (_, sp, c) => sp + c.toLocaleUpperCase('en'));
 }
 
 
