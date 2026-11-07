@@ -274,6 +274,17 @@ def _make_prune_verify(control_ad: Optional[str]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
+def spot_check_oracle(control=None):
+    """The lifecycle double-check reads a nowaisiry ad the way prune does: by its OWN post id.
+
+    WHY (2026-11-07, backlog 1427). lifecycle_spot_check read NW4349 by its stored slug, which the office
+    re-used for post 4513 (a different 14,582 m² farm): «200» → LIVE, so the ad prune had hidden on a direct
+    404 (11-04 12:42) was put back on screen (11-06 11:23, run 42208086448) and its card opened NW4513's page.
+    `control` is the spot check's known-live row (a dict with ad_number) or an ad number."""
+    ad = control.get("ad_number") if isinstance(control, dict) else control
+    return _make_prune_verify(ad)
+
+
 def _clean(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", ihtml.unescape(s or ""))).strip()
 
