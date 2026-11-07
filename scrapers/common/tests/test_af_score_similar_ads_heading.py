@@ -41,3 +41,17 @@ def test_other_spellings_are_headings_too():
     for h in ("إعلانات مشابهة", "عقارات مشابهة", "الإعلانات المشابهة"):
         assert similar_ads_tail(f"<h3>{h}</h3><p>x</p><footer>") == "<p>x</p>"
     assert similar_ads_tail("<h2>مميزات العقار</h2><p>x</p>") == ""
+
+
+def test_a_heading_inside_inline_markup_is_a_heading_too():
+    # CodeRabbit on #11065: «<h2><span>إعلانات مشابهة</span></h2>»
+    body = OWN + SIMILAR.replace('<h2 class="building-title ">الاعلانات المشابة</h2>',
+                                 '<h2 class="t"><span>إعلانات <b>مشابهة</b></span></h2>') + '<footer>x</footer></body></html>'
+    assert "مؤثثه" in similar_ads_tail(body)
+    assert not any("مؤثثه" in x for x in _lines(strip_related(page_evidence(body), body)))
+
+
+def test_the_ads_own_line_stays_when_a_similar_card_repeats_it():
+    # CodeRabbit on #11065: the ad says «مؤثثه بالكامل» itself, and so does a card under the heading
+    body = OWN.replace('</div>', '<p>مؤثثه بالكامل السعر غير شامل السعي للتواصل</p></div>', 1) + SIMILAR + '<footer>x</footer></body></html>'
+    assert any("مؤثثه" in x for x in _lines(strip_related(page_evidence(body), body)))
