@@ -856,6 +856,21 @@ def _photos(rec: dict[str, Any]) -> Optional[list[str]]:
 
 
 # ── FETCH ────────────────────────────────────────────────────────────────────────────────────────
+MIN_INTERVAL = max(1.0, REQUEST_GAP)   # seconds between request STARTS (≤ 1 req/s); the env gap can only slow it
+_last_start = [0.0]
+
+
+def _pace(now=time.monotonic, sleep=time.sleep) -> None:
+    """Hold the next request until MIN_INTERVAL has passed since the previous one STARTED. Every GET in
+    this module (list pages, retrieve, and each retry) goes through _get_json, which calls this first, so
+    no path can exceed 1 request/second whatever the latency (CodeRabbit #11136: an average is not an
+    interval). With ~0.7 s latency it adds ~0.3 s a call; the old fixed gap added 0.35 s."""
+    wait = _last_start[0] + MIN_INTERVAL - now()
+    if wait > 0:
+        sleep(wait)
+    _last_start[0] = now()
+
+
 def _get_json(s: cc.Session, url: str, *, what: str, tries: int = 4) -> Any:
     """One JSON GET with BACKOFF — measured, not decorative.
 
@@ -869,6 +884,7 @@ def _get_json(s: cc.Session, url: str, *, what: str, tries: int = 4) -> Any:
     """
     r = None
     for attempt in range(tries):
+        _pace()
         r = s.get(url, timeout=45)
         if r.status_code not in TRANSIENT_STATUSES:
             break
@@ -903,10 +919,6 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
     page = 1
     complete = False
     while page <= MAX_PAGES:
-        if page > 1:
-            # ~700 list pages now, not 95: at least one second apart (the scrapers' ≤ 1 request/second rule).
-            # The retrieve loop below already runs at ~1.07 s a call measured (12,000 in 215 min, 11-07).
-            time.sleep(max(REQUEST_GAP, 1.0))
         body = _get_json(s, f"{API}/list?page={page}", what=f"{API}/list page {page}")
         batch = [p for p in (body.get("properties") or []) if isinstance(p, dict)]
         if not batch:
@@ -1068,9 +1080,7 @@ def main() -> int:
             pid = _clean(listed.get("id"))
             if pid and pid not in tonight:
                 continue
-            read_n += 1
-            if read_n > 1:
-                time.sleep(REQUEST_GAP)     # the retrieve endpoint's measured sustained quota
+            read_n += 1               # pacing (≤ 1 request/second, retries included) lives in _get_json._pace
             detail = fetch_detail(s, pid) if pid else None
             if detail is None:
                 detail_misses += 1

@@ -53,3 +53,27 @@ assert R.detail_plan(small, 0, {}) == set(small), "budget 0 means no limit"
 assert R.detail_plan(["1", "2", "3"], 2, {"1": "2026-11-07", "2": "2026-11-01"}) == {"2", "3"}, \
     "never-read and oldest-read ads go first"
 print(f"✓ muhaysini: cap {R.MAX_PAGES * R.PAGE_SIZE:,} rows; every listed ad read within k nights, catalogue churn included")
+
+# ≤ 1 request/second between request STARTS, whatever the latency (CodeRabbit #11136): a fake clock drives
+# the REAL _pace with instant responses, then with slow ones.
+for latency in (0.0, 0.2, 1.5):
+    clock = {"t": 1000.0}
+    starts: list[float] = []
+
+    def now():
+        return clock["t"]
+
+    def sleep(dt):
+        clock["t"] += dt
+
+    R._last_start[0] = 0.0
+    for _ in range(50):
+        R._pace(now=now, sleep=sleep)
+        starts.append(clock["t"])
+        clock["t"] += latency                       # the request itself
+    gaps = [b - a for a, b in zip(starts, starts[1:])]
+    assert min(gaps) >= R.MIN_INTERVAL - 1e-9, (latency, min(gaps))
+assert R.MIN_INTERVAL >= 1.0
+src = Path(R.__file__).read_text()
+assert src.count("_pace()") == 1 and "_pace()\n        r = s.get(" in src, "every GET (and every retry) must be paced"
+print("✓ muhaysini: request starts ≥ 1 s apart at any latency")
