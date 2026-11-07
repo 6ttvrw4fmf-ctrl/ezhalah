@@ -43,7 +43,7 @@ from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
-from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
+from scrapers.common.arabic_location import catalog_district, find_district_in_text, resolve  # noqa: E402
 from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
@@ -212,6 +212,13 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     title = redact_pii(x.get("listing_title") or (x.get("list_address") or {}).get("unit_number")) or None
     desc = redact_pii(x.get("list_desc"), keep_lines=True) or None
     loc = location(x)
+    # No structured neighbourhood (`location` is null on some records) → the ad's OWN title/description, matched
+    # catalogue-exact only (find_district_in_text: never guessed). 2026-11-07: KW2074755354940342 «فيلا في حي
+    # الرائد» served with no district; 🔧 measured 16 of 189 KW cards district-less (new-site parity).
+    if not loc["district_ar"] and loc["city_id"]:
+        named = find_district_in_text(f"{title or ''}\n{desc or ''}", loc["city_id"])
+        if named:
+            loc = {**loc, "district_ar": named}
     st = x.get("structure") or {}
     # The ad page prints the LOT size («Acre 1225 sqm»), the API also carries living_area. A unit inside a building
     # (Apartment, Floor) is its living area — its «lot» is the whole building's plot (607 m² on a 109 m² flat); every

@@ -28,6 +28,8 @@ def _no_catalogue(monkeypatch):
     for m in (KW, AM, AS, MR, ST):
         monkeypatch.setattr(m, "resolve", fake)
         monkeypatch.setattr(m, "catalog_district", lambda cid, d: f"حي {d.removeprefix('حي ')}" if d else None)
+    # Catalogue-exact text match, stubbed: only «الرائد» is a district of the fake city here.
+    monkeypatch.setattr(KW, "find_district_in_text", lambda text, cid: "الرائد" if "حي الرائد" in (text or "") else None)
 
 
 def _no_pii(row: dict) -> None:
@@ -61,6 +63,18 @@ def test_kw_sale_is_the_source_price_with_licence_pin_and_no_agent():
     assert row["additional_info"]["latitude"] == pytest.approx(24.85) and row["elevator"] is True
     _no_pii(row)
     assert "Fakename" not in json.dumps(row, ensure_ascii=False)          # an UNLABELLED signature, removed by value
+
+
+def test_kw_without_a_neighbourhood_reads_the_district_its_own_text_names():
+    """2026-11-07: KW2074755354940342 has `location: null`; its description says «فيلا في حي الرائد» and the
+    card served no district. The ad's own text is read catalogue-exact; a text naming none stays empty."""
+    (row, _), _ = KW.map_listing(_kw(location=None, listing_title="750 SQM- Villa",
+                                     list_desc="فيلا في حي الرائد على أرض مساحتها 750 متر مربع"))
+    assert row["district_ar"] == "الرائد"
+    (row, _), _ = KW.map_listing(_kw(location=None, listing_title="750 SQM- Villa", list_desc="فيلا واسعة"))
+    assert row["district_ar"] is None
+    (row, _), _ = KW.map_listing(_kw(list_desc="فيلا في حي الرائد"))     # a structured neighbourhood still wins
+    assert row["district_ar"] == "حي القيروان"
 
 
 def test_kw_rent_period_only_when_the_text_ties_it_to_the_price():
