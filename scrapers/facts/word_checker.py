@@ -503,7 +503,7 @@ _PARTIAL_BEFORE = tuple(_n(w) for w in N._PARTIAL_BEFORE)
 # Negators that TOUCH the token. One word («غير», «بدون») or two («لا يوجد», «لا نقبل»).
 _NEG1 = frozenset(_n(w) for w in ("غير", "كغير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "no", "without", "not",
                                    "non", "ليس", "ليست", "عدا", "ماعدا", "باستثناء"))      # «ليست منحة» (owner handoff 2026-11-01)
-_NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتوفر", "لا تتوفر", "ما فيه", "ما في", "لا يشمل",
+_NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتوفر", "لا تتوفر", "ما فيه", "ما في", "ما فيها", "لا يحتوي", "لا تحتوي", "لا يشمل",
                                    "لا تشمل", "عدم وجود", "لا نقبل", "لا يقبل", "من غير", "ما يوجد", "is not"))
 # …and AFTER it: «مطبخ غير راكب», «مفروشة: لا», «الضمانات ومدتها: لا يوجد», «المطابخ: 0».
 _POST_NOT = tuple(_n(w) for w in ("متوفر", "موجود", "متاح", "مشمول", "شامل"))
@@ -921,6 +921,11 @@ def _negated_after(nxt: list[str], fact: str) -> int:
 _DISTRICT_WORDS = frozenset(_n(w) for w in ("حي", "بحي", "وحي", "لحي", "فحي", "وبحي", "بالحي", "الحي"))
 
 
+_LEAD_VERB_FACTS = frozenset({"shops_inside", "offices_inside", "apartments_inside"})
+_LEAD_VERBS = frozenset(_n(w) for w in ("يوجد", "توجد", "فيه", "فيها", "به", "بها", "يحتوي", "تحتوي", "يضم", "تضم"))
+_EXIST_VERBS = frozenset(_n(w) for w in ("يوجد", "توجد", "يحتوي", "تحتوي", "يضم", "تضم"))
+
+
 def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: int,
            cue_in: bool = False, near_in: bool = False, list_in: bool = False) -> tuple[Optional[bool], int, int]:
     """The outcome of ONE token hit: (True|False|None, quote start, quote end) in the normalised clause.
@@ -1093,7 +1098,19 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # the «لايوجد» belongs to the ACs before, and «نعم» right after the item is the item's own yes.
     if any(_strip_wa(w) == "نعم" for w in gn[:2]) and not _negated_after(nxt, fact):
         return True, ws, we + len(" ".join([""] + nxt[:1 + [_strip_wa(w) for w in gn[:2]].index("نعم")]))
-    back = _negated_before(prev)
+    # A NEGATED LEAD VERB (🔬 2026-11-07, two-way sample): the shops / offices / apartments regexes START with the verb
+    # («يوجد محلات», «فيها محلات», «تحتوي على محلات»), so the «لا / ما» before it was alone in `prev` and «لا يوجد
+    # محلات» was served as a YES. The look-back now sees the verb too; «كما يوجد محلات» is not a negation.
+    lead = t[s:e].split()[:1]
+    if fact in _LEAD_VERB_FACTS and lead and _strip_wa(lead[0]) in _LEAD_VERBS and prev:
+        nb = _negated_before(prev + [lead[0]])
+        if nb == 2:                                  # the negator RIGHT before the verb
+            qs = len(" ".join(prev[:-1])) + (1 if len(prev) > 1 else 0)
+            return False, qs, we
+    # …and an un-negated EXISTENCE verb that opens the match affirms it: «لا يوجد مصعد ويوجد محلات» has shops (the old
+    # look-back walked past «مصعد» to the lift's «لا يوجد»). Prepositions keep the look-back: «لا يوجد بها محلات» is a no.
+    verb_affirms = fact in _LEAD_VERB_FACTS and bool(lead) and _strip_wa(lead[0]) in _EXIST_VERBS
+    back = None if verb_affirms else _negated_before(prev)
     if back is not None:
         qs = len(" ".join(prev[:len(prev) - back])) + (1 if len(prev) > back else 0)
         return False, qs, we
@@ -2479,6 +2496,15 @@ def selftest() -> None:
         ("عمارة فيها محلات تجارية", {"shops_inside": True}, ()),
         ("يوجد 4 معارض", {"shops_inside": True, "shops_count": 4.0}, ()),
         ("محل للإيجار", {}, ("shops_inside",)),
+        # a negated lead verb is a stated NO, never a yes (🔬 2026-11-07)
+        ("لا يوجد محلات", {"shops_inside": False}, ()),
+        ("ولا توجد محلات بالعمارة", {"shops_inside": False}, ()),
+        ("ما فيها محلات", {"shops_inside": False}, ()),
+        ("لا تحتوي على محلات", {"shops_inside": False}, ()),
+        ("لا يوجد مكاتب", {"offices_inside": False}, ()),
+        ("لا يوجد شقق", {"apartments_inside": False}, ()),
+        ("كما يوجد محلات بالعمارة", {"shops_inside": True}, ()),
+        ("لا يوجد مصعد ويوجد محلات", {"elevator": False, "shops_inside": True}, ()),
         # 🔬 2026-11-07 two-way sample: the area's shops, a possible use, the street's shops
         ("قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية 🕌 مساجد", {}, ("shops_inside", "mosque")),
         ("قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ سوبرماركت", {}, ("market",)),
