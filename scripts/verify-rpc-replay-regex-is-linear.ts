@@ -40,6 +40,15 @@ ok(!!out.body && out.body.includes('+ 1 + 2 $$'), 'an assigned inline `replace(s
 ok(!!out.body && out.body.includes('+ 2'), 'the occurrence probe `length(replace(x, \'+ 2\', \'\'))` is NOT read as a patch');
 ok(out.unresolved.length === 0, `nothing left unresolved (${JSON.stringify(out.unresolved)})`);
 
+// Mutation proofs: each predicate above, applied to a deliberately broken input, must say "broken".
+const mustCatch = (label: string, caught: boolean) => ok(caught, `(mutation) catches ${label}`);
+const inlinePatched = (b: string | null) => !!b && b.includes('+ 1 + 2 $$');
+const probeSurvived = (b: string | null) => !!b && b.includes('+ 2');
+mustCatch('a replay that skipped the inline patch', !inlinePatched('select 1 /*NEEDLE*/ + 1 $$'));
+mustCatch('a replay that read the occurrence probe as a patch (the needle deleted)', !probeSurvived('select 1 /*NEEDLE*/ + 1  $$'));
+// The hang itself is proven by running this file against the OLD rpcReplay.ts: it does not finish
+// (killed at a 20 s timeout, exit 124, 2026-11-07); CI killed the real barrier at 600 s.
+
 fs.rmSync(dir, { recursive: true, force: true });
 if (failed) { console.error(`\n❌ rpc-replay-regex-is-linear: ${failed} failure(s)`); process.exit(1); }
 console.log('\n✓ rpc-replay-regex-is-linear: passed.');
