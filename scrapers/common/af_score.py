@@ -438,6 +438,8 @@ _WASALT_BORDER = re.compile(r"^borders\.", re.I)
 
 
 # wasalt's structured attribute keys → the Arabic label the comparison's keywords read («م²», «غرف», «دورات المياه»).
+WASALT_PRICE_KEYS = ("salePrice", "conversionPrice", "yearlyRent", "monthlyRent", "rentPrice")
+
 WASALT_FIELD_LABELS = {
     "builtUpArea": "مساحة البناء م²", "propertyArea": "مساحة العقار م²", "plotArea": "مساحة الأرض م²",
     "noOfBedrooms": "عدد غرف النوم", "noOfBathrooms": "عدد دورات المياه",
@@ -477,6 +479,13 @@ def wasalt_page(url: str, fetch=None) -> dict | None:
                 # to a size word while the REGA deed text («… من الأرض 51.52 متر») did, and 17926766's structured
                 # builtUpArea 96 (= ours) scored a mismatch (🆕 2026-10-16, re-read run 38925580390).
                 texts.append(f"{label} {node['value']}")
+            # wasalt's OWN price is a bare number (propertyInfo.salePrice / conversionPrice), and a bare number
+            # leaf never became a line, so the score read the description's other «ريال» figures and called our
+            # price — which IS salePrice — a MISMATCH (🆕 2026-11-07: 24756108 640000, 24765590 780000).
+            for pk in WASALT_PRICE_KEYS:
+                pv = node.get(pk)
+                if isinstance(pv, (int, float)) and not isinstance(pv, bool) and pv > 0:
+                    texts.append(f"السعر {int(pv) if float(pv) == int(pv) else pv} ريال")
             for k, v in node.items():
                 walk(v, str(k))
         elif isinstance(node, list):
