@@ -77,7 +77,11 @@ PREFIX = "TMZ"
 
 # The site's exact type spellings. «عمارة سكنية» is not in the shared map.
 _TYPE_OVERRIDES = {"شقة": "Apartment", "فيلا": "Villa", "عمارة سكنية": "Building", "عمارة": "Building",
-                   "مكتب": "Office", "محل": "Shop"}
+                   "مكتب": "Office", "محل": "Shop",
+                   # The site's category PLURALS (2026-11-07): every nightly run since 11-02 skipped 4 live ads as
+                   # type_unmapped_فيلل / _عمائر ×2 / _مكاتب — the same types as their singulars above. The title
+                   # check below still skips an ad whose own first word names a different type.
+                   "فيلل": "Villa", "فلل": "Villa", "عمائر": "Building", "مكاتب": "Office", "محلات": "Shop"}
 # Leading title words, used ONLY to detect a title that contradicts the structured type.
 _TITLE_TYPE_WORDS = {"عمارة": "Building", "فيلا": "Villa", "شقة": "Apartment", "أرض": "Residential Land",
                      "ارض": "Residential Land", "محل": "Shop", "مكتب": "Office", "معرض": "Showroom",
