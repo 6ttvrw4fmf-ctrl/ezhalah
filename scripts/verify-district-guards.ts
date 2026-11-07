@@ -274,7 +274,9 @@ mustCatch('one-letter names folded by themselves', everyListingProblems(mutTree(
 {
   // The LATEST definition is the plpgsql one (20261107132419); the mutation must hit the body the guard really reads.
   const latestDisplay = latestDef(tree, DISPLAY_RE);
-  check('the guard reads the latest loc_display_district_ar body (whatever its case)', latestDisplay.fn !== '' && (!tree.some((f) => /20261107132419/.test(f.n)) || /20261107132419/.test(latestDisplay.n)) ? [] : [`latest read from ${latestDisplay.n}`]);
+  // latestDef() walks the tree in migration order and keeps the LAST match, so whatever file redefines the function
+  // next is the one read — no filename is pinned here (CodeRabbit on #11108).
+  check('the guard reads the latest loc_display_district_ar body (whatever its case)', latestDisplay.fn !== '' ? [] : ['no definition of loc_display_district_ar found']);
   // Mutate the fold in the body the guard really reads: the plpgsql fallback once 20261107132419 is in the tree, the SQL chain before.
   mustCatch('the fold removed from loc_display_district_ar (latest body)', everyListingProblems(
     DISPLAY_FOLD_PLPGSQL.test(latestDisplay.fn)
@@ -284,9 +286,10 @@ mustCatch('one-letter names folded by themselves', everyListingProblems(mutTree(
   const plpgsqlBody = 'create or replace function public.loc_display_district_ar(p_city_id integer, p_raw text) returns text language plpgsql stable as $function$ begin if key is null then key := public.district_copy_of(p_city_id, p_raw); end if;\n  if key is null then key := own; end if; end $function$;';
   check('the plpgsql fallback shape is read as folding', displayFolds(plpgsqlBody) ? [] : ['plpgsql fold not recognised']);
   mustCatch('the plpgsql fallback removed', displayFolds(plpgsqlBody.replace('if key is null then key := public.district_copy_of(p_city_id, p_raw); end if;', '')) ? [] : ['fold missing']);
-  // The older SQL body must still be recognised (a rollback to it is a fold that works, not a missing fold).
-  const sqlBody = tree.map((f) => f.s.match(/CREATE OR REPLACE FUNCTION public\.loc_display_district_ar\([\s\S]*?\$function\$;/)?.[0]).filter(Boolean).pop() ?? '';
-  check('the SQL body of loc_display_district_ar is still read as folding', sqlBody !== '' && displayFolds(sqlBody) ? [] : ['SQL fold not recognised']);
+  // The SQL shape must still be recognised (a rollback to it is a fold that works, not a missing fold): a fixed fixture,
+  // not a tree pick, so a later uppercase plpgsql redefinition cannot be mistaken for it (CodeRabbit on #11108).
+  const sqlBody = 'CREATE OR REPLACE FUNCTION public.loc_display_district_ar(p_city_id integer, p_raw text) RETURNS text LANGUAGE sql STABLE AS $function$ select k.display_ar from (select coalesce(public.district_copy_of(p_city_id, p_raw), norm_district_tok(p_raw)) as key) q $function$;';
+  check('the SQL body of loc_display_district_ar is still read as folding', displayFolds(sqlBody) ? [] : ['SQL fold not recognised']);
   mustCatch('the fold removed from loc_display_district_ar (SQL body)', displayFolds(sqlBody.replace(DISPLAY_FOLD_SQL, 'norm_district_tok(p_raw)) as key')) ? [] : ['fold missing']);
 }
 mustCatch('the served-twins alarm not rostered', everyListingProblems(tree.map((f) => ({ n: f.n, s: f.s.replace("'''mon_detect_district_served_twins'', ' || anchor", "anchor") }))));
