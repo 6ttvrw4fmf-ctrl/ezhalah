@@ -124,6 +124,11 @@ export const DISTRICT_MAP_PLATFORMS: readonly string[] = [
   'almuteb', 'nawafeth', 'wadod', 'october', 'hazim', 'eydah', 'eightfloor',
   'razre',   // 2026-10-21: refuses framing now, so its ad opens on Ezhalah's page — 94 ads, all with a district, no pin
   'ibaax',   // 2026-10-22: refuses framing now (SAMEORIGIN), its ad opens on Ezhalah's page — 150 ads, all with a district, no pin
+  // Owner 2026-11-07 («every listing without an exact pin, on ALL sites, highlights its district»): the preview sites
+  // the list had missed (sadin 83 pin-less ads, albdah 64, manzo, aqaralsaudia, fursaghyr, nafithh) and the four
+  // new-tab sites that now open Ezhalah's ad page (KW, Al Rajhi, Almajdiah, Asas Makeen).
+  'sadin', 'albdah', 'manzo', 'aqaralsaudia', 'fursaghyr', 'nafithh',
+  'kellerwilliams', 'mrajhi', 'almajdiah', 'asasmakeen',
 ];
 /** The place an Aqar ad's own link names, e.g. sa.aqar.fm/شارع-الصليحى-212-الفرعاء-منطقة-عسير-6836489 →
  *  «شارع الصليحى 212 الفرعاء منطقة عسير، السعودية». Only sa.aqar.fm; the trailing ad number is dropped; a
