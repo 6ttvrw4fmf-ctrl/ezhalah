@@ -63,3 +63,50 @@ def test_a_recheck_with_nothing_to_read_still_leaves_its_heartbeat(site, monkeyp
     assert seen == ["fleet_liveness:testsite:recheck"]
     assert len(ended) == 1 and ended[0]["ok"] is True and ended[0]["rows_seen"] == 0
     assert "nothing to re-read" in ended[0]["notes"]
+
+
+class _Q:
+    def __init__(self, err=None, n=0):
+        self.err, self.n = err, n
+
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, *a):
+        return self
+
+    def gt(self, *a):
+        return self
+
+    def limit(self, *a):
+        return self
+
+    def execute(self):
+        if self.err:
+            raise self.err
+        return type("R", (), {"count": self.n})()
+
+
+class _Client:
+    def __init__(self, by_table):
+        self.by_table = by_table
+
+    def table(self, t):
+        return self.by_table[t]
+
+
+def test_a_failed_count_is_never_an_empty_recheck(monkeypatch):
+    """CodeRabbit on #11081: tables_for dropped a table whose count FAILED, so struck() could read 0 and the
+    heartbeat would say «nothing to re-read» over unread strikes. A missing table is skipped; a failed one raises."""
+    monkeypatch.setattr(F, "_execute", lambda q, **k: q.execute())
+    missing = RuntimeError("PGRST205 Could not find the table 'public.x_commercial_listings'")
+    ok = _Client({"x_residential_listings": _Q(n=2), "x_commercial_listings": _Q(err=missing)})
+    assert F.struck(ok, "x") == 2
+    broken = _Client({"x_residential_listings": _Q(err=RuntimeError("502 Bad Gateway")),
+                      "x_commercial_listings": _Q(err=missing)})
+    with pytest.raises(RuntimeError):
+        F.struck(broken, "x")
+    both_missing = _Client({"x_residential_listings": _Q(err=missing), "x_commercial_listings": _Q(err=missing)})
+    with pytest.raises(RuntimeError):
+        F.struck(both_missing, "x")
+    assert F.tables_for(broken, "x") == {}          # the lenient read used by the daily pass is unchanged

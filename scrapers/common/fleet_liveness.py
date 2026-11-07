@@ -162,22 +162,34 @@ def kill_cap(active: int) -> int:
     return max(KILL_FLOOR, math.ceil(KILL_FRAC * active))
 
 
-def tables_for(client, site: str) -> dict[str, int]:
-    """{table: active rows} for the site's tables that exist."""
+_NO_SUCH_TABLE = ("PGRST205", "42P01", "does not exist", "Could not find the table")
+
+
+def tables_for(client, site: str, *, strict: bool = False) -> dict[str, int]:
+    """{table: active rows} for the site's tables that exist. With strict=True only a table that does
+    not EXIST is skipped; a count that failed for any other reason raises, so a caller can never read
+    a failed count as an empty site (CodeRabbit on #11081, 2026-11-07)."""
     out = {}
     for t in (f"{site}_residential_listings", f"{site}_commercial_listings"):
         try:
             out[t] = _execute(client.table(t).select("id", count="exact").eq("active", True).limit(1),
                               what=f"{t}.count", tries=3).count or 0
-        except Exception:  # noqa: BLE001 — a site with one vertical has one table
+        except Exception as e:  # noqa: BLE001 — a site with one vertical has one table
+            if strict and not any(m in str(e) for m in _NO_SUCH_TABLE):
+                raise
             continue
+    if strict and not out:
+        raise RuntimeError(f"{site}: no listing table could be counted")
     return out
 
 
 def struck(client, site: str) -> int:
-    """How many of the site's active rows carry a strike — what a recheck has to read."""
+    """How many of the site's active rows carry a strike — what a recheck has to read. Strict: a failed
+    count raises (the site fails loudly), never reads as 0 struck — the recheck's heartbeat row says
+    «nothing to re-read» only after every table was really counted."""
     return sum(_execute(client.table(t).select("id", count="exact").eq("active", True).gt("missing_count", 0)
-                        .limit(1), what=f"{t}.struck").count or 0 for t in tables_for(client, site))
+                        .limit(1), what=f"{t}.struck").count or 0
+               for t in tables_for(client, site, strict=True))
 
 
 def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None) -> list[dict]:
