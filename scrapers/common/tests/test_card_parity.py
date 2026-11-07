@@ -166,6 +166,8 @@ def test_licence_digits_and_unlabelled_rows():        # CodeRabbit on #11140
     assert panel_licence([{"key": "rega_ad_license_number", "value": "7100000000"},
                           {"key": "rega_ad_license_number", "label": "Ad license number", "value": "٧٢٠٠٤٢٣٥٥٢"}]) == "7200423552"
     assert panel_licence([{"key": "rega_ad_license_number", "label": "", "value": "7100000000"}]) is None
+    assert panel_licence({"rega_ad_license_number": "&#55;200423552"}) == "7200423552"
+    assert panel_licence([{"key": "adlic", "label": "Ad license number", "value": "&#55;200423552"}]) == "7200423552"
 
 
 def test_stored_of_reads_a_rows_panel_licence():      # CodeRabbit on #11140: exercise stored_of itself
