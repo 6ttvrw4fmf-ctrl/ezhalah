@@ -175,3 +175,24 @@ def test_several_figures_plus_on_request_wording_still_clears_the_stored_rent_pa
         if price == "2500":
             assert stored["price_annual"] == 30000 and stored["rent_period"] == "monthly", stored
     assert stored == {"price_total": None, "price_annual": None, "rent_period": None}, stored
+
+
+def test_a_monthly_payment_schedule_is_not_a_second_rent_period():
+    """Review on #10940: «الإيجار السنوي» + «دفع شهري» is an annual rent paid monthly, not an ambiguous offer."""
+    from scrapers.eaqartabuk.run import _price, _stated_rent_period
+    assert _stated_rent_period("محل الإيجار السنوي 30000 دفع شهري") == "annual"
+    assert _price("30000", True, "محل الإيجار السنوي 30000 الدفع شهري") == (None, 30000, "annual")
+    assert _stated_rent_period("شقة للايجار شهري أو سنوي") == "both", "a genuine two-period offer must stay ambiguous"
+
+
+def test_an_explicit_sale_clears_a_stored_rent_pair():
+    """Review on #10940: Rent, then the operation says sale — the old rent pair must not survive to a later Rent read."""
+    from scrapers.common import db
+    stored = {}
+    for op, status, title in (("rent", "إيجار", "شقة للايجار شهري"), ("sale", "بيع", "شقة للبيع")):
+        row, _ = map_listing(_item(title), _mp(op, status), "<p>شقة</p>", [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
+        if op == "rent":
+            assert stored == {"price_annual": 2400000, "rent_period": "monthly"}, stored
+    assert stored == {"price_annual": None, "rent_period": None}, stored

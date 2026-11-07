@@ -452,10 +452,16 @@ _PERIOD_MONTHLY_RE = re.compile(r"شهري|شهريا|بالشهر|/\s*شهر|ف
 _PERIOD_ANNUAL_RE = re.compile(r"سنوي|سنويا|بالسنة|/\s*سنة|في\s*السنة")
 
 
+# A PAYMENT schedule («دفع شهري», «الدفع سنوي», «دفعات شهرية», «سداد شهري», «تقسيط شهري») is how the rent is paid,
+# not the rent's period: «الإيجار السنوي … دفع شهري» is an annual rent paid monthly, never a two-period offer.
+_INSTALMENT_RE = re.compile(r"(?:دفع|الدفع|دفعات|الدفعات|سداد|السداد|تقسيط|التقسيط)\s*(?:\S+\s+)?(?:شهري\S*|سنوي\S*|بالشهر|بالسنة)")
+
+
 def _stated_rent_period(text: Optional[str]) -> Optional[str]:
     """The period eaqartabuk actually PRINTS, or None. Never inferred from the price's magnitude."""
     if not text:
         return None
+    text = _INSTALMENT_RE.sub(" ", text)
     monthly = bool(_PERIOD_MONTHLY_RE.search(text))
     annual = bool(_PERIOD_ANNUAL_RE.search(text))
     if monthly and annual:
@@ -597,6 +603,10 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
         if is_rent:
             # «السعر حسب …» is the source's own statement: a rental's earlier figure and period must not linger.
             price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
+    if not is_rent and (op == "sale" or "بيع" in status_ar):
+        # Explicit sale evidence (operation/status, never a fallback or a failed read): a rent pair stored while the
+        # ad read Rent must not survive to be served under a rental budget if it later returns to rent.
+        price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
     if flipped_to_rent:
         # The row was stored as a sale with this figure in price_total; a rental holds it in price_annual only.
         price_total = getattr(db, "AUTHORITATIVE_NULL", None)
