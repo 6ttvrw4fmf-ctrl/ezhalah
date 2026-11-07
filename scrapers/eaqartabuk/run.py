@@ -129,6 +129,22 @@ COMMERCIAL_TYPES = {
 _TITLE_DISTRICT_RE = re.compile(r"(?:^|(?<=\s))ب?ح[يى]\s+([^\s,،.)\]]+)")
 
 
+
+_RENT_WORD = re.compile(r"(?:لل|ل)?[إا]يجار")
+# «بيع» only at a word start: «طبيعية» (natural ventilation) is not a sale (review on #10940).
+_SALE_WORD = re.compile(r"(?<![\u0621-\u064A])(?:و)?(?:لل|بال|ال)?بيع")
+
+
+def investment_offered_for_rent(op: str, status_ar: str, title, excerpt) -> bool:
+    """eaqartabuk's «استثمار» (operation=investment) states neither sale nor rent. When the ad's OWN words
+    say rent and never sale («هنجر للايجار حي المصيف», 24206284, 200,000), it is a rental; filing it as Buy was
+    our mapper's guess (backlog 1358, 2026-11-06: 4 investment ads, 2 titles say rent, 0 say sale). Anything
+    else keeps the old reading — never the reading that adds rows to a filter."""
+    if op != "investment" and "استثمار" not in (status_ar or ""):
+        return False
+    words = " ".join(str(x or "") for x in (title, excerpt))
+    return bool(_RENT_WORD.search(words)) and not _SALE_WORD.search(words)
+
 def _district_from_title(title: Optional[str]) -> Optional[str]:
     m = _TITLE_DISTRICT_RE.search(title or "")
     return m.group(1) if m else None
@@ -436,19 +452,32 @@ _PERIOD_MONTHLY_RE = re.compile(r"شهري|شهريا|بالشهر|/\s*شهر|ف
 _PERIOD_ANNUAL_RE = re.compile(r"سنوي|سنويا|بالسنة|/\s*سنة|في\s*السنة")
 
 
+# A PAYMENT schedule («دفع شهري», «الدفع سنوي», «دفعات شهرية», «سداد شهري», «تقسيط شهري») is how the rent is paid,
+# not the rent's period: «الإيجار السنوي … دفع شهري» is an annual rent paid monthly, never a two-period offer.
+# A rent word between them («دفع إيجار شهري») makes it the rent's own period again, so it is never stripped.
+_INSTALMENT_RE = re.compile(r"(?:دفع|الدفع|دفعات|الدفعات|سداد|السداد|تقسيط|التقسيط)\s*(?:(?!(?:ال)?[اإ]يجار)\S+\s+)?(?:شهري\S*|سنوي\S*|بالشهر|بالسنة)")
+
+
 def _stated_rent_period(text: Optional[str]) -> Optional[str]:
     """The period eaqartabuk actually PRINTS, or None. Never inferred from the price's magnitude."""
     if not text:
         return None
+    text = _INSTALMENT_RE.sub(" ", text)
     monthly = bool(_PERIOD_MONTHLY_RE.search(text))
     annual = bool(_PERIOD_ANNUAL_RE.search(text))
     if monthly and annual:
-        return None  # the ad offers both -> we cannot say which this price is
+        return "both"  # the ad offers both -> we cannot say which this price is (never judged as silent)
     if monthly:
         return "monthly"
     if annual:
         return "annual"
     return None
+
+
+def _several_figures(raw: Any) -> bool:
+    """True when meta.price holds two or more DISTINCT figures (e.g. two unit rents), i.e. no single price."""
+    groups = {g.replace(",", "").replace("٬", "") for g in re.findall(r"\d[\d,٬.]*", str(raw or ""))}
+    return len(groups) > 1
 
 
 def _price(raw: Any, is_rent: bool, raw_text: Optional[str] = None) -> tuple[Optional[int], Optional[int], Optional[str]]:
@@ -457,8 +486,7 @@ def _price(raw: Any, is_rent: bool, raw_text: Optional[str] = None) -> tuple[Opt
     # concatenate. Live id 598669 (2026-08-03): a multi-unit building listing two unit rents
     # (2,500 + 1,800) yielded price_annual=18,002,500 («1800»+«2500» glued); the page displays no
     # single price at all. Null it — the deal/type fields stay, only the price is unknowable.
-    groups = {g.replace(",", "").replace("٬", "") for g in re.findall(r"\d[\d,٬.]*", str(raw or ""))}
-    if len(groups) > 1:
+    if _several_figures(raw):
         return None, None, None
     v = _int(raw)
     if not v or v <= 0:
@@ -490,7 +518,12 @@ def _price(raw: Any, is_rent: bool, raw_text: Optional[str] = None) -> tuple[Opt
         return None, normalize.annualize_rent(v, "monthly"), "monthly"
     if period == "annual":
         return None, v, "annual"
-    return None, None, None
+    if period == "both":
+        # Monthly AND yearly terms, price tied to neither: ambiguous, not silent — the index must not judge it.
+        return None, None, None
+    # Period SILENT (owner rule 2026-10-31, «judge_silent_rent_period_ar»): keep the figure as published, period
+    # unknown — the search index labels it from the price and flags it judged. Same as asasmakeen / kellerwilliams.
+    return None, v, None
 
 
 # Some listings quote no real figure at all: the description literally says the price depends on
@@ -531,19 +564,53 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     op = (mp.get("operation") or "").strip().lower()
     status_ar = (mp.get("status") or "").strip()
     is_rent = op == "rent" or "إيجار" in status_ar or "ايجار" in status_ar
+    flipped_to_rent = False
+    if not is_rent and investment_offered_for_rent(op, status_ar, item.get("title"), item.get("excerpt")):
+        is_rent = flipped_to_rent = True
 
     # The period text eaqartabuk actually prints. Built from the raw title/excerpt/status available
     # here (the redacted `title`/`description` are computed further down); redaction only strips
     # phone numbers, so it cannot remove a period word.
-    _period_text = " ".join(str(x or "") for x in (item.get("title"), item.get("excerpt"), status_ar))
+    _period_text = " ".join(str(x or "") for x in (item.get("title"), item.get("excerpt"), status_ar,
+                                                    _strip_tags(desc_html) if desc_html else ""))
     price_total, price_annual, rent_period = _price(meta.get("price"), is_rent, _period_text)
+    # Silence is the source's answer only when the whole ad (its detail text too) was read; a failed detail fetch
+    # leaves the stored period alone (the upsert drops the plain None).
+    if _several_figures(meta.get("price")):
+        # Several distinct figures in meta.price (list API, read even when the detail fetch fails): the ad has no single
+        # price any more, so a figure stored by an earlier crawl must not linger (the upsert drops a plain None).
+        # Every price field is cleared whatever the deal reads now: an investment ad that falls back to Buy is not
+        # sale evidence, and a rent pair stored while it read Rent must not outlive the single figure it described.
+        price_total = price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
+    elif is_rent and rent_period is None and price_annual is not None and desc_html:
+        # The ad's own text was read and states no period: that silence is the source's answer, so a period stored
+        # by an earlier crawl must not stay paired with this figure (the upsert drops a plain None).
+        rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
+    elif is_rent and rent_period is None and price_annual is not None:
+        # Detail page NOT read (failed fetch): the period is unknown, so this crawl writes neither the figure nor the
+        # period — the stored pair stays together (a monthly 14,400 must never become 1,200 still labelled monthly).
+        price_annual = None
+    elif is_rent and _stated_rent_period(_period_text) == "both":
+        # Monthly AND yearly terms: the ad itself is ambiguous, so an older stored price/period must not linger.
+        price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
 
     # On-request pricing: the number in meta.price is a placeholder, not a real quote (see
     # _price_on_request docstring above). Null the price rather than store a fabricated figure;
     # transaction_type/rent_period-as-Rent-vs-Buy classification still comes from status/operation
     # (a separate, reliable field) so we keep that — only the price itself is unknown.
-    if _price_on_request(_strip_tags(desc_html), _strip_tags(item.get("excerpt"))):
+    # Several figures already cleared every price field authoritatively above; plain Nones here would undo that.
+    if not _several_figures(meta.get("price")) and _price_on_request(_strip_tags(desc_html), _strip_tags(item.get("excerpt"))):
         price_total = price_annual = rent_period = None
+        if is_rent:
+            # «السعر حسب …» is the source's own statement: a rental's earlier figure and period must not linger.
+            price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
+    if not is_rent and (op == "sale" or "بيع" in status_ar):
+        # Explicit sale evidence (operation/status, never a fallback or a failed read): a rent pair stored while the
+        # ad read Rent must not survive to be served under a rental budget if it later returns to rent.
+        price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
+    if flipped_to_rent:
+        # The row was stored as a sale with this figure in price_total; a rental holds it in price_annual only.
+        price_total = getattr(db, "AUTHORITATIVE_NULL", None)
 
     # Area fallback chain: structured meta.area → candles-map area → parse the description text
     # (where most eaqartabuk listings actually put it, e.g. "مساحة 796").

@@ -363,7 +363,7 @@ def main() -> int:
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)
             return 1
-        print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted (STAGED — not searchable)", flush=True)
+        print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted", flush=True)
         return 0
     except Exception as e:  # noqa: BLE001 — a wall or any error: record it, prune nothing
         if run_id:

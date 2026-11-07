@@ -44,9 +44,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { site: asasmakeen,     cmd: "python -m scrapers.asasmakeen.run" }
-          - { site: mrajhi,         cmd: "python -m scrapers.mrajhi.run" }
-          - { site: steam,          cmd: "python -m scrapers.steam.run" }
     steps:
       - name: Selected?
         id: pick

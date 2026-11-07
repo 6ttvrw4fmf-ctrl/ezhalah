@@ -334,7 +334,7 @@ jobs:
             # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
             # manzo (♻️ 2026-11-05): 1,062 detail records; the API answered 429 to 432 of them on 11-04 and the 10-min slot
             # killed the 11-04 12:44, 11-05 08:34 and 08:40 runs before end_run, so its list-presence stamps stopped (89.5 %).
-            - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 30, proxy: true }
+            - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 50, proxy: true }
             - { source: eightfloor,   cmd: "python -m scrapers.eightfloor.run --type all", tmo: 10, proxy: true }
             - { source: holoul,       cmd: "python -m scrapers.holoul.run --type all", tmo: 10, proxy: true }
             # wave 3, batch 4: dallali is an open JSON storefront (7 rows); muajarh is an open JSON API (18 rows, 11 real); mobasher reads its discovery API + 28 pages for age/facade; nafithh is server-rendered HTML (3 list pages + 30 details); opensooq's SERP carries the whole vertical as inline JSON (3 pages).
@@ -454,6 +454,9 @@ jobs:
             # honest client (scrapers/common/honest_fetch.py) — NO proxy, NO browser identity; a wall stops that site's run.
             - { source: kellerwilliams, cmd: "python -m scrapers.kellerwilliams.run" }
             - { source: almajdiah, cmd: "python -m scrapers.almajdiah.run" }
+            - { source: asasmakeen, cmd: "python -m scrapers.asasmakeen.run" }
+            - { source: mrajhi, cmd: "python -m scrapers.mrajhi.run" }
+            - { source: steam, cmd: "python -m scrapers.steam.run" }
             # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
             # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
             # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to

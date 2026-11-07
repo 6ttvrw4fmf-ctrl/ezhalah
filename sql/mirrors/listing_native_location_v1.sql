@@ -1,6 +1,10 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-11-06 after 20261106211857 (pin_district_candidates_materialized_judges_names_once only READS this view):
+--   UNCHANGED, 155,497 chars. md5 of everything below this header block: 2af9ead54b06f713aa85e08b0e9eaf00 == live
+--   (md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) read from production 2026-11-06 21:50 UTC).
+--
 -- Re-verified 2026-11-05 after 20261105111009 (five-source launch: Keller Williams + Almajdiah 20261105084502/84503; Asas Makeen + Al
 --   Rajhi + STeam 20261105111002 wiring, 20261105111003 replay): CHANGED. Ten arms spliced after the propertyfinder
 --   commercial arm (asasmakeen, mrajhi, steam, then kellerwilliams, almajdiah); 149,342 -> 155,497 chars. md5 of everything

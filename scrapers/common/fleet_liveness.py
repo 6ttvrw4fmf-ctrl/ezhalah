@@ -68,10 +68,14 @@ SITES: dict[str, str] = {
     **{p: f"scrapers.{p}.run:_probe.verify_gone" for p in (
         "aldarim", "aqaralriyadh", "hajer", "jazwtn", "souq24")},
     **{p: f"scrapers.{p}.run:_verify_gone" for p in (
-        "akariyoun", "aljassim", "almotmkenah", "alshawaf", "aqaralsaudia", "aqargate", "bossbih",
+        "akariyoun", "aljassim", "almotmkenah", "alshawaf", "aqaralsaudia", "bossbih",
         "daryusuf", "eaqartabuk", "ebriza", "eilmalriyada", "hasaad", "moftah", "nufouth", "raghdan",
         "sakani", "snam", "suwar")},
     **{p: f"scrapers.{p}.run:verify_gone" for p in ("wadod",)},
+    # 2026-11-06: aqargate moved to a marketplace app; its WordPress oracle answers UNKNOWN for every
+    # ad (the WP API is 500). verify_gone_any reads the marketplace record route for any ad whose
+    # stored link is /marketplace/<id>, and the WordPress oracle otherwise.
+    "aqargate": "scrapers.aqargate.run:verify_gone_any",
     # 2026-10-16: Haraj (licensed offers only). Shadow until its first shadow run is read.
     "haraj": "scrapers.haraj.run:_verify_gone",
     # 2026-10-08: its oracle needs the label taxonomy the crawl reads; this factory reads it itself.

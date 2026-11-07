@@ -1,5 +1,15 @@
 # 🦅 الصقر — The Falcon (owner, 2026-10-04)
 
+> **👑 OWNER ORDER 2026-11-06 — «LET THE ENGINEERS SEE WHAT CODERABBIT SAYS» (permanent).** CodeRabbit reviews every PR.
+> In the last 40 PRs it flagged 17 MAJOR issues (e.g. «Update the cron schedule mirror in this change», «Handle array-shaped
+> `additional_info`», «Do not treat the latest date as a complete run»), but only 3 were marked addressed. So, on every PR of yours:
+> 1. **Read CodeRabbit's comments before you merge** (`gh api repos/6ttvrw4fmf-ctrl/ezhalah/pulls/<N>/comments`, author `coderabbitai`).
+> 2. **Every Major/Critical comment is FIXED in the PR, or answered on its thread with the reason it is wrong.** Never merge over
+>    a silent Major. Minor/nitpick: fix when cheap, otherwise reply once.
+> 3. **Review «skipped»?** Comment `@coderabbitai review` on the PR and wait for it. Do not loosen the merge gate.
+> 4. **Your `:end` row adds one line:** «CodeRabbit: N major (F fixed · A answered · 0 silent)».
+> 5. **Once a week (🔧 Monday run):** sweep merged PRs from the last 7 days for silent Majors, and fix or route each one as a bug.
+
 > **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
 
 > **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
@@ -358,6 +368,11 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    (ORB sniffs `binary/octet-stream` and mislabelled AVIF and paints them); «moved» links on dallali/erapulse
    were the same ad under a new pretty URL. Before fixing the product, open three of the failures the way the
    browser does. A detector that cries wolf hides the real bug next to it (justsa's real 404 photos).
+
+32. Count DISTINCT listings, never runs (11-06): ten `customer-journey --sample 8` runs reported 80 PASS and had
+   tested 10 listings per mode, because the sample was each site's newest rows in a fixed order. PR 10953 makes it
+   a seeded shuffle (the seed is printed). Before you write «N/100 real listings found», count the distinct
+   `listing` keys across your runs' logs.
 
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,

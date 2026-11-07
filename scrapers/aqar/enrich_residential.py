@@ -361,6 +361,19 @@ def _own_coordinates(obj: Optional[dict[str, Any]]) -> Optional[dict[str, float]
     return {"latitude": float(lat), "longitude": float(lng)}
 
 
+def ad_licence(obj: Optional[dict[str, Any]]) -> Optional[str]:
+    """aqar's REGA advertisement licence, read from its own payload field `listing.ad_license_number`
+    (blind spot 1356, 2026-11-06: 0 of 999 aqar arrivals carried a licence while every one we probed had it —
+    96046 → 7200958887, 102675 → 7200887930; the page's visible licence block is rendered client-side, so the
+    stored visible text never held it). Verbatim, and only in REGA's 10-digit shape; anything else → None
+    (unknown, never a guess)."""
+    v = obj.get("ad_license_number") if isinstance(obj, dict) else None
+    if isinstance(v, bool) or v is None:
+        return None
+    v = str(v).strip()
+    return v if re.fullmatch(r"\d{10}", v) else None
+
+
 def _structured_price(obj: Optional[dict[str, Any]]) -> tuple[Optional[int], bool]:
     """aqar's OWN published price, plus whether aqar settled the question at all.
 
@@ -1121,6 +1134,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     pin = source_pin(html)
     if pin:
         source_capture["pin"] = pin
+    licence = ad_licence(obj)
+    if licence:
+        # trg_aqar_parse rewrites license_number from the visible text on every write; it reads this key first.
+        source_capture["ad_license_number"] = licence
     # Where a plot's type came from (owner 2026-10-10 audit): aqar_field · description · none.
     if land_usage_from:
         source_capture["land_usage_from"] = land_usage_from
@@ -1204,6 +1221,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         "zip_code":                zip_code,
         "additional_number":       additional_number,
         "rega_location_verified":  rega_verified,
+        # REGA advertisement licence from aqar's own payload (None → dropped by the upsert, never a guess).
+        # db._licence_on_card copies it into additional_info.rega_ad_license_number, the card's «رقم رخصة الإعلان».
+        "license_number":          ad_licence(obj),
         # features
         **features,
         # media
