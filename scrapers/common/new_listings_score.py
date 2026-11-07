@@ -39,6 +39,7 @@ from datetime import datetime, timedelta, timezone
 
 from scrapers.common.cleanup import _probe  # noqa: F401  (kept for callers that patch it)
 from scrapers.common.db import sb
+from scrapers.common.pii import redact_pii
 from scrapers.common.source_reread import page_evidence
 
 TABLE = "ops_new_listings_score"
@@ -231,6 +232,16 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                         break
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
+            # An OPEN bucket «+7 غرف نوم» / «7+ حمامات» is a floor, not a count: Property Finder 24671162 (score run
+            # 42343488034, 2026-11-07) prints «+7» while its own payload's bedrooms_value is 20 (bathrooms 9), and the
+            # score read our 20 as a MISMATCH. A stored count AT OR ABOVE the bucket's floor, on the keyword's own line.
+            # The bucket must sit in the SAME clause as this field's keyword: «عدد غرف النوم: 4، الحمامات: 7+» gives the
+            # bathrooms a «7+», never the bedrooms (CodeRabbit on #11031).
+            if (name in ("bedrooms", "bathrooms") and out[name] == MISMATCH and stored.get(col) is not None
+                    and any(re.search(kw, c) and any(float(stored.get(col)) >= int(m.group(1) or m.group(2))
+                                                     for m in OPEN_BUCKET.finditer(c))
+                            for x in lines for c in CLAUSE_SPLIT.split(x))):
+                out[name] = MATCH
             # ONE hall is written as the bare noun: haraj 21839188 «غرفة وصالة», 21839193 «4 غرف وصالة كبيره» (score run
             # 41009231494, 2026-10-30, backlog 1090) store living_rooms 1; the room line's «4» read as the hall count.
             if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
@@ -273,6 +284,10 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                     out[name] = MATCH
     return out
 
+
+# «+7» / «7+» (Western or Arabic-Indic digits): an open room bucket, «N or more».
+CLAUSE_SPLIT = re.compile(r"[،,|•؛;]")
+OPEN_BUCKET = re.compile(r"(?<![\d.])\+\s*(\d{1,2})(?![\d.])|(?<![\d.])(\d{1,2})\s*\+")
 
 # A site's own promo banner is not the ad. haraj prints partner offers under every ad (score dry run 41790110618,
 # 2026-11-04): «استأجر الآن وادفع لاحقًا مع إيجاري ، تقسيط شهري مريح…» (Ejari) on 23431125 / 23409947 and «وفّي وسيط
@@ -1148,6 +1163,54 @@ def dallali_page(url: str, fetch=None) -> dict | None:
             "text_head": " | ".join(lines)[:1500]}
 
 
+def muhaysini_page(url: str, fetch=None) -> dict | None:
+    """A muhaysini ad read from the platform's OWN record (🆕 2026-11-07). aqaralmuhaysini.com/propertydetails/<id> is
+    a Vue shell (re-read run 42352217629: title «أحمد المحيسني العقارية», no ad text), so the nightly score sampled
+    10 muhaysini arrivals a night and decided 0 — the second-biggest site (1,116 arrivals on 11-07) unmeasured.
+    This restates the record's REGA licence block (AdValidator.advertisement) and its own type, labelled the way
+    the comparison reads; None when the record cannot be read or is not this id (unknown, never wrong)."""
+    m = re.search(r"/propertydetails/(\d+)", url or "")
+    if not m:
+        return None
+    try:
+        if fetch is not None:
+            rec = fetch(m.group(1))
+        else:
+            from scrapers.muhaysini import run as mh
+            rec = mh.fetch_detail(mh.session(), m.group(1))
+    except Exception:  # noqa: BLE001 — a failed read is unknown, never wrong
+        return None
+    if not isinstance(rec, dict):
+        return None
+    adv = (rec.get("AdValidator") or {}) if isinstance(rec.get("AdValidator"), dict) else {}
+    rega = adv.get("advertisement") if isinstance(adv.get("advertisement"), dict) else {}
+    loc = rega.get("location") if isinstance(rega.get("location"), dict) else {}
+    lines: list[str] = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0, "0"):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", {"بيع": "للبيع", "إيجار": "للايجار", "ايجار": "للايجار"}.get(str(rega.get("advertisementType") or "").strip()))
+    put("المنطقة", loc.get("region"))
+    put("المدينة", (rec.get("City") or {}).get("name") if isinstance(rec.get("City"), dict) else None)
+    put("المدينة", loc.get("city"))
+    put("الحي", loc.get("district"))
+    put("نوع العقار", (rec.get("PropertyType") or {}).get("name") if isinstance(rec.get("PropertyType"), dict) else None)
+    put("المساحة", rega.get("propertyArea"), " م²")
+    put("عدد الغرف", rega.get("numberOfRooms"))
+    total = rega.get("landTotalPrice") or rega.get("landTotalAnnualRent")
+    put("السعر", total or rega.get("propertyPrice"), " ريال")
+    if total:
+        put("سعر المتر", rega.get("propertyPrice"), " ريال")
+    put("عرض الشارع", rega.get("streetWidth"))
+    put("عمر العقار", rega.get("propertyAge"))
+    title = str(rec.get("title") or "")
+    lines += [y.strip() for y in f"{title}\n{rec.get('description') or ''}".splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _TUBA_RECORDS: "dict | None" = None
 
 
@@ -1224,6 +1287,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
+        if "aqaralmuhaysini.com/propertydetails/" in url:
+            own = muhaysini_page
         if "dallali.com/advertisements/" in url:
             own = dallali or dallali_page
         if "safainv.sa" in url:
@@ -1238,8 +1303,10 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
                 row["sampled"] += 1
                 row["unreadable_pages"] += 1
                 continue
-            fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
-                                           prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
+            results = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                      prose_only_district=platform in PROSE_ONLY_DISTRICT)
+            _log_verdicts(key, results, stored, page)   # wasalt / sanadak / … print their cause too (🆕 11-07)
+            fold(row, key, results, stored)
             continue
         try:
             status, body = probe(url)
@@ -1273,18 +1340,7 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
         results = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
                                   prose_only_district=platform in PROSE_ONLY_DISTRICT)
-        # Which ad and which stored value: a site line says «furnished: mismatch=1» but not on which of the
-        # sampled ads, so every AF cap had to be re-derived by hand (dwelleo #890, 2026-10-26).
-        for name, verdict in results.items():
-            if verdict == MISMATCH:
-                col = next(c for n, _, c, _ in FIELDS if n == name)
-                print(f"    mismatch {key} {name}: stored={stored.get(col)!r}", flush=True)
-            elif verdict == WE_MISS and name in AF_FIELDS:
-                # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
-                kw = next(k for n, _, _, k in FIELDS if n == name)
-                hit = next((x for x in ([page.get("title") or ""] + list(page.get("evidence_lines") or [])
-                                        + (page.get("text_head") or "").split(" | ")) if re.search(kw, norm(x))), "")
-                print(f"    we_miss {key} {name}: page={hit[:160]!r}", flush=True)
+        _log_verdicts(key, results, stored, page)
         fold(row, key, results, stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
@@ -1317,6 +1373,38 @@ def write_rows(client, rows: list[dict]) -> str:
 
 def _pct(v: float | None) -> str:
     return "n/a" if v is None else f"{100 * v:.1f}%"
+
+
+def _evidence_lines(page: dict) -> list[str]:
+    """The page lines the comparator reads (title, meta, evidence lines, text head), PII-redacted for the log."""
+    raw = ([page.get("title") or ""] + list((page.get("meta") or {}).values()) + list(page.get("evidence_lines") or [])
+           + (page.get("text_head") or "").split(" | "))
+    return [redact_pii(str(x)) for x in raw if x]
+
+
+def _log_verdicts(key: str, results: dict, stored: dict, page: dict) -> None:
+    """Print the ad, the value compared and the page line behind every mismatch / AF we-miss. Lines are
+    PII-redacted (a seller can put a phone on a room line; CodeRabbit on #11031)."""
+    # Which ad and which stored value: a site line says «furnished: mismatch=1» but not on which of the
+    # sampled ads, so every AF cap had to be re-derived by hand (dwelleo #890, 2026-10-26).
+    lines = None
+    for name, verdict in results.items():
+        if verdict not in (MISMATCH, WE_MISS) or (verdict == WE_MISS and name not in AF_FIELDS):
+            continue
+        lines = lines if lines is not None else _evidence_lines(page)
+        kind, col, kw = next((k, c, w) for n, k, c, w in FIELDS if n == name)
+        if verdict == MISMATCH:
+            # …and the page line that disagreed (🆕 2026-11-07: the 05:35 log named rakez 24669873 bedrooms=2 and
+            # propertyfinder 24671162 bedrooms=20 but not what the page said, so each cap took a source re-read).
+            value = (stored.get("price_total") or stored.get("source_price_annual") or stored.get("price_annual")
+                     or stored.get("price_per_meter")) if name == "price" else stored.get(col)
+            hits = [] if not kw else [x for x in lines if re.search(kw, norm(x))
+                                      and (kind != "number" or re.search(r"\d", x))][:3]
+            print(f"    mismatch {key} {name}: stored={value!r} page={[h[:120] for h in hits]!r}", flush=True)
+        else:
+            # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
+            hit = next((x for x in lines if kw and re.search(kw, norm(x))), "")
+            print(f"    we_miss {key} {name}: page={hit[:160]!r}", flush=True)
 
 
 def _line(r: dict) -> str:
