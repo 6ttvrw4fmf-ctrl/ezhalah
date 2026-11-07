@@ -231,6 +231,13 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                         break
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
+            # An OPEN bucket «+7 غرف نوم» / «7+ حمامات» is a floor, not a count: Property Finder 24671162 (score run
+            # 42343488034, 2026-11-07) prints «+7» while its own payload's bedrooms_value is 20 (bathrooms 9), and the
+            # score read our 20 as a MISMATCH. A stored count AT OR ABOVE the bucket's floor, on the keyword's own line.
+            if (name in ("bedrooms", "bathrooms") and out[name] == MISMATCH and stored.get(col) is not None
+                    and any(re.search(kw, x) and any(float(stored.get(col)) >= int(m.group(1) or m.group(2)) for m in OPEN_BUCKET.finditer(x))
+                            for x in lines)):
+                out[name] = MATCH
             # ONE hall is written as the bare noun: haraj 21839188 «غرفة وصالة», 21839193 «4 غرف وصالة كبيره» (score run
             # 41009231494, 2026-10-30, backlog 1090) store living_rooms 1; the room line's «4» read as the hall count.
             if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
@@ -273,6 +280,9 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                     out[name] = MATCH
     return out
 
+
+# «+7» / «7+» (Western or Arabic-Indic digits): an open room bucket, «N or more».
+OPEN_BUCKET = re.compile(r"(?<![\d.])\+\s*(\d{1,2})(?![\d.])|(?<![\d.])(\d{1,2})\s*\+")
 
 # A site's own promo banner is not the ad. haraj prints partner offers under every ad (score dry run 41790110618,
 # 2026-11-04): «استأجر الآن وادفع لاحقًا مع إيجاري ، تقسيط شهري مريح…» (Ejari) on 23431125 / 23409947 and «وفّي وسيط
@@ -1278,7 +1288,13 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         for name, verdict in results.items():
             if verdict == MISMATCH:
                 col = next(c for n, _, c, _ in FIELDS if n == name)
-                print(f"    mismatch {key} {name}: stored={stored.get(col)!r}", flush=True)
+                # …and the page line that disagreed (🆕 2026-11-07: the 05:35 log named rakez 24669873 bedrooms=2 and
+                # propertyfinder 24671162 bedrooms=20 but not what the page said, so each cap took a source re-read).
+                kw = next(k for n, _, _, k in FIELDS if n == name)
+                hits = [x for x in ([page.get("title") or ""] + list(page.get("evidence_lines") or [])
+                                    + (page.get("text_head") or "").split(" | "))
+                        if re.search(kw, norm(x)) and re.search(r"\d", x)][:3]
+                print(f"    mismatch {key} {name}: stored={stored.get(col)!r} page={[h[:120] for h in hits]!r}", flush=True)
             elif verdict == WE_MISS and name in AF_FIELDS:
                 # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
                 kw = next(k for n, _, _, k in FIELDS if n == name)
