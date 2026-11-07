@@ -637,7 +637,10 @@ def strip_related(page: dict, body: str) -> dict:
         bits |= _text_bits(block)
     head, tail = _similar_split(body)
     # …but a line the ad ITSELF states above the heading stays, even when a similar card repeats it (CodeRabbit on #11065)
-    bits |= _text_bits(tail) - _text_bits(head)
+    # A card phrase that sits INSIDE any of the ad's own text above the heading is the ad's too: the card «مؤثثه بالكامل»
+    # must not delete the ad's longer «شقة مؤثثه بالكامل» (CodeRabbit Major on #11072).
+    own = _text_bits(head)
+    bits |= {b for b in _text_bits(tail) - own if not any(b in o for o in own)}
     if not bits:
         return page
 

@@ -55,3 +55,12 @@ def test_the_ads_own_line_stays_when_a_similar_card_repeats_it():
     # CodeRabbit on #11065: the ad says «مؤثثه بالكامل» itself, and so does a card under the heading
     body = OWN.replace('</div>', '<p>مؤثثه بالكامل السعر غير شامل السعي للتواصل</p></div>', 1) + SIMILAR + '<footer>x</footer></body></html>'
     assert any("مؤثثه" in x for x in _lines(strip_related(page_evidence(body), body)))
+
+
+def test_the_ads_longer_line_stays_when_a_card_repeats_part_of_it():
+    # CodeRabbit (Major) on #11072: card «مؤثثه بالكامل» vs the ad's own «شقة مؤثثه بالكامل للعائلات»
+    card = SIMILAR.replace('</div></div></div>', '<span class="tag">مؤثثه بالكامل</span></div></div></div>')
+    body = OWN.replace('</div>', '<p>شقة مؤثثه بالكامل للعائلات</p></div>', 1) + card + '<footer>x</footer></body></html>'
+    kept = _lines(strip_related(page_evidence(body), body))
+    assert any(x.strip() == "شقة مؤثثه بالكامل للعائلات" for x in kept), kept
+    assert not any("السعر غير شامل السعي" in x for x in kept), kept   # the card-only line is still dropped
