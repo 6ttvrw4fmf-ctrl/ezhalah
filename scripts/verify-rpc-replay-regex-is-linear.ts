@@ -51,6 +51,7 @@ fs.writeFileSync(path.join(dir, '20990101000006_dedup.sql'),
   "out_def := replace(out_def, n6, r6);\n" +
   "-- out_def := replace(out_def, E'+ S $$', E'+ S + BAD $$');\n" +
   "/* out_def := replace(out_def, E'+ S $$', E'+ S + BLOCK $$'); */\n" +
+  "-- don't read this apostrophe as a string\n" +
   "/* outer /* inner */\n out_def := replace(out_def, E'+ S $$', E'+ S + NESTED $$');\n*/\n" +
   "k := length(replace(out_def, a6, b6));\n" +
   "execute out_def; end $$;\n");

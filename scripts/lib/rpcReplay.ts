@@ -170,6 +170,11 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
   // depth count over the whole file, not "the last `/*` before it" (which an inner `*/` would fool).
   const inBlock = new Uint8Array(sql.length + 1);
   for (let i = 0, depth = 0; i < sql.length; i++) {
+    if (depth === 0 && sql.startsWith('--', i)) {   // a line comment: an apostrophe in it opens no string
+      const nl = sql.indexOf('\n', i);
+      i = nl < 0 ? sql.length : nl;
+      continue;
+    }
     if (depth === 0 && sql[i] === "'") {             // a '…' / E'…' string: a `/*` inside it opens nothing
       const e = i > 0 && /[eE]/.test(sql[i - 1]);
       let j = i + 1;
