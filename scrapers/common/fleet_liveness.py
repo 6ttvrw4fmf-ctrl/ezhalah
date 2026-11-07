@@ -291,6 +291,16 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
     shadow = shadow or site not in APPLY
     client = sb()
     if struck_only and not struck(client, site):
+        # A pass with nothing to re-read still RAN, and says so (♻️ 2026-11-07). It used to return
+        # before begin_run, so a site whose strikes all resolved wrote no row at all, and
+        # mon_detect liveness_job_silent read that absence as a dead checker (alert 13588,
+        # fleet_liveness:reinvest:recheck: its 5 struck ads were hidden at 11-06 14:22, so the
+        # 20:56 and 03:27 passes had nothing to read and left no trace). Absence cannot be
+        # compared (LISTING_LIVENESS.md §9.2): the heartbeat row makes silence mean broken again.
+        rid = begin_run(run_label(site, struck_only))
+        note = (f"{'SHADOW' if shadow else 'APPLY'} RECHECK probed=0 struck=0 hidden=0 "
+                f"| no struck row: nothing to re-read")
+        end_run(rid, ok=True, rows_seen=0, rows_upserted=0, notes=note, allow_empty=True)
         return {"site": site, "skipped": "no struck row"}
     policy = policy_for(site)
     now = datetime.now(timezone.utc).isoformat()

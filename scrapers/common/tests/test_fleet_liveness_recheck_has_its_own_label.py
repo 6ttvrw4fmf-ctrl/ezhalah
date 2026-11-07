@@ -47,3 +47,19 @@ def test_every_reader_that_must_see_the_label_still_does(struck_only):
     assert re.search(r"liveness", label, re.I) and re.search(r"(^|:)haraj([_:]|$)", label)
     # silent-partial-success skips every liveness label
     assert "liveness" in label
+
+
+def test_a_recheck_with_nothing_to_read_still_leaves_its_heartbeat(site, monkeypatch):
+    """♻️ 2026-11-07, alert 13588: a recheck pass that found no struck row returned before begin_run, so
+    fleet_liveness:reinvest:recheck wrote nothing for 21 h and liveness_job_silent fired on a healthy job.
+    The pass must write its own row, ok, with nothing read."""
+    site([_row(1)] + _controls(), {})
+    seen = _labels(monkeypatch)
+    ended: list[dict] = []
+    monkeypatch.setattr(F, "end_run", lambda rid, **kw: ended.append(kw))
+    monkeypatch.setattr(F, "struck", lambda client, s: 0)
+    out = F.run_site("testsite", shadow=False, struck_only=True)
+    assert out["skipped"] == "no struck row"
+    assert seen == ["fleet_liveness:testsite:recheck"]
+    assert len(ended) == 1 and ended[0]["ok"] is True and ended[0]["rows_seen"] == 0
+    assert "nothing to re-read" in ended[0]["notes"]
