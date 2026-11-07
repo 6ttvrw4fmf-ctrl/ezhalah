@@ -24,6 +24,7 @@ a 12-character window: «بدون عمولة ومطبخ راكب» has a kitchen
 from __future__ import annotations
 
 import argparse
+import bisect
 import re
 import sys
 import unicodedata
@@ -1208,6 +1209,19 @@ class Hit:
         self.fact, self.value, self.s, self.e, self.clause = fact, value, s, e, clause
 
 
+# A spaced «*» is a bullet between items («* مدارس * سوبر ماركت»); «*المميزات:*» (bold) and «3*4» are not.
+_STAR_BULLET_RE = re.compile(r"(?<=\s)\*+(?=\s)")
+
+
+def _owns_item(words: list[str]) -> bool:
+    """An own cue in a nearby / view list item makes it the ad's own: «خاص بالحي» stays the district's, «مدرسة فيها نادي»
+    stays the school's (the list goes on)."""
+    return any((_starts(_strip_wa(w), _OWN_CUES)
+                and not (k + 1 < len(words) and (words[k + 1] in _NBHD_OWNER or _strip_wa(words[k + 1]) in _NBHD_OWNER)))
+               or (_strip_wa(w) in _HAS_CUES and not (k and _starts(_strip_wa(words[k - 1]), _PLACE_WORDS)))
+               for k, w in enumerate(words))
+
+
 def _clauses(text: str) -> list[tuple[int, str]]:
     out, pos = [], 0
     for m in N._CLAUSE_BREAK_RE.finditer(text):
@@ -1342,18 +1356,27 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         words = t.split()
         # an item that STARTS with a place runs on as the list's item however long the clause is: «إطلالة ونافذة على: حديقة،
         # جامع، ونادي صحي خدمات الموقع القريبة: * مدارس» (aqar 15128626, 🔬 2026-11-06 — the view's gym served as the unit's)
-        list_in = near_list and comma and (len(words) <= 5 or _starts(_strip_wa(words[0]), _PLACE_WORDS)) \
-            and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words) \
-            and not any((_starts(_strip_wa(w), _OWN_CUES)      # «خاص بالحي»: the district's, the list goes on
-                         and not (k + 1 < len(words) and (words[k + 1] in _NBHD_OWNER
-                                                          or _strip_wa(words[k + 1]) in _NBHD_OWNER)))
-                        or (_strip_wa(w) in _HAS_CUES and not (k and _starts(_strip_wa(words[k - 1]), _PLACE_WORDS)))
-                        for k, w in enumerate(words))   # «مدرسة فيها نادي»: the school's, the list goes on
+        list_base = near_list and comma and (len(words) <= 5 or _starts(_strip_wa(words[0]), _PLACE_WORDS)) \
+            and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words)
+        list_in = list_base and not _owns_item(words)
+        # …but only the ITEM continues the list: a spaced «*» bullet starts the next one (🔬 2026-11-07, P1 13301). aqar
+        # 15128626 «إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس … * اتحاد ملاك مجاناً مميزات
+        # المشروع» — «مميزات» 60 words and eight bullets later is the project's heading, not the gym's owner. The item's
+        # own words decide, and only for a hit inside the item; a hit in a later bullet keeps the whole-clause answer, so
+        # this can only silence a view's / a nearby list's item, never add a yes.
+        item_end = -1
+        star = _STAR_BULLET_RE.search(_c) if list_base and not list_in else None
+        if star:
+            cut = bisect.bisect_left(_idx, star.start())
+            head = t[:cut].split()
+            if head and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in head) and not _owns_item(head):
+                item_end = cut
         n_words = len(words)
         for fact, pats in _PATTERNS.items():
             for rx, forced in pats:
                 for m in rx.finditer(t):
-                    v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in, list_in)
+                    v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in,
+                                       list_in or m.end() <= item_end)
                     if v is not None:
                         bool_hits.setdefault(fact, {}).setdefault(v, (ci, qs, qe))
         # what this clause hands to the next one: a cue (or a cued utility list going on), a «nearby» heading
@@ -1917,6 +1940,12 @@ def selftest() -> None:
         ("غسالة صحون", {}, ("laundry_room",)),
         # a view list's gym is not the unit's (P2 13085, aqar 15128626 / 15017191, 2026-11-06)
         ("* إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس تعليمية", {}, ("gym", "mosque", "garden")),
+        # …and with the rest of the REAL ad after it: «مميزات المشروع» eight bullets later is not the gym's owner (🔬 2026-11-07)
+        ("* إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس تعليمية * سوبر ماركت * مطاعم "
+         "الضمانات والمواصفات العالية > تطبيق أعلى معايير الجودة * 1 سنة: اتحاد ملاك مجاناً مميزات المشروع والخدمات الفاخرة "
+         "* التصميم والتشطيب: تصميم مودرن", {}, ("gym", "mosque", "garden")),
+        # a project's own «*» list stays its own (aqar 14840793, 12107689)
+        ("مميزات المجمع: * مسبح * صالة رياضية * حضانة أطفال * مواقف سيارات", {"gym": True, "pool": True}, ()),
         ("✓ تأثيث فاخر ومتكامل ✓ مطبخ مجهز بالكامل ✓ خدمات فندقية ونادي صحي ومسبح ✓ أمن وحراسة", {"gym": True}, ()),
         ("قريب من الخدمات، مدرسة كبيرة للبنات والشقة بها نادي رياضي", {"gym": True}, ()),
         ("قريب من الخدمات، مدرسة فيها نادي رياضي، مسجد", {}, ("gym", "mosque")),
