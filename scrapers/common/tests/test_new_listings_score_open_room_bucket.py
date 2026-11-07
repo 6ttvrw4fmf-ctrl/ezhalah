@@ -138,7 +138,7 @@ def test_the_log_never_carries_a_price_grouped_mobile(capsys):
 
 def test_the_log_never_carries_a_phone_with_any_separator(capsys):
     # CodeRabbit PDPL Major on #11053 (f94619f): «050/123/4567» — any punctuation between the digit groups.
-    for phone in ("050/123/4567", "(050) 123-4567", "050 / 123 / 4567", "011/234/5678", "+966/50/123/4567"):
+    for phone in ("050/123/4567", "(050) 123-4567", "050 / 123 / 4567", "011/234/5678", "+966/50/123/4567", "050_123_4567", "050*123*4567"):
         page = S.page_evidence(f"<p>غرف النوم 4 {phone}</p>")
         S._log_verdicts("t:7", {"bedrooms": S.MISMATCH}, {"bedrooms": 5}, page)
         out = capsys.readouterr().out
