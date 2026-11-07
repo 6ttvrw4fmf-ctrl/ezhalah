@@ -1248,8 +1248,10 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
                 row["sampled"] += 1
                 row["unreadable_pages"] += 1
                 continue
-            fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
-                                           prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
+            results = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                      prose_only_district=platform in PROSE_ONLY_DISTRICT)
+            _log_verdicts(key, results, stored, page)   # wasalt / sanadak / … print their cause too (🆕 11-07)
+            fold(row, key, results, stored)
             continue
         try:
             status, body = probe(url)
@@ -1283,24 +1285,7 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
         results = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
                                   prose_only_district=platform in PROSE_ONLY_DISTRICT)
-        # Which ad and which stored value: a site line says «furnished: mismatch=1» but not on which of the
-        # sampled ads, so every AF cap had to be re-derived by hand (dwelleo #890, 2026-10-26).
-        for name, verdict in results.items():
-            if verdict == MISMATCH:
-                col = next(c for n, _, c, _ in FIELDS if n == name)
-                # …and the page line that disagreed (🆕 2026-11-07: the 05:35 log named rakez 24669873 bedrooms=2 and
-                # propertyfinder 24671162 bedrooms=20 but not what the page said, so each cap took a source re-read).
-                kw = next(k for n, _, _, k in FIELDS if n == name)
-                hits = [x for x in ([page.get("title") or ""] + list(page.get("evidence_lines") or [])
-                                    + (page.get("text_head") or "").split(" | "))
-                        if re.search(kw, norm(x)) and re.search(r"\d", x)][:3]
-                print(f"    mismatch {key} {name}: stored={stored.get(col)!r} page={[h[:120] for h in hits]!r}", flush=True)
-            elif verdict == WE_MISS and name in AF_FIELDS:
-                # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
-                kw = next(k for n, _, _, k in FIELDS if n == name)
-                hit = next((x for x in ([page.get("title") or ""] + list(page.get("evidence_lines") or [])
-                                        + (page.get("text_head") or "").split(" | ")) if re.search(kw, norm(x))), "")
-                print(f"    we_miss {key} {name}: page={hit[:160]!r}", flush=True)
+        _log_verdicts(key, results, stored, page)
         fold(row, key, results, stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
@@ -1333,6 +1318,28 @@ def write_rows(client, rows: list[dict]) -> str:
 
 def _pct(v: float | None) -> str:
     return "n/a" if v is None else f"{100 * v:.1f}%"
+
+
+def _log_verdicts(key: str, results: dict, stored: dict, page: dict) -> None:
+    """Print the ad, the stored value and the page line behind every mismatch / AF we-miss."""
+    # Which ad and which stored value: a site line says «furnished: mismatch=1» but not on which of the
+    # sampled ads, so every AF cap had to be re-derived by hand (dwelleo #890, 2026-10-26).
+    for name, verdict in results.items():
+        if verdict == MISMATCH:
+            col = next(c for n, _, c, _ in FIELDS if n == name)
+            # …and the page line that disagreed (🆕 2026-11-07: the 05:35 log named rakez 24669873 bedrooms=2 and
+            # propertyfinder 24671162 bedrooms=20 but not what the page said, so each cap took a source re-read).
+            kw = next(k for n, _, _, k in FIELDS if n == name)
+            hits = [x for x in ([page.get("title") or ""] + list(page.get("evidence_lines") or [])
+                                + (page.get("text_head") or "").split(" | "))
+                    if re.search(kw, norm(x)) and re.search(r"\d", x)][:3]
+            print(f"    mismatch {key} {name}: stored={stored.get(col)!r} page={[h[:120] for h in hits]!r}", flush=True)
+        elif verdict == WE_MISS and name in AF_FIELDS:
+            # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
+            kw = next(k for n, _, _, k in FIELDS if n == name)
+            hit = next((x for x in ([page.get("title") or ""] + list(page.get("evidence_lines") or [])
+                                    + (page.get("text_head") or "").split(" | ")) if re.search(kw, norm(x))), "")
+            print(f"    we_miss {key} {name}: page={hit[:160]!r}", flush=True)
 
 
 def _line(r: dict) -> str:
