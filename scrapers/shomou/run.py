@@ -277,6 +277,9 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
     a = ap.parse_args()
+    # The budget covers the WHOLE run (CodeRabbit #10946): session probing and the index walk count too.
+    t0 = _clock()
+    index_cut = False
     # 2026-10-14 (backlog 533): the nightly read index page 0 in 1.5 s on one pinned profile, found no ad,
     # and logged only «0 ad(s)» → «RC-B demoted» with no reason. The shared resilient path probes three
     # profiles DIRECT, then the proxy, and an index page 0 with no ad is a FAILED run that names what
@@ -286,6 +289,10 @@ def main() -> int:
 
     nids: list[str] = []
     for page in range(MAX_PAGES):
+        if page and _clock() - t0 > SOFT_DEADLINE_S:
+            index_cut = True            # the index walk itself ran out of budget: incomplete, no prune
+            print(f"  ⏱ soft deadline during the index walk at page {page}", flush=True)
+            break
         try:
             html = get(s, f"{BASE}/?field_nw_al_qar_value=All&page={page}") or ""
         except Exception:  # noqa: BLE001 — page 0 is judged below; a later page ends the walk
@@ -312,7 +319,6 @@ def main() -> int:
     com: list[dict] = []
     skipped: dict[str, int] = {}
     unreadable = 0
-    t0 = _clock()
     cut = 0
     try:
         for i, nid in enumerate(nids):
@@ -348,7 +354,7 @@ def main() -> int:
         db.retire_superseded_siblings(res_table=RES_TABLE, com_table=COM_TABLE, res_ads={r["ad_number"] for r in res},
                                       com_ads={r["ad_number"] for r in com}, source=SOURCE)
         # Complete walk only: an expired ad is on the index but not in the kept set → pruned today.
-        complete = unreadable == 0 and cut == 0 and len(nids) > 0 and not a.limit
+        complete = unreadable == 0 and cut == 0 and not index_cut and len(nids) > 0 and not a.limit
         for tbl, rr in ((RES_TABLE, res), (COM_TABLE, com)):
             if complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
@@ -361,7 +367,8 @@ def main() -> int:
         healthy = db.end_run(run_id, ok=True, rows_seen=len(nids), rows_upserted=len(res) + len(com),
                              check_tables=["shomou_residential_listings", "shomou_commercial_listings"],
                              notes=(None if complete else
-                                    f"walk incomplete: unreadable={unreadable} deadline_cut={cut} of {len(nids)}"))
+                                    f"walk incomplete: unreadable={unreadable} deadline_cut={cut} of {len(nids)}"
+                                    + (" index_cut=1" if index_cut else "")))
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)
             return 1

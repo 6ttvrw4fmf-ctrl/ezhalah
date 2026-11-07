@@ -38,10 +38,10 @@ class _Sess:
         return _Resp("<html></html>")
 
 
-def test_the_deadline_ends_the_run_cleanly_and_prunes_nothing(monkeypatch):
+def _run(monkeypatch, ticks):
     sess, runs, pruned = _Sess(), [], []
-    ticks = iter([0.0, 1.0, S.SOFT_DEADLINE_S + 1.0, S.SOFT_DEADLINE_S + 2.0])
-    monkeypatch.setattr(S, "_clock", lambda: next(ticks))
+    it = iter(ticks)
+    monkeypatch.setattr(S, "_clock", lambda: next(it))
     monkeypatch.setattr(S, "retry_smarter_session", lambda url, **kw: (sess, ["direct/chrome124:200"]))
     monkeypatch.setattr(S.db, "begin_run", lambda slug: 7)
     monkeypatch.setattr(S.db, "end_run", lambda rid, **kw: runs.append(kw) or True)
@@ -52,7 +52,21 @@ def test_the_deadline_ends_the_run_cleanly_and_prunes_nothing(monkeypatch):
     monkeypatch.setattr(S.time, "sleep", lambda *_: None)
     monkeypatch.setattr(sys, "argv", ["shomou"])
     assert S.main() == 0
+    return sess, runs, pruned
+
+
+def test_the_deadline_ends_the_run_cleanly_and_prunes_nothing(monkeypatch):
+    # run start, index page 1, detail 1, detail 2 (over budget)
+    sess, runs, pruned = _run(monkeypatch, [0.0, 0.5, 1.0, S.SOFT_DEADLINE_S + 1.0, S.SOFT_DEADLINE_S + 2.0])
     assert sess.detail_reads == 1                      # 1 of 3 pages read, then the budget stopped the walk
     assert pruned == []                                # an incomplete walk prunes nothing
     assert len(runs) == 1 and runs[0]["ok"] is True
     assert "deadline_cut=2 of 3" in runs[0]["notes"]
+
+
+def test_the_budget_starts_when_the_run_starts(monkeypatch):
+    """CodeRabbit #10946: a slow session probe / index walk spends the same budget — the clock starts at main()."""
+    late = S.SOFT_DEADLINE_S + 5.0
+    sess, runs, pruned = _run(monkeypatch, [0.0, late, late, late, late, late])
+    assert sess.detail_reads == 0 and pruned == []
+    assert "index_cut=1" in runs[0]["notes"] and "deadline_cut=3 of 3" in runs[0]["notes"]
