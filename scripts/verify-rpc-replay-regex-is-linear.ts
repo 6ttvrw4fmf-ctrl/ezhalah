@@ -47,9 +47,11 @@ fs.writeFileSync(path.join(dir, '20990101000006_dedup.sql'),
   "do $$ declare n6 text := E'+ R $$'; r6 text := E'+ S $$'; a6 text := E'+ 3 $$'; b6 text := E'+ 3 + R $$';\n" +
   "src text; out_def text; k int; begin src := pg_get_functiondef('public.f_lin()'::regprocedure);\n" +
   "out_def := replace(src, E'+ 3 $$', E'+ 3 + R $$');\n" +
+  "k := length(E'/* not a comment');\n" +
   "out_def := replace(out_def, n6, r6);\n" +
   "-- out_def := replace(out_def, E'+ S $$', E'+ S + BAD $$');\n" +
   "/* out_def := replace(out_def, E'+ S $$', E'+ S + BLOCK $$'); */\n" +
+  "/* outer /* inner */\n out_def := replace(out_def, E'+ S $$', E'+ S + NESTED $$');\n*/\n" +
   "k := length(replace(out_def, a6, b6));\n" +
   "execute out_def; end $$;\n");
 fs.writeFileSync(path.join(dir, '20990101000007_table.sql'),
@@ -74,7 +76,7 @@ fs.writeFileSync(path.join(dir, '20990101000008_repeat.sql'),
 const inlinePatched = (b: string | null) => !!b && b.includes('+ 1 + 2');
 const probeSurvived = (b: string | null) => !!b && b.includes('+ 2');
 const orderKept = (b: string | null) => !!b && b.includes('+ 1 + 2 + 3');
-const commentIgnored = (b: string | null) => !!b && !b.includes('BAD') && !b.includes('BLOCK');
+const commentIgnored = (b: string | null) => !!b && !b.includes('BAD') && !b.includes('BLOCK') && !b.includes('NESTED');
 const dedupAfterSort = (b: string | null) => !!b && b.includes('+ 3 + S');
 const tableAtUse = (b: string | null) => !!b && b.includes('+ S + W $$');
 const repeatsRun = (b: string | null) => !!b && b.includes('+ S + W $$') && !b.includes('+ S + V $$');
@@ -99,6 +101,7 @@ mustCatch('a replay that skipped the inline patch', !inlinePatched('select 1 /*N
 mustCatch('a replay that applied the later patch first and dropped it', !orderKept('select 1 /*NEEDLE*/ + 1 + 2 + Q $$'));
 mustCatch('a replay that applied a commented-out patch', !commentIgnored('select 1 + 3 + BAD $$'));
 mustCatch('a replay that applied a block-commented patch', !commentIgnored('select 1 + 3 + BLOCK $$'));
+mustCatch('a replay that applied a patch inside a NESTED block comment', !commentIgnored('select 1 + S + NESTED $$'));
 mustCatch('a replay whose later duplicate displaced the inline pair', !dedupAfterSort('select 1 + 3 + R $$'));
 mustCatch('a replay that ran the table at its declaration', !tableAtUse('select 1 + S + U $$'));
 mustCatch('a replay that dropped the third, repeated patch', !repeatsRun('select 1 + S + V $$'));

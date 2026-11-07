@@ -166,10 +166,28 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
   // find nothing, and be skipped silently (CodeRabbit on #11148). Source order is execution order.
   const out: { anchor: string; replacement: string; pos: number; probe?: boolean }[] = [];
   // A `replace(...)` that sits after `--` on its own line is a comment: SQL never runs it…
-  // …and one inside an unclosed `/* … */` block comment is not run either.
+  // …and neither is one inside a `/* … */` block comment. PostgreSQL NESTS block comments, so this is a
+  // depth count over the whole file, not "the last `/*` before it" (which an inner `*/` would fool).
+  const inBlock = new Uint8Array(sql.length + 1);
+  for (let i = 0, depth = 0; i < sql.length; i++) {
+    if (depth === 0 && sql[i] === "'") {             // a '…' / E'…' string: a `/*` inside it opens nothing
+      const e = i > 0 && /[eE]/.test(sql[i - 1]);
+      let j = i + 1;
+      while (j < sql.length) {
+        if (sql[j] === "'" && sql[j + 1] === "'") { j += 2; continue; }
+        if (e && sql[j] === '\\') { j += 2; continue; }
+        if (sql[j] === "'") break;
+        j++;
+      }
+      i = j;
+      continue;
+    }
+    if (sql.startsWith('/*', i)) { depth++; inBlock[i] = 1; inBlock[i + 1] = 1; i++; continue; }
+    if (depth > 0 && sql.startsWith('*/', i)) { inBlock[i] = 1; inBlock[i + 1] = 1; depth--; i++; continue; }
+    if (depth > 0) inBlock[i] = 1;
+  }
   const commentedOut = (pos: number) =>
-    sql.slice(sql.lastIndexOf('\n', pos - 1) + 1, pos).includes('--') ||
-    sql.lastIndexOf('/*', pos) > sql.lastIndexOf('*/', pos);
+    sql.slice(sql.lastIndexOf('\n', pos - 1) + 1, pos).includes('--') || inBlock[pos] === 1;
 
   // (c) TABLE-DRIVEN — `edits text[][] := array[ ['needle','replacement','count'], ... ]` applied in
   // a loop (20260812122557). A migration that makes a dozen related edits to one RPC is far safer
