@@ -607,6 +607,62 @@ def _probe_id(s: cc.Session, url: str) -> str:
     return last
 
 
+def _make_verify_gone(control: Optional[dict]):
+    """The crawl's own-page oracle as a one-argument callable for the daily direct check
+    (fleet_liveness.SITES, ♻️ 2026-11-07). It was built only inside main(), so a removed ad was read
+    only after three crawl misses: AC30220 (2497625) lost its REGA licence on 11-06, its page went to
+    the expired banner, and it was still on screen at the 11-07 09:05 dead-visible score (aqarcity
+    over the line) with missing_count 1. Same _probe_id, same id URL, same two kill shapes as main's
+    prune oracle; the positive control is a row the caller hands in (a recently proven-live ad)
+    instead of this run's crawl, and it FAILS CLOSED exactly like _canary_ok."""
+    state: dict[str, Any] = {}
+
+    def sess() -> cc.Session:
+        if "s" not in state:
+            state["s"] = session()
+            try:
+                state["s"].get(f"{BASE}/", timeout=30, allow_redirects=True)   # warm the CF cookie once
+            except Exception:  # noqa: BLE001 — a failed warm-up is no verdict; the probe decides
+                pass
+        return state["s"]
+
+    def url(ad_number: str) -> Optional[str]:
+        pid = re.sub(r"\D", "", ad_number or "")
+        return f"{BASE}/property/{pid}" if pid else None
+
+    def canary() -> tuple[bool, str]:
+        if "canary" not in state:
+            u = url((control or {}).get("ad_number") or "")
+            if not u:
+                state["canary"] = (False, "no positive control was handed in, so no removal can be believed")
+            else:
+                st = _probe_id(sess(), u)
+                state["canary"] = (st == "live", f"positive control {control['ad_number']}: {st}")
+        return state["canary"]
+
+    def verify_gone(ad_number: str) -> tuple[str, str]:
+        u = url(ad_number)
+        if not u:
+            return "unknown", "no numeric id in ad_number"
+        status = _probe_id(sess(), u)
+        time.sleep(float(os.environ.get("AQARCITY_PROBE_DELAY", "0.25")))
+        if status in ("notfound", "expired"):
+            ok, why = canary()
+            if not ok:
+                return "unknown", f"withheld, source not proven to be answering: {why}"
+        if status == "notfound":
+            return "gone", "the source's own not-found: HTTP 404/410 on the listing's own URL (control-gated)"
+        if status == "expired":
+            return "gone", "source published its own end-of-ad banner or expiry title suffix (control-gated)"
+        if status == "live":
+            return "live", "listing page served with JSON-LD and no expired banner"
+        if status == "exists":
+            return "unknown", "real id but page unparseable (no JSON-LD, no expired banner)"
+        return "unknown", "probe error — transient/blocked is never proof of death"
+
+    return verify_gone
+
+
 def sequential_id_urls(s: cc.Session, start_id: int) -> list[str]:
     """Walk /property/<id> ids above start_id; return the live listing urls (frozen-sitemap fallback)."""
     max_gap = int(os.environ.get("AQARCITY_PROBE_MAX_GAP", "1500"))
