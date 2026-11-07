@@ -34,6 +34,7 @@ class _Sess:
 
 
 def _reader(monkeypatch):
+    monkeypatch.setattr(NW.time, "sleep", lambda s: None)
     monkeypatch.setattr(NW, "_oracle_session", lambda *a, **k: _Sess())
     assert SC._reader_for("nowaisiry") is None
     method, read = SC.pick_reader("nowaisiry", None, {"ad_number": "NW4513", "listing_url": SLUG})
@@ -47,7 +48,7 @@ def test_nowaisiry_is_read_by_its_own_post_id(monkeypatch):
     gone = {"ad_number": "NW4349", "listing_url": SLUG}   # SAME stored URL as the live ad
     assert read(live) == ALIVE
     # The re-used slug answers 200 for post 4513; NW4349's own /?p=4349 is a 404 → never LIVE.
-    assert read(gone) in (DEAD, UNKNOWN) and read(gone) != ALIVE
+    assert read(gone) == DEAD
 
 
 def test_a_page_for_another_post_is_not_this_ads_life():

@@ -282,7 +282,12 @@ def spot_check_oracle(control=None):
     404 (11-04 12:42) was put back on screen (11-06 11:23, run 42208086448) and its card opened NW4513's page.
     `control` is the spot check's known-live row (a dict with ad_number) or an ad number."""
     ad = control.get("ad_number") if isinstance(control, dict) else control
-    return _make_prune_verify(ad)
+    verify = _make_prune_verify(ad)
+
+    def paced(ad_number: str):
+        time.sleep(1.0)                 # ≤ 1 request/second between the spot check's row reads
+        return verify(ad_number)
+    return paced
 
 
 def _clean(s: str) -> str:
