@@ -1432,6 +1432,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # words[0] below would crash the whole run (2026-11-03: every shard of facts-words died on «… مياه وكهرباء، بيشة»)
         if not t.strip() or ci in void:
             near_list = False
+            svc_on = svc_on and "." not in sep and "\n" not in sep   # a skipped clause after «.» still ends the heading
             continue
         words = t.split()
         # an item that STARTS with a place runs on as the list's item however long the clause is: «إطلالة ونافذة على: حديقة،
