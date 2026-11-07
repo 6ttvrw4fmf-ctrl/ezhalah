@@ -905,7 +905,9 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
     complete = False
     while page <= MAX_PAGES:
         if page > 1:
-            time.sleep(REQUEST_GAP)         # the list walk is now ~700 pages, not 95: pace it like retrieve
+            # ~700 list pages now, not 95: at least one second apart (the scrapers' ≤ 1 request/second rule).
+            # The retrieve loop below already runs at ~1.07 s a call measured (12,000 in 215 min, 11-07).
+            time.sleep(max(REQUEST_GAP, 1.0))
         body = _get_json(s, f"{API}/list?page={page}", what=f"{API}/list page {page}")
         batch = [p for p in (body.get("properties") or []) if isinstance(p, dict)]
         if not batch:
