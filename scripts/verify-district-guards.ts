@@ -169,7 +169,9 @@ const PLPGSQL_COPY_FALLBACK = 'if key is null then key := public.district_copy_o
 const plpgsqlFolds = (fn: string): boolean => {
   const at = fn.indexOf(PLPGSQL_COPY_FALLBACK);
   if (at < 0) return false;
-  if (/\bkey\s*:=\s*own\b/.test(fn.slice(0, at))) return false;
+  // Any assignment that can seed `key` from the raw token before the fallback (`key := own`, `key := coalesce(key, own)`,
+  // …) bypasses it for a non-null token; the alias lookups before it are `select … into key`, never `key := … own`.
+  if (/\bkey\s*:=[^;]*\bown\b/.test(fn.slice(0, at))) return false;
   return /if key is null then key := own; end if;/.test(fn.slice(at + PLPGSQL_COPY_FALLBACK.length));
 };
 const displayFolds = (fn: string): boolean => DISPLAY_FOLD_SQL.test(fn) || plpgsqlFolds(fn);
@@ -298,6 +300,10 @@ mustCatch('one-letter names folded by themselves', everyListingProblems(mutTree(
   mustCatch('the raw token assigned BEFORE the copy fallback (district_copy_of can never run)',
     displayFolds(plpgsqlBody.replace('begin if key is null', 'begin key := own; if key is null')) ? [] : ['bypass accepted']);
   mustCatch('the raw-token fallback dropped after the copy fallback', displayFolds(plpgsqlBody.replace('if key is null then key := own; end if;', '')) ? [] : ['fold missing']);
+  mustCatch('the token seeded through coalesce BEFORE the copy fallback (key := coalesce(key, own))',
+    displayFolds(plpgsqlBody.replace('begin if key is null', 'begin key := coalesce(key, own); if key is null')) ? [] : ['bypass accepted']);
+  check('an alias lookup before the fallback (select … into key … = own) is NOT read as a bypass',
+    displayFolds(plpgsqlBody.replace('begin if key is null', 'begin select a.to_norm into key from public.loc_district_alias a where a.from_norm = own; if key is null')) ? [] : ['alias lookup rejected']);
   // The matcher must pick the NEWER lowercase definition over an older uppercase one (the whole point of this fix).
   const twoDefs = [
     { n: '20260101000000_old.sql', s: 'CREATE OR REPLACE FUNCTION public.loc_display_district_ar(p_city_id integer, p_raw text) RETURNS text LANGUAGE sql STABLE AS $function$ select 1 $function$;' },
