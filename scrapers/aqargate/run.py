@@ -303,6 +303,12 @@ def _additional_info(ar: dict) -> list[dict[str, Any]]:
     if isinstance(utils, list) and utils:
         add("services", "Property services", "، ".join(str(u) for u in utils))
     add("obligations", "Other obligations on the property", _val(ar.get("obligationsOnTheProperty")))
+    # The REGA ad licence the source publishes (adLicenseNumber, the same field rega_location_verified reads).
+    # The panel is the label/value ROWS shape, so the card's «رقم رخصة الإعلان» needs it as a row: card parity
+    # 11-07 found the licence on aqargate's own page and on 186 of 186 stored captures, and on 0 cards.
+    lic = str(ar.get("adLicenseNumber") or "").strip()
+    if re.fullmatch(r"\d{10}", lic):
+        add("rega_ad_license_number", "Ad license number", lic)
     add("regaAdvLicDate", "License Issuance Date", _val(ar.get("creationDate")))
     return rows
 
@@ -602,6 +608,7 @@ def map_marketplace(rec: dict, legacy_by_licence: Optional[dict[str, str]] = Non
         "propertyUtilities": rec.get("propertyUtilities"),
         "obligationsOnTheProperty": rg.get("obligationsOnTheProperty") if isinstance(rg, dict) else None,
         "creationDate": rec.get("creationDate"),
+        "adLicenseNumber": rec.get("adLicenseNumber"),
     }
     photos = [u for u in (_market_photo(x) for x in (rec.get("images") or [])) if u]
     desc = rec.get("descriptionAr")
