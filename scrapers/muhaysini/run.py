@@ -327,11 +327,11 @@ PAGE_SIZE = 30
 # 400 (12,000 rows) WAS hit every night from 11-02 on: the catalogue outgrew it, ~8,000 live ads were
 # never re-read (served_price_never_rechecked, 🔧 11-07) and nothing was ever pruned. 1,500 = 45,000 rows.
 MAX_PAGES = 1500
-# The `retrieve` call is the slow part (~1 s a row with REQUEST_GAP) and the job has 240 min. So at most
+# The `retrieve` call is the slow part (~1.05 s a row: 12,000 took 215 min on 11-07) and the job has 240 min. At most
 # DETAIL_BUDGET rows get their detail read per night, chosen by detail_plan() so that EVERY listed ad is
 # read in full at least once every ceil(n / budget) nights. The list walk itself stays complete, so every
 # listed ad is SEEN (never pruned) whether or not tonight's budget reached it.
-DETAIL_BUDGET = int(os.environ.get("MUHAYSINI_DETAIL_BUDGET", "12000"))
+DETAIL_BUDGET = int(os.environ.get("MUHAYSINI_DETAIL_BUDGET", "11000"))
 # Spacing between `retrieve` calls. The endpoint rate-limits under sustained load (987/2,827 got
 # HTTP 429 at ~3.6 req/s); override with MUHAYSINI_REQUEST_GAP.
 REQUEST_GAP = float(os.environ.get("MUHAYSINI_REQUEST_GAP", "0.35"))
