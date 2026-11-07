@@ -34,6 +34,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   bottomPromptInset, topPromptInset, promptInsets, promptMeasurementTarget, centredDialogBox,
+  columnPromptInset, topColumnInset,
   ONE_TAP_IFRAME_SELECTOR, AUTH_PROMPT_SELECTOR, OWN_DOCKED_PROMPT_SELECTOR, DOCKED_PROMPT_SELECTOR,
 } from '../src/lib/bottomPromptInset.ts';
 import { npmTestRuns } from './lib/testRegistry.ts';
@@ -758,6 +759,52 @@ const K_VH = 812, K_PAD = 16, K_CHROME = 48, K_BAND = 178;
     && /dialogBox\.paddingTop/.test(modal));
   check('K11 …and reads FOREIGN prompt insets, never the combined set (the #163 self-reference trap)',
     /useForeignPromptInsets\(\)/.test(modal) && !/usePromptInsets\(\)/.test(modal));
+}
+
+
+// ── L. THE DESKTOP CORNER CARD OVER THE DOCKED SIDEBAR (🔧 backlog 1527, 2026-11-07) ──────────────
+// F3 is right: the 391 px corner card spans too little of a 1440 px viewport to be a sheet, so the
+// APP reserves nothing for it. But the docked sidebar is a 300 px column pinned to the LEFT edge, and
+// the card is drawn over exactly that strip: journey-sweep run 42367701164 (Firefox AND WebKit,
+// 1440×1000) hit-tested the sidebar's sign-in CTA «إنشاء حساب / تسجيل الدخول» (146,101) and
+// «احصل على المزيد. سجل مجاناً» (146,110) to `#credential_picker_container` (20,20 → 391,158), 2/2,
+// on the Filter home and the AI Agent screen. The column reserves the card's band for itself.
+const VH_DESK = 1000;
+const VW_DESK = 1440;
+const DOCK_COLUMN = { left: 0, right: 300 };
+const DESK_CARD = { top: 20, bottom: 158, height: 138, width: 371, left: 20, right: 391 };
+{
+  check('L1. the measured desktop card over the sidebar column reserves everything above its bottom edge',
+    columnPromptInset(DESK_CARD, DOCK_COLUMN, VH_DESK, VW_DESK) === 158,
+    `got ${columnPromptInset(DESK_CARD, DOCK_COLUMN, VH_DESK, VW_DESK)}`);
+  check('L2. …while the app as a whole still reserves nothing for it (F3 unchanged)',
+    topPromptInset(DESK_CARD, VH_DESK, VW_DESK) === 0);
+  check('L3. a card beside the column (the far corner) reserves nothing for the column',
+    columnPromptInset({ ...DESK_CARD, left: 1049, right: 1420 }, DOCK_COLUMN, VH_DESK, VW_DESK) === 0);
+  check('L4. a card whose edge merely TOUCHES the column (left === column.right) is beside it → 0',
+    columnPromptInset({ ...DESK_CARD, left: 300, right: 671 }, DOCK_COLUMN, VH_DESK, VW_DESK) === 0);
+  check('L5. a hidden card reserves nothing',
+    columnPromptInset({ ...DESK_CARD, hidden: true }, DOCK_COLUMN, VH_DESK, VW_DESK) === 0);
+  check('L6. a card floating further down the page is not docked → 0',
+    columnPromptInset({ ...DESK_CARD, top: 300, bottom: 438 }, DOCK_COLUMN, VH_DESK, VW_DESK) === 0);
+  check('L7. a spanning top SHEET is the ROOT\'s band (topPromptInset > 0), never reserved twice by a column',
+    topPromptInset({ ...TOP_SHEET, left: 0, right: 375 }, VH_PHONE, VW_PHONE) > 0
+    && columnPromptInset({ ...TOP_SHEET, left: 0, right: 375 }, { left: 0, right: 300 }, VH_PHONE, VW_PHONE) === 0);
+  check('L8. a rect WITHOUT horizontal edges (every fixture that predates the column path) reserves nothing',
+    columnPromptInset(CORNER_CARD, DOCK_COLUMN, 900, 1440) === 0);
+  check('L9. the per-prompt cap holds: a column keeps at least half of itself',
+    columnPromptInset({ ...DESK_CARD, bottom: 900, height: 880 }, DOCK_COLUMN, VH_DESK, VW_DESK) === Math.floor(VH_DESK * 0.5));
+  check('L10. over several prompts the column takes the largest band (corner cards overlap, they do not stack)',
+    topColumnInset([null, DESK_CARD, { ...DESK_CARD, bottom: 120, height: 100 }, { ...DESK_CARD, left: 1049, right: 1420 }], DOCK_COLUMN, VH_DESK, VW_DESK) === 158
+    && topColumnInset([], DOCK_COLUMN, VH_DESK, VW_DESK) === 0);
+  const lib = readFileSync(join(ROOT, 'src/lib/bottomPromptInset.ts'), 'utf8');
+  check('L11. the DOM reader carries the horizontal edges the column path needs',
+    /left:\s*r\.left,\s*right:\s*r\.right/.test(lib));
+  const sidebar = readFileSync(join(ROOT, 'src/components/Sidebar.tsx'), 'utf8');
+  check('L12. the docked sidebar reads the column band for its own strip and adds it to its top padding',
+    /useColumnPromptInset\(DOCK_COLUMN\)/.test(sidebar)
+    && /DOCK_COLUMN:\s*ViewportColumn\s*=\s*\{\s*left:\s*0,\s*right:\s*DOCK_WIDTH\s*\}/.test(sidebar)
+    && /paddingTop:\s*insets\.top \+ 16 \+ cornerCardInset/.test(sidebar));
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nAll bottom-prompt-inset checks passed.');

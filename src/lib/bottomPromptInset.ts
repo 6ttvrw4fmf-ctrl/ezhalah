@@ -166,9 +166,17 @@ export type PromptRect = {
   /** Needed only by the TOP path, to tell a full-width docked SHEET from a corner CARD. Absent on
    *  the bottom path's own fixtures, which predate it — an undefined width never spans. */
   width?: number;
+  /** Horizontal edges, needed only by the COLUMN path (backlog 1527): a top corner CARD reserves
+   *  nothing for the app as a whole, yet it does cover whatever column of the app sits under it.
+   *  Absent on older fixtures — an undefined edge overlaps no column and reserves nothing there. */
+  left?: number;
+  right?: number;
   /** `display:none`, `visibility:hidden`, or fully transparent — present in the DOM but not shown. */
   hidden?: boolean;
 };
+
+/** A vertical strip of the viewport the app lays a column out in, as viewport x coordinates. */
+export type ViewportColumn = { left: number; right: number };
 
 /** Space to reserve on each edge. Both zero whenever nothing is docked over the app. */
 export type PromptInsets = { top: number; bottom: number };
@@ -242,6 +250,66 @@ export function topPromptInset(
   const overlap = rect.bottom;
   if (!(overlap > 0)) return 0;
   return Math.min(Math.round(overlap), Math.floor(viewportHeight * MAX_INSET_FRACTION));
+}
+
+/**
+ * THE CORNER CARD IS BESIDE THE APP — EXCEPT FOR THE COLUMN IT SITS ON (🔧 backlog 1527, 2026-11-07).
+ *
+ * `topPromptInset` is right to reserve nothing app-wide for Google's desktop corner card: it spans
+ * 391 of 1440 px, and pushing every screen down for it would be wrong. But "beside the app" was
+ * measured against the app as a whole, and on a docked desktop the app has a COLUMN exactly where
+ * the card lands: the sidebar is pinned to the LEFT edge, DOCK_WIDTH (300 px) wide, and the card is
+ * drawn at 20,20 → 391,158, `position: fixed`, `pointer-events: auto`. journey-sweep run 42367701164
+ * (13:24 UTC, Firefox AND WebKit, 1440×1000) hit-tested the sidebar's own sign-in CTA
+ * «إنشاء حساب / تسجيل الدخول» (146,101) and «احصل على المزيد. سجل مجاناً» (146,110) to the card's
+ * container on both the Filter home and the AI Agent screen — 2/2 — while the app reserved top 0,
+ * because the card is not a sheet. The owner rule of 2026-09-11 («must never cover, block, or
+ * intercept any Ezhalah controls») does not stop at the sheet shape.
+ *
+ * So the question is asked once more, per COLUMN: a prompt docked to the top edge that horizontally
+ * overlaps the column reserves its bottom edge for that column alone. Three things it deliberately
+ * does NOT do:
+ *  · a prompt that already counts as a top SHEET (`topPromptInset > 0`) is the ROOT's reservation
+ *    and contributes nothing here, so a column never pads twice for the same band;
+ *  · a prompt with no horizontal edges (older fixtures, or a measurement that failed to produce
+ *    them) overlaps nothing — the function is byte-for-byte a no-op for every caller that existed
+ *    before it, which is what lets the existing suite keep reading the same;
+ *  · the per-prompt cap is the same `MAX_INSET_FRACTION` the edge paths use: a column still keeps at
+ *    least half of itself.
+ */
+export function columnPromptInset(
+  rect: PromptRect | null | undefined,
+  column: ViewportColumn,
+  viewportHeight: number,
+  viewportWidth: number,
+): number {
+  if (!rect || rect.hidden || !(rect.height > 0)) return 0;
+  if (!(viewportHeight > 0) || !(viewportWidth > 0)) return 0;
+  if (!(column.right > column.left)) return 0;
+  // Not docked to the top → it floats in the page, and the column is not under it up here.
+  if (rect.top > TOP_ANCHOR_TOLERANCE) return 0;
+  // A spanning sheet is the root's band already (see topPromptInset); never reserve it twice.
+  if (topPromptInset(rect, viewportHeight, viewportWidth) > 0) return 0;
+  const left = rect.left; const right = rect.right;
+  if (typeof left !== 'number' || typeof right !== 'number' || !(right > left)) return 0;
+  // Horizontal overlap with the column: strictly positive, or the card is genuinely beside it.
+  if (!(Math.min(right, column.right) - Math.max(left, column.left) > 0)) return 0;
+  const overlap = rect.bottom;
+  if (!(overlap > 0)) return 0;
+  return Math.min(Math.round(overlap), Math.floor(viewportHeight * MAX_INSET_FRACTION));
+}
+
+/** The band a COLUMN must reserve at its top over every docked prompt in the document: the largest
+ *  single answer, because top-anchored corner cards overlap rather than stack. */
+export function topColumnInset(
+  rects: ReadonlyArray<PromptRect | null | undefined>,
+  column: ViewportColumn,
+  viewportHeight: number,
+  viewportWidth: number,
+): number {
+  let band = 0;
+  for (const rect of rects) band = Math.max(band, columnPromptInset(rect, column, viewportHeight, viewportWidth));
+  return band;
 }
 
 /**
@@ -417,7 +485,7 @@ function readPromptRects(selector: string = DOCKED_PROMPT_SELECTOR): PromptRect[
     // Hidden on EITHER node means nothing is shown: a display:none iframe inside a live container
     // reserves nothing, and so does a live iframe inside a hidden container.
     const hidden = isHidden(el) || isHidden(matched);
-    return { top: r.top, bottom: r.bottom, height: r.height, width: r.width, hidden };
+    return { top: r.top, bottom: r.bottom, height: r.height, width: r.width, left: r.left, right: r.right, hidden };
   });
 }
 
@@ -455,13 +523,39 @@ export function observePromptInsets(
   onChange: (insets: PromptInsets) => void,
   selector: string = DOCKED_PROMPT_SELECTOR,
 ): () => void {
+  return observeDockedPrompts(selector, promptInsets, onChange);
+}
+
+/**
+ * The same observer, answering `topColumnInset` for ONE column of the app (backlog 1527): the docked
+ * sidebar reads this for the strip it is pinned to. Third-party prompts only by default — our own
+ * docked cards never land in the sidebar's column, and the #163 self-reference trap stays closed.
+ * `bottom` is always 0 here; the shape is shared so the two hooks below read alike.
+ */
+export function observeColumnPromptInset(
+  column: ViewportColumn,
+  onChange: (insets: PromptInsets) => void,
+  selector: string = AUTH_PROMPT_SELECTOR,
+): () => void {
+  return observeDockedPrompts(
+    selector,
+    (rects, vh, vw) => ({ top: topColumnInset(rects, column, vh, vw), bottom: 0 }),
+    onChange,
+  );
+}
+
+function observeDockedPrompts(
+  selector: string,
+  measure: (rects: PromptRect[], viewportHeight: number, viewportWidth: number) => PromptInsets,
+  onChange: (insets: PromptInsets) => void,
+): () => void {
   if (typeof document === 'undefined' || typeof window === 'undefined') return () => {};
   let last: PromptInsets = { top: -1, bottom: -1 };
   let sizeObserver: ResizeObserver | null = null;
   let watched: Element[] = [];
 
   const emit = () => {
-    const next = promptInsets(readPromptRects(selector), window.innerHeight, window.innerWidth);
+    const next = measure(readPromptRects(selector), window.innerHeight, window.innerWidth);
     if (next.top === last.top && next.bottom === last.bottom) return;
     last = next;
     onChange(next);
@@ -611,4 +705,17 @@ export function useForeignPromptInsets(): PromptInsets {
   const [insets, setInsets] = useState<PromptInsets>({ top: 0, bottom: 0 });
   useEffect(() => observePromptInsets(setInsets, AUTH_PROMPT_SELECTOR), []);
   return insets;
+}
+
+/**
+ * The band a COLUMN pinned to one side of the viewport must reserve at its top for a third-party
+ * corner card docked over it (backlog 1527; see `columnPromptInset`). 0 whenever nothing third-party
+ * is docked over that strip, so a signed-in visitor, a phone, and a card beside the column all lay
+ * out exactly as before. Pass a module-level constant for `column`: the observer re-subscribes when
+ * its edges change.
+ */
+export function useColumnPromptInset(column: ViewportColumn): number {
+  const [band, setBand] = useState(0);
+  useEffect(() => observeColumnPromptInset(column, (i) => setBand(i.top)), [column.left, column.right]);
+  return band;
 }
