@@ -39,8 +39,10 @@ permissions:
 
 # Its own group: at most ONE card-parity browser on production, never queued behind (or cancelling) an engineer's
 # customer-journey proof run.
+# A PR proof run gets its own group: GitHub keeps ONE pending run per group, so a PR run queued behind a long run
+# replaced (cancelled) the 05:33 scheduled slot on 2026-11-07 (run 42343197377).
 concurrency:
-  group: production-browser-card-parity
+  group: production-browser-card-parity${{ github.event_name == 'pull_request' && '-pr' || '' }}
   cancel-in-progress: false
 
 env:

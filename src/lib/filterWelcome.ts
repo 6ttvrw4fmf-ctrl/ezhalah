@@ -181,7 +181,9 @@ export const NAME_SLOT = '⟦n⟧';
  *  (an Arabic line never shows Latin letters for the name — the normal headline stays instead). */
 export function fillName(text: string | null | undefined, name: string, locale: 'ar' | 'en'): string | null {
   if (!text) return null;
-  const first = (name ?? '').trim().split(/\s+/)[0] ?? '';
+  const raw = (name ?? '').trim().split(/\s+/)[0] ?? '';
+  // English starts a name with a capital (owner 2026-11-07: «Yusuf not yusuf»); Arabic has no case.
+  const first = locale === 'en' ? raw.charAt(0).toLocaleUpperCase('en') + raw.slice(1) : raw;
   if (!first || (locale === 'ar' && /[A-Za-z]/.test(first)) || (locale === 'en' && /[\u0600-\u06FF]/.test(first))) return null;
   // Isolated (U+2068 … U+2069): an Arabic name in an English line (or the reverse) can't drag the comma.
   return text.split(NAME_SLOT).join(`\u2068${first}\u2069`);

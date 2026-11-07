@@ -116,3 +116,9 @@ def test_our_licence_printed_anywhere_on_the_page_is_a_match():   # alajlan's pa
 
 def test_a_home_page_link_names_no_ad():
     assert cp.is_home("https://alajlan-re.com/") and not cp.is_home("https://alshawaf.com.sa/22293")
+
+
+def test_an_office_number_beside_the_label_is_not_the_ad_licence():   # remaxsa / holoul, first full run 11-07
+    assert cp.licence_on_page("رقم الترخيص: 1100029634") is None
+    assert cp.licence_on_page("رقم الترخيص 7032067345") is None
+    assert cp.licence_on_page("رقم ترخيص الاعلان 7101234567") == "7101234567"

@@ -57,8 +57,10 @@ export function pickName(
     return ar || (en ? phoneticAr(en, true) : '') || phoneticAr(base, true) || base;
   }
   // English UI: prefer the Latin spelling; if we only have Arabic, fall back to the as-typed value.
-  return en || (scriptOf(base) === 'en' ? base : '') || base;
+  // Each word starts with a capital (owner 2026-11-07: «Yusuf not yusuf», every user); the rest stays as typed (McAllister).
+  return (en || (scriptOf(base) === 'en' ? base : '') || base).replace(/(^|\s)(\p{Ll})/gu, (_, sp, c) => sp + c.toLocaleUpperCase('en'));
 }
+
 
 /** The name to put INSIDE A SENTENCE in `locale`: pickName's spelling, but never one in the other script —
  *  no Arabic name in an English line («يوسف, the market…», owner P1 2026-10-24), no Latin in an Arabic one.
