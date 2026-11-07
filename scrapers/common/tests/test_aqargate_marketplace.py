@@ -15,6 +15,7 @@ import sys
 sys.path.insert(0, ".")
 
 import scrapers.aqargate.run as AG  # noqa: E402
+from scrapers.common import db  # noqa: E402
 
 AG.to_catalog = lambda city, region_hint=None: (None, None)  # catalogue lookup needs the DB
 
@@ -68,7 +69,7 @@ def test_native_ad_gets_its_own_number_and_no_fake_pin():
 def test_land_rate_is_a_rate_not_a_total():
     row, _ = AG.map_marketplace(LAND)
     assert row["property_type"] == "Residential Land"
-    assert row["price_total"] is None and row["price_per_meter"] == 6500
+    assert row["price_total"] is db.AUTHORITATIVE_NULL and row["price_per_meter"] == 6500
 
 
 def test_unpublished_or_untyped_records_are_skipped():
@@ -149,4 +150,4 @@ def test_an_imported_land_ad_without_landTotalPrice_is_still_a_rate():
            "regaData": {"wp_id": 52441}}                  # AG52441, live 2026-11-06: no landTotalPrice
     row, _ = AG.map_marketplace(rec)
     assert row["ad_number"] == "AG52441"
-    assert row["price_total"] is None and row["price_per_meter"] == 40
+    assert row["price_total"] is db.AUTHORITATIVE_NULL and row["price_per_meter"] == 40
