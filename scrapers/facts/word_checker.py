@@ -501,7 +501,7 @@ _PARTIAL = tuple(_n(w) for w in N._PARTIAL_ONLY + N._FLOOR_COVERING)
 _PARTIAL_BEFORE = tuple(_n(w) for w in N._PARTIAL_BEFORE)
 
 # Negators that TOUCH the token. One word («غير», «بدون») or two («لا يوجد», «لا نقبل»).
-_NEG1 = frozenset(_n(w) for w in ("غير", "كغير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "no", "without", "not",
+_NEG1 = frozenset(_n(w) for w in ("غير", "كغير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "مافيها", "no", "without", "not",
                                    "non", "ليس", "ليست", "عدا", "ماعدا", "باستثناء"))      # «ليست منحة» (owner handoff 2026-11-01)
 _NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتوفر", "لا تتوفر", "ما فيه", "ما في", "ما فيها", "لا يحتوي", "لا تحتوي", "لا يشمل",
                                    "لا تشمل", "عدم وجود", "لا نقبل", "لا يقبل", "من غير", "ما يوجد", "is not"))
@@ -1107,7 +1107,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     lead = t[s:e].split()[:1]
     if fact in _LEAD_VERB_FACTS and lead and _strip_wa(lead[0]) in _LEAD_VERBS and prev:
         nb = _negated_before(prev + [lead[0]])
-        if nb == 2:                                  # the negator RIGHT before the verb
+        # the negator RIGHT before the verb: «لا يوجد» (two words) or a one-word negator «ليس يضم» (CodeRabbit on #11068)
+        if nb == 2 or (prev and (prev[-1] in _NEG1 or _strip_wa(prev[-1]) in _NEG1)):
             qs = len(" ".join(prev[:-1])) + (1 if len(prev) > 1 else 0)
             return False, qs, we
     # …and an un-negated EXISTENCE verb that opens the match affirms it: «لا يوجد مصعد ويوجد محلات» has shops (the old
@@ -2588,6 +2589,8 @@ def selftest() -> None:
         ("شارعها تجاري مقام فيه محلات بالعماير الي امامها", {}, ("shops_inside",)),
         ("كما يوجد ٦ محلات تجارية بالقرب من العمارة", {}, ("shops_inside",)),
         ("خلف العمارة 4 محلات تجارية", {}, ("shops_inside", "shops_count")),
+        ("عمارة مافيها محلات تجارية", {"shops_inside": False}, ()),
+        ("ليس يضم مكاتب", {"offices_inside": False}, ()),
         ("🏬 4 محلات تجارية ✅ جميع الشقق مؤجرة ✅ جميع المحلات مؤجرة", {"shops_inside": True}, ()),
         ("عماره للبيع دورين ع 3 شوارع شرق جامع الحوطي فيها محلات تجارية مؤجرة وشقق", {"shops_inside": True}, ()),
         ("مبنى يحتوي على مكاتب", {"offices_inside": True}, ()),
