@@ -478,6 +478,19 @@ def parse_description_amenities(page_html: str) -> dict[str, bool]:
     return normalize.prose_amenities(normalize.html_block_lines(m.group(1)), skip=_PROSE_SKIP)
 
 
+_AD_LICENCE_CELL = re.compile(
+    r"رقم\s*رخصة\s*الإعلان\s*</div>\s*<div[^>]*>\s*([\d٠-٩]{10})\s*</div>")
+
+
+def parse_ad_licence(page_html: str) -> Optional[str]:
+    """The REGA ad licence from the ad's own label/value cell (measured 2026-11-07 on
+    /properties/ard-llbyaa-fy-hy-alkhlyg: «<div …>رقم رخصة الإعلان</div> <div>7201006705</div>»). Card parity
+    found it on the page and on 0 of 298 cards. Read from the HTML cell, never from flattened text: this
+    page's other tables print headers before values (the plot/plan/block lesson above)."""
+    m = _AD_LICENCE_CELL.search(page_html or "")
+    return m.group(1).translate(_AR_DIGITS) if m else None
+
+
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:
     """(row, category, raw_price_text). row is None when the page is not a real listing."""
     t = _txt(page_html)
@@ -609,6 +622,10 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         extra["block_no"] = trio.group(3).translate(_AR_DIGITS)
     if gps: extra["lat"], extra["lng"] = float(gps.group(1)), float(gps.group(2))
     if raw_price: extra["price_text_source"] = raw_price
+    lic = parse_ad_licence(page_html)
+    if lic:
+        row["license_number"] = lic
+        extra["rega_ad_license_number"] = lic
     if extra:
         row["additional_info"] = extra
 
