@@ -162,8 +162,17 @@ const DISPLAY_RE = /create or replace function public\.loc_display_district_ar\(
 // The fold, in either body the function has had: the SQL coalesce chain, or the plpgsql «key := district_copy_of(...)»
 // fallback followed by the raw-token fallback («key := own», own = norm_district_tok(p_raw)).
 const DISPLAY_FOLD_SQL = /public\.district_copy_of\(p_city_id, p_raw\),\s+norm_district_tok\(p_raw\)\) as key/;
-const DISPLAY_FOLD_PLPGSQL = /if key is null then key := public\.district_copy_of\(p_city_id, p_raw\); end if;\s+if key is null then key := own; end if;/;
-const displayFolds = (fn: string): boolean => DISPLAY_FOLD_SQL.test(fn) || DISPLAY_FOLD_PLPGSQL.test(fn);
+const PLPGSQL_COPY_FALLBACK = 'if key is null then key := public.district_copy_of(p_city_id, p_raw); end if;';
+// The plpgsql fold holds only when the copy fallback can actually RUN: no `key := own` (the raw token) may be assigned
+// before it — a body that sets key := own first never consults district_copy_of for a non-null token (CodeRabbit on
+// #11108) — and the raw-token fallback must follow it.
+const plpgsqlFolds = (fn: string): boolean => {
+  const at = fn.indexOf(PLPGSQL_COPY_FALLBACK);
+  if (at < 0) return false;
+  if (/\bkey\s*:=\s*own\b/.test(fn.slice(0, at))) return false;
+  return /if key is null then key := own; end if;/.test(fn.slice(at + PLPGSQL_COPY_FALLBACK.length));
+};
+const displayFolds = (fn: string): boolean => DISPLAY_FOLD_SQL.test(fn) || plpgsqlFolds(fn);
 const TWINS_RE = /create or replace function public\.mon_detect_district_served_twins\(\)[\s\S]*?\$function\$;/;
 
 function everyListingProblems(files: { n: string; s: string }[]): string[] {
@@ -285,7 +294,17 @@ mustCatch('one-letter names folded by themselves', everyListingProblems(mutTree(
   // Both shapes are recognised and both mutations are caught, independent of what the tree holds today.
   const plpgsqlBody = 'create or replace function public.loc_display_district_ar(p_city_id integer, p_raw text) returns text language plpgsql stable as $function$ begin if key is null then key := public.district_copy_of(p_city_id, p_raw); end if;\n  if key is null then key := own; end if; end $function$;';
   check('the plpgsql fallback shape is read as folding', displayFolds(plpgsqlBody) ? [] : ['plpgsql fold not recognised']);
-  mustCatch('the plpgsql fallback removed', displayFolds(plpgsqlBody.replace('if key is null then key := public.district_copy_of(p_city_id, p_raw); end if;', '')) ? [] : ['fold missing']);
+  mustCatch('the plpgsql fallback removed', displayFolds(plpgsqlBody.replace(PLPGSQL_COPY_FALLBACK, '')) ? [] : ['fold missing']);
+  mustCatch('the raw token assigned BEFORE the copy fallback (district_copy_of can never run)',
+    displayFolds(plpgsqlBody.replace('begin if key is null', 'begin key := own; if key is null')) ? [] : ['bypass accepted']);
+  mustCatch('the raw-token fallback dropped after the copy fallback', displayFolds(plpgsqlBody.replace('if key is null then key := own; end if;', '')) ? [] : ['fold missing']);
+  // The matcher must pick the NEWER lowercase definition over an older uppercase one (the whole point of this fix).
+  const twoDefs = [
+    { n: '20260101000000_old.sql', s: 'CREATE OR REPLACE FUNCTION public.loc_display_district_ar(p_city_id integer, p_raw text) RETURNS text LANGUAGE sql STABLE AS $function$ select 1 $function$;' },
+    { n: '20260202000000_new.sql', s: plpgsqlBody },
+  ];
+  check('the matcher selects the newer lowercase definition over an older uppercase one', latestDef(twoDefs, DISPLAY_RE).n === '20260202000000_new.sql' ? [] : [`picked ${latestDef(twoDefs, DISPLAY_RE).n}`]);
+  mustCatch('a case-sensitive matcher (reads the older uppercase body)', latestDef(twoDefs, new RegExp(DISPLAY_RE.source)).n === '20260202000000_new.sql' ? [] : ['older body picked']);
   // The SQL shape must still be recognised (a rollback to it is a fold that works, not a missing fold): a fixed fixture,
   // not a tree pick, so a later uppercase plpgsql redefinition cannot be mistaken for it (CodeRabbit on #11108).
   const sqlBody = 'CREATE OR REPLACE FUNCTION public.loc_display_district_ar(p_city_id integer, p_raw text) RETURNS text LANGUAGE sql STABLE AS $function$ select k.display_ar from (select coalesce(public.district_copy_of(p_city_id, p_raw), norm_district_tok(p_raw)) as key) q $function$;';
