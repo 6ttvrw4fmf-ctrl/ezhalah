@@ -107,6 +107,22 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
+**Owed → JOB 0 on 11-08 (dated, from 11-07):** the 06:22 UTC 11-07 search sync FAILED (statement timeout after 10 min;
+routed to 🔧 «repair»), so these merged + crawled fixes reached the raw rows but not the index inside the slot. After
+the first successful sync, one phone `customer-journey.yml` run on: aqargate_residential 10029138 (Makkah القشاشية
+الجديد land 600 m², must NOT show «1,417» as the total; `search_listings_ar` aqargate rows with price_total =
+price_per_meter must read 0, was 20), tamyaz_residential 25034427 (Taif building rent 50,000) + tamyaz_commercial
+25034439 (Jeddah office 2,800,000) — new cards, tamyaz served 15 → ~19; kellerwilliams_residential 24214382 must be
+found under «حي الرائد» (KW served without district was 14). shomou #10946 (soft deadline, CodeRabbit Major fixed):
+proof crawl 42345510942 must end ok with notes «walk incomplete … deadline_cut» or complete, never «killed by SIGINT».
+**NW4349 is still shown:** #11015 stops the spot check reviving it, but the 11-07 06:33 nowaisiry crawl did NOT prune —
+«prune guard tripped: re-saw 7 of 10 active, floor 80%». On a 10-ad site 3 stale ads block the prune forever; read
+`prune_unseen`'s coverage floor for small tables (the own-post-id oracle is per-ad proof, so the floor protects nothing
+there) — that is tomorrow's own-lane fix.
+**NEW (11-07): a None from a scraper NEVER clears a stored value** — `_unknown_must_not_overwrite_known` drops it. When a
+fix changes a field from «a value» to «nothing» (aqargate land: total → rate), write `db.AUTHORITATIVE_NULL`, and only
+when the record was read and the source settled it (CodeRabbit: a missing price states nothing).
+
 **NEW (11-06): A SITE THAT «ANSWERS 500 ON EVERY PAGE» MAY HAVE BEEN REBUILT — OPEN ITS HOMEPAGE FIRST.** aqargate's
 WordPress REST answered 500 from 11-05 ~21:00 UTC (crawl 0 rows, liveness controls 0/5) while aqargate.com answered 200
 with a new single-page app. Its bundle (`/assets/index-*.js`) named the public routes in one grep:
