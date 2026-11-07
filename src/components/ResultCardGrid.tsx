@@ -1,9 +1,10 @@
-import { Children, useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { useI18n } from '@/i18n';
-import { GLINT_CELL_PROPS, installScrollCalm, watchGlintCells } from '@/lib/scrollCalm';
+import { installScrollCalm, watchGlintCells } from '@/lib/scrollCalm';
 
-/** Only layout changes: children keep their original order, keys and listing callbacks. */
+/** Only layout changes: children keep their original order, keys and listing callbacks. Each child is already its own
+ *  grid cell (ResultCardRow draws the cell box), so a re-render of the chat does not rebuild a wrapper per card. */
 /** `wide` (laptop): the cards use the room the column already has instead of stopping at the
  *  phone's 640px (owner 2026-10-03: «look at the left and right, there is space»).
  *  `cols` (laptop, 2026-10-11): the photo-first card sits in a real grid — 3 across when nothing is
@@ -31,7 +32,7 @@ export function ResultCardGrid({ children, wide = false, cols }: { children: Rea
         gridded && cols === 2 && styles.gridTwo,
         { direction: isRTL ? 'rtl' : 'ltr' },
       ]}>
-      {Children.map(children, (child) => <View {...GLINT_CELL_PROPS} style={{ width: '100%', minWidth: 0 }}>{child}</View>)}
+      {children}
     </View>
   );
 }

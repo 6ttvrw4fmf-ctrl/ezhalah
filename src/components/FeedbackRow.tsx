@@ -6,7 +6,7 @@
 // the chat (owner 2026-07-09: toast above the conversation, not next to the buttons). Feedback is
 // stored LOCALLY only (lib/listingFeedback, keyed by the results-message id → rates the RESPONSE,
 // not one listing). UI-only: no search/cards/ranking.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, withDelay, withTiming } from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -43,6 +43,8 @@ export default function FeedbackRow({
   readAloudSegments?: ReadAloudSegment[];
 }) {
   const { t, isRTL: uiRTL, locale } = useI18n();
+  // Once per script, not once per render: every key typed re-renders this row, and answering walks all 500 spoken cards.
+  const speakable = useMemo(() => hasSpeakableContent(readAloudSegments), [readAloudSegments]);
   const isRTL = rtl ?? uiRTL;
   const [rating, setRating] = useState<FeedbackRating | null>(() => getListingFeedback(feedbackKey));
   const reducedMotion = useReducedMotion();
@@ -150,7 +152,7 @@ export default function FeedbackRow({
             `readAloudSegments?.length` counted SEGMENTS; speaking needs a speakable UNIT, and
             buildUnits() drops a segment whose text is blank. In the gap the control rendered and its
             tap was a silent no-op (ops_incident #856) — see hasSpeakableContent()'s header. */}
-        {hasSpeakableContent(readAloudSegments) ? (
+        {speakable ? (
           <FbButton
             icon={speaking ? 'stop-circle' : 'volume-high-outline'}
             active={speaking}
