@@ -61,7 +61,7 @@ def test_only_available_is_published(status):
 
 def test_off_plan_and_type_conflict_are_never_published():
     assert R.map_unit(93, R.parse_unit(_unit_page(project="مقام 19")), PROJECTS)[1] == "offplan"
-    villa = _unit_page(name="فلة الروضة 101", project="")
+    villa = _unit_page(name="فلة الروضة 101")
     assert R.map_unit(27, R.parse_unit(villa), PROJECTS)[1] == "type_conflict"
 
 
@@ -156,13 +156,19 @@ def test_follow_source_hides_only_proven_rows_with_evidence(monkeypatch):
     assert "same unit A03 now served as MQMU91" in ev[0]["note"] and ev[1]["verdict"] == "UNKNOWN"
 
 
-def test_follow_source_needs_two_live_controls_and_keeps_a_hide_when_evidence_fails(monkeypatch):
+def test_follow_source_needs_two_live_controls_and_never_hides_without_evidence(monkeypatch):
     log = _fake_db(monkeypatch, OLD)
     assert R.follow_source_hide(R.RES_TABLE, set(), CONTROLS[:1], {}, status=_status_map())[0] == 0
     assert R.follow_source_hide(R.RES_TABLE, set(), CONTROLS, {}, status=_status_map(controls_live=False))[0] == 0
     assert not [x for x in log if x[0] == "update"]
     log = _fake_db(monkeypatch, OLD, fail_evidence=True)
-    assert R.follow_source_hide(R.RES_TABLE, set(), CONTROLS, {}, status=_status_map())[0] == 1
+    assert R.follow_source_hide(R.RES_TABLE, set(), CONTROLS, {}, status=_status_map())[0] == 0
+    assert not [x for x in log if x[0] == "update"]
+
+
+def test_a_unit_whose_project_has_no_card_is_never_published():
+    assert R.map_unit(5, R.parse_unit(_unit_page(project="مقام 21")), PROJECTS)[1] == "project_unmatched"
+    assert R.projects_from_listing('<script>self.__next_f.push([1,"[{\\"id\\":\\"1\\",\\"statusLabel"])</script>') == {}
 
 
 def test_complete_needs_every_listed_page():
