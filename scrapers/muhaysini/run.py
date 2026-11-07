@@ -293,7 +293,6 @@ OPEN QUESTIONS FOR ONBOARDING (none of these are guessed in code)
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import re
 import sys
@@ -934,18 +933,39 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
     return items, complete
 
 
-def detail_plan(ids: list[str], budget: int, day: int) -> set[str]:
-    """Which listed ids get their detail read tonight. All of them when they fit the budget; otherwise a
-    budget-sized WINDOW that advances by `budget` each night around ONE stable ordering of the ids (by a
-    hash, so new arrivals scatter instead of all landing in one night). Consecutive nights tile the ring,
-    so every id is read in full at least once every ceil(n / budget) nights, and each night reads exactly
-    the budget. (Hash BUCKETS were the first version: an oversized bucket starved ids — CodeRabbit, #11136.)"""
+def detail_plan(ids: list[str], budget: int, last_read: dict[str, str]) -> set[str]:
+    """Which listed ids get their detail read tonight: all of them when they fit the budget, otherwise the
+    `budget` ids read LONGEST ago. `last_read` maps a listed id to its stored row's last_seen_at, which only
+    this crawl's upsert writes, i.e. when that ad was last read in full. An id with no stored row (a new
+    ad) has no entry and goes first. Because the cursor is the data itself, every listed id is read within
+    ceil(n / budget) nights however the catalogue grows or shrinks between nights. (A position computed
+    from the catalogue SIZE jumped when one ad was added — CodeRabbit, #11136 — and hash buckets starved
+    ids when one overflowed.) Ties break by id, so the plan is deterministic."""
     if budget <= 0 or len(ids) <= budget:
         return set(ids)
-    ordered = sorted(ids, key=lambda i: (hashlib.sha1(i.encode()).hexdigest(), i))
-    n = len(ordered)
-    start = (day * budget) % n
-    return {ordered[(start + j) % n] for j in range(budget)}
+    return set(sorted(ids, key=lambda i: (last_read.get(i, ""), i))[:budget])
+
+
+def stored_last_read() -> dict[str, str]:
+    """listed id -> last_seen_at (ISO text, which sorts by time) of every stored muhaysini row, both tables.
+    A failed read raises: an empty answer would read as «nothing ever read» and only reshuffle the plan,
+    but a failure must not pass for a fact (A FAILED FETCH IS NOT AN EMPTY ANSWER)."""
+    out: dict[str, str] = {}
+    for tbl in ("muhaysini_residential_listings", "muhaysini_commercial_listings"):
+        off = 0
+        while True:
+            got = db._execute(db.sb().table(tbl).select("ad_number,last_seen_at").order("id")
+                              .range(off, off + 999), what=f"{tbl} last read")
+            rows = got.data or []
+            for r in rows:
+                ad, seen = r.get("ad_number") or "", r.get("last_seen_at") or ""
+                if ad.startswith(PREFIX):
+                    pid = ad[len(PREFIX):]
+                    out[pid] = max(out.get(pid, ""), seen)
+            if len(rows) < 1000:
+                break
+            off += 1000
+    return out
 
 
 def fetch_detail(s: cc.Session, pid: str) -> Optional[dict]:
@@ -1035,7 +1055,8 @@ def main() -> int:
         if not items:
             raise RuntimeError(f"{API}/list returned no properties")
         listed_ids = [i for i in (_clean(p.get("id")) for p in items) if i]
-        tonight = detail_plan(listed_ids, DETAIL_BUDGET, int(time.time() // 86400))
+        tonight = detail_plan(listed_ids, DETAIL_BUDGET,
+                              stored_last_read() if len(listed_ids) > DETAIL_BUDGET else {})
         # Listed but outside tonight's budget: SEEN on the source tonight (so never a prune candidate),
         # not rebuilt — their stored row stays as last read, and their turn comes within k nights.
         seen_not_read = {f"{PREFIX}{i}" for i in listed_ids if i not in tonight}
