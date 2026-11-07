@@ -617,16 +617,67 @@ def stated_rent_period(price: Optional[int], text: Optional[str]) -> Optional[st
     == price → 'annual'. re's \\d and to_int read Arabic-Indic digits too."""
     if not price or not text:
         return None
+    # EACH LABEL PAIRS WITH ITS OWN FIGURE (2026-11-07, haraj 24760182 + CodeRabbit on #11030): «الإيجار الشهري
+    # 2500ريال الإيجار السنوي 28000ريال» has «الشهري» within 40 chars of 28000 too, and the first-word-wins loop read
+    # the yearly 28,000 as monthly and served 336,000 a year. A label belongs to a figure only when no OTHER figure
+    # sits between them. The nearest such label BEFORE the figure is its label («السنوي 28000»); after it only when
+    # none precedes («4000 ريال شهري»). A figure with a different label on each side («شهري السعر: 2500 ريال سنوي
+    # 28000», asking about 2500) is ambiguous: no stated period, never a guess.
     found: Optional[str] = None
-    for word_re, period in ((_MONTHLY_WORD_RE, "monthly"), (_YEARLY_WORD_RE, "annual")):
-        for m in word_re.finditer(text):
-            for n in _NUMBER_RE.findall(text[max(0, m.start() - 40): m.end() + 40]):
-                v = to_int(n.replace("٬", ","))
-                if v == price:
-                    return period
-                if period == "monthly" and v and v * 12 == price:
-                    found = found or "annual"
-    return found
+    words = sorted([(m.start(), m.end(), period)
+                    for word_re, period in ((_MONTHLY_WORD_RE, "monthly"), (_YEARLY_WORD_RE, "annual"))
+                    for m in word_re.finditer(text)])
+    numbers = [(m.start(), m.end(), to_int(m.group(0).replace("٬", ","))) for m in _NUMBER_RE.finditer(text)]
+    # Only another PRICE-SIZED figure (≥ 1,000) separates a label from a figure: «إيجار سنوي فيلا 5 غرف 60000»
+    # keeps its label across the room count.
+    figures = [(x0, x1) for x0, x1, x in numbers if x and x >= 1000]
+
+    def between(lo: int, hi: int, spans) -> bool:
+        return any(lo <= x0 and x1 <= hi for x0, x1, *_ in spans)
+
+    def labels_before(a: int, b: int):
+        return [w for w in words if w[1] <= a and a - w[1] <= 40
+                and not between(w[1], a, [f for f in figures if f != (a, b)])]
+
+    def labels_after(a: int, b: int):
+        return [w for w in words if w[0] >= b and w[0] - b <= 40
+                and not between(b, w[0], [f for f in figures if f != (a, b)])]
+
+    def one_side(ws, nearest_first):
+        """The side's label, or None when the side names BOTH periods back to back («عقد سنوي او شهري»)."""
+        if not ws:
+            return None
+        ws = ws if nearest_first else ws[::-1]
+        for w in ws[1:]:
+            lo, hi = sorted((w, ws[0]))
+            if w[2] != ws[0][2] and EITHER.match(text[lo[1]:hi[0]]):
+                return None
+        return ws[0]
+
+    EITHER = re.compile(r"^\s*(?:او|أو|/|،|,|-)\s*$")                         # «سنوي او شهري», «سنوي / شهري»
+    TIGHT = re.compile(r"^[\s:：\-–()\[\]\u064B-\u0652ا]*$")                 # «السنوي: 28000», «شهريًا 3,250», «سنوي (50000)»
+    TIGHT_SUFFIX = re.compile(r"^[\s,،.\-–()\[\]]*(?:ريال|﷼|ر\.س|SAR)?[\s,،.\-–()\[\]]*$")  # «2500 ريال شهري»
+    verdicts: set[str] = set()
+    for a, b, v in numbers:
+        if v == price:
+            pre, post = one_side(labels_before(a, b)[::-1], True), one_side(labels_after(a, b), True)
+            # A label AFTER this figure that heads the NEXT figure («… 2500ريال الإيجار السنوي 28000ريال») is not this
+            # figure's.
+            if post and any(f0 >= post[1] and TIGHT.match(text[post[1]:f0])
+                            and not any(w[0] >= f1 and TIGHT_SUFFIX.match(text[f1:w[0]]) for w in words)
+                            for f0, f1 in figures):
+                post = None
+            # A label BEFORE it that closes the PREVIOUS figure («2500 شهري، 28000 سنوي») gives way to one after it.
+            if pre and post and any(f1 <= pre[0] and TIGHT_SUFFIX.match(text[f1:pre[0]]) for _, f1 in figures):
+                pre = None
+            if pre or post:
+                verdicts.add((pre or post)[2])
+        elif v and v * 12 == price and any(w[2] == "monthly" and (abs(a - w[1]) <= 40 or abs(w[0] - b) <= 40)
+                                           for w in words):
+            found = found or "annual"
+    if len(verdicts) == 1:
+        return verdicts.pop()
+    return None if verdicts else found
 
 
 def rent_period_from_ad(price: Optional[int], text: Optional[str], card_period: Optional[str],
