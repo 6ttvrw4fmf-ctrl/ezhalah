@@ -60,3 +60,33 @@ begin
   end;
   perform public.mon_detect_field_integrity();
 end $$;
+
+-- ── Part 2 (same run): unresolvable_alert_kind:bedrooms_not_captured_fleet ─────────────────────────────────────────
+-- mon_detect_bedrooms_not_captured() DOES clear its key, but as mon_resolve_key(k, k) through a constant, and
+-- mon_detect_unresolvable_alert_kinds() (STRICT on purpose) only recognises the kind as a literal. Write the literal.
+do $$
+declare src text; out_def text;
+begin
+  src := pg_get_functiondef('public.mon_detect_bedrooms_not_captured()'::regprocedure);
+  if position('mon_resolve_key(''bedrooms_not_captured_fleet''' in src) > 0 then
+    raise notice 'literal resolver already present';
+    return;
+  end if;
+  if position('k constant text := ''bedrooms_not_captured_fleet''' in src) = 0 then
+    raise exception 'k is not the constant this edit assumes — refusing';
+  end if;
+  out_def := replace(src, 'perform public.mon_resolve_key(k, k);',
+    'perform public.mon_resolve_key(''bedrooms_not_captured_fleet'', ''bedrooms_not_captured_fleet'');');
+  if out_def = src then raise exception 'anchor not found — refusing to guess'; end if;
+  execute out_def;
+end $$;
+
+-- PROOF: the meta-detector now recognises the kind, so its unresolvable_alert_kind row clears.
+do $$
+begin
+  perform public.mon_detect_unresolvable_alert_kinds();
+  if exists (select 1 from public.alert_event
+              where dedup_key = 'unresolvable_alert_kind:bedrooms_not_captured_fleet' and resolved_at is null) then
+    raise exception 'PROOF: bedrooms_not_captured_fleet still reads as unresolvable';
+  end if;
+end $$;
