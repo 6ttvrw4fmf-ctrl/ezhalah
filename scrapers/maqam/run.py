@@ -137,13 +137,16 @@ def projects_from_listing(page: str) -> dict[int, dict]:
     """The /projects page's own project records (its Next.js payload: id, title, status, statusLabel, price,
     neighborhood, city, unitsArea, mapUrl …) — every card a visitor sees, one request for all of them. The
     project PAGES render client-side (their <main> is «جاري تحميل المشروع…»), so they are never parsed."""
-    chunks = re.findall(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)', page)
-    s = "".join(json.loads(c) for c in chunks)
-    i = s.find('"statusLabel"')
-    start = s.rfind('[{"id":', 0, i) if i >= 0 else -1
-    if start < 0:
+    try:
+        chunks = re.findall(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)', page)
+        s = "".join(json.loads(c) for c in chunks)
+        i = s.find('"statusLabel"')
+        start = s.rfind('[{"id":', 0, i) if i >= 0 else -1
+        if start < 0:
+            return {}
+        arr, _ = json.JSONDecoder().raw_decode(s, start)
+    except ValueError:                                  # a changed payload: walk incomplete, oracle unknown
         return {}
-    arr, _ = json.JSONDecoder().raw_decode(s, start)
     return {int(p["id"]): p for p in arr if isinstance(p, dict) and str(p.get("id", "")).isdigit()}
 
 
@@ -196,6 +199,8 @@ def map_unit(uid: int, u: dict, projects_by_name: dict[str, dict]) -> tuple[Opti
     if u["status"] != _LIVE_UNIT:
         return None, f"status_{u['status']}"
     proj = projects_by_name.get(u.get("project") or "")
+    if u.get("project") and proj is None:              # its project's status (off-plan?) is unknown: never guessed
+        return None, "project_unmatched"
     if proj and proj.get("status") == "off_plan":
         return None, "offplan"
     ptype = _TYPES.get(u["type_ar"])
@@ -348,14 +353,14 @@ def follow_source_hide(table: str, seen: set[str], controls: list[dict], new_by_
                                   + (f"same unit {un} now served as {moved}" if moved else "no unit with this number in this district on the new site"))[:500]})
     if not ok():
         return 0, len(unseen), "controls not live after: hides withheld"
+    try:                                               # evidence FIRST: no hide without its record
+        db._execute(c.table("ops_stale_inactivation_probe").insert(evidence), what="ops_stale_inactivation_probe.insert")
+    except Exception as e:  # noqa: BLE001
+        return 0, len(unseen), f"evidence not written ({type(e).__name__}): hides withheld"
     now = datetime.now(timezone.utc).isoformat()
     if proven:
         db._execute(c.table(table).update({"active": False, "deactivated_at": now, "last_liveness_probe_at": now})
                     .in_("ad_number", proven).eq("active", True), what=table + ".follow_source_hide")
-    try:
-        db._execute(c.table("ops_stale_inactivation_probe").insert(evidence), what="ops_stale_inactivation_probe.insert")
-    except Exception as e:  # noqa: BLE001 — evidence failing never undoes a proven hide
-        print(f"  {table}: evidence not written ({type(e).__name__}: {e})", flush=True)
     return len(proven), len(unseen) - len(proven), "done"
 
 
