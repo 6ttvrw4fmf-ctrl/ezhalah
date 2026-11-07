@@ -40,8 +40,14 @@ def test_no_live_control_withholds_every_kill(probe):
     assert A._make_verify_gone(None)("AC30220")[0] == "unknown"
 
 
-@pytest.mark.parametrize("shape,verdict", [("live", "live"), ("exists", "unknown"), ("error", "unknown"),
+@pytest.mark.parametrize(("shape", "verdict"), [("live", "live"), ("exists", "unknown"), ("error", "unknown"),
                                            ("notfound", "gone")])
 def test_every_shape_maps_like_the_crawls_prune(probe, shape, verdict):
     probe.update({"9": shape, "1": "live"})
     assert A._make_verify_gone({"ad_number": "AC1"})("AC9")[0] == verdict
+
+
+@pytest.mark.parametrize("control_shape", ["notfound", "expired", "error"])
+def test_a_removed_or_unreadable_control_withholds_a_not_found_kill(probe, control_shape):
+    probe.update({"404": "notfound", "1": control_shape})
+    assert A._make_verify_gone({"ad_number": "AC1"})("AC404")[0] == "unknown"
