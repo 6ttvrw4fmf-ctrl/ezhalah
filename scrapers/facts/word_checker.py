@@ -1355,6 +1355,8 @@ def _num_hits(fact: str, t: str, ci: int, raw_clause: str = "", list_idx: frozen
             if any(w in _NEAR_WORDS for w in before):
                 continue
             if fact == "shops_count" and (any(_starts(_strip_wa(w), _EXCLUDE["shops_inside"][0]) for w in before[-3:])
+                                          # «خلف العمارة 4 محلات»: shops behind / opposite the building (CodeRabbit on #11068)
+                                          or any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in before[-3:])
                                           or any(_starts(_strip_wa(w), _EXCLUDE["shops_inside"][1])
                                                  for w in t[m.end():].split()[:2])):
                 continue                      # «تصلح 4 محلات», «4 محلات حسب الرخصة»: what COULD be there (🔬 2026-11-07)
@@ -2584,6 +2586,7 @@ def selftest() -> None:
         ("يمكن الاستفادة من الموقع بعدة خيارات، منها: ☕ كافيه أو مطعم 🏪 4 محلات حسب الرخصة", {}, ("shops_inside",)),
         ("شارعها تجاري مقام فيه محلات بالعماير الي امامها", {}, ("shops_inside",)),
         ("كما يوجد ٦ محلات تجارية بالقرب من العمارة", {}, ("shops_inside",)),
+        ("خلف العمارة 4 محلات تجارية", {}, ("shops_inside", "shops_count")),
         ("🏬 4 محلات تجارية ✅ جميع الشقق مؤجرة ✅ جميع المحلات مؤجرة", {"shops_inside": True}, ()),
         ("عماره للبيع دورين ع 3 شوارع شرق جامع الحوطي فيها محلات تجارية مؤجرة وشقق", {"shops_inside": True}, ()),
         ("مبنى يحتوي على مكاتب", {"offices_inside": True}, ()),
