@@ -288,7 +288,7 @@ mustCatch('one-letter names folded by themselves', everyListingProblems(mutTree(
   check('the guard reads the latest loc_display_district_ar body (whatever its case)', latestDisplay.fn !== '' ? [] : ['no definition of loc_display_district_ar found']);
   // Mutate the fold in the body the guard really reads: the plpgsql fallback once 20261107132419 is in the tree, the SQL chain before.
   mustCatch('the fold removed from loc_display_district_ar (latest body)', everyListingProblems(
-    DISPLAY_FOLD_PLPGSQL.test(latestDisplay.fn)
+    plpgsqlFolds(latestDisplay.fn)
       ? mutTree(latestDisplay.n, 'if key is null then key := public.district_copy_of(p_city_id, p_raw); end if;', '')
       : mutTree(latestDisplay.n, DISPLAY_FOLD_SQL, 'norm_district_tok(p_raw)) as key')));
   // Both shapes are recognised and both mutations are caught, independent of what the tree holds today.
@@ -304,7 +304,8 @@ mustCatch('one-letter names folded by themselves', everyListingProblems(mutTree(
     { n: '20260202000000_new.sql', s: plpgsqlBody },
   ];
   check('the matcher selects the newer lowercase definition over an older uppercase one', latestDef(twoDefs, DISPLAY_RE).n === '20260202000000_new.sql' ? [] : [`picked ${latestDef(twoDefs, DISPLAY_RE).n}`]);
-  mustCatch('a case-sensitive matcher (reads the older uppercase body)', latestDef(twoDefs, new RegExp(DISPLAY_RE.source)).n === '20260202000000_new.sql' ? [] : ['older body picked']);
+  mustCatch('the old uppercase-only matcher (reads the older uppercase body)',
+    latestDef(twoDefs, /CREATE OR REPLACE FUNCTION public\.loc_display_district_ar\([\s\S]*?\$function\$;/).n === '20260202000000_new.sql' ? [] : ['older body picked']);
   // The SQL shape must still be recognised (a rollback to it is a fold that works, not a missing fold): a fixed fixture,
   // not a tree pick, so a later uppercase plpgsql redefinition cannot be mistaken for it (CodeRabbit on #11108).
   const sqlBody = 'CREATE OR REPLACE FUNCTION public.loc_display_district_ar(p_city_id integer, p_raw text) RETURNS text LANGUAGE sql STABLE AS $function$ select k.display_ar from (select coalesce(public.district_copy_of(p_city_id, p_raw), norm_district_tok(p_raw)) as key) q $function$;';
