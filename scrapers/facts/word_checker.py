@@ -647,7 +647,7 @@ _NEAR_PUBLIC = frozenset(_n(w) for w in ("جنبها", "جنبه", "خلف", "خ
                                          "تحيطها", "بلقرب"))
 # …and a public place the ad OWNS says so: «مرافق المشروع: مصلى», «سوبر ماركت داخل المجمع», «يضم مسجد»
 _OWN_CUES = tuple(_n(w) for w in ("داخل", "بالمجمع", "بالمشروع", "بالعماره", "بالمبني", "مرافق", "يضم", "تضم",
-                                   "يحتوي", "تحتوي", "يوجد", "توجد", "خاص", "خاصه", "مميزات",
+                                   "يحتوي", "تحتوي", "يوجد", "توجد", "لسكان", "للسكان", "خاص", "خاصه", "مميزات",
                                    "متكامل", "متكامله"))      # «*خدمات متكاملة* 🔸 ممشى وحديقة» — the project's own list
 # AREA talk is not the ad's own place: «تتميز المنطقة بتوفر خدمات … والسوبرماركت», «يتميز الموقع بتوفر جميع الخدمات مسجد/بقالة»
 _AREA_WORDS = frozenset(_n(w) for w in ("المنطقه", "الحي", "الموقع"))
@@ -663,6 +663,23 @@ _PURE_PUBLIC_FACTS = frozenset({"mosque", "market", "restaurant_cafe", "in_mall"
 # «مباشرة» just before a public place makes it the neighbour — unless the ad says it has it («فيلا شمالية فيها حديقة»).
 _BOUNDARY_STEMS = tuple(_n(w) for w in ("شمال", "جنوب", "شرق", "غرب", "جهه", "جهتين", "جهات", "واجهه", "واجهتين",
                                          "واجهات", "يحد", "حدود", "مباشر"))
+_OWN_AFTER = frozenset(_n(w) for w in ("خاص", "خاصه", "مستقل", "مستقله", "لسكان", "للسكان"))
+# …unless the very next words name the NEIGHBOURHOOD as the owner: «ملعب كرة قدم خاص بالحي», «نادي لسكان الحي» are the
+# district's, not the home's (CodeRabbit on #10948: the lift above turned «واجهة على ملعب خاص بالحي» into football_pitch)
+_NBHD_OWNER = frozenset(_n(w) for w in ("الحي", "بالحي", "للحي", "حي", "المخطط", "بالمخطط", "للمخطط", "المنطقة",
+                                         "بالمنطقة", "للمنطقة", "المدينة", "بالمدينة", "للمدينة", "لاهل", "لأهل", "للجميع",
+                                         "للعموم", "عام", "عامة", "مخطط", "منطقة", "مدينة"))
+
+
+def _owned_after(gn: list[str]) -> bool:
+    """True when an ownership word («خاص», «مستقل», «لسكان») follows the place within two words and the word right
+    after it does not hand it to the neighbourhood («خاص بالحي», «لسكان المدينة»). Only that one word: in «خاص للفيلا
+    بالحي» the villa is the owner and «بالحي» says where the villa is."""
+    for k, w in enumerate(gn[:2]):
+        if _strip_wa(w) in _OWN_AFTER:
+            nxt = gn[k + 1:k + 2]
+            return not any(x in _NBHD_OWNER or _strip_wa(x) in _NBHD_OWNER for x in nxt)
+    return False
 _POOL_FACTS = frozenset({"pool", "heated_pool", "kids_pool"})
 # «لا تطل على مسبح» denies the view and says nothing of a pool; «مطلة على المسبح البلدي» is the town's
 _VIEW_NEG = frozenset(_n(w) for w in ("لا", "ليس", "ليست", "غير", "بدون", "بلا", "ما", "مو", "مش"))
@@ -678,7 +695,8 @@ def _is_boundary(w: str) -> bool:
             return True
     return False
 _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "restaurant_cafe", "food_allowed", "sports_court",
-                                "football_pitch", "events_hall", "nursery", "garden"})
+                                "football_pitch", "events_hall", "nursery", "garden",
+                                "gym"})   # «إطلالة ونافذة على: حديقة، جامع، ونادي صحي» is the view, not the unit's gym (🔬 2026-11-06)
 # A UNIT FIXTURE is never «nearby» (🔬 2026-11-04 live walk, dealapp): «بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة»,
 # «قريب من المسجد عدد 9 مكيفات راكبه», «20 دقيقة من روشن ❄ تكييف» — the near word belongs to the bullet before, the AC
 # is the unit's. Kept to the AC: a kitchen or a lift CAN be a nearby place's («قريب من مطبخ السلطان», a tower's lifts).
@@ -698,7 +716,8 @@ _PLACE_WORDS = tuple(_n(w) for w in (
     "صيدليه", "صيدليات", "جامعه", "جامعات", "مركز", "مراكز", "محطه", "بنك", "بنوك", "مغسله", "مغاسل", "فندق", "فنادق",
     "shop", "school", "hospital", "mall", "market", "restaurant", "cafe", "café", "park", "mosque", "bank", "grocer",
     "supermarket", "pharmac", "universit", "hotel", "service", "attraction", "coffee",
-    "تموينات", "بلديه", "بحيره", "شارع", "الشارع", "طريق", "مطار", "كليه", "ممشي", "كورنيش", "مدينه", "مصلي"))
+    "تموينات", "بلديه", "بحيره", "شارع", "الشارع", "طريق", "مطار", "كليه", "ممشي", "كورنيش", "مدينه", "مصلي",
+    "نادي", "اندية", "نوادي", "جيم", "gym"))
 _METER_FACTS = frozenset({"separate_water_meter", "separate_electricity_meter"})
 _DIGITS = "0123456789"
 
@@ -981,7 +1000,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                                           or any(p in " ".join(p5) for p in _NEAR_PHRASES)
                                           or _DISTANCE_TO.search(" ".join(gp[-8:]))):
         return None, s, e
-    if fact in _NEAR_PUBLIC_FACTS and (list_in or any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in p5)):
+    # …but an item the ad gives to the home («نادي رياضي مستقل للفيلا») is not the list's, whatever list it sits in
+    if fact in _NEAR_PUBLIC_FACTS and ((list_in and not _owned_after(gn))
+                                       or any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in p5)):
         return None, s, e
     if fact in _NEAR_PUBLIC_FACTS:
         # a near word up to 9 words back in the same clause («قريب من الدانوب و لولو هايبر ماركت»), unless the ad says it
@@ -994,7 +1015,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if fact in _NEAR_PUBLIC_FACTS:
         w4 = gp[-4:]
         at = max((k for k, w in enumerate(w4) if _is_boundary(w)), default=-1)
-        if at >= 0 and not any(_starts(w, _HAS_CUES) or _starts(_strip_wa(w), _HAS_CUES) for w in w4[at + 1:]):
+        if at >= 0 and not any(_starts(w, _HAS_CUES) or _starts(_strip_wa(w), _HAS_CUES) for w in w4[at + 1:]) \
+                and not _owned_after(gn):   # «واجهة شمالية ونادي رياضي خاص» is the home's; «خاص بالحي» is not
             return None, s, e
     if fact in _PURE_PUBLIC_FACTS:
         w8 = [_strip_wa(w) for w in gp[-8:]]
@@ -1318,8 +1340,15 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             near_list = False
             continue
         words = t.split()
-        list_in = near_list and comma and len(words) <= 5 and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words) \
-            and not any(_starts(_strip_wa(w), _OWN_CUES) for w in words)
+        # an item that STARTS with a place runs on as the list's item however long the clause is: «إطلالة ونافذة على: حديقة،
+        # جامع، ونادي صحي خدمات الموقع القريبة: * مدارس» (aqar 15128626, 🔬 2026-11-06 — the view's gym served as the unit's)
+        list_in = near_list and comma and (len(words) <= 5 or _starts(_strip_wa(words[0]), _PLACE_WORDS)) \
+            and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words) \
+            and not any((_starts(_strip_wa(w), _OWN_CUES)      # «خاص بالحي»: the district's, the list goes on
+                         and not (k + 1 < len(words) and (words[k + 1] in _NBHD_OWNER
+                                                          or _strip_wa(words[k + 1]) in _NBHD_OWNER)))
+                        or (_strip_wa(w) in _HAS_CUES and not (k and _starts(_strip_wa(words[k - 1]), _PLACE_WORDS)))
+                        for k, w in enumerate(words))   # «مدرسة فيها نادي»: the school's, the list goes on
         n_words = len(words)
         for fact, pats in _PATTERNS.items():
             for rx, forced in pats:
@@ -1886,6 +1915,23 @@ def selftest() -> None:
         ("غسالة ملابس", {"laundry_room": True}, ()),
         ("washing machine", {"laundry_room": True}, ()),
         ("غسالة صحون", {}, ("laundry_room",)),
+        # a view list's gym is not the unit's (P2 13085, aqar 15128626 / 15017191, 2026-11-06)
+        ("* إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس تعليمية", {}, ("gym", "mosque", "garden")),
+        ("✓ تأثيث فاخر ومتكامل ✓ مطبخ مجهز بالكامل ✓ خدمات فندقية ونادي صحي ومسبح ✓ أمن وحراسة", {"gym": True}, ()),
+        ("قريب من الخدمات، مدرسة كبيرة للبنات والشقة بها نادي رياضي", {"gym": True}, ()),
+        ("قريب من الخدمات، مدرسة فيها نادي رياضي، مسجد", {}, ("gym", "mosque")),
+        ("واجهة شمالية ونادي رياضي خاص", {"gym": True}, ()),
+        ("واجهة شمالية على ملعب كرة قدم خاص بالحي", {}, ("football_pitch", "sports_court")),
+        ("واجهة شمالية ونادي رياضي لسكان الحي", {}, ("gym",)),
+        ("واجهة شمالية ونادي رياضي مستقل للفيلا", {"gym": True}, ()),
+        ("واجهة شمالية ونادي رياضي لسكان المدينة", {}, ("gym",)),
+        ("واجهة شمالية ونادي رياضي لسكان المنطقة", {}, ("gym",)),
+        ("واجهة شمالية ونادي رياضي خاص للفيلا بالحي", {"gym": True}, ()),
+        ("قريب من الخدمات، نادي رياضي مستقل للفيلا", {"gym": True}, ()),
+        ("قريب من الخدمات، نادي رياضي خاص بالحي، مسجد", {}, ("gym", "mosque")),
+        ("البرج جديد ويوجد به نادي رياضي وكذلك مسبح", {"gym": True}, ()),
+        ("قريب من الخدمات، نادي رياضي لسكان المبنى", {"gym": True}, ()),
+        ("قريب من الخدمات، مدرسة، جيم، مسجد", {}, ("gym", "mosque")),
         # P2 13085 (2026-11-06), real served sentences
         ("فرصة استثماريه للبيع عمارة مكه المكرمة حي العدل الغسالة العقار عمره 21 سنه", {}, ("laundry_room",)),
         ("شقة للإيجار بمكة المكرمة حي العدل الغساله العليا ٤ غرف الدور الاول ركنيه مصعد", {}, ("laundry_room",)),
