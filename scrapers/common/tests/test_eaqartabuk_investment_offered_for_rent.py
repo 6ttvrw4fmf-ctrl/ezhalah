@@ -196,3 +196,12 @@ def test_an_explicit_sale_clears_a_stored_rent_pair():
         if op == "rent":
             assert stored == {"price_annual": 2400000, "rent_period": "monthly"}, stored
     assert stored == {"price_annual": None, "rent_period": None}, stored
+
+
+def test_a_rent_word_inside_the_payment_phrase_keeps_the_stated_period():
+    """Review on #10940: «دفع إيجار شهري» states the rent's own period — it is never stripped as a payment schedule."""
+    from scrapers.eaqartabuk.run import _price, _stated_rent_period
+    assert _stated_rent_period("شقة دفع إيجار شهري") == "monthly"
+    assert _stated_rent_period("شقة دفع الإيجار شهري") == "monthly"
+    assert _price("2000", True, "شقة دفع ايجار شهري") == (None, 24000, "monthly")
+    assert _stated_rent_period("محل الإيجار السنوي دفعات شهرية") == "annual", "a bare schedule is still not a period"

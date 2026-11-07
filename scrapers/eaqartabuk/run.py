@@ -454,7 +454,8 @@ _PERIOD_ANNUAL_RE = re.compile(r"سنوي|سنويا|بالسنة|/\s*سنة|ف�
 
 # A PAYMENT schedule («دفع شهري», «الدفع سنوي», «دفعات شهرية», «سداد شهري», «تقسيط شهري») is how the rent is paid,
 # not the rent's period: «الإيجار السنوي … دفع شهري» is an annual rent paid monthly, never a two-period offer.
-_INSTALMENT_RE = re.compile(r"(?:دفع|الدفع|دفعات|الدفعات|سداد|السداد|تقسيط|التقسيط)\s*(?:\S+\s+)?(?:شهري\S*|سنوي\S*|بالشهر|بالسنة)")
+# A rent word between them («دفع إيجار شهري») makes it the rent's own period again, so it is never stripped.
+_INSTALMENT_RE = re.compile(r"(?:دفع|الدفع|دفعات|الدفعات|سداد|السداد|تقسيط|التقسيط)\s*(?:(?!(?:ال)?[اإ]يجار)\S+\s+)?(?:شهري\S*|سنوي\S*|بالشهر|بالسنة)")
 
 
 def _stated_rent_period(text: Optional[str]) -> Optional[str]:
