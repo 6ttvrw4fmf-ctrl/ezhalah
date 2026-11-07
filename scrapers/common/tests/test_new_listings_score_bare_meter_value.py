@@ -29,3 +29,20 @@ def test_the_stated_width_matches():
 
 def test_a_different_width_is_still_a_mismatch():
     assert _sw(20) == MISMATCH
+
+
+# aqaralriyadh 13105499 (🔬 2026-11-07): the meta description glues its label/value pairs together; the live page's own
+# <meta name="description"> (net.http_get response 9297) is copied here.
+AQR = ('<html><head><title>شقة للإيجار في حي الحزم – الرياض - عقار الرياض</title><meta name="description" content="المدينة: '
+       'الرياضالحي: حي الحزمالسعر: 63,000 ريال سنويًاالمساحة: 182 م²عدد الغرف: 4 غرفالصالات: صالتاندورات المياه: 3"/>'
+       '</head><body></body></html>')
+
+
+def test_a_glued_dual_is_two():
+    r = compare_listing({"living_rooms": 2}, page_evidence(AQR), skip_price=True)
+    assert r["living_rooms"] == MATCH, r
+
+
+def test_a_glued_dual_is_not_five():
+    r = compare_listing({"living_rooms": 5}, page_evidence(AQR), skip_price=True)
+    assert r["living_rooms"] != MATCH, r

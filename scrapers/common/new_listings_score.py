@@ -392,7 +392,11 @@ AREA_UNIT = re.compile(r"م²|م2|متر مربع|m²")
 ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
 # Arabic states TWO with the dual, not the digit: bossbih 17388816 prints «غرفتين» for its 2 bedrooms
 # (2026-10-12: stored 2, scored MISMATCH). A dual on the keyword's own line states the figure 2.
-DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان|سنتين|سنتان|عامين|عامان)(?![\u0621-\u064A])")
+# …also when a glued meta description runs it straight into the NEXT label: aqaralriyadh 13105499 (🔬 2026-11-07, dry run
+# af-score 42360463480: living_rooms MISMATCH 4 of 14) prints «…عدد الغرف: 4 غرفالصالات: صالتاندورات المياه: 3».
+_NEXT_LABEL = r"(?:دورات|دوره|عدد|المساحه|المساحة|السعر|الحي|المدينه|المدينة|الغرف|الصالات|المجالس|الحمامات|عمر|الدور|الواجهه|الواجهة)"
+DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان|سنتين|سنتان|عامين|عامان)"
+                       r"(?:(?![\u0621-\u064A])|(?=" + _NEXT_LABEL + r"))")
 # «سنتين» is a two-year-old building: haraj 23236759 «عمر العقار: سنتين», stored 2 (branch re-score 41596198038, 2026-11-03).
 
 
