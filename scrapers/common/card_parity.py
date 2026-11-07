@@ -110,7 +110,7 @@ def paired_lines(text_head: str) -> list[str]:
     on the first full run, 2026-11-07) becomes one line, so the comparator reads the value next to its label."""
     lines = [x.strip() for x in (text_head or "").split(" | ")]
     # «04» is 4 (dwelleo prints «عدد دورات المياه» / «04», 2026-11-07 slot run)
-    return [f"{a} {re.sub(r'^0+(?=\d)', '', b)}" for a, b in zip(lines, lines[1:]) if _LABEL.match(a) and b and len(b) <= 40]
+    return [a + " " + re.sub(r"^0+(?=\d)", "", b) for a, b in zip(lines, lines[1:]) if _LABEL.match(a) and b and len(b) <= 40]
 
 
 def is_home(url: str | None) -> bool:
