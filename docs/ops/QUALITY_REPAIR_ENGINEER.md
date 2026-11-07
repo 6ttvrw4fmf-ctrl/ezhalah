@@ -664,7 +664,9 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 ## 📚 FLEET LESSONS 2026-11-07 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① A fix that turns «a value» into «nothing» must write `db.AUTHORITATIVE_NULL`, and you read the RAW row after the
-  first crawl, not only the code.** ⚡ 11-07: 39 aqargate land cards kept the per-metre rate as the total after #10963
+  first crawl, not only the code.** `AUTHORITATIVE_NULL` is written only when a SUCCESSFUL fetch and parse proved the
+  value absent (aqargate: the total is cleared only after its rate was read); a fetch or parse that could not read the
+  field keeps the stored value — `scrapers/common/db.py` keeps `None` for exactly that case (CodeRabbit on #11101). ⚡ 11-07: 39 aqargate land cards kept the per-metre rate as the total after #10963
   because a None never clears a stored value (#11014). 🆕 11-06: the #10940 review found the same shape on eaqartabuk
   (a Rent↔Buy flip kept the stale pair). Second night → ⚡'s rulebook already carries it as a rule (line 123).
 - **② Every push starts ~12 CI checks — one push per PR cycle.** 🔬 11-07 pushed #11068 and #11071 four times each into a
