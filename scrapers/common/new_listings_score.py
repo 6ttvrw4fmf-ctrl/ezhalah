@@ -293,8 +293,8 @@ def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = ""
     def dist(k, m):
         return m.start() - k.end() if m.start() >= k.end() else k.start() - m.end()
 
-    def labels(k, m):          # «الحمامات: 7+» — the keyword is the label of the figure right after it
-        return k.end() <= m.start() and re.fullmatch(r"\S*\s*[:：]\s*", clause[k.end():m.start()]) is not None
+    def labels(k, m):          # «الحمامات: 7+», «غرف النوم 7+» — the room phrase labels the figure right after it
+        return k.end() <= m.start() and re.fullmatch(r"\S*(?:\s+[^\s\d:：]+)?\s*[:：]?\s*", clause[k.end():m.start()]) is not None
     own = list(re.finditer(kw, clause))
     others = list(re.finditer(other_kw, clause)) if other_kw else []
     for m in OPEN_BUCKET.finditer(clause):

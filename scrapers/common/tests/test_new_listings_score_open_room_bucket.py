@@ -75,3 +75,9 @@ def test_a_bucket_after_the_other_field_stays_with_it():
 def test_room_keywords_match_the_field_registry():
     kws = {n: k for n, _, _, k in S.FIELDS}
     assert S.ROOM_KW["bedrooms"] == kws["bedrooms"] and S.ROOM_KW["bathrooms"] == kws["bathrooms"]
+
+
+def test_a_room_phrase_without_colon_labels_its_bucket():
+    line = "<p>غرف النوم 7+ حمامات: 4</p>"
+    assert _cmp({"bedrooms": 9}, line, "bedrooms") == S.MATCH
+    assert _cmp({"bathrooms": 9}, line, "bathrooms") == S.MISMATCH
