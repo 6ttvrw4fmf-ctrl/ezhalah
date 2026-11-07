@@ -187,9 +187,14 @@ def struck(client, site: str) -> int:
     """How many of the site's active rows carry a strike — what a recheck has to read. Strict: a failed
     count raises (the site fails loudly), never reads as 0 struck — the recheck's heartbeat row says
     «nothing to re-read» only after every table was really counted."""
-    return sum(_execute(client.table(t).select("id", count="exact").eq("active", True).gt("missing_count", 0)
-                        .limit(1), what=f"{t}.struck").count or 0
-               for t in tables_for(client, site, strict=True))
+    total = 0
+    for t in tables_for(client, site, strict=True):
+        n = _execute(client.table(t).select("id", count="exact").eq("active", True).gt("missing_count", 0)
+                     .limit(1), what=f"{t}.struck").count
+        if n is None:          # no exact count came back: not a zero (CodeRabbit on #11081)
+            raise RuntimeError(f"{t}: no exact struck count returned")
+        total += n
+    return total
 
 
 def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None) -> list[dict]:

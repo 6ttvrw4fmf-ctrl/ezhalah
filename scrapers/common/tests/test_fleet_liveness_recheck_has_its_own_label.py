@@ -115,8 +115,16 @@ def test_a_failed_count_is_never_an_empty_recheck(monkeypatch):
 def test_an_unrelated_does_not_exist_error_is_not_a_missing_table(monkeypatch):
     """CodeRabbit on #11081: «column … does not exist» is a broken count, not a missing table."""
     monkeypatch.setattr(F, "_execute", lambda q, **k: q.execute())
-    missing = RuntimeError("PGRST205 Could not find the table 'public.x_commercial_listings'")
     col = RuntimeError('42703 column "missing_count" does not exist')
-    c = _Client({"x_residential_listings": _Q(err=col), "x_commercial_listings": _Q(err=missing)})
+    c = _Client({"x_residential_listings": _Q(err=col), "x_commercial_listings": _Q()})
+    with pytest.raises(RuntimeError) as exc:
+        F.struck(c, "x")
+    assert exc.value is col
+
+
+def test_a_missing_exact_count_is_not_zero(monkeypatch):
+    """CodeRabbit on #11081: a response with no exact count (count=None) must not read as 0 struck."""
+    monkeypatch.setattr(F, "_execute", lambda q, **k: q.execute())
+    c = _Client({"x_residential_listings": _Q(n=None), "x_commercial_listings": _Q()})
     with pytest.raises(RuntimeError):
         F.struck(c, "x")
