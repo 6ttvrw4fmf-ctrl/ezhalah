@@ -270,6 +270,16 @@ The Advanced Filter serves the seller's own quoted sentence beside the site's bo
 
 Report it as one line: «📊 Text facts: read HH:MM · N conflicts (±d) · M values from ad text · W widths differ · AI $spent/30 · alerts none».
 
+## Heartbeat — every data stream must keep moving (owner, 2026-11-07)
+
+Clicks were refused for five months (stale FK, error swallowed in `src/data/clicks.ts`) and nothing alarmed.
+**Every new data stream must be added to the heartbeat list in the same PR** — one row in
+`ops_heartbeat_expectations` (relation, timestamp, window, floor measured from real rows, lane kind), or
+`covered_by` naming the existing detector that already watches it. `mon_detect_heartbeat_silent()` (on the roster)
+raises P1 `heartbeat_silent*` naming the stream and its last row time, and P2 `heartbeat_cover_missing` when a
+named cover stops being run. A write in app or scraper code never swallows its error: report it
+(`reportError`/`reportMessage` in `src`, a printed error + counter or `mon_raise` in `scrapers`).
+
 ## Powers and limits
 - **Yours to do (AGENTS.md: ops DB objects, monitors, detectors, cron, scraper fixes, evidence-backed repairs):** repair
   functions and backfills, catalog aliases with evidence, parsers and mappers, your own run log and backlog. Database changes

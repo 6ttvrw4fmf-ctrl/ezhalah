@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
+import { reportError, reportMessage } from '@/lib/observability';
 import { placeOnly } from '@/lib/shelfCheck';
 import type { SearchQuery } from './search';
 
@@ -40,5 +41,12 @@ export function logZeroResult(q: SearchQuery, shelf: number | null, clash: boole
     // a 999,000,000-riyal price. Kept, but tagged, so the nightly 🔧 re-check reads real users first.
     robot: typeof navigator !== 'undefined' && !!(navigator as { webdriver?: boolean }).webdriver,
   };
-  boundedRpc(supabase.rpc('log_zero_result', { p_entry: entry })).then(() => {}, () => {});
+  // Never delays the search — but a refused write is reported, not dropped (clicks, 2026-11-07).
+  boundedRpc(supabase.rpc('log_zero_result', { p_entry: entry })).then(
+    ({ error }) => {
+      const e = error as { code?: string; message?: string; timeout?: boolean } | null;
+      if (e) reportMessage('zero_result_log_failed', { code: e.code, message: e.message, timeout: e.timeout === true });
+    },
+    (e) => reportError(e, { where: 'logZeroResult' }),
+  );
 }

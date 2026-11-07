@@ -637,7 +637,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
               f"{RATE_SUSPECT_PPM} SAR/m² + {len(first) - len(nd) - n_rs} sale rows at ≥{MULTIPLIED_SUSPECT_PPM:,} SAR/m² "
               f"go first", flush=True)
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-fetched rows (cap {limit})", flush=True)
-    stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0}
+    stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0, "write_err": 0}
     lock = threading.Lock()
 
     # SELF-IMPOSED DEADLINE — stop cleanly instead of being killed at the CI wall.
@@ -675,8 +675,10 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
                 c.table(table).update({"ar_fetched": True, "ar_fetched_at": _now_iso(),
                                        "ar_data": bump_err({"_err": "noslug"}, row.get("ar_data"))
                                        }).eq("id", row["id"]).execute()
-            except Exception:
-                pass
+            except Exception as e:  # reported, never dropped (heartbeat rule 2026-11-07)
+                print(f"   ⚠ {table} {row.get('id')}: noslug marker write failed: {e}", file=sys.stderr)
+                with lock:
+                    stats["write_err"] += 1
             with lock:
                 stats["empty"] += 1
             return
@@ -734,7 +736,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
 
     run_rows(rows)
     print(f"   ✓ {table}: ok={stats['ok']} empty={stats['empty']} fail={stats['fail']} "
-          f"skipped={stats['skipped']}", flush=True)
+          f"skipped={stats['skipped']} write_err={stats['write_err']}", flush=True)
     if stats["skipped"]:
         print(f"   ⏳ {table}: out of time budget ({max_seconds:.0f}s) — {stats['skipped']} row(s) left "
               f"pending for the next scheduled run. This is a CLEAN stop, not a failure.", flush=True)
