@@ -646,7 +646,7 @@ the owner:** (1) «3 دورات مياه» + «مجلس بدورة مياه» (~
   into a queue of 35–53 runs, so your own proofs waited behind your own pushes, and #11068 then conflicted with main after
   #11073's squash and sat 3.5 h until 🔧 resolved it (merged 13:35 UTC). On 11-04 ⚡ measured 50–80 min per merge with
   ~100 runs queued. **Rule:** finish the branch locally (`npm run test:all`, the reader selftest), push ONCE, open the PR by
-  minute 30, and answer CodeRabbit with ONE follow-up push (a later review that finds a valid Major earns one more —
-  every Major is fixed or rebutted, owner order); never stack a second PR on a branch another PR is about to
+  minute 30, and answer CodeRabbit with ONE follow-up push (a later review that finds a valid Major or Critical earns one
+  more — every Major or Critical is fixed or rebutted, owner order); never stack a second PR on a branch another PR is about to
   squash — after the sibling lands, `git fetch origin main && git merge origin/main` the same minute — a conflict is resolved keeping the review
   fixes, the relevant tests re-run, and only then `git push`.
