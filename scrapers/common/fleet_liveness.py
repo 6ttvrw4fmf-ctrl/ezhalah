@@ -100,7 +100,11 @@ SITES: dict[str, str] = {
         "aqalemhajer",
         # 2026-10-11: its prune guard trips on a 100-row catalogue every night (re-saw 54 of 72), so
         # 19 ads its own SERP dropped since 09-28 were never read. Own-page oracle; shadow first.
-        "opensooq")},
+        "opensooq",
+        # 2026-11-07 (♻️): its own-page oracle (404 / the expired banner, control-gated) was built
+        # only inside the crawl, so a removed ad waited three crawl misses (AC30220, licence ended
+        # 11-06, dead on screen at the 11-07 score, aqarcity over the line). Shadow first.
+        "aqarcity")},
 }
 
 # NOT here, and why (shadow run 36490769167, 2026-09-28): mizlaj, nowaisiry, eastabha and muktamel —
