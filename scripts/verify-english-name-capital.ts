@@ -28,7 +28,8 @@ check('the rest of a word stays as typed → McAllister', en({ name: 'mcAllister
 check('Arabic is untouched', N.pickName({ name: 'يوسف' }, 'ar') === 'يوسف');
 check('the welcome sentence gets it too', N.sentenceName({ name: 'yusuf' }, 'en') === 'Yusuf');
 check('no name stays empty', en({}) === '' && en({ name: '  ' }) === '');
-check('MUTATION — the English branch returning the name as typed is caught',
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION — ${label}`, caught);
+mustCatch('the English branch returning the name as typed (yusuf stays yusuf)',
   !(await capsOk(SRC.replace(/\.replace\(\/\(\^\|\\s\)\(\\p\{Ll\}\)\/gu, [^\n]+\);/, ';'))));
 if (failed) { console.error(`\n❌ verify-english-name-capital: ${failed} failed`); process.exit(1); }
 console.log('\n✓ English names start with a capital for every user');
