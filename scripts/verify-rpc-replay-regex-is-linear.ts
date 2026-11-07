@@ -48,7 +48,8 @@ fs.writeFileSync(path.join(dir, '20990101000006_dedup.sql'),
   "src text; out_def text; k int; begin src := pg_get_functiondef('public.f_lin()'::regprocedure);\n" +
   "out_def := replace(src, E'+ 3 $$', E'+ 3 + R $$');\n" +
   "out_def := replace(out_def, n6, r6);\n" +
-  "-- out_def := replace(out_def, E'+ 3 $$', E'+ 3 + BAD $$');\n" +
+  "-- out_def := replace(out_def, E'+ S $$', E'+ S + BAD $$');\n" +
+  "/* out_def := replace(out_def, E'+ S $$', E'+ S + BLOCK $$'); */\n" +
   "k := length(replace(out_def, a6, b6));\n" +
   "execute out_def; end $$;\n");
 fs.writeFileSync(path.join(dir, '20990101000007_table.sql'),
@@ -73,7 +74,7 @@ fs.writeFileSync(path.join(dir, '20990101000008_repeat.sql'),
 const inlinePatched = (b: string | null) => !!b && b.includes('+ 1 + 2');
 const probeSurvived = (b: string | null) => !!b && b.includes('+ 2');
 const orderKept = (b: string | null) => !!b && b.includes('+ 1 + 2 + 3');
-const commentIgnored = (b: string | null) => !!b && !b.includes('BAD');
+const commentIgnored = (b: string | null) => !!b && !b.includes('BAD') && !b.includes('BLOCK');
 const dedupAfterSort = (b: string | null) => !!b && b.includes('+ 3 + S');
 const tableAtUse = (b: string | null) => !!b && b.includes('+ S + W $$');
 const repeatsRun = (b: string | null) => !!b && b.includes('+ S + W $$') && !b.includes('+ S + V $$');
@@ -86,7 +87,7 @@ ok(!!out.body && out.body.includes('/*NEEDLE*/ + 1'), 'a genuine `||` E-string d
 ok(inlinePatched(out.body), 'an assigned inline `replace(src, E\'…\', E\'…\' || E\'…\')` is replayed');
 ok(probeSurvived(out.body), 'the occurrence probe `length(replace(x, \'+ 2\', \'\'))` is NOT read as a patch');
 ok(orderKept(out.body), `patches apply in SQL order across arms (${JSON.stringify(out.body?.match(/\+ 1[^$]*\$\$/)?.[0])})`);
-ok(commentIgnored(out.body), 'a commented-out replace() is not applied');
+ok(commentIgnored(out.body), 'a commented-out replace() (`--` or `/* */`) is not applied');
 ok(dedupAfterSort(out.body), 'a later duplicate of an inline pair does not displace the earlier executing one');
 ok(tableAtUse(out.body), `a patch table applies where its loop runs (${JSON.stringify(out.body?.match(/\+ 1[^$]*\$\$/)?.[0])})`);
 ok(repeatsRun(out.body), 'a repeated executing pair runs every time (X→Y, Y→X, X→Y ends at Y)');
@@ -97,6 +98,7 @@ const mustCatch = (label: string, caught: boolean) => ok(caught, `(mutation) cat
 mustCatch('a replay that skipped the inline patch', !inlinePatched('select 1 /*NEEDLE*/ + 1 $$'));
 mustCatch('a replay that applied the later patch first and dropped it', !orderKept('select 1 /*NEEDLE*/ + 1 + 2 + Q $$'));
 mustCatch('a replay that applied a commented-out patch', !commentIgnored('select 1 + 3 + BAD $$'));
+mustCatch('a replay that applied a block-commented patch', !commentIgnored('select 1 + 3 + BLOCK $$'));
 mustCatch('a replay whose later duplicate displaced the inline pair', !dedupAfterSort('select 1 + 3 + R $$'));
 mustCatch('a replay that ran the table at its declaration', !tableAtUse('select 1 + S + U $$'));
 mustCatch('a replay that dropped the third, repeated patch', !repeatsRun('select 1 + S + V $$'));

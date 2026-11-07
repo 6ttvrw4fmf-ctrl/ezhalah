@@ -165,8 +165,11 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
   // scan separately, and a patch whose anchor an EARLIER patch creates would otherwise be applied first,
   // find nothing, and be skipped silently (CodeRabbit on #11148). Source order is execution order.
   const out: { anchor: string; replacement: string; pos: number; probe?: boolean }[] = [];
-  // A `replace(...)` that sits after `--` on its own line is a comment: SQL never runs it.
-  const commentedOut = (pos: number) => sql.slice(sql.lastIndexOf('\n', pos - 1) + 1, pos).includes('--');
+  // A `replace(...)` that sits after `--` on its own line is a comment: SQL never runs it…
+  // …and one inside an unclosed `/* … */` block comment is not run either.
+  const commentedOut = (pos: number) =>
+    sql.slice(sql.lastIndexOf('\n', pos - 1) + 1, pos).includes('--') ||
+    sql.lastIndexOf('/*', pos) > sql.lastIndexOf('*/', pos);
 
   // (c) TABLE-DRIVEN — `edits text[][] := array[ ['needle','replacement','count'], ... ]` applied in
   // a loop (20260812122557). A migration that makes a dozen related edits to one RPC is far safer
