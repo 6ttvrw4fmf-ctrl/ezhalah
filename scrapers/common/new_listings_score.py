@@ -1455,15 +1455,16 @@ def _safe_evidence(kw: str, line: str) -> str:
     # digit shape is dropped whatever its punctuation (CodeRabbit PDPL findings on #11053).
     def _price_shaped(x: str) -> bool:
         d = re.sub(r"\D", "", x)
-        if re.fullmatch(r"(?:00966|966)[15]\d{8}|0[15]\d{8}", d):
-            return False                       # 966/0-prefixed mobile or landline, any punctuation
+        if re.fullmatch(r"(?:00966|966)[15]\d{8}|0[15]\d{8}|5\d{8}", d):
+            return False                       # mobile/landline shape, any punctuation or grouping («512,345,678»)
         grouped = re.fullmatch(r"[1-9]\d{0,2}(?:([,.])\d{3})(?:\1\d{3})*(?:[.,]\d{1,2})?\+?", x)
         return bool(grouped) or (len(d) < 9 and not re.fullmatch(r"5\d{8}", d))
     # A phone split by spaces/dashes («966 51 234 5678») is removed as a span before figures are read.
     sep = r"[\s,.\-]*"
     grouped = r"[1-9]\d{0,2}(?:([,.])\d{3})(?:\1\d{3})*"
     unphoned = re.sub(rf"(?<!\d)(?:(?:\+?(?:00)?966{sep}|0)[15]|5)(?:{sep}\d){{8}}(?!\d)",
-                      lambda m: m.group(0) if re.fullmatch(grouped, m.group(0)) else " ", n)
+                      lambda m: m.group(0) if re.fullmatch(grouped, m.group(0))
+                      and not re.fullmatch(r"5\d{8}", re.sub(r"\D", "", m.group(0))) else " ", n)
     nums = [x for x in re.findall(r"[+]?\d[\d,.]*[+]?", unphoned) if _price_shaped(x)]
     neg = "لا" if re.search(r"(?<![\u0621-\u064A])(?:لا|بدون|غير)(?![\u0621-\u064A])", n) else ""
     return " ".join(x for x in ((k.group(0) if k else ""), neg, " ".join(nums[:6])) if x)

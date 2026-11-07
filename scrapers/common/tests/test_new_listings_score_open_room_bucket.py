@@ -125,3 +125,12 @@ def test_grouped_prices_still_reach_the_log():
 def test_an_unprefixed_or_966_phone_is_not_logged():
     for phone in ("512345678", "51,234,5678", "+966512345678", "966 51 234 5678", "00966112345678"):
         assert "5678" not in S._safe_evidence(r"غرف", f"غرف 4 {phone}"), phone
+
+
+def test_the_log_never_carries_a_price_grouped_mobile(capsys):
+    # CodeRabbit PDPL Major on #11053 (0bd8605): «هاتف 512,345,678» looks like a grouped price but is a mobile.
+    for phone in ("512,345,678", "512.345.678"):
+        page = S.page_evidence(f"<p>غرف النوم 4 هاتف {phone}</p>")
+        S._log_verdicts("t:6", {"bedrooms": S.MISMATCH}, {"bedrooms": 5}, page)
+        out = capsys.readouterr().out
+        assert "345" not in out and "'غرف 4'" in out, (phone, out)
