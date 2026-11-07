@@ -110,3 +110,13 @@ def test_a_failed_count_is_never_an_empty_recheck(monkeypatch):
     with pytest.raises(RuntimeError):
         F.struck(both_missing, "x")
     assert F.tables_for(broken, "x") == {}          # the lenient read used by the daily pass is unchanged
+
+
+def test_an_unrelated_does_not_exist_error_is_not_a_missing_table(monkeypatch):
+    """CodeRabbit on #11081: «column … does not exist» is a broken count, not a missing table."""
+    monkeypatch.setattr(F, "_execute", lambda q, **k: q.execute())
+    missing = RuntimeError("PGRST205 Could not find the table 'public.x_commercial_listings'")
+    col = RuntimeError('42703 column "missing_count" does not exist')
+    c = _Client({"x_residential_listings": _Q(err=col), "x_commercial_listings": _Q(err=missing)})
+    with pytest.raises(RuntimeError):
+        F.struck(c, "x")

@@ -162,7 +162,7 @@ def kill_cap(active: int) -> int:
     return max(KILL_FLOOR, math.ceil(KILL_FRAC * active))
 
 
-_NO_SUCH_TABLE = ("PGRST205", "42P01", "does not exist", "Could not find the table")
+_NO_SUCH_TABLE = ("PGRST205", "42P01", "Could not find the table")
 
 
 def tables_for(client, site: str, *, strict: bool = False) -> dict[str, int]:
