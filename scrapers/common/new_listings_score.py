@@ -238,8 +238,8 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             # The bucket must sit in the SAME clause as this field's keyword: «عدد غرف النوم: 4، الحمامات: 7+» gives the
             # bathrooms a «7+», never the bedrooms (CodeRabbit on #11031).
             if (name in ("bedrooms", "bathrooms") and out[name] == MISMATCH and stored.get(col) is not None
-                    and any(re.search(kw, c) and any(float(stored.get(col)) >= int(m.group(1) or m.group(2))
-                                                     for m in OPEN_BUCKET.finditer(c))
+                    and any(bucket_floor_next_to(kw, c, float(stored.get(col)),
+                                                 ROOM_KW["bathrooms" if name == "bedrooms" else "bedrooms"])
                             for x in lines for c in CLAUSE_SPLIT.split(x))):
                 out[name] = MATCH
             # ONE hall is written as the bare noun: haraj 21839188 «غرفة وصالة», 21839193 «4 غرف وصالة كبيره» (score run
@@ -285,6 +285,38 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
     return out
 
 
+def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = "") -> bool:
+    """An open bucket TIGHTLY attached to this field's keyword (within 12 chars, no other figure between) whose floor
+    the stored count meets. «عدد غرف النوم: 4 الحمامات: 7+» (no separator) gives the «7+» to the bathrooms only, and
+    «الحمامات: 7+ غرف النوم: 4» too: a bucket nearer the OTHER room field's keyword is that field's (CodeRabbit on
+    #11053). «+7 غرف نوم» (bucket first) still belongs to the bedrooms."""
+    def dist(k, m):
+        return m.start() - k.end() if m.start() >= k.end() else k.start() - m.end()
+
+    def labels(k, m):          # «الحمامات: 7+», «غرف النوم 7+» — the room phrase labels the figure right after it
+        span = clause[k.end():m.start()] if k.end() <= m.start() else ""
+        if other_kw and re.search(other_kw, span):     # «غرف: الحمامات: 7+» — the nearer label owns it
+            return False
+        return k.end() <= m.start() and re.fullmatch(r"\S*(?:\s+[^\s\d:：]+)?\s*[:：]?\s*", clause[k.end():m.start()]) is not None
+    own = list(re.finditer(kw, clause))
+    others = list(re.finditer(other_kw, clause)) if other_kw else []
+    for m in OPEN_BUCKET.finditer(clause):
+        if stored < int(m.group(1) or m.group(2)):
+            continue
+        near = [k for k in own if dist(k, m) <= 12 and not re.search(
+            r"\d", clause[k.end():m.start()] if m.start() >= k.end() else clause[m.end():k.start()])]
+        if not near:
+            continue
+        if any(labels(k, m) for k in near):
+            return True
+        if any(labels(o, m) for o in others):
+            continue
+        if not any(dist(o, m) < min(dist(k, m) for k in near) for o in others):
+            return True
+    return False
+
+
+ROOM_KW = {"bedrooms": r"غرف|غرفه نوم", "bathrooms": r"حمام|دوره مياه|دورات مياه|دوره المياه|دورات المياه"}
 # «+7» / «7+» (Western or Arabic-Indic digits): an open room bucket, «N or more».
 CLAUSE_SPLIT = re.compile(r"[،,|•؛;]")
 OPEN_BUCKET = re.compile(r"(?<![\d.])\+\s*(\d{1,2})(?![\d.])|(?<![\d.])(\d{1,2})\s*\+")
@@ -1202,7 +1234,8 @@ def muhaysini_page(url: str, fetch=None) -> dict | None:
         if isinstance(v, bool) or v in (None, "", 0, "0"):
             return
         lines.append(f"{label} {str(v).strip()}{tail}")
-    put("نوع الإعلان", {"بيع": "للبيع", "إيجار": "للايجار", "ايجار": "للايجار"}.get(str(rega.get("advertisementType") or "").strip()))
+    put("نوع الإعلان", {"بيع": "للبيع", "للبيع": "للبيع", "ايجار": "للايجار", "للايجار": "للايجار"}.get(
+        norm(str(rega.get("advertisementType") or "")).strip()))   # norm folds إ→ا (CodeRabbit on #11031)
     put("المنطقة", loc.get("region"))
     put("المدينة", (rec.get("City") or {}).get("name") if isinstance(rec.get("City"), dict) else None)
     put("المدينة", loc.get("city"))
@@ -1409,13 +1442,44 @@ def _log_verdicts(key: str, results: dict, stored: dict, page: dict) -> None:
             # propertyfinder 24671162 bedrooms=20 but not what the page said, so each cap took a source re-read).
             value = (stored.get("price_total") or stored.get("source_price_annual") or stored.get("price_annual")
                      or stored.get("price_per_meter")) if name == "price" else stored.get(col)
-            hits = [] if not kw else [x for x in lines if re.search(kw, norm(x))
+            if name == "price" and value and not stored.get("price_total") and (
+                    stored.get("rent_period_ar") == "شهري" or stored.get("source_rent_period") == "monthly"):
+                value = float(value) / 12          # the figure compare_listing compared (CodeRabbit on #11031)
+            hits = [] if not kw else [_safe_evidence(kw, x) for x in lines if re.search(kw, norm(x))
                                       and (kind != "number" or re.search(r"\d", x))][:3]
-            print(f"    mismatch {key} {name}: stored={value!r} page={[h[:120] for h in hits]!r}", flush=True)
+            print(f"    mismatch {key} {name}: stored={value!r} page={hits!r}", flush=True)
         else:
             # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
             hit = next((x for x in lines if kw and re.search(kw, norm(x))), "")
-            print(f"    we_miss {key} {name}: page={hit[:160]!r}", flush=True)
+            print(f"    we_miss {key} {name}: page={_safe_evidence(kw, hit) if hit else ''!r}", flush=True)
+
+
+def _safe_evidence(kw: str, line: str) -> str:
+    """The keyword and the figures/negation on that line — never the seller's prose, which can carry a person's name
+    redact_pii does not catch («غرف النوم 4 للتواصل مع أحمد», CodeRabbit PDPL finding on #11031)."""
+    n = norm(line)
+    k = re.search(kw, n)
+    # A phone is never evidence (PDPL; CodeRabbit findings on #11053). One rule, no per-format list: a CLUSTER is digit
+    # groups joined only by non-letters («050/123/4567», «+1 (202) 555-0147», «050_123_4567»). A cluster carrying 9+
+    # digits is dropped whole unless it is one well-formed grouped price («1,600,000», «2.500.000») whose digits are
+    # not a phone shape («512,345,678»). Shorter clusters keep their figures. A real price that fails this is only
+    # missing from the log; nothing reads the log back.
+    phone = r"(?:00966|966)[15]\d{8}|0[15]\d{8}|5\d{8}"
+    price = r"[1-9]\d{0,2}(?:([,.])\d{3})(?:\1\d{3})*(?:[.,]\d{1,2})?\+?"
+    def _keep(m: re.Match) -> str:
+        c = m.group(0)
+        d = re.sub(r"\D", "", c)
+        if len(d) < 9:
+            return c
+        if re.fullmatch(price, c.strip()) and not re.fullmatch(phone, d):
+            return c
+        # «غرف النوم 4 050/123/4567»: the room count before a space is not part of the phone; keep it alone.
+        lead = re.match(r"(\d{1,3}\+?)\s+(.*)$", c, re.S)
+        return f"{lead.group(1)} " if lead and len(re.sub(r"\D", "", lead.group(2))) >= 9 else " "
+    unphoned = re.sub(r"\+?\d(?:[^0-9A-Za-z\u0621-\u064A]+\+?\d|\d)*\+?", _keep, n)   # any separator length
+    nums = re.findall(r"[+]?\d[\d,.]*[+]?", unphoned)
+    neg = "لا" if re.search(r"(?<![\u0621-\u064A])(?:لا|بدون|غير)(?![\u0621-\u064A])", n) else ""
+    return " ".join(x for x in ((k.group(0) if k else ""), neg, " ".join(nums[:6])) if x)
 
 
 def _line(r: dict) -> str:
