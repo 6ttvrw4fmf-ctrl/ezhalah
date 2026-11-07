@@ -1,4 +1,4 @@
-"""Nuzul engine (goldendeal / yameen / maqam): an item the office took OFF its website is gone,
+"""Nuzul engine (goldendeal / yameen; maqam left Nuzul 2026-11-07): an item the office took OFF its website is gone,
 even while its status still reads «available».
 
 MEASURED 2026-09-28. GDL52019, GDL52111 and GDL53568 were active with missing_count 2: the list
@@ -26,7 +26,6 @@ _dotenv_mod.load_dotenv = lambda *a, **k: None
 sys.modules.setdefault("dotenv", _dotenv_mod)
 
 from scrapers.goldendeal import run as R  # noqa: E402
-from scrapers.maqam import run as MQ  # noqa: E402
 
 UNPUBLISHED_52019 = {"id": 52019, "type": "floor", "purpose": "rent", "category": "residential",
                      "availability_status": "available", "published_on_website": 0,
@@ -54,11 +53,5 @@ def test_the_oracle_retires_an_unpublished_item():
     assert _verdict(R.TENANT, "GDL50495", PUBLISHED_50495) == "live"
 
 
-def test_maqam_shares_the_same_gate():
-    """maqam (and yameen) import verify_gone_for / map_listing from the goldendeal engine."""
-    assert _verdict(MQ.TENANT, "MQM52019", UNPUBLISHED_52019) == "gone"
-
-
 def test_the_crawl_refuses_it_by_the_same_predicate():
     assert R.map_listing(UNPUBLISHED_52019, R.TENANT)[2] == "unpublished"
-    assert MQ.map_listing(UNPUBLISHED_52019)[2] == "unpublished"

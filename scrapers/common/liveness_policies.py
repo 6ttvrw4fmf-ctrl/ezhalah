@@ -1156,8 +1156,8 @@ POLICIES: dict[str, _P] = {
         "An oracle is possible (a removed unit should leave the sitemap and its page) but is not written; the sitemap + every page read IS this run's check."),
     "mrajhi": _P(
         _pol("mrajhi", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set over the site's sitemap.xml /units/ pages, every page read and its JSON-LD parsed; run.py prunes only when every page answered.",
-        "An oracle is possible (/units/<code> of a removed unit) but is not written; the sitemap + every page read IS this run's check."),
+        "the crawl's OWN seen-set over the site's sitemap.xml /units/ pages, every page read and its JSON-LD parsed; run.py prunes only when every page answered (a page answering 404 counts as read: the ad is gone).",
+        "2026-11-07: the ad's OWN page decides at grace (run.py::_make_gone — 404/410 gone, 200 live, else unknown, control-gated); a unit the walk itself read 404 is struck at grace 1 (EHKyWc1M was served dead while its 404 froze every prune)."),
     "steam": _P(
         _pol("steam", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's Yoast property-sitemap.xml, every Arabic /property/<slug>/ page read; run.py prunes only when every page answered.",
@@ -1366,16 +1366,14 @@ POLICIES: dict[str, _P] = {
         "does not exist — but it is not written yet, so this does not claim a direct check."),
     "maqam": _P(
         _pol("maqam", 3, 168), CANDIDATE_PLUS_DIRECT,
-        "the same Nuzul engine as goldendeal/yameen (scrapers/goldendeal/run.py::verify_gone_for on "
-        "tenant maqamco, host maqamco.nzl-backend.com), wired exactly as yameen wires it: "
-        "prune_unseen(..., verify_gone=verify_gone_for(TENANT, make_canary(TENANT, control))). A 404 "
-        "is GONE; a 200 for THIS id is LIVE only while availability_status is available and "
-        "published_on_website is not 0, otherwise GONE; another record and 401/403/429/5xx are "
-        "UNKNOWN; canary-gated (fails CLOSED), complete enumeration only. The feed itself states "
-        "availability for every record (130 = 50 available, "
-        "59 sold, 10 unavailable, 7 reserved, 4 rented, measured 2026-09-26).",
-        "The oracle's semantics are the engine's, measured on yameen 2026-09-23; the canary gate means "
-        "maqam prunes nothing unless its own control answers correctly on the first crawl."),
+        "2026-11-07: maqam LEFT Nuzul for its own site maqamco.sa (the abandoned Nuzul API still said 130 "
+        "items, so all 42 served cards were 404s called live). The crawl's OWN seen-set over the site's "
+        "complete /sitemap.xml (/units/<n>, 83 when measured) + the /projects card list (16); only a "
+        "COMPLETE walk prunes. Direct oracle scrapers/maqam/run.py::_make_verify_gone: the card's own link "
+        "— HTTP 404 (redirects followed) is GONE, a badge other than «متاحة» (unit) / «متاح» (project card) "
+        "is GONE, «متاحة» is LIVE, anything else UNKNOWN; a removal counts only while the control row reads live.",
+        "After the collapse guard refuses a complete walk, follow_source_hide hides only rows whose own "
+        "link reads gone with 2 live controls before and after, evidence per row (Dwelleo precedent)."),
     "earthapp": _P(
         _pol("earthapp", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over earthapp.com.sa/api/offer-list-by-area (pagination.total 54 when measured), which the server itself filters to status=active AND an unexpired REGA licence. run.py prunes only when every list page was read.",
