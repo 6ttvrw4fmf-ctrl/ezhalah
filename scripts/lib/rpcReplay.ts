@@ -164,7 +164,7 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
   // Every arm records WHERE in the SQL its patch sits, and the list is returned in that order: the arms
   // scan separately, and a patch whose anchor an EARLIER patch creates would otherwise be applied first,
   // find nothing, and be skipped silently (CodeRabbit on #11148). Source order is execution order.
-  const out: { anchor: string; replacement: string; pos: number; probe?: boolean }[] = [];
+  const out: { anchor: string; replacement: string; pos: number; probe?: boolean; loop?: [number, number] }[] = [];
   // A `replace(...)` that sits after `--` on its own line is a comment: SQL never runs it…
   // …and neither is one inside a `/* … */` block comment. PostgreSQL NESTS block comments, so this is a
   // depth count over the whole file, not "the last `/*` before it" (which an inner `*/` would fool).
@@ -227,16 +227,16 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
       loopRe.lastIndex = end + 1;
       // Exactly ONE loop may index the table: with two (one only reading it), which one applies the rows
       // is not something a static reader can know, so the order is reported as unresolved, never guessed.
-      const loopsUsing: number[] = [];
+      const loopsUsing: { at: number; span: [number, number] }[] = [];
       let lp: RegExpExecArray | null;
       while ((lp = loopRe.exec(sql))) {
         if (commentedOut(lp.index)) continue;
         const hit = idx.exec(lp[1]);
-        if (hit) loopsUsing.push(lp.index + 'loop'.length + hit.index);
+        if (hit) loopsUsing.push({ at: lp.index + 'loop'.length + hit.index, span: [lp.index, lp.index + lp[0].length] });
       }
       if (loopsUsing.length !== 1) { unplacedTables++; continue; }
-      const u = { index: loopsUsing[0] };
-      out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: u.index });
+      const u = { index: loopsUsing[0].at, span: loopsUsing[0].span };
+      out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: u.index, loop: u.span });
     }
   }
 
@@ -280,6 +280,9 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
   }
   // Every executing call is kept, repeats included (X→Y, Y→X, X→Y runs three times). Only a PROBE whose
   // pair already ran is dropped: it repeats a pair without applying it.
+  // A table's loop that ALSO holds another patch: the order of the two inside the loop body is not something
+  // this reader models, so such a migration is reported as unresolved rather than ordered by a guess.
+  const loopMixed = out.some((t) => t.loop && out.some((p) => !p.loop && p.pos >= t.loop![0] && p.pos <= t.loop![1]));
   out.sort((x, y) => x.pos - y.pos);
   const ran = new Set<string>();
   const patches = out.filter((p) => {
@@ -293,7 +296,7 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
   // so a migration mixing readable and unreadable patches is reported instead of half-replayed.
   const assigned = /:=\s*replace\s*\(/g;
   let m: RegExpExecArray | null;
-  let unreadAssigned = unplacedTables;
+  let unreadAssigned = unplacedTables + (loopMixed ? 1 : 0);
   while ((m = assigned.exec(sql))) {
     if (commentedOut(m.index)) continue;
     const semi = sql.indexOf(';', m.index);

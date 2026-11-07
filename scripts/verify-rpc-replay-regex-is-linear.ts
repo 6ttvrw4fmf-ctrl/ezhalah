@@ -126,6 +126,13 @@ fs.writeFileSync(path.join(mixed, '20990101000002_two_loops.sql'),
   "out_def := replace(src, E'/*B*/', E'/*B3*/');\n" +
   "for i in 1..1 loop out_def := replace(out_def, ed[i][1], ed[i][2]); end loop;\n" +
   "execute out_def; end $$;\n");
+// (11) the table and another patch inside the SAME loop: their order in the body is not modelled → reported.
+fs.writeFileSync(path.join(mixed, '20990101000003_same_loop.sql'),
+  "do $$ declare ed text[][] := array[['/*B3*/', '/*B4*/']]; src text; out_def text; pv text; begin\n" +
+  "src := pg_get_functiondef('public.f_mix()'::regprocedure); out_def := src;\n" +
+  "for i in 1..1 loop pv := ed[i][1]; out_def := replace(out_def, E'/*A2*/', E'/*A4*/');\n" +
+  " out_def := replace(out_def, ed[i][1], ed[i][2]); end loop;\n" +
+  "execute out_def; end $$;\n");
 const mixedOut = replayFunction(mixed, 'f_mix');
 const mixedReported = (u: string[]) => u.some((x) => x.includes('20990101000001_mixed.sql'));
 ok(mixedReported(mixedOut.unresolved), `a readable patch beside an unreadable assigned one is reported (${JSON.stringify(mixedOut.unresolved)})`);
@@ -133,6 +140,9 @@ mustCatch('a replay that half-applied a mixed migration silently', !mixedReporte
 const twoLoopsReported = (u: string[]) => u.some((x) => x.includes('20990101000002_two_loops.sql'));
 ok(twoLoopsReported(mixedOut.unresolved), 'a table indexed by two loops is reported, not placed at a guessed loop');
 mustCatch('a replay that placed a two-loop table silently', !twoLoopsReported([]));
+const sameLoopReported = (u: string[]) => u.some((x) => x.includes('20990101000003_same_loop.sql'));
+ok(sameLoopReported(mixedOut.unresolved), 'a table sharing its loop with another patch is reported, not ordered by a guess');
+mustCatch('a replay that ordered a shared-loop table silently', !sameLoopReported([]));
 fs.rmSync(mixed, { recursive: true, force: true });
 
 fs.rmSync(dir, { recursive: true, force: true });
