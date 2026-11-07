@@ -11,6 +11,7 @@ import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by t
 import { chromium } from 'playwright';
 import { openAfOffer } from './lib/afOfferLive.ts';
 import { pairCountForSelection, isResultsRequest } from './lib/afCountPairing.ts';
+import { expectedShownTotal, hydrationKeys } from './lib/afShownTotal.ts';
 
 // ONE BUDGET FOR "WAIT FOR THE AGENT'S NEXT TURN", not three magic numbers (2026-09-03).
 // Every wait below is behind the same dependency: a PAID LLM turn whose latency is variable. This
@@ -203,6 +204,8 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport });
   const page = await ctx.newPage();
   let lastCountBody = null, lastCountResp = null, lastSearchBody = null, lastSearchResp = null;
+  // every card the raw hydration returned on this page (scripts/lib/afShownTotal.ts) — the screen subtracts the rest
+  const hydrated = new Set<string>();
   const countPairs: Array<{ body: any; resp: any[] }> = [];
   let countsBeforeTap = 0;
   let tappedKey = '';
@@ -227,6 +230,9 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
         }
       } catch {}
     }
+    if (u.includes('/rest/v1/') && resp.request().method() === 'GET' && u.includes('id=in.')) {
+      try { for (const k of hydrationKeys(u, await resp.json())) hydrated.add(k); } catch {}
+    }
     if (u.includes('/rpc/location_search_candidates_ar') && resp.request().method() === 'POST') {
       try {
         const j = await resp.json();
@@ -236,7 +242,7 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
         // defect that production does not have. scripts/lib/afCountPairing.ts holds the shape.
         if (Array.isArray(j)) {
           const b = JSON.parse(resp.request().postData() || '{}');
-          if (isResultsRequest(b)) { lastSearchBody = b; lastSearchResp = j; }
+          if (isResultsRequest(b)) { lastSearchBody = b; lastSearchResp = j; hydrated.clear(); }
         }
       } catch {}
     }
@@ -606,6 +612,10 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     if (!lastSearchBody) { await ctx.close(); return; }
     const rpcTotal = Number(lastSearchResp?.[0]?.total_count ?? (Array.isArray(lastSearchResp) ? lastSearchResp.length : NaN));
     let uiCount = null;
+    // The screen shows honestTotal(total_count, page candidates, cards hydrated) — src/lib/honestTotal.ts, 🔧 1153.
+    // Comparing with the RAW total_count went red on every journey that met a row hidden since the last :22 sync
+    // (run 42352580488: ui=6705 rpc=6706). Recomputed each poll: hydration responses may still be arriving.
+    let want = expectedShownTotal(lastSearchResp, hydrated);
     const until2 = Date.now() + AGENT_TURN_MS;
     while (Date.now() < until2) {
       const t = await body();
@@ -614,10 +624,13 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       // takes the LAST sentence by document position — which is what the matchAll(...).pop() here
       // was reaching for by hand.
       const read = resultsFoundCount(t);
-      if (read != null) { uiCount = read; if (read === rpcTotal) break; }
+      want = expectedShownTotal(lastSearchResp, hydrated);
+      if (read != null) { uiCount = read; if (read === want.shown && want.hydrated > 0) break; }
       await page.waitForTimeout(500);
     }
-    check(`${name}: UI displayed count == result-RPC total_count`, uiCount != null && uiCount === rpcTotal, `ui=${uiCount} rpc=${rpcTotal}`);
+    check(`${name}: UI displayed count == result-RPC total_count less this page's unloadable cards (honestTotal)`,
+      uiCount != null && want.hydrated > 0 && uiCount === want.shown,
+      `ui=${uiCount} shown=${want.shown} rpc=${rpcTotal} page=${want.candidates} hydrated=${want.hydrated} dropped=${want.dropped}`);
 
     const { count: oc, unhandled: ocUnhandled } = await oracleCount(lastSearchBody);
     if (ocUnhandled.length) {
