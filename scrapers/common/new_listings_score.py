@@ -1163,6 +1163,54 @@ def dallali_page(url: str, fetch=None) -> dict | None:
             "text_head": " | ".join(lines)[:1500]}
 
 
+def muhaysini_page(url: str, fetch=None) -> dict | None:
+    """A muhaysini ad read from the platform's OWN record (🆕 2026-11-07). aqaralmuhaysini.com/propertydetails/<id> is
+    a Vue shell (re-read run 42352217629: title «أحمد المحيسني العقارية», no ad text), so the nightly score sampled
+    10 muhaysini arrivals a night and decided 0 — the second-biggest site (1,116 arrivals on 11-07) unmeasured.
+    This restates the record's REGA licence block (AdValidator.advertisement) and its own type, labelled the way
+    the comparison reads; None when the record cannot be read or is not this id (unknown, never wrong)."""
+    m = re.search(r"/propertydetails/(\d+)", url or "")
+    if not m:
+        return None
+    try:
+        if fetch is not None:
+            rec = fetch(m.group(1))
+        else:
+            from scrapers.muhaysini import run as mh
+            rec = mh.fetch_detail(mh.session(), m.group(1))
+    except Exception:  # noqa: BLE001 — a failed read is unknown, never wrong
+        return None
+    if not isinstance(rec, dict):
+        return None
+    adv = (rec.get("AdValidator") or {}) if isinstance(rec.get("AdValidator"), dict) else {}
+    rega = adv.get("advertisement") if isinstance(adv.get("advertisement"), dict) else {}
+    loc = rega.get("location") if isinstance(rega.get("location"), dict) else {}
+    lines: list[str] = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0, "0"):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", {"بيع": "للبيع", "إيجار": "للايجار", "ايجار": "للايجار"}.get(str(rega.get("advertisementType") or "").strip()))
+    put("المنطقة", loc.get("region"))
+    put("المدينة", (rec.get("City") or {}).get("name") if isinstance(rec.get("City"), dict) else None)
+    put("المدينة", loc.get("city"))
+    put("الحي", loc.get("district"))
+    put("نوع العقار", (rec.get("PropertyType") or {}).get("name") if isinstance(rec.get("PropertyType"), dict) else None)
+    put("المساحة", rega.get("propertyArea"), " م²")
+    put("عدد الغرف", rega.get("numberOfRooms"))
+    total = rega.get("landTotalPrice") or rega.get("landTotalAnnualRent")
+    put("السعر", total or rega.get("propertyPrice"), " ريال")
+    if total:
+        put("سعر المتر", rega.get("propertyPrice"), " ريال")
+    put("عرض الشارع", rega.get("streetWidth"))
+    put("عمر العقار", rega.get("propertyAge"))
+    title = str(rec.get("title") or "")
+    lines += [y.strip() for y in f"{title}\n{rec.get('description') or ''}".splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _TUBA_RECORDS: "dict | None" = None
 
 
@@ -1239,6 +1287,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
+        if "aqaralmuhaysini.com/propertydetails/" in url:
+            own = muhaysini_page
         if "dallali.com/advertisements/" in url:
             own = dallali or dallali_page
         if "safainv.sa" in url:
