@@ -27,3 +27,19 @@ def test_counts_below_the_bucket_still_mismatch():
 
 def test_a_plain_count_is_unchanged():
     assert _cmp({"bedrooms": 20}, "<p>4 غرف نوم</p>", "bedrooms") == S.MISMATCH
+
+
+def test_the_bucket_belongs_to_its_own_field_coderabbit_11031():
+    line = "<p>عدد غرف النوم: 4، الحمامات: 7+</p>"
+    assert _cmp({"bedrooms": 9}, line, "bedrooms") == S.MISMATCH
+    assert _cmp({"bathrooms": 9}, line, "bathrooms") == S.MATCH
+
+
+def test_the_mismatch_log_redacts_phones_and_names_the_compared_price(capsys):
+    page = S.page_evidence("<p>غرف النوم 4 هاتف 0501234567</p><p>السعر 650,000 ريال</p>")
+    S._log_verdicts("t:1", {"bedrooms": S.MISMATCH, "price": S.MISMATCH, "district": S.MISMATCH},
+                    {"bedrooms": 5, "price_total": 640000, "district_ar": "حي الزهور"}, page)
+    out = capsys.readouterr().out
+    assert "0501234567" not in out
+    assert "stored=640000" in out
+    assert "district: stored='حي الزهور' page=[]" in out
