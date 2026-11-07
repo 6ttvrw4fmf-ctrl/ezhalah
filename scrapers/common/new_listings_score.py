@@ -371,7 +371,11 @@ def facade_adjectives(stored) -> Optional[str]:
             + r"(?![\u0621-\u064A])")
 
 
-_UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
+# «م» alone is metres too (🔬 2026-11-07): justsa prints «<span>عرض الشارع</span> <strong>18 م</strong>» (just.sa/l/595,
+# re-read net.http_get 11-07) and the value line «18 م» never matched, so 15 of 15 sampled justsa street widths scored
+# MISMATCH on a stored 18 that the page states — the same «tool, not the data» backlog 297 named on 10-09.
+# Only a SPACED «م» («18 م»): a glued «250م» keeps its old reading, which the alshawaf related-table guard relies on.
+_UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س|(?<=\s)م)?\s*"
 
 
 # A control prompt («اختر عدد الغرف», rakez's room picker) names a field without stating it; the unit
@@ -388,7 +392,11 @@ AREA_UNIT = re.compile(r"م²|م2|متر مربع|m²")
 ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
 # Arabic states TWO with the dual, not the digit: bossbih 17388816 prints «غرفتين» for its 2 bedrooms
 # (2026-10-12: stored 2, scored MISMATCH). A dual on the keyword's own line states the figure 2.
-DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان|سنتين|سنتان|عامين|عامان)(?![\u0621-\u064A])")
+# …also when a glued meta description runs it straight into the NEXT label: aqaralriyadh 13105499 (🔬 2026-11-07, dry run
+# af-score 42360463480: living_rooms MISMATCH 4 of 14) prints «…عدد الغرف: 4 غرفالصالات: صالتاندورات المياه: 3».
+_NEXT_LABEL = r"(?:دورات|دوره|عدد|المساحه|المساحة|السعر|الحي|المدينه|المدينة|الغرف|الصالات|المجالس|الحمامات|عمر|الدور|الواجهه|الواجهة)"
+DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان|سنتين|سنتان|عامين|عامان)"
+                       r"(?:(?![\u0621-\u064A])|(?=" + _NEXT_LABEL + r"))")
 # «سنتين» is a two-year-old building: haraj 23236759 «عمر العقار: سنتين», stored 2 (branch re-score 41596198038, 2026-11-03).
 
 
@@ -439,7 +447,10 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     else:
         # A small figure counts only next to its keyword: on the keyword's own line, or on a
         # neighbouring line that is NOTHING BUT the value («غرف النوم» / «4», «م²» / «240»).
-        bare = re.compile(r"^" + _UNIT_TAIL + pat.pattern + _UNIT_TAIL + r"$")
+        # A street width's own value line may glue its «م»: erapulse prints «<div>20م</div><div>عرض الشارع</div>»
+        # (646396, net.http_get 2026-11-07). Street width only — a glued area «250م» keeps the alshawaf guard's meaning.
+        tail = _UNIT_TAIL + r"(?:م)?\s*" if "الشارع" in kw else _UNIT_TAIL
+        bare = re.compile(r"^" + _UNIT_TAIL + pat.pattern + tail + r"$")
         for i in kw_hits:
             if pat.search(lines[i]):
                 return MATCH
