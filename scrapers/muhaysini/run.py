@@ -294,7 +294,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import math
 import os
 import re
 import sys
@@ -905,6 +904,8 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
     page = 1
     complete = False
     while page <= MAX_PAGES:
+        if page > 1:
+            time.sleep(REQUEST_GAP)         # the list walk is now ~700 pages, not 95: pace it like retrieve
         body = _get_json(s, f"{API}/list?page={page}", what=f"{API}/list page {page}")
         batch = [p for p in (body.get("properties") or []) if isinstance(p, dict)]
         if not batch:
@@ -932,19 +933,17 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
 
 
 def detail_plan(ids: list[str], budget: int, day: int) -> set[str]:
-    """Which listed ids get their detail read tonight. All of them when they fit the budget; otherwise
-    k = ceil(n / budget) stable buckets by a hash of the id, tonight's bucket first, then the next ones
-    until the budget is spent. Tonight's bucket is at most ~n/k <= budget, so every id is read in full
-    at least once every k nights, and the nightly volume stays the budget (not a sawtooth)."""
+    """Which listed ids get their detail read tonight. All of them when they fit the budget; otherwise a
+    budget-sized WINDOW that advances by `budget` each night around ONE stable ordering of the ids (by a
+    hash, so new arrivals scatter instead of all landing in one night). Consecutive nights tile the ring,
+    so every id is read in full at least once every ceil(n / budget) nights, and each night reads exactly
+    the budget. (Hash BUCKETS were the first version: an oversized bucket starved ids — CodeRabbit, #11136.)"""
     if budget <= 0 or len(ids) <= budget:
         return set(ids)
-    k = math.ceil(len(ids) / budget)
-
-    def h(i: str) -> int:
-        return int(hashlib.sha1(i.encode()).hexdigest()[:8], 16)
-
-    ordered = sorted(ids, key=lambda i: ((h(i) - day) % k, h(i), i))
-    return set(ordered[:budget])
+    ordered = sorted(ids, key=lambda i: (hashlib.sha1(i.encode()).hexdigest(), i))
+    n = len(ordered)
+    start = (day * budget) % n
+    return {ordered[(start + j) % n] for j in range(budget)}
 
 
 def fetch_detail(s: cc.Session, pid: str) -> Optional[dict]:

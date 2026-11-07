@@ -26,6 +26,18 @@ for day in range(20_400, 20_400 + k):
     read |= tonight
 assert read == set(ids), f"{len(set(ids) - read)} listed ads were never read in full within {k} nights"
 
+# Near the budget boundary (CodeRabbit #11136: an oversized hash bucket starved ids), and odd sizes.
+for n_ids, b in ((4, 2), (5, 2), (12_001, 12_000), (23_999, 12_000), (7, 3)):
+    some = [str(i) for i in range(n_ids)]
+    kk = math.ceil(n_ids / b)
+    for start_day in (0, 1, 20_401):
+        got: set[str] = set()
+        for d in range(start_day, start_day + kk):
+            night = R.detail_plan(some, b, d)
+            assert len(night) == b, (n_ids, b, d, len(night))
+            got |= night
+        assert got == set(some), f"n={n_ids} budget={b} from day {start_day}: {len(set(some) - got)} starved"
+
 small = ids[:500]
 assert R.detail_plan(small, budget, 7) == set(small), "a catalogue under the budget is read in full every night"
 assert R.detail_plan(ids, 0, 7) == set(ids), "budget 0 means no limit"
