@@ -30,6 +30,7 @@ import { useI18n } from '@/i18n';
 import { pickName, initialsOf } from '@/lib/nameSync';
 import { noTranslateRef } from '@/noTranslate';
 import { DOCK_WIDTH, DOCK_BREAKPOINT } from '@/lib/responsive';
+import { useColumnPromptInset, type ViewportColumn } from '@/lib/bottomPromptInset';
 import { useAtLeast } from '@/lib/useAtLeast';
 
 const GOLD = '#e3a008';
@@ -106,8 +107,17 @@ function groupHistory(items: HistoryItem[]): { key: string; items: HistoryItem[]
 // In-screen drawer overlay. Rendered ON TOP of the current screen (not a separate route) so the
 // page content stays visible/dimmed behind it instead of going blank. The host mounts it when
 // open and removes it after onClose fires (we animate out first, then call onClose).
+// The strip the DOCKED panel occupies: pinned to the viewport's LEFT edge (LTR_PIN, see _layout.tsx),
+// DOCK_WIDTH wide. Google's desktop One Tap card (20,20 → 391,158, position: fixed) lands on this
+// strip and covered the panel's own sign-in CTA on 1440×1000 (🔧 backlog 1527, journey-sweep
+// 42367701164, Firefox + WebKit); the app root reserves nothing for a corner card by design, so the
+// panel reserves the card's band for itself. Module-level so the observer subscribes once.
+const DOCK_COLUMN: ViewportColumn = { left: 0, right: DOCK_WIDTH };
+
 export default function Sidebar({ onClose, docked = false }: { onClose: () => void; docked?: boolean }) {
   const insets = useSafeAreaInsets();
+  // Third-party corner card docked over the panel's own strip (backlog 1527): 0 unless one is shown.
+  const cornerCardInset = useColumnPromptInset(DOCK_COLUMN);
   const router = useRouter();
   // ACTIVE-CHAT TRUTH (owner 2026-08-29): the green active row means «this is the conversation you
   // are looking at RIGHT NOW». On the Filter home there is no conversation on screen, so nothing may
@@ -1007,7 +1017,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       // full-viewport click-catcher actually sits over the page (every RNW View is z-index:0 —
       // a sibling stacking context later in the DOM otherwise paints over it). Closed → back to
       // z-auto ordering so the root overlays (Support/About/Auth) keep painting above the sidebar.
-      <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, acctOpen && ({ zIndex: 30 } as any), { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
+      <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, acctOpen && ({ zIndex: 30 } as any), { paddingTop: insets.top + 16 + cornerCardInset, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
         {/* Continue the sky, with sparse column-sized clouds behind the controls. */}
         <HeroBackground clouds={false} />
         <SidebarClouds />
