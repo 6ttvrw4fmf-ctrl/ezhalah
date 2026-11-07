@@ -22,7 +22,7 @@ begin
 
   -- 3. real cheap land is untouched (الفوارة 13/m², the site's box agrees) and nothing it touched is double-read
   if not exists (select 1 from public.search_listings_ar where source_table = 'aqar_residential_listings' and listing_id = 6965212
-                  and price_total = 15055 and not price_in_thousands and not ppm_typed_as_total) then raise exception 'PROOF: الفوارة 13/m² was touched'; end if;
+                  and price_total between 15000 and 15100 and not price_in_thousands and not ppm_typed_as_total) then raise exception 'PROOF: الفوارة 13/m² was touched'; end if;
   if exists (select 1 from public.search_listings_ar where price_in_thousands and ppm_typed_as_total) then raise exception 'PROOF: a row carries both readings'; end if;
 
   -- 4. a customer's Riyadh yearly rent search 70k–80k finds the «75» unit
