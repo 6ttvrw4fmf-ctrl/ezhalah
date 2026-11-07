@@ -96,3 +96,76 @@ def test_the_oracle_reads_the_card_link_and_needs_a_live_control():
     assert v("MQMU77")[0] == "unknown"                  # unreadable is no opinion
     blind = R._make_verify_gone({"ad_number": "MQMU5"}, status=st)
     assert blind("MQM42571")[0] == "unknown", "no live control: no removal"
+
+
+def test_num_reads_the_first_figure_only():
+    assert R._num("ر.س 1,227,000") == 1227000 and R._num("1,227,000 ر.س") == 1227000
+    assert R._num("174.32 م²") == 174.32 and R._num("السعر عند الطلب") is None
+
+
+class _Q:
+    def __init__(self, log, rows):
+        self.log, self.rows = log, rows
+
+    def __getattr__(self, name):
+        def chain(*a, **k):
+            if name in ("update", "insert"):
+                self.log.append((name, a[0]))
+            if name == "in_":
+                self.log.append(("in_", list(a[1])))
+            return self
+        return chain
+
+
+def _fake_db(monkeypatch, rows, fail_evidence=False):
+    log: list = []
+    monkeypatch.setattr(R.db, "sb", lambda: _Q(log, rows))
+
+    def execute(q, what=""):
+        if what.endswith("follow_source_select"):
+            return type("X", (), {"data": rows})()
+        if fail_evidence and what.startswith("ops_stale"):
+            raise RuntimeError("evidence table down")
+        return type("X", (), {"data": []})()
+    monkeypatch.setattr(R.db, "_execute", execute)
+    return log
+
+
+OLD = [{"ad_number": "MQM42572", "listing_url": "https://property.maqamco.sa/properties/42572",
+        "district_ar": "حي الرمال", "source_capture": {"unit_number": "A03"}},
+       {"ad_number": "MQM51641", "listing_url": "https://property.maqamco.sa/properties/51641",
+        "district_ar": "حي النرجس", "source_capture": {"unit_number": "A01"}}]
+CONTROLS = [{"ad_number": "MQMU91", "listing_url": "https://maqamco.sa/units/91"},
+            {"ad_number": "MQMU90", "listing_url": "https://maqamco.sa/units/90"}]
+
+
+def _status_map(controls_live=True, old_404=True):
+    def st(url):
+        if "/units/" in url:
+            return (200, _unit_page()) if controls_live else (None, "")
+        return (404, "") if old_404 and "42572" in url else (200, "")
+    return st
+
+
+def test_follow_source_hides_only_proven_rows_with_evidence(monkeypatch):
+    log = _fake_db(monkeypatch, OLD)
+    h, k, why = R.follow_source_hide(R.RES_TABLE, set(), CONTROLS, {("حي الرمال", "A03"): "MQMU91"}, status=_status_map())
+    assert (h, k, why) == (1, 1, "done")
+    assert ("in_", ["MQM42572"]) in log
+    ev = next(v for n, v in log if n == "insert")
+    assert "same unit A03 now served as MQMU91" in ev[0]["note"] and ev[1]["verdict"] == "UNKNOWN"
+
+
+def test_follow_source_needs_two_live_controls_and_keeps_a_hide_when_evidence_fails(monkeypatch):
+    log = _fake_db(monkeypatch, OLD)
+    assert R.follow_source_hide(R.RES_TABLE, set(), CONTROLS[:1], {}, status=_status_map())[0] == 0
+    assert R.follow_source_hide(R.RES_TABLE, set(), CONTROLS, {}, status=_status_map(controls_live=False))[0] == 0
+    assert not [x for x in log if x[0] == "update"]
+    log = _fake_db(monkeypatch, OLD, fail_evidence=True)
+    assert R.follow_source_hide(R.RES_TABLE, set(), CONTROLS, {}, status=_status_map())[0] == 1
+
+
+def test_complete_needs_every_listed_page():
+    w = {"units": {1: {}}, "listed": 1, "projects": {1: {}}, "listed_projects": 1, "bad": {}}
+    assert R.complete(w)
+    assert not R.complete({**w, "bad": {"unit_unparsed": 1}}) and not R.complete({**w, "listed": 2})

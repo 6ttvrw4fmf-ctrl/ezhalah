@@ -195,7 +195,7 @@ def walk(log=print) -> dict:
         try:
             p = parse_unit(H.get_text(u, allowed=_allowed))
         except H.Blocked as e:
-            if " 404 " in str(e) or " 410 " in str(e):
+            if re.match(r"HTTP (404|410) at ", str(e)):      # the plain non-200 shape, never a wall
                 bad["gone_404"] += 1
                 gone_urls.append(u)
                 continue

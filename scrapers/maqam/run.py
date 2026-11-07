@@ -87,11 +87,9 @@ def _after(lines: list[str], label: str) -> Optional[str]:
 
 
 def _num(v: Any) -> Optional[float]:
-    s = re.sub(r"[^\d.]", "", str(v or "").translate(N._TRANS))
-    try:
-        f = float(s)
-    except ValueError:
-        return None
+    """The FIRST figure in the text («1,227,000 ر.س» → 1227000, «ر.س 897,000» → 897000), never digits glued together."""
+    m = re.search(r"\d[\d,]*(?:\.\d+)?", str(v or "").translate(N._TRANS))
+    f = float(m.group(0).replace(",", "")) if m else 0.0
     return f if f > 0 else None
 
 
@@ -115,6 +113,8 @@ def parse_unit(page: str) -> Optional[dict]:
     i = next((k for k, s in enumerate(lines) if s.startswith("رقم الوحدة")), None)
     if i is None or i == 0 or i + 3 >= len(lines):
         return None
+    if ":" not in lines[i]:
+        return None
     unit_no = lines[i].split(":", 1)[1].strip() or lines[i + 1]
     j = i + (1 if lines[i].rstrip().endswith(":") else 0)
     name, type_line = lines[j + 1], lines[j + 2]
@@ -127,7 +127,9 @@ def parse_unit(page: str) -> Optional[dict]:
             "city": parts[1] if len(parts) > 2 else None, "area": _after(lines, "المساحة"),
             "bedrooms": _after(lines, "غرف النوم"), "bathrooms": _after(lines, "دورات المياه"),
             "floor": _after(lines, "الدور"), "price_text": _after(lines, "سعر الوحدة"),
-            "features": _after(lines, "مميزات الوحدة"), "built_area": _after(lines, "مساحة البناء"),
+            "features": "\n".join(lines[lines.index("مميزات الوحدة") + 1:lines.index("بيانات العقار")])
+            if "مميزات الوحدة" in lines and "بيانات العقار" in lines[lines.index("مميزات الوحدة"):] else
+            _after(lines, "مميزات الوحدة"), "built_area": _after(lines, "مساحة البناء"),
             "pin": (pin.group(1), pin.group(2)) if pin else None, "ld": _product(page)}
 
 
@@ -393,6 +395,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
         if not (res or com):
             raise RuntimeError("the new site listed no publishable ad")
+        if a.type != "all":
+            res, com = (res, []) if a.type == "residential" else ([], com)
         db.upsert_maqam_residential_batch(res)
         db.upsert_maqam_commercial_batch(com)
         notes = [f"coverage {json.dumps(cover, ensure_ascii=False)}", f"skipped {dict(skipped)}"]
@@ -415,7 +419,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 else:
                     notes.append(f"{tbl} pruned={n}")
         else:
-            notes.append("NOT pruned (walk incomplete)")
+            notes.append("NOT pruned (" + ("walk incomplete" if not ok else f"--type {a.type}") + ")")
         healthy = db.end_run(run_id, ok=True, rows_seen=len(w["units"]), rows_upserted=len(res) + len(com),
                              degraded=degraded, notes="; ".join(notes)[:900],
                              check_tables=["maqam_residential_listings", "maqam_commercial_listings"])

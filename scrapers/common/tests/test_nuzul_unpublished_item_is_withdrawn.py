@@ -55,3 +55,12 @@ def test_the_oracle_retires_an_unpublished_item():
 
 def test_the_crawl_refuses_it_by_the_same_predicate():
     assert R.map_listing(UNPUBLISHED_52019, R.TENANT)[2] == "unpublished"
+
+
+def test_a_redirected_404_counts_but_a_redirected_challenge_never_does():
+    """maqam 2026-11-07: the card's link 308'd to a 404 and the engine called it «a different path»."""
+    def sf(text):
+        return lambda: types.SimpleNamespace(get=lambda url, **k: types.SimpleNamespace(
+            status_code=404, text=text, url="https://elsewhere.example/properties/1"))
+    assert R._web_status(R.TENANT, 1, sf("رمز الخطأ 404")) == 404
+    assert R._web_status(R.TENANT, 1, sf("<title>Attention Required! | Cloudflare</title>")) is None

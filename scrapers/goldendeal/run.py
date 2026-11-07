@@ -148,6 +148,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.honest_fetch import WALL_WORDS  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
@@ -631,7 +632,10 @@ def _web_status(tenant: Tenant, pid: int, session_factory: Callable[[], Any]) ->
     except Exception:  # noqa: BLE001 — unreadable is no opinion
         return None
     same = str(getattr(r, "url", url)).rstrip("/") == url
-    return r.status_code if same or r.status_code == 404 else None
+    if not same and r.status_code == 404:
+        low = (getattr(r, "text", "") or "")[:4000].lower()
+        return None if any(w in low for w in WALL_WORDS) else 404     # a challenge is never a death
+    return r.status_code if same else None
 
 
 def verify_gone_for(tenant: Tenant, canary: Callable[[], tuple[bool, str]],
