@@ -634,12 +634,6 @@ def _licence_on_card(r: dict[str, Any]) -> None:
     does not already carry the key. A row that does not write additional_info is left alone: an upsert
     replaces the whole column, so inventing one here would erase the stored panel."""
     lic = r.get("license_number")
-    # A JSON NUMBER is the same licence: rawaf's API sends adLicenseNumber as 7200423552, and the
-    # str-only check left all 19 rawaf cards without it after the 11-07 08:17 crawl (🔧 11-07). The
-    # column is text, so store the digits as text in both places. A bool is never a licence.
-    if isinstance(lic, int) and not isinstance(lic, bool):
-        lic = str(lic)
-        r["license_number"] = lic
     info = r.get("additional_info", _MISSING)
     if info is _MISSING or not isinstance(lic, str) or not _REGA_AD_LICENCE.match(lic.strip()):
         return

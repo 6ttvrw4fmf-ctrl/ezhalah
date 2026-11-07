@@ -199,6 +199,11 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
     row["additional_info"] = {k: v for k, v in {
         "type_ar": type_ar, "slug": p.get("slug"),
     }.items() if v is not None}
+    # «ترخيص<br/> 7201073069» in the ad's own text: card parity found it on the page and on 0 cards (🔧 2026-11-07).
+    lic = normalize.ad_licence_from_prose(desc)
+    if lic:
+        row["license_number"] = lic
+        row["additional_info"]["rega_ad_license_number"] = lic
     return row, category, ""
 
 
