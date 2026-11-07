@@ -46,6 +46,7 @@ SOURCE SHAPE (measured live 2026-09-24, before any code):
 from __future__ import annotations
 
 import argparse
+import os
 import html as ihtml
 import re
 import sys
@@ -329,6 +330,33 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    if os.environ.get("ALQ_PROBE", "1") == "1":
+        import json as _j
+        for u in (BASE + "/", BASE + "/robots.txt", ARCHIVE, BASE + "/properties/", BASE + "/?post_type=property",
+                  BASE + "/wp-json/", BASE + "/wp-json/wp/v2/property?per_page=3", BASE + "/wp-json/wp/v2/properties?per_page=3",
+                  BASE + "/en/", BASE + "/ar/"):
+            try:
+                r = s.get(u, timeout=40, allow_redirects=True)
+                b = r.text or ""
+                _gen = re.findall(r'<meta name=.generator. content=.([^"<>]+)', b)[:2]
+                print(f"PROBE {u} -> {r.status_code} final={r.url} bytes={len(b)} gen={_gen}", flush=True)
+                if u.endswith("/wp-json/") and r.status_code == 200:
+                    try:
+                        rs = list((_j.loads(b).get("routes") or {}).keys())
+                        print("  routes:", [x for x in rs if "prop" in x or "list" in x or "unit" in x][:40], "ns:", _j.loads(b).get("namespaces"))
+                    except Exception as e:
+                        print("  routes parse fail", e)
+                elif "robots" in u or "wp/v2" in u:
+                    print("  body:", b[:700].replace("\n", " | "))
+                else:
+                    hrefs = sorted(set(re.findall(r'href="(https?://[^"]*alqasem[^"]*|/[^"]*)"', b)))
+                    print("  hrefs:", len(hrefs), [h for h in hrefs if not h.endswith((".css", ".js", ".png", ".jpg", ".svg", ".webp", ".ico"))][:80])
+                    print("  apis:", sorted(set(re.findall(r'["\'](/?(?:api|wp-json)/[^"\'\s]{0,80})', b)))[:30])
+                    print("  scripts:", re.findall(r'<script[^>]+src="([^"]+)"', b)[:12])
+                    print("  title:", re.findall(r"<title>(.*?)</title>", b, re.S)[:1])
+            except Exception as e:
+                print(f"PROBE {u} EXC {type(e).__name__}: {e}", flush=True)
+        return 1
     try:
         urls = listing_urls_from_sitemap(fetch(s, SITEMAP))
         if not urls:
