@@ -1460,7 +1460,7 @@ def _safe_evidence(kw: str, line: str) -> str:
         grouped = re.fullmatch(r"[1-9]\d{0,2}(?:([,.])\d{3})(?:\1\d{3})*(?:[.,]\d{1,2})?\+?", x)
         return bool(grouped) or (len(d) < 9 and not re.fullmatch(r"5\d{8}", d))
     # A phone split by spaces/dashes («966 51 234 5678») is removed as a span before figures are read.
-    sep = r"[\s,.\-]*"
+    sep = r"[^\w]*"                       # any punctuation/space: «050/123/4567», «(050) 123-4567», «050_123»
     grouped = r"[1-9]\d{0,2}(?:([,.])\d{3})(?:\1\d{3})*"
     unphoned = re.sub(rf"(?<!\d)(?:(?:\+?(?:00)?966{sep}|0)[15]|5)(?:{sep}\d){{8}}(?!\d)",
                       lambda m: m.group(0) if re.fullmatch(grouped, m.group(0))
