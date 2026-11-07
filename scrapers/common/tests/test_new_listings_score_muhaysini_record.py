@@ -28,7 +28,15 @@ def test_a_wrong_stored_value_still_mismatches():
 def test_land_total_is_the_price_and_the_rate_is_the_metre_price():
     rec = {**REC, "AdValidator": {"advertisement": {"advertisementType": "بيع", "propertyArea": 600,
                                                     "propertyPrice": 1500, "landTotalPrice": 900000}}}
-    assert S.compare_listing({"price_total": 900000}, _page(rec))["price"] == S.MATCH
+    pg = _page(rec)
+    assert "السعر 900000 ريال" in pg["evidence_lines"] and "سعر المتر 1500 ريال" in pg["evidence_lines"]
+    assert S.compare_listing({"price_total": 900000}, pg)["price"] == S.MATCH
+
+
+def test_no_land_total_heads_with_the_property_price():
+    pg = _page()
+    assert "السعر 1600000 ريال" in pg["evidence_lines"]
+    assert not any(x.startswith("سعر المتر") for x in pg["evidence_lines"])
 
 
 def test_unreadable_is_none():
