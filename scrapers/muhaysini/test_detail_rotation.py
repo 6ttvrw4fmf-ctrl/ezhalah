@@ -90,4 +90,9 @@ try:
     assert R._Paced(_S()).get("u") == "resp" and calls == ["pace", "get"], calls
 finally:
     R._pace = _real_pace
+# The cursor (a DB read that raises on failure) is read only when the budget actually limits the night.
+assert not R.needs_cursor(0, 500) and not R.needs_cursor(-1, 500), "a nonpositive budget is «no limit»"
+assert not R.needs_cursor(500, 500) and not R.needs_cursor(600, 500), "a budget covering the list needs no cursor"
+assert R.needs_cursor(100, 500)
+assert "stored_last_read() if needs_cursor(DETAIL_BUDGET, len(listed_ids)) else {}" in src
 print("✓ muhaysini: request starts ≥ 1 s apart at any latency, prune probe included")

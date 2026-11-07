@@ -965,6 +965,12 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
     return items, complete
 
 
+def needs_cursor(budget: int, listed: int) -> bool:
+    """Read the stored last-read cursor only when the budget really limits tonight (0 < budget < listed):
+    a nonpositive budget means «no limit», so the read would be wasted and a DB blip would abort the run."""
+    return 0 < budget < listed
+
+
 def detail_plan(ids: list[str], budget: int, last_read: dict[str, str]) -> set[str]:
     """Which listed ids get their detail read tonight: all of them when they fit the budget, otherwise the
     `budget` ids read LONGEST ago. `last_read` maps a listed id to its stored row's last_seen_at, which only
@@ -1088,7 +1094,7 @@ def main() -> int:
             raise RuntimeError(f"{API}/list returned no properties")
         listed_ids = [i for i in (_clean(p.get("id")) for p in items) if i]
         tonight = detail_plan(listed_ids, DETAIL_BUDGET,
-                              stored_last_read() if 0 < DETAIL_BUDGET < len(listed_ids) else {})
+                              stored_last_read() if needs_cursor(DETAIL_BUDGET, len(listed_ids)) else {})
         # Listed but outside tonight's budget: SEEN on the source tonight (so never a prune candidate),
         # not rebuilt — their stored row stays as last read, and their turn comes within k nights.
         seen_not_read = {f"{PREFIX}{i}" for i in listed_ids if i not in tonight}
