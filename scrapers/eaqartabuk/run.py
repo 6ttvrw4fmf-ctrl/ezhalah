@@ -591,7 +591,8 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     # _price_on_request docstring above). Null the price rather than store a fabricated figure;
     # transaction_type/rent_period-as-Rent-vs-Buy classification still comes from status/operation
     # (a separate, reliable field) so we keep that — only the price itself is unknown.
-    if _price_on_request(_strip_tags(desc_html), _strip_tags(item.get("excerpt"))):
+    # Several figures already cleared every price field authoritatively above; plain Nones here would undo that.
+    if not _several_figures(meta.get("price")) and _price_on_request(_strip_tags(desc_html), _strip_tags(item.get("excerpt"))):
         price_total = price_annual = rent_period = None
         if is_rent:
             # «السعر حسب …» is the source's own statement: a rental's earlier figure and period must not linger.

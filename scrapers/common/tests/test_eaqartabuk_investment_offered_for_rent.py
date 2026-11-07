@@ -160,3 +160,18 @@ def test_a_sale_that_turns_into_several_figures_clears_its_stale_total():
         db._unknown_must_not_overwrite_known(row)
         stored.update({k: row[k] for k in ("price_total",) if k in row})
     assert stored == {"price_total": None}, stored
+
+
+def test_several_figures_plus_on_request_wording_still_clears_the_stored_rent_pair():
+    """Review on #10940: crawl 2 holds two figures AND «السعر حسب النشاط» — the on-request branch must not undo the clear."""
+    from scrapers.common import db
+    stored = {}
+    for title, excerpt, price in (("هنجر للايجار شهري", "", "2500"), ("هنجر حي المصيف", "السعر حسب النشاط", "2500 1800")):
+        item = _item(title, excerpt)
+        item["meta"]["price"] = price
+        row, _ = map_listing(item, _mp("investment", "استثمار"), "<p>هنجر</p>", [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_total", "price_annual", "rent_period") if k in row})
+        if price == "2500":
+            assert stored["price_annual"] == 30000 and stored["rent_period"] == "monthly", stored
+    assert stored == {"price_total": None, "price_annual": None, "rent_period": None}, stored
