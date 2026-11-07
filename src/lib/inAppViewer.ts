@@ -107,6 +107,10 @@ export const IN_APP_VIEWER_HOSTS = [
   'ryadah.com.sa',
   'sodasyat.sa',
   'app.abaadapp.sa',
+  // steam-realestate.com 2026-11-07 (owner: «Steam opens inside Ezhalah»): its ad pages send no X-Frame-Options and
+  // no frame-ancestors (CSP is only upgrade-insecure-requests); ad «STeam Residence 103» rendered its own page inside a
+  // plain iframe on an iPhone-13 profile in 2.9 s (Playwright, same allow=, no sandbox). robots allow /property/.
+  'steam-realestate.com',
 ] as const;
 
 /** The allowlisted host a listing URL belongs to, or null when it must open the old way. */
@@ -205,6 +209,13 @@ export const IN_APP_PREVIEW_HOSTS = [
   'nawait.sa',
   'just.sa',
   'sadin.com.sa',
+  // 2026-11-07 (owner: «for the sites that must open in a new tab, show everything before the user leaves»). Their
+  // pages send X-Frame-Options (KW, Asas Makeen and Almajdiah SAMEORIGIN, Al Rajhi DENY — checked 2026-11-07), so a card click
+  // went straight to a new tab with no Ezhalah ad page. Now they open Ezhalah's ad page first, like every site above.
+  'kwsaudiarabia.com',
+  'mrajhi.com.sa',
+  'asasmakeen.com',
+  'almajdiah.com',
 ] as const;
 export function inAppPreviewHost(url: string | null | undefined): string | null {
   if (!url) return null;

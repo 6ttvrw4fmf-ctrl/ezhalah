@@ -602,7 +602,9 @@ const districtProblems = (f: DistrictFns): string[] => {
   if (f.districtPlace({ platform: 'wasalt', district_ar: 'حي الساحل', city_ar: 'جدة' })?.query !== 'حي الساحل، جدة') out.push('Wasalt gets the district map (owner 2026-10-19)');
   for (const p of ['sakan', 'abralosol', 'nofodh', 'arkaan', 'bossbih', 'ksaaqar', 'mustqr', 'aqalemhajer', 'alshawaf', 'reinvest',
     // owner 2026-10-20: every remaining preview site
-    'haraj', 'muktamel', 'ialqarawi', 'aqarcity', 'rightcompound', 'sirdab', 'therc', 'sokok', 'raghdan', 'alsaedan', 'goldendeal', 'nufouth', 'akariyoun', 'sukna', 'aldarim', 'aqargate', 'shomou', 'abwbna', 'aqaratikom', 'thousand', 'alobid', 'jazwtn', 'aljassim', 'manafe', 'opensooq', 'justsa', 'senan', 'bahadhabab', 'erapulse', 'maqam', 'jawher', 'm3tmd', 'azure', 'holoul', 'superoffice', 'alhoshan', 'arsh', 'flow', 'nowaisiry', 'hasaad', 'almuteb', 'nawafeth', 'wadod', 'october', 'hazim', 'eydah', 'eightfloor']) {
+    'haraj', 'muktamel', 'ialqarawi', 'aqarcity', 'rightcompound', 'sirdab', 'therc', 'sokok', 'raghdan', 'alsaedan', 'goldendeal', 'nufouth', 'akariyoun', 'sukna', 'aldarim', 'aqargate', 'shomou', 'abwbna', 'aqaratikom', 'thousand', 'alobid', 'jazwtn', 'aljassim', 'manafe', 'opensooq', 'justsa', 'senan', 'bahadhabab', 'erapulse', 'maqam', 'jawher', 'm3tmd', 'azure', 'holoul', 'superoffice', 'alhoshan', 'arsh', 'flow', 'nowaisiry', 'hasaad', 'almuteb', 'nawafeth', 'wadod', 'october', 'hazim', 'eydah', 'eightfloor',
+    // owner 2026-11-07: every pin-less ad on Ezhalah's ad page
+    'sadin', 'albdah', 'manzo', 'aqaralsaudia', 'fursaghyr', 'nafithh', 'kellerwilliams', 'mrajhi', 'almajdiah', 'asasmakeen']) {
     if (f.districtPlace({ platform: p, district_ar: 'حي الساحل', city_ar: 'جدة' })?.query !== 'حي الساحل، جدة') out.push(`${p} gets the district map (owner 2026-10-19, the ten largest native-preview sites)`);
   }
   if (f.districtPlace({ platform: 'aqarmonthly', district_ar: 'حي الملز', city_ar: 'الرياض' })?.query !== 'حي الملز، الرياض') out.push('Aqar Monthly gets the district map too (owner 2026-10-17)');
@@ -643,11 +645,13 @@ const districtWired = (dataSrc: string, previewSrc: string) =>
   /if \(!pin\) setArea\(districtPlace\(row, listingOpenUrl\(l\)\)\);/.test(previewSrc)   // only when the source published no pin; the ad's own link feeds the town fallback
   && /\{!geo && area && IS_WEB \? \(/.test(previewSrc) && /\{mapOpen && !geo && area && IS_WEB \? \(/.test(previewSrc)
   && (previewSrc.match(/districtEmbedUrl\(area, locale\)/g) ?? []).length === 2
-  && /t\('Approximate location'\)/.test(previewSrc) && /t\('\{name\} published no exact location', \{ name \}\)/.test(previewSrc)
+  && (previewSrc.match(/<Text style=\{s\.areaTagTx\}>\{areaName\}<\/Text>/g) ?? []).length === 2 && !/Approximate location/.test(previewSrc)
+  && /t\('\{name\} published no exact location', \{ name \}\)/.test(previewSrc)
   && /const geo = mapPoint\(own\);\s*return \{ geo, row: own \};/.test(dataSrc);        // the pin path is untouched
-check('district border wiring: only without a pin, the free embed by name in both views, approximate labels, pin path untouched', districtWired(codeOnly(DATA_SRC), PREVIEW));
+check('district border wiring: only without a pin, the free embed by name in both views, tagged with the district name, pin path untouched', districtWired(codeOnly(DATA_SRC), PREVIEW));
 sourceMutant('the district map drawn even when the source published a pin', !districtWired(codeOnly(DATA_SRC), PREVIEW.replace('if (!pin) setArea(districtPlace(row, listingOpenUrl(l)));', 'setArea(districtPlace(row, listingOpenUrl(l)));')));
-sourceMutant('the approximate label dropped', !districtWired(codeOnly(DATA_SRC), PREVIEW.replaceAll("t('Approximate location')", "t('Location')")));
+// owner 2026-11-07: the tag names the district itself, never «الموقع التقريبي»
+sourceMutant('the «approximate» label back on the district map', !districtWired(codeOnly(DATA_SRC), PREVIEW.replace('<Text style={s.areaTagTx}>{areaName}</Text>', "<Text style={s.areaTagTx}>{t('Approximate location')}</Text>")));
 
 // ── the page counts only what search shows (owner 2026-10-10: a site the engineer marks dead/suspended
 // is hidden EVERYWHERE). Search's own switch is production_ready (a dormant platform's rows are false);
