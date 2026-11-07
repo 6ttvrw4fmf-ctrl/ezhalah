@@ -83,7 +83,9 @@ const PROBE_ROOT = 'scrapers.common.cleanup';
 // transport anyway — the rule is per invocation, not per intent.
 // 2026-11-05: `scrapers.common.served_link_check` (the daily served-link check) imports cleanup's `_probe`
 // for wasalt links (9). served-link-check.yml runs it under xvfb with WASALT_BROWSER and Chromium.
-const COHORT_FLOOR = 9;
+// 2026-11-06: `scrapers.common.card_parity` (the card-parity robot) imports new_listings_score → cleanup (10);
+// card-parity.yml runs it under xvfb with WASALT_BROWSER and Chromium.
+const COHORT_FLOOR = 10;
 
 const ls = (glob: string) =>
   execFileSync('git', ['ls-files', glob], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);

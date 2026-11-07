@@ -6,7 +6,7 @@
 //
 //   node e2e/engineers/customer-journey.mjs --mode normal --sample 5
 //   node e2e/engineers/customer-journey.mjs --mode af --listings '[{"platform":"aqar","source_table":"listings","listing_id":123}]'
-//   flags: --mode normal|af (required) · --sample N | --listings '<json>' · --count-watch N (af: tick N features, read the live count) · --phone (full mobile
+//   flags: --mode normal|af (required) · --sample N | --listings '<json>' · --count-watch N (af: tick N features, read the live count) · --card-full (normal: record the whole card text + photo) · --phone (full mobile
 //          emulation; the viewport is phone-size either way) · --json (machine lines only)
 //
 // NORMAL: drive the Filter home the way a customer does (deal toggle, city typeahead, district
@@ -80,6 +80,7 @@ const arg = (name) => { const i = process.argv.indexOf(`--${name}`); return i > 
 const MODE = arg('mode');
 const PHONE = process.argv.includes('--phone');
 const JSON_ONLY = process.argv.includes('--json');
+const CARD_FULL = process.argv.includes('--card-full');   // card_parity.py: full card text + photo painted
 const COUNT_WATCH = arg('count-watch') ? Math.min(6, parseInt(arg('count-watch'), 10)) : 0; // see COUNT WATCH below
 if (MODE !== 'normal' && MODE !== 'af') { console.error("need --mode normal|af"); process.exit(2); }
 const SAMPLE = arg('sample') ? Math.min(8, parseInt(arg('sample'), 10)) : null;     // politeness cap
@@ -389,6 +390,22 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       if (row.license_number) {
         const ascii = text.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
         result.evidence.licenceOnCard = ascii.includes(String(row.license_number).trim());
+      }
+      // CARD PARITY (scrapers/common/card_parity.py, 2026-11-06): the whole card as the customer reads it, and whether
+      // its photo painted (a loaded <img> wider than an icon, and no «لا توجد صورة» placeholder).
+      if (CARD_FULL) {
+        result.evidence.cardFull = text.slice(0, 4000);
+        // Photos load lazily: bring the card into view and wait (<= 8 s) for a painted photo or the placeholder.
+        // Still neither → null (unknown), never «missing».
+        await card.first().scrollIntoViewIfNeeded().catch(() => {});
+        result.evidence.cardPhoto = await card.first().evaluate(async (el) => {
+          for (let t = 0; t < 16; t++) {
+            if (/لا توجد صورة/.test(el.textContent || '')) return false;
+            if ([...el.querySelectorAll('img')].some((i) => i.complete && i.naturalWidth > 64)) return true;
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          return null;
+        }).catch(() => null);
       }
       step('click card');
       const link = card.first().getByRole('link').first();
