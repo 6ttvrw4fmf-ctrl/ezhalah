@@ -53,6 +53,20 @@ def test_figure_then_label_style_both_figures():
     assert N.stated_rent_period(28000, t) == "annual"
 
 
-def test_a_figure_with_a_different_label_on_each_side_and_no_owner_is_ambiguous():
-    # «سنوي» after 2500 heads nothing; «شهري» before it heads nothing else: no single reading → unstated.
-    assert N.stated_rent_period(2500, "ايجار شهري 2500 سنوي") is None
+def test_real_haraj_shapes_2026_11_07():
+    # contract types «عقد سنوي او شهري» after the figure state no period for it
+    assert N.stated_rent_period(1500, "الايجار 1500 ﷼ عقد سنوي او شهري الماء والكهرباء على المؤجر") is None
+    assert N.stated_rent_period(1950, "• السعر: 1950 ريال • نوع العقد: سنوي أو شهري •") is None
+    # the label before the figure wins over a payment note after it
+    assert N.stated_rent_period(40000, "الايجار السنوي 40,000 - (دفعتين او اول ست اشهر دفعه وبعدها شهري )") == "annual"
+    assert N.stated_rent_period(20000, "💰 الإيجار السنوي: 20,000 ريال 📅 يقبل الدفع الشهري 📍") == "annual"
+    assert N.stated_rent_period(39000, "قيمة الإيجار السنوي: 39,000 ريال 💳 طريقة الدفع: شهريًا 3,250 ريال شهريًا") == "annual"
+    # a label followed by prose and an instalment figure still belongs to the figure before it
+    assert N.stated_rent_period(36000, "الايجار 36000 سنوي ع دفعتين 18000 الدفعه الاولى") == "annual"
+
+
+def test_more_haraj_shapes_2026_11_07():
+    assert N.stated_rent_period(60000, "الاستراحتين ب 60000ريال سنوي 6000ريال شهري الاستراحة الوحدة 30000ريال") == "annual"
+    assert N.stated_rent_period(6000, "الاستراحتين ب 60000ريال سنوي 6000ريال شهري") == "monthly"
+    assert N.stated_rent_period(50000, "💰 الإيجار: [5000]شهري و السعر سنوي (50000) ( رقم") == "annual"
+    assert N.stated_rent_period(45000, "💰 رسوم الاشتراك: 150 ريال شهري 💰 الإيجار السنوي: 45,000 ريال") == "annual"
