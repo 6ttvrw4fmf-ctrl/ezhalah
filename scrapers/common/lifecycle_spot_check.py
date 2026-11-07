@@ -352,6 +352,9 @@ def _own_page_reader(platform: str):
 # while its crawl's API-record oracle was written that night for exactly those ads).
 CRAWL_ORACLES: dict[str, str] = {
     "aqaratikom": "scrapers.aqaratikom.run:_verify_gone",
+    # 2026-11-07 (backlog 1427): nowaisiry re-uses slugs, so a status read of the stored URL answers for
+    # ANOTHER post (NW4349's slug serves post 4513) and revived an ad prune had hidden on a direct 404.
+    "nowaisiry": "scrapers.nowaisiry.run:spot_check_oracle()",
 }
 
 

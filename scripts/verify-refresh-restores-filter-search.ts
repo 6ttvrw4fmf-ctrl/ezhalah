@@ -102,7 +102,24 @@ check('/agent goes Home on a hard refresh, with or without params',
   && shouldSendRefreshHome('/agent', '?seed=%D8%B4%D9%82%D8%A9') === true);
 check('/settings still goes Home', shouldSendRefreshHome('/settings', '') === true);
 check('/interview still goes Home', shouldSendRefreshHome('/interview', `?filter=${encodeURIComponent(REAL_FILTER)}`) === true);
-check('/about still goes Home', shouldSendRefreshHome('/about', '') === true);
+// The DOORS go Home THEMSELVES, after raising their modal (src/app/support.tsx / about.tsx). With
+// per-route lazy chunks (asyncRoutes, #9956) a root-layout redirect wins the race and the door never
+// mounts: /support opened the bare home with no Support modal (guardian the-doors-open, red from
+// 2026-11-02). So the guard must leave them alone — and each door must still replace the URL with '/',
+// or «a refresh lands on Home» would stop being true for them.
+for (const door of ['/support', '/about']) {
+  check(`${door} is left to its own door route (it raises the modal, then replaces to '/')`,
+    shouldSendRefreshHome(door, '') === false);
+  const doorSrc = readFileSync(new URL(`../src/app${door}.tsx`, import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+  check(`${door}.tsx still raises its modal and then goes Home with router.replace('/')`,
+    /openModal\('(support|about)'\)[\s\S]{0,200}router\.replace\('\/'\)/.test(doorSrc));
+}
+// Mutation proof: the pre-fix guard (doors NOT exempt) must be caught by the check above.
+{
+  const preFix = (p: string | null | undefined) => !!p && !['/', '/auth'].includes(p);
+  check('(mutation) a guard that redirects the doors is caught', preFix('/support') === true && shouldSendRefreshHome('/support', '') !== preFix('/support'));
+}
 check('/ is left alone', shouldSendRefreshHome('/', '') === false);
 check('/auth is left alone (OAuth redirect must finish signing in)', shouldSendRefreshHome('/auth', '?code=abc') === false);
 check('null/empty pathname is left alone',

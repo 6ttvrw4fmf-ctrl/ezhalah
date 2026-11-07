@@ -62,6 +62,7 @@ def test_sale_price_is_the_source_number_and_nothing_derived():
     assert r["price_evidence"]["raw"] == 2100000 and r["price_evidence"]["origin"] == "api"
     assert (r["area_m2"], r["bedrooms"], r["bathrooms"]) == (142, 3, 8)       # «7+» is the source's own 8
     assert r["license_number"] == "7200911553" and r["district_ar"] == "الملك فهد"
+    assert r["additional_info"]["rega_ad_license_number"] == "7200911553"   # the card's «رقم رخصة الإعلان» row
     assert r["additional_info"]["latitude"] == pytest.approx(24.74589729) and r["furnished"] is None   # PARTLY
 
 
@@ -74,6 +75,20 @@ def test_rent_period_maps_straight_across():
     daily = _row(_ad(offering_type="للايجار", price={"value": 600, "period": "daily"}), deal="Rent")
     assert daily.get("rent_period") is None and daily.get("price_annual") is None   # no bucket, never ×365
     assert daily["price_evidence"]["raw"] == 600 and daily["additional_info"]["price_period"] == "daily"
+
+
+def test_cheap_yearly_residential_rent_is_stored_monthly_owner_2026_11_04():
+    # «yearly» 3,900 on a home = a per-month price: stored monthly ×12, PF's own figure + word kept as evidence
+    r = _row(_ad(offering_type="للايجار", price={"value": 3900, "period": "yearly"}), deal="Rent")
+    assert (r["rent_period"], r["price_annual"]) == ("monthly", 46800)
+    ev = r["price_evidence"]
+    assert (ev["raw"], ev["source_period"], ev["judged_monthly"]) == (3900, "yearly", True)
+    # the edges of the fleet band (300 ≤ v < 8,000) and the commercial side stay as published
+    for v in (299, 8000):
+        r = _row(_ad(offering_type="للايجار", price={"value": v, "period": "yearly"}), deal="Rent")
+        assert (r["rent_period"], r["price_annual"]) == ("annual", v) and "judged_monthly" not in r["price_evidence"]
+    office = _row(_ad(offering_type="للايجار", price={"value": 800, "period": "yearly"}), deal="Rent", cat="commercial")
+    assert (office["rent_period"], office["price_annual"]) == ("annual", 800)
 
 
 def test_hidden_price_is_price_on_request_and_a_contradicting_period_is_skipped():

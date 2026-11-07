@@ -88,11 +88,14 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # moj (2026-10-10) is not a listing platform at all: it reads the Ministry of Justice's district sales
 # aggregates into moj_district_sales (scrapers/moj/sales.py) and writes no listing.
 # "facts" is not a platform: scrapers/facts/ is the facts-extraction test reader (2026-10-24), like "common".
-# almuteb JOINS this set on 2026-11-04 (owner «Yes, use your picks», decision 2): almuteb.sa has answered
-# NXDOMAIN since 2026-10-23; the platform is retired (RETIRED_PLATFORMS.txt) and its 11 rows are hidden and
-# adjudicated, kept. Its CANDIDATE_PLUS_DIRECT policy left the registry in the same change.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj", "facts",
-                                       "almuteb"})
+# almuteb joined this set on 2026-11-04 (retired, owner decision 2) and LEFT it the same day: the owner asked
+# for it back as dormant («yeah do that ok», 2026-11-04) so the daily crawl can bring it back by itself if
+# almuteb.sa ever serves its catalogue again. Its CANDIDATE_PLUS_DIRECT policy is back in POLICIES below.
+# kellerwilliams, almajdiah, asasmakeen, mrajhi, steam (2026-11-05) are STAGED exactly like propertyfinder was: their
+# run.py files store rows in tables no search arm reads, registry 'retired' until the owner launches them
+# (docs/ops/FIVE_SOURCES_LAUNCH.md); each gets its SOURCE_LIST_PRESENCE policy in that launch change.
+# Each LEAVES this set at its own launch (kellerwilliams + almajdiah: 2026-11-05) (owner switch, docs/ops/FIVE_SOURCES_LAUNCH.md) with SOURCE_LIST_PRESENCE below.
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "moj", "facts"})
 
 
 class _P(dict):
@@ -502,6 +505,16 @@ POLICIES: dict[str, _P] = {
         "Measured 2026-09-24: rented/sold ids 84, 48, 82 → 404 (3/3); live 92, 93, 80 → 200 (3/3); "
         "999999 → 500. Rented/sold cards carry no href on the catalogue, so the crawl never links "
         "them either."),
+    "almuteb": _P(
+        _pol("almuteb", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own wp/v2/properties REST record: HTTP 404 carrying rest_post_invalid_id is "
+        "GONE; a 200 for this id whose status is not publish or whose property_status terms match "
+        "the closed-deal vocabulary (تم البيع / تم الإيجار / مباع / مؤجر) is GONE; for a -U<i> "
+        "multi-unit row, the parent 200 with fewer fave_multi_units than the unit's index is GONE "
+        "(the post lives on, the unit was removed). Otherwise LIVE; a 200 for another id, an "
+        "unparseable body and 401/403/429/5xx are UNKNOWN.",
+        "Measured 2026-09-24: 10 posts, all publish, one carrying a Houzez multi-unit; the "
+        "closed-deal ids are resolved from the live property_status taxonomy each run."),
     "aalbarrak": _P(
         _pol("aalbarrak", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the post's own wp/v2/properties REST record: HTTP 404 carrying rest_post_invalid_id is "
@@ -1133,6 +1146,33 @@ POLICIES: dict[str, _P] = {
         "prune_unseen unless every detail page was readable.",
         "An oracle is possible — /web/gallery/<id> answers HTTP 404 for an unknown id — but it is "
         "not written yet, so this does not claim a direct check."),
+    "kellerwilliams": _P(
+        _pol("kellerwilliams", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's complete list API (POST api.kw-saudiarabia.com/api/listings/list/properties, every page to pagination.total_pages, unique ids checked against total_items). run.py prunes only after a complete walk.",
+        "No oracle within the owner's access rule: ad pages are a JS app over the same API, never fetched; the complete list is the reading."),
+    "asasmakeen": _P(
+        _pol("asasmakeen", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's unit sitemap (sitemap-units-ar.xml), every listed page read; run.py prunes only when every page answered with a unit block.",
+        "An oracle is possible (a removed unit should leave the sitemap and its page) but is not written; the sitemap + every page read IS this run's check."),
+    "mrajhi": _P(
+        _pol("mrajhi", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's sitemap.xml /units/ pages, every page read and its JSON-LD parsed; run.py prunes only when every page answered.",
+        "An oracle is possible (/units/<code> of a removed unit) but is not written; the sitemap + every page read IS this run's check."),
+    "steam": _P(
+        _pol("steam", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's Yoast property-sitemap.xml, every Arabic /property/<slug>/ page read; run.py prunes only when every page answered.",
+        "An oracle is possible (a removed WordPress post answers 404) but is not written; the sitemap + every page read IS this run's check."),
+    "almajdiah": _P(
+        _pol("almajdiah", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's complete rental API (rental-request?page=N to meta.last_page, every project's /rental-request/<id> to its last_page, project count checked against meta.total). run.py prunes only after a complete walk.",
+        "A unit has no page of its own (it is a card on its project page), so the complete list is the reading."),
+    "propertyfinder": _P(
+        _pol("propertyfinder", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's four COMPLETE category lists (/ar/<side>/عقارات-….html?page=N, "
+        "__NEXT_DATA__ searchResult, walked to meta.page_count and checked against meta.total_count; a side short "
+        "of it is walked twice). run.py prunes a table only when every side feeding it walked completely.",
+        "No oracle is possible within the owner's access rule: single-ad /plp/ pages answer 403 to robots and are "
+        "never fetched, so the complete list is the only reading there is."),
     "opensooq": _P(
         _pol("opensooq", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the real-estate SERP's inline JSON (/ar/عقارات?page=N, "
@@ -1516,6 +1556,13 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # 680 probed, 408 live, 272 gone, 0 unknown; gone = «العرض محذوف او قديم», re-read gone by a second
     # client (curl) 4/4 + the 2 first-run controls. 0 of 680 had ever been removed before this.
     "haraj",
+    # 2026-11-07 (♻️): sakani. Shadow daily run 11-06 07:41 read 2,036 of 2,036 with controls right
+    # (alive 1,968, dead 68, unknown 0); its three shadow rechecks of 11-06/11-07 read 11, 11 and 12
+    # struck-candidate units dead and could hide none, so a unit sakani had unpublished stayed on
+    # screen (dead-visible 11-07: SKS23002 / 22223720, REGA licence ended 11-06, over the line). The
+    # crawl's own prune cannot reach them: its coverage guard trips (re-saw 1,560 of 1,968) and the
+    # refused-prune reading skips tables of 1,000+ rows. Second reader: lifecycle-spot-check 11-07.
+    "sakani",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
@@ -1598,6 +1645,10 @@ SOURCE_LIST_DAILY: tuple[str, ...] = (
     "abralosol", "albukaeri", "aqaratikom", "aqarnajran", "arkaan", "awal", "dallali",
     "fahadalshahri", "fursaghyr", "maqrat", "muajarh", "nafithh", "october", "opensooq",
     "ramzalqasim", "safera", "satel", "shmoualshmal", "shomou", "squares", "vmksa", "wahadat",
+    # Property Finder launch (owner 2026-11-04 approved the source; launched by the owner's switch)
+    "propertyfinder",
+    # The five sources of 2026-11-05 (owner order; launched by the owner's switch, docs/ops/FIVE_SOURCES_LAUNCH.md)
+    "kellerwilliams", "almajdiah", "asasmakeen", "mrajhi", "steam",
 )
 for _p in SOURCE_LIST_DAILY:
     assert POLICIES[_p]["strategy"] == CRAWL_PRESENCE_ONLY, _p      # never demote an oracle tier

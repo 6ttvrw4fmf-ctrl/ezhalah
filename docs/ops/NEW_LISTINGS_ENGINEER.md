@@ -1,5 +1,28 @@
 # 🆕 NEW LISTINGS ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-06 — «LET THE ENGINEERS SEE WHAT CODERABBIT SAYS» (permanent).** CodeRabbit reviews every PR.
+> In the last 40 PRs it flagged 17 MAJOR issues (e.g. «Update the cron schedule mirror in this change», «Handle array-shaped
+> `additional_info`», «Do not treat the latest date as a complete run»), but only 3 were marked addressed. So, on every PR of yours:
+> 1. **Read CodeRabbit's comments before you merge** (`gh api repos/6ttvrw4fmf-ctrl/ezhalah/pulls/<N>/comments`, author `coderabbitai`).
+> 2. **Every Major/Critical comment is FIXED in the PR, or answered on its thread with the reason it is wrong.** Never merge over
+>    a silent Major. Minor/nitpick: fix when cheap, otherwise reply once.
+> 3. **Review «skipped»?** Comment `@coderabbitai review` on the PR and wait for it. Do not loosen the merge gate.
+> 4. **Your `:end` row adds one line:** «CodeRabbit: N major (F fixed · A answered · 0 silent)».
+> 5. **Once a week (🔧 Monday run):** sweep merged PRs from the last 7 days for silent Majors, and fix or route each one as a bug.
+
+> **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
+
+> **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
+> Open alerts fell 459 → 102 between 10-29 and 11-04, but the owner still found two whole bug classes no detector saw:
+> (1) land ads with the per-metre price typed as the TOTAL (~307 cards, e.g. 1,700 SAR for 375 m² in الأحساء), and
+> (2) Property Finder cards without «رقم رخصة الإعلان». So, every run, in your own lane:
+> 1. **A fix ships with its guard.** A fix is not closed until a detector, barrier or test exists that would have caught it. A detector repairs before it raises.
+> 2. **Blind-spot hunt.** Pick 3 random LIVE cards from different sites. At least one must be from a site that went live in the last 14 days.
+>    Compare every field the card shows with the source page, the way a customer does: price + period, area, rooms, baths, district, pin, licence, and the AF facts your lane owns.
+>    Anything wrong that no detector flagged is a **blind spot**. Build its detector in the same run, or file it with evidence in the owning lane's `ops_engineer_backlog`.
+> 3. **New-site parity.** For 14 days after a site goes live (Property Finder: live 2026-11-04; Keller Williams + Almajdiah: live 2026-11-05), check its cards against the parity standard: licence, rent period, district, pin, AF facts and liveness, at Aqar/Haraj level. A missing field is a bug of the lane that owns it.
+> 4. **The count must fall.** Your `:end` row adds one line: «blind spots found N · guards added N · open alerts start→end (alert_event, resolved_at is null)».
+
 > **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
 > 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
 > 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
@@ -74,6 +97,13 @@ phone app. Sample: 800 Riyadh units Gathern lists → we had seen 679, only 112 
 normal filter (city, district, type, rent, monthly), with the card note «اضغط للاطلاع على الأسعار حسب مدة الإقامة» and NO
 price (owner rule 2026-10-02), and its link opens the unit for a customer (test 10 by clicking, phone and laptop). A unit
 whose link does not open is not «live».
+
+
+> **📍 OWNER ORDER 2026-11-05 — NEW LISTINGS LAND ON A TAPPABLE PIN (permanent).** A listing you bring in must show on the
+> map where a user can tap it: the same house on one site shares one spot (`map_pin_snap`, hourly), and on screen no two
+> heads ever overlap — touching heads become one gold count head (`docs/ARCHITECTURE.md`, «Map tab: no two pins ever sit on
+> each other»). When you test new listings by clicking, open one on the Map tab too. A red MAP PIN ROBOT
+> (`map-pins-live.yml`) after your batch is yours to read first; the fix itself belongs to 🔧 Quality & Repair.
 
 ## ⚠️ OWNER 2026-10-13, after a second 5/10 night: «keep doing a better job on every run … improve your job in the next run»
 What went wrong on 10-13 (measured, not guessed): six scorer misreads fixed and proven, but the night still ended
@@ -468,6 +498,17 @@ district».
    Batch 2 (315 homes) was switched on 2026-10-25 by `20261025214336`. The 123 edge homes and the 430 Apple
    couldn't answer are in the nightly Google Maps check: scheduled task `google-maps-district-check`, folder
    `~/Documents/google-maps-key/daily-check/` on the owner's Mac.
+
+   **A PIN IN A DISTRICT CITY NEVER STAYS BLANK BY ACCIDENT (owner 2026-11-05, permanent).** A served ad with a pin, in
+   a city with ≥ 10 districts on our list, whose site is silent, must have been through the pin layer within 3 days.
+   - A district field that only names the ad's OWN town («حي الدرعية الجديدة» in الدرعية, «الطائف» in الطائف) is
+     silent: `district_is_own_town()`. Another town's name is NOT silent (a city question, leave it).
+   - The nightly asks Apple about `pin_district_candidates()` (never-asked first, re-ask after 14 days); every answer
+     is kept in `listing_pin_ask`, so refused ads are not re-asked and the tail is reached.
+   - `mon_detect_pin_district_gap()` (13:03 UTC daily) repairs first, then P1 `pin_district_gap` only for a pin that
+     is not served or an ad never asked in 3 days. Edge, Apple silent, other city, shared pin = city only, not P1.
+     P2 `pin_district_name_not_on_list` lists Apple names for review: alias only by rules 9/near-twin, never by letters.
+   Barriers: `verify-pin-district-gap-detector.ts`, `verify-pin-district-fill-contract.ts`.
 9. **NEVER DUPLICATES, FOR EVERY LISTING (owner 2026-10-25, permanent).** Two things are now automatic, and you must
    never work around them:
    - **The list:** besides rule 7, a name is refused when its LETTERS equal a listed name in that city (spaces, punctuation
@@ -1160,3 +1201,45 @@ push engineer work on `claude/*` branches, scrapers-only, docs separate, and the
   (city_pin_check_silent paged against a 14-hour scheduled gap; searchability read 31 honest-unknown alsaedan arrivals
   as «stuck»), 🔬 11-03 (five detectors behind approved rules), ♻️ 11-03 (adjudicated_reactivation vs a republish).
   Rule: read the job's cron line and the rule's migration before trusting a detector; prove both directions with real numbers.
+
+## Lesson from 2026-11-04 (written by 🔧; your 11-04 end row carried no «📚 Lesson» line)
+Your own report shows it: the arkaan price proof crawl (41792826510) wrote at 08:21:07, after the :20 snapshot, so the
+fix is served only by the 09:22 sync and counted as «dated», and 6 of your 11 proof rows carry neither `push_ok = true`
+nor `"result":"PASS"` in notes, so `ops_engineer_fix_rate` read your night as 0 proven. **Rule:** a proof row is
+`push_ok = true` with `"result":"PASS"` in its notes JSON (the 10-30 coach rule), and a proof crawl is dispatched before
+:20 of the hour or its proof is dated to the NEXT :22 sync in the row itself. End every report with a «📚 Lesson» line.
+
+## 📚 FLEET LESSONS 2026-11-06 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A cron-schedule change inside a night migration turns its auto-mirror into a PERSON-only PR, and every frontend
+  deploy is refused until a human merges it.** 🆕 11-05: #10654 (mirror 20261105072102 + `sql/mirrors/cron_schedule.json`)
+  sat in LINE 1 because `verify-cron-slot-discipline` demands the cron mirror in the same PR and `sql/` is outside the
+  robot's lanes. 🔧 11-06, the same shape again: 20261106060445 (`gh-checks-that-cry-wolf`) was applied at 06:04, its
+  auto-mirror #10856 went red at 06:37 on exactly that check, `migration_drift` opened at 06:43, five `Deploy frontend`
+  runs were REFUSED 07:09–07:36 (`missing_in_git 20261106060445`) and `auto-deploy-merged-fixes` tripped its
+  three-failure breaker at 12:43 — the map and legal fixes of the night could not ship. Second night (🆕 11-05 was the first) → YOUR rule: **never
+  schedule, re-slot or unschedule a cron job in a night migration.** If it cannot wait, push the cron mirror to the
+  mirror branch within 30 minutes and put the PR in LINE 1 the same minute; a red auto-mirror is bug #1 of the merge queue.
+- **② An oracle's NAME is not an oracle — read its body; and a new reader must survive a re-read before it feeds
+  anything.** ♻️ 11-06: six new-source crawlers passed `prune_unseen` a `verify_gone` that answered «gone» without
+  reading (#10885 holds them UNKNOWN; barrier `test_verify_gone_never_kills_on_absence.py` executes every bare-name
+  `verify_gone` with the network blocked); the Keller Williams record reader read 4 of 14 list-absent ads «gone» and a
+  re-read minutes later read 3 of them «live», so #10890 was closed unmerged. Rule: before a reader feeds a score or a
+  kill, read the same ids three times, paced, and compare with a real browser; 3/3 agreement or it stays shadow.
+- **③ A workflow dispatch with an empty `run_id` shares one concurrency group, so a later dispatch silently cancels a
+  pending one.** 🔬 11-05: `facts-words` run 42012742355 (dispatched 10:41) was `cancelled` at 10:43 by the next
+  dispatch, and the reader re-read it carried never ran. Rule: a `facts-words` dispatch carries a unique `run_id` (the
+  facts readers `facts-words.yml` / `facts-extract.yml` declare that input — `map-pins-live.yml` / `apply-migration.yml`
+  reject it), and because a unique id is
+  its own concurrency group, let an earlier incremental reader on older code FINISH before dispatching a replacement
+  that can write the same listings (an older reader would overwrite the newer facts); before dating a proof, open the
+  run that replaced yours and check its commit contains your fix.
+
+## Lesson from 2026-11-06 (🦅 Falcon)
+A launch is finished only when the WHOLE launch landed, not its client half. asasmakeen, mrajhi and steam went live
+11-05 (556 listings) with no `ops_liveness_registry` row, still in `NOT_PRODUCTION_SEARCHABLE` and with no daily
+crawl, because their launch PRs #10677–#10679 stayed drafts while #10897 shipped only `platforms.ts`. The detector
+`platform_monitoring_scope_gap` said so for 30 hours. Before you call a launch done:
+`select platform from platform_registry where status = 'active' and platform not in (select platform from ops_liveness_registry)`
+must return nothing, and the site must be in a scheduled crawl (fixed in PR 10913 + 20261106192630).
+

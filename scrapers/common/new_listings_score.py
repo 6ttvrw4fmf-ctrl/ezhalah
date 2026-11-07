@@ -39,6 +39,7 @@ from datetime import datetime, timedelta, timezone
 
 from scrapers.common.cleanup import _probe  # noqa: F401  (kept for callers that patch it)
 from scrapers.common.db import sb
+from scrapers.common.pii import redact_pii
 from scrapers.common.source_reread import page_evidence
 
 TABLE = "ops_new_listings_score"
@@ -231,11 +232,29 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                         break
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
+            # An OPEN bucket «+7 غرف نوم» / «7+ حمامات» is a floor, not a count: Property Finder 24671162 (score run
+            # 42343488034, 2026-11-07) prints «+7» while its own payload's bedrooms_value is 20 (bathrooms 9), and the
+            # score read our 20 as a MISMATCH. A stored count AT OR ABOVE the bucket's floor, on the keyword's own line.
+            # The bucket must sit in the SAME clause as this field's keyword: «عدد غرف النوم: 4، الحمامات: 7+» gives the
+            # bathrooms a «7+», never the bedrooms (CodeRabbit on #11031).
+            if (name in ("bedrooms", "bathrooms") and out[name] == MISMATCH and stored.get(col) is not None
+                    and any(bucket_floor_next_to(kw, c, float(stored.get(col)),
+                                                 ROOM_KW["bathrooms" if name == "bedrooms" else "bedrooms"])
+                            for x in lines for c in CLAUSE_SPLIT.split(x))):
+                out[name] = MATCH
             # ONE hall is written as the bare noun: haraj 21839188 «غرفة وصالة», 21839193 «4 غرف وصالة كبيره» (score run
             # 41009231494, 2026-10-30, backlog 1090) store living_rooms 1; the room line's «4» read as the hall count.
             if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
                     and float(stored.get(col)) == 1 and any(SINGLE_HALL.search(x) for x in lines)):
                 out[name] = MATCH
+            # A home described FLOOR BY FLOOR states no total (🆕 2026-11-05): Property Finder's CRM block «تفاصيل الدور
+            # الأرضي عدد المجالس: 1 ، دورات المياه: 3 ، الصالات: 1 ، غرف النوم: 2» (23817495, whose API says 5 bedrooms)
+            # and muhaysini's «الدور الارضي: مجلس ودورة مياه … الدور الاول : غرفتين … دورة مياه» (23814169) count ONE
+            # floor. Summing floors is a calculation we never make, so a NULL room count there is not a miss: the
+            # 05:35 score counted 6 such we_miss on propertyfinder alone. Only a NULL we hold, only these room counts.
+            if (name in PER_FLOOR_COUNTS and out[name] == WE_MISS and stored.get(col) is None
+                    and PER_FLOOR.search(whole)):
+                out[name] = PAGE_SILENT
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
@@ -244,6 +263,8 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             out[name] = _cmp_valued(stored.get(col), SITE_DEAL_MENU.sub("", whole), DEAL_KW)
         else:
             out[name] = _cmp_word(stored.get(col), whole, kw)
+            if name == "direction_ar":
+                lines = label_value_lines(lines, kw)
             if name == "direction_ar" and out[name] == WE_MISS and not facade_stated(lines, kw):
                 out[name] = PAGE_SILENT
             # haraj's REGA licence block prints the facade in English («واجهة العقار: Eastern», 21831096, backlog 1090).
@@ -256,8 +277,49 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 ar = facade_adjectives(stored.get(col))
                 if out[name] == MISMATCH and ar and any(re.search(kw, x) and re.search(ar, norm(x)) for x in lines):
                     out[name] = MATCH
+                # …and in JSON-LD, which never reaches `lines`: aqarcity 31207 (17802282, score 2026-11-06) publishes
+                # {"name": "الواجهة", "value": "جنوبية شرقية"} and we store «جنوب شرق». The label and its OWN value only
+                # (normalised: «"name": "الواجهه", "value": "جنوبيه شرقيه"») — never a bearing in another property's value.
+                if out[name] == MISMATCH and ar and re.search(r"(?:" + kw + r")[\"' \t,:]*(?:value[\"' \t,:]*)?" + ar, norm(whole)):
+                    out[name] = MATCH
     return out
 
+
+def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = "") -> bool:
+    """An open bucket TIGHTLY attached to this field's keyword (within 12 chars, no other figure between) whose floor
+    the stored count meets. «عدد غرف النوم: 4 الحمامات: 7+» (no separator) gives the «7+» to the bathrooms only, and
+    «الحمامات: 7+ غرف النوم: 4» too: a bucket nearer the OTHER room field's keyword is that field's (CodeRabbit on
+    #11053). «+7 غرف نوم» (bucket first) still belongs to the bedrooms."""
+    def dist(k, m):
+        return m.start() - k.end() if m.start() >= k.end() else k.start() - m.end()
+
+    def labels(k, m):          # «الحمامات: 7+», «غرف النوم 7+» — the room phrase labels the figure right after it
+        span = clause[k.end():m.start()] if k.end() <= m.start() else ""
+        if other_kw and re.search(other_kw, span):     # «غرف: الحمامات: 7+» — the nearer label owns it
+            return False
+        return k.end() <= m.start() and re.fullmatch(r"\S*(?:\s+[^\s\d:：]+)?\s*[:：]?\s*", clause[k.end():m.start()]) is not None
+    own = list(re.finditer(kw, clause))
+    others = list(re.finditer(other_kw, clause)) if other_kw else []
+    for m in OPEN_BUCKET.finditer(clause):
+        if stored < int(m.group(1) or m.group(2)):
+            continue
+        near = [k for k in own if dist(k, m) <= 12 and not re.search(
+            r"\d", clause[k.end():m.start()] if m.start() >= k.end() else clause[m.end():k.start()])]
+        if not near:
+            continue
+        if any(labels(k, m) for k in near):
+            return True
+        if any(labels(o, m) for o in others):
+            continue
+        if not any(dist(o, m) < min(dist(k, m) for k in near) for o in others):
+            return True
+    return False
+
+
+ROOM_KW = {"bedrooms": r"غرف|غرفه نوم", "bathrooms": r"حمام|دوره مياه|دورات مياه|دوره المياه|دورات المياه"}
+# «+7» / «7+» (Western or Arabic-Indic digits): an open room bucket, «N or more».
+CLAUSE_SPLIT = re.compile(r"[،,|•؛;]")
+OPEN_BUCKET = re.compile(r"(?<![\d.])\+\s*(\d{1,2})(?![\d.])|(?<![\d.])(\d{1,2})\s*\+")
 
 # A site's own promo banner is not the ad. haraj prints partner offers under every ad (score dry run 41790110618,
 # 2026-11-04): «استأجر الآن وادفع لاحقًا مع إيجاري ، تقسيط شهري مريح…» (Ejari) on 23431125 / 23409947 and «وفّي وسيط
@@ -295,6 +357,8 @@ def facade_stated(lines: list[str], kw: str) -> bool:
     return False
 
 # «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
+PER_FLOOR = re.compile(r"(?:تفاصيل\s+)?الدور\s*:?\s*(?:الارضي|الاول|الثاني|الثالث|العلوي)")
+PER_FLOOR_COUNTS = frozenset({"living_rooms", "majlis_rooms", "bathrooms"})
 SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
 # The facades in English, as a REGA licence block prints them. A compound one too: haraj 22820527 prints
 # «واجهة العقار: South west» and we store «جنوب غرب» (re-score 41406084400, 2026-11-02, scored MISMATCH).
@@ -308,6 +372,26 @@ for _ar, _en in (("شمال شرق", "north[\\s-]*east"), ("شمال غرب", "n
 _FACADE_BASES = ("شمال", "جنوب", "شرق", "غرب")
 
 
+# The next line is joined only when it IS a facade value (a bearing first): «الحي الشرقي» (a district) or another
+# source's text never becomes the label's value (CodeRabbit on #10939).
+_FACADE_VALUE_START = re.compile(r"^\s*(?:ال)?(?:شمال|جنوب|شرق|غرب)|^\s*(?:north|south|east|west)", re.I)
+
+
+def label_value_lines(lines: list[str], kw: str) -> list[str]:
+    """A label printed as its own line joins the value line after it. vmksa's feature block «<h2>واجهة العقار</h2>
+    <span>جنوبية شرقية</span>» reaches us as «واجهة العقار | جنوبية شرقية», two lines, so a facade that equals ours
+    (14110686 stores «جنوب شرق») scored MISMATCH and a stated one read as «not stated» (🔬 2026-11-06, ops_af_score
+    vmksa 3 direction mismatches). Only a BARE label (at most one short word left beside the keyword) is joined."""
+    out = list(lines)
+    for i, x in enumerate(lines[:-1]):
+        m = re.search(kw, x)
+        rest = re.sub(r"[:：\-–|]", " ", re.sub(kw, "", x)).split()      # «واجهة العقار :» — the colon is not a word
+        if m and len(rest) <= 1 and len(x) <= 24 and not (rest and _FACADE_VALUE_START.match(rest[0])) \
+                and _FACADE_VALUE_START.match(lines[i + 1]):           # «واجهة جنوبية» already holds its value
+            out[i] = x + " : " + lines[i + 1]
+    return out
+
+
 def facade_adjectives(stored) -> Optional[str]:
     """«جنوب شرقي» → a pattern for «جنوبيه - شرقيه» / «جنوبي شرقي» / «جنوبيه شرقيه» (norm folds ة→ه).
     Only the four bases, in the stored order; anything else returns None."""
@@ -315,11 +399,15 @@ def facade_adjectives(stored) -> Optional[str]:
     bases = [w[:-1] if w.endswith("ي") else w for w in words]
     if not bases or len(bases) > 2 or any(b not in _FACADE_BASES for b in bases):
         return None
-    return (r"(?<![\u0621-\u064A])" + r"\s*[-–/،,]?\s*(?:و)?".join(b + r"(?:يه|ي)?" for b in bases)
+    return (r"(?<![\u0621-\u064A])" + r"\s*[-–/،,]?\s*(?:و)?".join(r"(?:ال)?" + b + r"(?:يه|ي)?" for b in bases)
             + r"(?![\u0621-\u064A])")
 
 
-_UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
+# «م» alone is metres too (🔬 2026-11-07): justsa prints «<span>عرض الشارع</span> <strong>18 م</strong>» (just.sa/l/595,
+# re-read net.http_get 11-07) and the value line «18 م» never matched, so 15 of 15 sampled justsa street widths scored
+# MISMATCH on a stored 18 that the page states — the same «tool, not the data» backlog 297 named on 10-09.
+# Only a SPACED «م» («18 م»): a glued «250م» keeps its old reading, which the alshawaf related-table guard relies on.
+_UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س|(?<=\s)م)?\s*"
 
 
 # A control prompt («اختر عدد الغرف», rakez's room picker) names a field without stating it; the unit
@@ -336,7 +424,11 @@ AREA_UNIT = re.compile(r"م²|م2|متر مربع|m²")
 ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
 # Arabic states TWO with the dual, not the digit: bossbih 17388816 prints «غرفتين» for its 2 bedrooms
 # (2026-10-12: stored 2, scored MISMATCH). A dual on the keyword's own line states the figure 2.
-DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان|سنتين|سنتان|عامين|عامان)(?![\u0621-\u064A])")
+# …also when a glued meta description runs it straight into the NEXT label: aqaralriyadh 13105499 (🔬 2026-11-07, dry run
+# af-score 42360463480: living_rooms MISMATCH 4 of 14) prints «…عدد الغرف: 4 غرفالصالات: صالتاندورات المياه: 3».
+_NEXT_LABEL = r"(?:دورات|دوره|عدد|المساحه|المساحة|السعر|الحي|المدينه|المدينة|الغرف|الصالات|المجالس|الحمامات|عمر|الدور|الواجهه|الواجهة)"
+DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان|سنتين|سنتان|عامين|عامان)"
+                       r"(?:(?![\u0621-\u064A])|(?=" + _NEXT_LABEL + r"))")
 # «سنتين» is a two-year-old building: haraj 23236759 «عمر العقار: سنتين», stored 2 (branch re-score 41596198038, 2026-11-03).
 
 
@@ -387,7 +479,10 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     else:
         # A small figure counts only next to its keyword: on the keyword's own line, or on a
         # neighbouring line that is NOTHING BUT the value («غرف النوم» / «4», «م²» / «240»).
-        bare = re.compile(r"^" + _UNIT_TAIL + pat.pattern + _UNIT_TAIL + r"$")
+        # A street width's own value line may glue its «م»: erapulse prints «<div>20م</div><div>عرض الشارع</div>»
+        # (646396, net.http_get 2026-11-07). Street width only — a glued area «250م» keeps the alshawaf guard's meaning.
+        tail = _UNIT_TAIL + r"(?:م)?\s*" if "الشارع" in kw else _UNIT_TAIL
+        bare = re.compile(r"^" + _UNIT_TAIL + pat.pattern + tail + r"$")
         for i in kw_hits:
             if pat.search(lines[i]):
                 return MATCH
@@ -517,6 +612,36 @@ def _hajer_aliases(whole: str) -> str:
     return " ".join("الضاحيه " + m.group(1) for rx in _HAJER_FORMS for m in rx.finditer(whole))
 
 
+# THE OWNER'S OWN «ONE DISTRICT» DECISIONS ARE THE SAME PLACE (🆕 2026-11-05). loc_district_alias holds the owner's
+# rulings that two spellings are one district («المعيزيلة» → the catalogue's «حي المعيزلة», Riyadh, owner 2026-10-25,
+# Apple Maps names المعيزلة at both centres); the index serves the catalogue name for every ad that writes the other.
+# The 2026-11-05 05:35 score compared letters only and counted akariyoun 23729407 / 24208576 / … and raghdan
+# 23726297 / 23726304 / … («دور للبيع في حي المعيزيلة») as 8 district MISMATCHES, capping both sites at 88.2%.
+# Keys are norm_district_tok() forms (the table's own); a page word matches when ITS key is an alias of OUR key.
+# Loaded once per run by load_owner_district_aliases(); empty (letters only) when nothing is loaded.
+OWNER_DISTRICT_ALIASES: dict[str, frozenset[str]] = {}
+
+
+def load_owner_district_aliases(client) -> None:
+    rows = client.table("loc_district_alias").select("from_norm,to_norm").execute().data or []
+    m: dict[str, set[str]] = defaultdict(set)
+    for r in rows:
+        if r.get("from_norm") and r.get("to_norm"):
+            m[r["to_norm"]].add(r["from_norm"])
+    OWNER_DISTRICT_ALIASES.clear()
+    OWNER_DISTRICT_ALIASES.update({k: frozenset(v) for k, v in m.items()})
+
+
+def _owner_alias_on_page(stored: str, whole: str) -> bool:
+    from scrapers.common.arabic_location import norm_district_tok
+    froms = OWNER_DISTRICT_ALIASES.get(norm_district_tok(stored))
+    if not froms:
+        return False
+    words = re.findall(r"[\u0621-\u064A]+", whole)       # a two- or three-word name is matched whole, never in part
+    return any(norm_district_tok(" ".join(words[i:i + n])) in froms
+               for n in (1, 2, 3, 4) for i in range(len(words) - n + 1))
+
+
 def _cmp_district(stored, whole: str) -> str:
     page_names_one = bool(DISTRICT_ON_PAGE.search(whole))
     if not stored:
@@ -535,6 +660,8 @@ def _cmp_district(stored, whole: str) -> str:
     # Whole words only, so «السدره» never matches inside another name.
     core = d[2:] if d.startswith("ال") else ""
     if len(core) >= 3 and re.search(r"(?<!\S)(?:حي\s+)?" + re.escape(core) + r"(?!\S)", whole):
+        return MATCH
+    if _owner_alias_on_page(stored, whole):
         return MATCH
     return MISMATCH if page_names_one else PAGE_SILENT
 
@@ -1079,6 +1206,55 @@ def dallali_page(url: str, fetch=None) -> dict | None:
             "text_head": " | ".join(lines)[:1500]}
 
 
+def muhaysini_page(url: str, fetch=None) -> dict | None:
+    """A muhaysini ad read from the platform's OWN record (🆕 2026-11-07). aqaralmuhaysini.com/propertydetails/<id> is
+    a Vue shell (re-read run 42352217629: title «أحمد المحيسني العقارية», no ad text), so the nightly score sampled
+    10 muhaysini arrivals a night and decided 0 — the second-biggest site (1,116 arrivals on 11-07) unmeasured.
+    This restates the record's REGA licence block (AdValidator.advertisement) and its own type, labelled the way
+    the comparison reads; None when the record cannot be read or is not this id (unknown, never wrong)."""
+    m = re.search(r"/propertydetails/(\d+)", url or "")
+    if not m:
+        return None
+    try:
+        if fetch is not None:
+            rec = fetch(m.group(1))
+        else:
+            from scrapers.muhaysini import run as mh
+            rec = mh.fetch_detail(mh.session(), m.group(1))
+    except Exception:  # noqa: BLE001 — a failed read is unknown, never wrong
+        return None
+    if not isinstance(rec, dict):
+        return None
+    adv = (rec.get("AdValidator") or {}) if isinstance(rec.get("AdValidator"), dict) else {}
+    rega = adv.get("advertisement") if isinstance(adv.get("advertisement"), dict) else {}
+    loc = rega.get("location") if isinstance(rega.get("location"), dict) else {}
+    lines: list[str] = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0, "0"):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", {"بيع": "للبيع", "للبيع": "للبيع", "ايجار": "للايجار", "للايجار": "للايجار"}.get(
+        norm(str(rega.get("advertisementType") or "")).strip()))   # norm folds إ→ا (CodeRabbit on #11031)
+    put("المنطقة", loc.get("region"))
+    put("المدينة", (rec.get("City") or {}).get("name") if isinstance(rec.get("City"), dict) else None)
+    put("المدينة", loc.get("city"))
+    put("الحي", loc.get("district"))
+    put("نوع العقار", (rec.get("PropertyType") or {}).get("name") if isinstance(rec.get("PropertyType"), dict) else None)
+    put("المساحة", rega.get("propertyArea"), " م²")
+    put("عدد الغرف", rega.get("numberOfRooms"))
+    total = rega.get("landTotalPrice") or rega.get("landTotalAnnualRent")
+    put("السعر", total or rega.get("propertyPrice"), " ريال")
+    if total:
+        put("سعر المتر", rega.get("propertyPrice"), " ريال")
+    put("عرض الشارع", rega.get("streetWidth"))
+    put("عمر العقار", rega.get("propertyAge"))
+    title = str(rec.get("title") or "")
+    lines += [y.strip() for y in f"{title}\n{rec.get('description') or ''}".splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _TUBA_RECORDS: "dict | None" = None
 
 
@@ -1155,6 +1331,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
+        if "aqaralmuhaysini.com/propertydetails/" in url:
+            own = muhaysini_page
         if "dallali.com/advertisements/" in url:
             own = dallali or dallali_page
         if "safainv.sa" in url:
@@ -1169,8 +1347,10 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
                 row["sampled"] += 1
                 row["unreadable_pages"] += 1
                 continue
-            fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
-                                           prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
+            results = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                      prose_only_district=platform in PROSE_ONLY_DISTRICT)
+            _log_verdicts(key, results, stored, page)   # wasalt / sanadak / … print their cause too (🆕 11-07)
+            fold(row, key, results, stored)
             continue
         try:
             status, body = probe(url)
@@ -1204,18 +1384,7 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
         results = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
                                   prose_only_district=platform in PROSE_ONLY_DISTRICT)
-        # Which ad and which stored value: a site line says «furnished: mismatch=1» but not on which of the
-        # sampled ads, so every AF cap had to be re-derived by hand (dwelleo #890, 2026-10-26).
-        for name, verdict in results.items():
-            if verdict == MISMATCH:
-                col = next(c for n, _, c, _ in FIELDS if n == name)
-                print(f"    mismatch {key} {name}: stored={stored.get(col)!r}", flush=True)
-            elif verdict == WE_MISS and name in AF_FIELDS:
-                # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
-                kw = next(k for n, _, _, k in FIELDS if n == name)
-                hit = next((x for x in ([page.get("title") or ""] + list(page.get("evidence_lines") or [])
-                                        + (page.get("text_head") or "").split(" | ")) if re.search(kw, norm(x))), "")
-                print(f"    we_miss {key} {name}: page={hit[:160]!r}", flush=True)
+        _log_verdicts(key, results, stored, page)
         fold(row, key, results, stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
@@ -1250,6 +1419,69 @@ def _pct(v: float | None) -> str:
     return "n/a" if v is None else f"{100 * v:.1f}%"
 
 
+def _evidence_lines(page: dict) -> list[str]:
+    """The page lines the comparator reads (title, meta, evidence lines, text head), PII-redacted for the log."""
+    raw = ([page.get("title") or ""] + list((page.get("meta") or {}).values()) + list(page.get("evidence_lines") or [])
+           + (page.get("text_head") or "").split(" | "))
+    return [redact_pii(str(x)) for x in raw if x]
+
+
+def _log_verdicts(key: str, results: dict, stored: dict, page: dict) -> None:
+    """Print the ad, the value compared and the page line behind every mismatch / AF we-miss. Lines are
+    PII-redacted (a seller can put a phone on a room line; CodeRabbit on #11031)."""
+    # Which ad and which stored value: a site line says «furnished: mismatch=1» but not on which of the
+    # sampled ads, so every AF cap had to be re-derived by hand (dwelleo #890, 2026-10-26).
+    lines = None
+    for name, verdict in results.items():
+        if verdict not in (MISMATCH, WE_MISS) or (verdict == WE_MISS and name not in AF_FIELDS):
+            continue
+        lines = lines if lines is not None else _evidence_lines(page)
+        kind, col, kw = next((k, c, w) for n, k, c, w in FIELDS if n == name)
+        if verdict == MISMATCH:
+            # …and the page line that disagreed (🆕 2026-11-07: the 05:35 log named rakez 24669873 bedrooms=2 and
+            # propertyfinder 24671162 bedrooms=20 but not what the page said, so each cap took a source re-read).
+            value = (stored.get("price_total") or stored.get("source_price_annual") or stored.get("price_annual")
+                     or stored.get("price_per_meter")) if name == "price" else stored.get(col)
+            if name == "price" and value and not stored.get("price_total") and (
+                    stored.get("rent_period_ar") == "شهري" or stored.get("source_rent_period") == "monthly"):
+                value = float(value) / 12          # the figure compare_listing compared (CodeRabbit on #11031)
+            hits = [] if not kw else [_safe_evidence(kw, x) for x in lines if re.search(kw, norm(x))
+                                      and (kind != "number" or re.search(r"\d", x))][:3]
+            print(f"    mismatch {key} {name}: stored={value!r} page={hits!r}", flush=True)
+        else:
+            # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
+            hit = next((x for x in lines if kw and re.search(kw, norm(x))), "")
+            print(f"    we_miss {key} {name}: page={_safe_evidence(kw, hit) if hit else ''!r}", flush=True)
+
+
+def _safe_evidence(kw: str, line: str) -> str:
+    """The keyword and the figures/negation on that line — never the seller's prose, which can carry a person's name
+    redact_pii does not catch («غرف النوم 4 للتواصل مع أحمد», CodeRabbit PDPL finding on #11031)."""
+    n = norm(line)
+    k = re.search(kw, n)
+    # A phone is never evidence (PDPL; CodeRabbit findings on #11053). One rule, no per-format list: a CLUSTER is digit
+    # groups joined only by non-letters («050/123/4567», «+1 (202) 555-0147», «050_123_4567»). A cluster carrying 9+
+    # digits is dropped whole unless it is one well-formed grouped price («1,600,000», «2.500.000») whose digits are
+    # not a phone shape («512,345,678»). Shorter clusters keep their figures. A real price that fails this is only
+    # missing from the log; nothing reads the log back.
+    phone = r"(?:00966|966)[15]\d{8}|0[15]\d{8}|5\d{8}"
+    price = r"[1-9]\d{0,2}(?:([,.])\d{3})(?:\1\d{3})*(?:[.,]\d{1,2})?\+?"
+    def _keep(m: re.Match) -> str:
+        c = m.group(0)
+        d = re.sub(r"\D", "", c)
+        if len(d) < 9:
+            return c
+        if re.fullmatch(price, c.strip()) and not re.fullmatch(phone, d):
+            return c
+        # «غرف النوم 4 050/123/4567»: the room count before a space is not part of the phone; keep it alone.
+        lead = re.match(r"(\d{1,3}\+?)\s+(.*)$", c, re.S)
+        return f"{lead.group(1)} " if lead and len(re.sub(r"\D", "", lead.group(2))) >= 9 else " "
+    unphoned = re.sub(r"\+?\d(?:[^0-9A-Za-z\u0621-\u064A]+\+?\d|\d)*\+?", _keep, n)   # any separator length
+    nums = re.findall(r"[+]?\d[\d,.]*[+]?", unphoned)
+    neg = "لا" if re.search(r"(?<![\u0621-\u064A])(?:لا|بدون|غير)(?![\u0621-\u064A])", n) else ""
+    return " ".join(x for x in ((k.group(0) if k else ""), neg, " ".join(nums[:6])) if x)
+
+
 def _line(r: dict) -> str:
     return (f"{r['platform']}: sampled={r['sampled']} decided_ads={r['decided_ads']} "
             f"normal={_pct(normal_accuracy(r))} af_precision={_pct(af_precision(r))} "
@@ -1275,6 +1507,7 @@ def main() -> int:
     a = ap.parse_args()
 
     client = sb()
+    load_owner_district_aliases(client)
     rng = random.Random(a.seed)
     night = datetime.now(timezone.utc).date().isoformat()
     explicit = explicit_picks(a.sites or [])

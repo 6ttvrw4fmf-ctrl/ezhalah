@@ -1,5 +1,48 @@
 # 🔧 QUALITY & REPAIR ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-06 — «LET THE ENGINEERS SEE WHAT CODERABBIT SAYS» (permanent).** CodeRabbit reviews every PR.
+> In the last 40 PRs it flagged 17 MAJOR issues (e.g. «Update the cron schedule mirror in this change», «Handle array-shaped
+> `additional_info`», «Do not treat the latest date as a complete run»), but only 3 were marked addressed. So, on every PR of yours:
+> 1. **Read CodeRabbit's comments before you merge** (`gh api repos/6ttvrw4fmf-ctrl/ezhalah/pulls/<N>/comments`, author `coderabbitai`).
+> 2. **Every Major/Critical comment is FIXED in the PR, or answered on its thread with the reason it is wrong.** Never merge over
+>    a silent Major. Minor/nitpick: fix when cheap, otherwise reply once.
+> 3. **Review «skipped»?** Comment `@coderabbitai review` on the PR and wait for it. Do not loosen the merge gate.
+> 4. **Your `:end` row adds one line:** «CodeRabbit: N major (F fixed · A answered · 0 silent)».
+> 5. **Once a week (🔧 Monday run):** sweep merged PRs from the last 7 days for silent Majors, and fix or route each one as a bug.
+
+> **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
+
+> **🏎️ OWNER ORDER 2026-11-04 — SPEED IS YOUR JOB (permanent; the law files still win).** The owner: «we need to make sure
+> it's never ever slow … people will run away … something that always fixes it», and gave it to you rather than a new
+> routine. **First step of every run, before your other jobs:** the speed gate in `docs/ops/SPEED_ENGINEER.md` §1 (the
+> open `workflow_failed:site-speed-live.yml` alert and the last runs of `site-speed-live.yml`). If it is red, or a step is
+> over 75% of its budget twice running, fixing it is your FIRST job of the run, by that playbook: measure first, fix the
+> root cause with a guard, ship, prove it with the live speed watch. Never raise a budget or weaken a speed robot to
+> turn it green; never change product behaviour (put it in one line for the owner). Your report starts with one line:
+> «🏎️ speed: <green / fixed / why not> — <step times>».
+
+> **📍 OWNER ORDER 2026-11-05 — MAP PINS NEVER OVERLAP (permanent; the law files still win).** The owner: «we can never have
+> this issue … so so many duplicated listings, we need to make sure they are in the same pin close by … user cannot select
+> what he wants … make sure our engineers know about this». The rule and its two guards are in `docs/ARCHITECTURE.md`
+> («Map tab: no two pins ever sit on each other»). **Every run:** read the open `workflow_failed:map-pins-live.yml` alert
+> and the last runs of `map-pins-live.yml` (the MAP PIN ROBOT). If it is red, fixing it is a first job of the run: find
+> why heads overlap or cannot be tapped on the real map (a new head style, a new layer drawn over pins, a projection
+> change, a district name missing from the pill), fix the root cause, keep `scripts/verify-map-pins-never-overlap.ts`
+> green, deploy, and watch the robot go green. Never move the robot's spots, loosen its 1 px test or shrink
+> `PIN_GAP_PX` to turn it green. Same-site twins sharing one spot is the hourly `map_pin_snap_refresh_ar()` (inside
+> `map_grid_refresh_ar()`); if `map_pin_snap` stops refreshing, that is yours too.
+
+> **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
+> Open alerts fell 459 → 102 between 10-29 and 11-04, but the owner still found two whole bug classes no detector saw:
+> (1) land ads with the per-metre price typed as the TOTAL (~307 cards, e.g. 1,700 SAR for 375 m² in الأحساء), and
+> (2) Property Finder cards without «رقم رخصة الإعلان». So, every run, in your own lane:
+> 1. **A fix ships with its guard.** A fix is not closed until a detector, barrier or test exists that would have caught it. A detector repairs before it raises.
+> 2. **Blind-spot hunt.** Pick 3 random LIVE cards from different sites. At least one must be from a site that went live in the last 14 days.
+>    Compare every field the card shows with the source page, the way a customer does: price + period, area, rooms, baths, district, pin, licence, and the AF facts your lane owns.
+>    Anything wrong that no detector flagged is a **blind spot**. Build its detector in the same run, or file it with evidence in the owning lane's `ops_engineer_backlog`.
+> 3. **New-site parity.** For 14 days after a site goes live (Property Finder: live 2026-11-04; Keller Williams + Almajdiah: live 2026-11-05), check its cards against the parity standard: licence, rent period, district, pin, AF facts and liveness, at Aqar/Haraj level. A missing field is a bug of the lane that owns it.
+> 4. **The count must fall.** Your `:end` row adds one line: «blind spots found N · guards added N · open alerts start→end (alert_event, resolved_at is null)».
+
 > **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
 > 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
 > 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
@@ -435,6 +478,30 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   it is a verdict — page-probe planted nothing on `/agent` because no request carried `/_expo/static/js/web/agent-`;
   the probe must print the chunk requests it saw before I can date #9969 again.
 
+- **2026-11-04:** the session merge gate refused `safe-pr-merge.ts` for this routine a THIRD time (10-06, 10-11, today:
+  «Merge Without Review», even for green PRs whose files are all production copies) — never spend a call on it again:
+  every PR the robot cannot take goes to LINE 1 from minute 1, and the job is to make the ROBOT able to take it (gate
+  PR #10167, refreshed today). Second: the clock said 13:39 when the amount of work felt like 14:00 (the 10-20 / 11-01
+  lesson, kept because it still holds): `select now()` before every deadline judgement. Third: a parser whose catalog
+  lives in the database (`arabic_location._load()` reads `loc_catalog_city`) cannot be reproduced locally without
+  credentials — three stubbed runs failed; replay its SQL twin (`district_trailing_catalog_city_norm`,
+  `strip_district_city_suffix`) and read the writer (`aqarmonthly/run.py:_resolve_location`) instead. Fourth: a
+  byte-exact mirror can differ from main by ONE trailing newline (#10267/#10278 vs main, md5 against
+  `array_to_string(statements,'')`) — compare md5s before calling a CONFLICTING mirror PR wrong.
+
+- **2026-11-06:** the night's deploys died on a six-line migration: an owner-session cron job applied at 06:04 had no
+  git copy, its auto-mirror #10856 went red because `sql/mirrors/cron_schedule.json` must travel with a schedule change,
+  and from 06:43 the drift gate refused every frontend deploy (five runs 07:09–07:36) until a person merges a PR the
+  robot cannot take (`sql/` is outside its lanes). The whole repair was a 3-line JSON edit pushed to the mirror branch at
+  13:19 — do it in the first ten minutes of the run, not after the review: **read `migration_drift` and the auto-mirror
+  PR's red check before anything else, and when the red check is `verify-cron-slot-discipline`, push the cron mirror
+  to that branch and LINE 1 it at once.** Second: a map robot red on every run since it was born is first a question
+  about what the page really holds — one dispatch of the SAME robot from a branch that prints region / annotations /
+  DOM heads / the painted stack under each «covered» head (runs 42225384902, 42226056422) found two different defects
+  in ten minutes (a whole-cell crowd estimate that read a 280 m view as 1,501 listings and drew unzoomable bubbles; a
+  tap test that counted heads under the map's own control strip as «covered») — where a day of reading
+  `AppleMap.web.tsx` would have found neither. Dispatch the robot from a diagnostic branch before theorising.
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -529,3 +596,55 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   (adjudicated_reactivation could not tell a republish). Rule: read the job's cron line and the rule's migration before
   trusting or writing a detector, and prove both directions with the real numbers in the migration itself.
 
+
+## 📚 FLEET LESSONS 2026-11-04 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① With ~100 runs queued, nothing crawl-proven lands inside a 2-hour slot — pick jobs provable on rows that
+  already exist, and apply a migration before minute 30 or not at all.** ⚡ 11-04: 5 fixes merged (#10083 05:55,
+  #10352 06:31), 0 proven, every proof crawl queued past the slot (rating 6). 🔬 11-04: 6 fixes dated; deploy
+  41812835256 refused at 10:14 with four of its own migrations unmirrored behind 91 queued runs (fix rate 40 % vs
+  67 %). 🆕 11-04: 3 dated (the arkaan proof crawl wrote at 08:21, after the :20 snapshot). Rule: at minute 10 name,
+  per job, the workflow and the UTC time its proof can land; a job whose proof needs a runner you cannot get is
+  swapped for an RPC replay or a journey on existing rows. Third night of this family (10-31 ①, 11-01 ②) → ⚡'s and
+  🔬's rulebooks carry it as a rule.
+- **② A detector must know the state an engineer chose on purpose — the registry, the rule, the cron line.** 🔧
+  11-04: Property Finder is STAGED behind the owner's launch switch (platform_registry «retired», PR #10464), and
+  detect_novel_property_types + mon_detect_commercial_coverage_blind_spot raised three P1s on it at 12:59
+  (13054/13055/13060); mon_cron_expected_gap learned an 8 h grace for a job scheduled «50 0,4,18,20» (a 14 h gap)
+  and paged cron_overdue:202 every afternoon; stale_coverage_gate has no dormant skip and no resolve path
+  (sadin/senan/snam, all dormant — routed to ♻️, it lives in the mirrored mark_stale_listings_inactive). 🔬 11-03:
+  five detectors behind an approved rule. Rule: before trusting or writing a detector, read platform_registry, the
+  rule's migration and cron.job for what it watches, and prove both directions inside the migration
+  (20261104133232, 20261104133313).
+- **③ Read the consumer of the thing you change before the write: the rule it must satisfy, the arm that serves
+  it, the real page.** ♻️ 11-04: a «minute only» cron re-slot moved recheck-2 under the 6 h rest rule
+  (REPROBE_MIN_HOURS), so third reads never landed the same day. 🔬 11-04: a fixture pasted from invented markup
+  made #10132 pass on nothing (sakan's radio «label for»). 🆕 11-03: a value the recovery step found was thrown
+  away by a later CASE arm (pin_governorate) in the serving view. Rule: one real record, the consuming rule and the
+  serving arm before the first line of code — and a fixture is pasted from the re-read page, never typed.
+
+## 📚 FLEET LESSONS 2026-11-06 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A cron-schedule change inside a night migration turns its auto-mirror into a PERSON-only PR, and every frontend
+  deploy is refused until a human merges it.** 🆕 11-05: #10654 (mirror 20261105072102 + `sql/mirrors/cron_schedule.json`)
+  sat in LINE 1 because `verify-cron-slot-discipline` demands the cron mirror in the same PR and `sql/` is outside the
+  robot's lanes. 🔧 11-06, the same shape again: 20261106060445 (`gh-checks-that-cry-wolf`) was applied at 06:04, its
+  auto-mirror #10856 went red at 06:37 on exactly that check, `migration_drift` opened at 06:43, five `Deploy frontend`
+  runs were REFUSED 07:09–07:36 (`missing_in_git 20261106060445`) and `auto-deploy-merged-fixes` tripped its
+  three-failure breaker at 12:43 — the map and legal fixes of the night could not ship. Second night → a rule: **never
+  schedule, re-slot or unschedule a cron job in a night migration.** If it cannot wait, push the cron mirror to the
+  mirror branch within 30 minutes and put the PR in LINE 1 the same minute; a red auto-mirror is bug #1 of the merge queue.
+- **② An oracle's NAME is not an oracle — read its body; and a new reader must survive a re-read before it feeds
+  anything.** ♻️ 11-06: six new-source crawlers passed `prune_unseen` a `verify_gone` that answered «gone» without
+  reading (#10885 holds them UNKNOWN; barrier `test_verify_gone_never_kills_on_absence.py` executes every bare-name
+  `verify_gone` with the network blocked); the Keller Williams record reader read 4 of 14 list-absent ads «gone» and a
+  re-read minutes later read 3 of them «live», so #10890 was closed unmerged. Rule: before a reader feeds a score or a
+  kill, read the same ids three times, paced, and compare with a real browser; 3/3 agreement or it stays shadow.
+- **③ A workflow dispatch with an empty `run_id` shares one concurrency group, so a later dispatch silently cancels a
+  pending one.** 🔬 11-05: `facts-words` run 42012742355 (dispatched 10:41) was `cancelled` at 10:43 by the next
+  dispatch, and the reader re-read it carried never ran. Rule: a `facts-words` dispatch carries a unique `run_id` (the
+  facts readers `facts-words.yml` / `facts-extract.yml` declare that input — `map-pins-live.yml` / `apply-migration.yml`
+  reject it), and because a unique id is
+  its own concurrency group, let an earlier incremental reader on older code FINISH before dispatching a replacement
+  that can write the same listings (an older reader would overwrite the newer facts); before dating a proof, open the
+  run that replaced yours and check its commit contains your fix.

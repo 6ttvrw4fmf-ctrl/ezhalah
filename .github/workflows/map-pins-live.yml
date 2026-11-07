@@ -1,0 +1,55 @@
+# Map pin robot (owner 2026-11-05: «we can never have this issue … make a robot that checks … duplicated listings …
+# same pin close by … user cannot select what he wants»). Every hour and after each production deploy: on ezhalah.com,
+# on a phone, the densest street views we know — no two pins overlap, every pin can be tapped, the count pill names the
+# district. A red run raises an alert (alert_event → GitHub issue via alert-dispatch.yml) for the engineers to fix.
+# Read-only; uses the robot pass; one browser. Logic: e2e/map/map-pins-live.mjs. Per-PR half:
+# scripts/verify-map-pins-never-overlap.ts (in npm test).
+name: Map pin robot (live)
+
+on:
+  schedule:
+    - cron: '21 * * * *'
+  workflow_run:
+    workflows: ['Site speed watch (live)'] # after-deploy robots run in turn, one browser at a time
+    types: [completed]
+  workflow_dispatch: {}
+
+concurrency:
+  group: map-pins-live
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  pins:
+    name: Phone map — no overlapping pins, every pin tappable, district named
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.conclusion != 'skipped')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright + browser
+        run: |
+          npm i -D @playwright/test@^1.49
+          npx playwright install --with-deps chromium
+      - name: Check the map's pins like a phone user
+        env:
+          BASE_URL: https://ezhalah.com
+        run: node e2e/map/map-pins-live.mjs
+
+      # Unattended: a red run must reach a human. One open alert per workflow file; the next green run resolves it.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind journey_live_check_failed
+          --workflow map-pins-live.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

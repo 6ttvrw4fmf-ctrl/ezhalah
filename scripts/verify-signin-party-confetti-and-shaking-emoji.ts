@@ -3,7 +3,8 @@
 //   1. every welcome line carries 🥳 (Arabic AND English), so there is an emoji to shake;
 //   2. the headline tags exactly 🥳 as the party emoji, and the app-wide CSS makes it shake on an INFINITE loop
 //      (still under prefers-reduced-motion);
-//   3. every firework pop is at least half confetti and throws extra slow confetti on top.
+//   3. the party is full of confetti (owner 2026-11-04, the fireworks became poppers + balloons + rain): each popper
+//      throws ≥ 100 pieces, and every balloon that pops bursts into ≥ 20 confetti pieces.
 // The 3-second timing itself is pinned (with mutations) by verify-eagle-takes-off-every-visit.ts.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -43,15 +44,15 @@ check('…and stands still under prefers-reduced-motion', calm(party));
 const loaded = read('src/components/NamePrompt.tsx').includes('useEffect(() => { ensureNameBoxCss(); }, []);') && read('src/app/_layout.tsx').includes('<NamePrompt />');
 check('the CSS is loaded app-wide (NamePrompt in the root layout injects it)', loaded);
 
-// 3. fireworks pop into confetti
+// 3. poppers and balloons pop into confetti
 const confetti = (src: string) => {
-  const share = Number(src.match(/export const CONFETTI_SHARE = ([\d.]+);/)?.[1]);
-  const extra = Number(src.match(/export const CONFETTI_PER_BURST = (\d+);/)?.[1]);
-  return share >= 0.5 && extra >= 20
-    && src.includes('kind: Math.random() < CONFETTI_SHARE ? 1 : 0,')
-    && /for \(let i = 0; i < CONFETTI_PER_BURST; i\+\+\) \{[^]*?kind: 1,/.test(src);
+  const popper = Number(src.match(/export const POPPER_PIECES = (\d+);/)?.[1]);
+  const burst = Number(src.match(/export const BALLOON_BURST = (\d+);/)?.[1]);
+  return popper >= 100 && burst >= 20
+    && /for \(let i = 0; i < POPPER_PIECES; i\+\+\) \{[^]*?piece\(/.test(src)
+    && /for \(let j = 0; j < BALLOON_BURST; j\+\+\) \{[^]*?piece\(/.test(src);
 };
-check('every pop is at least half confetti, plus ≥ 20 extra confetti pieces', confetti(party));
+check('every popper throws ≥ 100 confetti pieces, and every balloon pops into ≥ 20', confetti(party));
 
 // ── mutation proofs ──────────────────────────────────────────────────────────────────────────────────────────
 mustCatch('an English welcome line without 🥳', !allParty(welcome.replace(/(en: 'Welcome \{n\}) 🥳/, '$1')));
@@ -61,9 +62,9 @@ mustCatch('the shake playing once instead of forever', !shakes(party.replace(/(\
 mustCatch('the shake on an inline span that cannot rotate', !shakes(party.replace('[data-ezh-emoji="party"]{display:inline-block;', '[data-ezh-emoji="party"]{')));
 mustCatch('the shake rule removed', !shakes(party.replace('[data-ezh-emoji="party"]{', '[data-ezh-x]{')));
 mustCatch('the emoji still shaking under reduced motion', !calm(party.replace('[data-ezh-shine],[data-ezh-emoji]{', '[data-ezh-shine]{')));
-mustCatch('confetti back to a third of the shell', !confetti(party.replace('export const CONFETTI_SHARE = 0.5;', 'export const CONFETTI_SHARE = 0.3;')));
-mustCatch('the extra confetti removed', !confetti(party.replace('export const CONFETTI_PER_BURST = 24;', 'export const CONFETTI_PER_BURST = 0;')));
-mustCatch('the share constant declared but not used', !confetti(party.replace('kind: Math.random() < CONFETTI_SHARE ? 1 : 0,', 'kind: Math.random() < 0.3 ? 1 : 0,')));
+mustCatch('a thin popper (30 pieces)', !confetti(party.replace('export const POPPER_PIECES = 110;', 'export const POPPER_PIECES = 30;')));
+mustCatch('balloons that pop into nothing', !confetti(party.replace('export const BALLOON_BURST = 26;', 'export const BALLOON_BURST = 0;')));
+mustCatch('the popper constant declared but not used', !confetti(party.replace('for (let i = 0; i < POPPER_PIECES; i++) {', 'for (let i = 0; i < 30; i++) {')));
 
 if (failed) { console.error(`\n❌ signin-party: ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✅ signin-party: fireworks pop into confetti, «نورت {name} 🥳» with the 🥳 shaking nonstop');

@@ -1,8 +1,9 @@
 import type { Deal } from './taxonomy';
 
 // Source listing platforms. (PRD §8.1) allowsRent/allowsBuy gate which deals a source can appear in.
-// PRODUCT RULE: Ezhalah aggregates SAUDI-OWNED platforms only — we don't carry foreign companies
-// operating in the Saudi market (Bayut/EMPG, Property Finder/UAE were removed for this reason).
+// Foreign-owned platforms join only with the owner's explicit approval: Property Finder was approved by
+// the owner on 2026-11-04 (entry below); Bayut/EMPG is pending the site's permission (its pages answer a
+// security check to robots) and stays out until then.
 export type Platform = {
   name: string;
   domain: string;
@@ -161,6 +162,25 @@ export const PLATFORMS: Platform[] = [
   { name: 'سوبر أوفيس', domain: 'superoffice.sa', brand: 'SuperOffice', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // haraj: حراج — public classifieds; ONLY REGA-licensed property offers are listed (owner 2026-10-16), ~7 of every 150 property-titled posts read on 2026-10-16.
   { name: 'حراج', domain: 'haraj.com.sa', brand: 'Haraj', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // propertyfinder: Property Finder Saudi — 4,516 ads + 155 off-plan (hidden) measured 2026-11-04, BOTH sides (3,306 sale + 1,210 rent).
+  { name: 'بروبرتي فايندر', domain: 'propertyfinder.sa', brand: 'Property Finder', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // The three sources of 2026-11-05 still missing here while the owner's launch PRs (#10677 / #10678 / #10679) are drafts:
+  // their rows are ALREADY served by search_listings_ar (asasmakeen 507, mrajhi 39, steam 10 on 2026-11-06), so a customer
+  // saw their count but could never reach their cards (customer-journey 42227257631: asasmakeen total 965, mrajhi 33,
+  // steam 30 — card absent; the 2026-10-30 Sakani/Wajaf shape). Entries copied verbatim from those PRs (🔧 2026-11-06).
+  // asasmakeen: one of the five sources of 2026-11-05 (owner order), launched by the owner's switch
+  // (docs/ops/FIVE_SOURCES_LAUNCH.md). BOTH sides (sale + rent; off-plan stays hidden in asasmakeen_offplan_units).
+  { name: 'أساس مكين', domain: 'asasmakeen.com', brand: 'Asas Makeen', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // mrajhi: one of the five sources of 2026-11-05 (owner order), launched by the owner's switch
+  // (docs/ops/FIVE_SOURCES_LAUNCH.md). RENT only (39 yearly rents; the site lists no sale).
+  { name: 'الراجحي للتنمية', domain: 'mrajhi.com.sa', brand: 'Al Rajhi Development', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // steam: one of the five sources of 2026-11-05 (owner order), launched by the owner's switch
+  // (docs/ops/FIVE_SOURCES_LAUNCH.md). RENT only (the site lists no sale).
+  { name: 'ستيم العربية', domain: 'steam-realestate.com', brand: 'STeam Residence', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // kellerwilliams / almajdiah: two of the five sources of 2026-11-05 (owner order), launched by
+  // the owner's switch (docs/ops/FIVE_SOURCES_LAUNCH.md). Sides = what each site lists (almajdiah sales ON HOLD).
+  { name: 'كيلر وليامز', domain: 'kwsaudiarabia.com', brand: 'Keller Williams', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'الماجدية', domain: 'almajdiah.com', brand: 'Almajdiah', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // shomou: مكتب شموع العقار (Al-Ahsa) — 142 in-date ads of 1,028 listed (835 past their own end date) measured 2026-09-28.
   { name: 'شموع العقار', domain: 'shomoalaqar.com.sa', brand: 'Shomou', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // maktab: منصة مكتب — 11 offices with in-date REGA ad licences (Riyadh + Tabuk) measured 2026-09-28.

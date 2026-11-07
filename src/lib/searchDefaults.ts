@@ -253,6 +253,11 @@ export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
     contextSize: q.contextSize,                   // visible: area context
     areaMin: q.areaMin,                           // visible: area من/إلى
     areaMax: q.areaMax,
+    // visible: the main filter's «الأثاث» row (owner 2026-11-05) — carried ONLY where that row can show (yearly
+    // residential rent; the home page then checks the type with cohortAllows and clears it where the row hides). Anywhere
+    // else it is an invisible filter, which is exactly what this allowlist exists to stop.
+    ...(q.deal === 'Rent' && !q.dealCombined && validRentPeriod(q.rentPeriod) === 'annual'
+        && (q.category ?? base.category) === 'Residential' && q.furnishedPref != null ? { furnishedPref: q.furnishedPref } : {}),
     priceMin: q.priceMin,                         // visible: price من/إلى
     priceMax: q.priceMax,
     rentPeriod: validRentPeriod(q.rentPeriod) ?? base.rentPeriod,  // visible: شهري/سنوي

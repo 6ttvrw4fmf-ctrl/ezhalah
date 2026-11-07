@@ -1,0 +1,50 @@
+# Owner 2026-11-06 («test every alarm … so they don't stop»): once a week, list every check robot whose verdict flips
+# between red and green on UNCHANGED code — a check that does that is not judging the code, it is crying wolf. Measured
+# the day this landed: lifecycle-spot-check flipped 11 times in 7 days on the same main commits (41/62 runs red).
+# The run goes red when any check flips >= 3 times, and that red reaches alert_event (bridge step below), so a wolf is
+# fixed rather than ignored. Dispatched by pg_cron (gh-checks-that-cry-wolf); GitHub's own schedule is a fallback only.
+name: Checks that cry wolf (weekly)
+
+on:
+  schedule:
+    - cron: '33 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: checks-that-cry-wolf
+  cancel-in-progress: false
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): the alert bridge below talks to our own database.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  report:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: List checks whose verdict flips on unchanged code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ops/checks-that-cry-wolf.mjs
+
+      # Unattended, so a red run must reach alert_event (same bridge as auto-deploy-merged-fixes.yml).
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind barrier_check_failed
+          --workflow checks-that-cry-wolf.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

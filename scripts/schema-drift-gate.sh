@@ -53,14 +53,18 @@ echo "Running the schema-drift + duplicate-overload gate [${PHASE}] (ops_deploy_
 
 # Shared with scripts/verify-migration-drift-vs-production.ts (the continuous, push/schedule-driven
 # half of this same gate) so there is exactly ONE parser for "what migrations does the repo claim".
-BODY="$(node -e 'process.stdout.write(JSON.stringify({p_repo_versions: require("./scripts/build-repo-migration-versions.cjs").buildRepoMigrationVersions()}))')"
+# The body goes to curl from a FILE (--data-binary @file), never as one argv string: Linux caps a single argument at
+# 128 KiB (MAX_ARG_STRLEN), and the version list crossed it on 2026-11-05 (~129 KB and growing a few KB a day) —
+# every deploy then died with «/usr/bin/curl: Argument list too long» and was reported as «drift gate could not run».
+BODY_FILE="/tmp/safe-deploy-drift-body-${PHASE}.json"
+node -e 'process.stdout.write(JSON.stringify({p_repo_versions: require("./scripts/build-repo-migration-versions.cjs").buildRepoMigrationVersions()}))' > "$BODY_FILE"
 HTTP="$(curl -s -o "$RESP" -w '%{http_code}' --max-time 20 \
   -X POST "$URL" \
   -H "apikey: $ANON" \
   -H "Authorization: Bearer $ANON" \
   ${EZ_GATE_H[@]+"${EZ_GATE_H[@]}"} \
   -H "Content-Type: application/json" \
-  -d "$BODY" || echo "curl_failed")"
+  --data-binary @"$BODY_FILE" || echo "curl_failed")"
 
 if [ "$HTTP" = "404" ]; then
   # PGRST202 — the gate RPC itself has not shipped yet. Expected ONLY for the deploy that ships it.

@@ -31,4 +31,9 @@ jobs:
     uses: ./.github/workflows/dealapp-liveness.yml
     with:
       apply: true
+      # One runner per shard = one visitor IP = one dealapp view quota (scrapers/dealapp/liveness_run.py
+      # parse_shard). One sweep reached ~10k fresh reads a day for 55,971 rows (65 % in 48 h, 11-05).
+      # Three shards plateaued at 84-85 % (11-06: ~1,065 alive reads/h vs ~1,185/h needed for 56,844 rows
+      # inside 48 h), so four (♻️ 2026-11-06): ~1,420/h, no proxy.
+      shards: '["0/4","1/4","2/4","3/4"]'
     secrets: inherit

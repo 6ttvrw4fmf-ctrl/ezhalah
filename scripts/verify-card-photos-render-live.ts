@@ -35,6 +35,31 @@ function corpBlocksCrossOrigin(corpHeader: string): boolean {
   const v = (corpHeader || '').toLowerCase().trim();
   return v === 'same-origin' || v === 'same-site';
 }
+// PURE, mutation-proven below. The browser's render decision for a 200 cross-origin no-cors <img>
+// response, after Fetch's Opaque Response Blocking (ORB) and the image decoder: null = it paints.
+//   • an image/* label renders (the decoder sniffs the real format);
+//   • html / json / xml labels are blocked outright; text/plain is blocked when nosniff is set;
+//   • anything else (octet-stream, binary/octet-stream, no label, text/plain without nosniff) is
+//     SNIFFED: it renders only if the first bytes are an image signature from the mimesniff table
+//     (JPEG, PNG, GIF, WEBP, BMP, ICO) or an ISO-BMFF image brand (AVIF/HEIC «ftyp» box), which
+//     Chromium's ORB lets through (it blocks only bodies that sniff as html/xml/json) and decodes —
+//     masar and squares serve WordPress .avif files as text/plain (card-photos-render-pr run on PR 10912, 2026-11-06).
+export function orbImageVerdict(contentType: string, nosniff: boolean, head: Uint8Array): string | null {
+  const ct = (contentType || '').toLowerCase().split(';')[0].trim();
+  if (ct.startsWith('image/')) return null;
+  if (/^text\/html$|json$|\+json$|^text\/xml$|^application\/xml$/.test(ct)) return 'ORB blocks this label';
+  if (nosniff && ct === 'text/plain') return 'ORB blocks text/plain under nosniff';
+  if (nosniff && ct && ct !== 'application/octet-stream' && ct !== 'binary/octet-stream')
+    return 'nosniff on a non-image label';
+  const b = head;
+  const at = (i: number, ...xs: number[]) => xs.every((x, k) => b[i + k] === x);
+  const isImage = at(0, 0xff, 0xd8, 0xff) || at(0, 0x89, 0x50, 0x4e, 0x47) || at(0, 0x47, 0x49, 0x46, 0x38)
+    || (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) || at(0, 0x42, 0x4d)
+    || at(0, 0x00, 0x00, 0x01, 0x00)
+    || (at(4, 0x66, 0x74, 0x79, 0x70) && ['avif', 'avis', 'heic', 'heix', 'mif1']
+      .includes(String.fromCharCode(b[8] ?? 0, b[9] ?? 0, b[10] ?? 0, b[11] ?? 0)));
+  return isImage ? null : 'body does not sniff as an image';
+}
 // PURE. A platform passes when the MAJORITY of its sampled listings render (a platform-wide block
 // like Sadin's sinks all of them; one corrupt url on one listing does not).
 const majorityRender = (rendered: number, total: number): boolean => total > 0 && rendered * 2 >= total;
@@ -110,8 +135,21 @@ async function whyBlocked(url: string): Promise<string | null> {
     }
     if (r.status !== 200) return `HTTP ${r.status}`;
     const ct = (r.headers.get('content-type') || '').toLowerCase();
-    if (!ct.startsWith('image/')) return `content-type ${ct || '(none)'} is not an image`;
-    return null; // 200 image, no blocking CORP in the chain → the browser renders it
+    const nosniff = (r.headers.get('x-content-type-options') || '').toLowerCase().includes('nosniff');
+    // The browser does NOT stop at the label (falcon 2026-11-06): a cross-origin <img> goes through
+    // ORB, which SNIFFS the body unless the label is blocklisted or nosniff forbids it. sakani's S3
+    // («binary/octet-stream») and tuba («(none)») were scored broken while Chrome paints them.
+    let head = new Uint8Array(0);
+    if (!ct.startsWith('image/')) {
+      try {
+        const rd = r.body?.getReader();
+        const chunk = rd ? await rd.read() : { value: undefined };
+        head = chunk.value ? chunk.value.slice(0, 32) : head;
+        await rd?.cancel().catch(() => {});
+      } catch (e) { return `${UNKNOWN}body unreadable after a 200 (${String((e as Error).message).slice(0, 60)})`; }
+    } else { await r.body?.cancel().catch(() => {}); }
+    const v = orbImageVerdict(ct, nosniff, head);
+    return v === null ? null : `${v} — content-type ${ct || '(none)'}${nosniff ? ', nosniff' : ''}`;
   }
   return 'too many redirects';
 }
@@ -206,6 +244,25 @@ mustCatch('a HOST-sent 404 downgraded to UNKNOWN',
   isUnknownVerdict('HTTP 404') === true);
 mustCatch('the majority gate reading an UNKNOWN card as a rendered one (0 answered is not 0 broken)',
   majorityRender(0, 0) === true);
+
+// ORB render decision — both directions (falcon 2026-11-06).
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+const WEBP = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]);
+const HTML = new TextEncoder().encode('<!doctype html>');
+mustCatch('a real image/jpeg label scored broken', orbImageVerdict('image/jpeg', true, new Uint8Array()) !== null);
+mustCatch('sakani S3 binary/octet-stream carrying a JPEG scored broken (Chrome sniffs and paints it)',
+  orbImageVerdict('binary/octet-stream', false, JPEG) !== null);
+mustCatch('an unlabelled WEBP scored broken', orbImageVerdict('', false, WEBP) !== null);
+mustCatch('text/plain + nosniff over a JPEG scored as rendering (ORB blocks it)',
+  orbImageVerdict('text/plain; charset=utf-8', true, JPEG) === null);
+mustCatch('an HTML error page labelled octet-stream scored as rendering',
+  orbImageVerdict('application/octet-stream', false, HTML) === null);
+const AVIF = new Uint8Array([0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66]);
+const MP4 = new Uint8Array([0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+mustCatch('masar/squares: a WordPress AVIF labelled text/plain (no nosniff) scored broken',
+  orbImageVerdict('text/plain', false, AVIF) !== null);
+mustCatch('an mp4 «ftyp isom» box scored as an image', orbImageVerdict('', false, MP4) === null);
+mustCatch('a text/html label scored as rendering', orbImageVerdict('text/html', false, JPEG) === null);
 
 console.log(`\n${measured} platform(s) with photos checked, ${noPhoto} without photos skipped, `
   + `${judgedPlatforms} judged, ${unknownPlatforms} UNKNOWN (no host answered).`);

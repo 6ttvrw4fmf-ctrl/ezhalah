@@ -66,7 +66,7 @@ import { clickWitnessed, dismissStrayOverlay, isStable, MAX_CLICK_ATTEMPTS } fro
  *  inverted: two probes, two rules, disagreeing about what "the CTA" is. So there is now ONE scan
  *  and one rule. `present` means the scan found the element; `point` is null when it found it but
  *  the element has no laid-out box yet, which is exactly the #687 state and is a HARNESS fact. */
-export const CLICK_LEAF_SRC = (want: { testid: string; txt: string }): { present: boolean; point: { x: number; y: number } | null } => {
+export const CLICK_LEAF_SRC = (want: { testid: string; txt: string }): { present: boolean; point: { x: number; y: number } | null; vh?: number; vw?: number } => {
   const hits: any[] = [];
   const byId = document.querySelector(`[data-testid="${want.testid}"]`);
   if (byId) hits.push(byId);
@@ -115,8 +115,20 @@ export const CLICK_LEAF_SRC = (want: { testid: string; txt: string }): { present
     sc.scrollTop += (er.top - sr.top) - sc.clientHeight / 2 + er.height / 2;
   }
   const r = best.getBoundingClientRect();
-  return { present: true, point: { x: r.x + r.width / 2, y: r.y + r.height / 2 } };
+  return { present: true, point: { x: r.x + r.width / 2, y: r.y + r.height / 2 }, vh: innerHeight, vw: innerWidth };
 };
+
+/** A point a tap can actually reach. A point off the viewport is not a miss to spend a click on: mouse.click there
+ *  dispatches nothing («(no click event seen)»). Measured 2026-11-05 on MOBILE الرياض/إيجار/شقة: the CTA sat ~5,000 px
+ *  below the screen while the card cascade was still revealing — the app keeps the view on the newest card, so
+ *  scrollTop moves do not hold — and six taps at y≈5,000 burned the budget in 15.6 s. A missing viewport size (an
+ *  older stub) reads as reachable. */
+export function pointIsReachable(found: { point: { x: number; y: number } | null; vh?: number; vw?: number } | null): boolean {
+  const p = found?.point;
+  if (!p) return false;
+  if (found?.vh == null || found?.vw == null) return true;
+  return p.y >= 0 && p.y <= found.vh && p.x >= 0 && p.x <= found.vw;
+}
 
 /** Drive every scrollable container to its bottom — the CTA renders below the newest turn. */
 const SCROLL_BOTTOM_SRC = () => {
@@ -208,7 +220,17 @@ export async function openAfOffer(
     // even on a frame where the CTA has no laid-out box yet, which is the #687 state.
     const found = await page.evaluate(CLICK_LEAF_SRC, want).catch(() => null);
     if (found?.present) ctaSeen++;
-    const box = found?.point ?? null;
+    let box = found?.point ?? null;
+    if (box && !pointIsReachable(found)) {
+      // Off the screen: scroll toward it the way a finger does (real wheel input, which the app's follow-the-newest-card
+      // behaviour yields to), spend no click, and measure again.
+      const vh = found?.vh ?? 800;
+      await page.mouse?.wheel?.(0, Math.max(-vh * 3, Math.min(vh * 3, box.y - vh / 2)))?.catch?.(() => {});
+      prev = null;
+      box = null;
+      await page.waitForTimeout(pollMs);
+      continue;
+    }
     if (box) {
       // ONLY CLICK A POINT THAT HAS HELD STILL. The measurement and the click are two round trips;
       // requiring the same coordinates twice in a row is what makes the point still true when the

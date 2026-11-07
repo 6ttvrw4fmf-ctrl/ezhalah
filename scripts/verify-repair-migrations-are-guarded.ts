@@ -48,6 +48,21 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 🔧 2026-11-06. One aqarmonthly row («بحرة», pin 21.4669 N) left under Jazan city 3504 after the owner's 10-22 Bahrah twin
+  // repair (20261022004255 ran before that row was captured); refiled to بحرة المجاهدين (city 1882, منطقة مكة المكرمة).
+  '20261106135341_bahrah_leftover_refiled_to_makkah.sql':
+    'watched by the standing detector that found it, mon_detect_jazan_label_pin_far_north (alert jazan_label_pin_far_north, ' +
+    'in the roster since 20261022004255): any production_ready row served under region_id 10 whose own pin is north of 19.5 N ' +
+    're-raises it — the exact shape this repair removes (alert 13409). Also enrolled in ops_repair_guarantee_registry ' +
+    '(bahrah_leftover_refiled_to_makkah_1106). The applied file cannot be edited to name the detector (content parity: ' +
+    'byte-exact mirror).',
+  // 🆕 2026-11-05. 19 Property Finder arrivals whose own DISTRICT word is a catalogued place got that district.
+  '20261105072253_propertyfinder_19_arrivals_get_their_catalogued_district.sql':
+    'watched by the standing daily detector mon_detect_unknown_named_district (cron 04:41 UTC, created in ' +
+    '20261018035154): any active row whose own district word is not on its city\'s list re-raises it, and the writer is ' +
+    'fixed (_DISTRICT_SPELLING in scrapers/propertyfinder/run.py, test_propertyfinder_district_spellings_1105.py). Also ' +
+    'enrolled in ops_repair_guarantee_registry (propertyfinder_unknown_named_districts_1105). The applied file cannot be ' +
+    'edited to name the detector (content parity: byte-exact mirror).',
   // 2026-11-03 owner session. Hid 371 billion-plus prices; the owner reversed it 20 minutes later (PRICE = SOURCE).
   '20261103230546_hide_billion_price_typos.sql':
     'undone by 20261103232309_revert_hide_billion_price_typos.sql the same hour (owner: «dont hide, show me» — a source\'s ' +
@@ -69,6 +84,11 @@ const WAIVED: Record<string, string> = {
     'be edited to name it (content parity: this is its byte-exact mirror).',
   // 2026-11-03 (backlog 1261/1263). Four guarded row repairs whose applied files name their detector only in comments
   // (content parity: these are byte-exact mirrors of what production executed, so the SQL cannot be edited to name it).
+  // 2026-11-05: a byte-exact mirror that names its detector only in comments (content parity forbids editing it).
+  '20261105042913_dealapp_two_field_integrity_rows_adjudicated_from_their_pages.sql':
+    'one dealapp ad hidden on its own page (redirects home, read twice, live control; adjudicated) and one recorded as ' +
+    'source-published (111,111,111,111 on its page); watched by mon_detect_field_integrity (phone_price / extreme_magnitude ' +
+    're-raise on any unverified return) and registered in ops_repair_guarantee_registry (20261105042932).',
   '20261103170854_wasalt_archive_never_restores_an_impossible_price.sql':
     'five wasalt prices put back to what wasalt publishes today (guarded on the stale value), plus the trigger fix that stops a ' +
     'stale archive restoring them; watched by mon_detect_field_integrity (field_integrity_extreme_magnitude re-raises if the ' +
@@ -120,6 +140,23 @@ const WAIVED: Record<string, string> = {
     'mon_detect_adjudicated_reactivation (rostered, enrolled for this repair in 20261104094703) watches; the crawl left ' +
     'every matrix (RETIRED_PLATFORMS.txt), so no scrape can bring the rows back. The applied file cannot be edited to name ' +
     'the detector (content parity).',
+  // 2026-11-04. Owner reversal of the retirement above, same day («yeah do that ok»): almuteb back to dormant.
+  '20261104224447_unretire_almuteb_back_to_dormant.sql':
+    'a one-off owner decision that undoes 20261104094609 on the same fixed 11 almuteb rows: their adjudications are ' +
+    'removed and the rows made active in ONE transaction, restoring the 2026-10-27 dormant state; they stay out of ' +
+    'search through the dormant gate (production_ready=false), which the v2 location view and the daily stale-listings ' +
+    'detector already watch for every dormant platform. No new data is computed, so there is no invariant to guard.',
+  // 2026-11-04. Property Finder launch follow-ups; both are one-off fills of rows the WRITER now produces itself.
+  '20261104214154_propertyfinder_license_on_card.sql':
+    'a one-off copy of license_number into additional_info.rega_ad_license_number on the stored Property Finder rows; the ' +
+    'writer is fixed (scrapers/propertyfinder/run.py map_listing writes the key on every daily crawl, asserted by ' +
+    'test_propertyfinder_staged_ingest.py in the workflow\'s own pre-crawl test step), so every row is rewritten each day ' +
+    'and the fill cannot decay. The applied file cannot be edited to name it (content parity).',
+  '20261104215527_propertyfinder_cheap_yearly_rent_stored_monthly.sql':
+    'owner decision 2026-11-04 on the 12 measured rows (PF «yearly» residential rents 300–7,999 = monthly ×12, evidence ' +
+    'flagged judged_monthly); the writer is fixed (scrapers/propertyfinder/run.py price_fields, band edges and the ' +
+    'untouched commercial side asserted by test_cheap_yearly_residential_rent_is_stored_monthly_owner_2026_11_04, run before ' +
+    'every crawl), so the daily crawl re-stores every such row the same way. Content parity forbids naming it in the file.',
   // 2026-10-27. Owner-approved one-off retirement («do that please fix everything»).
   '20261027025056_razre_retire_wix_era_rows.sql':
     'a one-off owner decision on a fixed set of 94 rows from razre.sa before its rebuild (Wix /onepro-1/ URLs that now ' +
@@ -873,6 +910,16 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260914190653_rakez_off_plan_resurrection_detector.sql, which '
     + 'creates mon_detect_rakez_off_plan_resurrection(), needle-edits it into the '
     + 'mon_run_all_detectors() roster, runs it green, and proves the predicate is not vacuous',
+  // Blind spot 1356 (new-listings engineer, 2026-11-06). NOT a data repair: the migration needle-edits
+  // trg_aqar_parse to prefer source_capture.ad_license_number. Its only UPDATE is the check block's
+  // self-test, which fires the trigger on one row inside a sub-transaction it then rolls back by raising
+  // (chk_rollback) — no listing row changes. The class it fixes is watched by its companion
+  // 20261106215350_arrivals_licence_dip_declares_aqar_publisher.sql, which declares aqar a proven licence
+  // publisher in arrivals_pin_licence_coverage() (read by the rostered mon_detect_arrivals_pin_or_licence_dip())
+  // and executes the predicate to prove aqar is flagged. Open both to verify this reason.
+  '20261106214548_aqar_trigger_keeps_payload_ad_licence.sql':
+    'not a repair: the only UPDATE is a self-test rolled back inside its check block; the class is '
+    + 'watched by companion 20261106215350 via rostered mon_detect_arrivals_pin_or_licence_dip()',
 };
 
 // Enforcement starts here — the day this rule landed.

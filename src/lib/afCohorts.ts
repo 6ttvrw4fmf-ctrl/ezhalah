@@ -89,7 +89,7 @@ const VILLA_BUY_CARDS: CardLists = {
   papers: ['warranty', 'sanitation', 'water_tank_well', 'separate_meters', 'electronic_deed', 'basement', 'two_entrances', 'car_entrance', 'cameras_smart_home'],
 };
 const VILLA_RENT_CARDS: CardLists = {
-  comfort: ['kitchen', 'ac', 'furnished', 'parking', 'car_entrance', 'private_entrance', 'laundry_room'],
+  comfort: ['kitchen', 'ac', 'parking', 'car_entrance', 'private_entrance', 'laundry_room'],
   space: ['majlis', 'women_majlis', 'dining_majlis', 'maid_room', 'driver_room', 'annex', 'roof'],
   outdoors: ['pool', 'garden_yard', 'grill', 'irrigation', 'garage', 'storage', 'balcony'],
   smart: ['elevator', 'gym', 'jacuzzi_sauna', 'sports_court', 'smart_home_entry', 'central_gas', 'cameras'],
@@ -320,7 +320,7 @@ export const COHORT_CARDS: Record<string, Partial<Record<CohortDeal, CardLists>>
   Duplex: VILLA_CARDS, // shares the villa lists (owner 2026-11-02): 850 Buy / 76 Rent ads, chips self-hide at 0
   Apartment: {
     RentAnnual: {
-      comfort: ['kitchen', 'ac', 'parking', 'elevator', 'furnished', 'private_entrance', 'bills_included'],
+      comfort: ['kitchen', 'ac', 'parking', 'elevator', 'private_entrance', 'bills_included'],
       space: ['majlis', 'maid_room', 'driver_room', 'roof', 'two_entrances', 'balcony', 'garden'],
       safety: ['cameras', 'guard', 'smart_entry', 'smart_home', 'central_gas', 'optical_fibers', 'separate_meters'],
       perks: ['gym', 'pool', 'sauna', 'kids_play_area', 'nursery', 'cleaning_service', 'free_maintenance'],
@@ -330,7 +330,7 @@ export const COHORT_CARDS: Record<string, Partial<Record<CohortDeal, CardLists>>
   },
   Floor: {
     RentAnnual: {
-      comfort: ['kitchen', 'ac', 'parking', 'furnished', 'private_entrance', 'car_entrance', 'elevator'],
+      comfort: ['kitchen', 'ac', 'parking', 'private_entrance', 'car_entrance', 'elevator'],
       space: ['majlis', 'dining_majlis', 'maid_room', 'driver_room', 'roof', 'two_entrances', 'yard'],
       extras: ['storage', 'laundry_room', 'annex', 'garage', 'grill', 'water_tank', 'balcony'],
       safety: ['separate_meters', 'optical_fibers', 'cameras', 'smart_entry', 'central_gas', 'smart_home', 'pool'],
@@ -344,7 +344,7 @@ export const COHORT_CARDS: Record<string, Partial<Record<CohortDeal, CardLists>>
   },
   Room: {
     RentAnnual: {
-      comfort: ['ac', 'furnished', 'kitchen', 'bills_included', 'own_bathroom', 'private_entrance', 'parking'],
+      comfort: ['ac', 'kitchen', 'bills_included', 'own_bathroom', 'private_entrance', 'parking'],
       who: ['singles', 'families'],
       extras: ['optical_fibers', 'cameras', 'elevator', 'guard', 'fridge', 'laundry_room', 'smart_entry'],
     },
@@ -352,7 +352,7 @@ export const COHORT_CARDS: Record<string, Partial<Record<CohortDeal, CardLists>>
   },
   Studio: {
     RentAnnual: {
-      comfort: ['furnished', 'kitchen', 'ac', 'parking', 'elevator', 'bills_included', 'private_entrance'],
+      comfort: ['kitchen', 'ac', 'parking', 'elevator', 'bills_included', 'private_entrance'],
       extras: ['gym', 'optical_fibers', 'cameras', 'roof', 'pool', 'balcony', 'laundry_room'],
     },
     Buy: APARTMENT_BUY_CARDS,
@@ -374,7 +374,7 @@ export const COHORT_CARDS: Record<string, Partial<Record<CohortDeal, CardLists>>
       build: ['sanitation', 'warranty', 'optical_fibers', 'water_tank', 'electronic_deed', 'guard', 'cameras'],
     },
     RentAnnual: {
-      features: ['parking', 'elevator', 'ac', 'furnished', 'separate_meters', 'basement', 'annex'],
+      features: ['parking', 'elevator', 'ac', 'separate_meters', 'basement', 'annex'],
       services: ['sanitation', 'warranty', 'optical_fibers', 'roof', 'cameras', 'two_entrances', 'water_tank'],
     },
   },
@@ -488,7 +488,12 @@ export function cardKeys(q: SearchQuery, id: string): string[] {
 // Office (owner list 2026-11-01): office kind → ready to work → ⚙️ building → 📍 location → business; the Buildings &
 // Facilities box: what's inside → 💰 investment → 📍 location. So `building`, `inside` and `investment` sit before
 // `location` (measured live 2026-11-03: both scopes asked location too early). The retail lists keep location → space.
-const GROUP_ASK_ORDER = ['rnpl', 'bathrooms', 'property_age', 'street_width', 'direction', 'apartments', 'shops', 'who',
+// «🛋️ مفروشة / غير مفروشة» right after age on YEARLY RENT (owner 2026-11-05: «for yearly we include it in the filter»). It
+// replaced the 2026-10-31 comfort-card chip, which could only say «مفروشة». Audit that day over 126,831 yearly ads: the
+// stated furnished / unfurnished disagreed with the ad's words on ~0.24 %, and those were reader faults fixed the same
+// day (PR #10630: the ad's own district hid the next word, «كغير مؤثث», «بدون فرش», a near word). Commercial «ready» /
+// «cspace» keep the chip; Buy never asks it.
+const GROUP_ASK_ORDER = ['rnpl', 'bathrooms', 'property_age', 'furnished', 'street_width', 'direction', 'apartments', 'shops', 'who',
   'office_kind', 'ready', 'building', 'inside', 'investment', 'location', 'plot', 'water', 'games', 'camp_life', 'comfort',
   'space', 'cspace', 'outdoors', 'water_land', 'power', 'crops', 'animals', 'buildings', 'trucks', 'factory', 'workshop',
   'hotel', 'station', 'extras', 'safety', 'smart', 'perks', 'build', 'papers', 'land', 'services', 'cservices',

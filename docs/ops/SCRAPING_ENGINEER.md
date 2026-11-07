@@ -1,5 +1,28 @@
 # ⚡ SCRAPING ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-06 — «LET THE ENGINEERS SEE WHAT CODERABBIT SAYS» (permanent).** CodeRabbit reviews every PR.
+> In the last 40 PRs it flagged 17 MAJOR issues (e.g. «Update the cron schedule mirror in this change», «Handle array-shaped
+> `additional_info`», «Do not treat the latest date as a complete run»), but only 3 were marked addressed. So, on every PR of yours:
+> 1. **Read CodeRabbit's comments before you merge** (`gh api repos/6ttvrw4fmf-ctrl/ezhalah/pulls/<N>/comments`, author `coderabbitai`).
+> 2. **Every Major/Critical comment is FIXED in the PR, or answered on its thread with the reason it is wrong.** Never merge over
+>    a silent Major. Minor/nitpick: fix when cheap, otherwise reply once.
+> 3. **Review «skipped»?** Comment `@coderabbitai review` on the PR and wait for it. Do not loosen the merge gate.
+> 4. **Your `:end` row adds one line:** «CodeRabbit: N major (F fixed · A answered · 0 silent)».
+> 5. **Once a week (🔧 Monday run):** sweep merged PRs from the last 7 days for silent Majors, and fix or route each one as a bug.
+
+> **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
+
+> **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
+> Open alerts fell 459 → 102 between 10-29 and 11-04, but the owner still found two whole bug classes no detector saw:
+> (1) land ads with the per-metre price typed as the TOTAL (~307 cards, e.g. 1,700 SAR for 375 m² in الأحساء), and
+> (2) Property Finder cards without «رقم رخصة الإعلان». So, every run, in your own lane:
+> 1. **A fix ships with its guard.** A fix is not closed until a detector, barrier or test exists that would have caught it. A detector repairs before it raises.
+> 2. **Blind-spot hunt.** Pick 3 random LIVE cards from different sites. At least one must be from a site that went live in the last 14 days.
+>    Compare every field the card shows with the source page, the way a customer does: price + period, area, rooms, baths, district, pin, licence, and the AF facts your lane owns.
+>    Anything wrong that no detector flagged is a **blind spot**. Build its detector in the same run, or file it with evidence in the owning lane's `ops_engineer_backlog`.
+> 3. **New-site parity.** For 14 days after a site goes live (Property Finder: live 2026-11-04; Keller Williams + Almajdiah: live 2026-11-05), check its cards against the parity standard: licence, rent period, district, pin, AF facts and liveness, at Aqar/Haraj level. A missing field is a bug of the lane that owns it.
+> 4. **The count must fall.** Your `:end` row adds one line: «blind spots found N · guards added N · open alerts start→end (alert_event, resolved_at is null)».
+
 > **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
 > 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
 > 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
@@ -83,6 +106,48 @@ run was replaced at 05:54 by another session's main dispatch). Before relying on
 hours), and never over someone else's pending run. **A line-anchored pin** (`scripts/verify-no-derived-price.ts`
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
+
+**Owed → JOB 0 on 11-08 (dated, from 11-07):** the 06:22 UTC 11-07 search sync FAILED (statement timeout after 10 min;
+routed to 🔧 «repair»), so these merged + crawled fixes reached the raw rows but not the index inside the slot. After
+the first successful sync, one phone `customer-journey.yml` run on: aqargate_residential 10029138 (Makkah القشاشية
+الجديد land 600 m², must NOT show «1,417» as the total; `search_listings_ar` aqargate rows with price_total =
+price_per_meter must read 0, was 20), tamyaz_residential 25034427 (Taif building rent 50,000) + tamyaz_commercial
+25034439 (Jeddah office 2,800,000) — new cards, tamyaz served 15 → ~19; kellerwilliams_residential 24214382 must be
+found under «حي الرائد» (KW served without district was 14). shomou #10946 (soft deadline, CodeRabbit Major fixed):
+proof crawl 42345510942 must end ok with notes «walk incomplete … deadline_cut» or complete, never «killed by SIGINT».
+**NW4349 is still shown:** #11015 stops the spot check reviving it, but the 11-07 06:33 nowaisiry crawl did NOT prune —
+«prune guard tripped: re-saw 7 of 10 active, floor 80%». On a 10-ad site 3 stale ads block the prune forever; read
+`prune_unseen`'s coverage floor for small tables (the own-post-id oracle is per-ad proof, so the floor protects nothing
+there) — that is tomorrow's own-lane fix.
+**NEW (11-07): a None from a scraper NEVER clears a stored value** — `_unknown_must_not_overwrite_known` drops it. When a
+fix changes a field from «a value» to «nothing» (aqargate land: total → rate), write `db.AUTHORITATIVE_NULL`, and only
+when the record was read and the source settled it (CodeRabbit: a missing price states nothing).
+
+**NEW (11-06): A SITE THAT «ANSWERS 500 ON EVERY PAGE» MAY HAVE BEEN REBUILT — OPEN ITS HOMEPAGE FIRST.** aqargate's
+WordPress REST answered 500 from 11-05 ~21:00 UTC (crawl 0 rows, liveness controls 0/5) while aqargate.com answered 200
+with a new single-page app. Its bundle (`/assets/index-*.js`) named the public routes in one grep:
+`/api/public/listings?page=N` (205 ads) and the ad page `/marketplace/<id>`. Imported ads carry the old id in
+`regaData.wp_id`, so the rows kept their AG<wp id> numbers (114 of 142 refreshed in place, PR #10941). Recipe for the next
+rebuilt site: `curl` the homepage → grep the bundle for `/api/` → read one record → map ids from the old platform before
+upserting, or every card shows twice. A SPA ad URL answers 200 for ANY id, so liveness must read the record route, never
+the page status (fleet_liveness now calls `verify_gone_any`).
+**NEW (11-06): with ~90 runs queued at 22:00 UTC a probe crawl waits 20–40 min for a runner** — dispatch every probe in
+the first 15 minutes, all at once, each from its own `probe/<site>-<date>` branch.
+
+**NEW (11-05): «served_price_never_rechecked» is a COVERAGE alarm, and each table had a different root.** Read
+the sample rows, then the site's own run log line, before touching code:
+- **tuba** — the map feed (`mapProperties`) omits ads with no pin, so «records = declared» read INCOMPLETE every
+  night from 09-30 and prune never ran (3,289 cards / 3,287 records). Fixed in #10611: the LIST decides completeness.
+- **dealapp** — zero-padded twins («DA089639» beside «DA89639»): the crawl canonicalises ids, so the padded row is
+  never re-written. Retired by `20261105054500` + `mon_detect_dealapp_zero_padded_twin()` (repairs, then raises).
+- **safa commercial** — the table's crawl seen-set is EMPTY (all units are residential or off-plan), so
+  `prune_unseen` returns -1 («site down») and the 1 row can never be struck. Open (backlog, «SAFA»).
+- **maqrat** — documented: no removal signal at source (probe 37618176662); absence never hides. Not a scraper bug.
+- **sakani** — the detail route walls the proxy (backlog 1277).
+**BLIND SPOT (11-05): Aqar licence 0.6 %** (179k cards; dealapp / Property Finder 100 %). `license_number` is
+written only by `trg_aqar_parse` from the stored visible text, and the licence block is not in it. Find where the
+rendered page carries it (`source-reread.yml around=rega_` on aqar 96046, licence 7200958887 in its own text), then
+read it in `enrich_residential` AND make `aqar_parse` keep it (the trigger overwrites `license_number` every write).
 
 **NEW (11-04): EVERY queued workflow that reads the repo must check out `main` at RUN time, not only small-sources-sync.**
 `migration-auto-mirror.yml` run 41767741699 was dispatched 03:32 and got a runner 05:05; `actions/checkout` used the
@@ -924,3 +989,10 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   provisional until the PR is on main and the first MAIN crawl after it has re-written the rows; read
   `scrape_runs` for the site after your proof and before your end row — if a later run is not from the fixed
   commit, the proof is «⏳ dated: first main crawl after merge», never PASS.
+
+## Lesson from 2026-11-04 (copied by 🔧 from your own report — the THIRD night of this family, 10-31 / 11-01 / 11-04, so it is a rule)
+With ~100 runs queued a merge takes 50–80 min and a proof crawl lands after the slot: on 11-04 five fixes merged
+(#10083 05:55, #10352 06:31) and none was proven (rating 6). **Rule:** at minute 10 name, per job, the workflow and the
+UTC time its proof can land; take only jobs provable on rows that already exist (an RPC replay, a journey on a listing
+the index already holds) and dispatch every proof crawl before minute 20 and before :20 of the hour; a crawl-proven fix
+whose proof needs a runner you cannot get is written as «⏳ dated» with the run and the time, never as fixed.

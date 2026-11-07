@@ -2,9 +2,9 @@
 // per settled view. A failed read is 'unknown' — the caller keeps its other path, never an empty map.
 import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
-import { parseAreasFeed, areasFromFeed, type AreaFeedRow, type AreaLevel, type AreaRow } from '@/lib/mapAreas';
+import { parseAreasFeed, areasFromFeed, COUNTRY_CENTER, COUNTRY_NAME, type AreaFeedRow, type AreaLevel, type AreaRow } from '@/lib/mapAreas';
 
-export { CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, type AreaLevel, type AreaRow } from '@/lib/mapAreas';
+export { CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, COUNTRY_NAME, COUNTRY_CENTER, areaPlaceName, areaPlace, type AreaLevel, type AreaRow } from '@/lib/mapAreas';
 
 // The labels feed, once per visit (map_areas_feed_ar(), ~5.7k labels, ~70 KB brotli). A failed read is retried on the
 // next ask and the per-view RPC below answers meanwhile — never an empty map.
@@ -36,11 +36,16 @@ export async function fetchMapAreas(box: { s: number; w: number; n: number; e: n
   if (local) return areasFromFeed(local, level, deals, box, 400);
   if (!supabase) return 'unknown';
   try {
+    // The per-view read knows cities and districts only: a region view shows its cities, the country view sums them.
+    const ask = level === 'country' || level === 'region' ? 'city' : level;
     const { data, error } = await boundedRpc<AreaRow[]>(supabase.rpc('map_areas_ar', {
-      p_s: box.s, p_w: box.w, p_n: box.n, p_e: box.e, p_level: level, p_deals: deals.length === 3 ? null : deals, p_limit: 400,
+      p_s: box.s, p_w: box.w, p_n: box.n, p_e: box.e, p_level: ask, p_deals: deals.length === 3 ? null : deals, p_limit: level === 'country' ? 1000 : 400,
     }));
     if (error || !Array.isArray(data)) return 'unknown';
-    return data.filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng) && r.n > 0);
+    const rows = data.filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng) && r.n > 0);
+    if (level !== 'country') return rows;
+    const n = rows.reduce((t, r) => t + r.n, 0);
+    return n > 0 ? [{ city: COUNTRY_NAME.ar, district: '', lat: COUNTRY_CENTER.lat, lng: COUNTRY_CENTER.lng, n }] : [];
   } catch {
     return 'unknown';
   }

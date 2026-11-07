@@ -81,6 +81,21 @@ about moving our robots, not visitors.
 5. Move our robots off the bare public key (they send the handshake too, from the GitHub secret), then close the back
    door: `robot_gate` refuses the public roles without a valid handshake. Owner present for this step.
 
+## Speed limit (Vercel firewall, owner 2026-11-04: «only let people go at normal human speed»)
+
+One per-IP rate-limit rule on the front door (`/sb/*`, `/api/sb*`): 300 requests per 60 s window, fixed window. Set it
+by dispatching **Vercel rate limit** (`.github/workflows/vercel-rate-limit.yml`, mode `log` | `rate_limit` | `off`); it
+upserts the rule through the Vercel API and fails unless the ACTIVE config shows it. No deploy needed.
+
+- **Start and stay in `log`** (watch only, nobody refused) until the Firewall overview shows who would have hit it.
+- Threshold, measured in edge_logs 2026-11-02/04: busiest real visitor 128 calls/min (p99 91, p50 14); our robots with
+  the robot pass reached 595/min. Per 10 s: busiest human 71, robots 174.
+- **Before `rate_limit` (429):** (1) our own e2e robots need a bypass condition (a dedicated header the firewall can
+  match — not EZ_GATE_SECRET, which would sit in plain text in the firewall config); (2) Saudi mobile carriers share
+  addresses (CGNAT), so many real phones can sit behind one IP — check the log hits first; (3) the owner approves.
+  A 429 is final for the app (it only retries 502/503/504).
+- Undo: dispatch `log` again; off: dispatch `off`.
+
 ## Cloudflare Turnstile (owner 2026-10-21: invisible, "users shouldn't verify every time")
 
 Second guard next to BotID. Site key `0x4AAAAAAFfpkJx1Y3UJ9QLd` (public, in src/lib/supabase.ts), widget "Ezhalah",
@@ -91,6 +106,15 @@ renewed at 50 minutes. The front door labels every call `x-ezhalah-human: pass|n
 `EZ_TURNSTILE_ENFORCE=1`. Runs only when the front door is on. Cloudflare requires Invisible-mode sites to reference
 its Turnstile Privacy Addendum in their privacy policy. Done 2026-10-21: owner-approved line in Privacy Policy §6
 (src/data/legal.ts + legalEnglish.ts, «Last updated» 21 October 2026), linking https://www.cloudflare.com/turnstile-privacy-policy/.
+
+**Why visitors lack a pass — measured, then made visible (2026-11-04).** 24 h of real browsers (robot=0, BotID human):
+iPhones carried the pass on 1,125 calls (111 without), desktop on 29 of 1,157, Android on 0 of 433. ezhalah.com is an
+accepted hostname (a test widget on ezhalah.com answered 600010 — "looks automated" in our CDP-driven browser — not
+110200 "domain not allowed"). The widget's errors used to be swallowed, so every door call now carries
+`ezhalah-tsc=<state>` in x-client-info: `wait` (no outcome yet), `ok` (pass minted), `err<code>` (Cloudflare's code),
+`srv<status>` (/api/human refused the token), `load` (script never loaded). Read it next to `ts=pass|none` in edge_logs
+before deciding the fix. **Do not enforce Turnstile until desktop and Android pass rates are explained and high.**
+Barrier: `scripts/verify-turnstile-reports-why.ts`.
 
 ## Network guard: no VPN, Tor or server networks (owner 2026-10-21: «aqar and those websites also don't work with VPN»)
 

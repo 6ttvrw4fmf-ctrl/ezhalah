@@ -1,5 +1,28 @@
 # ♻️ LIFECYCLE ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-06 — «LET THE ENGINEERS SEE WHAT CODERABBIT SAYS» (permanent).** CodeRabbit reviews every PR.
+> In the last 40 PRs it flagged 17 MAJOR issues (e.g. «Update the cron schedule mirror in this change», «Handle array-shaped
+> `additional_info`», «Do not treat the latest date as a complete run»), but only 3 were marked addressed. So, on every PR of yours:
+> 1. **Read CodeRabbit's comments before you merge** (`gh api repos/6ttvrw4fmf-ctrl/ezhalah/pulls/<N>/comments`, author `coderabbitai`).
+> 2. **Every Major/Critical comment is FIXED in the PR, or answered on its thread with the reason it is wrong.** Never merge over
+>    a silent Major. Minor/nitpick: fix when cheap, otherwise reply once.
+> 3. **Review «skipped»?** Comment `@coderabbitai review` on the PR and wait for it. Do not loosen the merge gate.
+> 4. **Your `:end` row adds one line:** «CodeRabbit: N major (F fixed · A answered · 0 silent)».
+> 5. **Once a week (🔧 Monday run):** sweep merged PRs from the last 7 days for silent Majors, and fix or route each one as a bug.
+
+> **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
+
+> **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
+> Open alerts fell 459 → 102 between 10-29 and 11-04, but the owner still found two whole bug classes no detector saw:
+> (1) land ads with the per-metre price typed as the TOTAL (~307 cards, e.g. 1,700 SAR for 375 m² in الأحساء), and
+> (2) Property Finder cards without «رقم رخصة الإعلان». So, every run, in your own lane:
+> 1. **A fix ships with its guard.** A fix is not closed until a detector, barrier or test exists that would have caught it. A detector repairs before it raises.
+> 2. **Blind-spot hunt.** Pick 3 random LIVE cards from different sites. At least one must be from a site that went live in the last 14 days.
+>    Compare every field the card shows with the source page, the way a customer does: price + period, area, rooms, baths, district, pin, licence, and the AF facts your lane owns.
+>    Anything wrong that no detector flagged is a **blind spot**. Build its detector in the same run, or file it with evidence in the owning lane's `ops_engineer_backlog`.
+> 3. **New-site parity.** For 14 days after a site goes live (Property Finder: live 2026-11-04; Keller Williams + Almajdiah: live 2026-11-05), check its cards against the parity standard: licence, rent period, district, pin, AF facts and liveness, at Aqar/Haraj level. A missing field is a bug of the lane that owns it.
+> 4. **The count must fall.** Your `:end` row adds one line: «blind spots found N · guards added N · open alerts start→end (alert_event, resolved_at is null)».
+
 > **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
 > 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
 > 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
@@ -1499,6 +1522,23 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   asking to restore 11 almuteb rows the owner had retired (NXDOMAIN); it now excuses a retraction recorded within ±1 h
   of the deactivation (20261104112157). `stale_listings_detected` likewise skips dormant/retired sites (20261104112551).
 
+## Lessons from 2026-11-06 (♻️)
+- **An oracle's NAME is not an oracle.** Six new-source crawlers (kellerwilliams, almajdiah, propertyfinder live;
+  steam, asasmakeen, mrajhi staged) handed `prune_unseen` a `verify_gone` whose whole body was
+  `return "gone", "absent from 3 consecutive COMPLETE walks"` — an absence-only kill that every keyword barrier
+  counted as protected. 32 shown kellerwilliams ads (dropped from the site's list 164 → 140) and 7 propertyfinder ads
+  were 1–2 walks from being hidden on absence alone, and a CI status read of 14 of the kellerwilliams ones answered
+  200 to all 14, controls 5/5 (spot-check 42209305892), and their own record (the API the page itself calls,
+  found with page-probe 42214711491) showed at least 10 of the 14 «Active»: the old code would have hidden live ads.
+  The first own-record reader also flipped (4 «gone» → 3 «live» on a re-read minutes later), so it stayed shadow
+  and its PR was closed unmerged: a new reader proves itself on a re-read before it feeds the score. Now
+  held UNKNOWN (#10885) and pinned by `scrapers/common/tests/test_verify_gone_never_kills_on_absence.py`, which
+  EXECUTES every bare-name `verify_gone` with the network blocked. When a new site goes live, read its oracle's
+  body, not its keyword.
+- **A sharding fix has a plateau; read it before calling the job done.** dealapp 3 shards: 65.0 → 84.8 % in 24 h,
+  then flat 83–85 % from 22:00 UTC (≈1,065 alive reads/h vs ≈1,185/h needed for 56,844 rows in 48 h). Compute
+  `active ÷ (sla_hours × alive reads/h)` from the shard notes the morning after; the 4th shard is in #10885.
+
 ## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
 
 1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
@@ -1615,3 +1655,19 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   (city_pin_check_silent paged against a 14-hour scheduled gap; searchability read 31 honest-unknown alsaedan arrivals
   as «stuck»), 🔬 11-03 (five detectors behind approved rules), ♻️ 11-03 (adjudicated_reactivation vs a republish).
   Rule: read the job's cron line and the rule's migration before trusting a detector; prove both directions with real numbers.
+
+## Lesson from 2026-11-04 (copied by 🔧 from your own report)
+A «minute only» cron re-slot can break a rest rule: recheck-2 moved to 20:06 by the 11-04 rebalance sat under the 6 h
+rest after the 14:17 pass, so third reads never landed the same day. **Rule:** before applying any schedule change,
+check every recheck pass gap against REPROBE_MIN_HOURS (guard in #10474), and pick free cron minutes BEFORE applying,
+not after (three applies on one night). Also from 🔧: `stale_coverage_gate` in mark_stale_listings_inactive has no
+dormant/retired skip and nothing resolves its keys — sadin/senan/snam (all dormant) raised at 05:15 can never close
+until the same registry skip and a `mon_resolve_stale_keys('stale_coverage_gate', live)` land in that function.
+
+## Lesson from 2026-11-06 (🦅 Falcon)
+`served-link-check` raised P1 `served_links_broken` for dallali (16/17) and erapulse (20/20), yet every «moved»
+link landed on the SAME ad under the site's new pretty URL (a UUID → a slug ending in its first block;
+`ref-mlu12xet-cd3sx` → `REF-MLU12XET-CD3SX`). A same-site landing that carries the ad's own id token is now `ok`
+(`same_ad_redirect`, PR 10912), and every moved link prints its landing page. Before raising a broken-link
+alert, open three of the moved landings and ask whether it is the same ad.
+

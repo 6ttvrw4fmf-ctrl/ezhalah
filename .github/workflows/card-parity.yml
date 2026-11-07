@@ -1,0 +1,106 @@
+# Card parity: our card next to the source ad, field by field, every active website every day (2026-11-06; owner:
+# «eliminate bugs ASAP, fully automate catching them»). The 11-06 licence gap (~37,000 cards) and the 11-05 Dwelleo
+# dead links (4,791) were both a card that disagreed with its source, and no robot looked at both.
+# scrapers/common/card_parity.py: 1-2 served ads per website; the card read in the real customer journey on
+# production (e2e/engineers/customer-journey.mjs --card-full, ONE browser, batches of 12, the database checked quiet
+# before each batch); the source rendered with the honest UA «Ezhalah-bot/1.0», robots.txt obeyed, <= 1 page/s a site,
+# a site left alone at its first wall; Property Finder compared from its robots-allowed category page.
+# Repairs first (moved link → same ad's new address; licence → card key); one row per website per night into
+# ops_card_parity; mon_detect_card_parity (roster, :59) raises P1 per website × field class.
+#
+# Dispatch-only: pg_cron gh-card-parity fires at :33 of 01,05,09,13,17,21 UTC and each run takes one sixth of the
+# websites (slot = UTC hour // 4), so production never carries the whole fleet's journeys at once.
+name: Card parity
+
+on:
+  workflow_dispatch:
+    inputs:
+      sites:
+        description: "Only these websites, comma- or space-separated (empty = this hour's slice)"
+        type: string
+        default: ""
+      all:
+        description: "Every active website in one run (first full run / after a fix)"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Print the rows; repair nothing, write nothing"
+        type: boolean
+        default: false
+  # A PR that changes the robot proves it on three websites, dry (writes and repairs nothing).
+  pull_request:
+    paths:
+      - scrapers/common/card_parity.py
+      - e2e/engineers/customer-journey.mjs
+      - .github/workflows/card-parity.yml
+
+permissions:
+  contents: read
+
+# Its own group: at most ONE card-parity browser on production, never queued behind (or cancelling) an engineer's
+# customer-journey proof run.
+# A PR proof run gets its own group: GitHub keeps ONE pending run per group, so a PR run queued behind a long run
+# replaced (cancelled) the 05:33 scheduled slot on 2026-11-07 (run 42343197377).
+concurrency:
+  group: production-browser-card-parity${{ github.event_name == 'pull_request' && '-pr' || '' }}
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  parity:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install scraper dependencies, Playwright + Chromium
+        run: |
+          pip install -r scrapers/requirements.txt
+          python -m playwright install --with-deps chromium
+          npm i -D @playwright/test@^1.49 playwright@^1.49
+          npx playwright install chromium
+      - name: Compare our cards with their source ads
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_BROWSER: "1"        # the imported cleanup transport (verify-wasalt-probing-workflows-carry-the-browser.ts)
+          SITES: ${{ inputs.sites }}
+          ALL: ${{ inputs.all }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          JOURNEY_OUT_DIR: ${{ runner.temp }}/card-parity
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            exec xvfb-run -a python -m scrapers.common.card_parity --dry-run --sites "dwelleo,muhaysini,propertyfinder"
+          fi
+          exec xvfb-run -a python -m scrapers.common.card_parity \
+            $([ "$DRY_RUN" = "true" ] && echo --dry-run) \
+            $([ "$ALL" = "true" ] && echo --all) \
+            --sites "$SITES"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: card-parity-screens
+          path: ${{ runner.temp }}/card-parity
+          if-no-files-found: ignore
+          retention-days: 7
+      # A measurement that fails silently is no measurement (verify-scheduled-checks-alert-on-failure.ts).
+      - name: Raise or resolve the workflow alert
+        if: always() && github.event_name != 'pull_request'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind lifecycle_check_failed
+          --workflow card-parity.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

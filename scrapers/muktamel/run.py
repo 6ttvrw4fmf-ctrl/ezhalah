@@ -1074,7 +1074,7 @@ def _strike_read_gone(tbl: str, gone_ids: set[int], shards: int, shard: int) -> 
     while True:   # PostgREST caps a select at 1000 rows — page explicitly
         page = db._execute(
             db.sb().table(tbl).select("ad_number").eq("active", True).eq("source", "Muktamel")
-              .range(start, start + 999), what=tbl + ".read_gone_slice").data or []
+              .order("id").range(start, start + 999), what=tbl + ".read_gone_slice").data or []
         rows += [r["ad_number"] for r in page if r.get("ad_number")]
         if len(page) < 1000:
             break

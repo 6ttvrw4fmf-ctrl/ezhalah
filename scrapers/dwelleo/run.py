@@ -49,8 +49,12 @@ Accept-Language: ar is sent; city/area/type names come back Arabic («الريا
 (verified: title, «السعر 1,400,000», «227 م²», the ad licence «7200899466» all on the page).
 /ar/properties itself client-redirects to the homepage, so listing_url is ALWAYS the detail page.
 2026-10-07 the site moved its pages to /ar/properties/for-{rent|sale}/{type}/{city}/{district}/{slug}
-and the old /ar/properties/<slug> answers 404: listing_url now comes from sitemaps/properties.xml
-(the site's own list of live pages) and a record with no page there is skipped (no_public_page).
+and the old /ar/properties/<slug> 308-redirects there while the ad lives (404 once it is gone):
+listing_url is the redirect's target (resolve_public_url); no redirect → skipped (no_public_page).
+2026-11-04 DWELLEO CUT ITS CATALOGUE 11,480 → 18 (9 sale + 9 rent): its listing pages, its API
+(pagination.total 18), its sitemap and its map page all agree; 10 of 10 of our served ads answered
+API 422 and page 404. The collapse guard rightly refuses such a prune; FOLLOW-SOURCE below hides
+only the rows proven gone one by one (owner 2026-11-05: «follow the source»).
 
 Catalogue on 2026-09-24 (second walk, 479 s): 11,480 rows / 11,480 ids, site total 11,481.
 listing_type.key: for-sale + re-sale → Buy, for-rent → Rent, short-term-rental 1 (→ skipped,
@@ -165,12 +169,6 @@ from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://www.dwelleo.sa"
 API = "https://api.dwelleo.sa/api/v1/properties"
-# The site's own list of public listing pages. Since 2026-10-07 a listing lives at
-# /ar/properties/for-{rent|sale}/{type}/{city}/{district}/{slug}; the old /ar/properties/{slug}
-# answers 404 (8/8 sampled). The path parts are the site's own English slugs, which the API does
-# not hand us, so the URL is TAKEN from the sitemap, never assembled: a card must open a live page.
-SITEMAP = f"{BASE}/sitemaps/properties.xml"
-_LOC_RE = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>")
 SOURCE = "دويليو"
 PREFIX = "DWL"
 _PAUSE = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
@@ -290,47 +288,35 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[dict[int, dict], int
     return items, total, complete
 
 
-def parse_sitemap(xml: str) -> tuple[dict[str, str], list[str]]:
-    """({slug: public page URL}, [child sitemap URLs]) from one sitemap document.
+def canonical_from_redirect(status: Optional[int], location: Optional[str]) -> Optional[str]:
+    """The listing's own page from the site's answer to /ar/properties/<slug> (pure).
 
-    A listing page is any <loc> under /properties/ with a slug after it; the Arabic page wins over
-    the English one for the same slug. A <sitemapindex> yields its children instead."""
-    locs = _LOC_RE.findall(xml or "")
-    if "<sitemapindex" in (xml or ""):
-        return {}, locs
-    urls: dict[str, str] = {}
-    for loc in locs:
-        path = loc.split("#", 1)[0].split("?", 1)[0].rstrip("/")
-        if "/properties/" not in path:
-            continue
-        slug = path.rsplit("/", 1)[-1]
-        if slug and (slug not in urls or "/ar/" in path and "/ar/" not in urls[slug]):
-            urls[slug] = path
-    return urls, []
+    Since 2026-10-07 that old address answers 308 → /ar/properties/for-{rent|sale}/{type}/{city}/
+    {district}/<slug> while the ad lives, and 404 «This page could not be found» once it is gone
+    (18 of 18 live records and 10 of 10 removed ones, measured 2026-11-05). The target's path parts
+    are the site's own English slugs, which the API does not hand us, so the URL is TAKEN from the
+    redirect, never assembled. Anything else → None: no known page, no card."""
+    if status not in (301, 302, 307, 308) or not location:
+        return None
+    url = location if location.startswith("http") else BASE + location
+    path = url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    return path if path.startswith(f"{BASE}/ar/properties/for-") else None
 
 
-def fetch_public_urls(s: cc.Session) -> dict[str, str]:
-    """{slug: public page URL} for every listing page the site publishes. Raises when the sitemap
-    cannot be read: without it no listing has a known page, and a guessed URL is a dead card."""
-    def get(url: str) -> str:
-        for attempt in range(_CATALOGUE_ATTEMPTS):
-            try:
-                r = s.get(url, timeout=40, headers={"Accept": "application/xml,text/xml,*/*"})
-                if r.status_code == 200 and "<loc>" in r.text:
-                    return r.text
-                if r.status_code < 500 and r.status_code != 429:
-                    break
-            except Exception:  # noqa: BLE001 — retried below
-                pass
-            time.sleep(1.5 * (attempt + 1))
-        raise RuntimeError(f"the properties sitemap {url} did not answer with listing pages")
-
-    urls, children = parse_sitemap(get(SITEMAP))
-    for child in children[:50]:
-        found, _ = parse_sitemap(get(child))
-        for slug, url in found.items():
-            urls.setdefault(slug, url)
-    return urls
+def resolve_public_url(s: cc.Session, slug: str) -> Optional[str]:
+    """The canonical page of one listing: the site's own 308 from its old address. NOT the sitemap:
+    on 2026-11-04 sitemaps/properties.xml listed 16 of the 18 live ads (the 2 newest were missing),
+    and before that it lagged a catalogue of 11k. One request per record, no body read."""
+    for attempt in range(3):
+        try:
+            r = s.get(f"{BASE}/ar/properties/{quote(slug)}", timeout=40, allow_redirects=False,
+                      headers={"Accept": "text/html,*/*"})
+            if r.status_code < 500 and r.status_code != 429:
+                return canonical_from_redirect(r.status_code, r.headers.get("location"))
+        except Exception:  # noqa: BLE001 — retried below
+            pass
+        time.sleep(1.5 * (attempt + 1))
+    return None
 
 
 def fetch_detail(s: cc.Session, key: Any) -> Optional[dict]:
@@ -423,8 +409,8 @@ def map_listing(rec: dict, *, this_year: Optional[int] = None,
                 public_urls: Optional[dict[str, str]] = None) -> tuple[Optional[dict], str, str]:
     """One API record (list item, or list item merged with its detail) → (row|None, category, why).
 
-    `public_urls` is the sitemap's {slug: page}. A record whose slug has no public page is skipped
-    (no_public_page): the card would open a 404. None (tests only) keeps the record's slug path."""
+    `public_urls` is {slug: canonical page} (resolve_public_url). A record whose slug has no public
+    page is skipped (no_public_page): the card would open a 404. None (tests only) keeps the slug path."""
     this_year = this_year or datetime.now(timezone.utc).year
     dwl_id = _pos(rec.get("id"))
     if not dwl_id:
@@ -634,6 +620,95 @@ def _make_verify_gone(control: Optional[dict]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
+# ── FOLLOW THE SOURCE (owner 2026-11-05) ────────────────────────────────────────────────────────
+# On 2026-11-04 Dwelleo cut its catalogue from ~7,000 to 18 ads. prune_unseen's collapse guard
+# refuses that (a 30%+ vanish is a broken crawl on any other site) and must keep doing so for every
+# other site, so this path is dwelleo's own and runs only after the guard refused a COMPLETE walk
+# that collected >= 98% of the site's own pagination.total. It hides a row only when the source
+# says gone TWO ways: its API record answers the measured removal (422 «The selected id is
+# invalid.» / 404 «العقار غير موجود», or not publish+available) AND the stored page answers 404
+# with no redirect. Anything else keeps the row. Known-live controls from THIS run are read before
+# each block of reads and again before its hides, so a source that stopped answering hides nothing.
+OWNER_FOLLOW_SOURCE = "owner 2026-11-05: follow the source"
+_FOLLOW_BLOCK = 200
+
+
+def page_gone(status: Optional[int]) -> bool:
+    """The stored page's own answer, read with redirects OFF: only a plain 404 is gone (a 308 is the
+    ad moving to its canonical page, which is live; 403/429/5xx/timeouts say nothing)."""
+    return status == 404
+
+
+def _page_status(s: cc.Session, url: str) -> Optional[int]:
+    try:
+        return s.get(url, timeout=40, allow_redirects=False, headers={"Accept": "text/html,*/*"}).status_code
+    except Exception:  # noqa: BLE001 — unreadable is no opinion
+        return None
+
+
+def follow_source_hide(s: cc.Session, table: str, seen_ads: set[str], controls: list[dict]) -> tuple[int, int, str]:
+    """(hidden, kept, why) for one table. Never raises past the caller's run."""
+    if len(controls) < 2:
+        return 0, 0, "fewer than 2 live controls from this run"
+    c = db.sb()
+    rows: list[dict] = []
+    for off in range(0, 100_000, 1000):
+        page = db._execute(c.table(table).select("id,ad_number,listing_url").eq("active", True)
+                           .eq("source", SOURCE).order("id").range(off, off + 999),
+                           what=table + ".follow_source_select").data or []
+        rows += page
+        if len(page) < 1000:
+            break
+    unseen = [r for r in rows if r.get("ad_number") not in seen_ads]
+    api = LivenessProbe(platform="dwelleo", signal=lambda *a: None, session=lambda: s,
+                        url_for=lambda ad: f"{API}/{ad[len(PREFIX):]}")
+
+    def api_verdict(ad: str) -> tuple[str, str]:
+        oid = ad[len(PREFIX):] if ad.startswith(PREFIX) else ""
+        if not oid.isdigit():
+            return "unknown", "not a DWL<id> ad number"
+        api.signal = _signal_for(int(oid))
+        return api.verify_gone(ad)
+
+    def controls_live() -> bool:
+        return all(api_verdict(r["ad_number"])[0] == "live" for r in controls[:2])
+
+    hidden, kept = 0, 0
+    for i in range(0, len(unseen), _FOLLOW_BLOCK):
+        block = unseen[i:i + _FOLLOW_BLOCK]
+        if not controls_live():
+            return hidden, kept + len(unseen) - i, f"controls not live before block {i}: stopped"
+        proven, evidence = [], []
+        for r in block:
+            time.sleep(_PAUSE)
+            verdict, why = api_verdict(r["ad_number"])
+            st = _page_status(s, r["listing_url"]) if verdict == "gone" and r.get("listing_url") else None
+            ok = verdict == "gone" and page_gone(st)
+            (proven if ok else []).append(r["ad_number"])
+            evidence.append({"source_table": table, "ad_number": r["ad_number"],
+                             "verdict": "GONE" if ok else "UNKNOWN", "oracle": "dwelleo.follow_source",
+                             "listing_url": r.get("listing_url") or "",
+                             "note": f"{OWNER_FOLLOW_SOURCE} | api: {why} | page HTTP {st}"[:500]})
+        if not controls_live():
+            return hidden, kept + len(unseen) - i, f"controls not live after block {i}: its hides withheld"
+        now = datetime.now(timezone.utc).isoformat()
+        for j in range(0, len(proven), 200):
+            db._execute(c.table(table).update({"active": False, "deactivated_at": now,
+                                               "last_liveness_probe_at": now})
+                        .in_("ad_number", proven[j:j + 200]).eq("active", True),
+                        what=table + ".follow_source_hide")
+        try:
+            db._execute(c.table("ops_stale_inactivation_probe").insert(evidence),
+                        what="ops_stale_inactivation_probe.insert")
+        except Exception as e:  # noqa: BLE001 — evidence failing never undoes a proven hide
+            print(f"  {table}: follow-source evidence not written ({type(e).__name__}: {e})", flush=True)
+        hidden += len(proven)
+        kept += len(block) - len(proven)
+        print(f"  {table}: follow-source block {i}: {len(proven)} hidden, {len(block) - len(proven)} kept",
+              flush=True)
+    return hidden, kept, "done"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -656,10 +731,15 @@ def main() -> int:
         if not items:
             raise RuntimeError("the catalogue API answered with no properties")
         print(f"{SOURCE}: {len(items)} listings enumerated (site total {site_total})", flush=True)
-        public_urls = fetch_public_urls(s)
-        print(f"{SOURCE}: {len(public_urls)} public listing pages in {SITEMAP}", flush=True)
+        public_urls: dict[str, str] = {}
         for dwl_id, item in items.items():
             seen += 1
+            slug = (item.get("slug") or "").strip()
+            if slug:
+                time.sleep(_PAUSE)
+                url = resolve_public_url(s, slug)
+                if url:
+                    public_urls[slug] = url
             detail = None
             if not args.no_detail:
                 time.sleep(_PAUSE)
@@ -699,20 +779,24 @@ def main() -> int:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
         # PRUNE only after a COMPLETE walk that collected the site's own total (≥ 98%), with the
         # canary-gated oracle above; prune_unseen's own breakers sit on top.
-        pruned = 0
+        pruned, followed = 0, []
         if args.type == "all" and complete and len(items) >= 0.98 * site_total:
             verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
             for tbl, rows in (("dwelleo_residential_listings", res), ("dwelleo_commercial_listings", com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
                                     verify_gone=verify_gone)
                 if n < 0:
-                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                    print(f"  ⚠ {tbl}: prune guard tripped — following the source row by row", flush=True)
+                    h, k, why = follow_source_hide(s, tbl, {r["ad_number"] for r in res + com}, res + com)
+                    followed.append(f"{tbl.split('_')[1]} hidden={h} kept={k} ({why})")
+                    pruned += h
                 else:
                     pruned += n
         else:
             print(f"  prune skipped: walk complete={complete}, {len(items)}/{site_total} collected")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
-                             notes=f"pruned={pruned} {notes}"[:300],
+                             notes=(f"pruned={pruned} " + (f"{OWNER_FOLLOW_SOURCE}: " + "; ".join(followed) + " | "
+                                                           if followed else "") + notes)[:300],
                              check_tables=["dwelleo_residential_listings",
                                            "dwelleo_commercial_listings"])
         if not healthy:

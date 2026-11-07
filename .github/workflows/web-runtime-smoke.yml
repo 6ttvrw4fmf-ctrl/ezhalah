@@ -116,6 +116,14 @@ jobs:
       # header of the script and src/lib/scrollCalm.ts. One search + two taps of «عرض المزيد» (no extra network).
       - name: Scroll smoothness on a laptop (the live-animation budget, measured)
         run: node scripts/verify-web-scroll-smooth.mjs
+      # Owner 2026-11-04: «changing between filter, smart broker and map … something that always fixes it». A change that
+      # makes a tab switch slow never ships: the built app, as a mid-range phone, times every switch against its budget.
+      - name: Tab switching speed on a phone (Filter, Smart Broker, Map)
+        run: node scripts/verify-web-tab-switch-speed.mjs
+      # Owner 2026-11-06: «I never want it to pop up late … let a robot see it». The signed-in welcome line must be on
+      # screen when the page is usable and never change, even when today's facts are slow (replayed as a 4 s, failing read).
+      - name: Welcome headline never pops in late (signed-in phone, slow facts)
+        run: node scripts/verify-web-welcome-never-late.mjs
 
       # Now that this runs unattended on a schedule, a red run has to reach a human. One open P1 per
       # workflow file, self-healing on the next green run. `always()` so a failing run still gets here.

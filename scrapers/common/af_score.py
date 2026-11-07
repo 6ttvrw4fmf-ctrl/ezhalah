@@ -170,7 +170,11 @@ PROJECT_PAGE_UNIT_TRAITS: dict[str, tuple[str, ...]] = {
 # of cards for every N (CI re-read 39228340160: 14146 and 13181 print the identical cards). Its «مفروشة بالكامل» chip
 # belongs to another unit's card; all 4 safa misses on 10-19 asked furnished from it. Such a page is not this ad:
 # unreadable, never counted as wrong.
-SHARED_LIST_PAGE_SITES = {"safa"}
+# nufouth (🔬 2026-11-06): every one of its 331 listing_urls is «/latest-offers?ads-<code>=1», and the server returns the
+# SAME 399,743-byte list of 14 other offers for every code (ads-N4670 and ads-N5007 byte-identical; the ad's own code
+# is not in the HTML — the popup is drawn by script). All 4 nufouth bathroom «mismatches» of 11-06 read another
+# offer's «دورات مياه»; the stored 3/3/3/4 equal each ad's own description.
+SHARED_LIST_PAGE_SITES = {"safa", "nufouth"}
 # WordPress «WP Residence» sites: the ticked checklist is the structured statement (wpresidence_props).
 WP_RESIDENCE_SITES = {"eastabha"}
 COL = {n: c for n, _, c, _ in FIELDS}
@@ -316,7 +320,11 @@ DEED_BOUNDARY = re.compile(r"تمام\s*الحد|يحده|الحد\s*(?:الشم
 # والمصعد», the Houzez detail list on fursaghyr): the evidence line keeps the VALUE and loses its label, so
 # DEED_BOUNDARY cannot see it. fursaghyr 4367079 was asked elevator from exactly that row on 10-24 (run 40076306911)
 # while its «خدمات العقار» names none. Every value printed under a «… الحد …» label is dropped before the page is read.
-_BOUNDARY_ROW = re.compile(r"<strong>\s*(?:وصف|نوع|طول)\s+(?:ال)?حد[^<:]{0,20}:?\s*</strong>\s*<span[^>]*>([^<]{1,300})</span>")
+# sakan prints the same rows as two spans (🔬 2026-11-05: «<span class="f14">وصف الحد الجنوبي</span> <span class="f16
+# f16-700"> مصعد و ارتدادات 1 و درج …</span>», re-read of sakan 95709): both 11-05 sakan elevator misses (12610753,
+# 12611202) were that deed row while the ad's own «مميزات العقار» names no lift.
+_BOUNDARY_ROW = re.compile(r"<(?:strong|span)[^>]*>\s*(?:وصف|نوع|طول)\s+(?:ال)?حد[^<:]{0,20}:?\s*</(?:strong|span)>"
+                           r"\s*<span[^>]*>([^<]{1,300})</span>")
 
 
 def strip_boundary(page: dict, body: str) -> dict:
@@ -333,6 +341,16 @@ def strip_boundary(page: dict, body: str) -> dict:
     keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
     head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
     return {**page, "evidence_lines": keep, "text_head": head}
+
+
+# A counted chip printing ZERO says nothing (🔬 2026-11-05). abaad prints «<strong>0</strong> حمام», «0 غرف نوم», «0 صالات»,
+# «<strong>0</strong> مطبخ» on ads that never filled them in (13214778, a villa, re-read live); the page reader splits the
+# «0» from its word, so «مطبخ» stood alone and the score asked «kitchen». The chip is dropped before the page is read.
+_ZERO_CHIP = re.compile(r"<strong>\s*[0٠]\s*</strong>\s*[^<]{1,24}")
+
+
+def drop_zero_chips(body: str) -> str:
+    return _ZERO_CHIP.sub(" ", body)
 
 
 def page_says_yes(lines: list[str], field: str) -> bool:
@@ -420,6 +438,8 @@ _WASALT_BORDER = re.compile(r"^borders\.", re.I)
 
 
 # wasalt's structured attribute keys → the Arabic label the comparison's keywords read («م²», «غرف», «دورات المياه»).
+WASALT_PRICE_KEYS = ("salePrice", "conversionPrice", "yearlyRent", "monthlyRent", "rentPrice")
+
 WASALT_FIELD_LABELS = {
     "builtUpArea": "مساحة البناء م²", "propertyArea": "مساحة العقار م²", "plotArea": "مساحة الأرض م²",
     "noOfBedrooms": "عدد غرف النوم", "noOfBathrooms": "عدد دورات المياه",
@@ -459,6 +479,13 @@ def wasalt_page(url: str, fetch=None) -> dict | None:
                 # to a size word while the REGA deed text («… من الأرض 51.52 متر») did, and 17926766's structured
                 # builtUpArea 96 (= ours) scored a mismatch (🆕 2026-10-16, re-read run 38925580390).
                 texts.append(f"{label} {node['value']}")
+            # wasalt's OWN price is a bare number (propertyInfo.salePrice / conversionPrice), and a bare number
+            # leaf never became a line, so the score read the description's other «ريال» figures and called our
+            # price — which IS salePrice — a MISMATCH (🆕 2026-11-07: 24756108 640000, 24765590 780000).
+            for pk in WASALT_PRICE_KEYS:
+                pv = node.get(pk)
+                if isinstance(pv, (int, float)) and not isinstance(pv, bool) and pv > 0:
+                    texts.append(f"السعر {int(pv) if float(pv) == int(pv) else pv} ريال")
             for k, v in node.items():
                 walk(v, str(k))
         elif isinstance(node, list):
@@ -547,6 +574,90 @@ def sanadak_page(url: str, fetch=None) -> dict | None:
 # internal link is dropped before the page is read.
 NAV_LINK_SITES = {"opensooq"}
 _NAV_LINK = re.compile(r'<a\b[^>]*href="/[^"]*"[^>]*>([^<]{1,60})</a>')
+
+
+# WordPress «next / previous post» links carry ANOTHER ad's title (🔬 2026-11-05): eastabha 595447 was asked
+# «furnished» from «<a href=".../estate_property/33555/" rel="next"> 🏡 شقة مفروشة راقية للإيجار الصيفي …</a>»
+# while its own page names no furniture (re-read 2026-11-05). On every site, a rel=next/prev link is not the ad.
+_POST_NAV = re.compile(r'<a\b[^>]*\brel="(?:next|prev)"[^>]*>([^<]{1,200})</a>')
+
+
+def strip_post_nav(page: dict, body: str) -> dict:
+    nav = {norm(html.unescape(t)) for t in _POST_NAV.findall(body or "") if t.strip()}
+    nav.discard("")
+    if not nav:
+        return page
+
+    def keep_line(x: str) -> bool:
+        nx = norm(x)
+        return not any(nx == n or (len(n) >= 12 and n in nx) for n in nav)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
+# A «related ads» block lists OTHER ads (🔬 2026-11-05): aljassim 4731 (aljassim_residential_listings:12590177, a house
+# for sale) was asked «kitchen» from «3 غرف + وصالة + ومطبخ + ودورتين مياه» — a cell of the Drupal block
+# «block-views-block-related-ads-block-1», i.e. ad 5084, a flat for rent. Text inside such a block is not the ad.
+_RELATED_BLOCK = re.compile(r'<div[^>]*\b(?:id|class)="[^"]*related[-_](?:ads|posts|listings|properties)[^"]*"[^>]*>'
+                            r'(.{0,15000}?)(?=<div[^>]*\bid="block-|<footer|</body>|\Z)', re.S)
+
+
+# …and so does everything under a «similar ads» HEADING (🔬 2026-11-07): vmksa 641 (vmksa_residential_listings:13604850,
+# a building for sale whose own text never mentions furniture) was asked «furnished» from «مؤثثه بالكامل» — a card
+# under «<h2 class="building-title">الاعلانات المشابة</h2>» (the site's spelling), i.e. another ad's price line.
+# The heading's text may sit inside inline markup («<h2><span>إعلانات مشابهة</span></h2>», CodeRabbit on #11065).
+_SIMILAR_HEADING = re.compile(r"<h([2-4])[^>]*>(.{2,200}?)</h\1>", re.S)
+_SIMILAR_END = re.compile(r"<footer|</body>")
+
+
+def _similar_split(body: str) -> tuple[str, str]:
+    """(markup BEFORE the first «similar / related ads» heading, markup under it up to the footer); ('', '') if none."""
+    for m in _SIMILAR_HEADING.finditer(body or ""):
+        t = norm(html.unescape(re.sub(r"<[^>]+>", " ", m.group(2))))
+        if "مشاب" in t and any(w in t for w in ("اعلان", "عقار", "عروض")):
+            end = _SIMILAR_END.search(body, m.end())
+            return body[:m.start()], body[m.end(): end.start() if end else len(body)]
+    return "", ""
+
+
+def similar_ads_tail(body: str) -> str:
+    """The markup under the first «similar / related ads» heading, up to the footer; '' when the page has none."""
+    return _similar_split(body)[1]
+
+
+def _text_bits(markup: str) -> set[str]:
+    return {nt for t in re.split(r"<[^>]+>", markup or "") if len(nt := norm(html.unescape(t))) >= 6}
+
+
+def strip_related(page: dict, body: str) -> dict:
+    bits: set[str] = set()
+    for block in _RELATED_BLOCK.findall(body or ""):
+        bits |= _text_bits(block)
+    _head, tail = _similar_split(body)
+    # A line the ad ITSELF states stays, even when a similar card repeats it or a part of it (CodeRabbit on #11065, Major
+    # on #11072). «The ad's own lines» are the evidence lines the page yields with the similar tail CUT OUT — never raw
+    # markup above the heading, where a script or a menu could hold the card's phrase (CodeRabbit Major on #11080) — and
+    # a line is protected only by being one of them, so a card's «مطبخ مجهز بالكامل» still goes while the ad's own
+    # «لا يوجد مطبخ مجهز بالكامل» stays (CodeRabbit Major on #11080).
+    bits |= _text_bits(tail)
+    if not bits:
+        return page
+    cut = _RELATED_BLOCK.sub("", body.replace(tail, "", 1) if tail else body)   # the same holds for a related-ads block
+    end = _SIMILAR_END.search(cut)       # …and the site footer is not the ad either (CodeRabbit Major on #11080, e52d91f)
+    cut = cut[:end.start()] if end else cut
+    ad = page_evidence(cut) or {}
+    own = {norm(x) for x in (ad.get("evidence_lines") or []) + (ad.get("text_head") or "").split(" | ")}
+    own.discard("")
+
+    def keep_line(x: str) -> bool:
+        nx = norm(x)
+        return nx in own or not any(nx == b or (len(b) >= 12 and b in nx) for b in bits)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
 
 
 def strip_nav(page: dict, body: str) -> dict:
@@ -877,9 +988,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                 status, body = probe(url)
             except Exception:  # noqa: BLE001
                 status, body = None, ""
+            body = drop_zero_chips(body or "")
             page = page_evidence(body) if status == 200 and body else None
             if page is not None:
-                page = strip_boundary(page, body)
+                page = strip_related(strip_post_nav(strip_boundary(page, body), body), body)
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
             if page is not None and platform in WARRANTY_SITES:
@@ -907,6 +1019,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page,
                                   texts.get((table, rid)))
         fold(row, key, af_only, stored)
+        # Name the field (🔬 2026-11-07): ops_af_score keeps only the key, so every night's precision work began by
+        # guessing WHICH answer disagreed. Field names and keys only — never a value, URL, name or phone (PDPL).
+        if (mm := sorted(k for k, v in af_only.items() if v == MISMATCH)):
+            print(f"  mismatch {key} fields {mm}", flush=True)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
         answers = offered(customer_answers(ad_lines, af_only, platform, page, texts.get((table, rid))), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
@@ -929,6 +1045,60 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     return row
 
 
+SERVED_N = 5                 # served-answer findability: ads asked per website (owner 11-05: every site tested)
+SERVED_COLS = (*AMENITY_SLUG, FURNISHED)
+
+
+def served_findability(client, anon, platform: str, rng: random.Random, *, n: int = SERVED_N,
+                       pace: float = PACE_S, hours: int = MIN_AGE_H) -> dict:
+    """The second, independent half of findability (🔬 2026-11-05, owner: «we need this 100», over EVERY site).
+
+    The page-stated half above asks a question only when the score's own page reader sees the answer on the page,
+    so on 2026-11-05 it tried 87 of 142 websites: muhaysini (11,028 served yeses), wasalt (8,990), dwelleo (3,730)
+    and sakani (1,309) were never asked at all — their pages are a shell or their prose is not quoted by that
+    reader. This half needs no page: it takes ads that CARRY a served Advanced Filter yes, picks ONE of those
+    answers the way a customer taps one chip, and asks the PUBLIC anon RPC (deal, city, district, type, period +
+    that answer) whether the ad comes back. A miss is the customer picking an answer we show for an ad and not
+    reaching it: a mapping, an RPC, a pool or a stored-vs-served disagreement. Whether the yes is TRUE is the
+    precision half's question, not this one's. Returns {served_tried, served_found, served_missed_ids}."""
+    out = {"served_tried": 0, "served_found": 0, "served_missed_ids": []}
+    if anon is None:
+        return out
+    before = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    def base():
+        return (client.table("search_listings_ar").select(STORED, count="exact")
+                .eq("platform", platform).eq("production_ready", True).lt("first_seen_at", before)
+                .not_.like("type_ar", "أرض%").or_(",".join(f"{c}.is.true" for c in SERVED_COLS)))
+
+    total = base().limit(1).execute().count or 0
+    if not total:
+        return out
+    last = 0.0
+    for off in rng.sample(range(total), min(n, total)):
+        stored = (base().order("listing_id").range(off, off).execute().data or [{}])[0]
+        answers = offered([c for c in SERVED_COLS if stored.get(c) is True], stored)
+        if not answers:
+            continue
+        pick = [rng.choice(answers)]
+        params = rpc_params(stored, pick)
+        if not params:
+            continue
+        time.sleep(max(0.0, last + pace - time.monotonic()))
+        last = time.monotonic()
+        verdict = findable(ask(anon, params), stored["source_table"], stored["listing_id"])
+        if verdict is None:
+            continue
+        out["served_tried"] += 1
+        if verdict:
+            out["served_found"] += 1
+        else:
+            key = f"{stored['source_table']}:{stored['listing_id']}"
+            out["served_missed_ids"].append(key)
+            print(f"  served-miss {key} asked {pick}", flush=True)
+    return out
+
+
 def findability(row: dict) -> float | None:
     return row["find_found"] / row["find_tried"] if row["find_tried"] else None
 
@@ -941,7 +1111,7 @@ def _line(r: dict) -> str:
     return (f"{r['platform']}: sampled={r['sampled']} findability={_pct(findability(r))} "
             f"({r['find_found']}/{r['find_tried']}) precision={_pct(af_precision(r))} "
             f"capture={_pct(af_recall(r))} parity={r.get('parity_ok', 0)}/{r.get('parity_tried', 0)} "
-            f"misses={len(r['find_missed_ids'])}"
+            f"misses={len(r['find_missed_ids'])} served={r.get('served_found')}/{r.get('served_tried')}"
             + (f" | {r['note']}" if r["note"] else ""))
 
 
@@ -953,6 +1123,8 @@ def write_rows(client, rows: list[dict]) -> str:
         "af_page_states": r["af_page_states"], "af_captured": r["af_captured"],
         "mismatch_ids": r["mismatch_ids"], "find_missed_ids": r["find_missed_ids"], "note": r["note"],
         "parity_tried": r.get("parity_tried") or None, "parity_ok": r.get("parity_ok") if r.get("parity_tried") else None,
+        "served_tried": r.get("served_tried"), "served_found": r.get("served_found"),
+        "served_missed_ids": r.get("served_missed_ids"),
     } for r in rows]
     try:
         client.table(TABLE).upsert(payload, on_conflict="night,platform").execute()
@@ -971,7 +1143,11 @@ def fleet_totals(rows: list[dict]) -> dict:
             "capture": r_(t("af_captured"), t("af_page_states")), "find_tried": t("find_tried"),
             "find_found": t("find_found"), "sampled": t("sampled"),
             "parity_tried": sum(r.get("parity_tried") or 0 for r in rows),
-            "parity_ok": sum(r.get("parity_ok") or 0 for r in rows)}
+            "parity_ok": sum(r.get("parity_ok") or 0 for r in rows),
+            # served-answer half: «X % over N of M sites» — N = websites asked at least once, M = every website
+            "served_tried": sum(r.get("served_tried") or 0 for r in rows),
+            "served_found": sum(r.get("served_found") or 0 for r in rows),
+            "served_sites": sum(1 for r in rows if r.get("served_tried")), "sites": len(rows)}
 
 
 def main() -> int:
@@ -1001,6 +1177,11 @@ def main() -> int:
                              night=night, pace=a.pace)
         except Exception as e:  # noqa: BLE001 — one website failing never stops the fleet
             row = new_row(night, p, note=f"error: {type(e).__name__}: {e}"[:300])
+        try:
+            row.update(served_findability(client, anon, p, rng, pace=a.pace))
+        except Exception as e:  # noqa: BLE001 — a failed read is UNKNOWN (NULL), never a zero
+            row.update(served_tried=None, served_found=None, served_missed_ids=None)
+            print(f"  ! served findability unread for {p}: {type(e).__name__}: {e}"[:300], flush=True)
         rows.append(row)
         print(_line(row), flush=True)
         # WRITE AS YOU GO (🔬 2026-10-11): the 08:00 run of 2026-10-11 hit the job's 60-minute timeout after
@@ -1025,7 +1206,8 @@ def main() -> int:
         f = out["fleet"]
         print(f"fleet: findability={_pct(f['findability'])} ({f['find_found']}/{f['find_tried']}) "
               f"precision={_pct(f['precision'])} capture={_pct(f['capture'])} "
-              f"parity={f['parity_ok']}/{f['parity_tried']}")
+              f"parity={f['parity_ok']}/{f['parity_tried']} "
+              f"served={f['served_found']}/{f['served_tried']} over {f['served_sites']} of {f['sites']} sites")
         print(out["written"])
     return 0
 

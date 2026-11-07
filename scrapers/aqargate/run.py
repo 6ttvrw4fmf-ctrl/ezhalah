@@ -441,6 +441,336 @@ def map_listing(p: dict, s: Optional[cc.Session] = None) -> tuple[Optional[dict]
     return row, category
 
 
+# ── The marketplace platform (live 2026-11-06) ──────────────────────────────────────────────────
+# aqargate.com replaced its Houzez WordPress site with a single-page app around 2026-11-05 21:00 UTC:
+# /wp-json/wp/v2/properties answers HTTP 500 on every page (crawl 11-06 04:23 saved 0 rows; the
+# liveness controls read 0/5) while the homepage answers 200. The site CHANGED, it did not die
+# (rulebook «A DOWN SITE MUST FAIL TWO CHECKS FIRST»). Its public catalogue is now
+#   GET /api/public/listings?page=N          → {"data":[…20…], "pagination":{page,limit,total,pages}}
+#   GET /api/public/listings/<id>            → the record, or 404 {"error":"Listing not found"}
+# and the ad page a customer opens is /marketplace/<id> (route table in the app bundle). Measured
+# 2026-11-06 21:40 UTC: 205 published ads; 122 were imported from WordPress and carry the old post id
+# in regaData.wp_id, so they keep their AG<wp id> ad number (the same row is refreshed with the
+# new link, never shown twice); the rest get AGM<id>.
+MARKET_API = "https://aqargate.com/api/public/listings"
+MARKET_PAGE = "https://aqargate.com/marketplace/{id}"
+MARKET_ORIGIN = "https://aqargate.com"
+
+MARKET_TYPE_MAP = {
+    "apartment": "Apartment", "villa": "Villa", "duplex": "Duplex", "floor": "Floor",
+    "building": "Building", "land": "Residential Land", "farm": "Farm", "room": "Room",
+    "compound": "Compound", "office": "Office", "shop": "Shop", "warehouse": "Warehouse",
+    "showroom": "Showroom", "commercial": "Commercial Building", "studio": "Apartment",
+    "chalet": "Chalet", "rest_house": "Rest House", "resthouse": "Rest House",
+}
+
+# PDPL: contact and advertiser identity in the marketplace record — never stored, at any depth.
+_MARKET_PII = {
+    "contactName", "contactPhone", "contactEmail", "contactWhatsapp", "advertiserId",
+    "advertiserName", "advertiserMobile", "responsibleEmployeeName", "responsibleEmployeePhone",
+    "responsibleEmployeePhoneNumber", "phoneNumber", "attorneyCode", "_publisher", "createdBy",
+    "reviewedBy", "wp_author_id", "deedNumber", "deedSerialNumber", "brokerageContractNumber",
+    # regaData.PlatformCompliance on WordPress-imported ads is a PHP-serialised blob that embeds the
+    # advertiser's name and mobile — dropped whole (the parsed platformCompliance stays).
+    "PlatformCompliance",
+}
+
+# ad_number → marketplace id, for every ad read this run (the oracle's first lookup).
+_MARKET_IDS: dict[str, int] = {}
+
+
+def _scrub(v: Any) -> Any:
+    if isinstance(v, dict):
+        return {k: _scrub(x) for k, x in v.items() if k not in _MARKET_PII}
+    if isinstance(v, list):
+        return [_scrub(x) for x in v]
+    return v
+
+
+def market_type(raw: Any) -> Optional[str]:
+    t = str(raw or "").strip()
+    if not t:
+        return None
+    return MARKET_TYPE_MAP.get(t.lower()) or TYPE_MAP_AR.get(t) or None
+
+
+def market_ad_number(rec: dict, legacy_by_licence: Optional[dict[str, str]] = None) -> Optional[str]:
+    """AG<wp post id> for an ad imported from the WordPress site (the row we already hold), else the
+    stored AG<wp id> row that carries the SAME REGA ad licence (one ad re-published without its
+    import tag: marketplace 41 = our AG52707, 2026-11-06), else AGM<marketplace id>. The spaces
+    cannot collide: the M is part of the number."""
+    rg = rec.get("regaData") or {}
+    wp = rg.get("wp_id") if isinstance(rg, dict) else None
+    if isinstance(wp, int) or (isinstance(wp, str) and wp.isdigit()):
+        return f"AG{int(wp)}"
+    lic = str(rec.get("adLicenseNumber") or "").strip()
+    if legacy_by_licence and lic and lic in legacy_by_licence:
+        return legacy_by_licence[lic]
+    mid = rec.get("id")
+    if isinstance(mid, int) or (isinstance(mid, str) and str(mid).isdigit()):
+        return f"AGM{int(mid)}"
+    return None
+
+
+def _market_photo(u: Any) -> Optional[str]:
+    if not isinstance(u, str) or not u.strip():
+        return None
+    u = u.strip()
+    if u.startswith("http"):
+        return u
+    return MARKET_ORIGIN + (u if u.startswith("/") else "/" + u)
+
+
+def _pin(lat: Any, lng: Any) -> tuple[Optional[str], Optional[str]]:
+    """The source's own pin, verbatim, only when it is inside Saudi Arabia (rulebook: never 0,0,
+    never outside the Kingdom)."""
+    try:
+        la, ln = float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None, None
+    if 16.0 <= la <= 32.5 and 34.5 <= ln <= 56.0:
+        return str(lat).strip(), str(lng).strip()
+    return None, None
+
+
+def map_marketplace(rec: dict, legacy_by_licence: Optional[dict[str, str]] = None) -> tuple[Optional[dict], str]:
+    """One marketplace record → our row. Same field rules as map_listing (the WordPress path):
+    PRICE = SOURCE; on a Buy land ad whose REGA block carries landTotalPrice the price is the UNIT
+    RATE (price × area = landTotalPrice, the site's own arithmetic) → price_per_meter, no total."""
+    ad = market_ad_number(rec, legacy_by_licence)
+    mid = rec.get("id")
+    if not ad or mid is None or str(rec.get("status") or "published") != "published":
+        return None, "residential"
+    rg = rec.get("regaData") if isinstance(rec.get("regaData"), dict) else {}
+    req = ((rg.get("platformCompliance") or {}).get("request") or {}) if isinstance(rg, dict) else {}
+    property_type = market_type(rec.get("propertyType"))
+    if not property_type:
+        return None, "residential"
+    usage = " ".join(str(u) for u in ([rec.get("propertyUsage")] + list(req.get("propertyUsages") or []))
+                     if u)
+    if property_type == "Residential Land" and "تجاري" in usage:
+        property_type = "Commercial Land"
+    category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
+    is_rent = str(rec.get("listingType") or "").strip().lower() == "rent"
+
+    land_total = rg.get("landTotalPrice") if rg.get("landTotalPrice") not in (None, "") \
+        else req.get("landTotalPrice")
+    land_rent = req.get("landTotalAnnualRent")
+    title = (rec.get("titleAr") or "").strip() or None
+    rent_annual, rent_period = _rent_annualize(
+        _price_int(rec.get("price")), has_annual_field=land_rent not in (None, ""),
+        title_text=title or "") if is_rent else (None, None)
+    # On a Buy LAND ad the marketplace `price` is the REGA unit rate («سعر الوحدة»), never the asking total:
+    # measured 2026-11-06 on all 41 land sale ads, 40-6,500 SAR on plots of 169-106,474 m² (AG52441: 40 for
+    # 106,474 m²); the WordPress page said the same (AG55663 «سعر الوحدة 2817», «2817 ريال للمتر»). The import
+    # dropped landTotalPrice from most records, so its presence cannot be the test. Rate → price_per_meter,
+    # total UNKNOWN (never rate × area). The first marketplace crawl (11-06 21:57) served 16 such rates as totals.
+    is_land = property_type in ("Residential Land", "Commercial Land")
+    per_metre = (not is_rent) and (land_total not in (None, "") or is_land)
+
+    city_ar = (rec.get("city") or "").strip() or None
+    district_ar = (rec.get("district") or "").strip() or None
+    region_ar = (str(rg.get("region") or "").strip() or None) if isinstance(rg, dict) else None
+    cid, rid = to_catalog(city_ar, region_hint=region_ar)
+    lat, lng = _pin(rec.get("latitude"), rec.get("longitude"))
+
+    cap_rec = _scrub(copy.deepcopy(rec))
+    for _k in ("descriptionAr", "descriptionEn", "titleAr", "titleEn"):
+        if isinstance(cap_rec.get(_k), str):
+            cap_rec[_k] = redact_pii(cap_rec[_k])
+    # The rich-attrs index view reads an aqargate pin from
+    # source_capture.property_meta.advertisement_response.location.{latitude,longitude}
+    # (20261022001318). The values below are the record's OWN latitude/longitude/city/district,
+    # copied verbatim — only the container is ours — so pins keep reaching the card with no view
+    # change. The whole (PII-scrubbed) source record is kept under "marketplace".
+    loc = {"region": region_ar, "city": city_ar, "district": district_ar}
+    if lat and lng:
+        loc.update({"latitude": lat, "longitude": lng})
+    cap = {
+        "schema": "aqargate.marketplace.v1",
+        "marketplace": cap_rec,
+        "property_meta": {"advertisement_response": {
+            "location": loc, "adLicenseNumber": rec.get("adLicenseNumber"),
+        }},
+    }
+    ar_like = {
+        "propertyUsages": req.get("propertyUsages") or ([rec["propertyUsage"]] if rec.get("propertyUsage") else None),
+        "propertyAge": rec.get("propertyAge"), "propertyFace": rec.get("propertyFace"),
+        "adSource": rec.get("adSource"), "planNumber": rec.get("planNumber"),
+        "landNumber": rec.get("landNumber"),
+        "streetWidth": None if str(rec.get("streetWidth") or "") in ("", "0", "0.00") else rec.get("streetWidth"),
+        "propertyUtilities": rec.get("propertyUtilities"),
+        "obligationsOnTheProperty": rg.get("obligationsOnTheProperty") if isinstance(rg, dict) else None,
+        "creationDate": rec.get("creationDate"),
+    }
+    photos = [u for u in (_market_photo(x) for x in (rec.get("images") or [])) if u]
+    desc = rec.get("descriptionAr")
+    row = {
+        "ad_number": ad,
+        "listing_url": MARKET_PAGE.format(id=int(mid)),
+        "source": "Aqargate",
+        "active": True,
+        "property_type": property_type,
+        "transaction_type": "Rent" if is_rent else "Buy",
+        "area_m2": _int(rec.get("area")),
+        # The marketplace has a bedrooms field of its own (roomsNumber stays REGA's total room count).
+        "bedrooms": _int(rec.get("bedrooms")),
+        "bathrooms": _int(rec.get("bathrooms")),
+        # A land rate SETTLES «no total»: AUTHORITATIVE_NULL clears a stored total, a bare None is dropped by the
+        # upsert and kept the wrong rate-as-total alive (11-07: 39 rows still total = rate after #10963's crawl).
+        # Only a READ rate settles it: a land record with no price states nothing, so the stored total is kept.
+        "price_total": None if is_rent else (
+            (db.AUTHORITATIVE_NULL if _price_int(rec.get("price")) is not None else None) if per_metre
+            else _price_int(rec.get("price"))),
+        "price_per_meter": _price_int(rec.get("price")) if per_metre else None,
+        "price_annual": rent_annual,
+        "rent_period": rent_period,
+        "city": normalize.map_city(city_ar or ""),
+        "neighborhood": district_ar,
+        "title": title,
+        "description": (redact_pii(desc.strip()) or None) if isinstance(desc, str) and desc.strip() else None,
+        "photo_urls": photos,
+        "property_age": _int(rec.get("propertyAge")),
+        "rega_location_verified": bool(rec.get("adLicenseNumber")),
+        "additional_info": _additional_info(ar_like),
+        "city_ar": city_ar,
+        "district_ar": district_ar,
+        "city_id": cid,
+        "region_id": rid,
+        "source_capture": cap,
+    }
+    _MARKET_IDS[ad] = int(mid)
+    return row, category
+
+
+def legacy_licence_map(stored: list[tuple[str, Optional[str]]], records: list[dict]) -> dict[str, str]:
+    """licence → stored WordPress-era ad number, only where it is unambiguous: the licence names
+    exactly ONE stored AG<digits> row, that row is not claimed by an imported record (wp_id), and
+    exactly one non-imported record this run carries the licence. Anything else gets AGM<id>."""
+    by_lic: dict[str, list[str]] = {}
+    for ad, lic in stored:
+        if ad and re.fullmatch(r"AG\d+", ad) and lic:
+            by_lic.setdefault(str(lic).strip(), []).append(ad)
+    claimed = {market_ad_number(r) for r in records
+               if isinstance((r.get("regaData") or {}), dict) and (r.get("regaData") or {}).get("wp_id")}
+    rec_lic: dict[str, int] = {}
+    for r in records:
+        if not (isinstance(r.get("regaData"), dict) and r["regaData"].get("wp_id")):
+            lic = str(r.get("adLicenseNumber") or "").strip()
+            if lic:
+                rec_lic[lic] = rec_lic.get(lic, 0) + 1
+    return {lic: ads[0] for lic, ads in by_lic.items()
+            if len(ads) == 1 and ads[0] not in claimed and rec_lic.get(lic) == 1}
+
+
+def _stored_licences() -> list[tuple[str, Optional[str]]]:
+    out: list[tuple[str, Optional[str]]] = []
+    for tbl in ("aqargate_residential_listings", "aqargate_commercial_listings"):
+        got = db._execute(db.sb().table(tbl).select("ad_number,source_capture->property_meta->advertisement_response->>adLicenseNumber")
+                          .eq("active", True), what=f"{tbl} licences")
+        for r in (got.data or []):
+            out.append((r.get("ad_number"), r.get("adLicenseNumber")))
+    return out
+
+
+def fetch_market_page(s: cc.Session, page: int) -> tuple[Optional[list[dict]], int, int]:
+    """(records, pages, total) — records is None when the page could not be read (never [])."""
+    last = None
+    for attempt in range(3):
+        _throttle()
+        try:
+            r = s.get(f"{MARKET_API}?page={page}", timeout=30)
+            last = f"HTTP {r.status_code}"
+            if r.status_code == 200:
+                body = r.json() or {}
+                pg = body.get("pagination") or {}
+                data = body.get("data")
+                if isinstance(data, list):
+                    return data, int(pg.get("pages") or 0), int(pg.get("total") or 0)
+        except Exception as e:  # noqa: BLE001 — retried, then reported as unread
+            last = f"{type(e).__name__}: {e}"
+        time.sleep(2 * (attempt + 1))
+    print(f"Aqargate marketplace page {page}: unread ({last})")
+    return None, 0, 0
+
+
+def _market_verdict(status: Optional[int], payload: Any, mid: int) -> Optional[tuple[str, str]]:
+    """Pure decision for the marketplace record route. 404 «Listing not found» is the site's own
+    answer that the ad is gone; 200 + status published is alive; anything else is no answer."""
+    if status is None:
+        return None
+    if status == 404:
+        if isinstance(payload, dict) and str(payload.get("error") or "").strip().lower() == "listing not found":
+            return "gone", "marketplace 404 «Listing not found»"
+        return "unknown", "404 without the site's not-found answer"
+    if status != 200:
+        return None
+    if not isinstance(payload, dict):
+        return "unknown", "200 with unparseable body"
+    if str(payload.get("id")) != str(mid):
+        return "unknown", f"200 for a different listing (asked {mid}, got {payload.get('id')!r})"
+    st = str(payload.get("status") or "").strip().lower()
+    if st == "published":
+        return "live", "marketplace status=published"
+    return "unknown", f"marketplace status={st!r}"
+
+
+def _stored_market_id(ad_number: str) -> Optional[int]:
+    """The marketplace id of a row we already moved to the new site (its stored listing_url)."""
+    try:
+        for tbl in ("aqargate_residential_listings", "aqargate_commercial_listings"):
+            got = db.sb().table(tbl).select("listing_url").eq("ad_number", ad_number).limit(1).execute()
+            for r in (got.data or []):
+                m = re.search(r"/marketplace/(\d+)", str(r.get("listing_url") or ""))
+                if m:
+                    return int(m.group(1))
+    except Exception:  # noqa: BLE001 — no lookup is no answer, never death
+        return None
+    return None
+
+
+def _market_id_for(ad_number: str) -> Optional[int]:
+    if ad_number in _MARKET_IDS:
+        return _MARKET_IDS[ad_number]
+    m = re.fullmatch(r"AGM(\d+)", ad_number or "")
+    if m:
+        return int(m.group(1))
+    return _stored_market_id(ad_number)
+
+
+def _verify_gone_market(mid: int) -> tuple[str, str]:
+    s = _oracle_session()
+    last = "no attempt made"
+    for attempt in range(2):
+        _throttle()
+        status: Optional[int] = None
+        payload: Any = None
+        try:
+            r = s.get(f"{MARKET_API}/{mid}", timeout=30)
+            status = r.status_code
+            last = f"HTTP {status}"
+            try:
+                payload = r.json()
+            except Exception:  # noqa: BLE001
+                payload = None
+        except Exception as e:  # noqa: BLE001
+            last = f"{type(e).__name__}: {e}"
+        decided = _market_verdict(status, payload, mid)
+        if decided is not None:
+            return decided
+        time.sleep(1.2 * (attempt + 1))
+    return "unknown", f"no answer after 2 attempts ({last})"
+
+
+def verify_gone_any(ad_number: str) -> tuple[str, str]:
+    """The oracle handed to prune_unseen: the marketplace route for any ad we know a marketplace id
+    for, the WordPress route (_verify_gone, which now only ever answers 'unknown') otherwise."""
+    mid = _market_id_for(ad_number)
+    if mid is not None:
+        return _verify_gone_market(mid)
+    return _verify_gone(ad_number)
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -448,31 +778,53 @@ def main() -> int:
     args = p.parse_args()
 
     s = session()
-    _, total_pages = fetch_page(s, 1)
-    print(f"Aqargate: {total_pages} pages (per_page={PER_PAGE})")
+    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
+    first, total_pages, total = fetch_market_page(s, 1)
+    print(f"Aqargate marketplace: {total} ads on {total_pages} pages")
     run_id = None if args.limit_test else db.begin_run("aqargate")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
+    read_records = 0
+    records: list[dict] = []
+    unread_pages: list[int] = []
     try:
-        for page in range(1, total_pages + 1):
-            listings, _ = fetch_page(s, page)
-            if not listings:
-                break
-            for p_ in listings:
-                row, cat = map_listing(p_, s)
-                if not row or not row.get("property_type"):
-                    continue
-                if args.type != "all" and cat != args.type:
-                    continue
-                (com if cat == "commercial" else res).append(row)
-                seen += 1
+        if first is None:
+            raise RuntimeError(f"{MARKET_API}?page=1 unread — marketplace catalogue not reachable")
+        for page in range(1, max(total_pages, 1) + 1):
+            listings = first if page == 1 else fetch_market_page(s, page)[0]
+            if listings is None:
+                unread_pages.append(page)
+                continue
+            read_records += len(listings)
+            records.extend(listings)
             if args.limit_test and page >= args.limit_test:
                 break
+        legacy = {}
+        if not args.limit_test:
+            try:
+                legacy = legacy_licence_map(_stored_licences(), records)
+            except Exception as e:  # noqa: BLE001 — no carry-over is at worst one duplicate card
+                print(f"Aqargate: licence carry-over unread ({type(e).__name__}: {e})")
+            print(f"Aqargate: {len(legacy)} WordPress-era row(s) matched by REGA licence")
+        for p_ in records:
+            row, cat = map_marketplace(p_, legacy)
+            if not row or not row.get("property_type"):
+                continue
+            if args.type != "all" and cat != args.type:
+                continue
+            (com if cat == "commercial" else res).append(row)
+            seen += 1
+        # Complete = every page read AND the records add up to the site's own total.
+        complete = (not unread_pages) and total > 0 and read_records >= total
+        print(f"Aqargate marketplace: read {read_records}/{total} records, unread pages {unread_pages}, "
+              f"complete={complete}")
         if args.limit_test:
             print(f"DRY RUN — would upsert {len(res)} residential + {len(com)} commercial")
-            for r in res[:4]:
-                print("  ", {k: r[k] for k in ("ad_number", "property_type", "transaction_type", "city", "neighborhood", "area_m2", "price_total")})
+            for r in (res[:4] + com[:2]):
+                print("  ", {k: r[k] for k in ("ad_number", "listing_url", "property_type", "transaction_type",
+                                                  "city", "neighborhood", "area_m2", "price_total",
+                                                  "price_per_meter", "price_annual")})
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:80])
             return 0
         if res: db.upsert_aqargate_residential_batch(res)
@@ -496,14 +848,17 @@ def main() -> int:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
         for tbl, rows_seen in (("aqargate_residential_listings", res), ("aqargate_commercial_listings", com)):
+            if not complete:
+                print(f"⚠ {tbl}: walk incomplete — no prune, nothing struck")
+                continue
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqargate",
-                                verify_gone=_verify_gone)
+                                verify_gone=verify_gone_any)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
         print(f"✓ Aqargate: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["aqargate_residential_listings", "aqargate_commercial_listings"])
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned} complete={complete} source=marketplace", check_tables=["aqargate_residential_listings", "aqargate_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

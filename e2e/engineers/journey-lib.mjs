@@ -210,6 +210,18 @@ export const pickSpread = (rows, n) => {
   return out;
 };
 
+/** A seeded shuffle (mulberry32): the «random» sample must change from run to run, and a seed makes any
+ *  run reproducible. 🦅 2026-11-06: 80 journeys in ten runs covered only 10 distinct listings per mode,
+ *  because the sample was always each site's newest rows in a fixed order (trap 8: copies prove nothing). */
+export const seededShuffle = (rows, seed) => {
+  let a = (Number(seed) >>> 0) || 1;
+  const rnd = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const out = rows.slice();
+  for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+  return out;
+};
+
 export const idKey = (r) => `${r.source_table}:${r.listing_id}`;
 
 // ── hermetic self-check ─────────────────────────────────────────────────────────────────────
@@ -223,6 +235,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   assert.equal(normUrl('https://aoujestates.com/ar/properties/x'), normUrl('https://aoujestates.com/ar/properties/x'));
   assert.notEqual(normUrl('https://gathern.co/ar/view/1/unit/2'), normUrl('https://gathern.co/view/1/unit/3'), 'a different unit is a different ad');
   assert.notEqual(normUrl('https://x.sa/area/1'), normUrl('https://x.sa/1'), 'only a whole /ar/ segment is a language, not a prefix of a word');
+  { // seededShuffle: same seed → same order; different seeds → a different pick; nothing lost or added
+    const xs = Array.from({ length: 30 }, (_, i) => ({ platform: `p${i % 3}`, listing_id: i }));
+    const a = seededShuffle(xs, 7), b = seededShuffle(xs, 7), c = seededShuffle(xs, 8);
+    assert.deepEqual(a, b, 'a seed reproduces its run');
+    assert.notDeepEqual(pickSpread(a, 6), pickSpread(c, 6), 'two seeds sample different listings');
+    assert.deepEqual([...a].sort((x, y) => x.listing_id - y.listing_id), xs, 'a permutation, never a subset');
+  }
   assert.ok(isMainSearch({ p_offset: 0, p_limit: 24 }));
   assert.ok(!isMainSearch({ p_offset: 0, p_limit: 1 }), 'district count probe is not the main search');
   assert.ok(!isMainSearch({ p_offset: 24, p_limit: 24 }), 'page 2 is not the main search');

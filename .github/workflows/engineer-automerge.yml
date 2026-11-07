@@ -50,6 +50,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASELINE_PR_TOKEN: ${{ secrets.BASELINE_PR_TOKEN }}
           REPO: ${{ github.repository }}
+          # The database lane reads what production ran (ops_migration_sql) — read-only.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           set -uo pipefail
           # ONE baseline PR at a time (owner session 2026-11-01): every deploy opens a deploy/baseline-* PR and 139 had piled up,
@@ -79,17 +82,28 @@ jobs:
             outside=$(printf '%s\n' "$files" \
               | grep -vE '^(scrapers|scripts|e2e|docs|src|public|\.github/workflows)/' \
               ; printf '%s\n' "$files" \
-              | grep -E '^(\.github/workflows/engineer-automerge\.yml|scripts/safe-pr-merge\.ts|scripts/lib/gateFetch\.mjs|scripts/lib/robotPass\.mjs)$' \
+              | grep -E '^(\.github/workflows/engineer-automerge\.yml|scripts/safe-pr-merge\.ts|scripts/lib/mergeGate\.ts|scripts/pr-migrations-match-production\.ts|scripts/lib/migrationDrift\.ts|scripts/lib/gateFetch\.mjs|scripts/lib/robotPass\.mjs)$' \
               ; true)
             outside=$(printf '%s' "$outside" | sed '/^$/d')
-            # A MIRROR PR (owner 2026-10-19): its ONLY files are supabase/migrations/<14 digits>_*.sql and its title
-            # says «mirror». Merging it changes nothing in production — migrations reach prod only through the
-            # engineers' apply step; the file is the git copy of one ALREADY applied, and an unmirrored one blocks
-            # EVERY frontend deploy (drift gate: 10-18 #7555, #7619). The required checks (incl. the byte-parity
-            # check against production) still decide, through the same gate.
-            mirror_only=0
-            notmig=$(printf '%s\n' "$files" | grep -vE '^supabase/migrations/[0-9]{14}_[A-Za-z0-9_]+\.sql$' || true)
-            if [ -n "$files" ] && [ -z "$notmig" ] && printf '%s' "$title" | grep -qi 'mirror'; then mirror_only=1; fi
+            # THE DATABASE LANE (owner 2026-11-07, «yeah do that» after 20 h with no frontend deploy): besides the lanes, a
+            # PR may carry supabase/migrations/<14 digits>_*.sql and sql/mirrors/ files — but only when EVERY migration in it
+            # is exactly what production already ran (scripts/pr-migrations-match-production.ts reads ops_migration_sql).
+            # Merging it then changes nothing in production and clears the deploy drift gate, which refuses EVERY deploy
+            # while an applied migration is missing from git (11-06: #10856, #10913, #10929 waited for a person). A migration
+            # production has not run, or any byte of difference, stays with a person. This replaces the 10-19 rule
+            # (title «mirror» + migration files only), which trusted a byte-parity check that is not a required PR check.
+            db_lane=0
+            if [ -n "$outside" ] && ! printf '%s\n' "$outside" | grep -qvE '^(supabase/migrations/[0-9]{14}_[A-Za-z0-9_]+\.sql|sql/mirrors/[A-Za-z0-9_.-]+)$'; then
+              head_sha=$(gh pr view "$pr" --repo "$REPO" --json headRefOid -q .headRefOid)
+              mapfile -t db_files <<< "$outside"
+              if git fetch -q origin "refs/pull/$pr/head" \
+                 && node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+                      scripts/pr-migrations-match-production.ts "$head_sha" "${db_files[@]}"; then
+                db_lane=1
+              else
+                echo "#$pr: database files do not match what production ran — left for a person"
+              fi
+            fi
             # An EMPTY mirror PR (owner 2026-10-26, 🔧 backlog 912): its migration file already reached main through
             # another PR, so the diff is empty and the PR would read «not a mirror» forever (8713 sat 14 h, 8678 24 h,
             # 8659 27 h, 8921 12 h). Nothing is lost — git and production already agree — so it is closed with the reason.
@@ -121,8 +135,8 @@ jobs:
                 continue
               fi
             fi
-            if [ -z "$files" ] || { [ -n "$outside" ] && [ "$mirror_only" != 1 ]; }; then
-              echo "#$pr: not scrapers-only / not a mirror — left for a person"; continue
+            if [ -z "$files" ] || { [ -n "$outside" ] && [ "$db_lane" != 1 ]; }; then
+              echo "#$pr: outside the lanes — left for a person"; continue
             fi
             # GitHub answers UNKNOWN while it recomputes mergeability after main moved (🔧 2026-10-24, backlog
             # 802: #8449 read UNKNOWN at 12:07 while it was BEHIND, so the branch was not updated and the gate

@@ -117,6 +117,17 @@ check('a NON-required check that FAILED still blocks the merge',
 check('a NON-required check still PENDING still blocks the merge',
   !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, { context: 'optional-lint', conclusion: null }], ...CLEAN }).allow);
 
+// 0b′ (2026-11-07): an ADVISORY reviewer that had nothing to read (CodeRabbit «No files to review») is not a result.
+const rabbit = (conclusion: CheckRun['conclusion']): CheckRun => ({ context: 'CodeRabbit', conclusion });
+check('CodeRabbit SKIPPED (not required) → ALLOWED (#10856 sat blocked on exactly this)',
+  decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, rabbit('SKIPPED')], ...CLEAN }).allow);
+for (const bad of ['FAILURE', 'CANCELLED', 'NEUTRAL', null] as const) {
+  check(`CodeRabbit ${bad ?? 'PENDING'} still blocks`,
+    !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, rabbit(bad)], ...CLEAN }).allow);
+}
+check('CodeRabbit SKIPPED when it IS required → BLOCKED (rule 1 governs)',
+  !decideMerge({ requiredContexts: [...REQ, 'CodeRabbit'], requiredContextsKnown: true, checks: [...allGreen, rabbit('SKIPPED')], ...CLEAN }).allow);
+
 console.log('\n  mutation proof — each guard must FAIL on its own defect\n');
 let mutFail = 0;
 const mustCatch = (label: string, caught: boolean) => {
@@ -154,6 +165,11 @@ mustCatch('a gate that treats an UNREADABLE required-check contract as "nothing 
   })());
 mustCatch('a gate that inspects ONLY required contexts would wrongly allow a FAILING optional check',
   !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, { context: 'not-required', conclusion: 'FAILURE' }], ...CLEAN }).allow);
+
+mustCatch('a skip exemption widened to ANY optional check would wrongly allow a SKIPPED optional-lint',
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, { context: 'optional-lint', conclusion: 'SKIPPED' }], ...CLEAN }).allow);
+mustCatch('a skip exemption that ignores the REQUIRED list would wrongly allow a required CodeRabbit that skipped',
+  !decideMerge({ requiredContexts: ['CodeRabbit'], requiredContextsKnown: true, checks: [{ context: 'CodeRabbit', conclusion: 'SKIPPED' }], ...CLEAN }).allow);
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

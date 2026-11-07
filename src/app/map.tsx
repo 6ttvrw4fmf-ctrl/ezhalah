@@ -164,6 +164,9 @@ export default function MapRoute() {
         {/* «مسار» is built but HIDDEN (2026-11-01): Apple's directions return ZERO routes anywhere in Saudi Arabia on MapKit JS
           (measured live: Jeddah→Riyadh, inside Riyadh, walking — all 0; the same call routes in the UAE, the UK, the US).
           Pass `onRoute` again once a routing provider that covers the Kingdom is chosen (ROUTE_PROVIDER_READY). */}
+      {/* The deal button stays in full screen (owner 2026-11-05: a full-screen «0 listings» over Umluj — the map was on Buy
+          and nothing on screen said so). */}
+      {full && M ? <View style={s.fullDeals}><M.MapDealRow deals={deals} onDeals={(d) => { setDeals(d); setPinRow(null); }} onFilter={() => setFilterOpen(true)} filterOn={isNarrowed(mapFilter)} /></View> : null}
       {M && <M.AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals, ...pinFilterOf(mapFilter) }} onPinSelect={(row) => { setPinRow(row); }} />}
       {pinRow ? <MapPinSheet row={pinRow} onClose={() => setPinRow(null)} /> : null}
       </View>
@@ -192,5 +195,6 @@ const s = StyleSheet.create({
   modeWrap: { alignSelf: 'center', marginTop: 8, zIndex: 1 },
   dealWrap: { zIndex: 3 }, // above the map: the search field's suggestions drop over it
   body: { flex: 1, marginTop: 6, zIndex: 1 }, // tight under the row (owner 2026-10-31: «eliminate those extra spaces»)
+  fullDeals: { marginBottom: 6, zIndex: 3 },
   bodyFull: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, backgroundColor: colors.paper, paddingHorizontal: 8 },
 });

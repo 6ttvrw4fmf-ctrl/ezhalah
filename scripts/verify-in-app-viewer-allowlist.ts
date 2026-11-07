@@ -49,6 +49,7 @@ const PROVEN_HOSTS = [
   'aqaralmuhaysini.com', // 9.96 s on the runner; owner keeps it on (2026-10-17)
   'albukaeri.sa', 'tamyaz-sa.com', 'ashab.sa', 'macsaib.sa', 'sanadak.sa', 'masaraqarat.com', // 0.7–2.7 s, run 39026362475
   'ryadah.com.sa', 'sodasyat.sa', 'app.abaadapp.sa', // 1.6–4.8 s, run 39033523902 (challenge-aware guard)
+  'steam-realestate.com', // 2026-11-07: no frame headers, ad «STeam Residence 103» framed on a phone profile in 2.9 s
 ].join(',');
 check('allowlist is exactly the proven sites', IN_APP_VIEWER_HOSTS.join(',') === PROVEN_HOSTS);
 
@@ -454,6 +455,11 @@ const additionalPreviewHosts = [
   'hasaadestate.com',
   'yameen.sa',
   'maktab.sa',
+  // 2026-11-07: the new-tab sites now open Ezhalah's ad page first
+  'kwsaudiarabia.com',
+  'mrajhi.com.sa',
+  'asasmakeen.com',
+  'almajdiah.com',
 ];
 const hostPass = (host: string, previewHost: typeof inAppPreviewHost, frameHost = inAppViewerHost) =>
   [`https://${host}/ad/1`, `https://www.${host}/ad/1`, `https://${host.toUpperCase()}/ad/1`]

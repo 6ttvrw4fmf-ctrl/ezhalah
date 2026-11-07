@@ -6,7 +6,7 @@
 //
 //   node e2e/engineers/customer-journey.mjs --mode normal --sample 5
 //   node e2e/engineers/customer-journey.mjs --mode af --listings '[{"platform":"aqar","source_table":"listings","listing_id":123}]'
-//   flags: --mode normal|af (required) · --sample N | --listings '<json>' · --count-watch N (af: tick N features, read the live count) · --phone (full mobile
+//   flags: --mode normal|af (required) · --sample N | --listings '<json>' · --count-watch N (af: tick N features, read the live count) · --card-full (normal: record the whole card text + photo) · --phone (full mobile
 //          emulation; the viewport is phone-size either way) · --json (machine lines only)
 //
 // NORMAL: drive the Filter home the way a customer does (deal toggle, city typeahead, district
@@ -41,7 +41,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   normUrl, isMainSearch, afTargetsFor, carriedOnRequest, typeUi, TYPE_UI,
-  priceOf, rangeAround, clampToPriceBox, pickSpread, idKey,
+  priceOf, rangeAround, clampToPriceBox, pickSpread, seededShuffle, idKey,
 } from './journey-lib.mjs';
 // The AF's own card lists (backlog 1268): targets are chips the product really shows for the listing's type × deal.
 // A plain static import — if the module cannot load the run fails loudly, never falls back to guessing.
@@ -80,6 +80,7 @@ const arg = (name) => { const i = process.argv.indexOf(`--${name}`); return i > 
 const MODE = arg('mode');
 const PHONE = process.argv.includes('--phone');
 const JSON_ONLY = process.argv.includes('--json');
+const CARD_FULL = process.argv.includes('--card-full');   // card_parity.py: full card text + photo painted
 const COUNT_WATCH = arg('count-watch') ? Math.min(6, parseInt(arg('count-watch'), 10)) : 0; // see COUNT WATCH below
 if (MODE !== 'normal' && MODE !== 'af') { console.error("need --mode normal|af"); process.exit(2); }
 const SAMPLE = arg('sample') ? Math.min(8, parseInt(arg('sample'), 10)) : null;     // politeness cap
@@ -100,7 +101,7 @@ const log = (...m) => { if (!JSON_ONLY) console.log(...m); };
 const ROW_COLS = 'platform,source_table,listing_id,city_ar,district_ar,region_ar,deal_ar,type_ar,' +
   'rent_period_ar,price_total,price_annual,price_total_effective,area_m2,furnished,elevator,kitchen,' +
   'parking,air_conditioner,private_entrance,maid_room,driver_room,balcony,pool,garden,gym,' +
-  'laundry_room,optical_fibers,car_entrance,sanitation,electricity,water_supply,first_seen_at,production_ready';
+  'laundry_room,optical_fibers,car_entrance,sanitation,electricity,water_supply,first_seen_at,production_ready,license_number';
 
 const fetchRow = async (l) => {
   const rows = await rest(`search_listings_ar?select=${ROW_COLS}` +
@@ -136,7 +137,12 @@ const sampleListings = async (n) => {
   }
   const rows = (await Promise.all(platforms.map((p) =>
     rest(`search_listings_ar?select=${ROW_COLS}&${base}&platform=eq.${encodeURIComponent(p)}&order=first_seen_at.desc&limit=30`)))).flat();
-  const usable = rows.filter((r) => typeUi(r.type_ar, r.source_table) && (MODE !== 'af' || afTargetsFor(r, 2, COHORT_CARDS).length));
+  // RANDOM, as the workflow input promises (🦅 2026-11-06): shuffle before the round-robin spread, so each
+  // run samples different listings and a different site order. JOURNEY_SEED reproduces a run; it is printed.
+  const seed = Number(process.env.JOURNEY_SEED) || (Date.now() % 2147483647);
+  console.log(`sample seed ${seed} (JOURNEY_SEED=${seed} reproduces this pick)`);
+  const usable = seededShuffle(rows, seed)
+    .filter((r) => typeUi(r.type_ar, r.source_table) && (MODE !== 'af' || afTargetsFor(r, 2, COHORT_CARDS).length));
   if (MODE !== 'af') return pickSpread(usable, n);
   // The app offers the guided interview only above 25 results, so an AF sample prefers listings
   // whose city + deal + type scope is comfortably larger (one cheap exact-count request each).
@@ -379,6 +385,28 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       const text = ((await card.first().innerText()) || (await card.first().textContent()) || '')
         .replace(/\s*\n+\s*/g, ' | ');
       result.evidence.card = text.slice(0, 300);
+      // 🦅 2026-11-06: ~37,000 cards stored a REGA ad licence the card never printed. Record whether THIS card
+      // shows the listing's own licence (Arabic-Indic digits folded), from the card's full text, not the 300-char cut.
+      if (row.license_number) {
+        const ascii = text.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+        result.evidence.licenceOnCard = ascii.includes(String(row.license_number).trim());
+      }
+      // CARD PARITY (scrapers/common/card_parity.py, 2026-11-06): the whole card as the customer reads it, and whether
+      // its photo painted (a loaded <img> wider than an icon, and no «لا توجد صورة» placeholder).
+      if (CARD_FULL) {
+        result.evidence.cardFull = text.slice(0, 4000);
+        // Photos load lazily: bring the card into view and wait (<= 8 s) for a painted photo or the placeholder.
+        // Still neither → null (unknown), never «missing».
+        await card.first().scrollIntoViewIfNeeded().catch(() => {});
+        result.evidence.cardPhoto = await card.first().evaluate(async (el) => {
+          for (let t = 0; t < 16; t++) {
+            if (/لا توجد صورة/.test(el.textContent || '')) return false;
+            if ([...el.querySelectorAll('img')].some((i) => i.complete && i.naturalWidth > 64)) return true;
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          return null;
+        }).catch(() => null);
+      }
       step('click card');
       const link = card.first().getByRole('link').first();
       if (await link.count()) await link.click(); else await card.first().click();

@@ -84,9 +84,21 @@
     "grace": 3
   },
   {
+    "platform": "almajdiah",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "almotmkenah",
     "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "almuteb",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
     "grace": 3
   },
   {
@@ -211,6 +223,12 @@
   },
   {
     "platform": "arsh",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "asasmakeen",
     "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
     "grace": 3
@@ -462,6 +480,12 @@
     "grace": 3
   },
   {
+    "platform": "kellerwilliams",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "ksaaqar",
     "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
@@ -540,6 +564,12 @@
     "grace": 3
   },
   {
+    "platform": "mrajhi",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "muajarh",
     "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
@@ -601,6 +631,12 @@
   },
   {
     "platform": "opensooq",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "propertyfinder",
     "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
     "grace": 3
@@ -709,8 +745,8 @@
   },
   {
     "platform": "sakani",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -781,6 +817,12 @@
   },
   {
     "platform": "squares",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "steam",
     "strategy": "SOURCE_LIST_PRESENCE",
     "sla_hours": 48,
     "grace": 3

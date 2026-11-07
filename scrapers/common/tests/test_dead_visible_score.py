@@ -182,3 +182,58 @@ def test_a_void_website_is_read_once_more_at_the_end_of_the_run(monkeypatch, tmp
     assert by["walled"]["live"] == 5 and not by["walled"]["note"]
     assert by["down"]["note"].startswith("void") and "still void" in by["down"]["note"] and by["ok"]["live"] == 5
     assert S.retry_void([{"note": "void: x"}, {"note": None}, {"note": "error: y"}]) == [0]
+
+
+# ── A status read must be able to see a dead ad (♻️ 2026-11-06) ─────────────────────────────────
+
+def test_negative_control_url_replaces_the_trailing_id():
+    n = S.negative_control_url
+    assert n("https://kwsaudiarabia.com/propertydetails/6707227ff8bc59395742594e") == \
+        "https://kwsaudiarabia.com/propertydetails/000000000000000000000000"
+    assert n("https://almajdiah.com/rentals/207?platform=web") == \
+        "https://almajdiah.com/rentals/9999999?platform=web"                 # a whole-digit segment is an id
+    assert n("https://x.sa/ads/flat-3b2") is None                              # a short mixed token is not
+    assert n("https://arkaanalaqar.com/property/2377") == "https://arkaanalaqar.com/property/99999999"
+    assert n("https://wasalt.sa/en/property/apartment-600-sqm-5896910") == \
+        "https://wasalt.sa/en/property/apartment-600-sqm-99999999999"
+    assert n("https://x.sa/ads/12345/") == "https://x.sa/ads/999999999/"
+    for u in (None, "", "https://alnowaisiry.com/lands/%d9%84%d9%84/", "https://x.sa/about"):
+        assert n(u) is None, u
+
+
+def _status_only(monkeypatch, controls, sample, answers):
+    _fake(monkeypatch, controls, sample, answers)
+    read = S.reader_for("x", None)[1]
+    monkeypatch.setattr(S, "reader_for", lambda platform, control: ("status-only", read))
+
+
+def _ads_id(prefix, n):
+    return [{"table": "t_residential_listings", "id": i, "ad_number": f"{prefix}{i}",
+             "listing_url": f"https://x/{prefix}/{1000 + i}"} for i in range(n)]
+
+
+def test_a_status_only_site_that_reads_a_nonexistent_ad_live_is_void(monkeypatch):
+    ctl, ads = _ads_id("c", 5), _ads_id("a", 4)
+    answers = {r["listing_url"]: ALIVE for r in ctl + ads}
+    answers["https://x/c/99999999"] = ALIVE                      # the JS shell answers 200 for anything
+    _status_only(monkeypatch, ctl, ads, answers)
+    row = S.score_site(object(), "x", 400, n=4, rng=random.Random(1), night="2026-11-06", pace=0)
+    assert row["note"].startswith("void: status-only reader") and row["sampled"] == row["live"] == 0
+    assert S.gone_share(row) is None
+
+
+def test_a_status_only_site_whose_nonexistent_ad_reads_gone_is_measured(monkeypatch):
+    ctl, ads = _ads_id("c", 5), _ads_id("a", 4)
+    answers = {r["listing_url"]: ALIVE for r in ctl + ads}
+    answers["https://x/c/99999999"] = DEAD
+    _status_only(monkeypatch, ctl, ads, answers)
+    row = S.score_site(object(), "x", 400, n=4, rng=random.Random(1), night="2026-11-06", pace=0)
+    assert row["note"] is None and row["live"] == 4
+
+
+def test_only_status_only_rows_take_the_negative_control(monkeypatch):
+    ctl, ads = _ads_id("c", 5), _ads_id("a", 4)
+    answers = {r["listing_url"]: ALIVE for r in ctl + ads}       # no entry for the negative URL:
+    _fake(monkeypatch, ctl, ads, answers)                        # a «fake» reader is never asked for it
+    row = S.score_site(object(), "x", 400, n=4, rng=random.Random(1), night="2026-11-06", pace=0)
+    assert row["live"] == 4

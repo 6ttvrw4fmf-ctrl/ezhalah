@@ -3,16 +3,26 @@
 // show the names of the districts only and the number of listings»). Pure rules, import-free, so the barrier can
 // execute them: which level a zoom shows, a label's words, and where a tap on a label takes the map.
 
-export type AreaLevel = 'city' | 'district';
+export type AreaLevel = 'country' | 'region' | 'city' | 'district';
+/** One label. At region level `city` holds the region's name; at country level, the country's. */
 export type AreaRow = { city: string; district: string; lat: number; lng: number; n: number };
 
-/** Wider than this (latitude span, degrees): one label per CITY. */
+// ZOOM GOES COUNTRY → REGION → CITY → DISTRICT → PINS (owner 2026-11-05: «when the user zooms in, first thing Saudi, the
+// total number, then region, then city, and then district»). The map opens on the whole Kingdom (latitude span 17-18°),
+// so the first view is one «السعودية» label with the total; each zoom step (about ×2) moves one level down.
+/** Wider than this (latitude span, degrees): ONE label for the whole country, with the total. */
+export const COUNTRY_LABELS_ABOVE = 12;
+/** Wider than this: one label per REGION (the 13 administrative regions). */
+export const REGION_LABELS_ABOVE = 5;
+/** Wider than this: one label per CITY. */
 export const CITY_LABELS_ABOVE = 2.5;
 /** Wider than this: one label per DISTRICT. At or below it the price pins show. */
 export const DISTRICT_LABELS_ABOVE = 0.06;
 
 /** The level a view shows; null = close enough for price pins. */
 export function areaLevelFor(latitudeDelta: number): AreaLevel | null {
+  if (latitudeDelta > COUNTRY_LABELS_ABOVE) return 'country';
+  if (latitudeDelta > REGION_LABELS_ABOVE) return 'region';
   if (latitudeDelta > CITY_LABELS_ABOVE) return 'city';
   if (latitudeDelta > DISTRICT_LABELS_ABOVE) return 'district';
   return null;
@@ -26,15 +36,36 @@ export function areaCount(n: number, loc: 'ar' | 'en'): string {
   return String(n);
 }
 
-/** The label's name: the city at city level, the district (without a leading «حي ») at district level. */
-export function areaName(a: Pick<AreaRow, 'city' | 'district'>, level: AreaLevel): string {
-  if (level === 'city' || !a.district) return a.city;
-  return a.district.replace(/^حي\s+/, '');
+/** The country label's place and name. */
+export const COUNTRY_CENTER = { lat: 23.9, lng: 45.1 };
+export const COUNTRY_NAME = { ar: 'السعودية', en: 'Saudi Arabia' } as const;
+/** The 13 regions as the index stores them → their English names (the English UI never shows Arabic letters on a label). */
+export const REGION_EN: Record<string, string> = {
+  'منطقة الرياض': 'Riyadh Region', 'منطقة مكة المكرمة': 'Makkah Region', 'المنطقة الشرقية': 'Eastern Province',
+  'منطقة القصيم': 'Qassim Region', 'منطقة المدينة المنورة': 'Madinah Region', 'منطقة عسير': 'Asir Region',
+  'منطقة جازان': 'Jazan Region', 'منطقة حائل': 'Hail Region', 'منطقة تبوك': 'Tabuk Region', 'منطقة الباحة': 'Al Bahah Region',
+  'منطقة الحدود الشمالية': 'Northern Borders Region', 'منطقة نجران': 'Najran Region', 'منطقة الجوف': 'Al Jouf Region',
+};
+/**
+ * The label's name in the UI language (owner 2026-11-05: «I switched to English — why does it show Arabic in here? It
+ * should change automatically»): the country, the region, the city, or the district (without a leading «حي »). In
+ * English a city or district goes through `latin` (src/lib/translitPlace.ts — its dictionary, then a letter mapping),
+ * a region through REGION_EN; Arabic is the stored name.
+ */
+export function areaName(a: Pick<AreaRow, 'city' | 'district'>, level: AreaLevel, loc: 'ar' | 'en' = 'ar', latin: (s: string) => string = (s) => s): string {
+  if (level === 'country') return COUNTRY_NAME[loc];
+  if (level === 'region') return loc === 'en' ? (REGION_EN[a.city] ?? latin(a.city.replace(/^منطقة\s+/, ''))) : a.city;
+  const name = level === 'city' || !a.district ? a.city : a.district.replace(/^حي\s+/, '');
+  return loc === 'en' ? latin(name) : name;
 }
 
-/** Where a tap on a label takes the map: a city opens at district level, a district opens at pin level. */
+/** Where a tap on a label takes the map: one level closer — country → regions, region → cities, city → districts,
+ *  district → pins. MapKit WIDENS a requested span to the screen's shape: measured live 2026-11-05 on a 390×844 phone,
+ *  a region tap asking 4° landed at 5.17° — still the region band — so the user tapped and nothing changed. Each target
+ *  therefore sits deep enough inside the next band that up to TAP_WIDEN × the request still lands there. */
+export const TAP_WIDEN = 1.6;
 export function areaZoomSpan(level: AreaLevel): number {
-  return level === 'city' ? 0.4 : 0.015;
+  return level === 'country' ? 7 : level === 'region' ? 3 : level === 'city' ? 0.3 : 0.015;
 }
 
 /** A view too crowded for price pins shows district names while two or more districts share it; once one district
@@ -64,16 +95,22 @@ export const areasTotal = (rows: AreaRow[]): number => rows.reduce((a, r) => a +
  *  Every listing still counts in the pill (areasTotal of ALL the areas, not just the drawn ones). */
 export const LABEL_SHARE = 0.005;
 export const LABEL_MIN = 10;
-export function visibleAreas(rows: AreaRow[]): AreaRow[] {
+export function visibleAreas(rows: AreaRow[], level: AreaLevel = 'district'): AreaRow[] {
+  // The country label and the 13 regions always show: a region is an administrative area, not a crowd of small towns
+  // (Al Jouf's ~400 listings are 0.2% of Riyadh Region's — the share rule would hide it).
+  if (level === 'country' || level === 'region') return rows;
   const max = rows.reduce((m, r) => Math.max(m, r.n), 0);
-  const floor = Math.max(LABEL_MIN, max * LABEL_SHARE);
+  // A SMALL TOWN SHOWS ITS PLACES (owner 2026-11-05, Umluj: «0 listings» — its districts hold 1-2 listings each, so the
+  // LABEL_MIN floor hid every one of them and the map over Umluj was empty while the pill counted 6). The floor exists
+  // to hide tiny places BESIDE big ones; when nothing in view reaches LABEL_MIN there is nothing to hide them beside.
+  const floor = max < LABEL_MIN ? 1 : Math.max(LABEL_MIN, max * LABEL_SHARE);
   return rows.filter((r) => r.n >= floor);
 }
 
 // ── THE LABELS FEED, FILTERED ON THE PHONE (owner 2026-11-03: «I want it to feel smooth»). Measured: each zoom waited
 //    ~300-420 ms for the network although map_areas_ar() ran in 1 ms; map_areas_feed_ar() hands over every label once
 //    ([is_city, city, district, lat, lng, n_buy, n_rent, n_short]) and these rules pick the ones in view.
-export type AreaFeedRow = { isCity: boolean; city: string; district: string; lat: number; lng: number; buy: number; rent: number; short: number };
+export type AreaFeedRow = { isCity: boolean; city: string; district: string; lat: number; lng: number; buy: number; rent: number; short: number; region: string };
 
 /** The feed's rows → labels. Anything that is not a well-formed row is dropped, never invented. */
 export function parseAreasFeed(raw: unknown): AreaFeedRow[] {
@@ -81,10 +118,10 @@ export function parseAreasFeed(raw: unknown): AreaFeedRow[] {
   const out: AreaFeedRow[] = [];
   for (const r of raw) {
     if (!Array.isArray(r) || r.length < 8) continue;
-    const [isCity, city, district, lat, lng, b, re, sh] = r as unknown[];
+    const [isCity, city, district, lat, lng, b, re, sh, region] = r as unknown[];
     if (typeof city !== 'string' || !city || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) continue;
     out.push({ isCity: isCity === true, city, district: typeof district === 'string' ? district : '', lat: Number(lat), lng: Number(lng),
-      buy: Number(b) || 0, rent: Number(re) || 0, short: Number(sh) || 0 });
+      buy: Number(b) || 0, rent: Number(re) || 0, short: Number(sh) || 0, region: typeof region === 'string' ? region : '' });
   }
   return out;
 }
@@ -92,6 +129,31 @@ export function parseAreasFeed(raw: unknown): AreaFeedRow[] {
 /** The labels of one level inside a box, counted for the chosen deals, biggest first — what map_areas_ar() returned. */
 export function areasFromFeed(feed: AreaFeedRow[], level: AreaLevel, deals: string[], box: { s: number; w: number; n: number; e: number }, limit = 400): AreaRow[] {
   const want = { buy: deals.includes('buy'), rent: deals.includes('rent'), short: deals.includes('short') };
+  const count = (a: AreaFeedRow) => (want.buy ? a.buy : 0) + (want.rent ? a.rent : 0) + (want.short ? a.short : 0);
+  if (level === 'country' || level === 'region') {
+    // Summed from the CITY labels (each carries its region since 20261105…_map_labels_carry_region): every city counts
+    // in the country label; a region label sits at the count-weighted centre of its cities.
+    const cities = feed.filter((a) => a.isCity);
+    if (level === 'country') {
+      const n = cities.reduce((t, a) => t + count(a), 0);
+      const inBox = COUNTRY_CENTER.lat >= box.s && COUNTRY_CENTER.lat <= box.n && COUNTRY_CENTER.lng >= box.w && COUNTRY_CENTER.lng <= box.e;
+      return n > 0 && inBox ? [{ city: COUNTRY_NAME.ar, district: '', lat: COUNTRY_CENTER.lat, lng: COUNTRY_CENTER.lng, n }] : [];
+    }
+    const by = new Map<string, { n: number; la: number; lo: number }>();
+    for (const a of cities) {
+      const n = count(a); if (!a.region || n <= 0) continue;
+      const g = by.get(a.region) ?? { n: 0, la: 0, lo: 0 };
+      g.n += n; g.la += a.lat * n; g.lo += a.lng * n; by.set(a.region, g);
+    }
+    // A feed built before regions were stored has none: show the cities rather than an empty map.
+    if (!by.size) return areasFromFeed(feed, 'city', deals, box, limit);
+    const regions: AreaRow[] = [];
+    for (const [name, g] of by) {
+      const lat = g.la / g.n, lng = g.lo / g.n;
+      if (lat >= box.s && lat <= box.n && lng >= box.w && lng <= box.e) regions.push({ city: name, district: '', lat, lng, n: g.n });
+    }
+    return regions.sort((x, y) => y.n - x.n).slice(0, limit);
+  }
   const out: AreaRow[] = [];
   for (const a of feed) {
     if (a.isCity !== (level === 'city')) continue;
@@ -104,3 +166,40 @@ export function areasFromFeed(feed: AreaFeedRow[], level: AreaLevel, deals: stri
 
 /** A close view estimated (from the dots feed) to hold more listings than this skips the exact read: it is crowded. */
 export const CROWD_ESTIMATE = 1500;
+
+/** THE COUNT NAMES WHERE THE VIEW IS, AT EVERY ZOOM (owner 2026-11-05: «when the user zooms in this needs to change —
+ *  it shows the city name, then the district, depending where the user is»; it said «… in Saudi Arabia» at every
+ *  label zoom below the country). From the labels on screen: the country view is the country; otherwise the label
+ *  holding at least AREA_PLACE_SHARE of the listings in view — a region, a city, a district; at district zoom, failing
+ *  one district, the city most of those districts are in; else null, the plain «في هذه المنطقة». Never a name most of
+ *  the view is not in. */
+export const AREA_PLACE_SHARE = 0.6;
+export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
+  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): string | null {
+  return areaPlace(rows, level, loc, latin, center, span)?.name ?? null;
+}
+/** The named place AND its own count. The pill prints THIS count beside the name — measured live 2026-11-05 it said
+ *  «14,531 إعلان في حي النرجس» (every district in view) where النرجس alone holds ~5,900, and «127,013 … في منطقة
+ *  الرياض» where the region holds 108K. A number beside a name is that place's number. */
+export function areaPlace(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
+  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): { name: string; n: number } | null {
+  if (level === 'country') { const n = rows.reduce((t, a) => t + a.n, 0); return n > 0 ? { name: COUNTRY_NAME[loc], n } : null; }
+  const onScreen = rows.filter((a) => inView(a, center, span));
+  const seen = onScreen.length ? onScreen : rows;
+  const total = seen.reduce((t, a) => t + a.n, 0);
+  if (!total) return null;
+  const top = seen.reduce((b, a) => (a.n > b.n ? a : b));
+  if (top.n / total >= AREA_PLACE_SHARE) {
+    const name = areaName(top, level, loc, latin);
+    return { name: level === 'district' && loc === 'ar' ? `حي ${name}` : name, n: top.n };
+  }
+  if (level === 'district') {
+    const byCity = new Map<string, number>();
+    for (const a of seen) byCity.set(a.city, (byCity.get(a.city) ?? 0) + a.n);
+    const [city, n] = [...byCity].reduce((b, x) => (x[1] > b[1] ? x : b));
+    if (city && n / total >= AREA_PLACE_SHARE) {
+      return { name: areaName({ city, district: '' }, 'city', loc, latin), n: rows.filter((a) => a.city === city).reduce((t, a) => t + a.n, 0) };
+    }
+  }
+  return null;
+}
