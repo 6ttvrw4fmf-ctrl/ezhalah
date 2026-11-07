@@ -309,7 +309,7 @@ def main() -> int:
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)
             return 1
-        print(f"✓ {SOURCE}: {len(rows)} listings + {len(offplan)} off-plan upserted (STAGED — not searchable)", flush=True)
+        print(f"✓ {SOURCE}: {len(rows)} listings + {len(offplan)} off-plan upserted", flush=True)
         return 0
     except Exception as e:  # noqa: BLE001
         if run_id:
