@@ -546,7 +546,8 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     # A POSSIBLE use or the STREET's shops are not shops inside the property (🔬 2026-11-07 two-way sample, 4 of 25
     # served yeses wrong): «مناسبة لمحلات تجارية» (aqar 20809503), «منها: كافيه أو مطعم 🏪 4 محلات حسب الرخصة» (9566204),
     # «شارعها تجاري مقام فيه محلات بالعماير الي امامها» (39729)
-    "shops_inside": (("مناسب", "مناسبه", "يصلح", "تصلح", "مثالي", "مثاليه", "ينفع", "تنفع", "لبناء", "لانشاء", "مقام"),
+    "shops_inside": (("مناسب", "مناسبه", "يصلح", "تصلح", "مثالي", "مثاليه", "ينفع", "تنفع", "لبناء", "لانشاء", "مقام",
+                      "يمكن", "ممكن", "امكانيه", "بامكانيه", "قابل", "قابله"),
                      ("حسب", "بالعماير", "بالعمائر", "بالعماره المقابله", "المقابله", "المجاوره")),                                  # «جنوب: مواقف ثم شارع» is a boundary
     # «خزان المياه مستقل» is a tank, «دورة مياه مستقلة» a bathroom — not a meter (checked only on the
     # «مياه مستقل» / «كهرباء مستقلة» shapes; «خزانات وعدادات مستقلة» names the meter itself)
@@ -1323,6 +1324,9 @@ def _num_hits(fact: str, t: str, ci: int, raw_clause: str = "", list_idx: frozen
                 continue                      # «كل شقه 2 دورات مياه»: a per-unit count, not the home's
             if any(w in _NEAR_WORDS for w in before):
                 continue
+            if fact == "shops_count" and (any(_starts(_strip_wa(w), _EXCLUDE["shops_inside"][0]) for w in before[-3:])
+                                          or any(after.lstrip().startswith(x) for x in ("حسب",))):
+                continue                      # «تصلح 4 محلات», «4 محلات حسب الرخصة»: what COULD be there (🔬 2026-11-07)
             if any(_strip_wa(w).startswith(x) for w in before for x in ("نظام", "رخص", "تصريح", "يسمح", "مسموح", "حتي")):
                 continue                      # «نظام البناء 3 ادوار», «تصريح حتى 12 دور»: what may be built, not what is
             if fact == "floors" and ("ارضي" in t[max(0, m.start() - 12):m.end() + 12] or after.lstrip().startswith("مي")):
@@ -1517,6 +1521,13 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         hits = num_hits.get(fact, [])
         if len({h.value for h in hits}) == 1:      # several different counts → none, never a pick
             emit(fact, float(hits[0].value), quote_of(hits[0].clause, hits[0].s, hits[0].e))
+    # A STATED NUMBER OF SHOPS says the building has shops (🔬 2026-11-07 two-way recall sample: 15 of 25 building ads
+    # that state their shops carried no answer — «عباره عن أربع محلات», «الدور الأرضي:- ثلاث معارض», «5محلات و4شقق»: the
+    # count was read, the yes was not). Only when the ad said nothing else about shops either way.
+    sc = next((r for r in out if r["fact"] == "shops_count"), None)
+    # «فتحات» is left out: on a showroom («معرض مكون من ٣ فتحات») it is the frontage openings, not three shops.
+    if sc and (sc["value_num"] or 0) >= 1 and "shops_inside" not in bool_hits and "فتح" not in norm(sc["quote"]):
+        emit("shops_inside", True, sc["quote"])
     # age: the scrapers' own labelled-prose reader on the raw text (open bounds stay unknown)
     if "property_age_years" not in {r["fact"] for r in out} and not num_hits.get("property_age_years"):
         ages = {}
@@ -2497,6 +2508,14 @@ def selftest() -> None:
         ("يوجد 4 معارض", {"shops_inside": True, "shops_count": 4.0}, ()),
         ("محل للإيجار", {}, ("shops_inside",)),
         # a negated lead verb is a stated NO, never a yes (🔬 2026-11-07)
+        # a stated count of shops is a yes; a possible count is nothing (🔬 2026-11-07)
+        ("عباره عن أربع محلات وشقق", {"shops_inside": True, "shops_count": 4.0}, ()),
+        ("الدور الأرضي:- ثلاث معارض . الدور الاول :- شقة", {"shops_inside": True, "shops_count": 3.0}, ()),
+        ("تتكون العماره من 5محلات و4شقق", {"shops_inside": True, "shops_count": 5.0}, ()),
+        ("داخلي تصلح 4 محلات وشقق", {}, ("shops_inside", "shops_count")),
+        ("يمكن عمل ثلاث محلات", {}, ("shops_inside", "shops_count")),
+        ("معرض للايجار مكون من ٣ فتحات مساحة كل فتحة ٦٠ متر", {"shops_count": 3.0}, ("shops_inside",)),
+        ("منها: كافيه أو مطعم 4 محلات حسب الرخصة", {}, ("shops_inside", "shops_count")),
         ("لا يوجد محلات", {"shops_inside": False}, ()),
         ("ولا توجد محلات بالعمارة", {"shops_inside": False}, ()),
         ("ما فيها محلات", {"shops_inside": False}, ()),
