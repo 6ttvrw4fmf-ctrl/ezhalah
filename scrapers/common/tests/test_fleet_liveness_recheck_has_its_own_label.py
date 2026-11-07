@@ -47,3 +47,84 @@ def test_every_reader_that_must_see_the_label_still_does(struck_only):
     assert re.search(r"liveness", label, re.I) and re.search(r"(^|:)haraj([_:]|$)", label)
     # silent-partial-success skips every liveness label
     assert "liveness" in label
+
+
+def test_a_recheck_with_nothing_to_read_still_leaves_its_heartbeat(site, monkeypatch):
+    """♻️ 2026-11-07, alert 13588: a recheck pass that found no struck row returned before begin_run, so
+    fleet_liveness:reinvest:recheck wrote nothing for 21 h and liveness_job_silent fired on a healthy job.
+    The pass must write its own row, ok, with nothing read."""
+    site([_row(1)] + _controls(), {})
+    seen = _labels(monkeypatch)
+    ended: list[dict] = []
+    monkeypatch.setattr(F, "end_run", lambda rid, **kw: ended.append(kw))
+    monkeypatch.setattr(F, "struck", lambda client, s: 0)
+    out = F.run_site("testsite", shadow=False, struck_only=True)
+    assert out["skipped"] == "no struck row"
+    assert seen == ["fleet_liveness:testsite:recheck"]
+    assert len(ended) == 1 and ended[0]["ok"] is True and ended[0]["rows_seen"] == 0
+    assert "nothing to re-read" in ended[0]["notes"]
+
+
+class _Q:
+    def __init__(self, err=None, n=0):
+        self.err, self.n = err, n
+
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, *a):
+        return self
+
+    def gt(self, *a):
+        return self
+
+    def limit(self, *a):
+        return self
+
+    def execute(self):
+        if self.err:
+            raise self.err
+        return type("R", (), {"count": self.n})()
+
+
+class _Client:
+    def __init__(self, by_table):
+        self.by_table = by_table
+
+    def table(self, t):
+        return self.by_table[t]
+
+
+def test_a_failed_count_is_never_an_empty_recheck(monkeypatch):
+    """CodeRabbit on #11081: tables_for dropped a table whose count FAILED, so struck() could read 0 and the
+    heartbeat would say «nothing to re-read» over unread strikes. A missing table is skipped; a failed one raises."""
+    monkeypatch.setattr(F, "_execute", lambda q, **k: q.execute())
+    missing = RuntimeError("PGRST205 Could not find the table 'public.x_commercial_listings'")
+    ok = _Client({"x_residential_listings": _Q(n=2), "x_commercial_listings": _Q(err=missing)})
+    assert F.struck(ok, "x") == 2
+    broken = _Client({"x_residential_listings": _Q(err=RuntimeError("502 Bad Gateway")),
+                      "x_commercial_listings": _Q(err=missing)})
+    with pytest.raises(RuntimeError):
+        F.struck(broken, "x")
+    both_missing = _Client({"x_residential_listings": _Q(err=missing), "x_commercial_listings": _Q(err=missing)})
+    with pytest.raises(RuntimeError):
+        F.struck(both_missing, "x")
+    assert F.tables_for(broken, "x") == {}          # the lenient read used by the daily pass is unchanged
+
+
+def test_an_unrelated_does_not_exist_error_is_not_a_missing_table(monkeypatch):
+    """CodeRabbit on #11081: «column … does not exist» is a broken count, not a missing table."""
+    monkeypatch.setattr(F, "_execute", lambda q, **k: q.execute())
+    col = RuntimeError('42703 column "missing_count" does not exist')
+    c = _Client({"x_residential_listings": _Q(err=col), "x_commercial_listings": _Q()})
+    with pytest.raises(RuntimeError) as exc:
+        F.struck(c, "x")
+    assert exc.value is col
+
+
+def test_a_missing_exact_count_is_not_zero(monkeypatch):
+    """CodeRabbit on #11081: a response with no exact count (count=None) must not read as 0 struck."""
+    monkeypatch.setattr(F, "_execute", lambda q, **k: q.execute())
+    c = _Client({"x_residential_listings": _Q(n=None), "x_commercial_listings": _Q()})
+    with pytest.raises(RuntimeError):
+        F.struck(c, "x")

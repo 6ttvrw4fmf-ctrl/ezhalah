@@ -338,7 +338,11 @@ def test_the_recheck_clears_a_strike_that_was_a_blip(site):
 
 def test_the_recheck_leaves_a_site_with_no_struck_row_alone(site, monkeypatch):
     c = site([_row(1)] + _controls(), lambda ad, n: pytest.fail("nothing to read"))
-    monkeypatch.setattr(F, "begin_run", lambda name: pytest.fail("no run row for a site left alone"))
+    # It reads nothing and writes no listing, but it does leave its heartbeat run row (2026-11-07,
+    # alert 13588: a pass that wrote no row read as a silent checker): see
+    # test_fleet_liveness_recheck_has_its_own_label.py::test_a_recheck_with_nothing_to_read_still_leaves_its_heartbeat.
+    monkeypatch.setattr(F, "begin_run", lambda name: 1)
+    monkeypatch.setattr(F, "end_run", lambda rid, **kw: None)
     assert F.run_site("testsite", shadow=False, struck_only=True)["skipped"]
     assert not c.log
 

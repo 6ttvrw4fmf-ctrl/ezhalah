@@ -166,22 +166,39 @@ def kill_cap(active: int) -> int:
     return max(KILL_FLOOR, math.ceil(KILL_FRAC * active))
 
 
-def tables_for(client, site: str) -> dict[str, int]:
-    """{table: active rows} for the site's tables that exist."""
+_NO_SUCH_TABLE = ("PGRST205", "42P01", "Could not find the table")
+
+
+def tables_for(client, site: str, *, strict: bool = False) -> dict[str, int]:
+    """{table: active rows} for the site's tables that exist. With strict=True only a table that does
+    not EXIST is skipped; a count that failed for any other reason raises, so a caller can never read
+    a failed count as an empty site (CodeRabbit on #11081, 2026-11-07)."""
     out = {}
     for t in (f"{site}_residential_listings", f"{site}_commercial_listings"):
         try:
             out[t] = _execute(client.table(t).select("id", count="exact").eq("active", True).limit(1),
                               what=f"{t}.count", tries=3).count or 0
-        except Exception:  # noqa: BLE001 — a site with one vertical has one table
+        except Exception as e:  # noqa: BLE001 — a site with one vertical has one table
+            if strict and not any(m in str(e) for m in _NO_SUCH_TABLE):
+                raise
             continue
+    if strict and not out:
+        raise RuntimeError(f"{site}: no listing table could be counted")
     return out
 
 
 def struck(client, site: str) -> int:
-    """How many of the site's active rows carry a strike — what a recheck has to read."""
-    return sum(_execute(client.table(t).select("id", count="exact").eq("active", True).gt("missing_count", 0)
-                        .limit(1), what=f"{t}.struck").count or 0 for t in tables_for(client, site))
+    """How many of the site's active rows carry a strike — what a recheck has to read. Strict: a failed
+    count raises (the site fails loudly), never reads as 0 struck — the recheck's heartbeat row says
+    «nothing to re-read» only after every table was really counted."""
+    total = 0
+    for t in tables_for(client, site, strict=True):
+        n = _execute(client.table(t).select("id", count="exact").eq("active", True).gt("missing_count", 0)
+                     .limit(1), what=f"{t}.struck").count
+        if n is None:          # no exact count came back: not a zero (CodeRabbit on #11081)
+            raise RuntimeError(f"{t}: no exact struck count returned")
+        total += n
+    return total
 
 
 def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None) -> list[dict]:
@@ -295,6 +312,16 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
     shadow = shadow or site not in APPLY
     client = sb()
     if struck_only and not struck(client, site):
+        # A pass with nothing to re-read still RAN, and says so (♻️ 2026-11-07). It used to return
+        # before begin_run, so a site whose strikes all resolved wrote no row at all, and
+        # mon_detect liveness_job_silent read that absence as a dead checker (alert 13588,
+        # fleet_liveness:reinvest:recheck: its 5 struck ads were hidden at 11-06 14:22, so the
+        # 20:56 and 03:27 passes had nothing to read and left no trace). Absence cannot be
+        # compared (LISTING_LIVENESS.md §9.2): the heartbeat row makes silence mean broken again.
+        rid = begin_run(run_label(site, struck_only))
+        note = (f"{'SHADOW' if shadow else 'APPLY'} RECHECK probed=0 struck=0 hidden=0 "
+                f"| no struck row: nothing to re-read")
+        end_run(rid, ok=True, rows_seen=0, rows_upserted=0, notes=note, allow_empty=True)
         return {"site": site, "skipped": "no struck row"}
     policy = policy_for(site)
     now = datetime.now(timezone.utc).isoformat()
