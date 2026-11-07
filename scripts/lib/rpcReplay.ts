@@ -161,7 +161,10 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     if (ok && pos >= expr.length) decls.set(dd[1], val);
   }
 
-  const out: { anchor: string; replacement: string }[] = [];
+  // Every arm records WHERE in the SQL its patch sits, and the list is returned in that order: the arms
+  // scan separately, and a patch whose anchor an EARLIER patch creates would otherwise be applied first,
+  // find nothing, and be skipped silently (CodeRabbit on #11148). Source order is execution order.
+  const out: { anchor: string; replacement: string; pos: number }[] = [];
 
   // (c) TABLE-DRIVEN — `edits text[][] := array[ ['needle','replacement','count'], ... ]` applied in
   // a loop (20260812122557). A migration that makes a dozen related edits to one RPC is far safer
@@ -187,7 +190,7 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     const rowRe = /\[\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'/g;
     let r: RegExpExecArray | null;
     while ((r = rowRe.exec(span))) {
-      out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'") });
+      out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: a.index + r.index });
     }
   }
 
@@ -196,7 +199,7 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
   const dollarRe =
     /\breplace\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*\$([A-Za-z_]*)\$([\s\S]*?)\$\1\$\s*,\s*\$([A-Za-z_]*)\$([\s\S]*?)\$\3\$\s*\)/g;
   let q: RegExpExecArray | null;
-  while ((q = dollarRe.exec(sql))) out.push({ anchor: q[2], replacement: q[4] });
+  while ((q = dollarRe.exec(sql))) out.push({ anchor: q[2], replacement: q[4], pos: q.index });
 
   const callRe = /\breplace\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g;
   let c: RegExpExecArray | null;
@@ -208,7 +211,7 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     const key = `${anchor}\u0000${replacement}`;
     if (seen.has(key)) continue;                                       // occurrence-count probes repeat it
     seen.add(key);
-    out.push({ anchor, replacement });
+    out.push({ anchor, replacement, pos: c.index });
   }
 
   // (g) INLINE LITERAL ARGUMENTS (20261107213742) — `replace(src, E'needle\n', E'needle\n' || E'added\n')`,
@@ -229,9 +232,9 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     const key = `${anchor}\u0000${replacement}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ anchor, replacement });
+    out.push({ anchor, replacement, pos: il.index });
   }
-  return out;
+  return out.sort((x, y) => x.pos - y.pos).map(({ anchor, replacement }) => ({ anchor, replacement }));
 }
 
 /**
