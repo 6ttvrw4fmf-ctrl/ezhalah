@@ -121,7 +121,13 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
   // and `v_new constant text := v_needle || E'…';`. Evaluated in declaration order so a later
   // declaration may build on an earlier one; anything that is not literals-and-known-variables is
   // skipped (left to the unresolved path), never guessed.
-  const exprDeclRe = /([A-Za-z_][A-Za-z0-9_]*)\s+(?:constant\s+)?text\s*:=\s*((?:\s*(?:E'(?:[^'\\]|''|\\.)*'|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_]*)\s*(?:\|\|)?)+)\s*;/g;
+  // Segments are JOINED by a required `||` — never `(seg (\|\|)?)+`. An optional separator lets one
+  // identifier split into exponentially many runs, and a declaration-shaped string with no `;` (e.g.
+  // `position('k constant text := ''x''' in src)` in 20261107213742) then backtracks for minutes:
+  // CI killed this barrier at its 600 s cap. evalDeclExpr already required `||` between segments.
+  const SEG = String.raw`(?:E'(?:[^'\\]|''|\\.)*'|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_]*)`;
+  const exprDeclRe = new RegExp(
+    String.raw`([A-Za-z_][A-Za-z0-9_]*)\s+(?:constant\s+)?text\s*:=\s*(${SEG}(?:\s*\|\|\s*${SEG})*)\s*;`, 'g');
   let e: RegExpExecArray | null;
   while ((e = exprDeclRe.exec(sql))) {
     if (decls.has(e[1])) continue;                      // a plain literal already read it
@@ -201,6 +207,27 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     if (anchor === undefined || replacement === undefined) continue;  // not a literal pair
     const key = `${anchor}\u0000${replacement}`;
     if (seen.has(key)) continue;                                       // occurrence-count probes repeat it
+    seen.add(key);
+    out.push({ anchor, replacement });
+  }
+
+  // (g) INLINE LITERAL ARGUMENTS (20261107213742) — `replace(src, E'needle\n', E'needle\n' || E'added\n')`,
+  // the needle and replacement written straight into the call instead of declared first. Each argument
+  // must evaluate through evalDeclExpr (literals and known variables joined by `||`); anything else
+  // stays invisible and falls to the unresolved path, never guessed. Only an ASSIGNED call (`x := replace(…)`)
+  // is a patch: `length(replace(out_def, 'needle', ''))` is an occurrence probe, and reading it as a patch
+  // would delete the needle from the replayed body.
+  const LIT = String.raw`(?:E'(?:[^'\\]|''|\\.)*'|'(?:[^']|'')*'|[A-Za-z_][A-Za-z0-9_]*)`;
+  const ARG = String.raw`${LIT}(?:\s*\|\|\s*${LIT})*`;
+  const inlineRe = new RegExp(String.raw`:=\s*replace\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*(${ARG})\s*,\s*(${ARG})\s*\)`, 'g');
+  let il: RegExpExecArray | null;
+  while ((il = inlineRe.exec(sql))) {
+    if (!/'/.test(il[1]) && !/'/.test(il[2])) continue;               // the variable-only form is (callRe)'s
+    const anchor = evalDeclExpr(il[1].trim(), decls);
+    const replacement = evalDeclExpr(il[2].trim(), decls);
+    if (anchor === undefined || replacement === undefined) continue;
+    const key = `${anchor}\u0000${replacement}`;
+    if (seen.has(key)) continue;
     seen.add(key);
     out.push({ anchor, replacement });
   }
