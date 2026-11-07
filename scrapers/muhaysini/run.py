@@ -453,6 +453,26 @@ def session() -> cc.Session:
     return s
 
 
+class _Paced:
+    """A session whose every GET waits for _pace() first: the prune's liveness probe and its canary go through
+    http_liveness.LivenessProbe, which calls session().get() itself (CodeRabbit #11136), so they share the
+    same ≤ 1 request/second limiter as the walk. Status, body and redirects are the session's own."""
+
+    def __init__(self, s):
+        self._s = s
+
+    def get(self, *a, **k):
+        _pace()
+        return self._s.get(*a, **k)
+
+    def __getattr__(self, name):
+        return getattr(self._s, name)
+
+
+def paced_session() -> "_Paced":
+    return _Paced(session())
+
+
 def _clean(v) -> Optional[str]:
     s = str(v).strip() if v is not None else ""
     return s or None
@@ -1034,7 +1054,7 @@ def _make_verify_gone(control: Optional[dict]):
             except Exception:  # noqa: BLE001 — an unparseable body is no opinion
                 return None
 
-        return LivenessProbe(platform=SLUG, signal=signal, session=session,
+        return LivenessProbe(platform=SLUG, signal=signal, session=paced_session,
                              url_for=lambda _ad: f"{API}/retrieve/{pid}",
                              canary=canary).verify_gone(ad_number)
 

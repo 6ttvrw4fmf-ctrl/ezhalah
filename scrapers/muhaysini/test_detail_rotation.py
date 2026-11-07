@@ -75,5 +75,19 @@ for latency in (0.0, 0.2, 1.5):
     assert min(gaps) >= R.MIN_INTERVAL - 1e-9, (latency, min(gaps))
 assert R.MIN_INTERVAL >= 1.0
 src = Path(R.__file__).read_text()
-assert src.count("_pace()") == 1 and "_pace()\n        r = s.get(" in src, "every GET (and every retry) must be paced"
-print("✓ muhaysini: request starts ≥ 1 s apart at any latency")
+assert "_pace()\n        r = s.get(" in src, "every GET (and every retry) must be paced"
+assert src.count("r = s.get(") == 1 and src.count("return self._s.get(") == 1, "a new GET call site must be paced too"
+
+# The prune's liveness probe + canary (http_liveness.LivenessProbe calls session().get() itself) share the limiter.
+assert "session=paced_session," in src, "the verify_gone probe must use the paced session"
+calls = []
+R._pace, _real_pace = (lambda: calls.append("pace")), R._pace
+try:
+    class _S:
+        def get(self, *a, **k):
+            calls.append("get")
+            return "resp"
+    assert R._Paced(_S()).get("u") == "resp" and calls == ["pace", "get"], calls
+finally:
+    R._pace = _real_pace
+print("✓ muhaysini: request starts ≥ 1 s apart at any latency, prune probe included")
