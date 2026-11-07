@@ -80,7 +80,10 @@ def test_eaqartabuk_two_figures_in_one_price_field_are_never_concatenated():
     # Single figures keep the existing magnitude heuristic behavior.
     # 2026-08-05: a stated «شهري» still annualises; a SILENT ad is now unknown, never guessed.
     assert eaqar_price("2500", is_rent=True, raw_text="ايجار شهري") == (None, 30000, "monthly")
-    assert eaqar_price("2500", is_rent=True) == (None, None, None)
+    # 2026-11-06: a SILENT rent keeps the published figure with the period UNKNOWN (never guessed) — the search
+    # index labels it from the price (owner rule 2026-10-31, judge_silent_rent_period_ar). Dropping the figure
+    # hid every period-silent eaqartabuk rental from both rent buttons.
+    assert eaqar_price("2500", is_rent=True) == (None, 2500, None)
     assert eaqar_price("150000", is_rent=True, raw_text="ايجار سنوي") == (None, 150000, "annual")
     # 2026-08-05: the ×1000 magnitude guess is GONE — ET10864's page and wp-json both say 380 and we
     # stored 380,000. A price the source prints as 580 IS 580.

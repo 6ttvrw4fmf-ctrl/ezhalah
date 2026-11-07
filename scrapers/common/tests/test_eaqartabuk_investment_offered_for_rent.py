@@ -1,0 +1,207 @@
+"""eaqartabuk «استثمار» (operation=investment) states neither sale nor rent; the ad's own words decide.
+
+Backlog 1358 (2026-11-06): 24206284 «هنجر للايجار حي المصيف» (200,000, status «استثمار») was filed Buy because
+the mapper read every non-rent operation as a sale. 4 live investment ads: 2 titles say rent, 0 say sale.
+An investment ad whose own title/excerpt says rent (and not sale) is a Rent; anything else keeps the old reading.
+
+Run: python -m pytest scrapers/common/tests/test_eaqartabuk_investment_offered_for_rent.py -v
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from scrapers.eaqartabuk.run import investment_offered_for_rent, map_listing  # noqa: E402
+
+
+def _item(title, excerpt=""):
+    return {"id": 24206284, "title": title, "link": "https://eaqartabuk.com/?p=24206284", "date": "2026-11-04",
+            "meta": {"price": "200000"}, "featured_image": None, "excerpt": excerpt}
+
+
+def _mp(op, status):
+    return {"usage": "commercial", "operation": op, "status": status, "city": "تبوك", "district": "المصيف",
+            "type": "معرض / هنجر"}
+
+
+def test_investment_ad_that_says_rent_is_a_rental():
+    row, _ = map_listing(_item("هنجر للايجار حي المصيف"), _mp("investment", "استثمار"), None, [])
+    assert row["transaction_type"] == "Rent", "the ad's own «للايجار» was filed as a sale"
+    row, _ = map_listing(_item("هنجر للإيجار في حي الريان تبوك"), _mp("investment", "استثمار"), None, [])
+    assert row["transaction_type"] == "Rent"
+
+
+def test_investment_ad_without_rent_words_keeps_the_old_reading():
+    row, _ = map_listing(_item("معارض في حي المصيف في تبوك"), _mp("investment", "استثمار"), None, [])
+    assert row["transaction_type"] == "Buy"
+    assert not investment_offered_for_rent("investment", "استثمار", "أرض للبيع أو الإيجار", "")
+
+
+def test_a_sale_ad_never_becomes_a_rental():
+    row, _ = map_listing(_item("هنجر للايجار سابقا"), _mp("sale", "بيع"), None, [])
+    assert row["transaction_type"] == "Buy"
+
+
+def test_natural_ventilation_is_not_a_sale_word():
+    assert investment_offered_for_rent("investment", "استثمار", "هنجر للايجار بتهوية طبيعية", "")
+    assert not investment_offered_for_rent("investment", "استثمار", "هنجر للايجار وللبيع", "")
+    assert not investment_offered_for_rent("investment", "استثمار", "هنجر للايجار أو البيع", "")
+    assert not investment_offered_for_rent("investment", "استثمار", "هنجر للإيجار أو بالبيع", "")
+
+
+def test_a_rental_keeps_its_published_figure_when_the_period_is_silent():
+    row, _ = map_listing(_item("هنجر للايجار حي المصيف"), _mp("investment", "استثمار"), "<p>هنجر</p>", [])
+    assert row["price_annual"] == 200000, "the published figure was dropped"
+    from scrapers.common import db
+    assert row.get("rent_period") in (None, db.AUTHORITATIVE_NULL), "a period was invented"
+
+
+def test_a_flipped_row_clears_its_stale_sale_total_even_when_the_price_is_on_request():
+    from scrapers.common import db
+    row, _ = map_listing(_item("هنجر للايجار حي المصيف", "السعر حسب النشاط"), _mp("investment", "استثمار"), None, [])
+    assert row["transaction_type"] == "Rent"
+    assert row["price_total"] is db.AUTHORITATIVE_NULL, "the stored sale figure would survive on a rental"
+
+
+def test_conflicting_periods_are_ambiguous_not_silent():
+    from scrapers.eaqartabuk.run import _price
+    assert _price("3000", True, "شقة للايجار شهري أو سنوي") == (None, None, None), "a two-period ad was judged as silent"
+    assert _price("3000", True, "شقة للايجار") == (None, 3000, None)
+
+
+def test_a_re_scrape_never_pairs_a_new_figure_with_a_stale_period():
+    """Two consecutive crawls through the real upsert guard: first «شهري», then the ad drops its period / states both."""
+    from scrapers.common import db
+    stored = {}
+
+    def crawl(title):
+        row, _ = map_listing(_item(title), _mp("rent", "إيجار"), "<p>شقة</p>", [])
+        db._unknown_must_not_overwrite_known(row)
+        for k in ("price_annual", "rent_period"):
+            if k in row:
+                stored[k] = row[k]
+        return stored
+
+    assert crawl("شقة للايجار شهري") == {"price_annual": 2400000, "rent_period": "monthly"}
+    assert crawl("شقة للايجار") == {"price_annual": 200000, "rent_period": None}, "a stale «monthly» survived"
+    crawl("شقة للايجار شهري")
+    assert crawl("شقة للايجار شهري أو سنوي") == {"price_annual": None, "rent_period": None}, "an old price lingered"
+
+
+def test_a_priced_rental_that_turns_on_request_clears_its_figure_and_period():
+    from scrapers.common import db
+    stored = {}
+    for title, excerpt in (("شقة للايجار شهري", ""), ("شقة للايجار شهري", "السعر حسب مدة العقد")):
+        row, _ = map_listing(_item(title, excerpt), _mp("rent", "إيجار"), None, [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
+    assert stored == {"price_annual": None, "rent_period": None}, stored
+
+
+def test_a_failed_detail_fetch_never_clears_a_stored_period():
+    from scrapers.common import db
+    row, _ = map_listing(_item("شقة للايجار"), _mp("rent", "إيجار"), None, [])
+    db._unknown_must_not_overwrite_known(row)
+    assert "rent_period" not in row and "price_annual" not in row, "an unread detail page split the stored pair"
+    row, _ = map_listing(_item("شقة للايجار"), _mp("rent", "إيجار"), "<p>الإيجار شهري</p>", [])
+    assert row["rent_period"] == "monthly", "the detail text's own period was ignored"
+
+
+def test_a_failed_detail_fetch_keeps_the_stored_price_and_period_together():
+    from scrapers.common import db
+    stored = {}
+    for desc in ("<p>الإيجار شهري</p>", None):            # crawl 1 reads «شهري»; crawl 2's detail fetch fails
+        row, _ = map_listing(_item("شقة للايجار"), _mp("rent", "إيجار"), desc, [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
+    assert stored == {"price_annual": 2400000, "rent_period": "monthly"}, stored
+
+
+def test_a_rental_that_turns_into_several_figures_clears_its_stale_price():
+    """Review on #10940: one rent, then two distinct unit rents (live id 598669's shape) — no single price remains."""
+    from scrapers.common import db
+    stored = {}
+    for price, desc in (("2500", "<p>الإيجار شهري</p>"), ("2500 1800", "<p>الإيجار شهري</p>"),
+                        ("2500", "<p>الإيجار شهري</p>"), ("2500 1800", None)):
+        item = _item("شقة للايجار")
+        item["meta"]["price"] = price
+        row, _ = map_listing(item, _mp("rent", "إيجار"), desc, [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
+        if price == "2500":
+            assert stored == {"price_annual": 30000, "rent_period": "monthly"}, stored
+        else:
+            assert stored == {"price_annual": None, "rent_period": None}, ("a stale single rent survived two figures", desc)
+
+
+def test_an_investment_rental_that_falls_back_to_buy_with_several_figures_clears_its_rent_pair():
+    """Review on #10940: crawl 1 reads Rent («للايجار»); crawl 2 loses the rent wording and holds two figures."""
+    from scrapers.common import db
+    stored = {}
+    for title, price in (("هنجر للايجار شهري", "2500"), ("هنجر حي المصيف", "2500 1800")):
+        item = _item(title)
+        item["meta"]["price"] = price
+        row, _ = map_listing(item, _mp("investment", "استثمار"), "<p>هنجر</p>", [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("transaction_type", "price_total", "price_annual", "rent_period") if k in row})
+        if price == "2500":
+            assert stored["transaction_type"] == "Rent", stored
+            assert stored["price_annual"] == 30000 and stored["rent_period"] == "monthly", stored
+    assert stored == {"transaction_type": "Buy", "price_total": None, "price_annual": None, "rent_period": None}, stored
+
+
+def test_a_sale_that_turns_into_several_figures_clears_its_stale_total():
+    from scrapers.common import db
+    stored = {}
+    for price in ("380000", "380000 420000"):
+        item = _item("أرض للبيع")
+        item["meta"]["price"] = price
+        row, _ = map_listing(item, _mp("sale", "بيع"), "<p>أرض</p>", [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_total",) if k in row})
+    assert stored == {"price_total": None}, stored
+
+
+def test_several_figures_plus_on_request_wording_still_clears_the_stored_rent_pair():
+    """Review on #10940: crawl 2 holds two figures AND «السعر حسب النشاط» — the on-request branch must not undo the clear."""
+    from scrapers.common import db
+    stored = {}
+    for title, excerpt, price in (("هنجر للايجار شهري", "", "2500"), ("هنجر حي المصيف", "السعر حسب النشاط", "2500 1800")):
+        item = _item(title, excerpt)
+        item["meta"]["price"] = price
+        row, _ = map_listing(item, _mp("investment", "استثمار"), "<p>هنجر</p>", [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_total", "price_annual", "rent_period") if k in row})
+        if price == "2500":
+            assert stored["price_annual"] == 30000 and stored["rent_period"] == "monthly", stored
+    assert stored == {"price_total": None, "price_annual": None, "rent_period": None}, stored
+
+
+def test_a_monthly_payment_schedule_is_not_a_second_rent_period():
+    """Review on #10940: «الإيجار السنوي» + «دفع شهري» is an annual rent paid monthly, not an ambiguous offer."""
+    from scrapers.eaqartabuk.run import _price, _stated_rent_period
+    assert _stated_rent_period("محل الإيجار السنوي 30000 دفع شهري") == "annual"
+    assert _price("30000", True, "محل الإيجار السنوي 30000 الدفع شهري") == (None, 30000, "annual")
+    assert _stated_rent_period("شقة للايجار شهري أو سنوي") == "both", "a genuine two-period offer must stay ambiguous"
+
+
+def test_an_explicit_sale_clears_a_stored_rent_pair():
+    """Review on #10940: Rent, then the operation says sale — the old rent pair must not survive to a later Rent read."""
+    from scrapers.common import db
+    stored = {}
+    for op, status, title in (("rent", "إيجار", "شقة للايجار شهري"), ("sale", "بيع", "شقة للبيع")):
+        row, _ = map_listing(_item(title), _mp(op, status), "<p>شقة</p>", [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
+        if op == "rent":
+            assert stored == {"price_annual": 2400000, "rent_period": "monthly"}, stored
+    assert stored == {"price_annual": None, "rent_period": None}, stored
+
+
+def test_a_rent_word_inside_the_payment_phrase_keeps_the_stated_period():
+    """Review on #10940: «دفع إيجار شهري» states the rent's own period — it is never stripped as a payment schedule."""
+    from scrapers.eaqartabuk.run import _price, _stated_rent_period
+    assert _stated_rent_period("شقة دفع إيجار شهري") == "monthly"
+    assert _stated_rent_period("شقة دفع الإيجار شهري") == "monthly"
+    assert _price("2000", True, "شقة دفع ايجار شهري") == (None, 24000, "monthly")
+    assert _stated_rent_period("محل الإيجار السنوي دفعات شهرية") == "annual", "a bare schedule is still not a period"
