@@ -105,3 +105,23 @@ def test_the_log_never_carries_a_comma_grouped_phone(capsys):
     S._log_verdicts("t:4", {"bedrooms": S.MISMATCH}, {"bedrooms": 5}, page)
     out = capsys.readouterr().out
     assert "050" not in out and "4567" not in out and "'غرف 4'" in out
+
+
+def test_the_log_never_carries_a_comma_grouped_landline(capsys):
+    # CodeRabbit PDPL Major on #11053 (03b766d): «هاتف 011,234,5678» is a landline redact_pii leaves intact.
+    for phone in ("011,234,5678", "011.234.5678", "0112345678", "011,234,567"):
+        page = S.page_evidence(f"<p>غرف النوم 4 هاتف {phone}</p>")
+        S._log_verdicts("t:5", {"bedrooms": S.MISMATCH}, {"bedrooms": 5}, page)
+        out = capsys.readouterr().out
+        assert "011" not in out and "234" not in out and "'غرف 4'" in out, (phone, out)
+
+
+def test_grouped_prices_still_reach_the_log():
+    assert S._safe_evidence(r"السعر", "السعر 1,600,000 ريال") == "السعر 1,600,000"
+    assert S._safe_evidence(r"السعر", "السعر 2.500.000") == "السعر 2.500.000"
+    assert S._safe_evidence(r"السعر", "السعر 125,000,000") == "السعر 125,000,000"
+
+
+def test_an_unprefixed_or_966_phone_is_not_logged():
+    for phone in ("512345678", "51,234,5678", "+966512345678", "966 51 234 5678", "00966112345678"):
+        assert "5678" not in S._safe_evidence(r"غرف", f"غرف 4 {phone}"), phone
