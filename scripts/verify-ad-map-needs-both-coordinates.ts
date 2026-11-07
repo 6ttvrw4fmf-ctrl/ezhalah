@@ -645,13 +645,13 @@ const districtWired = (dataSrc: string, previewSrc: string) =>
   /if \(!pin\) setArea\(districtPlace\(row, listingOpenUrl\(l\)\)\);/.test(previewSrc)   // only when the source published no pin; the ad's own link feeds the town fallback
   && /\{!geo && area && IS_WEB \? \(/.test(previewSrc) && /\{mapOpen && !geo && area && IS_WEB \? \(/.test(previewSrc)
   && (previewSrc.match(/districtEmbedUrl\(area, locale\)/g) ?? []).length === 2
-  && (previewSrc.match(/<Text style=\{s\.areaTagTx\}>\{areaName\}<\/Text>/g) ?? []).length === 2 && !/Approximate location/.test(previewSrc)
+  && (previewSrc.match(/<Text numberOfLines=\{1\} style=\{s\.areaTagTx\}>\{areaName\}<\/Text>/g) ?? []).length === 2 && !/Approximate location/.test(previewSrc)
   && /t\('\{name\} published no exact location', \{ name \}\)/.test(previewSrc)
   && /const geo = mapPoint\(own\);\s*return \{ geo, row: own \};/.test(dataSrc);        // the pin path is untouched
 check('district border wiring: only without a pin, the free embed by name in both views, tagged with the district name, pin path untouched', districtWired(codeOnly(DATA_SRC), PREVIEW));
 sourceMutant('the district map drawn even when the source published a pin', !districtWired(codeOnly(DATA_SRC), PREVIEW.replace('if (!pin) setArea(districtPlace(row, listingOpenUrl(l)));', 'setArea(districtPlace(row, listingOpenUrl(l)));')));
 // owner 2026-11-07: the tag names the district itself, never «الموقع التقريبي»
-sourceMutant('the «approximate» label back on the district map', !districtWired(codeOnly(DATA_SRC), PREVIEW.replace('<Text style={s.areaTagTx}>{areaName}</Text>', "<Text style={s.areaTagTx}>{t('Approximate location')}</Text>")));
+sourceMutant('the «approximate» label back on the district map', !districtWired(codeOnly(DATA_SRC), PREVIEW.replace('<Text numberOfLines={1} style={s.areaTagTx}>{areaName}</Text>', "<Text style={s.areaTagTx}>{t('Approximate location')}</Text>")));
 
 // ── the page counts only what search shows (owner 2026-10-10: a site the engineer marks dead/suspended
 // is hidden EVERYWHERE). Search's own switch is production_ready (a dormant platform's rows are false);
