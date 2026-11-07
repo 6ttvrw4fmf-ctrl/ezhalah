@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Ezhalah house rules for CodeRabbit (owner 2026-11-06: «teach CodeRabbit our rules»).
+# Each rule below caused a real production bug before; flag any change that breaks one as Major.
+language: en-US
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Ezhalah is a neutral Saudi property search engine. Flag as MAJOR any change that:
+        - Changes a price or rent period the source published (PRICE = SOURCE, PERIOD = SOURCE). Only our own
+          parsing errors may be corrected, and derived figures (e.g. per-m² × area, monthly × 12) must be labelled.
+        - Stores or logs a phone number, email or person name from a listing (PDPL). Redaction must be idempotent.
+        - Recommends a property or says best / good deal / better (neutrality), or surfaces a source's own badges.
+        - Lets Gathern or Aqar Monthly appear in Buy, or shows an off-plan project as a normal listing.
+        - Treats a failed or partial fetch/crawl as «no results» or as proof an ad is gone.
+        - Hides or deactivates listings in bulk without a guard (collapse guard, 3 complete misses, or proof the ad page is gone).
+    - path: "supabase/migrations/**"
+      instructions: |
+        - Every applied migration needs a byte-exact mirror (sql/mirrors/, cron changes in sql/mirrors/cron_schedule.json) in the same PR.
+        - CREATE OR REPLACE of an existing function/view must start from the LIVE definition and change only the intended
+          lines; a full replace silently drops a concurrent migration's edits.
+        - Long rebuilds must `set local client_min_messages = warning` (the Management API drops at ~120 s).
+        - RAISE strings must not contain an unescaped apostrophe.
+        - Never GRANT internal/ops tables or views to anon/authenticated.
+    - path: "scrapers/**"
+      instructions: |
+        - Honest UA, ≤ 1 request/second, obey robots.txt, and stop on any CAPTCHA/challenge (never bypass).
+        - Store every field the source gives, including the full description.
+        - A district comes from the site, then map pins (Apple, then Google), else city only; never guess.
+        - Absence from a list alone is not proof an ad is gone when its own page can be checked.
+    - path: "src/**"
+      instructions: |
+        - A displayed count must equal the cards a user can reach.
+        - A failed request must show an error/retry, never an empty «no results» state.
+        - English UI mirrors the Arabic; the close ✕ sits top-right in both languages.
+    - path: ".github/workflows/**"
+      instructions: |
+        - Every job uses the shared EZ_RUNNER switch expression for runs-on (enforced by scripts/verify-runner-switch.ts).
+        - Never print secrets; never add a schedule without updating the cron-ordering contract.
