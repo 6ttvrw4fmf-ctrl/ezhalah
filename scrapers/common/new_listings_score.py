@@ -447,7 +447,10 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     else:
         # A small figure counts only next to its keyword: on the keyword's own line, or on a
         # neighbouring line that is NOTHING BUT the value («غرف النوم» / «4», «م²» / «240»).
-        bare = re.compile(r"^" + _UNIT_TAIL + pat.pattern + _UNIT_TAIL + r"$")
+        # A street width's own value line may glue its «م»: erapulse prints «<div>20م</div><div>عرض الشارع</div>»
+        # (646396, net.http_get 2026-11-07). Street width only — a glued area «250م» keeps the alshawaf guard's meaning.
+        tail = _UNIT_TAIL + r"(?:م)?\s*" if "الشارع" in kw else _UNIT_TAIL
+        bare = re.compile(r"^" + _UNIT_TAIL + pat.pattern + tail + r"$")
         for i in kw_hits:
             if pat.search(lines[i]):
                 return MATCH

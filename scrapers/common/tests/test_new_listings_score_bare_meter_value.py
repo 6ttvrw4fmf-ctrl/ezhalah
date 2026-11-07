@@ -46,3 +46,16 @@ def test_a_glued_dual_is_two():
 def test_a_glued_dual_is_not_five():
     r = compare_listing({"living_rooms": 5}, page_evidence(AQR), skip_price=True)
     assert r["living_rooms"] != MATCH, r
+
+
+# erapulse 646396 (🔬 2026-11-07): the value comes BEFORE its label and glues the «م» (live markup, net.http_get 9303)
+ERA = ('<html><body><div class="text-2xl sm:text-3xl font-bold text-gray-900">20م</div>'
+       '<div class="text-xs sm:text-sm font-medium">عرض الشارع</div></body></html>')
+
+
+def test_a_glued_metre_value_before_the_street_label_matches():
+    assert compare_listing({"street_width_m": 20}, page_evidence(ERA), skip_price=True)["street_width_m"] == MATCH
+
+
+def test_a_glued_metre_value_still_disagrees_with_another_width():
+    assert compare_listing({"street_width_m": 15}, page_evidence(ERA), skip_price=True)["street_width_m"] != MATCH
