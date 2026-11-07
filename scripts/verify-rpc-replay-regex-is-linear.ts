@@ -59,13 +59,23 @@ fs.writeFileSync(path.join(dir, '20990101000007_table.sql'),
   "for i in 1..array_length(ed, 1) loop out_def := replace(out_def, ed[i][1], ed[i][2]); end loop;\n" +
   "execute out_def; end $$;\n");
 
+// (8) a repeated executing pair runs every time (X→Y, Y→X, X→Y ends at Y); (9) a migration that mixes a
+// readable patch with an assigned replace() whose argument is computed at run time is reported, not half-replayed.
+fs.writeFileSync(path.join(dir, '20990101000008_repeat.sql'),
+  "do $$ declare src text; out_def text; begin src := pg_get_functiondef('public.f_lin()'::regprocedure);\n" +
+  "out_def := replace(src, E'+ V $$', E'+ W $$');\n" +
+  "out_def := replace(out_def, E'+ W $$', E'+ V $$');\n" +
+  "out_def := replace(out_def, E'+ V $$', E'+ W $$');\n" +
+  "execute out_def; end $$;\n");
+
 // One predicate per claim, used by the real assertion AND by its mutation proof below.
 const inlinePatched = (b: string | null) => !!b && b.includes('+ 1 + 2');
 const probeSurvived = (b: string | null) => !!b && b.includes('+ 2');
 const orderKept = (b: string | null) => !!b && b.includes('+ 1 + 2 + 3');
 const commentIgnored = (b: string | null) => !!b && !b.includes('BAD');
 const dedupAfterSort = (b: string | null) => !!b && b.includes('+ 3 + S');
-const tableAtUse = (b: string | null) => !!b && b.includes('+ S + V $$');
+const tableAtUse = (b: string | null) => !!b && b.includes('+ S + W $$');
+const repeatsRun = (b: string | null) => !!b && b.includes('+ S + W $$') && !b.includes('+ S + V $$');
 
 const t0 = Date.now();
 const out = replayFunction(dir, 'f_lin');
@@ -78,6 +88,7 @@ ok(orderKept(out.body), `patches apply in SQL order across arms (${JSON.stringif
 ok(commentIgnored(out.body), 'a commented-out replace() is not applied');
 ok(dedupAfterSort(out.body), 'a later duplicate of an inline pair does not displace the earlier executing one');
 ok(tableAtUse(out.body), `a patch table applies where its loop runs (${JSON.stringify(out.body?.match(/\+ 1[^$]*\$\$/)?.[0])})`);
+ok(repeatsRun(out.body), 'a repeated executing pair runs every time (X→Y, Y→X, X→Y ends at Y)');
 ok(out.unresolved.length === 0, `nothing left unresolved (${JSON.stringify(out.unresolved)})`);
 
 // Mutation proofs: each predicate above, applied to a deliberately broken input, must say "broken".
@@ -87,9 +98,25 @@ mustCatch('a replay that applied the later patch first and dropped it', !orderKe
 mustCatch('a replay that applied a commented-out patch', !commentIgnored('select 1 + 3 + BAD $$'));
 mustCatch('a replay whose later duplicate displaced the inline pair', !dedupAfterSort('select 1 + 3 + R $$'));
 mustCatch('a replay that ran the table at its declaration', !tableAtUse('select 1 + S + U $$'));
+mustCatch('a replay that dropped the third, repeated patch', !repeatsRun('select 1 + S + V $$'));
 mustCatch('a replay that read the occurrence probe as a patch (the needle deleted)', !probeSurvived('select 1 /*NEEDLE*/ + 1  $$'));
 // The hang itself is proven by running this file against the OLD rpcReplay.ts: it does not finish
 // (killed at a 20 s timeout, exit 124, 2026-11-07); CI killed the real barrier at 600 s.
+
+// (9) in its own directory, so the main fixture stays fully resolved.
+const mixed = fs.mkdtempSync(path.join(os.tmpdir(), 'rpcreplay-mixed-'));
+fs.writeFileSync(path.join(mixed, '20990101000000_def.sql'),
+  "create or replace function public.f_mix() returns int language sql as $$ select 1 /*A*/ /*B*/ $$;\n");
+fs.writeFileSync(path.join(mixed, '20990101000001_mixed.sql'),
+  "do $$ declare src text; out_def text; begin src := pg_get_functiondef('public.f_mix()'::regprocedure);\n" +
+  "out_def := replace(src, E'/*A*/', E'/*A2*/');\n" +
+  "out_def := replace(out_def, format('/*%s*/', 'B'), E'/*B2*/');\n" +
+  "execute out_def; end $$;\n");
+const mixedOut = replayFunction(mixed, 'f_mix');
+const mixedReported = (u: string[]) => u.some((x) => x.includes('20990101000001_mixed.sql'));
+ok(mixedReported(mixedOut.unresolved), `a readable patch beside an unreadable assigned one is reported (${JSON.stringify(mixedOut.unresolved)})`);
+mustCatch('a replay that half-applied a mixed migration silently', !mixedReported([]));
+fs.rmSync(mixed, { recursive: true, force: true });
 
 fs.rmSync(dir, { recursive: true, force: true });
 if (failed) { console.error(`\n❌ rpc-replay-regex-is-linear: ${failed} failure(s)`); process.exit(1); }

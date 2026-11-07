@@ -103,7 +103,7 @@ function evalDeclExpr(expr: string, decls: Map<string, string>): string | undefi
   return consumed >= expr.trimEnd().length ? out : undefined;
 }
 
-function extractPatches(sql: string): { anchor: string; replacement: string }[] {
+function extractPatches(sql: string): { patches: { anchor: string; replacement: string }[]; unreadAssigned: number } {
   // NAME [constant] text := 'literal';   (multi-line, '' = escaped quote)
   //
   // A declaration's literal may also be split across SEVERAL `||`-concatenated segments for
@@ -164,7 +164,7 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
   // Every arm records WHERE in the SQL its patch sits, and the list is returned in that order: the arms
   // scan separately, and a patch whose anchor an EARLIER patch creates would otherwise be applied first,
   // find nothing, and be skipped silently (CodeRabbit on #11148). Source order is execution order.
-  const out: { anchor: string; replacement: string; pos: number; call?: boolean }[] = [];
+  const out: { anchor: string; replacement: string; pos: number; probe?: boolean }[] = [];
   // A `replace(...)` that sits after `--` on its own line is a comment: SQL never runs it.
   const commentedOut = (pos: number) => sql.slice(sql.lastIndexOf('\n', pos - 1) + 1, pos).includes('--');
 
@@ -178,7 +178,9 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
   // count) is ignored — it is an assertion, not an edit.
   const arrDeclRe = /\b([A-Za-z_][A-Za-z0-9_]*)\s+text\s*\[\s*\]\s*\[\s*\]\s*:=\s*array\s*\[/g;
   let a: RegExpExecArray | null;
+  const tables: string[] = [];
   while ((a = arrDeclRe.exec(sql))) {
+    tables.push(a[1]);
     // Walk from the opening bracket to its match so we only ever read inside THIS declaration.
     let depth = 0;
     let end = -1;
@@ -219,7 +221,10 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     const replacement = decls.get(c[3]);
     if (anchor === undefined || replacement === undefined) continue;  // not a literal pair
     if (commentedOut(c.index)) continue;
-    out.push({ anchor, replacement, pos: c.index, call: true });
+    // An ASSIGNED or EXECUTED call runs every time it appears; anything else (`length(replace(…))`) is an
+    // occurrence probe, which repeats a pair without applying it.
+    const lead = sql.slice(Math.max(0, c.index - 40), c.index);
+    out.push({ anchor, replacement, pos: c.index, probe: !/(:=|\bexecute)\s*$/i.test(lead) });
   }
 
   // (g) INLINE LITERAL ARGUMENTS (20261107213742) — `replace(src, E'needle\n', E'needle\n' || E'added\n')`,
@@ -238,18 +243,33 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     const replacement = evalDeclExpr(il[2].trim(), decls);
     if (anchor === undefined || replacement === undefined) continue;
     if (commentedOut(il.index)) continue;
-    out.push({ anchor, replacement, pos: il.index, call: true });
+    out.push({ anchor, replacement, pos: il.index });
   }
-  // Deduplicate AFTER ordering: a call pair repeated later (an occurrence-count probe, a re-check) must
-  // not displace its first, executing occurrence.
-  const seenCall = new Set<string>();
-  return out.sort((x, y) => x.pos - y.pos).filter((p) => {
-    if (!p.call) return true;
+  // Every executing call is kept, repeats included (X→Y, Y→X, X→Y runs three times). Only a PROBE whose
+  // pair already ran is dropped: it repeats a pair without applying it.
+  out.sort((x, y) => x.pos - y.pos);
+  const ran = new Set<string>();
+  const patches = out.filter((p) => {
     const k = `${p.anchor}\u0000${p.replacement}`;
-    if (seenCall.has(k)) return false;
-    seenCall.add(k);
+    if (p.probe && ran.has(k)) return false;
+    ran.add(k);
     return true;
   }).map(({ anchor, replacement }) => ({ anchor, replacement }));
+
+  // An ASSIGNED replace() this reader could not turn into a patch (a runtime-computed argument) is counted,
+  // so a migration mixing readable and unreadable patches is reported instead of half-replayed.
+  const assigned = /:=\s*replace\s*\(/g;
+  let m: RegExpExecArray | null;
+  let unreadAssigned = 0;
+  while ((m = assigned.exec(sql))) {
+    if (commentedOut(m.index)) continue;
+    const semi = sql.indexOf(';', m.index);
+    const end = semi < 0 ? sql.length : semi;        // the whole statement: a table row's use sits in its args
+    const stmt = sql.slice(m.index, end);
+    const tableRow = tables.some((t) => new RegExp(String.raw`\b${t}\s*\[`).test(stmt));
+    if (!tableRow && !out.some((p) => p.pos >= m!.index && p.pos <= end)) unreadAssigned++;
+  }
+  return { patches, unreadAssigned };
 }
 
 /**
@@ -347,7 +367,10 @@ export function replayFunction(migrationsDir: string, fn: string): Replayed {
       continue;
     }
 
-    const patches = extractPatches(sql);
+    const { patches, unreadAssigned } = extractPatches(sql);
+    if (patches.length && unreadAssigned && looksLikeUninterpretedChange(sql, fn)) {
+      unresolved.push(`${f} (${unreadAssigned} assigned replace() not readable beside readable patches)`);
+    }
     if (patches.length) {
       if (body === null) { unresolved.push(`${f} (patches ${fn} before any definition)`); continue; }
       let applied = false;
