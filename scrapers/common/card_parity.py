@@ -110,7 +110,8 @@ def paired_lines(text_head: str) -> list[str]:
     on the first full run, 2026-11-07) becomes one line, so the comparator reads the value next to its label."""
     lines = [x.strip() for x in (text_head or "").split(" | ")]
     # «04» is 4 (dwelleo prints «عدد دورات المياه» / «04», 2026-11-07 slot run)
-    return [a + " " + re.sub(r"^0+(?=\d)", "", b) for a, b in zip(lines, lines[1:]) if _LABEL.match(a) and b and len(b) <= 40]
+    return [a + " " + re.sub(r"^0+(?=\d+(?![.\d]))", "", b.translate(_DIG))
+            for a, b in zip(lines, lines[1:]) if _LABEL.match(a) and b and len(b) <= 40]
 
 
 def is_home(url: str | None) -> bool:
@@ -170,7 +171,9 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
     # = shown total»; akariyoun 12049505: page «5,000 ريال للمتر», served 5,600,000 for 1,120 m², 2026-11-07).
     if src.get("price") == MISMATCH and stored.get("price_total") and stored.get("area_m2"):
         total, area = float(stored["price_total"]), float(stored["area_m2"])
-        if any(abs(n * area - total) < 1 for n in numbers(" ".join(page.get("evidence_lines") or [])) if n):
+        rates = [float(m.replace(",", "").replace("٬", "")) for x in page.get("evidence_lines") or []
+                 if re.search(r"للمتر|المتر|/\s*م", x) for m in re.findall(r"\d[\d,٬]*(?:\.\d+)?", x.translate(_DIG))]
+        if any(abs(round(r * area) - total) < 1 for r in rates if r):
             src["price"] = MATCH
     for f in SOURCE_FIELDS:
         v = src.get(f, UNREADABLE if page is None else PAGE_SILENT)
