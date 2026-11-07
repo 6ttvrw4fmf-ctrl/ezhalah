@@ -70,3 +70,8 @@ def test_more_haraj_shapes_2026_11_07():
     assert N.stated_rent_period(6000, "الاستراحتين ب 60000ريال سنوي 6000ريال شهري") == "monthly"
     assert N.stated_rent_period(50000, "💰 الإيجار: [5000]شهري و السعر سنوي (50000) ( رقم") == "annual"
     assert N.stated_rent_period(45000, "💰 رسوم الاشتراك: 150 ريال شهري 💰 الإيجار السنوي: 45,000 ريال") == "annual"
+
+
+def test_a_deposit_after_the_label_does_not_steal_it_coderabbit_11030():
+    assert N.stated_rent_period(40000, "الإيجار 40000 ريال سنوي، التأمين 2000 ريال") == "annual"
+    assert N.stated_rent_period(28000, "2500 ريال الإيجار السنوي للفيلا 28000") == "annual"
