@@ -146,3 +146,14 @@ def test_an_area_line_that_says_metre_is_not_a_rate():      # CodeRabbit (Major)
     page = {**PAGE, "evidence_lines": lines, "text_head": " | ".join(lines), "_text": "\n".join(lines)}
     land = {**STORED, "type_ar": "أرض", "price_total": 1000000, "area_m2": 1000, "bedrooms": None, "bathrooms": None}
     assert _judge(stored=land, card={**CARD, "text": "SAR 1,000,000 | 1000 م²"}, page=page)["price"] == MISMATCH
+
+
+def test_rows_shape_panel_licence_is_read():          # 🔧 11-07: aqargate's rows panel read as «we miss it»
+    from scrapers.common.card_parity import panel_licence
+    assert panel_licence({"rega_ad_license_number": "7200423552"}) == "7200423552"
+    assert panel_licence([{"key": "usage", "label": "Property usage", "value": "سكني"},
+                          {"key": "rega_ad_license_number", "label": "Ad license number", "value": "7100267912"}]) == "7100267912"
+    assert panel_licence([{"key": "adlic", "label": "Ad license number", "value": "7200111222"}]) == "7200111222"
+    assert panel_licence({"rows": [{"key": "adlic", "label": "Ad license number", "value": "7200111222"}]}) == "7200111222"
+    assert panel_licence([{"key": "usage", "label": "Property usage", "value": "سكني"}]) is None
+    assert panel_licence(None) is None and panel_licence({}) is None
