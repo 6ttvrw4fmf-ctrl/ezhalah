@@ -56,3 +56,26 @@ def test_a_redirect_to_the_same_ads_new_address_is_ok():
     assert S.classify(era2, 200, "https://erapulse.sa/x/%D9%82-REF-AAAABBBB-6HUS9") == "moved"
     # slug words are not ids: dwelleo's slug move is still a repairable «moved»
     assert S.classify(OLD, 200, NEW) == "moved"
+
+
+# 🔧 2026-11-07: a language prefix or one pretty segment on the SAME path is the same ad, not a move. Both
+# real redirects below were read live; each re-raised card_parity_self_healed / served_links_self_healed daily.
+def test_locale_prefix_is_the_same_ad():
+    from scrapers.common.served_link_check import classify
+    url = "https://macsaib.sa/property/ard-skny-bhy-alkhzamy-shrk-bryd"
+    assert classify(url, 200, "https://macsaib.sa/ar/property/ard-skny-bhy-alkhzamy-shrk-bryd") == "ok"
+
+
+def test_pretty_slug_appended_is_the_same_ad():
+    from scrapers.common.served_link_check import classify
+    url = "https://www.alhoshan.sa/properties/1013"
+    landed = ("https://www.alhoshan.sa/properties/1013/%D8%B9%D9%85%D8%A7%D8%B1%D9%87-%D9%84%D9%84%D8%A8%D9%8A%D8%B9")
+    assert classify(url, 200, landed) == "ok"
+
+
+def test_a_different_ad_or_a_deeper_path_is_still_moved():
+    from scrapers.common.served_link_check import classify
+    assert classify("https://www.alhoshan.sa/properties/1013", 200, "https://www.alhoshan.sa/properties/1014") == "moved"
+    assert classify("https://www.alhoshan.sa/properties/1013", 200,
+                    "https://www.alhoshan.sa/properties/1013/a/b") == "moved"
+    assert classify("https://macsaib.sa/property/x-y", 200, "https://macsaib.sa/ar/projects/x-y") == "moved"

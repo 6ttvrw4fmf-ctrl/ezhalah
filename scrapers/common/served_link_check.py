@@ -64,6 +64,28 @@ def _ad_id_tokens(u: str) -> set[str]:
             if len(t) >= 8 and re.search(r"\d", t) and re.search(r"[a-z]", t)}
 
 
+_LOCALES = {"ar", "en"}
+
+
+def _segments(u: str) -> list[str]:
+    return [unquote(x) for x in urlsplit(u).path.strip("/").split("/") if x]
+
+
+def _same_path_dressed(url: str, landed: str) -> bool:
+    """The landing is the stored path itself, only DRESSED: a language prefix in front (macsaib
+    /property/<slug> → /ar/property/<slug>) and/or one pretty segment behind (alhoshan /properties/1013 →
+    /properties/1013/<عماره-للبيع-…>). Every stored segment is kept, in order, so it is the same ad. Measured
+    🔧 2026-11-07: both sites read «moved» on 20 of 20 links every night; the robot rewrote them, the next
+    crawl wrote the short form back, and card_parity_self_healed / served_links_self_healed re-raised daily
+    (pure)."""
+    s, l = _segments(url), _segments(landed)
+    if not s:
+        return False
+    if l and l[0].lower() in _LOCALES and s[0].lower() not in _LOCALES:
+        l = l[1:]
+    return l[:len(s)] == s and len(l) - len(s) <= 1
+
+
 def same_ad_redirect(url: str, landed: str | None) -> bool:
     """The site redirected the stored link to its new pretty address FOR THE SAME AD: same site and
     the landing's last segment carries one of the ad's own id tokens (falcon 2026-11-06: dallali
@@ -71,6 +93,8 @@ def same_ad_redirect(url: str, landed: str | None) -> bool:
     lands on the ad, so the card works (pure)."""
     if not landed or _host(landed) != _host(url):
         return False
+    if _same_path_dressed(url, landed):
+        return True
     tail = _last_segment(landed).lower()
     if any(t in tail for t in _ad_id_tokens(url)):
         return True

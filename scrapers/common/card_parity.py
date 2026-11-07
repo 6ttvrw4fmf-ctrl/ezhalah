@@ -413,13 +413,37 @@ class SourceReader:
         self._pw.stop()
 
 
+def panel_licence(panel) -> str | None:
+    """The licence the card's «رقم رخصة الإعلان» row prints, in either panel shape the card reads
+    (src/data/remote.ts buildAdditionalInfo): the object's rega_ad_license_number key, or the label/value ROWS
+    shape (aqargate, alhoshan, … and the {rows: [...]} wrapper) whose row is labelled «Ad license number».
+    Reading only the object shape made every rows-shape site a permanent «we miss it» (🔧 2026-11-07: aqargate
+    229 of 229 cards carry the row, parity still said we_miss)."""
+    if isinstance(panel, dict) and isinstance(panel.get("rows"), list):
+        panel = panel["rows"]
+    if isinstance(panel, dict):
+        v = panel.get("rega_ad_license_number")
+        return (_html.unescape(str(v)).translate(_DIG).strip() or None) if v not in (None, "") else None
+    if isinstance(panel, list):
+        for r in panel:
+            # The card drops a row with no label (buildAdditionalInfo), so parity must not compare one either.
+            if not isinstance(r, dict) or not str(r.get("label") or "").strip():
+                continue
+            if r.get("key") == "rega_ad_license_number" or r.get("label") == "Ad license number":
+                v = _html.unescape(str(r.get("value") or "")).translate(_DIG).strip()   # the card decodes too
+                if v:
+                    return v
+    return None
+
+
 def stored_of(client, table: str, rid: int) -> tuple[dict, str | None]:
     stored = (client.table("search_listings_ar").select(STORED + ",license_number").eq("source_table", table)
               .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
     raw = (client.table(table).select("listing_url,neighborhood,photo_urls,additional_info,price_annual,rent_period")
            .eq("id", rid).limit(1).execute().data or [{}])[0]
     info = raw.get("additional_info") if isinstance(raw.get("additional_info"), dict) else {}
-    stored = {**stored, "card_district_raw": raw.get("neighborhood"), "card_licence": info.get("rega_ad_license_number"),
+    stored = {**stored, "card_district_raw": raw.get("neighborhood"),
+              "card_licence": panel_licence(raw.get("additional_info")),
               "has_photo": bool([u for u in (raw.get("photo_urls") or []) if isinstance(u, str) and u]),
               "source_rent_period": raw.get("rent_period"), "source_price_annual": raw.get("price_annual")}
     return stored, raw.get("listing_url")
