@@ -326,10 +326,6 @@ def main() -> int:
     args = ap.parse_args()
     s = session()
     dry = args.dry_run or bool(args.limit)
-    run_id = None if dry else db.begin_run("alqasem")
-    res: list[dict] = []
-    com: list[dict] = []
-    skipped: dict[str, int] = {}
     if os.environ.get("ALQ_PROBE", "1") == "1":
         import json as _j
         for u in (BASE + "/", BASE + "/robots.txt", ARCHIVE, BASE + "/properties/", BASE + "/?post_type=property",
@@ -357,6 +353,10 @@ def main() -> int:
             except Exception as e:
                 print(f"PROBE {u} EXC {type(e).__name__}: {e}", flush=True)
         return 1
+    run_id = None if dry else db.begin_run("alqasem")
+    res: list[dict] = []
+    com: list[dict] = []
+    skipped: dict[str, int] = {}
     try:
         urls = listing_urls_from_sitemap(fetch(s, SITEMAP))
         if not urls:
