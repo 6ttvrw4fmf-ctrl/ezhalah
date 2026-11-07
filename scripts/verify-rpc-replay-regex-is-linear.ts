@@ -54,6 +54,7 @@ fs.writeFileSync(path.join(dir, '20990101000006_dedup.sql'),
 fs.writeFileSync(path.join(dir, '20990101000007_table.sql'),
   "do $$ declare ed text[][] := array[['+ U $$', '+ V $$']]; src text; out_def text; begin\n" +
   "src := pg_get_functiondef('public.f_lin()'::regprocedure);\n" +
+  "-- ed holds the edits; ed is applied below\n" +
   "out_def := replace(src, E'+ S $$', E'+ S + U $$');\n" +
   "for i in 1..array_length(ed, 1) loop out_def := replace(out_def, ed[i][1], ed[i][2]); end loop;\n" +
   "execute out_def; end $$;\n");

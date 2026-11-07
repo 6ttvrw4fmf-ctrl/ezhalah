@@ -194,9 +194,13 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     while ((r = rowRe.exec(span))) {
       // Positioned where the table is first USED (its loop), not where it is declared: an inline patch
       // between the two may create a row's anchor.
-      const use = new RegExp(String.raw`\b${a[1]}\b`, 'g');
+      // Only an executable USE counts (an index `name[`, `array_length(name`, `in array name`), never a
+      // bare mention, and never one on a commented-out line. `a[1]` is an identifier (\w+), so it is safe
+      // inside a pattern.
+      const use = new RegExp(String.raw`\b${a[1]}\s*\[|array_length\s*\(\s*${a[1]}\b|\bin\s+array\s+${a[1]}\b`, 'gi');
       use.lastIndex = end + 1;
-      const u = use.exec(sql);
+      let u: RegExpExecArray | null;
+      while ((u = use.exec(sql)) && commentedOut(u.index)) { /* a comment, not the loop */ }
       out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: u ? u.index : a.index + r.index });
     }
   }
