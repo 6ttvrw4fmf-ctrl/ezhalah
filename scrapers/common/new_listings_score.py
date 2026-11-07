@@ -1465,7 +1465,7 @@ def _safe_evidence(kw: str, line: str) -> str:
         # «غرف النوم 4 050/123/4567»: the room count before a space is not part of the phone; keep it alone.
         lead = re.match(r"(\d{1,3}\+?)\s+(.*)$", c, re.S)
         return f"{lead.group(1)} " if lead and len(re.sub(r"\D", "", lead.group(2))) >= 9 else " "
-    unphoned = re.sub(r"\+?\d(?:[^0-9A-Za-z\u0621-\u064A]{1,3}\+?\d|\d)*\+?", _keep, n)
+    unphoned = re.sub(r"\+?\d(?:[^0-9A-Za-z\u0621-\u064A]+\+?\d|\d)*\+?", _keep, n)   # any separator length
     nums = re.findall(r"[+]?\d[\d,.]*[+]?", unphoned)
     neg = "لا" if re.search(r"(?<![\u0621-\u064A])(?:لا|بدون|غير)(?![\u0621-\u064A])", n) else ""
     return " ".join(x for x in ((k.group(0) if k else ""), neg, " ".join(nums[:6])) if x)
