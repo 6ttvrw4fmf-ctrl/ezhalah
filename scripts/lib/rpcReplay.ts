@@ -198,7 +198,7 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
     const rowRe = /\[\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'/g;
     let r: RegExpExecArray | null;
     while ((r = rowRe.exec(span))) {
-      // Positioned at the table's first index use INSIDE A LOOP after its declaration — the loop that applies
+      // Positioned at the table's index use INSIDE THE LOOP after its declaration — the loop that applies
       // the rows (directly, `replace(x, name[i][1], …)`, or through variables, `needle := name[i][1]`). A read
       // outside a loop (`n := array_length(name, 1)`, `preview := name[1][1]`) applies nothing and can sit
       // before an inline patch that creates a row's anchor. No such use → the order cannot be known, and the
@@ -207,14 +207,17 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
       const idx = new RegExp(String.raw`\b${a[1]}\s*\[`);
       const loopRe = /\bloop\b([\s\S]*?)\bend\s+loop\b/gi;
       loopRe.lastIndex = end + 1;
-      let u: { index: number } | null = null;
+      // Exactly ONE loop may index the table: with two (one only reading it), which one applies the rows
+      // is not something a static reader can know, so the order is reported as unresolved, never guessed.
+      const loopsUsing: number[] = [];
       let lp: RegExpExecArray | null;
-      while (!u && (lp = loopRe.exec(sql))) {
+      while ((lp = loopRe.exec(sql))) {
         if (commentedOut(lp.index)) continue;
         const hit = idx.exec(lp[1]);
-        if (hit) u = { index: lp.index + 'loop'.length + hit.index };
+        if (hit) loopsUsing.push(lp.index + 'loop'.length + hit.index);
       }
-      if (!u) { unplacedTables++; continue; }
+      if (loopsUsing.length !== 1) { unplacedTables++; continue; }
+      const u = { index: loopsUsing[0] };
       out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: u.index });
     }
   }

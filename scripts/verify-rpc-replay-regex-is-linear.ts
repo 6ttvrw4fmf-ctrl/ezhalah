@@ -115,10 +115,21 @@ fs.writeFileSync(path.join(mixed, '20990101000001_mixed.sql'),
   "out_def := replace(src, E'/*A*/', E'/*A2*/');\n" +
   "out_def := replace(out_def, format('/*%s*/', 'B'), E'/*B2*/');\n" +
   "execute out_def; end $$;\n");
+// (10) two loops index the table (one only reads it): which applies the rows cannot be known → reported.
+fs.writeFileSync(path.join(mixed, '20990101000002_two_loops.sql'),
+  "do $$ declare ed text[][] := array[['/*A2*/', '/*A3*/']]; src text; out_def text; pv text; begin\n" +
+  "src := pg_get_functiondef('public.f_mix()'::regprocedure);\n" +
+  "for i in 1..1 loop pv := ed[i][1]; end loop;\n" +
+  "out_def := replace(src, E'/*B*/', E'/*B3*/');\n" +
+  "for i in 1..1 loop out_def := replace(out_def, ed[i][1], ed[i][2]); end loop;\n" +
+  "execute out_def; end $$;\n");
 const mixedOut = replayFunction(mixed, 'f_mix');
 const mixedReported = (u: string[]) => u.some((x) => x.includes('20990101000001_mixed.sql'));
 ok(mixedReported(mixedOut.unresolved), `a readable patch beside an unreadable assigned one is reported (${JSON.stringify(mixedOut.unresolved)})`);
 mustCatch('a replay that half-applied a mixed migration silently', !mixedReported([]));
+const twoLoopsReported = (u: string[]) => u.some((x) => x.includes('20990101000002_two_loops.sql'));
+ok(twoLoopsReported(mixedOut.unresolved), 'a table indexed by two loops is reported, not placed at a guessed loop');
+mustCatch('a replay that placed a two-loop table silently', !twoLoopsReported([]));
 fs.rmSync(mixed, { recursive: true, force: true });
 
 fs.rmSync(dir, { recursive: true, force: true });
