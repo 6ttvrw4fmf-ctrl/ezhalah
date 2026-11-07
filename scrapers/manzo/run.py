@@ -132,7 +132,62 @@ def read_details(s: cc.Session, listing: list[dict], fetch=None) -> list[Optiona
             return None
 
     with ThreadPoolExecutor(DETAIL_WORKERS) as ex:
-        return list(ex.map(one, listing))
+        out = list(ex.map(one, listing))
+    return retry_refused(s, listing, out, fetch=fetch)
+
+
+# A REFUSED RECORD IS RE-ASKED, SLOWLY, BEFORE THE WALK IS CALLED INCOMPLETE (⚡ 2026-11-06, alert
+# run_killed_by_timeout:manzo). Five workers still drew HTTP 429 on 300 of 1,279 records (11-06 05:19, 13 of its 30
+# minutes used), so `complete` stayed false and the absence prune never ran. After the pool, every record that failed
+# is read again ONE AT A TIME with a pause, and a 429 waits for the API's own Retry-After (capped) before one more try.
+# The pass stops at RETRY_BUDGET_S so the job still ends inside its slot; a record not re-read in time stays unreadable
+# (`why=retry_budget`) and the walk stays incomplete — never a guess, never a prune on a partial read.
+RETRY_PAUSE_S = 1.5
+RETRY_BUDGET_S = 25 * 60
+RETRY_AFTER_CAP_S = 30.0
+
+
+def _retry_after(e: BaseException) -> float:
+    resp = getattr(e, "response", None)
+    try:
+        v = float((getattr(resp, "headers", None) or {}).get("Retry-After") or 0)
+    except (TypeError, ValueError):
+        v = 0.0
+    return min(max(v, 5.0), RETRY_AFTER_CAP_S)
+
+
+def retry_refused(s: cc.Session, listing: list[dict], out: list[Optional[dict]], fetch=None,
+                  *, clock=time.monotonic, sleep=time.sleep) -> list[Optional[dict]]:
+    fetch = fetch or get_json
+    todo = [i for i, d in enumerate(out) if d is None]
+    if not todo:
+        return out
+    with _why_lock:
+        UNREADABLE_WHY.clear()           # the counts now describe what is STILL unreadable after this pass
+    start = clock()
+    recovered = 0
+    for n, i in enumerate(todo):
+        if clock() - start > RETRY_BUDGET_S:
+            with _why_lock:
+                UNREADABLE_WHY["retry_budget"] = UNREADABLE_WHY.get("retry_budget", 0) + len(todo) - n
+            break
+        url = f"{API}/details/s/{listing[i]['slug']}/"
+        for attempt in range(2):
+            try:
+                d = fetch(s, url)
+                out[i] = d.get("data") or d
+                recovered += 1
+                break
+            except Exception as e:  # noqa: BLE001
+                code = getattr(getattr(e, "response", None), "status_code", None)
+                if attempt == 0 and code == 429:
+                    sleep(_retry_after(e))
+                    continue
+                _note_unreadable(e)
+                break
+        sleep(RETRY_PAUSE_S)
+    print(f"  manzo: re-asked {len(todo)} refused record(s) one at a time, recovered {recovered}", flush=True)
+    return out
 
 
 def source_published_empty(listing: list, declared: int) -> bool:

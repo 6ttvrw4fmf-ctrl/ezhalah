@@ -252,6 +252,8 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             out[name] = _cmp_valued(stored.get(col), SITE_DEAL_MENU.sub("", whole), DEAL_KW)
         else:
             out[name] = _cmp_word(stored.get(col), whole, kw)
+            if name == "direction_ar":
+                lines = label_value_lines(lines, kw)
             if name == "direction_ar" and out[name] == WE_MISS and not facade_stated(lines, kw):
                 out[name] = PAGE_SILENT
             # haraj's REGA licence block prints the facade in English («واجهة العقار: Eastern», 21831096, backlog 1090).
@@ -263,6 +265,11 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 # 2026-11-03) prints «جنوبية - شرقية» and we store «جنوب شرقي».
                 ar = facade_adjectives(stored.get(col))
                 if out[name] == MISMATCH and ar and any(re.search(kw, x) and re.search(ar, norm(x)) for x in lines):
+                    out[name] = MATCH
+                # …and in JSON-LD, which never reaches `lines`: aqarcity 31207 (17802282, score 2026-11-06) publishes
+                # {"name": "الواجهة", "value": "جنوبية شرقية"} and we store «جنوب شرق». The label and its OWN value only
+                # (normalised: «"name": "الواجهه", "value": "جنوبيه شرقيه"») — never a bearing in another property's value.
+                if out[name] == MISMATCH and ar and re.search(r"(?:" + kw + r")[\"' \t,:]*(?:value[\"' \t,:]*)?" + ar, norm(whole)):
                     out[name] = MATCH
     return out
 
@@ -318,6 +325,26 @@ for _ar, _en in (("شمال شرق", "north[\\s-]*east"), ("شمال غرب", "n
 _FACADE_BASES = ("شمال", "جنوب", "شرق", "غرب")
 
 
+# The next line is joined only when it IS a facade value (a bearing first): «الحي الشرقي» (a district) or another
+# source's text never becomes the label's value (CodeRabbit on #10939).
+_FACADE_VALUE_START = re.compile(r"^\s*(?:ال)?(?:شمال|جنوب|شرق|غرب)|^\s*(?:north|south|east|west)", re.I)
+
+
+def label_value_lines(lines: list[str], kw: str) -> list[str]:
+    """A label printed as its own line joins the value line after it. vmksa's feature block «<h2>واجهة العقار</h2>
+    <span>جنوبية شرقية</span>» reaches us as «واجهة العقار | جنوبية شرقية», two lines, so a facade that equals ours
+    (14110686 stores «جنوب شرق») scored MISMATCH and a stated one read as «not stated» (🔬 2026-11-06, ops_af_score
+    vmksa 3 direction mismatches). Only a BARE label (at most one short word left beside the keyword) is joined."""
+    out = list(lines)
+    for i, x in enumerate(lines[:-1]):
+        m = re.search(kw, x)
+        rest = re.sub(r"[:：\-–|]", " ", re.sub(kw, "", x)).split()      # «واجهة العقار :» — the colon is not a word
+        if m and len(rest) <= 1 and len(x) <= 24 and not (rest and _FACADE_VALUE_START.match(rest[0])) \
+                and _FACADE_VALUE_START.match(lines[i + 1]):           # «واجهة جنوبية» already holds its value
+            out[i] = x + " : " + lines[i + 1]
+    return out
+
+
 def facade_adjectives(stored) -> Optional[str]:
     """«جنوب شرقي» → a pattern for «جنوبيه - شرقيه» / «جنوبي شرقي» / «جنوبيه شرقيه» (norm folds ة→ه).
     Only the four bases, in the stored order; anything else returns None."""
@@ -325,7 +352,7 @@ def facade_adjectives(stored) -> Optional[str]:
     bases = [w[:-1] if w.endswith("ي") else w for w in words]
     if not bases or len(bases) > 2 or any(b not in _FACADE_BASES for b in bases):
         return None
-    return (r"(?<![\u0621-\u064A])" + r"\s*[-–/،,]?\s*(?:و)?".join(b + r"(?:يه|ي)?" for b in bases)
+    return (r"(?<![\u0621-\u064A])" + r"\s*[-–/،,]?\s*(?:و)?".join(r"(?:ال)?" + b + r"(?:يه|ي)?" for b in bases)
             + r"(?![\u0621-\u064A])")
 
 

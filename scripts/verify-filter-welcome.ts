@@ -14,6 +14,7 @@ import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, PREPARED_MAX_MS, FACTLESS_ANYTIME_IDS,
   MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, GREET_LINES, GREET_HOLD_MS, greetIndex, greetingFor, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, tabLine, TAB_KEY, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
+import { windowBetween, windowUpTo } from './lib/sourceWindow.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -204,8 +205,8 @@ const hookSrc = (await import('node:fs')).readFileSync(new URL('../src/lib/useFi
 // («show the welcome with 🥳, then change it to a market insight», visibly). Nothing else re-decides.
 check('the hook decides once per page load and re-decides ONLY for a sign-in welcome and its hand-over',
   // (a fourth setShown only lifts the hold on the welcome at the first firework pop — owner 2026-10-28)
-  // (a fifth settles the FIRST visit of a day once today's fact is read — still hidden until then, owner 2026-10-30)
-  (hookSrc.match(/setShown\(/g) ?? []).length === 5
+  // (the 10-30 fifth — a late settle after a hidden server read — is gone: owner 2026-11-06 «never pop up late»)
+  (hookSrc.match(/setShown\(/g) ?? []).length === 4
   && hookSrc.includes('const reveal = () => setShown((s) => (s.hold ? { ...s, hold: false } : s));')
   && /if \(greet\) welcomeThenInsight\(\);/.test(hookSrc) && /nameEn: session\.nameEn, hold: true \}\);\s*welcomeThenInsight\(\);/.test(hookSrc)
   && (hookSrc.match(/welcomeThenInsight\(\);/g) ?? []).length === 2
@@ -458,22 +459,27 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
   check('the tab memory is sessionStorage (one tab), never localStorage (every tab would freeze)', TAB_KEY.startsWith('ezhalah:') && !/localStorage\?\.getItem\(TAB_KEY\)/.test(hookSrc));
 }
 
-// ── FACTS ALWAYS (owner 2026-10-30: «show facts always» — the first visit of a day showed «even small cities have a
-// place here» and kept the fact for the NEXT visit). Only a FACT is held; with none on the device the hook reads today's
-// now, hidden (never a visible swap), for at most FACT_WAIT_MS, and the plain line shows only when that read fails.
+// ── NEVER LATE (owner 2026-11-06: «I never want it to pop up late») — replaces the 10-30 «facts always» hidden wait.
+// Only a FACT is held (10-30 still stands), but a device with no fact today shows today's last fact or the plain line AT
+// ONCE; it never hides the headline while today's fact is read. The pack read happens in the background for the next
+// open. The behaviour on a real phone is executed by scripts/verify-web-welcome-never-late.mjs (web-runtime-smoke).
 {
-  const factsAlways = (src: string) =>
-    src.includes('const isFact = (l: { id: number | null } | null | undefined) => !!l && l.id != null && isInsightLineId(l.id);')
-    && src.includes('cache: isFact(cache) ? cache : null,')
-    && /if \(!greet && session\.present && inst && !isFact\(inst\)\) \{[\s\S]{0,400}?fetchPack\(lastLocation, lastDistrict\)/.test(src)
-    && /void Promise\.race\(\[fact, slow\]\)/.test(src) && /setTimeout\(\(\) => r\(null\), FACT_WAIT_MS\)/.test(src)
-    && /setShown\(\{ settled: true, id: line\.id, ar: line\.ar, en: line\.en, nameAr, nameEn, greet: greetNowIdx \}\);\s*\}\);\s*return;/.test(src);
-  check("facts always: only a fact is held, and a device without one reads today's fact before the headline shows", factsAlways(hookSrc));
-  const { FACT_WAIT_MS: wait } = await import('../src/lib/useFilterWelcome.ts').catch(() => ({ FACT_WAIT_MS: Number(/export const FACT_WAIT_MS = (\d+);/.exec(hookSrc)?.[1]) }));
-  check('the hidden wait is bounded (0 < FACT_WAIT_MS ≤ 3 s), never a headline that waits forever', Number(wait) > 0 && Number(wait) <= 3000);
-  mustCatch('a held plain line blocking the fact again', !factsAlways(hookSrc.replace('cache: isFact(cache) ? cache : null,', 'cache,')));
-  mustCatch('the first visit of a day back to the plain line', !factsAlways(hookSrc.replace('if (!greet && session.present && inst && !isFact(inst)) {', 'if (false) {')));
-  mustCatch('a fact read with no time limit', !factsAlways(hookSrc.replace('void Promise.race([fact, slow])', 'void Promise.race([fact])')));
+  const neverLate = (src: string) => { try {
+    const mount = windowBetween(src, '// ONCE PER PAGE LOAD', '// BACKGROUND, for later visits.', 'useFilterWelcome.ts');
+    return src.includes('const isFact = (l: { id: number | null } | null | undefined) => !!l && l.id != null && isInsightLineId(l.id);')
+      && src.includes('cache: isFact(cache) ? cache : null,')
+      && /if \(!greet && session\.present && inst && !isFact\(inst\)\) \{\s*const today = isFact\(cache\) && cache && sameRiyadhDay\(cache\.at, now\.getTime\(\)\) \? cache : null;\s*if \(today\) inst = \{ id: today\.id/.test(src)
+      // the mount decision never waits on the network: no race, no timer, no early return before the headline settles
+      && mount.length > 0 && !/Promise\.race\(|setTimeout\(|await /.test(mount)
+      && /setShown\(inst \? \{ settled: true/.test(mount)
+      && !/\n\s*return;\n/.test(windowUpTo(mount, 'setShown(inst ? { settled: true', 'useFilterWelcome.ts mount'));
+  } catch { return false; } };
+  check('never late: the first visit of a day shows today\'s last fact or the plain line at once; nothing at mount waits on the network', neverLate(hookSrc));
+  check('the 2.5 s hidden wait is gone (no FACT_WAIT_MS anywhere in the hook)', !/FACT_WAIT_MS/.test(hookSrc));
+  mustCatch('a held plain line blocking the fact again', !neverLate(hookSrc.replace('cache: isFact(cache) ? cache : null,', 'cache,')));
+  mustCatch('today\'s last fact dropped (the plain line even when a fact was shown today)', !neverLate(hookSrc.replace('if (today) inst = {', 'if (false) inst = {')));
+  mustCatch('a server read raced against a timer before the headline shows', !neverLate(hookSrc.replace('// ONCE PER PAGE LOAD', '// ONCE PER PAGE LOAD\n    void Promise.race([fetchPack(lastLocation, lastDistrict), new Promise((r) => setTimeout(r, 2500))]);')));
+  mustCatch('an early return that leaves the headline hidden', !neverLate(hookSrc.replace('    // The greeting is chosen NOW', '    if (!greet && session.present) {\n      return;\n    }\n    // The greeting is chosen NOW')));
 }
 
 // ── THE EMOJI STAYS VISIBLE THROUGH THE SHINE (owner 2026-10-28: «the emoji after the name doesn't show») ──

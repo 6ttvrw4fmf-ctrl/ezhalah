@@ -663,6 +663,11 @@ _PURE_PUBLIC_FACTS = frozenset({"mosque", "market", "restaurant_cafe", "in_mall"
 # «مباشرة» just before a public place makes it the neighbour — unless the ad says it has it («فيلا شمالية فيها حديقة»).
 _BOUNDARY_STEMS = tuple(_n(w) for w in ("شمال", "جنوب", "شرق", "غرب", "جهه", "جهتين", "جهات", "واجهه", "واجهتين",
                                          "واجهات", "يحد", "حدود", "مباشر"))
+_POOL_FACTS = frozenset({"pool", "heated_pool", "kids_pool"})
+# «لا تطل على مسبح» denies the view and says nothing of a pool; «مطلة على المسبح البلدي» is the town's
+_VIEW_NEG = frozenset(_n(w) for w in ("لا", "ليس", "ليست", "غير", "بدون", "بلا", "ما", "مو", "مش"))
+_PUBLIC_POOL = frozenset(_n(w) for w in ("البلدي", "بلدي", "العام", "عام", "العامه", "عامه", "الاولمبي", "اولمبي"))
+_GOVERNS_NEAR = frozenset(_n(w) for w in ("بجوار", "جوار", "بجانب", "جنب", "مقابل", "امام", "قرب", "قريب", "قريبه", "بالقرب"))
 _HAS_CUES = tuple(_n(w) for w in ("فيها", "فيه", "بها", "به", "تحتوي", "يحتوي", "يوجد", "توجد", "يضم", "تضم", "داخل"))
 
 
@@ -779,7 +784,7 @@ def _prepared_applies(before: list[str], after: list[str], hit: str = "") -> boo
         if not _starts(w, _PREPARED):
             continue
         nxt = after[k + 1] if k + 1 < len(after) else ""
-        if nxt and (_starts(_bare_l(nxt), _PREPARABLE)
+        if nxt and ((_starts(_bare_l(nxt), _PREPARABLE) and not (nxt.startswith("و") and _strip_wa(nxt) != nxt))
                     or (_starts(_strip_wa(w), _PREP_VERBAL) and not _starts(_bare_l(nxt), _PREP_MAKE))):
             continue                                # it governs the next word, not this hit
         return True
@@ -927,6 +932,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                for k, w in enumerate(w3)):
             return False, ws, we
     public = fact in _PUBLIC_FACTS or fact in _NEAR_PUBLIC_FACTS   # public places keep the strict window (precision first)
+    # …except the POOL, which reads «prepared» like the home's own facts: in «مسبح تأسيس مصعد» / «مسبح مؤسس مصعد» the
+    # «تأسيس» governs the elevator after it, not the pool before (🔬 2026-11-06 two-way sample, aqar 17595 / 83389)
+    public = public and fact != "pool"
     if (any(_starts(w, _PREPARED) for w in gp[-2:] + gn[:2]) if public
             else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:3]), t[ws:we])) or "prepared for" in " ".join(n2):
         return None, s, e
@@ -951,9 +959,25 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         if at >= 0 and any(_strip_wa(w) in _SERVICES_OBJECT or _strip_wa(w) in _UNIT_AGAIN for w in p5[at + 1:]):
             p5 = p5[at + 1:]
     near5 = [w for w in p5 if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS]
-    if fact in _UNIT_ROOMS and near5 and all(_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS for w in near5):
+    # …and the POOL a room overlooks is the home's (🔬 2026-11-06 two-way sample: 8 of 25 aqar villas that say «صالة كبيرة
+    # مطلة على المسبح», «إطلالة مباشرة على المسبح», «ملحق كبير مطل على المسبح» served no pool) — a public pool is rare;
+    # a public SEA / PARK / mosque view stays nearby, those facts are not here.
+    if (fact in _UNIT_ROOMS or (fact in _POOL_FACTS and not any(p5[k] in _VIEW_NEG and (_strip_wa(p5[k + 1]) in _VIEW_WORDS or p5[k + 1] in _VIEW_WORDS)
+                                                 for k in range(len(p5) - 1))
+                                and not any(_strip_wa(w) in _PUBLIC_POOL for w in gn[:2]))) \
+            and near5 and all(_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS for w in near5):
         p5 = [w for w in p5 if w not in near5]       # a view word next to the home's own room says nothing about the room
-    if fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
+    # «… محطة المترو ٧ دقائق موقف خاص» (dealapp 23282670, 🔬 2026-11-06): «خاص» right after the parking makes it the
+    # home's own — the distance list before it no longer reaches it. Parking only; «موقف عام» stays nearby.
+    own_parking = (fact == "parking" and bool(gn[:1]) and _strip_wa(gn[0]) in ("خاص", "خاصه", "مستقل", "مستقله", "مخصص")
+                   and not any(_strip_wa(w) in ("تابع", "تابعه", "يتبع", "تتبع") for w in gn[1:3])   # «… تابع للمسجد»: the place's
+                   and not (gp[-1:] and (gp[-1] in ("من", "عن")                # «قريب من موقف خاص»: still the near word's object
+                                         or _n(gp[-1]) in _GOVERNS_NEAR))   # «بجوار موقف خاص»; «٧ دقائق موقف خاص» stays own
+                   and not (gn[1:2] and gn[1].startswith(("بال", "لل"))          # «مواقف خاصة بالمول»: another place's,
+                            and not _starts(_bare_l(gn[1][1:] if gn[1].startswith("ب") else gn[1]),
+                                            ("شقه", "فيلا", "فله", "وحده", "عماره", "مبني", "دور", "منزل", "بيت", "سكن",
+                                             "عقار", "سكان", "ساكن", "مستاجر"))))  # but «موقف خاص بالشقة» is the home's
+    if not own_parking and fact not in _NEAR_NEVER_FACTS and (any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5)
                                           or any(p in " ".join(p5) for p in _NEAR_PHRASES)
                                           or _DISTANCE_TO.search(" ".join(gp[-8:]))):
         return None, s, e
@@ -988,6 +1012,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
             break
         if _strip_wa(w) in ("موقع", "الموقع", "موقعه", "موقعها", "موقعنا"):
             break                                    # «موقف سياره 🚗 موقع مميز قريب من الخدمات»: a new subject (dealapp 7439621)
+        if _strip_wa(w) in ("سعر", "السعر", "سعرها", "سعره", "سوم", "السوم", "بيع", "البيع", "للبيع", "ايجار", "الايجار", "للايجار"):
+            break                                    # «ومسبح السوم مليون والبيع قريب»: the price / sale is the new subject (🔬 11-06)
         if _starts(w, _NEAR_AFTER):
             near_after = True
             break
@@ -1727,6 +1753,14 @@ def selftest() -> None:
         ("لا نقبل الدفع الشهري", {"payment_monthly": False}, ()),
         ("مسبح خاص", {"pool": True}, ()),
         ("حوض سباحه", {"pool": True}, ()),
+        ("الشقة لا تطل على مسبح", {}, ("pool",)),
+        ("شقة بدون مصعد تطل على مسبح", {"pool": True}, ()),
+        ("الشقة مطلة على المسبح البلدي", {}, ("pool",)),
+        ("فيلا مطلة على مسبح مدفأ", {"pool": True, "heated_pool": True}, ()),
+        ("المسبح موسس والمصعد راكب", {}, ("pool",)),
+        ("بجوار موقف خاص", {}, ("parking",)),
+        ("فيلا بمسبح سعرها قريب من مليون", {"pool": True}, ()),
+        ("شقة قريبة من مسجد فيه موقف خاص تابع للمسجد", {}, ("parking",)),
         # AI teacher pass 2026-10-27 — the phrasings the paid reader found on ads the word reader had no row for
         ("مكونة من: 3 غرف واصل كهرباء واصل مياه", {"electricity": True, "water_supply": True}, ()),
         ("ماء وكهرب راكب", {"electricity": True, "water_supply": True}, ()),
@@ -1835,6 +1869,23 @@ def selftest() -> None:
         ("غسالة ملابس", {"laundry_room": True}, ()),
         ("washing machine", {"laundry_room": True}, ()),
         ("غسالة صحون", {}, ("laundry_room",)),
+        # the pool a room overlooks is the home's (🔬 2026-11-06 two-way sample, aqar 6645260 / 8036456 / 14871554)
+        ("الدور الأرضي مجلس رجال 🔘 صاله كبيره مطله على المسبح🔘 مطبخ 🔘 دورات مياة", {"pool": True}, ()),
+        ("الصاله مفتوحه على الدرج . * ملحق كبير مطل على المسبح . * مواقف سيارات", {"pool": True}, ()),
+        ("دوبلكس للبيع تصميم عصري مع صالات واسعة وإطلالة على المسبح!", {"pool": True}, ()),
+        ("قريب من مسبح الأولمبي", {}, ("pool",)),
+        ("موقف سياره يتسع لسيارتين مسبح تأسيس مصعد تكييف دكت", {"pool": True}, ("elevator",)),   # aqar 17595
+        ("حوش امامي وخلفي فيه مسبح مؤسس", {}, ("pool",)),
+        ("امكانية اضافة مسبح السعر", {}, ("pool",)),
+        # «خاص» right after the parking: the home's, whatever distance list came before (dealapp 23282670, 2026-11-06)
+        ("وعن محطة المترو المسار الازرق (بنك ساب) ٧ دقائق موقف خاص جميع الخدمات متوفره", {"parking": True}, ()),
+        ("دقيقتين عن المول موقف خاص بالشقة", {"parking": True}, ()),
+        ("قريب من مواقف خاصة بالمول", {}, ("parking",)),
+        ("قريب من موقف خاص", {}, ("parking",)),
+        # a price / sale word starts a new subject: «والبيع قريب» is the sale, not a nearby pool (aqar 41587, 2026-11-06)
+        ("ونخل وبير ماء ومسبح السوم مليون والبيع قريب مكتب اتحاد النجاح للعقارات", {"pool": True}, ()),
+        ("وبالقرب من الجامع السوم ١٨٥ والبيع قريب باذن الله", {}, ("mosque",)),
+        ("✅ لا يوجد مصعد. ✅ لا يوجد موقف خاص داخل العقار.", {"parking": False}, ()),
         ("دور كامل للإيجار", {"whole_floor": True}, ()),
         ("شقة في الدور الأول", {}, ("whole_floor",)),
         ("للعزاب فقط", {"singles": True}, ()),

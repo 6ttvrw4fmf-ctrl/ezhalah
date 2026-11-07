@@ -142,3 +142,11 @@ def test_a_reposted_ad_without_its_import_tag_keeps_its_row_by_licence():
     # two marketplace records with one licence are two ads: neither inherits the row
     twin = {**rec, "id": 42}
     assert AG.legacy_licence_map(stored, [rec, twin]) == {}
+
+
+def test_an_imported_land_ad_without_landTotalPrice_is_still_a_rate():
+    rec = {**LAND, "id": 648, "price": "40.00", "area": "106474.00",
+           "regaData": {"wp_id": 52441}}                  # AG52441, live 2026-11-06: no landTotalPrice
+    row, _ = AG.map_marketplace(rec)
+    assert row["ad_number"] == "AG52441"
+    assert row["price_total"] is None and row["price_per_meter"] == 40
