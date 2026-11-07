@@ -42,6 +42,15 @@ export function normaliseConclusion(c: string | null | undefined): CheckConclusi
   return c.toUpperCase() as CheckConclusion;
 }
 
+// 0b′ (owner 2026-11-07, «make the robot handle these database PRs»): CodeRabbit is an advisory reviewer, never a
+// required check. On a PR it has nothing to read it reports SKIPPED («No files to review»): #10856 (one migration +
+// the cron mirror) was skipped twice and could not merge while every frontend deploy waited 20 h on its drift. Only
+// that one context, only SKIPPED, and only while it is NOT required: its FAILURE/CANCELLED/pending still block, and
+// if branch protection ever makes it required, rule 1 governs and SKIPPED blocks again.
+export const ADVISORY_MAY_SKIP = ['CodeRabbit'];
+const advisorySkip = (c: CheckRun, required: string[]) =>
+  normaliseConclusion(c.conclusion) === 'SKIPPED' && ADVISORY_MAY_SKIP.includes(c.context) && !required.includes(c.context);
+
 export function decideMerge(input: MergeGateInput): MergeGateResult {
   const reasons: string[] = [];
 
@@ -57,6 +66,7 @@ export function decideMerge(input: MergeGateInput): MergeGateResult {
   // means a branch with NO protection configured (requiredContexts legitimately []) is still not a
   // free pass. Strictly stricter than the required-only rule — never a substitute for it.
   for (const c of input.checks) {
+    if (advisorySkip(c, input.requiredContexts)) continue;
     if (normaliseConclusion(c.conclusion) !== 'SUCCESS') {
       reasons.push(`check "${c.context}" is ${normaliseConclusion(c.conclusion) ?? 'PENDING'}, not SUCCESS`);
     }
