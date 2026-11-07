@@ -294,6 +294,9 @@ def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = ""
         return m.start() - k.end() if m.start() >= k.end() else k.start() - m.end()
 
     def labels(k, m):          # «الحمامات: 7+», «غرف النوم 7+» — the room phrase labels the figure right after it
+        span = clause[k.end():m.start()] if k.end() <= m.start() else ""
+        if other_kw and re.search(other_kw, span):     # «غرف: الحمامات: 7+» — the nearer label owns it
+            return False
         return k.end() <= m.start() and re.fullmatch(r"\S*(?:\s+[^\s\d:：]+)?\s*[:：]?\s*", clause[k.end():m.start()]) is not None
     own = list(re.finditer(kw, clause))
     others = list(re.finditer(other_kw, clause)) if other_kw else []
@@ -1445,7 +1448,9 @@ def _safe_evidence(kw: str, line: str) -> str:
     redact_pii does not catch («غرف النوم 4 للتواصل مع أحمد», CodeRabbit PDPL finding on #11031)."""
     n = norm(line)
     k = re.search(kw, n)
-    nums = re.findall(r"[+]?\d[\d,.]*[+]?", n)
+    # A phone is never evidence: a separator-free run of 9+ digits (05XXXXXXXX, 9665…, Arabic/Persian digits that
+    # norm() made ASCII) is dropped, whatever redact_pii caught (CodeRabbit PDPL finding on #11053).
+    nums = [x for x in re.findall(r"[+]?\d[\d,.]*[+]?", n) if len(re.sub(r"\D", "", x)) < 9 or re.search(r"[,.]", x)]
     neg = "لا" if re.search(r"(?<![\u0621-\u064A])(?:لا|بدون|غير)(?![\u0621-\u064A])", n) else ""
     return " ".join(x for x in ((k.group(0) if k else ""), neg, " ".join(nums[:6])) if x)
 

@@ -81,3 +81,14 @@ def test_a_room_phrase_without_colon_labels_its_bucket():
     line = "<p>غرف النوم 7+ حمامات: 4</p>"
     assert _cmp({"bedrooms": 9}, line, "bedrooms") == S.MATCH
     assert _cmp({"bathrooms": 9}, line, "bathrooms") == S.MISMATCH
+
+
+def test_a_second_label_in_the_span_does_not_give_the_bucket_away():
+    line = "<p>غرف: الحمامات: 7+</p>"
+    assert _cmp({"bedrooms": 9}, line, "bedrooms") == S.MISMATCH
+    assert _cmp({"bathrooms": 9}, line, "bathrooms") == S.MATCH
+
+
+def test_safe_evidence_never_carries_a_phone():
+    out = S._safe_evidence(r"غرف", "غرف النوم 4 جوال ٠٥٠١٢٣٤٥٦٧ و 966501234567 السعر 1,600,000")
+    assert "0501234567" not in out and "966501234567" not in out and "4" in out and "1,600,000" in out
