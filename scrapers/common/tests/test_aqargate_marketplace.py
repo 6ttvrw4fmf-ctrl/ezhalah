@@ -151,3 +151,9 @@ def test_an_imported_land_ad_without_landTotalPrice_is_still_a_rate():
     row, _ = AG.map_marketplace(rec)
     assert row["ad_number"] == "AG52441"
     assert row["price_total"] is db.AUTHORITATIVE_NULL and row["price_per_meter"] == 40
+
+
+def test_a_land_record_without_a_price_keeps_the_stored_total():
+    """CodeRabbit on #11014: AUTHORITATIVE_NULL only when a rate was READ — a missing price states nothing."""
+    row, _ = AG.map_marketplace({**LAND, "id": 649, "price": None, "regaData": {"wp_id": 52442}})
+    assert row["price_total"] is None and row["price_per_meter"] is None

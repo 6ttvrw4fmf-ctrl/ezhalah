@@ -618,7 +618,10 @@ def map_marketplace(rec: dict, legacy_by_licence: Optional[dict[str, str]] = Non
         "bathrooms": _int(rec.get("bathrooms")),
         # A land rate SETTLES «no total»: AUTHORITATIVE_NULL clears a stored total, a bare None is dropped by the
         # upsert and kept the wrong rate-as-total alive (11-07: 39 rows still total = rate after #10963's crawl).
-        "price_total": None if is_rent else (db.AUTHORITATIVE_NULL if per_metre else _price_int(rec.get("price"))),
+        # Only a READ rate settles it: a land record with no price states nothing, so the stored total is kept.
+        "price_total": None if is_rent else (
+            (db.AUTHORITATIVE_NULL if _price_int(rec.get("price")) is not None else None) if per_metre
+            else _price_int(rec.get("price"))),
         "price_per_meter": _price_int(rec.get("price")) if per_metre else None,
         "price_annual": rent_annual,
         "rent_period": rent_period,
