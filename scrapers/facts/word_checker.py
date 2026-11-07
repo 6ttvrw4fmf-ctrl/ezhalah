@@ -422,7 +422,7 @@ FACT_TOKENS: dict[str, list[Any]] = {
                     "car service"],
     "meeting_room": ["re:(?:قاعه|غرفه|قاعات|غرف) (?:ال)?اجتماعات", "meeting room"],
     "reception": ["^استقبال", "^ريسبشن", "^رسبشن", "reception"],
-    "coworking": ["re:مساح(?:ه|ات) (?:ال)?عمل(?: مشتركه)?", "re:مكاتب مشتركه", "^كوركنج", "^كوركينج", "coworking", "co working"],
+    "coworking": ["re:مساحات (?:ال)?عمل(?: مشتركه)?", "re:مساحه عمل(?: مشتركه)?", "re:مساحه العمل (?:ال)?مشتركه", "re:مكاتب مشتركه", "^كوركنج", "^كوركينج", "coworking", "co working"],
     "private_office": ["re:مكتب (?:خاص|اداري)", "re:مكاتب (?:خاصه|اداريه)", "private office"],
     "central_ac": ["re:(?:تكييف|تكيف|مكيف|مكيفات) (?:مركزي|مركزيه)", "central ac", "central air"],
     # contents of a building: a holding word or a count before the plural
@@ -1046,6 +1046,11 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
     if fact == "kitchen" and p2 and _starts(_strip_wa(p2[-1]), ("سطح", "اسطح")):
         return None, s, e                            # «سطح مطبخ» / «أسطح المطبخ» is a countertop
+    if fact == "corner_plot" and _n(t[ws:we]).lstrip("و").startswith("للزاوي"):
+        return None, s, e                            # «مليون و٣٥٠ للزاوية», «سعر موحد للزاوية والشارع»: the price of a
+                                                     # project's corner unit, not this ad's plot (P2 13085, 2026-11-06)
+    if fact == "laundry_room" and p2 and p2[-1] in ("حي", "بحي", "العدل"):
+        return None, s, e                            # «حي العدل الغسالة»: a Makkah district, not a washing machine
     if fact == "pumps" and _n(t[ws:we]).lstrip("و").startswith("بمضخه"):
         return None, s, e                            # «بمضخة» = equipped WITH a pump: the pool's, well's, tank's or fire
                                                      # system's («مسبح … بمضخه وفلتر», «بئر ارتوازي بمضخة», «خزان … مزود
@@ -1294,16 +1299,28 @@ def _blank_place_names(t: str, names: tuple[str, ...]) -> str:
     return t
 
 
+_ADL_PAIR = re.compile(r"(العدل\s+)(ال?غسال\S*)")
+_ADL_GHASSALA = re.compile(r"(العدل)([ \t]*[-–—،,|/]+[ \t]*)(ال?غس[اٱ]ل\S*)( ?)")
+
+
 def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     """Facts the ad's text states: [{fact, value_bool|value_num|value_text, quote}], quote = the ad's own span.
     place_names: the listing's own district / city — never read as a fact (_blank_place_names)."""
     if not text:
         return []
     raw = unicodedata.normalize("NFKC", text)
+    # «حي العدل - الغسالة» / «العدل، الغسالة»: one Makkah address, not a clause break before a washing machine — the
+    # separator becomes blanks of the same length (quotes keep their offsets) so _judge sees «العدل» before it.
+    raw = _ADL_GHASSALA.sub(lambda m: m.group(1) + " " * len(m.group(2)) + m.group(3) + ("،" if m.group(4) else ""), raw)
+    # …and the clause break moves to AFTER the address, so «مسبح حي العدل - الغسالة لا يوجد مصعد» keeps «لا يوجد» with
+    # the lift, not the pool (CodeRabbit on #10943)
     full_norm = norm(raw)
     clauses = [(off, c) + norm_map(c) for off, c in _clauses(raw)]
     if place_names:
-        clauses = [(off, c, _blank_place_names(t, place_names), idx) for off, c, t, idx in clauses]
+        # «حي العدل الغسالة»: the Makkah address goes WITH the district name — blanking «العدل» alone left «الغساله»
+        # for the reader to take as a washing machine (CodeRabbit on #10943)
+        clauses = [(off, c, _blank_place_names(_ADL_PAIR.sub(lambda m: m.group(1) + " " * len(m.group(2)), t),
+                                               place_names), idx) for off, c, t, idx in clauses]
     bool_hits: dict[str, dict[bool, tuple[int, int, int]]] = {}
     num_hits: dict[str, list[Hit]] = {}
     cue_in = near_in = near_list = False
@@ -1915,6 +1932,19 @@ def selftest() -> None:
         ("البرج جديد ويوجد به نادي رياضي وكذلك مسبح", {"gym": True}, ()),
         ("قريب من الخدمات، نادي رياضي لسكان المبنى", {"gym": True}, ()),
         ("قريب من الخدمات، مدرسة، جيم، مسجد", {}, ("gym", "mosque")),
+        # P2 13085 (2026-11-06), real served sentences
+        ("فرصة استثماريه للبيع عمارة مكه المكرمة حي العدل الغسالة العقار عمره 21 سنه", {}, ("laundry_room",)),
+        ("شقة للإيجار بمكة المكرمة حي العدل الغساله العليا ٤ غرف الدور الاول ركنيه مصعد", {}, ("laundry_room",)),
+        ("عمارة للبيع مكة حي العدل - الغسالة عمرها 10 سنوات", {}, ("laundry_room",)),
+        ("شقة للإيجار مكة العدل، الغسالة الدور الثاني", {}, ("laundry_room",)),
+        ("ستوديو غرفة مع بوفية ودورة مياه مؤثث بالكامل مع توفر الغسالة والثلاجة", {"laundry_room": True}, ()),
+        ("السعر مليون 700 الف للزاويه مليون 650 الف للبطن قابل للتفاوض", {}, ("corner_plot",)),
+        ("السعر مليون و ٢٥٠ للبطون ومليون و٣٥٠ للزاوية", {}, ("corner_plot",)),
+        ("💰 السعر: 390,000 ريال (سعر موحد للزاوية والشارع)", {}, ("corner_plot",)),
+        ("🏢 اختر مساحة العمل التي تناسب نجاحك ابدأ أعمالك من مكتب جاهز", {}, ("coworking",)),
+        ("3- مساحة العمل ( Workspace ) مساحة : ٨٦.٢٩م2", {}, ("coworking",)),
+        ("مساحات عمل مشتركة ومكاتب خاصة", {"coworking": True}, ()),
+        ("مساحة عمل مشتركة", {"coworking": True}, ()),
         # the pool a room overlooks is the home's (🔬 2026-11-06 two-way sample, aqar 6645260 / 8036456 / 14871554)
         ("الدور الأرضي مجلس رجال 🔘 صاله كبيره مطله على المسبح🔘 مطبخ 🔘 دورات مياة", {"pool": True}, ()),
         ("الصاله مفتوحه على الدرج . * ملحق كبير مطل على المسبح . * مواقف سيارات", {"pool": True}, ()),
