@@ -192,7 +192,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     rows = (q.order("enrich_attempted_at", desc=False, nullsfirst=True)
             .limit(limit).execute().data) or []
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-enriched rows to process (cap {limit})")
-    stats = {"deep": 0, "empty": 0, "fail": 0}
+    stats = {"deep": 0, "empty": 0, "fail": 0, "write_err": 0}
     lock = threading.Lock()
 
     stamp = _now_iso()
@@ -209,8 +209,9 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
             # so it IS retried later. (starvation guard.)
             try:
                 db.sb().table(table).update({"enrich_attempted_at": stamp}).eq("ad_number", row["ad_number"]).execute()
-            except Exception:
-                pass
+            except Exception as e:  # reported, never dropped (heartbeat rule 2026-11-07)
+                print(f"   ⚠ {table} {row.get('ad_number')}: attempt stamp write failed: {e}", file=sys.stderr)
+                with lock: stats["write_err"] += 1
             with lock: stats["fail"] += 1
             return
         # Page loaded → mark enriched (page-loaded ⇒ no more to get). Write deep rows if any; if empty,
@@ -235,7 +236,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(work, rows))
-    print(f"   ✓ {table}: deep={stats['deep']} empty={stats['empty']} fail={stats['fail']}")
+    print(f"   ✓ {table}: deep={stats['deep']} empty={stats['empty']} fail={stats['fail']} write_err={stats['write_err']}")
     return stats
 
 
