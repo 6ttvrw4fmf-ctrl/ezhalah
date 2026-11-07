@@ -668,15 +668,17 @@ _OWN_AFTER = frozenset(_n(w) for w in ("خاص", "خاصه", "مستقل", "مس
 # district's, not the home's (CodeRabbit on #10948: the lift above turned «واجهة على ملعب خاص بالحي» into football_pitch)
 _NBHD_OWNER = frozenset(_n(w) for w in ("الحي", "بالحي", "للحي", "حي", "المخطط", "بالمخطط", "للمخطط", "المنطقة",
                                          "بالمنطقة", "للمنطقة", "المدينة", "بالمدينة", "للمدينة", "لاهل", "لأهل", "للجميع",
-                                         "للعموم", "عام", "عامة"))
+                                         "للعموم", "عام", "عامة", "مخطط", "منطقة", "مدينة"))
 
 
 def _owned_after(gn: list[str]) -> bool:
-    """True when an ownership word («خاص», «مستقل», «لسكان») follows the place within two words and does not
-    hand it to the neighbourhood («خاص بالحي», «لسكان الحي»)."""
+    """True when an ownership word («خاص», «مستقل», «لسكان») follows the place within two words and the word right
+    after it does not hand it to the neighbourhood («خاص بالحي», «لسكان المدينة»). Only that one word: in «خاص للفيلا
+    بالحي» the villa is the owner and «بالحي» says where the villa is."""
     for k, w in enumerate(gn[:2]):
         if _strip_wa(w) in _OWN_AFTER:
-            return not any(_strip_wa(x) in _NBHD_OWNER for x in gn[k + 1:k + 3])
+            nxt = gn[k + 1:k + 2]
+            return not any(x in _NBHD_OWNER or _strip_wa(x) in _NBHD_OWNER for x in nxt)
     return False
 _POOL_FACTS = frozenset({"pool", "heated_pool", "kids_pool"})
 # «لا تطل على مسبح» denies the view and says nothing of a pool; «مطلة على المسبح البلدي» is the town's
@@ -1901,6 +1903,9 @@ def selftest() -> None:
         ("واجهة شمالية على ملعب كرة قدم خاص بالحي", {}, ("football_pitch", "sports_court")),
         ("واجهة شمالية ونادي رياضي لسكان الحي", {}, ("gym",)),
         ("واجهة شمالية ونادي رياضي مستقل للفيلا", {"gym": True}, ()),
+        ("واجهة شمالية ونادي رياضي لسكان المدينة", {}, ("gym",)),
+        ("واجهة شمالية ونادي رياضي لسكان المنطقة", {}, ("gym",)),
+        ("واجهة شمالية ونادي رياضي خاص للفيلا بالحي", {"gym": True}, ()),
         ("البرج جديد ويوجد به نادي رياضي وكذلك مسبح", {"gym": True}, ()),
         ("قريب من الخدمات، نادي رياضي لسكان المبنى", {"gym": True}, ()),
         ("قريب من الخدمات، مدرسة، جيم، مسجد", {}, ("gym", "mosque")),
