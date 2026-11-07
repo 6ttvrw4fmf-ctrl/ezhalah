@@ -645,6 +645,8 @@ def strip_related(page: dict, body: str) -> dict:
     if not bits:
         return page
     cut = _RELATED_BLOCK.sub("", body.replace(tail, "", 1) if tail else body)   # the same holds for a related-ads block
+    end = _SIMILAR_END.search(cut)       # …and the site footer is not the ad either (CodeRabbit Major on #11080, e52d91f)
+    cut = cut[:end.start()] if end else cut
     ad = page_evidence(cut) or {}
     own = {norm(x) for x in (ad.get("evidence_lines") or []) + (ad.get("text_head") or "").split(" | ")}
     own.discard("")

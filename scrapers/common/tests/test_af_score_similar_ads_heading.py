@@ -91,3 +91,11 @@ def test_a_related_ads_block_card_does_not_delete_the_ads_longer_line():
     kept = [x.strip() for x in _lines(strip_related(page_evidence(body), body))]
     assert "شقة مؤثثه بالكامل السعر غير شامل السعي للتواصل للعائلات" in kept, kept
     assert "مؤثثه بالكامل السعر غير شامل السعي للتواصل" not in kept, kept
+
+
+def test_a_footer_repeating_the_cards_phrase_does_not_protect_it():
+    # CodeRabbit (Major) on #11080 e52d91f: the footer is site chrome, not the ad's own text
+    body = OWN + SIMILAR + '<footer><p>مؤثثه بالكامل السعر غير شامل السعي للتواصل</p></footer></body></html>'
+    kept = _lines(strip_related(page_evidence(body), body))
+    assert not any("مؤثثه" in x for x in kept), kept
+    assert any("السديري" in x for x in kept), kept
