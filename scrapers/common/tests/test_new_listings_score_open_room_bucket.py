@@ -41,5 +41,25 @@ def test_the_mismatch_log_redacts_phones_and_names_the_compared_price(capsys):
                     {"bedrooms": 5, "price_total": 640000, "district_ar": "حي الزهور"}, page)
     out = capsys.readouterr().out
     assert "0501234567" not in out
+    assert "هاتف" not in out
     assert "stored=640000" in out
     assert "district: stored='حي الزهور' page=[]" in out
+
+
+def test_no_separator_bucket_stays_with_its_own_field():
+    line = "<p>عدد غرف النوم: 4 الحمامات: 7+</p>"
+    assert _cmp({"bedrooms": 9}, line, "bedrooms") == S.MISMATCH
+    assert _cmp({"bathrooms": 9}, line, "bathrooms") == S.MATCH
+
+
+def test_the_log_never_carries_the_sellers_prose(capsys):
+    page = S.page_evidence("<p>غرف النوم 4 للتواصل مع أحمد</p>")
+    S._log_verdicts("t:2", {"bedrooms": S.MISMATCH}, {"bedrooms": 5}, page)
+    out = capsys.readouterr().out
+    assert "أحمد" not in out and "4" in out
+
+
+def test_a_monthly_price_logs_the_monthly_figure(capsys):
+    page = S.page_evidence("<p>الإيجار 1100 ريال شهريا</p>")
+    S._log_verdicts("t:3", {"price": S.MISMATCH}, {"price_annual": 12000, "rent_period_ar": "شهري"}, page)
+    assert "stored=1000.0" in capsys.readouterr().out

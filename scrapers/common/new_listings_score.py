@@ -238,8 +238,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             # The bucket must sit in the SAME clause as this field's keyword: «عدد غرف النوم: 4، الحمامات: 7+» gives the
             # bathrooms a «7+», never the bedrooms (CodeRabbit on #11031).
             if (name in ("bedrooms", "bathrooms") and out[name] == MISMATCH and stored.get(col) is not None
-                    and any(re.search(kw, c) and any(float(stored.get(col)) >= int(m.group(1) or m.group(2))
-                                                     for m in OPEN_BUCKET.finditer(c))
+                    and any(bucket_floor_next_to(kw, c, float(stored.get(col)))
                             for x in lines for c in CLAUSE_SPLIT.split(x))):
                 out[name] = MATCH
             # ONE hall is written as the bare noun: haraj 21839188 «غرفة وصالة», 21839193 «4 غرف وصالة كبيره» (score run
@@ -283,6 +282,18 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 if out[name] == MISMATCH and ar and re.search(r"(?:" + kw + r")[\"' \t,:]*(?:value[\"' \t,:]*)?" + ar, norm(whole)):
                     out[name] = MATCH
     return out
+
+
+def bucket_floor_next_to(kw: str, clause: str, stored: float) -> bool:
+    """An open bucket TIGHTLY attached to this field's keyword (within 12 chars, no other figure between) whose floor
+    the stored count meets. «عدد غرف النوم: 4 الحمامات: 7+» (no separator) gives the «7+» to the bathrooms only
+    (CodeRabbit follow-up on #11031)."""
+    for k in re.finditer(kw, clause):
+        for m in OPEN_BUCKET.finditer(clause):
+            gap = clause[k.end():m.start()] if m.start() >= k.end() else clause[m.end():k.start()]
+            if len(gap) <= 12 and not re.search(r"\d", gap) and stored >= int(m.group(1) or m.group(2)):
+                return True
+    return False
 
 
 # «+7» / «7+» (Western or Arabic-Indic digits): an open room bucket, «N or more».
@@ -1398,13 +1409,26 @@ def _log_verdicts(key: str, results: dict, stored: dict, page: dict) -> None:
             # propertyfinder 24671162 bedrooms=20 but not what the page said, so each cap took a source re-read).
             value = (stored.get("price_total") or stored.get("source_price_annual") or stored.get("price_annual")
                      or stored.get("price_per_meter")) if name == "price" else stored.get(col)
-            hits = [] if not kw else [x for x in lines if re.search(kw, norm(x))
+            if name == "price" and value and not stored.get("price_total") and (
+                    stored.get("rent_period_ar") == "شهري" or stored.get("source_rent_period") == "monthly"):
+                value = float(value) / 12          # the figure compare_listing compared (CodeRabbit on #11031)
+            hits = [] if not kw else [_safe_evidence(kw, x) for x in lines if re.search(kw, norm(x))
                                       and (kind != "number" or re.search(r"\d", x))][:3]
-            print(f"    mismatch {key} {name}: stored={value!r} page={[h[:120] for h in hits]!r}", flush=True)
+            print(f"    mismatch {key} {name}: stored={value!r} page={hits!r}", flush=True)
         else:
             # Recall is the 10/10 blocker: name the page line that made the score say «we miss it».
             hit = next((x for x in lines if kw and re.search(kw, norm(x))), "")
-            print(f"    we_miss {key} {name}: page={hit[:160]!r}", flush=True)
+            print(f"    we_miss {key} {name}: page={_safe_evidence(kw, hit) if hit else ''!r}", flush=True)
+
+
+def _safe_evidence(kw: str, line: str) -> str:
+    """The keyword and the figures/negation on that line — never the seller's prose, which can carry a person's name
+    redact_pii does not catch («غرف النوم 4 للتواصل مع أحمد», CodeRabbit PDPL finding on #11031)."""
+    n = norm(line)
+    k = re.search(kw, n)
+    nums = re.findall(r"[+]?\d[\d,.]*[+]?", n)
+    neg = "لا" if re.search(r"(?<![\u0621-\u064A])(?:لا|بدون|غير)(?![\u0621-\u064A])", n) else ""
+    return " ".join(x for x in ((k.group(0) if k else ""), neg, " ".join(nums[:6])) if x)
 
 
 def _line(r: dict) -> str:
