@@ -1000,7 +1000,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                                           or any(p in " ".join(p5) for p in _NEAR_PHRASES)
                                           or _DISTANCE_TO.search(" ".join(gp[-8:]))):
         return None, s, e
-    if fact in _NEAR_PUBLIC_FACTS and (list_in or any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in p5)):
+    # …but an item the ad gives to the home («نادي رياضي مستقل للفيلا») is not the list's, whatever list it sits in
+    if fact in _NEAR_PUBLIC_FACTS and ((list_in and not _owned_after(gn))
+                                       or any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in p5)):
         return None, s, e
     if fact in _NEAR_PUBLIC_FACTS:
         # a near word up to 9 words back in the same clause («قريب من الدانوب و لولو هايبر ماركت»), unless the ad says it
@@ -1325,7 +1327,9 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # جامع، ونادي صحي خدمات الموقع القريبة: * مدارس» (aqar 15128626, 🔬 2026-11-06 — the view's gym served as the unit's)
         list_in = near_list and comma and (len(words) <= 5 or _starts(_strip_wa(words[0]), _PLACE_WORDS)) \
             and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words) \
-            and not any(_starts(_strip_wa(w), _OWN_CUES)
+            and not any((_starts(_strip_wa(w), _OWN_CUES)      # «خاص بالحي»: the district's, the list goes on
+                         and not (k + 1 < len(words) and (words[k + 1] in _NBHD_OWNER
+                                                          or _strip_wa(words[k + 1]) in _NBHD_OWNER)))
                         or (_strip_wa(w) in _HAS_CUES and not (k and _starts(_strip_wa(words[k - 1]), _PLACE_WORDS)))
                         for k, w in enumerate(words))   # «مدرسة فيها نادي»: the school's, the list goes on
         n_words = len(words)
@@ -1906,6 +1910,8 @@ def selftest() -> None:
         ("واجهة شمالية ونادي رياضي لسكان المدينة", {}, ("gym",)),
         ("واجهة شمالية ونادي رياضي لسكان المنطقة", {}, ("gym",)),
         ("واجهة شمالية ونادي رياضي خاص للفيلا بالحي", {"gym": True}, ()),
+        ("قريب من الخدمات، نادي رياضي مستقل للفيلا", {"gym": True}, ()),
+        ("قريب من الخدمات، نادي رياضي خاص بالحي، مسجد", {}, ("gym", "mosque")),
         ("البرج جديد ويوجد به نادي رياضي وكذلك مسبح", {"gym": True}, ()),
         ("قريب من الخدمات، نادي رياضي لسكان المبنى", {"gym": True}, ()),
         ("قريب من الخدمات، مدرسة، جيم، مسجد", {}, ("gym", "mosque")),
