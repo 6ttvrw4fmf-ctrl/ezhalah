@@ -194,10 +194,10 @@ _PHONE_RE = re.compile(
 )
 _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3}")
 # A contact call-to-action + the ~40 chars after it (phone / WhatsApp / a seller alias).
-_CONTACT_LINE_RE = re.compile(
-    r"(?:للتواصل|للحجز|للاستفسار|للاتصال|اتصل(?:\s*(?:بنا|على))?|"
-    r"رقم\s*(?:الجوال|الجوّال|التواصل|الهاتف|الواتس|المعلن)|جوال|موبايل|المعلن|الوسيط|المسوق|"
-    r"مسؤول\s*الإعلان|واتس\S*|whats\s*app|whatsapp)[^\n]{0,40}", re.I)
+_CONTACT_CUES = (r"للتواصل|للحجز|للاستفسار|للاتصال|اتصل(?:\s*(?:بنا|على))?|"
+                 r"رقم\s*(?:الجوال|الجوّال|التواصل|الهاتف|الواتس|المعلن)|جوال|موبايل|المعلن|الوسيط|المسوق|"
+                 r"مسؤول\s*الإعلان|واتس\S*|whats\s*app|whatsapp")
+_CONTACT_LINE_RE = re.compile(r"(?:" + _CONTACT_CUES + r")[^\n]{0,40}", re.I)
 
 # ── Per-listing field regexes ──────────────────────────────────────────────────
 REALESTATE_NAME_RE = re.compile(r'realestate_name\s*=\s*"([^"]*)"')
@@ -425,12 +425,46 @@ def _deobfuscate(t: str) -> str:
     return _OBFUSC_RUN_RE.sub(fix, t)
 
 
+# The advertiser's own words (🔬 2026-11-06, backlog 1386; re-read live on /389/x, /374/x, /1303/x): the
+# «responsive-text» block printed right BEFORE the «Specifications» table. The old note «24 Souq detail pages carry no
+# advertiser-written description block» was wrong — 648168 says «غرفة شغالة … ومطبخ … المدخل مستقل» there, and the
+# word reader saw none of it. Anchored on the Specifications id so a template block elsewhere can never be read.
+_DESC_RE = re.compile(
+    r"""<div class="responsive-text[^"]*">(.*?)</div>\s*<div[^>]*id=['"]Specifications['"]""", re.S)
+
+
+# A line holding nothing but a contact cue («للتواصل», «رقم الجوال :») — the name or number follows on the next line.
+_CONTACT_CUE_ONLY_RE = re.compile(r"^[\W_]*(?:" + _CONTACT_CUES + r")[\W_]*$", re.I)
+
+
+def _advertiser_text(body: str) -> Optional[str]:
+    m = _DESC_RE.search(body or "")
+    if not m:
+        return None
+    t = re.sub(r"<br\s*/?>", "\n", m.group(1), flags=re.I)
+    t = re.sub(r"<[^>]+>", " ", t)
+    lines, carry = [], False
+    for x in t.split("\n"):
+        if carry and not ihtml.unescape(x).strip():   # «&nbsp;» spacer lines count as blank too
+            continue                     # «للتواصل<br>\n أحمد»: a blank line does not use up the pending skip
+        if carry and len(ihtml.unescape(x).strip()) <= 40:
+            carry = False                # «للتواصل<br>أحمد محمد»: the line after a bare contact cue is the contact (PDPL)
+            continue
+        carry = bool(_CONTACT_CUE_ONLY_RE.match(ihtml.unescape(x)))   # a line that is ONLY the cue: the name is on the next
+        ln = _redact(x)
+        if ln:
+            lines.append(ln)             # each line on its own: the reader's clause breaks
+    t = "\n".join(lines)
+    return t[:4000] if t else None
+
+
 def _redact(text: Optional[str]) -> Optional[str]:
     """Strip phones / wa.me / contact CTAs / seller aliases from free text (PDPL)."""
     if not text:
         return text
     t = ihtml.unescape(text)
     t = _deobfuscate(t)            # o5o… → 050… so the phone patterns below catch it
+    t = re.sub(r"[^\S\n]{2,}", " ", t)   # any Unicode space run (U+00A0, U+2002 …), never a line break   # «للتواصل:      أحمد» — padding must not push the name past the 40-char reach
     t = _CONTACT_LINE_RE.sub(" ", t)
     t = _PHONE_LOOSE.sub(" ", t)
     t = _PHONE_RE.sub(" ", t)
@@ -824,10 +858,9 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     plan_m = INFO_PLAN_RE.search(body)
     parcel_m = INFO_PARCEL_RE.search(body)
 
-    # ── PDPL-safe text ── (heading/title only; the listing has no free-text description field —
-    # the descriptive copy is the share line, which we redact defensively).
+    # ── PDPL-safe text ── the title and the advertiser's own block, both through _redact.
     title = _redact(title_text.split("|")[0]) if title_text else None
-    description = None  # 24 Souq detail pages carry no advertiser-written description block
+    description = _advertiser_text(body)
 
     # ── photos ──
     photos: list[str] = []

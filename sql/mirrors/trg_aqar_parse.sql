@@ -1,4 +1,9 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-11-06 (migration 20261106214548_aqar_trigger_keeps_payload_ad_licence, 🆕 new-listings): one needle line —
+--   license_number now prefers source_capture.ad_license_number (aqar's payload licence, blind spot 1356).
+--   verified md5: fa440fd873b46ba1b284ae209c8b455c (md5(pg_get_functiondef) in production, re-read 2026-11-07 00:15 UTC).
+-- Re-verified 2026-11-07 (migration 20261107004327_sql_mirror_expected_catches_up_to_trg_aqar_parse_licence, 🆕): UNCHANGED. That
+--   migration only registers this file's digest in ops_sql_mirror_expected; md5(pg_get_functiondef) still fa440fd873b46ba1b284ae209c8b455c.
 -- Re-verified 2026-11-03 (migration 20261103191545_repair_guarantee_enroll_66_unreachable_repairs): UNCHANGED. That migration names this object only inside text it inserts; production md5 re-read 21:45 UTC (🔧).
 --   md5(pg_get_functiondef) in production = 875f73fe437078aef9475631feb8bb25, identical to this file. Stamped for
 --   verify-sql-mirrors-not-stale (B2): the 2026-11-02 stamp did not name this later same-day migration.
@@ -50,7 +55,7 @@ begin
   NEW.direction       := public.aqar_facade(p->>'direction');
   NEW.last_update     := coalesce(p->>'last_update', NEW.last_update);
   NEW.date_added      := coalesce(p->>'date_added', NEW.date_added);
-  NEW.license_number  := p->>'license_number';
+  NEW.license_number  := coalesce(NEW.source_capture->>'ad_license_number', p->>'license_number');  -- aqar's payload licence first (1356)
   NEW.license_expiry  := p->>'license_expiry';
   NEW.ad_source       := p->>'ad_source';
   NEW.plan_parcel     := p->>'plan_parcel';
