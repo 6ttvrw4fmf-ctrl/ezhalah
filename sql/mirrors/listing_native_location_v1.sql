@@ -1,6 +1,11 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-11-07 after 20261107132419 (loc_display_district_ar_plpgsql_sync_speed only READS this matview: its
+--   parity proof lists every distinct (city_id, district_ar) pair the sync can hand loc_display_district_ar()):
+--   UNCHANGED, 155,497 chars. md5 of everything below this header block: 2af9ead54b06f713aa85e08b0e9eaf00 == live
+--   (md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) read from production 2026-11-07 13:52 UTC).
+--
 -- Re-verified 2026-11-06 after 20261106211857 (pin_district_candidates_materialized_judges_names_once only READS this view):
 --   UNCHANGED, 155,497 chars. md5 of everything below this header block: 2af9ead54b06f713aa85e08b0e9eaf00 == live
 --   (md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) read from production 2026-11-06 21:50 UTC).
