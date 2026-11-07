@@ -42,3 +42,9 @@ def test_no_land_total_heads_with_the_property_price():
 def test_unreadable_is_none():
     assert S.muhaysini_page("https://aqaralmuhaysini.com/propertydetails/1", fetch=lambda _id: None) is None
     assert S.muhaysini_page("https://aqaralmuhaysini.com/other", fetch=lambda _id: REC) is None
+
+
+def test_deal_word_variants_are_read():
+    for word in ("إيجار", "للإيجار", "ايجار"):
+        rec = {**REC, "AdValidator": {"advertisement": {**REC["AdValidator"]["advertisement"], "advertisementType": word}}}
+        assert "نوع الإعلان للايجار" in _page(rec)["evidence_lines"]

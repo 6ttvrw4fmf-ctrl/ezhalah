@@ -1247,7 +1247,7 @@ _STAR_BULLET_RE = re.compile(r"(?<=\s)\*+(?=\s)")
 # العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية» the «المرافق» is what the flat is near, not «مرافق المشروع», so the
 # area's shops / market / mosque after it are the area's. Only that one word: «قريب من الخدمات ويوجد بالمجمع مسجد» still
 # owns its mosque («يوجد»), and a second «مرافق» later in the clause still counts.
-_NEAR_OBJECT_SKIP = frozenset(_n(w) for w in ("من", "جميع", "كل", "لجميع", "لكل", "الى", "إلى", "ل"))
+_NEAR_OBJECT_SKIP = frozenset(_n(w) for w in ("من", "جميع", "كل", "لجميع", "لكل", "الى", "إلى", "ل", "جدا", "جداً"))
 
 
 def _near_object_at(words: list[str], at: int) -> int:
@@ -1257,6 +1257,34 @@ def _near_object_at(words: list[str], at: int) -> int:
     while k < len(words) and _strip_wa(words[k]) in _NEAR_OBJECT_SKIP:
         k += 1
     return k if k < len(words) and (_strip_wa(words[k]) in _SERVICES_OBJECT or words[k] in _SERVICES_OBJECT) else -1
+
+
+# A NEARBY-SERVICES HEADING names the AREA's places after it (🔬 2026-11-07, backlog 1507: of 19 real aqar served yeses
+# after «قريب من … الخدمات», 9 were the area's): «بالقرب من جميع الخدمات التي تحتاجها، وتشمل: 🕌 جامع 🛒 سوبرماركت 🌿
+# حديقة» (13447339), «قريبه من كل الخدمات /حديقة /مسجد.» (15125261), «بقربه من خدمات متعددة : حدائق / مدارس / مسجد»
+# (15130356), «قريب جدا من الخدمات بشكل عام تموينات - محل غاز - مطعم» (8798208). The heading runs on through list
+# separators («،», «/», «-», «•», emoji) and stops at «.», a new line or an own cue — «قريبه من الخدمات • يوجد نادي
+# رياضي», «قريب من كل الخدمات *مع مرافق داخلية:* نادي رياضي», «خدمات الكامبوند نادي صحي» stay the ad's own.
+_SVC_NEAR = frozenset(_NEAR_WORDS) | frozenset(_n(w) for w in ("القرب", "بقربه", "بقربها", "بقرب", "لقربه", "لقربها"))
+_SVC_STOP = frozenset(_n(w) for w in ("المشروع", "للمشروع", "بالمشروع", "مشروع", "المجمع", "للمجمع", "بالمجمع", "مجمع",
+                                      "الكامبوند", "الكمباوند", "كمباوند", "كامبوند", "بالكمباوند", "المبني", "العماره",
+                                      "للعماره", "بالعماره", "للسكان"))
+
+
+def _svc_heading_end(words: list[str]) -> int:
+    """Index just past «<near word> من [جميع/كل] الخدمات/المرافق/خدمات …» in `words`, or -1."""
+    for k, w in enumerate(words):
+        if _strip_wa(w) in _SVC_NEAR or w in _SVC_NEAR:
+            j = k + 1
+            while j < len(words) and _strip_wa(words[j]) in _NEAR_OBJECT_SKIP:
+                j += 1
+            if j < len(words) and _starts(_strip_wa(words[j]), _SERVICES_OBJECT):
+                return j + 1
+    return -1
+
+
+def _svc_stops(w: str) -> bool:
+    return _starts(_strip_wa(w), _OWN_CUES) or _strip_wa(w) in _SVC_STOP or w in _SVC_STOP or _strip_wa(w) in _HAS_CUES
 
 
 def _owns_item(words: list[str]) -> bool:
@@ -1393,6 +1421,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     prev_end = 0
     list_idx = _list_index_values(raw)
     void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
+    svc_on = False
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
         # A NEARBY LIST runs on across commas (🔬 2026-11-04 café audit): «Close to shops, restaurants, and markets»,
         # «قريبة من جميع الخدمات: مسجد، بقالة، مغسلة، مطعم» — each item is its own clause, so the near word was lost.
@@ -1404,6 +1433,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # words[0] below would crash the whole run (2026-11-03: every shard of facts-words died on «… مياه وكهرباء، بيشة»)
         if not t.strip() or ci in void:
             near_list = False
+            svc_on = svc_on and "." not in sep and "\n" not in sep   # a skipped clause after «.» still ends the heading
             continue
         words = t.split()
         # an item that STARTS with a place runs on as the list's item however long the clause is: «إطلالة ونافذة على: حديقة،
@@ -1423,12 +1453,25 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             head = t[:cut].split()
             if head and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in head) and not _owns_item(head):
                 item_end = cut
+        # the nearby-services heading (🔬 2026-11-07, backlog 1507): [svc_from, svc_to) of `t` holds the AREA's places
+        starts_at = [m.start() for m in re.finditer(r"\S+", t)]
+        svc_from = svc_to = -1
+        hs = _svc_heading_end(words)
+        if hs >= 0:
+            stop = next((k for k in range(hs, len(words)) if _svc_stops(words[k])), len(words))
+            if stop > hs:
+                svc_from, svc_to = starts_at[hs], (starts_at[stop] if stop < len(words) else len(t))
+            svc_on = stop == len(words)
+        elif svc_on and "." not in sep and "\n" not in sep and not any(_svc_stops(w) for w in words):
+            svc_from, svc_to = 0, len(t)
+        else:
+            svc_on = False
         n_words = len(words)
         for fact, pats in _PATTERNS.items():
             for rx, forced in pats:
                 for m in rx.finditer(t):
                     v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in,
-                                       list_in or m.end() <= item_end)
+                                       list_in or m.end() <= item_end or svc_from <= m.start() < svc_to)
                     if v is not None:
                         bool_hits.setdefault(fact, {}).setdefault(v, (ci, qs, qe))
         # what this clause hands to the next one: a cue (or a cued utility list going on), a «nearby» heading
@@ -2534,6 +2577,13 @@ def selftest() -> None:
         ("قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية 🕌 مساجد", {}, ("shops_inside", "mosque")),
         ("قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ سوبرماركت", {}, ("market",)),
         ("قريب من الخدمات، مرافق المشروع: مسجد ونادي رياضي", {"mosque": True, "gym": True}, ()),
+        # a nearby-services heading runs on through a list and stops at an own cue (🔬 2026-11-07, backlog 1507)
+        ("بالقرب من جميع الخدمات التي تحتاجها، وتشمل: 🕌 جامع 🛒 سوبرماركت 🌿 حديقة", {}, ("mosque", "market", "garden")),
+        ("●قريبه من كل الخدمات /حديقة /مسجد. ●قريبه من محطة المترو", {}, ("garden", "mosque")),
+        ("قريب جدا من الخدمات بشكل عام تموينات - محل غاز - مطعم - مطاحن", {}, ("restaurant_cafe",)),
+        ("قريبه من الخدمات • يوجد نادي رياضي • يوجد حضانه أطفال", {"gym": True, "nursery": True}, ()),
+        ("بقربه من الخدمات والطرق الرئيسية، خدمات المشروع • العاب اطفال • حديقة خارجية • نادي رياضي", {"gym": True}, ()),
+        ("قريب من كل الخدمات *مع مرافق داخلية:* نادي رياضي للرجال والنساء", {"gym": True}, ()),
         ("مناسبة لمغاسل السيارات مناسبة لمحلات تجارية مناسبة لدايف ثرو", {}, ("shops_inside",)),
         ("يمكن الاستفادة من الموقع بعدة خيارات، منها: ☕ كافيه أو مطعم 🏪 4 محلات حسب الرخصة", {}, ("shops_inside",)),
         ("شارعها تجاري مقام فيه محلات بالعماير الي امامها", {}, ("shops_inside",)),

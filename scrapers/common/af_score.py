@@ -607,33 +607,53 @@ _RELATED_BLOCK = re.compile(r'<div[^>]*\b(?:id|class)="[^"]*related[-_](?:ads|po
 # …and so does everything under a «similar ads» HEADING (🔬 2026-11-07): vmksa 641 (vmksa_residential_listings:13604850,
 # a building for sale whose own text never mentions furniture) was asked «furnished» from «مؤثثه بالكامل» — a card
 # under «<h2 class="building-title">الاعلانات المشابة</h2>» (the site's spelling), i.e. another ad's price line.
-_SIMILAR_HEADING = re.compile(r"<h[2-4][^>]*>([^<]{2,60})</h[2-4]>")
+# The heading's text may sit inside inline markup («<h2><span>إعلانات مشابهة</span></h2>», CodeRabbit on #11065).
+_SIMILAR_HEADING = re.compile(r"<h([2-4])[^>]*>(.{2,200}?)</h\1>", re.S)
 _SIMILAR_END = re.compile(r"<footer|</body>")
+
+
+def _similar_split(body: str) -> tuple[str, str]:
+    """(markup BEFORE the first «similar / related ads» heading, markup under it up to the footer); ('', '') if none."""
+    for m in _SIMILAR_HEADING.finditer(body or ""):
+        t = norm(html.unescape(re.sub(r"<[^>]+>", " ", m.group(2))))
+        if "مشاب" in t and any(w in t for w in ("اعلان", "عقار", "عروض")):
+            end = _SIMILAR_END.search(body, m.end())
+            return body[:m.start()], body[m.end(): end.start() if end else len(body)]
+    return "", ""
 
 
 def similar_ads_tail(body: str) -> str:
     """The markup under the first «similar / related ads» heading, up to the footer; '' when the page has none."""
-    for m in _SIMILAR_HEADING.finditer(body or ""):
-        t = norm(html.unescape(m.group(1)))
-        if "مشاب" in t and any(w in t for w in ("اعلان", "عقار", "عروض")):
-            end = _SIMILAR_END.search(body, m.end())
-            return body[m.end(): end.start() if end else len(body)]
-    return ""
+    return _similar_split(body)[1]
+
+
+def _text_bits(markup: str) -> set[str]:
+    return {nt for t in re.split(r"<[^>]+>", markup or "") if len(nt := norm(html.unescape(t))) >= 6}
 
 
 def strip_related(page: dict, body: str) -> dict:
     bits: set[str] = set()
-    for block in _RELATED_BLOCK.findall(body or "") + [similar_ads_tail(body)]:
-        for t in re.split(r"<[^>]+>", block):
-            nt = norm(html.unescape(t))
-            if len(nt) >= 6:
-                bits.add(nt)
+    for block in _RELATED_BLOCK.findall(body or ""):
+        bits |= _text_bits(block)
+    _head, tail = _similar_split(body)
+    # A line the ad ITSELF states stays, even when a similar card repeats it or a part of it (CodeRabbit on #11065, Major
+    # on #11072). «The ad's own lines» are the evidence lines the page yields with the similar tail CUT OUT — never raw
+    # markup above the heading, where a script or a menu could hold the card's phrase (CodeRabbit Major on #11080) — and
+    # a line is protected only by being one of them, so a card's «مطبخ مجهز بالكامل» still goes while the ad's own
+    # «لا يوجد مطبخ مجهز بالكامل» stays (CodeRabbit Major on #11080).
+    bits |= _text_bits(tail)
     if not bits:
         return page
+    cut = _RELATED_BLOCK.sub("", body.replace(tail, "", 1) if tail else body)   # the same holds for a related-ads block
+    end = _SIMILAR_END.search(cut)       # …and the site footer is not the ad either (CodeRabbit Major on #11080, e52d91f)
+    cut = cut[:end.start()] if end else cut
+    ad = page_evidence(cut) or {}
+    own = {norm(x) for x in (ad.get("evidence_lines") or []) + (ad.get("text_head") or "").split(" | ")}
+    own.discard("")
 
     def keep_line(x: str) -> bool:
         nx = norm(x)
-        return not any(nx == b or (len(b) >= 12 and b in nx) for b in bits)
+        return nx in own or not any(nx == b or (len(b) >= 12 and b in nx) for b in bits)
 
     keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
     head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))

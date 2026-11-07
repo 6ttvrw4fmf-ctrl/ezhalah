@@ -1556,6 +1556,13 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # 680 probed, 408 live, 272 gone, 0 unknown; gone = «العرض محذوف او قديم», re-read gone by a second
     # client (curl) 4/4 + the 2 first-run controls. 0 of 680 had ever been removed before this.
     "haraj",
+    # 2026-11-07 (♻️): sakani. Shadow daily run 11-06 07:41 read 2,036 of 2,036 with controls right
+    # (alive 1,968, dead 68, unknown 0); its three shadow rechecks of 11-06/11-07 read 11, 11 and 12
+    # struck-candidate units dead and could hide none, so a unit sakani had unpublished stayed on
+    # screen (dead-visible 11-07: SKS23002 / 22223720, REGA licence ended 11-06, over the line). The
+    # crawl's own prune cannot reach them: its coverage guard trips (re-saw 1,560 of 1,968) and the
+    # refused-prune reading skips tables of 1,000+ rows. Second reader: lifecycle-spot-check 11-07.
+    "sakani",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
