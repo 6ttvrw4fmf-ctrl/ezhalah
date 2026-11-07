@@ -143,3 +143,12 @@ def test_the_log_never_carries_a_phone_with_any_separator(capsys):
         S._log_verdicts("t:7", {"bedrooms": S.MISMATCH}, {"bedrooms": 5}, page)
         out = capsys.readouterr().out
         assert "123" not in out and "234" not in out and "'غرف 4'" in out, (phone, out)
+
+
+def test_the_log_never_carries_an_international_phone(capsys):
+    # CodeRabbit PDPL Major on #11053 (fed9a0d): «+1/202/555/0147» — one rule for every phone, not a format list.
+    for phone in ("+1/202/555/0147", "+1 (202) 555-0147", "+44 20 7946 0958", "+971-4-123-4567"):
+        page = S.page_evidence(f"<p>غرف النوم 4 {phone}</p>")
+        S._log_verdicts("t:8", {"bedrooms": S.MISMATCH}, {"bedrooms": 5}, page)
+        out = capsys.readouterr().out
+        assert "555" not in out and "7946" not in out and "123" not in out and "'غرف 4'" in out, (phone, out)

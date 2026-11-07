@@ -1448,24 +1448,25 @@ def _safe_evidence(kw: str, line: str) -> str:
     redact_pii does not catch («غرف النوم 4 للتواصل مع أحمد», CodeRabbit PDPL finding on #11031)."""
     n = norm(line)
     k = re.search(kw, n)
-    # A phone is never evidence: a separator-free run of 9+ digits (05XXXXXXXX, 9665…, Arabic/Persian digits that
-    # norm() made ASCII) is dropped, whatever redact_pii caught (CodeRabbit PDPL finding on #11053).
-    # A long figure is kept only as a well-formed grouped price («1,600,000», «2.500.000»): no leading zero, groups
-    # of three. A phone in any punctuation («050,123,4567», «011,234,5678») is not, and a Saudi mobile or landline
-    # digit shape is dropped whatever its punctuation (CodeRabbit PDPL findings on #11053).
-    def _price_shaped(x: str) -> bool:
-        d = re.sub(r"\D", "", x)
-        if re.fullmatch(r"(?:00966|966)[15]\d{8}|0[15]\d{8}|5\d{8}", d):
-            return False                       # mobile/landline shape, any punctuation or grouping («512,345,678»)
-        grouped = re.fullmatch(r"[1-9]\d{0,2}(?:([,.])\d{3})(?:\1\d{3})*(?:[.,]\d{1,2})?\+?", x)
-        return bool(grouped) or (len(d) < 9 and not re.fullmatch(r"5\d{8}", d))
-    # A phone split by spaces/dashes («966 51 234 5678») is removed as a span before figures are read.
-    sep = r"[^0-9A-Za-z\u0621-\u064A]*"   # anything but a digit or letter: «050/123/4567», «(050) 123-4567», «050_123_4567»
-    grouped = r"[1-9]\d{0,2}(?:([,.])\d{3})(?:\1\d{3})*"
-    unphoned = re.sub(rf"(?<!\d)(?:(?:\+?(?:00)?966{sep}|0)[15]|5)(?:{sep}\d){{8}}(?!\d)",
-                      lambda m: m.group(0) if re.fullmatch(grouped, m.group(0))
-                      and not re.fullmatch(r"5\d{8}", re.sub(r"\D", "", m.group(0))) else " ", n)
-    nums = [x for x in re.findall(r"[+]?\d[\d,.]*[+]?", unphoned) if _price_shaped(x)]
+    # A phone is never evidence (PDPL; CodeRabbit findings on #11053). One rule, no per-format list: a CLUSTER is digit
+    # groups joined only by non-letters («050/123/4567», «+1 (202) 555-0147», «050_123_4567»). A cluster carrying 9+
+    # digits is dropped whole unless it is one well-formed grouped price («1,600,000», «2.500.000») whose digits are
+    # not a phone shape («512,345,678»). Shorter clusters keep their figures. A real price that fails this is only
+    # missing from the log; nothing reads the log back.
+    phone = r"(?:00966|966)[15]\d{8}|0[15]\d{8}|5\d{8}"
+    price = r"[1-9]\d{0,2}(?:([,.])\d{3})(?:\1\d{3})*(?:[.,]\d{1,2})?\+?"
+    def _keep(m: re.Match) -> str:
+        c = m.group(0)
+        d = re.sub(r"\D", "", c)
+        if len(d) < 9:
+            return c
+        if re.fullmatch(price, c.strip()) and not re.fullmatch(phone, d):
+            return c
+        # «غرف النوم 4 050/123/4567»: the room count before a space is not part of the phone; keep it alone.
+        lead = re.match(r"(\d{1,3}\+?)\s+(.*)$", c, re.S)
+        return f"{lead.group(1)} " if lead and len(re.sub(r"\D", "", lead.group(2))) >= 9 else " "
+    unphoned = re.sub(r"\+?\d(?:[^0-9A-Za-z\u0621-\u064A]{1,3}\+?\d|\d)*\+?", _keep, n)
+    nums = re.findall(r"[+]?\d[\d,.]*[+]?", unphoned)
     neg = "لا" if re.search(r"(?<![\u0621-\u064A])(?:لا|بدون|غير)(?![\u0621-\u064A])", n) else ""
     return " ".join(x for x in ((k.group(0) if k else ""), neg, " ".join(nums[:6])) if x)
 
