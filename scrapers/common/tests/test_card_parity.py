@@ -139,3 +139,10 @@ def test_only_a_stated_per_metre_rate_makes_a_total():     # CodeRabbit on #1107
     assert _judge(stored=land, card={**CARD, "text": "SAR 1,000,000 | 1000 م²"}, page=page)["price"] == MISMATCH
     assert cp.paired_lines("عدد دورات المياه | ٠٤") == ["عدد دورات المياه 4"]
     assert cp.paired_lines("المساحة | 040.5 م²") == ["المساحة 040.5 م²"]
+
+
+def test_an_area_line_that_says_metre_is_not_a_rate():      # CodeRabbit (Major) on #11084
+    lines = ["المساحة بالمتر: 1,000", "السعر 900,000 ريال"]
+    page = {**PAGE, "evidence_lines": lines, "text_head": " | ".join(lines), "_text": "\n".join(lines)}
+    land = {**STORED, "type_ar": "أرض", "price_total": 1000000, "area_m2": 1000, "bedrooms": None, "bathrooms": None}
+    assert _judge(stored=land, card={**CARD, "text": "SAR 1,000,000 | 1000 م²"}, page=page)["price"] == MISMATCH

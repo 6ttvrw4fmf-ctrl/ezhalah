@@ -172,7 +172,7 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
     if src.get("price") == MISMATCH and stored.get("price_total") and stored.get("area_m2"):
         total, area = float(stored["price_total"]), float(stored["area_m2"])
         rates = [float(m.replace(",", "").replace("٬", "")) for x in page.get("evidence_lines") or []
-                 if re.search(r"للمتر|المتر|/\s*م", x) for m in re.findall(r"\d[\d,٬]*(?:\.\d+)?", x.translate(_DIG))]
+                 if re.search(r"للمتر|المتر|/\s*م", x) and re.search(r"ريال|ر\.س|سعر|SAR", x, re.I) for m in re.findall(r"\d[\d,٬]*(?:\.\d+)?", x.translate(_DIG))]
         if any(abs(round(r * area) - total) < 1 for r in rates if r):
             src["price"] = MATCH
     for f in SOURCE_FIELDS:
