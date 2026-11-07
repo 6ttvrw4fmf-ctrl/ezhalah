@@ -109,7 +109,8 @@ def paired_lines(text_head: str) -> list[str]:
     """A label printed on its own line with its value on the next one («المساحة» / «265 م», alqasem and alshawaf
     on the first full run, 2026-11-07) becomes one line, so the comparator reads the value next to its label."""
     lines = [x.strip() for x in (text_head or "").split(" | ")]
-    return [f"{a} {b}" for a, b in zip(lines, lines[1:]) if _LABEL.match(a) and b and len(b) <= 40]
+    # «04» is 4 (dwelleo prints «عدد دورات المياه» / «04», 2026-11-07 slot run)
+    return [a + " " + re.sub(r"^0+(?=\d)", "", b) for a, b in zip(lines, lines[1:]) if _LABEL.match(a) and b and len(b) <= 40]
 
 
 def is_home(url: str | None) -> bool:
@@ -165,6 +166,12 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
     out: dict[str, str] = {}
     src = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
                           prose_only_district=platform in PROSE_ONLY_DISTRICT) if page else {}
+    # A land total we serve as the page's per-metre figure × the area is the page's own price (owner rule «PPM × area
+    # = shown total»; akariyoun 12049505: page «5,000 ريال للمتر», served 5,600,000 for 1,120 m², 2026-11-07).
+    if src.get("price") == MISMATCH and stored.get("price_total") and stored.get("area_m2"):
+        total, area = float(stored["price_total"]), float(stored["area_m2"])
+        if any(abs(n * area - total) < 1 for n in numbers(" ".join(page.get("evidence_lines") or [])) if n):
+            src["price"] = MATCH
     for f in SOURCE_FIELDS:
         v = src.get(f, UNREADABLE if page is None else PAGE_SILENT)
         if f == "price" and platform in SKIP_PRICE:
