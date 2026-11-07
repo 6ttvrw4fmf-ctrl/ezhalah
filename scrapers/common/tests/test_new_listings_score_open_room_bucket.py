@@ -97,3 +97,11 @@ def test_safe_evidence_never_carries_a_phone():
 def test_safe_evidence_drops_a_punctuated_mobile():
     out = S._safe_evidence(r"غرف", "غرف النوم 4 تواصل 050,123,4567 او 0501.234.567 السعر 1,600,000")
     assert "050,123,4567" not in out and "0501.234.567" not in out and "1,600,000" in out
+
+
+def test_the_log_never_carries_a_comma_grouped_phone(capsys):
+    # CodeRabbit PDPL Major on #11053: «هاتف 050,123,4567» on a room line, end to end through _log_verdicts.
+    page = S.page_evidence("<p>غرف النوم 4 هاتف 050,123,4567</p>")
+    S._log_verdicts("t:4", {"bedrooms": S.MISMATCH}, {"bedrooms": 5}, page)
+    out = capsys.readouterr().out
+    assert "050" not in out and "4567" not in out and "'غرف 4'" in out
