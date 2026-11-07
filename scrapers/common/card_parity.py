@@ -99,6 +99,22 @@ def licence_on_page(page_text: str) -> str | None:
     return m.group(1) if m else None
 
 
+_LABEL = re.compile(r"^(?:ال)?(?:مساحة|مساحه|المساحة الإجمالية|غرف(?: النوم)?|عدد الغرف|دورات المياه|عدد دورات المياه|"
+                    r"الحمامات|السعر|الحي|عرض الشارع|عمر العقار)\s*:?$")
+
+
+def paired_lines(text_head: str) -> list[str]:
+    """A label printed on its own line with its value on the next one («المساحة» / «265 م», alqasem and alshawaf
+    on the first full run, 2026-11-07) becomes one line, so the comparator reads the value next to its label."""
+    lines = [x.strip() for x in (text_head or "").split(" | ")]
+    return [f"{a} {b}" for a, b in zip(lines, lines[1:]) if _LABEL.match(a) and b and len(b) <= 40]
+
+
+def is_home(url: str | None) -> bool:
+    """A link to the site's home page names no ad (alajlan: all 10 ads share «https://alajlan-re.com/»)."""
+    return urlsplit(url or "").path.strip("/") == "" and not urlsplit(url or "").query
+
+
 def stored_licence(stored: dict) -> str | None:
     for v in (stored.get("card_licence"), stored.get("license_number")):
         v = str(v or "").strip()
@@ -163,8 +179,8 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
         out["licence"] = PAGE_SILENT
     elif not lic:
         out["licence"] = WE_MISS
-    elif lic != plic:
-        out["licence"] = MISMATCH
+    elif lic != plic and lic not in page.get("_text", "").translate(_DIG):
+        out["licence"] = MISMATCH            # the page prints another licence and never ours
     else:
         out["licence"] = CARD_MISSING if shown is False else MATCH
     # photo: the source shows photos; the card must paint one
@@ -412,6 +428,8 @@ def check(client, picks: list[dict], cards: dict[str, dict], reader: SourceReade
             if p.get("pf"):
                 page, photo = pf_page(p["pf"])
                 link_kind = "ok"                      # picked FROM the source's own list at this very URL
+            elif url and is_home(url):
+                note = "the stored link is the site's home page: it names no ad (nothing compared)"
             elif url:
                 why, status, landed, body = reader.read(url)
                 if why == "ok":
@@ -425,6 +443,8 @@ def check(client, picks: list[dict], cards: dict[str, dict], reader: SourceReade
                         ev = page_evidence(scoped)
                         if not (is_other_ads_page(stored, ev) or page_lacks_its_ad(url, scoped)):
                             text = re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", scoped))
+                            ev = {**ev, "evidence_lines": paired_lines(ev.get("text_head", ""))
+                                  + list(ev.get("evidence_lines") or [])}
                             page = {**ev, "_text": re.sub(r"\s+", " ", _html.unescape(text))}
                             photo = bool(page_image_count(ev)) or bool((ev.get("meta") or {}).get("og:image"))
                 else:

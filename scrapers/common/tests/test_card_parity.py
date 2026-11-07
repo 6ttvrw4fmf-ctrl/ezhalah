@@ -98,3 +98,21 @@ def test_card_missing_only_when_the_source_agrees():
 
 def test_a_photo_still_loading_is_unknown_not_missing():
     assert _judge(card={**CARD, "photo": None})["photo"] == UNREADABLE
+
+
+def test_a_label_and_its_value_on_two_lines_are_read_together():   # alqasem / alshawaf, first full run 11-07
+    head = "نوع العقار | شقة | المساحة | 265 م | غرف | 3 غرف"
+    assert "المساحة 265 م" in cp.paired_lines(head)
+    lines = cp.paired_lines(head) + head.split(" | ")
+    page = {**PAGE, "evidence_lines": lines, "text_head": head}
+    assert _judge(stored={**STORED, "area_m2": 265, "bedrooms": 3}, card={**CARD, "text": CARD["text"] + " 265"},
+                  page=page)["area"] == MATCH
+
+
+def test_our_licence_printed_anywhere_on_the_page_is_a_match():   # alajlan's page lists other ads' licences too
+    page = {**PAGE, "_text": "رقم ترخيص الاعلان: 7200503415 … 7200767759"}
+    assert _judge(page=page)["licence"] == MATCH
+
+
+def test_a_home_page_link_names_no_ad():
+    assert cp.is_home("https://alajlan-re.com/") and not cp.is_home("https://alshawaf.com.sa/22293")
