@@ -548,7 +548,9 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     # «شارعها تجاري مقام فيه محلات بالعماير الي امامها» (39729)
     "shops_inside": (("مناسب", "مناسبه", "يصلح", "تصلح", "مثالي", "مثاليه", "ينفع", "تنفع", "لبناء", "لانشاء", "مقام",
                       "يمكن", "ممكن", "امكانيه", "بامكانيه", "قابل", "قابله"),
-                     ("حسب", "بالعماير", "بالعمائر", "بالعماره المقابله", "المقابله", "المجاوره")),                                  # «جنوب: مواقف ثم شارع» is a boundary
+                     ("حسب", "بالعماير", "بالعمائر", "بالعماره المقابله", "المقابله", "المجاوره",
+                      # «كما يوجد ٦ محلات تجارية بالقرب من …» (aqar 20476375): the shops are nearby
+                      "بالقرب", "قريب", "قريبه", "بجوار", "مجاوره")),                                  # «جنوب: مواقف ثم شارع» is a boundary
     # «خزان المياه مستقل» is a tank, «دورة مياه مستقلة» a bathroom — not a meter (checked only on the
     # «مياه مستقل» / «كهرباء مستقلة» shapes; «خزانات وعدادات مستقلة» names the meter itself)
     "separate_water_meter": (("خزان", "دور", "حمام", "مغسل", "سخان", "تحلي", "فلتر", "مضخ", "بئر", "بير"), ()),
@@ -1325,7 +1327,8 @@ def _num_hits(fact: str, t: str, ci: int, raw_clause: str = "", list_idx: frozen
             if any(w in _NEAR_WORDS for w in before):
                 continue
             if fact == "shops_count" and (any(_starts(_strip_wa(w), _EXCLUDE["shops_inside"][0]) for w in before[-3:])
-                                          or any(after.lstrip().startswith(x) for x in ("حسب",))):
+                                          or any(_starts(_strip_wa(w), _EXCLUDE["shops_inside"][1])
+                                                 for w in t[m.end():].split()[:2])):
                 continue                      # «تصلح 4 محلات», «4 محلات حسب الرخصة»: what COULD be there (🔬 2026-11-07)
             if any(_strip_wa(w).startswith(x) for w in before for x in ("نظام", "رخص", "تصريح", "يسمح", "مسموح", "حتي")):
                 continue                      # «نظام البناء 3 ادوار», «تصريح حتى 12 دور»: what may be built, not what is
@@ -2531,6 +2534,7 @@ def selftest() -> None:
         ("مناسبة لمغاسل السيارات مناسبة لمحلات تجارية مناسبة لدايف ثرو", {}, ("shops_inside",)),
         ("يمكن الاستفادة من الموقع بعدة خيارات، منها: ☕ كافيه أو مطعم 🏪 4 محلات حسب الرخصة", {}, ("shops_inside",)),
         ("شارعها تجاري مقام فيه محلات بالعماير الي امامها", {}, ("shops_inside",)),
+        ("كما يوجد ٦ محلات تجارية بالقرب من العمارة", {}, ("shops_inside",)),
         ("🏬 4 محلات تجارية ✅ جميع الشقق مؤجرة ✅ جميع المحلات مؤجرة", {"shops_inside": True}, ()),
         ("عماره للبيع دورين ع 3 شوارع شرق جامع الحوطي فيها محلات تجارية مؤجرة وشقق", {"shops_inside": True}, ()),
         ("مبنى يحتوي على مكاتب", {"offices_inside": True}, ()),
