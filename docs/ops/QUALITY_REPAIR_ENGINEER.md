@@ -502,6 +502,18 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   tap test that counted heads under the map's own control strip as «covered») — where a day of reading
   `AppleMap.web.tsx` would have found neither. Dispatch the robot from a diagnostic branch before theorising.
 
+- **2026-11-07:** a night migration whose PROOF block writes a listing or ops row (`update … search_listings_ar` to plant a
+  divergence) is held by the connector for a human and times out after 60 s with NOTHING applied — the same hold as the
+  DELETE of 11-04 and the UPDATE of 10-20, in a new place. The retry without the write applied in 4 s. Rule: a migration's
+  proof writes nothing to listing/ops rows; prove the other direction with a plain SELECT over a hand-made row (a `with a
+  as (select …)` of the real shape) or an INSERT inside a rolled-back sub-block, and check `select now()` before judging
+  the clock — tonight the amount of work «felt like» 14:30 when the database said 13:21 (the 10-20 / 11-01 / 11-04 lesson,
+  kept because it still holds). Second: the cheapest speed win hides in a FUNCTION, not a query — `loc_display_district_ar`
+  (LANGUAGE sql, six scalar sub-selects, re-planned on every call) was 0.72 ms of the sync's 0.775 ms per row; EXPLAIN
+  ANALYZE on a 172-row slice with TIMING ON named it in two queries, and `explain analyze … limit 3000` per function gave
+  the per-call cost of each suspect. Same body as plpgsql (plans cached) = 0.23 ms, proven identical over every distinct
+  (city, district) pair inside the migration. Measure functions one at a time before touching the query that calls them.
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -648,3 +660,19 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   its own concurrency group, let an earlier incremental reader on older code FINISH before dispatching a replacement
   that can write the same listings (an older reader would overwrite the newer facts); before dating a proof, open the
   run that replaced yours and check its commit contains your fix.
+
+## 📚 FLEET LESSONS 2026-11-07 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A fix that turns «a value» into «nothing» must write `db.AUTHORITATIVE_NULL`, and you read the RAW row after the
+  first crawl, not only the code.** ⚡ 11-07: 39 aqargate land cards kept the per-metre rate as the total after #10963
+  because a None never clears a stored value (#11014). 🆕 11-06: the #10940 review found the same shape on eaqartabuk
+  (a Rent↔Buy flip kept the stale pair). Second night → ⚡'s rulebook already carries it as a rule (line 123).
+- **② Every push starts ~12 CI checks — one push per PR cycle.** 🔬 11-07 pushed #11068 and #11071 four times each into a
+  queue of 35–53 runs and slowed its own proofs; ⚡ 11-04 measured 50–80 min per merge with ~100 runs queued. Rule: finish
+  locally, `npm run test:all`, push once, CodeRabbit follow-ups as one push; a PR stranded by a sibling's squash is
+  merged with main the same minute. Second night → 🔬's rulebook carries it as a rule (this PR).
+- **③ A night migration whose proof block writes a listing/ops row (UPDATE or DELETE text, even inside `do $$`) is held
+  by the connector for a human and times out with NOTHING applied.** 🔧 11-07 (the planted divergence), 🔧 11-04 (a
+  DELETE inside a function body), 🆕 11-01 (#9761 met the prompt at minute 70). Rule: prove the other direction with a
+  plain SELECT over a hand-made row of the real shape, or an INSERT inside a rolled-back sub-block; read the row state
+  after any timeout before retrying ("a timeout is not a rollback").

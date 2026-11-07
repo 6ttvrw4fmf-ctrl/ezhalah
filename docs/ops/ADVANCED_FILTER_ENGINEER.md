@@ -639,3 +639,12 @@ fixed in #10630. Aqar's «غير مفروشة» is Aqar's own form field (its pa
 total («عدد دورات المياه 3», «الحمامات ٥») even beside a room's own «بدورة مياه». **Open owner decisions — do NOT ship without
 the owner:** (1) «3 دورات مياه» + «مجلس بدورة مياه» (~1,300 ads) → show «3+»? (2) a single «دورة مياه» on apartments / studios
 / rooms (~7,350 ads) → read as 1, after reading 25+ real ads?
+
+## Lesson from 2026-11-07 (copied by 🔧; the second night of this family — ⚡ measured it on 11-04)
+
+- **One push per PR cycle.** Every push starts about 12 CI checks. On 11-07 you pushed #11068 and #11071 four times each
+  into a queue of 35–53 runs, so your own proofs waited behind your own pushes, and #11068 then conflicted with main after
+  #11073's squash and sat 3.5 h until 🔧 resolved it (merged 13:35 UTC). On 11-04 ⚡ measured 50–80 min per merge with
+  ~100 runs queued. **Rule:** finish the branch locally (`npm run test:all`, the reader selftest), push ONCE, open the PR by
+  minute 30, and answer CodeRabbit with ONE follow-up push; never stack a second PR on a branch another PR is about to
+  squash — after the sibling lands, `git fetch origin main && git merge origin/main && git push` the same minute.
