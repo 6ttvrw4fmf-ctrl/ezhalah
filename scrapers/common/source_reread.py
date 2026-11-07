@@ -94,8 +94,11 @@ BUTTON_BLOCK = re.compile(r"<button\b[^>]*>.*?</button>", re.S | re.I)
 # value="private-entrance" /> مدخل خاص (19)», «مصعد (90)», «كراج (11)»; ad 598475 re-read 2026-11-05) and the score
 # asked those features of ads that never state them. A ticked feature list (the reason checkboxes are otherwise kept)
 # never prints a count after each item, and a checked box is kept.
-FACET_CHECKBOX = re.compile(r'<input\b(?=[^>]*\btype=["\']?checkbox)(?![^>]*\bchecked\b)[^>]*>\s*[^<]{1,60}?\(\s*\d{1,6}\s*\)',
-                            re.I)
+# The LIVE markup wraps the text in <label> and the count in <small> («<input type="checkbox" id="feature-pool" …/>
+# <label for="feature-pool">مسبح <small>(0)</small></label>», ad 598690 re-read 2026-11-06): the 11-05 pattern allowed no
+# tag in between, so «مسبح» still scored pool we_miss 10 of 10 on 11-06. Both shapes are one facet.
+FACET_CHECKBOX = re.compile(r'<input\b(?=[^>]*\btype=["\']?checkbox)(?![^>]*\bchecked\b)[^>]*>\s*(?:<label\b[^>]*>)?\s*[^<]{1,60}?'
+                            r'(?:<small\b[^>]*>)?\s*\(\s*\d{1,6}\s*\)\s*(?:</small>)?\s*(?:</label>)?', re.I)
 # A WordPress MENU ITEM is the site's navigation, not the ad: aqaralriyadh's menu «شقق مفروشة» on every page read as
 # the ad saying furnished (furnished we_miss 5 of 5, 2026-11-03 re-read). Only the anchor text of a `menu-item` <li>.
 MENU_ITEM_LINK = re.compile(r'(<li\b[^>]*class="[^"]*\bmenu-item\b[^"]*"[^>]*>\s*<a\b[^>]*>)[^<]{0,80}', re.I)

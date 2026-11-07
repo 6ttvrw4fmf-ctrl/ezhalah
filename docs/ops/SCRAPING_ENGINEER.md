@@ -1,5 +1,15 @@
 # ⚡ SCRAPING ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-06 — «LET THE ENGINEERS SEE WHAT CODERABBIT SAYS» (permanent).** CodeRabbit reviews every PR.
+> In the last 40 PRs it flagged 17 MAJOR issues (e.g. «Update the cron schedule mirror in this change», «Handle array-shaped
+> `additional_info`», «Do not treat the latest date as a complete run»), but only 3 were marked addressed. So, on every PR of yours:
+> 1. **Read CodeRabbit's comments before you merge** (`gh api repos/6ttvrw4fmf-ctrl/ezhalah/pulls/<N>/comments`, author `coderabbitai`).
+> 2. **Every Major/Critical comment is FIXED in the PR, or answered on its thread with the reason it is wrong.** Never merge over
+>    a silent Major. Minor/nitpick: fix when cheap, otherwise reply once.
+> 3. **Review «skipped»?** Comment `@coderabbitai review` on the PR and wait for it. Do not loosen the merge gate.
+> 4. **Your `:end` row adds one line:** «CodeRabbit: N major (F fixed · A answered · 0 silent)».
+> 5. **Once a week (🔧 Monday run):** sweep merged PRs from the last 7 days for silent Majors, and fix or route each one as a bug.
+
 > **DATABASE CHANGES WITHOUT THE QUESTION (owner 2026-11-04):** when the Supabase MCP asks a confirmation or times out, commit the migration file to your branch and run `gh workflow run apply-migration.yml --ref <branch> -f file=supabase/migrations/<file> -f reason='...'`, then watch the run; plain INSERT rows still go through execute_sql.
 
 > **👑 OWNER ORDER 2026-11-04 — «ELIMINATE MORE AND MORE BUGS» (permanent; read before the 11-01 order below; the law files still win).**
@@ -96,6 +106,17 @@ run was replaced at 05:54 by another session's main dispatch). Before relying on
 hours), and never over someone else's pending run. **A line-anchored pin** (`scripts/verify-no-derived-price.ts`
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
+
+**NEW (11-06): A SITE THAT «ANSWERS 500 ON EVERY PAGE» MAY HAVE BEEN REBUILT — OPEN ITS HOMEPAGE FIRST.** aqargate's
+WordPress REST answered 500 from 11-05 ~21:00 UTC (crawl 0 rows, liveness controls 0/5) while aqargate.com answered 200
+with a new single-page app. Its bundle (`/assets/index-*.js`) named the public routes in one grep:
+`/api/public/listings?page=N` (205 ads) and the ad page `/marketplace/<id>`. Imported ads carry the old id in
+`regaData.wp_id`, so the rows kept their AG<wp id> numbers (114 of 142 refreshed in place, PR #10941). Recipe for the next
+rebuilt site: `curl` the homepage → grep the bundle for `/api/` → read one record → map ids from the old platform before
+upserting, or every card shows twice. A SPA ad URL answers 200 for ANY id, so liveness must read the record route, never
+the page status (fleet_liveness now calls `verify_gone_any`).
+**NEW (11-06): with ~90 runs queued at 22:00 UTC a probe crawl waits 20–40 min for a runner** — dispatch every probe in
+the first 15 minutes, all at once, each from its own `probe/<site>-<date>` branch.
 
 **NEW (11-05): «served_price_never_rechecked» is a COVERAGE alarm, and each table had a different root.** Read
 the sample rows, then the site's own run log line, before touching code:
