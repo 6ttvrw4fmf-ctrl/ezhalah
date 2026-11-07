@@ -293,6 +293,8 @@ OPEN QUESTIONS FOR ONBOARDING (none of these are guessed in code)
 from __future__ import annotations
 
 import argparse
+import hashlib
+import math
 import os
 import re
 import sys
@@ -321,9 +323,16 @@ SOURCE = "أحمد المحيسني العقارية"
 PREFIX = "MHS"
 SLUG = "muhaysini"
 PAGE_SIZE = 30
-# 95 pages today. A bound is load-bearing because this API publishes NO total to stop against — see
-# fetch_catalogue. Hitting it leaves complete=False, so a runaway can never prune.
-MAX_PAGES = 400
+# 95 pages on 09-24; ~700 on 11-07. A bound is load-bearing because this API publishes NO total to stop
+# against — see fetch_catalogue. Hitting it leaves complete=False, so a runaway can never prune.
+# 400 (12,000 rows) WAS hit every night from 11-02 on: the catalogue outgrew it, ~8,000 live ads were
+# never re-read (served_price_never_rechecked, 🔧 11-07) and nothing was ever pruned. 1,500 = 45,000 rows.
+MAX_PAGES = 1500
+# The `retrieve` call is the slow part (~1 s a row with REQUEST_GAP) and the job has 240 min. So at most
+# DETAIL_BUDGET rows get their detail read per night, chosen by detail_plan() so that EVERY listed ad is
+# read in full at least once every ceil(n / budget) nights. The list walk itself stays complete, so every
+# listed ad is SEEN (never pruned) whether or not tonight's budget reached it.
+DETAIL_BUDGET = int(os.environ.get("MUHAYSINI_DETAIL_BUDGET", "12000"))
 # Spacing between `retrieve` calls. The endpoint rate-limits under sustained load (987/2,827 got
 # HTTP 429 at ~3.6 req/s); override with MUHAYSINI_REQUEST_GAP.
 REQUEST_GAP = float(os.environ.get("MUHAYSINI_REQUEST_GAP", "0.35"))
@@ -922,6 +931,22 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[list[dict], bool]:
     return items, complete
 
 
+def detail_plan(ids: list[str], budget: int, day: int) -> set[str]:
+    """Which listed ids get their detail read tonight. All of them when they fit the budget; otherwise
+    k = ceil(n / budget) stable buckets by a hash of the id, tonight's bucket first, then the next ones
+    until the budget is spent. Tonight's bucket is at most ~n/k <= budget, so every id is read in full
+    at least once every k nights, and the nightly volume stays the budget (not a sawtooth)."""
+    if budget <= 0 or len(ids) <= budget:
+        return set(ids)
+    k = math.ceil(len(ids) / budget)
+
+    def h(i: str) -> int:
+        return int(hashlib.sha1(i.encode()).hexdigest()[:8], 16)
+
+    ordered = sorted(ids, key=lambda i: ((h(i) - day) % k, h(i), i))
+    return set(ordered[:budget])
+
+
 def fetch_detail(s: cc.Session, pid: str) -> Optional[dict]:
     """This listing's OWN record, or None. None degrades the row to its list fields (and is
     counted) — every field the detail adds is absent-means-NULL, so it can never corrupt one."""
@@ -1008,9 +1033,21 @@ def main() -> int:
         items, complete = fetch_catalogue(s, limit=args.limit)
         if not items:
             raise RuntimeError(f"{API}/list returned no properties")
+        listed_ids = [i for i in (_clean(p.get("id")) for p in items) if i]
+        tonight = detail_plan(listed_ids, DETAIL_BUDGET, int(time.time() // 86400))
+        # Listed but outside tonight's budget: SEEN on the source tonight (so never a prune candidate),
+        # not rebuilt — their stored row stays as last read, and their turn comes within k nights.
+        seen_not_read = {f"{PREFIX}{i}" for i in listed_ids if i not in tonight}
+        if seen_not_read:
+            print(f"  detail budget {DETAIL_BUDGET}: {len(tonight)} read in full tonight, "
+                  f"{len(seen_not_read)} seen on the list and read on a later night", flush=True)
+        read_n = 0
         for n, listed in enumerate(items, 1):
             pid = _clean(listed.get("id"))
-            if n > 1:
+            if pid and pid not in tonight:
+                continue
+            read_n += 1
+            if read_n > 1:
                 time.sleep(REQUEST_GAP)     # the retrieve endpoint's measured sustained quota
             detail = fetch_detail(s, pid) if pid else None
             if detail is None:
@@ -1062,7 +1099,7 @@ def main() -> int:
             verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
             for tbl, rows in (("muhaysini_residential_listings", res),
                               ("muhaysini_commercial_listings", com)):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | seen_not_read, source=SOURCE,
                                     verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
@@ -1073,7 +1110,8 @@ def main() -> int:
         healthy = db.end_run(run_id, ok=True, rows_seen=len(items),
                              rows_upserted=len(res) + len(com),
                              notes=(f"pruned={pruned} complete={complete} "
-                                    f"detail_misses={detail_misses} {notes}")[:300],
+                                    f"detail_misses={detail_misses} later_nights={len(seen_not_read)} "
+                                    f"{notes}")[:300],
                              check_tables=["muhaysini_residential_listings",
                                            "muhaysini_commercial_listings"])
         if not healthy:
