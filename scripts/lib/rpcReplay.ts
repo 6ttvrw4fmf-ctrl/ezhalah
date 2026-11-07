@@ -164,7 +164,9 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
   // Every arm records WHERE in the SQL its patch sits, and the list is returned in that order: the arms
   // scan separately, and a patch whose anchor an EARLIER patch creates would otherwise be applied first,
   // find nothing, and be skipped silently (CodeRabbit on #11148). Source order is execution order.
-  const out: { anchor: string; replacement: string; pos: number }[] = [];
+  const out: { anchor: string; replacement: string; pos: number; call?: boolean }[] = [];
+  // A `replace(...)` that sits after `--` on its own line is a comment: SQL never runs it.
+  const commentedOut = (pos: number) => sql.slice(sql.lastIndexOf('\n', pos - 1) + 1, pos).includes('--');
 
   // (c) TABLE-DRIVEN — `edits text[][] := array[ ['needle','replacement','count'], ... ]` applied in
   // a loop (20260812122557). A migration that makes a dozen related edits to one RPC is far safer
@@ -190,7 +192,12 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     const rowRe = /\[\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'/g;
     let r: RegExpExecArray | null;
     while ((r = rowRe.exec(span))) {
-      out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: a.index + r.index });
+      // Positioned where the table is first USED (its loop), not where it is declared: an inline patch
+      // between the two may create a row's anchor.
+      const use = new RegExp(String.raw`\b${a[1]}\b`, 'g');
+      use.lastIndex = end + 1;
+      const u = use.exec(sql);
+      out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: u ? u.index : a.index + r.index });
     }
   }
 
@@ -199,19 +206,16 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
   const dollarRe =
     /\breplace\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*\$([A-Za-z_]*)\$([\s\S]*?)\$\1\$\s*,\s*\$([A-Za-z_]*)\$([\s\S]*?)\$\3\$\s*\)/g;
   let q: RegExpExecArray | null;
-  while ((q = dollarRe.exec(sql))) out.push({ anchor: q[2], replacement: q[4], pos: q.index });
+  while ((q = dollarRe.exec(sql))) if (!commentedOut(q.index)) out.push({ anchor: q[2], replacement: q[4], pos: q.index });
 
   const callRe = /\breplace\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g;
   let c: RegExpExecArray | null;
-  const seen = new Set<string>();
   while ((c = callRe.exec(sql))) {
     const anchor = decls.get(c[2]);
     const replacement = decls.get(c[3]);
     if (anchor === undefined || replacement === undefined) continue;  // not a literal pair
-    const key = `${anchor}\u0000${replacement}`;
-    if (seen.has(key)) continue;                                       // occurrence-count probes repeat it
-    seen.add(key);
-    out.push({ anchor, replacement, pos: c.index });
+    if (commentedOut(c.index)) continue;
+    out.push({ anchor, replacement, pos: c.index, call: true });
   }
 
   // (g) INLINE LITERAL ARGUMENTS (20261107213742) — `replace(src, E'needle\n', E'needle\n' || E'added\n')`,
@@ -229,12 +233,19 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     const anchor = evalDeclExpr(il[1].trim(), decls);
     const replacement = evalDeclExpr(il[2].trim(), decls);
     if (anchor === undefined || replacement === undefined) continue;
-    const key = `${anchor}\u0000${replacement}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ anchor, replacement, pos: il.index });
+    if (commentedOut(il.index)) continue;
+    out.push({ anchor, replacement, pos: il.index, call: true });
   }
-  return out.sort((x, y) => x.pos - y.pos).map(({ anchor, replacement }) => ({ anchor, replacement }));
+  // Deduplicate AFTER ordering: a call pair repeated later (an occurrence-count probe, a re-check) must
+  // not displace its first, executing occurrence.
+  const seenCall = new Set<string>();
+  return out.sort((x, y) => x.pos - y.pos).filter((p) => {
+    if (!p.call) return true;
+    const k = `${p.anchor}\u0000${p.replacement}`;
+    if (seenCall.has(k)) return false;
+    seenCall.add(k);
+    return true;
+  }).map(({ anchor, replacement }) => ({ anchor, replacement }));
 }
 
 /**
