@@ -121,7 +121,8 @@ def test_a_rental_that_turns_into_several_figures_clears_its_stale_price():
     """Review on #10940: one rent, then two distinct unit rents (live id 598669's shape) — no single price remains."""
     from scrapers.common import db
     stored = {}
-    for price, desc in (("2500", "<p>الإيجار شهري</p>"), ("2500 1800", "<p>الإيجار شهري</p>"), ("2500 1800", None)):
+    for price, desc in (("2500", "<p>الإيجار شهري</p>"), ("2500 1800", "<p>الإيجار شهري</p>"),
+                        ("2500", "<p>الإيجار شهري</p>"), ("2500 1800", None)):
         item = _item("شقة للايجار")
         item["meta"]["price"] = price
         row, _ = map_listing(item, _mp("rent", "إيجار"), desc, [])
@@ -129,7 +130,23 @@ def test_a_rental_that_turns_into_several_figures_clears_its_stale_price():
         stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
         if price == "2500":
             assert stored == {"price_annual": 30000, "rent_period": "monthly"}, stored
-    assert stored == {"price_annual": None, "rent_period": None}, "a stale single rent survived two figures"
+        else:
+            assert stored == {"price_annual": None, "rent_period": None}, ("a stale single rent survived two figures", desc)
+
+
+def test_an_investment_rental_that_falls_back_to_buy_with_several_figures_clears_its_rent_pair():
+    """Review on #10940: crawl 1 reads Rent («للايجار»); crawl 2 loses the rent wording and holds two figures."""
+    from scrapers.common import db
+    stored = {}
+    for title, price in (("هنجر للايجار شهري", "2500"), ("هنجر حي المصيف", "2500 1800")):
+        item = _item(title)
+        item["meta"]["price"] = price
+        row, _ = map_listing(item, _mp("investment", "استثمار"), "<p>هنجر</p>", [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_total", "price_annual", "rent_period") if k in row})
+        if price == "2500":
+            assert stored["price_annual"] == 30000 and stored["rent_period"] == "monthly", stored
+    assert stored == {"price_total": None, "price_annual": None, "rent_period": None}, stored
 
 
 def test_a_sale_that_turns_into_several_figures_clears_its_stale_total():
