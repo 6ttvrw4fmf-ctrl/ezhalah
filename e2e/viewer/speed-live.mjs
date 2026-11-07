@@ -57,6 +57,7 @@ const SITES = [
   { host: 'ryadah.com.sa', table: 'ryadah_residential_listings' },
   { host: 'sodasyat.sa', table: 'sodasyat_residential_listings' },
   { host: 'app.abaadapp.sa', table: 'abaad_residential_listings' },
+  { host: 'steam-realestate.com', table: 'steam_residential_listings' },
   { host: 'sadiq-eltajer.sa', table: 'sadiqeltajer_residential_listings' },
   { host: 'rakez.sa', table: 'rakez_residential_listings' },
   { host: 'tuba.com.sa', table: 'tuba_residential_listings' },

@@ -71,8 +71,10 @@ JOURNEY = ROOT / "e2e/engineers/customer-journey.mjs"
 # The REGA AD licence (7xxxxxxxxx), never the broker's FAL licence (1xxxxxxxxx) printed beside it: muhaysini 34988
 # prints «رقم رخصة فال: 1200025871 رقم ترخيص الاعلان: 7200990751» (smoke run 2026-11-06).
 AD_LICENCE = re.compile(r"(?:ترخيص (?:ال)?[اإ]علان|رخص[ةه] (?:ال)?[اإ]علان|رقم الترخيص(?!\s*فال)|رقم ترخيص(?!\s*فال)|"
-                        r"ad(?:vertis\w*)? licen[cs]e|advertising licen[cs]e)[^\d\n]{0,30}(\d{10})(?!\d)", re.I)
-LICENCE = re.compile(r"(?:رخص|ترخيص|licen[cs]e|rega)[^\d\n]{0,40}(7\d{9})(?!\d)", re.I)
+                        r"ad(?:vertis\w*)? licen[cs]e|advertising licen[cs]e)[^\d\n]{0,30}(7[12]\d{8})(?!\d)", re.I)
+LICENCE = re.compile(r"(?:رخص|ترخيص|licen[cs]e|rega)[^\d\n]{0,40}(7[12]\d{8})(?!\d)", re.I)
+# Only the REGA AD-licence shape 71/72xxxxxxxx: remaxsa's office licence «1100029634» and holoul's «7032067345» sat beside
+# every ad's label on the first full run (2026-11-07) and read as the ad's licence.
 _DIG = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
 

@@ -224,6 +224,12 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   const [geo, setGeo] = useState<GeoPoint | null>(null);
   // No pin from the source → the district by name, Google's own border around it (owner 2026-10-17).
   const [area, setArea] = useState<DistrictPlace | null>(null);
+  // The tag on the district map names the place itself — «حي العليا» — never «الموقع التقريبي» (owner 2026-11-07:
+  // no «تقريبي» fake location). Same district truth as search: the index row's district_ar, else its city.
+  const areaName = area ? (locale === 'en' ? translitPlace(area.district || area.city) : (area.district || area.city)) : '';
+  // The ad licence the index holds (search_listings_ar.license_number) — shown in Details when the source's own
+  // panel did not already carry it (owner 2026-11-07: «show everything we store before the user leaves»).
+  const [licence, setLicence] = useState<string | null>(null);
   // The «الأسعار» block's three sources, fetched together once the ad's own row is known: the asking
   // prices around it (each house once), the ministry's actual sales, the same ad on other sites.
   // stats = this ad's OWN type (card 3); group = the whole macro group, the split card's right half — the
@@ -239,6 +245,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
       if (!alive) return;
       setGeo(pin);
       if (!pin) setArea(districtPlace(row, listingOpenUrl(l)));
+      setLicence(String(row?.license_number ?? '').trim() || null);
       // Aqar sale ads only for now (owner update 22): nothing is even fetched for the rest.
       if (!pricesBlockEligible(row)) return;
       const price = Number(row?.price_total), area = Number(row?.area_m2);
@@ -417,6 +424,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   }
   const chips = FEATURE_META.filter((f) => l.features?.[f.key]).map((f) => t(f.label));
   if (l.driver_room) chips.push(t('Driver room'));
+  if (licence && ![...facts, ...extra].some(([, v]) => v.trim() === licence)) extra.push([t('Ad license number'), licence]);
   const rows = [...facts, ...extra];
   const tx = { textAlign: (isRTL ? 'right' : 'left') as 'right' | 'left', writingDirection: (isRTL ? 'rtl' : 'ltr') as 'rtl' | 'ltr' };
   // «1.95» (millions, two decimals at most, trailing zeros dropped) · «6,500» · «1,293,000».
@@ -650,7 +658,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             </View>
           ) : null}
           {/* THE DISTRICT BORDER (owner 2026-10-17): no pin from the source → the same free map, asked for the
-              district by name; Google fits it and draws its own border. Labelled approximate, never a pin. */}
+              district by name; Google fits it and draws its own border. Tagged with the district's name, never a pin. */}
           {!geo && area && IS_WEB ? (
               <View style={[s.mapBox, { height: mapH }]} testID="listing-preview-area">
                 <Frame
@@ -665,7 +673,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                 <Pressable testID="listing-preview-map" onPress={openMap} accessibilityRole="button" accessibilityLabel={t('Expand the map')} style={s.mapTap}>
                   <View style={[s.areaTag, isRTL ? { right: 10 } : { left: 10 }]}>
                     <View style={s.areaDot} />
-                    <Text style={s.areaTagTx}>{t('Approximate location')}</Text>
+                    <Text numberOfLines={1} style={s.areaTagTx}>{areaName}</Text>
                   </View>
                   <View style={s.mapChip}>
                     <Ionicons name="expand-outline" size={15} color={lightColors.ink} />
@@ -940,7 +948,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             <Frame src={districtEmbedUrl(area, locale)} title={t('District location on Google Maps')} referrerPolicy="no-referrer-when-downgrade" allow="fullscreen" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }} />
             <View pointerEvents="none" style={[s.areaTag, { top: 14 }, isRTL ? { right: 60 } : { left: 60 }]}>
               <View style={s.areaDot} />
-              <Text style={s.areaTagTx}>{t('Approximate location')}</Text>
+              <Text numberOfLines={1} style={s.areaTagTx}>{areaName}</Text>
             </View>
             <Pressable
               testID="listing-preview-map-close"
@@ -1148,7 +1156,8 @@ const s = StyleSheet.create({
   },
   mapChipTx: { fontSize: 13, fontWeight: '700', color: lightColors.ink },
   mapSheet: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface },
-  areaTag: { position: 'absolute', top: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
+  // under the centred «tap to see» chip (top 10, ~34 px tall) so a long district name never slides beneath it
+  areaTag: { position: 'absolute', top: 52, maxWidth: '70%', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
   areaDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.selFill },
   areaTagTx: { fontSize: 12.5, fontWeight: '800', color: colors.ink },
   // the ministry's deals sheet: a head, a sticky header row, then one row per deal

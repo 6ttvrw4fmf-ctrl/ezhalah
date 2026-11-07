@@ -313,8 +313,11 @@ mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, 
   const ar = fillName(slotted, 'يوسف', 'ar');
   check('Arabic line gets the Arabic spelling', !!ar && ar.includes('يوسف') && !/[A-Za-z]/.test(ar), String(ar));
   check('a Latin name is never put into an Arabic line', fillName(slotted, 'yusuf', 'ar') === null);
-  check('English line gets the Latin name', fillName(renderWelcome(line(24), NAME_SLOT, { ...FACTS, city: { ar: 'الرياض', en: 'Riyadh', count: 162_312 } }, 'en'), 'yusuf', 'en')?.includes('yusuf') === true, String(renderWelcome(line(24), NAME_SLOT, FACTS, 'en')));
+  check('English line gets the Latin name', fillName(renderWelcome(line(24), NAME_SLOT, { ...FACTS, city: { ar: 'الرياض', en: 'Riyadh', count: 162_312 } }, 'en'), 'yusuf', 'en')?.includes('Yusuf') === true, String(renderWelcome(line(24), NAME_SLOT, FACTS, 'en')));
   check('no name → no line', fillName(slotted, '  ', 'ar') === null);
+  // owner 2026-11-07: «Yusuf not yusuf» — English capitalises the name; the rest of it is left as typed
+  check('English capitalises a lower-case name (yusuf → Yusuf)', fillName('Hi ⟦n⟧, x', 'yusuf', 'en') === 'Hi \u2068Yusuf\u2069, x');
+  check('…and keeps the rest as typed (McAllister stays McAllister)', fillName('Hi ⟦n⟧, x', 'mcAllister', 'en') === 'Hi \u2068McAllister\u2069, x');
   // sentenceName = pickName (the menu's own rule) minus the other script (owner P1 2026-10-24: «يوسف, the market…»).
   check("the hook takes BOTH spellings from sentenceName (pickName, never the other script)", /sentenceName\(names, 'ar'\)/.test(hookSrc) && /sentenceName\(names, 'en'\)/.test(hookSrc));
   check('the hook remembers lines with the name SLOT and fills the name per language when shown',

@@ -604,9 +604,26 @@ _RELATED_BLOCK = re.compile(r'<div[^>]*\b(?:id|class)="[^"]*related[-_](?:ads|po
                             r'(.{0,15000}?)(?=<div[^>]*\bid="block-|<footer|</body>|\Z)', re.S)
 
 
+# …and so does everything under a «similar ads» HEADING (🔬 2026-11-07): vmksa 641 (vmksa_residential_listings:13604850,
+# a building for sale whose own text never mentions furniture) was asked «furnished» from «مؤثثه بالكامل» — a card
+# under «<h2 class="building-title">الاعلانات المشابة</h2>» (the site's spelling), i.e. another ad's price line.
+_SIMILAR_HEADING = re.compile(r"<h[2-4][^>]*>([^<]{2,60})</h[2-4]>")
+_SIMILAR_END = re.compile(r"<footer|</body>")
+
+
+def similar_ads_tail(body: str) -> str:
+    """The markup under the first «similar / related ads» heading, up to the footer; '' when the page has none."""
+    for m in _SIMILAR_HEADING.finditer(body or ""):
+        t = norm(html.unescape(m.group(1)))
+        if "مشاب" in t and any(w in t for w in ("اعلان", "عقار", "عروض")):
+            end = _SIMILAR_END.search(body, m.end())
+            return body[m.end(): end.start() if end else len(body)]
+    return ""
+
+
 def strip_related(page: dict, body: str) -> dict:
     bits: set[str] = set()
-    for block in _RELATED_BLOCK.findall(body or ""):
+    for block in _RELATED_BLOCK.findall(body or "") + [similar_ads_tail(body)]:
         for t in re.split(r"<[^>]+>", block):
             nt = norm(html.unescape(t))
             if len(nt) >= 6:
@@ -982,6 +999,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page,
                                   texts.get((table, rid)))
         fold(row, key, af_only, stored)
+        # Name the field (🔬 2026-11-07): ops_af_score keeps only the key, so every night's precision work began by
+        # guessing WHICH answer disagreed. Field names and keys only — never a value, URL, name or phone (PDPL).
+        if (mm := sorted(k for k, v in af_only.items() if v == MISMATCH)):
+            print(f"  mismatch {key} fields {mm}", flush=True)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
         answers = offered(customer_answers(ad_lines, af_only, platform, page, texts.get((table, rid))), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
