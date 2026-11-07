@@ -87,7 +87,7 @@ check('the review list names the three refused shapes', ['tiny_price_no_band', '
   check('the detector REPAIRS (no-op update fires the trigger) before it can raise P1', upd > 0 && p1 > upd);
   check('every key the detector raises has a resolve path',
     ['price_typed_in_thousands_self_healed', 'price_typed_in_thousands_served'].every((k) => det.includes(`mon_resolve_key('${k}'`)));
-  check('the detector is scheduled daily, after the land detector (05:36)', /cron\.schedule\('mon-price-typed-in-thousands', '46 5 \* \* \*'/.test(SQL));
+  check('the detector is scheduled daily, after the land detector (05:36)', /cron\.schedule\('mon-price-typed-in-thousands', '56 5 \* \* \*'/.test(SQL));
 }
 check('the welcome facts: the migration proves every welcome price floor still keeps review rows out',
   SQL.includes("price_annual between 3000 and 2000000") && SQL.includes("price_total between 100000 and 20000000")

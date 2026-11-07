@@ -326,7 +326,7 @@ end
 $function$;
 revoke execute on function public.mon_detect_price_typed_in_thousands() from public, anon, authenticated;
 
-select cron.schedule('mon-price-typed-in-thousands', '46 5 * * *',
+select cron.schedule('mon-price-typed-in-thousands', '56 5 * * *',
   $cron$set statement_timeout to '300s'; select public.mon_detect_price_typed_in_thousands();$cron$);
 
 -- Inputs, then the backfill (a no-op update fires the trigger), then the detector (must find no residue).
