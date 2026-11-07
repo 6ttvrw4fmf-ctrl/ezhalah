@@ -617,24 +617,59 @@ def stated_rent_period(price: Optional[int], text: Optional[str]) -> Optional[st
     == price → 'annual'. re's \\d and to_int read Arabic-Indic digits too."""
     if not price or not text:
         return None
-    # THE NEAREST period word to THIS price wins (2026-11-07, haraj 24760182): «الإيجار الشهري 2500ريال
-    # الإيجار السنوي 28000ريال» has «الشهري» within 40 chars of 28000 too, and the first-word-wins loop
-    # read the yearly 28,000 as monthly and served 336,000 a year. Ties keep the old order (monthly first).
-    best: Optional[tuple[int, int, str]] = None
+    # EACH LABEL PAIRS WITH ITS OWN FIGURE (2026-11-07, haraj 24760182 + CodeRabbit on #11030): «الإيجار الشهري
+    # 2500ريال الإيجار السنوي 28000ريال» has «الشهري» within 40 chars of 28000 too, and the first-word-wins loop read
+    # the yearly 28,000 as monthly and served 336,000 a year. A label belongs to a figure only when no OTHER figure
+    # sits between them. The nearest such label BEFORE the figure is its label («السنوي 28000»); after it only when
+    # none precedes («4000 ريال شهري»). A figure with a different label on each side («شهري السعر: 2500 ريال سنوي
+    # 28000», asking about 2500) is ambiguous: no stated period, never a guess.
     found: Optional[str] = None
-    for order, (word_re, period) in enumerate(((_MONTHLY_WORD_RE, "monthly"), (_YEARLY_WORD_RE, "annual"))):
-        for m in word_re.finditer(text):
-            lo = max(0, m.start() - 40)
-            for nm in _NUMBER_RE.finditer(text[lo: m.end() + 40]):
-                v = to_int(nm.group(0).replace("٬", ","))
-                if v == price:
-                    a, b = lo + nm.start(), lo + nm.end()
-                    gap = a - m.end() if a >= m.end() else (m.start() - b if b <= m.start() else 0)
-                    if best is None or (gap, order) < best[:2]:
-                        best = (gap, order, period)
-                elif period == "monthly" and v and v * 12 == price:
-                    found = found or "annual"
-    return best[2] if best else found
+    words = sorted([(m.start(), m.end(), period)
+                    for word_re, period in ((_MONTHLY_WORD_RE, "monthly"), (_YEARLY_WORD_RE, "annual"))
+                    for m in word_re.finditer(text)])
+    numbers = [(m.start(), m.end(), to_int(m.group(0).replace("٬", ","))) for m in _NUMBER_RE.finditer(text)]
+    # Only another PRICE-SIZED figure (≥ 1,000) separates a label from a figure: «إيجار سنوي فيلا 5 غرف 60000»
+    # keeps its label across the room count.
+    figures = [(x0, x1) for x0, x1, x in numbers if x and x >= 1000]
+
+    def between(lo: int, hi: int, spans) -> bool:
+        return any(lo <= x0 and x1 <= hi for x0, x1, *_ in spans)
+
+    def label_before(a: int, b: int):
+        c = [w for w in words if w[1] <= a and a - w[1] <= 40 and not between(w[1], a, [f for f in figures if f != (a, b)])]
+        return c[-1] if c else None
+
+    def label_after(a: int, b: int):
+        c = [w for w in words if w[0] >= b and w[0] - b <= 40 and not between(b, w[0], [f for f in figures if f != (a, b)])]
+        return c[0] if c else None
+
+    verdicts: set[str] = set()
+    for a, b, v in numbers:
+        if v == price:
+            pre, post = label_before(a, b), label_after(a, b)
+            # A label AFTER this figure that is really the prefix of the next figure («… 2500ريال الإيجار السنوي
+            # 28000ريال»: «السنوي» heads 28000, which has no label of its own after it) is not this figure's.
+            if post:
+                nxt = next(((f0, f1) for f0, f1 in figures if f0 >= post[1] and f0 - post[1] <= 40
+                            and not between(post[1], f0, words)), None)
+                if nxt and not label_after(*nxt):
+                    post = None
+            # …and a label BEFORE it that is the suffix of the previous figure («2500 شهري، 28000 سنوي»).
+            if pre and post and pre[2] != post[2]:
+                prv = next(((f0, f1) for f0, f1 in reversed(figures) if f1 <= pre[0] and pre[0] - f1 <= 40
+                            and not between(f1, pre[0], words)), None)
+                if prv and not label_before(*prv):
+                    pre = None
+            if pre and post and pre[2] != post[2]:
+                verdicts.add("ambiguous")
+            elif pre or post:
+                verdicts.add((pre or post)[2])
+        elif v and v * 12 == price and any(w[2] == "monthly" and (abs(a - w[1]) <= 40 or abs(w[0] - b) <= 40)
+                                           for w in words):
+            found = found or "annual"
+    if len(verdicts) == 1 and "ambiguous" not in verdicts:
+        return verdicts.pop()
+    return None if verdicts else found
 
 
 def rent_period_from_ad(price: Optional[int], text: Optional[str], card_period: Optional[str],
