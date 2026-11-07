@@ -286,6 +286,16 @@ def main() -> int:
                 why = (f"index page 0 held no ad ({BASE}/?field_nw_al_qar_value=All&page=0): "
                        f"answered {_LAST.get('status')} with {_LAST.get('bytes')} bytes | route: {' · '.join(tried)}")
                 print(f"✗ {SOURCE}: {why}", flush=True)
+                print("PROBE title:", re.findall(r"<title>(.*?)</title>", html, re.S)[:1], "tbody:", "<tbody>" in html,
+                      "\nPROBE text:", re.sub(r"\s+", " ", re.sub(r"(?s)<[^>]+>", " ", re.sub(r"(?is)<(script|style).*?</\1>", " ", html)))[:1500],
+                      "\nPROBE head:", html[:1500], flush=True)
+                for _p in ("/", "/node", "/?page=0", "/ar", "/properties"):
+                    try:
+                        _r = s.get(BASE + _p, timeout=40)
+                        print("PROBE", _p, _r.status_code, len(_r.text or ""), "tbody" in (_r.text or ""), len(_NID_RE.findall(_r.text or "")), flush=True)
+                    except Exception as _e:
+                        print("PROBE", _p, "EXC", _e, flush=True)
+                a.dry_run = True
                 if not a.dry_run:
                     rid = db.begin_run(SLUG)
                     db.end_run(rid, ok=False, rows_seen=0, rows_upserted=0, notes=why[:300])
