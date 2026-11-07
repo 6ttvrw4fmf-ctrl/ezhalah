@@ -503,7 +503,7 @@ _PARTIAL_BEFORE = tuple(_n(w) for w in N._PARTIAL_BEFORE)
 # Negators that TOUCH the token. One word («غير», «بدون») or two («لا يوجد», «لا نقبل»).
 _NEG1 = frozenset(_n(w) for w in ("غير", "كغير", "بدون", "بلا", "لايوجد", "لاتوجد", "مافيه", "مافي", "no", "without", "not",
                                    "non", "ليس", "ليست", "عدا", "ماعدا", "باستثناء"))      # «ليست منحة» (owner handoff 2026-11-01)
-_NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتوفر", "لا تتوفر", "ما فيه", "ما في", "لا يشمل",
+_NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتوفر", "لا تتوفر", "ما فيه", "ما في", "ما فيها", "لا يحتوي", "لا تحتوي", "لا يشمل",
                                    "لا تشمل", "عدم وجود", "لا نقبل", "لا يقبل", "من غير", "ما يوجد", "is not"))
 # …and AFTER it: «مطبخ غير راكب», «مفروشة: لا», «الضمانات ومدتها: لا يوجد», «المطابخ: 0».
 _POST_NOT = tuple(_n(w) for w in ("متوفر", "موجود", "متاح", "مشمول", "شامل"))
@@ -542,7 +542,15 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
                 ("للايجار", "للبيع", "تجاري", "صناعي", "تجاريه", "صناعيه", "مبرد", "مبرده", "للتاجير")),
     "garden": (_BEARINGS + ("مناسب", "مثالي", "خلف", "مقابل"),   # «الوجهة: غرب حديقة» is a boundary; «مناسب للحديقة» a maybe
                ("عامه", "عام", "الحي", "العامه")),
-    "parking": (_BEARINGS, ()),                                  # «جنوب: مواقف ثم شارع» is a boundary
+    "parking": (_BEARINGS, ()),
+    # A POSSIBLE use or the STREET's shops are not shops inside the property (🔬 2026-11-07 two-way sample, 4 of 25
+    # served yeses wrong): «مناسبة لمحلات تجارية» (aqar 20809503), «منها: كافيه أو مطعم 🏪 4 محلات حسب الرخصة» (9566204),
+    # «شارعها تجاري مقام فيه محلات بالعماير الي امامها» (39729)
+    "shops_inside": (("مناسب", "مناسبه", "يصلح", "تصلح", "مثالي", "مثاليه", "ينفع", "تنفع", "لبناء", "لانشاء", "مقام",
+                      "يمكن", "ممكن", "امكانيه", "بامكانيه", "قابل", "قابله"),
+                     ("حسب", "بالعماير", "بالعمائر", "بالعماره المقابله", "المقابله", "المجاوره",
+                      # «كما يوجد ٦ محلات تجارية بالقرب من …» (aqar 20476375): the shops are nearby
+                      "بالقرب", "قريب", "قريبه", "بجوار", "مجاوره")),                                  # «جنوب: مواقف ثم شارع» is a boundary
     # «خزان المياه مستقل» is a tank, «دورة مياه مستقلة» a bathroom — not a meter (checked only on the
     # «مياه مستقل» / «كهرباء مستقلة» shapes; «خزانات وعدادات مستقلة» names the meter itself)
     "separate_water_meter": (("خزان", "دور", "حمام", "مغسل", "سخان", "تحلي", "فلتر", "مضخ", "بئر", "بير"), ()),
@@ -697,7 +705,10 @@ def _is_boundary(w: str) -> bool:
     return False
 _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "restaurant_cafe", "food_allowed", "sports_court",
                                 "football_pitch", "events_hall", "nursery", "garden",
-                                "gym"})   # «إطلالة ونافذة على: حديقة، جامع، ونادي صحي» is the view, not the unit's gym (🔬 2026-11-06)
+                                "gym",
+                                # «قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية» — the area's shops (🔬 2026-11-07
+                                # two-way sample, aqar 12726261)
+                                "shops_inside"})   # «إطلالة ونافذة على: حديقة، جامع، ونادي صحي» is the view, not the unit's gym (🔬 2026-11-06)
 # A UNIT FIXTURE is never «nearby» (🔬 2026-11-04 live walk, dealapp): «بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة»,
 # «قريب من المسجد عدد 9 مكيفات راكبه», «20 دقيقة من روشن ❄ تكييف» — the near word belongs to the bullet before, the AC
 # is the unit's. Kept to the AC: a kitchen or a lift CAN be a nearby place's («قريب من مطبخ السلطان», a tower's lifts).
@@ -913,6 +924,11 @@ def _negated_after(nxt: list[str], fact: str) -> int:
 _DISTRICT_WORDS = frozenset(_n(w) for w in ("حي", "بحي", "وحي", "لحي", "فحي", "وبحي", "بالحي", "الحي"))
 
 
+_LEAD_VERB_FACTS = frozenset({"shops_inside", "offices_inside", "apartments_inside"})
+_LEAD_VERBS = frozenset(_n(w) for w in ("يوجد", "توجد", "فيه", "فيها", "به", "بها", "يحتوي", "تحتوي", "يضم", "تضم"))
+_EXIST_VERBS = frozenset(_n(w) for w in ("يوجد", "توجد", "يحتوي", "تحتوي", "يضم", "تضم"))
+
+
 def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: int,
            cue_in: bool = False, near_in: bool = False, list_in: bool = False) -> tuple[Optional[bool], int, int]:
     """The outcome of ONE token hit: (True|False|None, quote start, quote end) in the normalised clause.
@@ -1011,7 +1027,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         w9 = gp[-9:]
         at = max((k for k, w in enumerate(w9) if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS
                   or _strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC), default=-1)
-        if at >= 0 and not any(_starts(_strip_wa(w), _OWN_CUES) for w in w9[at + 1:]):
+        if at >= 0 and not any(_starts(_strip_wa(w), _OWN_CUES) for k, w in enumerate(w9[at + 1:], at + 1)
+                               if k != _near_object_at(w9, at)):
             return None, s, e
     if fact in _NEAR_PUBLIC_FACTS:
         w4 = gp[-4:]
@@ -1084,7 +1101,19 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # the «لايوجد» belongs to the ACs before, and «نعم» right after the item is the item's own yes.
     if any(_strip_wa(w) == "نعم" for w in gn[:2]) and not _negated_after(nxt, fact):
         return True, ws, we + len(" ".join([""] + nxt[:1 + [_strip_wa(w) for w in gn[:2]].index("نعم")]))
-    back = _negated_before(prev)
+    # A NEGATED LEAD VERB (🔬 2026-11-07, two-way sample): the shops / offices / apartments regexes START with the verb
+    # («يوجد محلات», «فيها محلات», «تحتوي على محلات»), so the «لا / ما» before it was alone in `prev` and «لا يوجد
+    # محلات» was served as a YES. The look-back now sees the verb too; «كما يوجد محلات» is not a negation.
+    lead = t[s:e].split()[:1]
+    if fact in _LEAD_VERB_FACTS and lead and _strip_wa(lead[0]) in _LEAD_VERBS and prev:
+        nb = _negated_before(prev + [lead[0]])
+        if nb == 2:                                  # the negator RIGHT before the verb
+            qs = len(" ".join(prev[:-1])) + (1 if len(prev) > 1 else 0)
+            return False, qs, we
+    # …and an un-negated EXISTENCE verb that opens the match affirms it: «لا يوجد مصعد ويوجد محلات» has shops (the old
+    # look-back walked past «مصعد» to the lift's «لا يوجد»). Prepositions keep the look-back: «لا يوجد بها محلات» is a no.
+    verb_affirms = fact in _LEAD_VERB_FACTS and bool(lead) and _strip_wa(lead[0]) in _EXIST_VERBS
+    back = None if verb_affirms else _negated_before(prev)
     if back is not None:
         qs = len(" ".join(prev[:len(prev) - back])) + (1 if len(prev) > back else 0)
         return False, qs, we
@@ -1213,6 +1242,50 @@ class Hit:
 _STAR_BULLET_RE = re.compile(r"(?<=\s)\*+(?=\s)")
 
 
+# The near phrase's OWN object is not an own cue (🔬 2026-11-07 two-way sample, aqar 12726261): in «قريبة من المرافق
+# العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية» the «المرافق» is what the flat is near, not «مرافق المشروع», so the
+# area's shops / market / mosque after it are the area's. Only that one word: «قريب من الخدمات ويوجد بالمجمع مسجد» still
+# owns its mosque («يوجد»), and a second «مرافق» later in the clause still counts.
+_NEAR_OBJECT_SKIP = frozenset(_n(w) for w in ("من", "جميع", "كل", "لجميع", "لكل", "الى", "إلى", "ل", "جدا", "جداً"))
+
+
+def _near_object_at(words: list[str], at: int) -> int:
+    """Index of the near word's object in `words` (the first word after `at` past «من / جميع / كل»), when that object
+    is a services word («الخدمات», «المرافق»); -1 otherwise."""
+    k = at + 1
+    while k < len(words) and _strip_wa(words[k]) in _NEAR_OBJECT_SKIP:
+        k += 1
+    return k if k < len(words) and (_strip_wa(words[k]) in _SERVICES_OBJECT or words[k] in _SERVICES_OBJECT) else -1
+
+
+# A NEARBY-SERVICES HEADING names the AREA's places after it (🔬 2026-11-07, backlog 1507: of 19 real aqar served yeses
+# after «قريب من … الخدمات», 9 were the area's): «بالقرب من جميع الخدمات التي تحتاجها، وتشمل: 🕌 جامع 🛒 سوبرماركت 🌿
+# حديقة» (13447339), «قريبه من كل الخدمات /حديقة /مسجد.» (15125261), «بقربه من خدمات متعددة : حدائق / مدارس / مسجد»
+# (15130356), «قريب جدا من الخدمات بشكل عام تموينات - محل غاز - مطعم» (8798208). The heading runs on through list
+# separators («،», «/», «-», «•», emoji) and stops at «.», a new line or an own cue — «قريبه من الخدمات • يوجد نادي
+# رياضي», «قريب من كل الخدمات *مع مرافق داخلية:* نادي رياضي», «خدمات الكامبوند نادي صحي» stay the ad's own.
+_SVC_NEAR = frozenset(_NEAR_WORDS) | frozenset(_n(w) for w in ("القرب", "بقربه", "بقربها", "بقرب", "لقربه", "لقربها"))
+_SVC_STOP = frozenset(_n(w) for w in ("المشروع", "للمشروع", "بالمشروع", "مشروع", "المجمع", "للمجمع", "بالمجمع", "مجمع",
+                                      "الكامبوند", "الكمباوند", "كمباوند", "كامبوند", "بالكمباوند", "المبني", "العماره",
+                                      "للعماره", "بالعماره", "للسكان"))
+
+
+def _svc_heading_end(words: list[str]) -> int:
+    """Index just past «<near word> من [جميع/كل] الخدمات/المرافق/خدمات …» in `words`, or -1."""
+    for k, w in enumerate(words):
+        if _strip_wa(w) in _SVC_NEAR or w in _SVC_NEAR:
+            j = k + 1
+            while j < len(words) and _strip_wa(words[j]) in _NEAR_OBJECT_SKIP:
+                j += 1
+            if j < len(words) and _starts(_strip_wa(words[j]), _SERVICES_OBJECT):
+                return j + 1
+    return -1
+
+
+def _svc_stops(w: str) -> bool:
+    return _starts(_strip_wa(w), _OWN_CUES) or _strip_wa(w) in _SVC_STOP or w in _SVC_STOP or _strip_wa(w) in _HAS_CUES
+
+
 def _owns_item(words: list[str]) -> bool:
     """An own cue in a nearby / view list item makes it the ad's own: «خاص بالحي» stays the district's, «مدرسة فيها نادي»
     stays the school's (the list goes on)."""
@@ -1281,6 +1354,12 @@ def _num_hits(fact: str, t: str, ci: int, raw_clause: str = "", list_idx: frozen
                 continue                      # «كل شقه 2 دورات مياه»: a per-unit count, not the home's
             if any(w in _NEAR_WORDS for w in before):
                 continue
+            if fact == "shops_count" and (any(_starts(_strip_wa(w), _EXCLUDE["shops_inside"][0]) for w in before[-3:])
+                                          # «خلف العمارة 4 محلات»: shops behind / opposite the building (CodeRabbit on #11068)
+                                          or any(_strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC for w in before[-3:])
+                                          or any(_starts(_strip_wa(w), _EXCLUDE["shops_inside"][1])
+                                                 for w in t[m.end():].split()[:2])):
+                continue                      # «تصلح 4 محلات», «4 محلات حسب الرخصة»: what COULD be there (🔬 2026-11-07)
             if any(_strip_wa(w).startswith(x) for w in before for x in ("نظام", "رخص", "تصريح", "يسمح", "مسموح", "حتي")):
                 continue                      # «نظام البناء 3 ادوار», «تصريح حتى 12 دور»: what may be built, not what is
             if fact == "floors" and ("ارضي" in t[max(0, m.start() - 12):m.end() + 12] or after.lstrip().startswith("مي")):
@@ -1341,6 +1420,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     prev_end = 0
     list_idx = _list_index_values(raw)
     void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
+    svc_on = False
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
         # A NEARBY LIST runs on across commas (🔬 2026-11-04 café audit): «Close to shops, restaurants, and markets»,
         # «قريبة من جميع الخدمات: مسجد، بقالة، مغسلة، مطعم» — each item is its own clause, so the near word was lost.
@@ -1352,6 +1432,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # words[0] below would crash the whole run (2026-11-03: every shard of facts-words died on «… مياه وكهرباء، بيشة»)
         if not t.strip() or ci in void:
             near_list = False
+            svc_on = svc_on and "." not in sep and "\n" not in sep   # a skipped clause after «.» still ends the heading
             continue
         words = t.split()
         # an item that STARTS with a place runs on as the list's item however long the clause is: «إطلالة ونافذة على: حديقة،
@@ -1371,12 +1452,25 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             head = t[:cut].split()
             if head and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in head) and not _owns_item(head):
                 item_end = cut
+        # the nearby-services heading (🔬 2026-11-07, backlog 1507): [svc_from, svc_to) of `t` holds the AREA's places
+        starts_at = [m.start() for m in re.finditer(r"\S+", t)]
+        svc_from = svc_to = -1
+        hs = _svc_heading_end(words)
+        if hs >= 0:
+            stop = next((k for k in range(hs, len(words)) if _svc_stops(words[k])), len(words))
+            if stop > hs:
+                svc_from, svc_to = starts_at[hs], (starts_at[stop] if stop < len(words) else len(t))
+            svc_on = stop == len(words)
+        elif svc_on and "." not in sep and "\n" not in sep and not any(_svc_stops(w) for w in words):
+            svc_from, svc_to = 0, len(t)
+        else:
+            svc_on = False
         n_words = len(words)
         for fact, pats in _PATTERNS.items():
             for rx, forced in pats:
                 for m in rx.finditer(t):
                     v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in,
-                                       list_in or m.end() <= item_end)
+                                       list_in or m.end() <= item_end or svc_from <= m.start() < svc_to)
                     if v is not None:
                         bool_hits.setdefault(fact, {}).setdefault(v, (ci, qs, qe))
         # what this clause hands to the next one: a cue (or a cued utility list going on), a «nearby» heading
@@ -1475,6 +1569,13 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         hits = num_hits.get(fact, [])
         if len({h.value for h in hits}) == 1:      # several different counts → none, never a pick
             emit(fact, float(hits[0].value), quote_of(hits[0].clause, hits[0].s, hits[0].e))
+    # A STATED NUMBER OF SHOPS says the building has shops (🔬 2026-11-07 two-way recall sample: 15 of 25 building ads
+    # that state their shops carried no answer — «عباره عن أربع محلات», «الدور الأرضي:- ثلاث معارض», «5محلات و4شقق»: the
+    # count was read, the yes was not). Only when the ad said nothing else about shops either way.
+    sc = next((r for r in out if r["fact"] == "shops_count"), None)
+    # «فتحات» is left out: on a showroom («معرض مكون من ٣ فتحات») it is the frontage openings, not three shops.
+    if sc and (sc["value_num"] or 0) >= 1 and "shops_inside" not in bool_hits and "فتح" not in norm(sc["quote"]):
+        emit("shops_inside", True, sc["quote"])
     # age: the scrapers' own labelled-prose reader on the raw text (open bounds stay unknown)
     if "property_age_years" not in {r["fact"] for r in out} and not num_hits.get("property_age_years"):
         ages = {}
@@ -2454,6 +2555,41 @@ def selftest() -> None:
         ("عمارة فيها محلات تجارية", {"shops_inside": True}, ()),
         ("يوجد 4 معارض", {"shops_inside": True, "shops_count": 4.0}, ()),
         ("محل للإيجار", {}, ("shops_inside",)),
+        # a negated lead verb is a stated NO, never a yes (🔬 2026-11-07)
+        # a stated count of shops is a yes; a possible count is nothing (🔬 2026-11-07)
+        ("عباره عن أربع محلات وشقق", {"shops_inside": True, "shops_count": 4.0}, ()),
+        ("الدور الأرضي:- ثلاث معارض . الدور الاول :- شقة", {"shops_inside": True, "shops_count": 3.0}, ()),
+        ("تتكون العماره من 5محلات و4شقق", {"shops_inside": True, "shops_count": 5.0}, ()),
+        ("داخلي تصلح 4 محلات وشقق", {}, ("shops_inside", "shops_count")),
+        ("يمكن عمل ثلاث محلات", {}, ("shops_inside", "shops_count")),
+        ("معرض للايجار مكون من ٣ فتحات مساحة كل فتحة ٦٠ متر", {"shops_count": 3.0}, ("shops_inside",)),
+        ("منها: كافيه أو مطعم 4 محلات حسب الرخصة", {}, ("shops_inside", "shops_count")),
+        ("لا يوجد محلات", {"shops_inside": False}, ()),
+        ("ولا توجد محلات بالعمارة", {"shops_inside": False}, ()),
+        ("ما فيها محلات", {"shops_inside": False}, ()),
+        ("لا تحتوي على محلات", {"shops_inside": False}, ()),
+        ("لا يوجد مكاتب", {"offices_inside": False}, ()),
+        ("لا يوجد شقق", {"apartments_inside": False}, ()),
+        ("كما يوجد محلات بالعمارة", {"shops_inside": True}, ()),
+        ("لا يوجد مصعد ويوجد محلات", {"elevator": False, "shops_inside": True}, ()),
+        # 🔬 2026-11-07 two-way sample: the area's shops, a possible use, the street's shops
+        ("قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية 🕌 مساجد", {}, ("shops_inside", "mosque")),
+        ("قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ سوبرماركت", {}, ("market",)),
+        ("قريب من الخدمات، مرافق المشروع: مسجد ونادي رياضي", {"mosque": True, "gym": True}, ()),
+        # a nearby-services heading runs on through a list and stops at an own cue (🔬 2026-11-07, backlog 1507)
+        ("بالقرب من جميع الخدمات التي تحتاجها، وتشمل: 🕌 جامع 🛒 سوبرماركت 🌿 حديقة", {}, ("mosque", "market", "garden")),
+        ("●قريبه من كل الخدمات /حديقة /مسجد. ●قريبه من محطة المترو", {}, ("garden", "mosque")),
+        ("قريب جدا من الخدمات بشكل عام تموينات - محل غاز - مطعم - مطاحن", {}, ("restaurant_cafe",)),
+        ("قريبه من الخدمات • يوجد نادي رياضي • يوجد حضانه أطفال", {"gym": True, "nursery": True}, ()),
+        ("بقربه من الخدمات والطرق الرئيسية، خدمات المشروع • العاب اطفال • حديقة خارجية • نادي رياضي", {"gym": True}, ()),
+        ("قريب من كل الخدمات *مع مرافق داخلية:* نادي رياضي للرجال والنساء", {"gym": True}, ()),
+        ("مناسبة لمغاسل السيارات مناسبة لمحلات تجارية مناسبة لدايف ثرو", {}, ("shops_inside",)),
+        ("يمكن الاستفادة من الموقع بعدة خيارات، منها: ☕ كافيه أو مطعم 🏪 4 محلات حسب الرخصة", {}, ("shops_inside",)),
+        ("شارعها تجاري مقام فيه محلات بالعماير الي امامها", {}, ("shops_inside",)),
+        ("كما يوجد ٦ محلات تجارية بالقرب من العمارة", {}, ("shops_inside",)),
+        ("خلف العمارة 4 محلات تجارية", {}, ("shops_inside", "shops_count")),
+        ("🏬 4 محلات تجارية ✅ جميع الشقق مؤجرة ✅ جميع المحلات مؤجرة", {"shops_inside": True}, ()),
+        ("عماره للبيع دورين ع 3 شوارع شرق جامع الحوطي فيها محلات تجارية مؤجرة وشقق", {"shops_inside": True}, ()),
         ("مبنى يحتوي على مكاتب", {"offices_inside": True}, ()),
         ("عدد المكاتب 10", {"offices_inside": True}, ()),
         ("مكتب للإيجار", {}, ("offices_inside",)),
