@@ -1202,7 +1202,8 @@ def muhaysini_page(url: str, fetch=None) -> dict | None:
         if isinstance(v, bool) or v in (None, "", 0, "0"):
             return
         lines.append(f"{label} {str(v).strip()}{tail}")
-    put("نوع الإعلان", {"بيع": "للبيع", "إيجار": "للايجار", "ايجار": "للايجار"}.get(str(rega.get("advertisementType") or "").strip()))
+    put("نوع الإعلان", {"بيع": "للبيع", "للبيع": "للبيع", "ايجار": "للايجار", "للايجار": "للايجار"}.get(
+        norm(str(rega.get("advertisementType") or "")).strip()))   # norm folds إ→ا (CodeRabbit on #11031)
     put("المنطقة", loc.get("region"))
     put("المدينة", (rec.get("City") or {}).get("name") if isinstance(rec.get("City"), dict) else None)
     put("المدينة", loc.get("city"))
