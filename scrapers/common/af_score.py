@@ -635,18 +635,23 @@ def strip_related(page: dict, body: str) -> dict:
     bits: set[str] = set()
     for block in _RELATED_BLOCK.findall(body or ""):
         bits |= _text_bits(block)
-    head, tail = _similar_split(body)
-    # …but a line the ad ITSELF states above the heading stays, even when a similar card repeats it (CodeRabbit on #11065)
-    # A card phrase that sits INSIDE any of the ad's own text above the heading is the ad's too: the card «مؤثثه بالكامل»
-    # must not delete the ad's longer «شقة مؤثثه بالكامل» (CodeRabbit Major on #11072).
-    own = _text_bits(head)
-    bits |= {b for b in _text_bits(tail) - own if not any(b in o for o in own)}
+    _head, tail = _similar_split(body)
+    # A line the ad ITSELF states stays, even when a similar card repeats it or a part of it (CodeRabbit on #11065, Major
+    # on #11072). «The ad's own lines» are the evidence lines the page yields with the similar tail CUT OUT — never raw
+    # markup above the heading, where a script or a menu could hold the card's phrase (CodeRabbit Major on #11080) — and
+    # a line is protected only by being one of them, so a card's «مطبخ مجهز بالكامل» still goes while the ad's own
+    # «لا يوجد مطبخ مجهز بالكامل» stays (CodeRabbit Major on #11080).
+    bits |= _text_bits(tail)
     if not bits:
         return page
+    cut = _RELATED_BLOCK.sub("", body.replace(tail, "", 1) if tail else body)   # the same holds for a related-ads block
+    ad = page_evidence(cut) or {}
+    own = {norm(x) for x in (ad.get("evidence_lines") or []) + (ad.get("text_head") or "").split(" | ")}
+    own.discard("")
 
     def keep_line(x: str) -> bool:
         nx = norm(x)
-        return not any(nx == b or (len(b) >= 12 and b in nx) for b in bits)
+        return nx in own or not any(nx == b or (len(b) >= 12 and b in nx) for b in bits)
 
     keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
     head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
