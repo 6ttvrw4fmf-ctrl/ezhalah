@@ -195,15 +195,22 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
     const rowRe = /\[\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'/g;
     let r: RegExpExecArray | null;
     while ((r = rowRe.exec(span))) {
-      // Positioned at the table's first INDEX use after its declaration (`name[i][1]`, inside the loop that
-      // applies the rows). A size read (`n := array_length(name, 1)`) can sit before an inline patch that
-      // creates a row's anchor, and indexes nothing, so it never counts. No index use → the order cannot be
-      // known, and the migration is reported as unresolved rather than placed at a guessed position.
+      // Positioned at the table's first index use INSIDE A LOOP after its declaration — the loop that applies
+      // the rows (directly, `replace(x, name[i][1], …)`, or through variables, `needle := name[i][1]`). A read
+      // outside a loop (`n := array_length(name, 1)`, `preview := name[1][1]`) applies nothing and can sit
+      // before an inline patch that creates a row's anchor. No such use → the order cannot be known, and the
+      // migration is reported as unresolved rather than placed at a guessed position.
       // `a[1]` is an identifier (\w+), so it is safe inside a pattern.
-      const use = new RegExp(String.raw`\b${a[1]}\s*\[`, 'g');
-      use.lastIndex = end + 1;
-      let u: RegExpExecArray | null;
-      while ((u = use.exec(sql)) && commentedOut(u.index)) { /* a comment, not the loop */ }
+      const idx = new RegExp(String.raw`\b${a[1]}\s*\[`);
+      const loopRe = /\bloop\b([\s\S]*?)\bend\s+loop\b/gi;
+      loopRe.lastIndex = end + 1;
+      let u: { index: number } | null = null;
+      let lp: RegExpExecArray | null;
+      while (!u && (lp = loopRe.exec(sql))) {
+        if (commentedOut(lp.index)) continue;
+        const hit = idx.exec(lp[1]);
+        if (hit) u = { index: lp.index + 'loop'.length + hit.index };
+      }
       if (!u) { unplacedTables++; continue; }
       out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: u.index });
     }

@@ -52,8 +52,8 @@ fs.writeFileSync(path.join(dir, '20990101000006_dedup.sql'),
   "k := length(replace(out_def, a6, b6));\n" +
   "execute out_def; end $$;\n");
 fs.writeFileSync(path.join(dir, '20990101000007_table.sql'),
-  "do $$ declare ed text[][] := array[['+ U $$', '+ V $$']]; src text; out_def text; n int; begin\n" +
-  "n := array_length(ed, 1);\n" +
+  "do $$ declare ed text[][] := array[['+ U $$', '+ V $$']]; src text; out_def text; n int; pv text; begin\n" +
+  "n := array_length(ed, 1); pv := ed[1][1];\n" +
   "src := pg_get_functiondef('public.f_lin()'::regprocedure);\n" +
   "-- ed holds the edits; ed is applied below\n" +
   "out_def := replace(src, E'+ S $$', E'+ S + U $$');\n" +
