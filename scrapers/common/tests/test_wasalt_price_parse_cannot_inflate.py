@@ -9,9 +9,11 @@ rows of its own archived payload. Nothing in our code inflates anything.
 But the reason it CANNOT is a single unguarded implementation detail. run.py maps price with a bare
 `int(info["salePrice"])` on a JSON-native number, and area with `int(float(carpetArea))`. Swap either
 for the shared `normalize.to_int()` helper — an entirely reasonable-looking tidy-up, and run.py has a
-comment begging you not to — and a 3-decimal value is read as EUROPEAN DIGIT GROUPING:
-`to_int("3523.967") == 3523967`. On the real Makkah land listing below that turns a 3,523.967 m plot
-into 3,523,967 m, and the same swap on the price turns 24,829,872.186 into 24,829,872,186.
+comment begging you not to — and a 3-decimal value was read as EUROPEAN DIGIT GROUPING:
+`to_int("3523.967") == 3523967`. On the real Makkah land listing below that turned a 3,523.967 m plot
+into 3,523,967 m, and the same swap on the price turned 24,829,872.186 into 24,829,872,186.
+Since 2026-09-27 to_int truncates those long decimals, but 1-3 digits + exactly 3 decimals is still
+grouping (`to_int("812.375") == 812375`), so the swap still inflates — the barrier stays.
 
 That is the exact 1000x defect four investigations went looking for. It is not in the code today. This
 barrier is what keeps it that way, because a comment is not a code path.
@@ -32,6 +34,7 @@ from scrapers.wasalt.run import map_property   # noqa: E402  -- the REAL mapper,
 # Exactly what wasalt publishes for this listing, trimmed to the keys map_property reads.
 SALE_PRICE = 24829872186
 CARPET_AREA = "3523.967"          # a STRING with three decimals — the whole hazard
+SMALL_3DP = "812.375"             # the 3-decimal shape to_int STILL reads as grouping (812,375)
 # NOTE the key: the SEARCH payload map_property() consumes calls this `builtUpArea`; the DETAIL
 # payload archived into ar_data calls the same figure `carpetArea`. Using the detail-page name here
 # silently yields area_m2=None and the barrier tests nothing — which is exactly what happened on the
@@ -79,6 +82,9 @@ def test_a_fractional_price_truncates_and_is_never_multiplied_by_1000():
     fractional = {**REAL_PAYLOAD,
                   "propertyInfo": {**REAL_PAYLOAD["propertyInfo"], "salePrice": 24829872.186}}
     assert map_property(fractional, "sale", None)["price_total"] == 24829872
+    small = {**REAL_PAYLOAD,
+             "propertyInfo": {**REAL_PAYLOAD["propertyInfo"], "salePrice": float(SMALL_3DP)}}
+    assert map_property(small, "sale", None)["price_total"] == 812
 
 
 def test_area_truncates_and_is_never_multiplied_by_1000():
@@ -87,6 +93,8 @@ def test_area_truncates_and_is_never_multiplied_by_1000():
     row = _mapped()
     assert row["area_m2"] is not None, "area did not parse at all — check the builtUpArea key above"
     assert row["area_m2"] == 3523
+    small = {**REAL_PAYLOAD, "attributes": [{"key": "builtUpArea", "value": SMALL_3DP}]}
+    assert map_property(small, "sale", None)["area_m2"] == 812
 
 
 def test_price_is_not_derived_from_area_at_all():
@@ -100,18 +108,18 @@ def test_price_is_not_derived_from_area_at_all():
 # and the barrier would be asserting nothing.
 
 def test_to_int_would_inflate_the_area_1000x():
-    assert normalize.to_int(CARPET_AREA) == 3523967, (
+    assert normalize.to_int(SMALL_3DP) == 812375, (
         "to_int no longer reads 3 decimals as European grouping. If that changed deliberately, this "
         "barrier's premise moved — re-read normalize.to_int's docstring before relaxing anything."
     )
 
 
 def test_to_int_would_inflate_a_fractional_price_1000x():
-    assert normalize.to_int("24829872.186") == 24829872186
+    assert normalize.to_int(float(SMALL_3DP)) == 812375
 
 
 def test_the_two_helpers_are_not_interchangeable():
     """to_int_numeric is the safe one; to_int is not. Different answers on the same input is the
     whole reason run.py keeps its own parse."""
-    assert normalize.to_int_numeric(CARPET_AREA) == 3523
-    assert normalize.to_int(CARPET_AREA) != normalize.to_int_numeric(CARPET_AREA)
+    assert normalize.to_int_numeric(SMALL_3DP) == 812
+    assert normalize.to_int(SMALL_3DP) != normalize.to_int_numeric(SMALL_3DP)
