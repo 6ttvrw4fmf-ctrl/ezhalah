@@ -238,7 +238,8 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             # The bucket must sit in the SAME clause as this field's keyword: «عدد غرف النوم: 4، الحمامات: 7+» gives the
             # bathrooms a «7+», never the bedrooms (CodeRabbit on #11031).
             if (name in ("bedrooms", "bathrooms") and out[name] == MISMATCH and stored.get(col) is not None
-                    and any(bucket_floor_next_to(kw, c, float(stored.get(col)))
+                    and any(bucket_floor_next_to(kw, c, float(stored.get(col)),
+                                                 ROOM_KW["bathrooms" if name == "bedrooms" else "bedrooms"])
                             for x in lines for c in CLAUSE_SPLIT.split(x))):
                 out[name] = MATCH
             # ONE hall is written as the bare noun: haraj 21839188 «غرفة وصالة», 21839193 «4 غرف وصالة كبيره» (score run
@@ -284,18 +285,35 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
     return out
 
 
-def bucket_floor_next_to(kw: str, clause: str, stored: float) -> bool:
+def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = "") -> bool:
     """An open bucket TIGHTLY attached to this field's keyword (within 12 chars, no other figure between) whose floor
-    the stored count meets. «عدد غرف النوم: 4 الحمامات: 7+» (no separator) gives the «7+» to the bathrooms only
-    (CodeRabbit follow-up on #11031)."""
-    for k in re.finditer(kw, clause):
-        for m in OPEN_BUCKET.finditer(clause):
-            gap = clause[k.end():m.start()] if m.start() >= k.end() else clause[m.end():k.start()]
-            if len(gap) <= 12 and not re.search(r"\d", gap) and stored >= int(m.group(1) or m.group(2)):
-                return True
+    the stored count meets. «عدد غرف النوم: 4 الحمامات: 7+» (no separator) gives the «7+» to the bathrooms only, and
+    «الحمامات: 7+ غرف النوم: 4» too: a bucket nearer the OTHER room field's keyword is that field's (CodeRabbit on
+    #11053). «+7 غرف نوم» (bucket first) still belongs to the bedrooms."""
+    def dist(k, m):
+        return m.start() - k.end() if m.start() >= k.end() else k.start() - m.end()
+
+    def labels(k, m):          # «الحمامات: 7+» — the keyword is the label of the figure right after it
+        return k.end() <= m.start() and re.fullmatch(r"\S*\s*[:：]\s*", clause[k.end():m.start()]) is not None
+    own = list(re.finditer(kw, clause))
+    others = list(re.finditer(other_kw, clause)) if other_kw else []
+    for m in OPEN_BUCKET.finditer(clause):
+        if stored < int(m.group(1) or m.group(2)):
+            continue
+        near = [k for k in own if dist(k, m) <= 12 and not re.search(
+            r"\d", clause[k.end():m.start()] if m.start() >= k.end() else clause[m.end():k.start()])]
+        if not near:
+            continue
+        if any(labels(k, m) for k in near):
+            return True
+        if any(labels(o, m) for o in others):
+            continue
+        if not any(dist(o, m) < min(dist(k, m) for k in near) for o in others):
+            return True
     return False
 
 
+ROOM_KW = {"bedrooms": r"غرف|غرفه نوم", "bathrooms": r"حمام|دوره مياه|دورات مياه|دوره المياه|دورات المياه"}
 # «+7» / «7+» (Western or Arabic-Indic digits): an open room bucket, «N or more».
 CLAUSE_SPLIT = re.compile(r"[،,|•؛;]")
 OPEN_BUCKET = re.compile(r"(?<![\d.])\+\s*(\d{1,2})(?![\d.])|(?<![\d.])(\d{1,2})\s*\+")

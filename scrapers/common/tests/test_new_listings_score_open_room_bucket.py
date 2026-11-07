@@ -63,3 +63,15 @@ def test_a_monthly_price_logs_the_monthly_figure(capsys):
     page = S.page_evidence("<p>الإيجار 1100 ريال شهريا</p>")
     S._log_verdicts("t:3", {"price": S.MISMATCH}, {"price_annual": 12000, "rent_period_ar": "شهري"}, page)
     assert "stored=1000.0" in capsys.readouterr().out
+
+
+def test_a_bucket_after_the_other_field_stays_with_it():
+    line = "<p>الحمامات: 7+ غرف النوم: 4</p>"
+    assert _cmp({"bedrooms": 9}, line, "bedrooms") == S.MISMATCH
+    assert _cmp({"bathrooms": 9}, line, "bathrooms") == S.MATCH
+    assert _cmp({"bedrooms": 20}, "<p>+7 غرف نوم</p>", "bedrooms") == S.MATCH
+
+
+def test_room_keywords_match_the_field_registry():
+    kws = {n: k for n, _, _, k in S.FIELDS}
+    assert S.ROOM_KW["bedrooms"] == kws["bedrooms"] and S.ROOM_KW["bathrooms"] == kws["bathrooms"]
