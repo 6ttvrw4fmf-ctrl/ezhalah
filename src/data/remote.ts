@@ -20,6 +20,7 @@ import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { listingDiscountFrom } from '@/lib/listingDisplay';
 import { servedSaleFigures } from '@/lib/meterBoxPrice';
 import { followIndexPerMeterVerdict } from '@/lib/landPerMeterTotal';
+import { followIndexThousandsVerdict } from '@/lib/priceInThousands';
 import { orderByScope, scopeForDistricts, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
 import { truncateGlyphs } from '@/lib/typedReveal';
@@ -1885,6 +1886,9 @@ export async function fetchListingsForQuery(
     // A land «total» the index read as a PER-METRE price (owner 2026-11-04) prints the index's «≈ figure × area», so the
     // client budget net below keeps the card the server matched (src/lib/landPerMeterTotal.ts).
     followIndexPerMeterVerdict(l, c.effective_price);
+    // A price the index read as written in THOUSANDS (owner 2026-11-06: «75» = 75,000) prints the index's «≈ figure × 1000»
+    // the same way (src/lib/priceInThousands.ts), so the card, the client net and the count agree.
+    followIndexThousandsVerdict(l, c.effective_price);
     const region =(ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
   }
