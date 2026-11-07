@@ -122,3 +122,11 @@ def test_an_office_number_beside_the_label_is_not_the_ad_licence():   # remaxsa 
     assert cp.licence_on_page("رقم الترخيص: 1100029634") is None
     assert cp.licence_on_page("رقم الترخيص 7032067345") is None
     assert cp.licence_on_page("رقم ترخيص الاعلان 7101234567") == "7101234567"
+
+
+def test_zero_padded_values_and_per_metre_totals():          # dwelleo «04», akariyoun 5,000/m² × 1,120 m²
+    assert cp.paired_lines("عدد دورات المياه | 04") == ["عدد دورات المياه 4"]
+    lines = ["💰 السعر المطلوب: 5,000 ريال للمتر", "المساحة 1120 م²"]
+    page = {**PAGE, "evidence_lines": lines, "text_head": " | ".join(lines), "_text": "\n".join(lines)}
+    land = {**STORED, "type_ar": "أرض", "price_total": 5600000, "area_m2": 1120, "bedrooms": None, "bathrooms": None}
+    assert _judge(stored=land, card={**CARD, "text": "SAR 5,600,000 | 1120 م²"}, page=page)["price"] == MATCH
