@@ -179,6 +179,7 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
   const arrDeclRe = /\b([A-Za-z_][A-Za-z0-9_]*)\s+text\s*\[\s*\]\s*\[\s*\]\s*:=\s*array\s*\[/g;
   let a: RegExpExecArray | null;
   const tables: string[] = [];
+  let unplacedTables = 0;
   while ((a = arrDeclRe.exec(sql))) {
     tables.push(a[1]);
     // Walk from the opening bracket to its match so we only ever read inside THIS declaration.
@@ -194,16 +195,17 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
     const rowRe = /\[\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'/g;
     let r: RegExpExecArray | null;
     while ((r = rowRe.exec(span))) {
-      // Positioned where the table is first USED (its loop), not where it is declared: an inline patch
-      // between the two may create a row's anchor.
-      // Only an executable USE counts (an index `name[`, `array_length(name`, `in array name`), never a
-      // bare mention, and never one on a commented-out line. `a[1]` is an identifier (\w+), so it is safe
-      // inside a pattern.
-      const use = new RegExp(String.raw`\b${a[1]}\s*\[|array_length\s*\(\s*${a[1]}\b|\bin\s+array\s+${a[1]}\b`, 'gi');
+      // Positioned at the table's first INDEX use after its declaration (`name[i][1]`, inside the loop that
+      // applies the rows). A size read (`n := array_length(name, 1)`) can sit before an inline patch that
+      // creates a row's anchor, and indexes nothing, so it never counts. No index use → the order cannot be
+      // known, and the migration is reported as unresolved rather than placed at a guessed position.
+      // `a[1]` is an identifier (\w+), so it is safe inside a pattern.
+      const use = new RegExp(String.raw`\b${a[1]}\s*\[`, 'g');
       use.lastIndex = end + 1;
       let u: RegExpExecArray | null;
       while ((u = use.exec(sql)) && commentedOut(u.index)) { /* a comment, not the loop */ }
-      out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: u ? u.index : a.index + r.index });
+      if (!u) { unplacedTables++; continue; }
+      out.push({ anchor: r[1].replace(/''/g, "'"), replacement: r[2].replace(/''/g, "'"), pos: u.index });
     }
   }
 
@@ -260,7 +262,7 @@ function extractPatches(sql: string): { patches: { anchor: string; replacement: 
   // so a migration mixing readable and unreadable patches is reported instead of half-replayed.
   const assigned = /:=\s*replace\s*\(/g;
   let m: RegExpExecArray | null;
-  let unreadAssigned = 0;
+  let unreadAssigned = unplacedTables;
   while ((m = assigned.exec(sql))) {
     if (commentedOut(m.index)) continue;
     const semi = sql.indexOf(';', m.index);

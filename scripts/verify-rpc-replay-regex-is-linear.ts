@@ -52,11 +52,12 @@ fs.writeFileSync(path.join(dir, '20990101000006_dedup.sql'),
   "k := length(replace(out_def, a6, b6));\n" +
   "execute out_def; end $$;\n");
 fs.writeFileSync(path.join(dir, '20990101000007_table.sql'),
-  "do $$ declare ed text[][] := array[['+ U $$', '+ V $$']]; src text; out_def text; begin\n" +
+  "do $$ declare ed text[][] := array[['+ U $$', '+ V $$']]; src text; out_def text; n int; begin\n" +
+  "n := array_length(ed, 1);\n" +
   "src := pg_get_functiondef('public.f_lin()'::regprocedure);\n" +
   "-- ed holds the edits; ed is applied below\n" +
   "out_def := replace(src, E'+ S $$', E'+ S + U $$');\n" +
-  "for i in 1..array_length(ed, 1) loop out_def := replace(out_def, ed[i][1], ed[i][2]); end loop;\n" +
+  "for i in 1..n loop out_def := replace(out_def, ed[i][1], ed[i][2]); end loop;\n" +
   "execute out_def; end $$;\n");
 
 // (8) a repeated executing pair runs every time (X→Y, Y→X, X→Y ends at Y); (9) a migration that mixes a
