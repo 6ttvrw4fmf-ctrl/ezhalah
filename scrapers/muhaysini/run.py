@@ -1068,7 +1068,7 @@ def main() -> int:
             raise RuntimeError(f"{API}/list returned no properties")
         listed_ids = [i for i in (_clean(p.get("id")) for p in items) if i]
         tonight = detail_plan(listed_ids, DETAIL_BUDGET,
-                              stored_last_read() if len(listed_ids) > DETAIL_BUDGET else {})
+                              stored_last_read() if 0 < DETAIL_BUDGET < len(listed_ids) else {})
         # Listed but outside tonight's budget: SEEN on the source tonight (so never a prune candidate),
         # not rebuilt — their stored row stays as last read, and their turn comes within k nights.
         seen_not_read = {f"{PREFIX}{i}" for i in listed_ids if i not in tonight}
