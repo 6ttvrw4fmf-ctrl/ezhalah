@@ -542,7 +542,12 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
                 ("للايجار", "للبيع", "تجاري", "صناعي", "تجاريه", "صناعيه", "مبرد", "مبرده", "للتاجير")),
     "garden": (_BEARINGS + ("مناسب", "مثالي", "خلف", "مقابل"),   # «الوجهة: غرب حديقة» is a boundary; «مناسب للحديقة» a maybe
                ("عامه", "عام", "الحي", "العامه")),
-    "parking": (_BEARINGS, ()),                                  # «جنوب: مواقف ثم شارع» is a boundary
+    "parking": (_BEARINGS, ()),
+    # A POSSIBLE use or the STREET's shops are not shops inside the property (🔬 2026-11-07 two-way sample, 4 of 25
+    # served yeses wrong): «مناسبة لمحلات تجارية» (aqar 20809503), «منها: كافيه أو مطعم 🏪 4 محلات حسب الرخصة» (9566204),
+    # «شارعها تجاري مقام فيه محلات بالعماير الي امامها» (39729)
+    "shops_inside": (("مناسب", "مناسبه", "يصلح", "تصلح", "مثالي", "مثاليه", "ينفع", "تنفع", "لبناء", "لانشاء", "مقام"),
+                     ("حسب", "بالعماير", "بالعمائر", "بالعماره المقابله", "المقابله", "المجاوره")),                                  # «جنوب: مواقف ثم شارع» is a boundary
     # «خزان المياه مستقل» is a tank, «دورة مياه مستقلة» a bathroom — not a meter (checked only on the
     # «مياه مستقل» / «كهرباء مستقلة» shapes; «خزانات وعدادات مستقلة» names the meter itself)
     "separate_water_meter": (("خزان", "دور", "حمام", "مغسل", "سخان", "تحلي", "فلتر", "مضخ", "بئر", "بير"), ()),
@@ -697,7 +702,10 @@ def _is_boundary(w: str) -> bool:
     return False
 _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "restaurant_cafe", "food_allowed", "sports_court",
                                 "football_pitch", "events_hall", "nursery", "garden",
-                                "gym"})   # «إطلالة ونافذة على: حديقة، جامع، ونادي صحي» is the view, not the unit's gym (🔬 2026-11-06)
+                                "gym",
+                                # «قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية» — the area's shops (🔬 2026-11-07
+                                # two-way sample, aqar 12726261)
+                                "shops_inside"})   # «إطلالة ونافذة على: حديقة، جامع، ونادي صحي» is the view, not the unit's gym (🔬 2026-11-06)
 # A UNIT FIXTURE is never «nearby» (🔬 2026-11-04 live walk, dealapp): «بلكونة مطلة على لاندسكيب 🔹مكيفات راكبة»,
 # «قريب من المسجد عدد 9 مكيفات راكبه», «20 دقيقة من روشن ❄ تكييف» — the near word belongs to the bullet before, the AC
 # is the unit's. Kept to the AC: a kitchen or a lift CAN be a nearby place's («قريب من مطبخ السلطان», a tower's lifts).
@@ -1011,7 +1019,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         w9 = gp[-9:]
         at = max((k for k, w in enumerate(w9) if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS
                   or _strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC), default=-1)
-        if at >= 0 and not any(_starts(_strip_wa(w), _OWN_CUES) for w in w9[at + 1:]):
+        if at >= 0 and not any(_starts(_strip_wa(w), _OWN_CUES) for k, w in enumerate(w9[at + 1:], at + 1)
+                               if k != _near_object_at(w9, at)):
             return None, s, e
     if fact in _NEAR_PUBLIC_FACTS:
         w4 = gp[-4:]
@@ -1211,6 +1220,22 @@ class Hit:
 
 # A spaced «*» is a bullet between items («* مدارس * سوبر ماركت»); «*المميزات:*» (bold) and «3*4» are not.
 _STAR_BULLET_RE = re.compile(r"(?<=\s)\*+(?=\s)")
+
+
+# The near phrase's OWN object is not an own cue (🔬 2026-11-07 two-way sample, aqar 12726261): in «قريبة من المرافق
+# العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية» the «المرافق» is what the flat is near, not «مرافق المشروع», so the
+# area's shops / market / mosque after it are the area's. Only that one word: «قريب من الخدمات ويوجد بالمجمع مسجد» still
+# owns its mosque («يوجد»), and a second «مرافق» later in the clause still counts.
+_NEAR_OBJECT_SKIP = frozenset(_n(w) for w in ("من", "جميع", "كل", "لجميع", "لكل", "الى", "إلى", "ل"))
+
+
+def _near_object_at(words: list[str], at: int) -> int:
+    """Index of the near word's object in `words` (the first word after `at` past «من / جميع / كل»), when that object
+    is a services word («الخدمات», «المرافق»); -1 otherwise."""
+    k = at + 1
+    while k < len(words) and _strip_wa(words[k]) in _NEAR_OBJECT_SKIP:
+        k += 1
+    return k if k < len(words) and (_strip_wa(words[k]) in _SERVICES_OBJECT or words[k] in _SERVICES_OBJECT) else -1
 
 
 def _owns_item(words: list[str]) -> bool:
@@ -2454,6 +2479,15 @@ def selftest() -> None:
         ("عمارة فيها محلات تجارية", {"shops_inside": True}, ()),
         ("يوجد 4 معارض", {"shops_inside": True, "shops_count": 4.0}, ()),
         ("محل للإيجار", {}, ("shops_inside",)),
+        # 🔬 2026-11-07 two-way sample: the area's shops, a possible use, the street's shops
+        ("قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية 🕌 مساجد", {}, ("shops_inside", "mosque")),
+        ("قريبة من المرافق العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ سوبرماركت", {}, ("market",)),
+        ("قريب من الخدمات، مرافق المشروع: مسجد ونادي رياضي", {"mosque": True, "gym": True}, ()),
+        ("مناسبة لمغاسل السيارات مناسبة لمحلات تجارية مناسبة لدايف ثرو", {}, ("shops_inside",)),
+        ("يمكن الاستفادة من الموقع بعدة خيارات، منها: ☕ كافيه أو مطعم 🏪 4 محلات حسب الرخصة", {}, ("shops_inside",)),
+        ("شارعها تجاري مقام فيه محلات بالعماير الي امامها", {}, ("shops_inside",)),
+        ("🏬 4 محلات تجارية ✅ جميع الشقق مؤجرة ✅ جميع المحلات مؤجرة", {"shops_inside": True}, ()),
+        ("عماره للبيع دورين ع 3 شوارع شرق جامع الحوطي فيها محلات تجارية مؤجرة وشقق", {"shops_inside": True}, ()),
         ("مبنى يحتوي على مكاتب", {"offices_inside": True}, ()),
         ("عدد المكاتب 10", {"offices_inside": True}, ()),
         ("مكتب للإيجار", {}, ("offices_inside",)),
