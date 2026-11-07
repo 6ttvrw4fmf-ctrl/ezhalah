@@ -190,13 +190,14 @@ def inherit_from_project(rows: list[dict]) -> None:
 def walk(log=print) -> dict:
     sm = H.get_text(SITEMAP, allowed=_allowed)
     urls = [u for u in dict.fromkeys(re.findall(r"<loc>\s*([^<]+?)\s*</loc>", sm)) if "/units/" in u and _allowed(u)]
-    units, bad = {}, Counter()
+    units, bad, gone_urls = {}, Counter(), []
     for u in urls:
         try:
             p = parse_unit(H.get_text(u, allowed=_allowed))
         except H.Blocked as e:
-            if " 404 " in str(e) or " 410 " in str(e):
+            if re.match(r"HTTP (404|410) at ", str(e)):      # the plain non-200 shape, never a wall
                 bad["gone_404"] += 1
+                gone_urls.append(u)
                 continue
             raise
         if p is None:
@@ -204,7 +205,7 @@ def walk(log=print) -> dict:
             continue
         units[u.rsplit("/", 1)[1]] = (u, p)
     log(f"  {len(units)} of {len(urls)} unit pages parsed")
-    return {"listed": len(urls), "units": units, "bad": bad}
+    return {"listed": len(urls), "units": units, "bad": bad, "gone_urls": gone_urls}
 
 
 def main() -> int:
@@ -224,7 +225,10 @@ def main() -> int:
                 continue
             (res if got[1] == "residential" else com).append(got[0])
         inherit_from_project(res + com)
-        ok = not w["bad"] and len(w["units"]) == w["listed"] > 0
+        # A sitemap unit whose OWN page answers 404 is a removed ad (2026-11-07: EHKyWc1M, served dead), not an
+        # unreadable walk: it must not freeze every prune.
+        gone404 = w["bad"].get("gone_404", 0)
+        ok = not (set(w["bad"]) - {"gone_404"}) and len(w["units"]) + gone404 == w["listed"] > 0
         cover = {"sitemap_units": w["listed"], "parsed": len(w["units"]), "bad": dict(w["bad"]), "complete": ok}
         print(f"  coverage: {json.dumps(cover)}\n  mapped: {len(res)} residential + {len(com)} commercial; "
               f"skipped (not guessed): {dict(skipped)}", flush=True)
@@ -239,9 +243,14 @@ def main() -> int:
                                             com_ads={r["ad_number"] for r in com}, source=SOURCE)
         if sup:
             notes.append(f"superseded={sup}")
+        _GONE[0] = gone = _make_gone(next((r["listing_url"] for r in res + com), None))
+        listed_404 = {f"{PREFIX}{u.rsplit('/', 1)[1]}" for u in w.get("gone_urls", [])}
         for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
             if rows and ok:
-                notes.append(f"{tbl} pruned={db.prune_unseen(tbl, {r['ad_number'] for r in rows}, source=SOURCE, verify_gone=_gone)}")
+                seen = {r["ad_number"] for r in rows}
+                if listed_404:      # «once we see it, remove it»: this walk read the 404 itself → grace 1
+                    notes.append(f"{tbl} own-404 struck={db.strike_read_gone(tbl, seen, SOURCE, grace=1, verify_gone=lambda ad: gone(ad) if ad in listed_404 else ('unknown', 'not read 404 by this walk'))}")
+                notes.append(f"{tbl} pruned={db.prune_unseen(tbl, seen, source=SOURCE, verify_gone=_gone)}")
         healthy = db.end_run(run_id, ok=True, rows_seen=len(w["units"]), rows_upserted=len(res) + len(com),
                              notes="; ".join(notes)[:900], check_tables=["mrajhi_residential_listings", "mrajhi_commercial_listings"])
         if not healthy:
@@ -255,11 +264,45 @@ def main() -> int:
         raise
 
 
+def _page_status(url: str) -> Optional[int]:
+    """The ad page's own HTTP status (honest client, its 1 s gap); None when unreadable or walled."""
+    try:
+        return H.request("GET", url, allowed=_allowed, accept="text/html").status_code
+    except H.Blocked as e:
+        m = re.search(r"HTTP (404|410) at ", str(e))
+        return int(m.group(1)) if m else None
+    except Exception:  # noqa: BLE001 — unreadable is no opinion
+        return None
+
+
+def _make_gone(control_url: Optional[str], status=_page_status):
+    """prune_unseen's answer at grace, from the ad's OWN page (LISTING_LIVENESS.md §2): 404/410 is gone, 200 is live,
+    anything else unknown — and a removal counts only while this run's control unit answers 200."""
+    memo: dict[str, bool] = {}
+
+    def gone(ad_number: str) -> tuple[str, str]:
+        code = ad_number[len(PREFIX):] if ad_number.startswith(PREFIX) else ""
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", code):
+            return "unknown", f"{ad_number!r} is not an {PREFIX}<code> ad number"
+        url = f"{SITE}/units/{code}"
+        st = status(url)
+        if st == 200:
+            return "live", f"{url} answers 200"
+        if st not in (404, 410):
+            return "unknown", f"{url} answered {st}"
+        if "v" not in memo:
+            memo["v"] = bool(control_url) and status(control_url) == 200
+        if not memo["v"]:
+            return "unknown", f"{url} answers {st} but the control {control_url} did not answer 200"
+        return "gone", f"{url} answers HTTP {st} (control {control_url} 200)"
+    return gone
+
+
+_GONE = [_make_gone(None)]          # main() binds this run's control before any prune
+
+
 def _gone(ad_number: str) -> tuple[str, str]:
-    """prune_unseen's answer at grace. Absence from a list is a CANDIDATE, never a kill (LISTING_LIVENESS.md §2:
-    only a DIRECT reading of the ad's own page may deactivate). Until this site has a measured own-page oracle the
-    strike is held: UNKNOWN. ♻️ 2026-11-06 — it used to return «gone» here, an absence-only kill."""
-    return "unknown", "absent from 3 consecutive COMPLETE walks of the site's own unit sitemap; no own-page oracle yet — held (absence never kills)"
+    return _GONE[0](ad_number)
 
 
 if __name__ == "__main__":

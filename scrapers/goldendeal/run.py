@@ -148,6 +148,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.honest_fetch import WALL_WORDS  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
@@ -622,13 +623,19 @@ def make_canary(tenant: Tenant, control_pid: Optional[int],
 
 def _web_status(tenant: Tenant, pid: int, session_factory: Callable[[], Any]) -> Optional[int]:
     """HTTP status of the listing's OWN page (the card's link), None when it could not be read or
-    the request landed on a different path."""
+    the request landed on a different path — except a 404 wherever the redirects end: that is exactly
+    what a customer tapping the card gets (maqam 2026-11-07: property.maqamco.sa/properties/<id> 308s
+    to maqamco.sa/properties/<id> «رمز الخطأ 404», and the oracle called all 42 dead cards live)."""
     url = f"{tenant.base}/properties/{pid}"
     try:
         r = session_factory().get(url, timeout=30, allow_redirects=True)
     except Exception:  # noqa: BLE001 — unreadable is no opinion
         return None
-    return r.status_code if str(getattr(r, "url", url)).rstrip("/") == url else None
+    same = str(getattr(r, "url", url)).rstrip("/") == url
+    if not same and r.status_code == 404:
+        low = (getattr(r, "text", "") or "")[:4000].lower()
+        return None if any(w in low for w in WALL_WORDS) else 404     # a challenge is never a death
+    return r.status_code if same else None
 
 
 def verify_gone_for(tenant: Tenant, canary: Callable[[], tuple[bool, str]],
