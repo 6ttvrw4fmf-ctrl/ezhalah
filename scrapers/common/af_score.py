@@ -982,6 +982,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page,
                                   texts.get((table, rid)))
         fold(row, key, af_only, stored)
+        # Name the field (🔬 2026-11-07): ops_af_score keeps only the key, so every night's precision work began by
+        # guessing WHICH answer disagreed. Field names and keys only — never a value, URL, name or phone (PDPL).
+        if (mm := sorted(k for k, v in af_only.items() if v == MISMATCH)):
+            print(f"  mismatch {key} fields {mm}", flush=True)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
         answers = offered(customer_answers(ad_lines, af_only, platform, page, texts.get((table, rid))), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
