@@ -256,7 +256,10 @@ def map_unit(proj: dict, u: dict) -> Optional[tuple[dict[str, Any], str]]:
         "maid_room": _flag(u.get("maidRoom")),
         "kitchen": _flag(u.get("ketchin")),
         "furnished": _flag(u.get("furnitured")),
-        "license_number": proj.get("adLicenseNumber") or None,
+        # The API sends adLicenseNumber as a JSON NUMBER (7200423552). db._licence_on_card copies only a 10-digit
+        # STRING onto the card, so the number left all 19 rawaf cards without «رقم رخصة الإعلان» (🔧 2026-11-07).
+        "license_number": (str(proj.get("adLicenseNumber")).strip() or None)
+                          if proj.get("adLicenseNumber") not in (None, "", False) else None,
         "photo_urls": unit_photos(u) or None,
     }
     if deal == "Buy":

@@ -420,6 +420,12 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "photo_urls": (images or {}).get(p.get("id"), []),
         "additional_info": {k: v for k, v in info.items() if v not in (None, "", [], {})},
     }
+    # The REGA ad licence the ad states in its own text («رخصة الإعلان: 7200661580»), read BEFORE _redact():
+    # card parity found it on amaall's page and on 0 of 28 cards (🔧 2026-11-07).
+    lic = normalize.ad_licence_from_prose(body)
+    if lic:
+        row["license_number"] = lic
+        row["additional_info"]["rega_ad_license_number"] = lic
     row.update(_feature_flags(features))
     return row, category
 
