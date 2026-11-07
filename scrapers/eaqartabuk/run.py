@@ -467,14 +467,19 @@ def _stated_rent_period(text: Optional[str]) -> Optional[str]:
     return None
 
 
+def _several_figures(raw: Any) -> bool:
+    """True when meta.price holds two or more DISTINCT figures (e.g. two unit rents), i.e. no single price."""
+    groups = {g.replace(",", "").replace("٬", "") for g in re.findall(r"\d[\d,٬.]*", str(raw or ""))}
+    return len(groups) > 1
+
+
 def _price(raw: Any, is_rent: bool, raw_text: Optional[str] = None) -> tuple[Optional[int], Optional[int], Optional[str]]:
     """→ (price_total, price_annual, rent_period). Applies the magnitude heuristic."""
     # Two DISTINCT figures squashed into one price field are ambiguous — never pick one and never
     # concatenate. Live id 598669 (2026-08-03): a multi-unit building listing two unit rents
     # (2,500 + 1,800) yielded price_annual=18,002,500 («1800»+«2500» glued); the page displays no
     # single price at all. Null it — the deal/type fields stay, only the price is unknowable.
-    groups = {g.replace(",", "").replace("٬", "") for g in re.findall(r"\d[\d,٬.]*", str(raw or ""))}
-    if len(groups) > 1:
+    if _several_figures(raw):
         return None, None, None
     v = _int(raw)
     if not v or v <= 0:
@@ -564,7 +569,14 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
     price_total, price_annual, rent_period = _price(meta.get("price"), is_rent, _period_text)
     # Silence is the source's answer only when the whole ad (its detail text too) was read; a failed detail fetch
     # leaves the stored period alone (the upsert drops the plain None).
-    if is_rent and rent_period is None and price_annual is not None and desc_html:
+    if _several_figures(meta.get("price")):
+        # Several distinct figures in meta.price (list API, read even when the detail fetch fails): the ad has no single
+        # price any more, so a figure stored by an earlier crawl must not linger (the upsert drops a plain None).
+        if is_rent:
+            price_annual = rent_period = getattr(db, "AUTHORITATIVE_NULL", None)
+        else:
+            price_total = getattr(db, "AUTHORITATIVE_NULL", None)
+    elif is_rent and rent_period is None and price_annual is not None and desc_html:
         # The ad's own text was read and states no period: that silence is the source's answer, so a period stored
         # by an earlier crawl must not stay paired with this figure (the upsert drops a plain None).
         rent_period = getattr(db, "AUTHORITATIVE_NULL", None)

@@ -115,3 +115,30 @@ def test_a_failed_detail_fetch_keeps_the_stored_price_and_period_together():
         db._unknown_must_not_overwrite_known(row)
         stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
     assert stored == {"price_annual": 2400000, "rent_period": "monthly"}, stored
+
+
+def test_a_rental_that_turns_into_several_figures_clears_its_stale_price():
+    """Review on #10940: one rent, then two distinct unit rents (live id 598669's shape) — no single price remains."""
+    from scrapers.common import db
+    stored = {}
+    for price, desc in (("2500", "<p>الإيجار شهري</p>"), ("2500 1800", "<p>الإيجار شهري</p>"), ("2500 1800", None)):
+        item = _item("شقة للايجار")
+        item["meta"]["price"] = price
+        row, _ = map_listing(item, _mp("rent", "إيجار"), desc, [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_annual", "rent_period") if k in row})
+        if price == "2500":
+            assert stored == {"price_annual": 30000, "rent_period": "monthly"}, stored
+    assert stored == {"price_annual": None, "rent_period": None}, "a stale single rent survived two figures"
+
+
+def test_a_sale_that_turns_into_several_figures_clears_its_stale_total():
+    from scrapers.common import db
+    stored = {}
+    for price in ("380000", "380000 420000"):
+        item = _item("أرض للبيع")
+        item["meta"]["price"] = price
+        row, _ = map_listing(item, _mp("sale", "بيع"), "<p>أرض</p>", [])
+        db._unknown_must_not_overwrite_known(row)
+        stored.update({k: row[k] for k in ("price_total",) if k in row})
+    assert stored == {"price_total": None}, stored
