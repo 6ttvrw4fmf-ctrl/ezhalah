@@ -107,6 +107,17 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
+**NEW (11-06): A SITE THAT «ANSWERS 500 ON EVERY PAGE» MAY HAVE BEEN REBUILT — OPEN ITS HOMEPAGE FIRST.** aqargate's
+WordPress REST answered 500 from 11-05 ~21:00 UTC (crawl 0 rows, liveness controls 0/5) while aqargate.com answered 200
+with a new single-page app. Its bundle (`/assets/index-*.js`) named the public routes in one grep:
+`/api/public/listings?page=N` (205 ads) and the ad page `/marketplace/<id>`. Imported ads carry the old id in
+`regaData.wp_id`, so the rows kept their AG<wp id> numbers (114 of 142 refreshed in place, PR #10941). Recipe for the next
+rebuilt site: `curl` the homepage → grep the bundle for `/api/` → read one record → map ids from the old platform before
+upserting, or every card shows twice. A SPA ad URL answers 200 for ANY id, so liveness must read the record route, never
+the page status (fleet_liveness now calls `verify_gone_any`).
+**NEW (11-06): with ~90 runs queued at 22:00 UTC a probe crawl waits 20–40 min for a runner** — dispatch every probe in
+the first 15 minutes, all at once, each from its own `probe/<site>-<date>` branch.
+
 **NEW (11-05): «served_price_never_rechecked» is a COVERAGE alarm, and each table had a different root.** Read
 the sample rows, then the site's own run log line, before touching code:
 - **tuba** — the map feed (`mapProperties`) omits ads with no pin, so «records = declared» read INCOMPLETE every
