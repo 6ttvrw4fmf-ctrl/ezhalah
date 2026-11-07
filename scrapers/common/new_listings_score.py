@@ -371,7 +371,11 @@ def facade_adjectives(stored) -> Optional[str]:
             + r"(?![\u0621-\u064A])")
 
 
-_UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
+# «م» alone is metres too (🔬 2026-11-07): justsa prints «<span>عرض الشارع</span> <strong>18 م</strong>» (just.sa/l/595,
+# re-read net.http_get 11-07) and the value line «18 م» never matched, so 15 of 15 sampled justsa street widths scored
+# MISMATCH on a stored 18 that the page states — the same «tool, not the data» backlog 297 named on 10-09.
+# Only a SPACED «م» («18 م»): a glued «250م» keeps its old reading, which the alshawaf related-table guard relies on.
+_UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س|(?<=\s)م)?\s*"
 
 
 # A control prompt («اختر عدد الغرف», rakez's room picker) names a field without stating it; the unit
