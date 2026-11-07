@@ -123,6 +123,29 @@ def listing_urls_from_archive(page_html: str) -> set[str]:
             if "/property/pro-" not in u}
 
 
+def archive_walk(s: cc.Session, max_pages: int = 40) -> list[str]:
+    """Every listing the paginated archive names (/property/, /property/page/N/), in order.
+
+    WHY (2026-11-07, backlog 1391/1398/1456): since 11-04 08:36 every sitemap answers 404 (property-sitemap.xml,
+    sitemap_index.xml, wp-sitemap.xml, sitemap.xml) while the archive still lists the ads (CI probe run 42341971426:
+    /?post_type=property → 200 with /property/<slug>/ links and /property/page/2/). A page that fails raises: a
+    failed read is never an empty catalogue. A page past the last answers 404 or names nothing new → the end."""
+    urls: list[str] = []
+    for n in range(1, max_pages + 1):
+        url = ARCHIVE if n == 1 else f"{ARCHIVE}page/{n}/"
+        r = s.get(url, timeout=60)
+        if r.status_code == 404 and n > 1:
+            break
+        if r.status_code != 200:
+            raise RuntimeError(f"{url} → HTTP {r.status_code}")
+        new = [u for u in sorted(listing_urls_from_archive(r.text)) if u not in urls]
+        if not new:
+            break
+        urls += new
+        time.sleep(_PAUSE)
+    return urls
+
+
 def _section(lines: list[str], start: str, stop: tuple[str, ...]) -> list[str]:
     out, on = [], False
     for ln in lines:
@@ -330,14 +353,27 @@ def main() -> int:
     com: list[dict] = []
     skipped: dict[str, int] = {}
     try:
-        urls = listing_urls_from_sitemap(fetch(s, SITEMAP))
-        if not urls:
-            raise RuntimeError("property-sitemap.xml lists no listings")
-        time.sleep(_PAUSE)
-        archive = listing_urls_from_archive(fetch(s, ARCHIVE))
-        complete = archive == set(urls)
-        print(f"{SOURCE}: sitemap {len(urls)} listings, archive {len(archive)} "
-              f"({'match' if complete else 'MISMATCH — no prune this run'})", flush=True)
+        try:
+            sm_note, urls = "", listing_urls_from_sitemap(fetch(s, SITEMAP))
+        except RuntimeError as e:
+            if "HTTP 404" not in str(e):        # only «the sitemap is gone» falls back; any other failure fails
+                raise
+            sm_note, urls = "HTTP 404", []
+        if urls:
+            time.sleep(_PAUSE)
+            archive = listing_urls_from_archive(fetch(s, ARCHIVE))
+            complete = archive == set(urls)
+            print(f"{SOURCE}: sitemap {len(urls)} listings, archive {len(archive)} "
+                  f"({'match' if complete else 'MISMATCH — no prune this run'})", flush=True)
+        else:
+            # The sitemap is gone (HTTP 404 since 2026-11-04): the archive pages are the only list, so there is no
+            # second list to prove the walk complete — read every ad, prune nothing (liveness stays its own job).
+            urls = archive_walk(s)
+            if not urls:
+                raise RuntimeError(f"no sitemap listing ({SITEMAP} {sm_note or 'empty'}) and the archive names none")
+            complete = False
+            print(f"{SOURCE}: sitemap {sm_note or 'empty'}; archive walk {len(urls)} listings (no prune this run)",
+                  flush=True)
         if args.limit:
             urls = urls[:args.limit]
         # The stored listing_url is the sitemap's (a real page a user lands on); it also drives the probe.

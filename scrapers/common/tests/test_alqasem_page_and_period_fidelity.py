@@ -213,3 +213,24 @@ def test_main_refuses_to_prune_when_the_archive_disagrees_with_the_sitemap(monke
     monkeypatch.setattr(R, "db", _db(calls))
     monkeypatch.setattr(sys, "argv", ["run"])
     assert R.main() == 0 and "prune" not in calls and calls["end"]["rows_upserted"] == 3
+
+
+def test_main_reads_the_archive_when_the_sitemap_is_gone(monkeypatch):
+    """2026-11-07: every sitemap answers 404 since 11-04; the archive walk feeds the crawl and nothing is pruned."""
+    calls = {}
+    pages = _pages(FX["archive_links"])
+    urls = R.listing_urls_from_sitemap(FX["sitemap"])
+
+    def fetch(s, url):
+        if url == R.SITEMAP:
+            raise RuntimeError(f"{url} → HTTP 404")
+        return pages[url]
+    monkeypatch.setattr(R, "session", lambda: object())
+    monkeypatch.setattr(R, "fetch", fetch)
+    monkeypatch.setattr(R, "archive_walk", lambda s: list(urls))
+    monkeypatch.setattr(R.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(R, "db", _db(calls))
+    monkeypatch.setattr(sys, "argv", ["run"])
+    assert R.main() == 0
+    assert sorted(dict(calls["batches"])["alqasem_residential_listings"]) == ["QSM2700", "QSM2760", "QSM2835"]
+    assert "prune" not in calls and calls["end"]["ok"] is True and calls["end"]["rows_seen"] == 29
