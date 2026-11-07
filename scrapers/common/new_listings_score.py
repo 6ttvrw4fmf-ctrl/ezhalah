@@ -1450,7 +1450,10 @@ def _safe_evidence(kw: str, line: str) -> str:
     k = re.search(kw, n)
     # A phone is never evidence: a separator-free run of 9+ digits (05XXXXXXXX, 9665…, Arabic/Persian digits that
     # norm() made ASCII) is dropped, whatever redact_pii caught (CodeRabbit PDPL finding on #11053).
-    nums = [x for x in re.findall(r"[+]?\d[\d,.]*[+]?", n) if len(re.sub(r"\D", "", x)) < 9 or re.search(r"[,.]", x)]
+    # A Saudi mobile in any punctuation («050,123,4567», «+966 5…») is dropped by its digit shape.
+    nums = [x for x in re.findall(r"[+]?\d[\d,.]*[+]?", n)
+            if (len(re.sub(r"\D", "", x)) < 9 or re.search(r"[,.]", x))
+            and not re.fullmatch(r"(?:00966|966|0)?5\d{8}", re.sub(r"\D", "", x))]
     neg = "لا" if re.search(r"(?<![\u0621-\u064A])(?:لا|بدون|غير)(?![\u0621-\u064A])", n) else ""
     return " ".join(x for x in ((k.group(0) if k else ""), neg, " ".join(nums[:6])) if x)
 

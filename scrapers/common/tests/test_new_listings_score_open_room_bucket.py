@@ -92,3 +92,8 @@ def test_a_second_label_in_the_span_does_not_give_the_bucket_away():
 def test_safe_evidence_never_carries_a_phone():
     out = S._safe_evidence(r"غرف", "غرف النوم 4 جوال ٠٥٠١٢٣٤٥٦٧ و 966501234567 السعر 1,600,000")
     assert "0501234567" not in out and "966501234567" not in out and "4" in out and "1,600,000" in out
+
+
+def test_safe_evidence_drops_a_punctuated_mobile():
+    out = S._safe_evidence(r"غرف", "غرف النوم 4 تواصل 050,123,4567 او 0501.234.567 السعر 1,600,000")
+    assert "050,123,4567" not in out and "0501.234.567" not in out and "1,600,000" in out
