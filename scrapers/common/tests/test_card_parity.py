@@ -156,4 +156,35 @@ def test_rows_shape_panel_licence_is_read():          # 🔧 11-07: aqargate's r
     assert panel_licence([{"key": "adlic", "label": "Ad license number", "value": "7200111222"}]) == "7200111222"
     assert panel_licence({"rows": [{"key": "adlic", "label": "Ad license number", "value": "7200111222"}]}) == "7200111222"
     assert panel_licence([{"key": "usage", "label": "Property usage", "value": "سكني"}]) is None
-    assert panel_licence(None) is None and panel_licence({}) is None
+    assert panel_licence(None) is None
+    assert panel_licence({}) is None
+
+
+def test_licence_digits_and_unlabelled_rows():        # CodeRabbit on #11140
+    from scrapers.common.card_parity import panel_licence
+    assert panel_licence({"rega_ad_license_number": "٧٢٠٠٤٢٣٥٥٢"}) == "7200423552"
+    assert panel_licence([{"key": "rega_ad_license_number", "value": "7100000000"},
+                          {"key": "rega_ad_license_number", "label": "Ad license number", "value": "٧٢٠٠٤٢٣٥٥٢"}]) == "7200423552"
+    assert panel_licence([{"key": "rega_ad_license_number", "label": "", "value": "7100000000"}]) is None
+
+
+def test_stored_of_reads_a_rows_panel_licence():      # CodeRabbit on #11140: exercise stored_of itself
+    from scrapers.common.card_parity import stored_of
+
+    class Q:
+        def __init__(self, data): self._d = data
+        def select(self, *a): return self
+        def eq(self, *a): return self
+        def limit(self, *a): return self
+        def execute(self): return type("R", (), {"data": self._d})()
+
+    class C:
+        def table(self, name):
+            if name == "search_listings_ar":
+                return Q([{"license_number": None}])
+            return Q([{"listing_url": "https://x/1", "additional_info": {"rows": [
+                {"key": "adlic", "label": "Ad license number", "value": "7200111222"}]}}])
+
+    stored, url = stored_of(C(), "aqargate_listings", 1)
+    assert stored["card_licence"] == "7200111222"
+    assert url == "https://x/1"

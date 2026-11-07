@@ -423,11 +423,14 @@ def panel_licence(panel) -> str | None:
         panel = panel["rows"]
     if isinstance(panel, dict):
         v = panel.get("rega_ad_license_number")
-        return str(v).strip() or None if v not in (None, "") else None
+        return (str(v).translate(_DIG).strip() or None) if v not in (None, "") else None
     if isinstance(panel, list):
         for r in panel:
-            if isinstance(r, dict) and (r.get("key") == "rega_ad_license_number" or r.get("label") == "Ad license number"):
-                v = str(r.get("value") or "").strip()
+            # The card drops a row with no label (buildAdditionalInfo), so parity must not compare one either.
+            if not isinstance(r, dict) or not str(r.get("label") or "").strip():
+                continue
+            if r.get("key") == "rega_ad_license_number" or r.get("label") == "Ad license number":
+                v = str(r.get("value") or "").translate(_DIG).strip()
                 if v:
                     return v
     return None
