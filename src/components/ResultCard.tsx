@@ -1471,7 +1471,7 @@ function sourceHost(source: string): string {
   if (s.includes('مباشر') || s.includes('mobasher')) return 'mobasher.sa';
   if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'muajarh.com';
   if (s.includes('دلّالي') || s.includes('dallali')) return 'dallali.com';
-  if (raw === 'maqam' || s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'property.maqamco.sa';
+  if (raw === 'maqam' || s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'maqamco.sa';
   if (s.includes('تطبيق أرض') || s.includes('earthapp')) return 'earthapp.com.sa';
   if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return 'nawafethalwatan.com';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'remax.sa';

@@ -442,7 +442,6 @@ const additionalPreviewHosts = [
   'map.earthapp.com.sa',
   'senanrealestate.sa',
   'bahadhabab-res.com',
-  'property.maqamco.sa',
   'erapulse.sa',
   'jawher2030.com',
   'm3tmd.com',
@@ -460,6 +459,8 @@ const additionalPreviewHosts = [
   'mrajhi.com.sa',
   'asasmakeen.com',
   'almajdiah.com',
+  // 2026-11-07: Maqam moved to its own maqamco.sa (frame refused), ad page first
+  'maqamco.sa',
 ];
 const hostPass = (host: string, previewHost: typeof inAppPreviewHost, frameHost = inAppViewerHost) =>
   [`https://${host}/ad/1`, `https://www.${host}/ad/1`, `https://${host.toUpperCase()}/ad/1`]
