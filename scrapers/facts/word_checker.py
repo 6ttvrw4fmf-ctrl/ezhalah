@@ -790,12 +790,25 @@ def _stove_not_fire(raw: str, clauses: list, ci: int, t: str, s: int, e: int) ->
     ws, we = _word_bounds(t, s, e)
     if not _strip_wa(_bare(t[ws:we])).startswith(("موقد", "الموقد")):
         return False
-    before, after = t[:ws].split(), t[we:].split()
-    for k in range(ci - 1, max(-1, ci - 4), -1):      # earlier clauses, only across a list separator
+    # «!» / «؟» are not clause breaks, so a sentence can end INSIDE this clause («مطبخ فيه فرن! موقد حجري»): cut the
+    # window there too (CodeRabbit on #11295), via the clause's own raw text and its position map.
+    c_raw, idx = clauses[ci][1], clauses[ci][3]
+    lo, hi, left_open, right_open = 0, len(t), True, True
+    if idx and ws < len(idx):
+        ends = [m.end() for m in _SENTENCE_END.finditer(c_raw[:idx[ws]])]
+        if ends:
+            lo = next((k for k, r in enumerate(idx) if r >= ends[-1]), ws)
+            left_open = False
+        nxt = _SENTENCE_END.search(c_raw, idx[min(we, len(idx)) - 1] + 1)
+        if nxt:
+            hi = next((k for k, r in enumerate(idx) if r >= nxt.start()), len(t))
+            right_open = False
+    before, after = t[lo:ws].split(), t[we:max(we, hi)].split()
+    for k in range(ci - 1, max(-1, ci - 4), -1) if left_open else ():   # earlier clauses, only across a list separator
         if _SENTENCE_END.search(raw[clauses[k][0] + len(clauses[k][1]):clauses[k + 1][0]]):
             break
         before = clauses[k][2].split() + before
-    for k in range(ci + 1, min(len(clauses), ci + 4)):
+    for k in range(ci + 1, min(len(clauses), ci + 4)) if right_open else ():
         if _SENTENCE_END.search(raw[clauses[k - 1][0] + len(clauses[k - 1][1]):clauses[k][0]]):
             break
         after = after + clauses[k][2].split()
@@ -2226,6 +2239,8 @@ def selftest() -> None:
         # CodeRabbit on #11295: a seating word must not veto a cooktop, and the previous SENTENCE lends no stove word
         ("جلسة خارجية، مطبخ مجهز بموقد سيراميكي", {}, ("fire_pit",)),
         ("مطبخ فيه فرن.\nموقد حجري في الصالة", {"fire_pit": True}, ()),
+        ("مطبخ فيه فرن! موقد حجري في الصالة", {"fire_pit": True}, ()),
+        ("موقد حجري في الصالة؟ مطبخ فيه فرن", {"fire_pit": True}, ()),
         ("بيت شعر كبير", {"bait_shaar": True}, ()),
         ("خيمة شعر", {"bait_shaar": True, "tent": True}, ()),
         ("بدون بيت شعر", {"bait_shaar": False}, ()),
