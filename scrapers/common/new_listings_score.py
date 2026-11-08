@@ -382,36 +382,64 @@ ROOM_FIGURE = {
 _ROOM_WORD = {"bedrooms": r"غرف", "bathrooms": r"حمام|دور(?:ه|ات)\s+(?:ال)?مياه"}
 _MANY_ROOMS = {
     "bedrooms": re.compile(r"غرفت(?:ين|ان)|(?<![\u0621-\u064A])(?:ال)?غرف(?![\u0621-\u064A])"
-                           r"|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+bed", re.I),
+                           r"|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+bed", re.I),
     "bathrooms": re.compile(r"حمام(?:ين|ان|ات)|دورت(?:ين|ان)\s*(?:ال)?مياه|دورات\s+(?:ال)?مياه"
-                            r"|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+bath", re.I),
+                            r"|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+bath", re.I),
 }
+
+
+_TOKEN = re.compile(r"[\u0621-\u064A]+|[A-Za-z]+|\d+(?:[.,]\d+)?\+?")
+_ROOM_WINDOW = 4
+_ROOM_TOKEN = {
+    "bedrooms": re.compile(r"(?:و|ب|لل|ال)*غرف(?:ه|ة|تين|تان)?|bedrooms?|rooms?", re.I),
+    "bathrooms": re.compile(r"(?:و|ب|لل|ال)*(?:حمام(?:ات|ين|ان)?|دور(?:ه|ة|ات|تين|تان))|bathrooms?|baths?|wc", re.I),
+}
+_UNIT_AFTER = re.compile(r"(?:م|متر|مترمربع|m|sqm|ريال|sar)$", re.I)
+
+
+def _token_count(toks: list[str], k: int) -> int | None:
+    """The room count token k states, or None: a 1-2 digit figure not followed by a unit, or a number word."""
+    t = toks[k]
+    nxt = toks[k + 1] if k + 1 < len(toks) else ""
+    if re.fullmatch(r"\d{1,2}\+?", t):
+        return None if _UNIT_AFTER.match(nxt) else int(t.rstrip("+"))
+    if t in WORD_NUMBERS:
+        return WORD_NUMBERS[t]
+    return EN_NUMBERS.get(t.lower())
 
 
 def room_figure_stated(name: str, lines: list[str]) -> bool:
     """Does the page give this room count as a figure anywhere — beside the word, as a number word, or as the
     bare value on the line next to it («غرف النوم» / «3»)? Then the bare singular noun never decides it."""
     word = _ROOM_WORD[name]
-    # The comparator's own Arabic number words (WORD_NUMBERS), so the two cannot drift (CodeRabbit on #11280).
-    _COUNT_WORD = "(?:" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True)) + ")"
     # A dual («غرفتين», «حمامين», «دورتين مياه»), a bare plural («غرف», «حمامات», «دورات مياه») or an English count
     # («two bedrooms») is a count too: the bare singular never outvotes it (CodeRabbit on #11280).
     if any(_MANY_ROOMS[name].search(x) for x in lines):
         return True
+    room_tok = _ROOM_TOKEN[name]
     for i, x in enumerate(lines):
         if ROOM_FIGURE[name].search(x):
             return True
-        if not re.search(word, x):
-            continue
-        if EN_NUMBER.search(x):            # «غرفة نوم: two» (CodeRabbit on #11280)
+        toks = _TOKEN.findall(x)
+        hits = [k for k, t in enumerate(toks) if room_tok.fullmatch(t)]
+        # Any count within _ROOM_WINDOW tokens of THIS room word — a digit, or a number word the comparator itself
+        # reads (WORD_NUMBERS / EN_NUMBERS) — states the count, unless every such count is 1: «غرفه نوم ماستر عددها
+        # ثلاث», «2 bedrooms», «حمام: two» (CodeRabbit on #11280). An area «بمساحه 246 م» four tokens away from the
+        # word is outside the window only when it is farther; a figure followed by a unit is never a room count.
+        other = _ROOM_TOKEN["bathrooms" if name == "bedrooms" else "bedrooms"]
+        counts = []
+        for h in hits:
+            for step in (-1, 1):            # walk out from the word; another room type's word ends its reach
+                for k in range(h + step, h + step * (_ROOM_WINDOW + 1), step):
+                    if not 0 <= k < len(toks) or other.fullmatch(toks[k]):
+                        break
+                    if (c := _token_count(toks, k)) is not None:
+                        counts.append(c)
+        if counts and any(c != 1 for c in counts):
             return True
-        if re.search(r"(?<![\u0621-\u064A])" + _COUNT_WORD + r"\s+(?:ال)?(?:" + word + r")"
-                     r"|(?:" + word + r")\S*(?:\s+(?:ال)?نوم)?\s*[:：]?\s*" + _COUNT_WORD + r"(?![\u0621-\u064A])", x):
-            return True
-        if any(0 <= j < len(lines) and (re.fullmatch(r"\s*(?:\d{1,2}\+?|" + _COUNT_WORD + r")\s*", lines[j])
-                                        or EN_NUMBER.fullmatch(lines[j].strip()))
-               for j in (i - 1, i + 1)):
-            return True
+        if hits and any(0 <= j < len(lines) and _token_count([lines[j].strip()], 0) not in (None, 1)
+                        for j in (i - 1, i + 1)):
+            return True                     # the bare value on the next line («غرف النوم» / «3»)
     return False
 
 

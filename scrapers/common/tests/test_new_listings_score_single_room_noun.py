@@ -68,3 +68,21 @@ def test_alshawaf_without_its_node_block_is_not_cut():
 ])
 def test_a_dual_plural_or_english_count_is_never_outvoted_by_the_bare_noun(field, text):
     assert _score({field: 1}, text)[field] != S.MATCH
+
+
+@pytest.mark.parametrize("field,text", [
+    ("bedrooms", "غرفه نوم ماستر عددها ثلاث بمساحه 300"),         # a count a few words after the noun (CodeRabbit)
+    ("bathrooms", "حمام عددها ثلاث بمساحه 200"),
+    ("bedrooms", "غرفه نوم بمساحه 200 | 2 bedrooms"),             # a digit before an English room word
+    ("bathrooms", "دورة مياه بمساحه 200 | 2 bathrooms"),
+])
+def test_a_nearby_count_other_than_one_is_never_outvoted(field, text):
+    assert _score({field: 1}, text)[field] != S.MATCH
+
+
+@pytest.mark.parametrize("field,text", [
+    ("bedrooms", "غرفه نوم بمساحه 200 | one bedroom"),            # an agreeing count of one still matches
+    ("bedrooms", "غرفه نوم، حمام: two بمساحه 200"),               # the «two» belongs to the bathroom
+])
+def test_an_agreeing_one_or_another_rooms_count_does_not_block(field, text):
+    assert _score({field: 1}, text)[field] == S.MATCH
