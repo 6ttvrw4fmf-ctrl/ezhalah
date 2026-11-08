@@ -672,3 +672,11 @@ def test_a_land_row_whose_rate_box_repeats_the_total_stores_no_rate():
     assert row["price_per_meter"] is R.db.AUTHORITATIVE_NULL
     # a genuine rate (LAND_SALE: 1746 vs 1099980) is untouched
     assert _row(LAND_SALE)[0]["price_per_meter"] == 1746
+
+
+def test_a_small_figure_in_both_boxes_is_not_guessed_either_way():
+    """Below 100,000 the same figure could be a real rate (e.g. 900 SAR/m² on 600 m²): nothing is
+    cleared and the index's price_box_equals_rate_ar decides what to show."""
+    rec = {**LAND_SALE, "id": 17069999, "price": "900", "total_price": "900", "space": "600"}
+    row, _ = _row(rec)
+    assert row["price_per_meter"] == 900

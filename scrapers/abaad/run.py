@@ -476,10 +476,12 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         # ONE FIGURE IN BOTH BOXES (owner 2026-11-07, row 3076). 7 land sales (17060146 «355,000» on
         # 710 m², 17060131, 17060133, 17060134, 17060196, 13214806, 22358074) send the SAME number in
         # `price` and `total_price`. A rate equal to the total is only possible on 1 m², so on a
-        # larger plot the source published a total and no rate: the «per-metre» slot is the total
-        # repeated. AUTHORITATIVE_NULL clears the stored copy (a bare None is dropped by the upsert).
+        # larger plot one of the two is false. A figure no metre costs (≥ 100,000 — the same rung
+        # as the index's price_box_equals_rate_ar 'total') is the total repeated in the rate slot;
+        # below that nothing is guessed and the index decides. AUTHORITATIVE_NULL clears the stored
+        # copy (a bare None is dropped by the upsert).
         area = _pos(rec.get("space"))
-        if ppm is not None and ppm == headline and area and area > 1:
+        if ppm is not None and ppm == headline and area and area > 1 and ppm >= 100_000:
             ppm = db.AUTHORITATIVE_NULL
     else:
         ppm = None
