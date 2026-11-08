@@ -446,3 +446,31 @@ def test_catchup_cursor_ignores_the_finished_licensed_only_walk():
     old = '{"catchup_before": "2026-07-20-00", "catchup_files_left": 0}'
     assert R._CURSOR.search(old) is None
     assert R._CURSOR.search('{"catchup_all_before": "2026-09-01-03"}').group(1) == "2026-09-01-03"
+
+
+@pytest.mark.parametrize("deal", ["Sell", "Rent"])
+def test_land_total_clears_the_rate_for_both_transaction_types(deal):
+    desc = (LAND_EN.replace("Sell", deal)
+            .replace("💵 سعر المتر التقريبي: 844.4 ريال", ""))
+    title = "أرض سكنية للبيع" if deal == "Sell" else "أرض سكنية للإيجار"
+    row, _, skip, _ = mapped(title, desc)
+    assert not skip
+    assert row["price_per_meter"] is R.db.AUTHORITATIVE_NULL
+    assert row["price_total" if deal == "Sell" else "price_annual"] == 400000
+
+
+@pytest.mark.parametrize("amount,free_text,expected", [
+    (1500, "سعر المتر 1500 ريال", "rate"),
+    (50000, "", "unknown"),
+])
+def test_land_rate_and_unknown_basis_are_not_cleared_as_totals(amount, free_text, expected):
+    licence = LAND_EN[LAND_EN.index("معلومات العقار حسب الرخصة"):]
+    desc = free_text + "\n" + licence.replace("سعر الوحدة: 400000", f"سعر الوحدة: {amount}")
+    row, _, skip, _ = mapped("أرض سكنية للبيع", desc)
+    assert not skip
+    if expected == "rate":
+        assert row["price_per_meter"] == amount
+        assert row["price_total"] is R.db.AUTHORITATIVE_NULL
+    else:
+        assert row["price_per_meter"] is None
+        assert row["price_total"] is None

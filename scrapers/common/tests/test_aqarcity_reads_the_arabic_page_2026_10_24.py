@@ -7,6 +7,8 @@ English page is skipped, never written.
 """
 import json
 import sys
+
+import pytest
 from pathlib import Path
 
 sys.path.insert(0, ".")
@@ -109,3 +111,26 @@ def test_a_rent_page_whose_displayed_total_is_not_a_rate_settles_no_rate():
     from scrapers.common import db
     row = _land_rent('<span class="btnPriceHead">18</span>')
     assert row["price_per_meter"] is db.AUTHORITATIVE_NULL
+
+
+
+@pytest.mark.parametrize("html,period,annual", [
+    ('<span class="btnPriceHead">10,260</span>', "monthly", 123120),
+    ('<p>الإيجار السنوي للأرض: 10,260</p>', "annual", 10260),
+])
+def test_a_proven_land_rental_rate_survives_the_authoritative_null_default(html, period, annual):
+    # The fixture publishes 570 m²: 10,260 is a total consistent with the 18 SAR/m² rate.
+    # Only the second HTML shape explicitly declares an annual period.
+    row = _land_rent(html)
+    assert row["area_m2"] == 570
+    assert row["price_per_meter"] == 18
+    assert row["rent_period"] == period
+    assert row["price_annual"] == annual
+    assert row["price_total"] is R.db.AUTHORITATIVE_NULL
+
+
+def test_a_displayed_rent_not_matching_rate_times_area_does_not_invent_a_rate():
+    row = _land_rent('<span class="btnPriceHead">999,999</span>')
+    assert row["price_per_meter"] is R.db.AUTHORITATIVE_NULL
+    assert row["rent_period"] == "monthly"
+    assert row["price_annual"] == 18 * 12
