@@ -247,6 +247,10 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
                     and float(stored.get(col)) == 1 and any(SINGLE_HALL.search(x) for x in lines)):
                 out[name] = MATCH
+            if (name in SINGLE_ROOM and out[name] == MISMATCH and stored.get(col) is not None
+                    and float(stored.get(col)) == 1 and any(SINGLE_ROOM[name].search(x) for x in lines)
+                    and not any(ROOM_FIGURE[name].search(x) for x in lines)):
+                out[name] = MATCH
             # A home described FLOOR BY FLOOR states no total (🆕 2026-11-05): Property Finder's CRM block «تفاصيل الدور
             # الأرضي عدد المجالس: 1 ، دورات المياه: 3 ، الصالات: 1 ، غرف النوم: 2» (23817495, whose API says 5 bedrooms)
             # and muhaysini's «الدور الارضي: مجلس ودورة مياه … الدور الاول : غرفتين … دورة مياه» (23814169) count ONE
@@ -360,6 +364,21 @@ def facade_stated(lines: list[str], kw: str) -> bool:
 PER_FLOOR = re.compile(r"(?:تفاصيل\s+)?الدور\s*:?\s*(?:الارضي|الاول|الثاني|الثالث|العلوي)")
 PER_FLOOR_COUNTS = frozenset({"living_rooms", "majlis_rooms", "bathrooms"})
 SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
+# ONE bedroom / bathroom is written as the bare noun in a components list: sadiqeltajer 25456611 (2026-11-08 score,
+# backlog 1350) «المكونات : صاله . غرفه . دورة مياة», stored 1 / 1, scored MISMATCH because the same description's
+# area «246» and street «15» were the only figures. A service room («غرفة خادمة», «حمام سباحة») is not one, and a
+# room word with a figure beside it anywhere on the page («3 غرف», «غرف النوم: 2») leaves the count to that figure.
+_NOT_A_BEDROOM = r"(?:ال)?(?:خادمه|خادمات|سائق|حارس|غسيل|كهرباء|تخزين|ملابس|طعام|جلوس|سينما|العاب|الخادمه)"
+SINGLE_ROOM = {
+    "bedrooms": re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?غرفه(?:\s+(?:ال)?نوم)?(?![\u0621-\u064A])"
+                           r"(?!\s+" + _NOT_A_BEDROOM + r"(?![\u0621-\u064A]))"),
+    "bathrooms": re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?(?:دوره\s+(?:ال)?مياه|حمام)(?![\u0621-\u064A])"
+                            r"(?!\s+(?:ال)?(?:سباحه|بخار)(?![\u0621-\u064A]))"),
+}
+ROOM_FIGURE = {
+    "bedrooms": re.compile(r"\d\s*(?:ال)?غرف|غرف(?:ه)?(?:\s*(?:ال)?نوم)?\s*[:：]?\s*\d"),
+    "bathrooms": re.compile(r"\d\s*(?:ال)?(?:حمام|دور(?:ه|ات)\s+(?:ال)?مياه)|(?:حمام(?:ات)?|دور(?:ه|ات)\s+(?:ال)?مياه)\s*[:：]?\s*\d"),
+}
 # The facades in English, as a REGA licence block prints them. A compound one too: haraj 22820527 prints
 # «واجهة العقار: South west» and we store «جنوب غرب» (re-score 41406084400, 2026-11-02, scored MISMATCH).
 FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
