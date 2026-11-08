@@ -379,7 +379,6 @@ ROOM_FIGURE = {
     "bedrooms": re.compile(r"\d\s*(?:ال)?غرف|غرف(?:ه)?(?:\s*(?:ال)?نوم)?\s*[:：]?\s*\d"),
     "bathrooms": re.compile(r"\d\s*(?:ال)?(?:حمام|دور(?:ه|ات)\s+(?:ال)?مياه)|(?:حمام(?:ات)?|دور(?:ه|ات)\s+(?:ال)?مياه)\s*[:：]?\s*\d"),
 }
-_COUNT_WORD = r"(?:واحد|واحده|اثنين|اثنان|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثمانيه|تسع|تسعه|عشر|عشره)"
 _ROOM_WORD = {"bedrooms": r"غرف", "bathrooms": r"حمام|دور(?:ه|ات)\s+(?:ال)?مياه"}
 _MANY_ROOMS = {
     "bedrooms": re.compile(r"غرفت(?:ين|ان)|(?<![\u0621-\u064A])(?:ال)?غرف(?![\u0621-\u064A])"
@@ -393,6 +392,8 @@ def room_figure_stated(name: str, lines: list[str]) -> bool:
     """Does the page give this room count as a figure anywhere — beside the word, as a number word, or as the
     bare value on the line next to it («غرف النوم» / «3»)? Then the bare singular noun never decides it."""
     word = _ROOM_WORD[name]
+    # The comparator's own Arabic number words (WORD_NUMBERS), so the two cannot drift (CodeRabbit on #11280).
+    _COUNT_WORD = "(?:" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True)) + ")"
     # A dual («غرفتين», «حمامين», «دورتين مياه»), a bare plural («غرف», «حمامات», «دورات مياه») or an English count
     # («two bedrooms») is a count too: the bare singular never outvotes it (CodeRabbit on #11280).
     if any(_MANY_ROOMS[name].search(x) for x in lines):

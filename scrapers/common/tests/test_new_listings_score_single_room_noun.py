@@ -63,6 +63,8 @@ def test_alshawaf_without_its_node_block_is_not_cut():
     ("bedrooms", "غرفه نوم: eleven بمساحه 200"),                   # every English word the comparator reads
     ("bathrooms", "حمام: twelve بمساحه 200"),
     ("bedrooms", "غرفه . twelve bedrooms . 240 sqm"),
+    ("bedrooms", "غرفه نوم: ثماني بمساحه 200"),                   # every Arabic word the comparator reads
+    ("bathrooms", "حمام: ثماني بمساحه 200"),
 ])
 def test_a_dual_plural_or_english_count_is_never_outvoted_by_the_bare_noun(field, text):
     assert _score({field: 1}, text)[field] != S.MATCH
