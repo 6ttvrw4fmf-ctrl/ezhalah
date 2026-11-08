@@ -35,6 +35,34 @@ const moves = (s: string) => /panMs: 3_000, panFreezeMs: 500, mapColdTapMs: 5_00
 check('it drags the map (time + stutter) and taps the map at once on a fresh phone, each against a budget', moves(js));
 mustCatch('the drag step removed', !moves(js.replace(/say\(results\.panMs <= BUDGET\.panMs/, 'void (0')));
 mustCatch('the impatient tap removed', !moves(js.replace(/say\(results\.mapColdTapMs <= BUDGET\.mapColdTapMs/, 'void (0')));
+// THE SIGNED-IN SIDEBAR AND A SAVED CHAT (owner 2026-11-08, iPhone on a VPN: «takes sooooo long for it to load and pop»):
+// a second journey in the same workflow seeds a signed-in visitor client-side (the journeys' harness) and times ☰ until
+// the saved chats show and a row until the conversation shows, on 4G and on a VPN line, against the owner's budgets.
+const sb = readFileSync(join(root, 'e2e/speed/signed-in-sidebar-live.mjs'), 'utf8');
+const sidebarWired = (w: string) => /node e2e\/speed\/signed-in-sidebar-live\.mjs/.test(w)
+  && /name: Signed-in sidebar[\s\S]{0,200}if: always\(\)[\s\S]{0,200}node e2e\/speed\/signed-in-sidebar-live\.mjs/.test(w);
+check('the signed-in sidebar journey runs in the same workflow, even when the guest journey is red', sidebarWired(wf));
+mustCatch('the signed-in step removed', !sidebarWired(wf.replace('node e2e/speed/signed-in-sidebar-live.mjs', 'true')));
+const sidebarBudgets = (s: string) => /sidebarMs: 1_000, historyChatMs: 3_000/.test(s)
+  && /say\(results\[`sidebarMs_\$\{line\.name\}`\] <= BUDGET\.sidebarMs/.test(s)
+  && /say\(results\[`historyChatMs_\$\{line\.name\}`\] <= BUDGET\.historyChatMs/.test(s)
+  && /name: 'VPN', latency: 450/.test(s) && /seedInitScript, THREE_CHATS, SUB/.test(s);
+check('it keeps the owner\'s budgets (sidebar ≤ 1 s, saved chat ≤ 3 s), measures a VPN line and seeds the signed-in visitor the harness way', sidebarBudgets(sb));
+mustCatch('the sidebar budget removed', !sidebarBudgets(sb.replace(/say\(results\[`sidebarMs_\$\{line\.name\}`\] <= BUDGET\.sidebarMs/, 'void (0')));
+mustCatch('the VPN line removed', !sidebarBudgets(sb.replace("name: 'VPN', latency: 450", "name: 'VPN', latency: 150")));
+check('a missed budget or a broken signed-in journey fails the run', loud(sb));
+// CodeRabbit on #11331: a width > 0 passes while the drawer is still off-screen or the conversation is still fading in.
+// Both timings wait for the element to be SEEN: inside the viewport and not faded/hidden by itself or an ancestor.
+// All FOUR viewport edges, in both timings: a drawer parked off-screen to the left has right <= 0 and would pass a
+// left/top-only test (CodeRabbit on #11331).
+const FOUR_EDGES = /r\.right > 0 && r\.bottom > 0 && r\.left < innerWidth && r\.top < innerHeight/g;
+const seenByAPerson = (s: string) => (s.match(FOUR_EDGES) ?? []).length >= 2
+  && (s.match(/parseFloat\(cs\.opacity\) < 0\.9/g) ?? []).length >= 2;
+check('both signed-in timings wait for the element to be on screen (all four viewport edges) and not faded (opacity walk)', seenByAPerson(sb));
+mustCatch('a timing that settles for width > 0 again', !seenByAPerson(sb.replace(/r\.right > 0 && r\.bottom > 0 && r\.left < innerWidth && r\.top < innerHeight/, 'true')));
+mustCatch('a timing that drops the right edge (a drawer parked off-screen to the left would count)', !seenByAPerson(sb.replace(/r\.right > 0 && /, '')));
+mustCatch('a timing that drops the opacity walk', !seenByAPerson(sb.replace(/parseFloat\(cs\.opacity\) < 0\.9/, 'false')));
+mustCatch('a signed-in journey that swallows its own failure', !loud(sb.replace('process.exit(1)', 'process.exit(0)')));
 // pg_cron starts it (GitHub ran the schedule ~3×/day): two bundle steps ~30 min apart in the newest bundle migration
 const trig = readFileSync(new URL('../supabase/migrations/20261105172415_speed_robot_started_by_pg_cron.sql', import.meta.url), 'utf8');
 check('pg_cron starts the robot from both hourly bundles (:12 and :43)', (trig.match(/trigger_gh_workflow\('site-speed-live\.yml'\)/g) ?? []).length === 2 && /'12 \* \* \* \*'/.test(trig) && /'43 \* \* \* \*'/.test(trig));
