@@ -147,9 +147,13 @@ if (trg) {
     'the licence block is gone from the winning trigger body — wasalt cards stop printing «رقم رخصة الإعلان»');
 }
 
+/** True when the trigger body reads adLicenseNumber from regaVerifiedInfo, keeps only the 10-digit REGA shape, and
+ *  APPENDS {key: rega_ad_license_number, …, value: lic} to additional_info (the assignment itself, not just the
+ *  NOT EXISTS probe that names the key — CodeRabbit on #11274). */
 function licenceBlockCheck(squashed: string): boolean {
-  return /'rega_ad_license_number'/.test(squashed) && /'adLicenseNumber'/.test(squashed)
-    && /regaVerifiedInfo/.test(squashed) && /lic\s*~\s*'\^\\d\{10\}\$'/.test(squashed);
+  return /'adLicenseNumber'/.test(squashed) && /regaVerifiedInfo/.test(squashed)
+    && /lic\s*~\s*'\^\\d\{10\}\$'/.test(squashed)
+    && /NEW\.additional_info\s*:=\s*NEW\.additional_info\s*\|\|\s*jsonb_build_array\(\s*jsonb_build_object\(\s*'key'\s*,\s*'rega_ad_license_number'\s*,[^;]*'value'\s*,\s*lic\s*\)\s*\)\s*;/i.test(squashed);
 }
 
 // 6. The live-data counterpart must stay reachable from the detector runner. It was orphaned for
@@ -267,6 +271,9 @@ if (trg) {
   const anyLength = healthy.replace(/lic ~ '\^\\d\{10\}\$'/, "lic IS NOT NULL");
   mustCatch('a trigger rebuilt without the licence block is caught', !licenceBlockCheck(noBlock));
   mustCatch('…and a licence copied without the 10-digit REGA shape guard is caught', !licenceBlockCheck(anyLength));
+  const noAppend = healthy.replace(/NEW\.additional_info\s*:=\s*NEW\.additional_info\s*\|\|[^;]*;/i, 'NULL;');
+  mustCatch('…and the append assignment alone replaced by NULL; is caught (the NOT EXISTS probe still names the key)',
+    noAppend !== healthy && !licenceBlockCheck(noAppend));
   mustCatch('…while the genuine trigger IS recognised (negative control)', licenceBlockCheck(healthy));
 }
 
