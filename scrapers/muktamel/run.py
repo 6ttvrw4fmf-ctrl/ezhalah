@@ -398,6 +398,7 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
     if not parsed or not parsed.get("offer"):
         _note("unparseable_or_no_offer")
         return None
+    parsed["_page_bathrooms"] = page_bathrooms(html)
     offer = parsed["offer"]
     # Liveness gate: only fully-hydrated, available listings carry real data.
     if not offer.get("isAvailable") or offer.get("price") in (None, 0):
@@ -651,6 +652,26 @@ def _resolve_location(offer: dict, addr_json: Optional[dict]) -> tuple[Optional[
     return city_en or "Other", region_en, district_ar, raw
 
 
+# The bathrooms a customer READS on the ad (🔬 2026-11-08, backlog 1508). The page renders «الحمامات : N» in the ad's
+# «المكونات الداخلية» block, and on some ads that N is not offer.bathroomsCount: real-estates/33770 renders 3 while the
+# payload says 4, and the ad's own words say «3 دورات مياه» (as do 34132, 33971, 34258, 34524 — 5 of 5 read). Rooms and
+# halls in the same block equal the payload. So the rendered figure is the published one; the payload is the fallback
+# for a page that renders no bathrooms row. Markup pasted from the re-read page (net.http_get, 2026-11-08):
+#   <label for data-v-66ad8990>الحمامات</label> <span data-v-66ad8990>:</span> <span class="number-text" data-v-66ad8990>3</span>
+_PAGE_BATHS_RE = re.compile(
+    r"<label[^>]*>\s*الحمامات\s*</label>\s*<span[^>]*>\s*:\s*</span>\s*<span[^>]*class=\"number-text\"[^>]*>\s*(\d{1,2})\s*</span>")
+
+
+def page_bathrooms(html: Optional[str]) -> Optional[int]:
+    """The «الحمامات : N» the ad's own page renders (its first, own block — before the Nuxt payload), else None."""
+    if not html:
+        return None
+    cut = html.find("window.__NUXT__")
+    m = _PAGE_BATHS_RE.search(html if cut < 0 else html[:cut])
+    v = int(m.group(1)) if m else 0
+    return v if v > 0 else None      # a rendered «0» is the form's empty default (the payload's 0 is NULL too): silence
+
+
 def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
     offer = parsed["offer"]
     deal = offer.get("dealType")
@@ -814,7 +835,8 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": round(area) if area else None,
         "bedrooms": _int(offer.get("bedRoomsCount")) if category == "residential" else None,
-        "bathrooms": _int(offer.get("bathroomsCount")),
+        "bathrooms": (parsed.get("_page_bathrooms") if parsed.get("_page_bathrooms") is not None
+                      else _int(offer.get("bathroomsCount"))),   # the page's rendered figure first (backlog 1508)
         "halls": _int(offer.get("hallsCount")),
         "reception_rooms_majlis": _int(offer.get("otherRoomsCount")),
         "property_age": property_age,
