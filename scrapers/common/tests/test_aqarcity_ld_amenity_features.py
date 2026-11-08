@@ -58,3 +58,39 @@ def test_an_unticked_feature_is_not_a_tick():
 
 def test_the_checklist_is_kept_verbatim():
     assert _row(FEATURES)["additional_info"]["amenity_features"] == [f["name"] for f in FEATURES]
+
+
+# 🆕 2026-11-08: the same checklist ticks home amenities (aqarcity 25437035 /property/31634, re-read 42460062892:
+# «موقف سيارات=True | مدخل خاص=True»); they were never stored, so the Advanced Filter could not find the villa.
+HOME_FEATURES = [{"@type": "LocationFeatureSpecification", "name": n, "value": True}
+                 for n in ("موقف سيارات", "حديقة", "مدخل خاص", "مصعد", "غرفة خادمة", "مطبخ راكب", "كهرباء")]
+HOME_DL = "".join(ROW.format(icon=i, label=l, value=v) for i, l, v in (
+    ("tag", "نوع العقار", "فيلا"), ("ruler-combined", "مساحة العقار", "200 م²")))
+
+
+def _home(features):
+    ld = {"@context": "https://schema.org", "@type": "RealEstateListing",
+          "url": "https://www.aqarcity.net/property/31634", "name": "فيلا للبيع في حي الصواري - الخبر",
+          "mainEntity": {"@type": "Place", "amenityFeature": features},
+          "offers": {"@type": "Offer", "priceCurrency": "SAR", "price": 970000,
+                     "availability": "https://schema.org/InStock"}}
+    body = f'<script type="application/ld+json">{json.dumps(ld, ensure_ascii=False)}</script>' + HOME_DL
+    row, why = R.map_listing(body, "https://www.aqarcity.net/property/31634")
+    assert row is not None, why
+    return row
+
+
+def test_ticked_home_amenities_reach_the_advanced_filter():
+    row = _home(HOME_FEATURES)
+    assert (row["parking"], row["private_entrance"], row["elevator"], row["maid_room"], row["kitchen"]) == (
+        True, True, True, True, True)
+
+
+def test_an_amenity_the_checklist_does_not_tick_stays_silent():
+    row = _home([f for f in HOME_FEATURES if f["name"] not in ("مصعد", "موقف سيارات")])
+    assert row.get("elevator") is None and row.get("parking") is None     # never «no» from silence
+
+
+def test_an_unticked_home_amenity_is_not_a_yes():
+    row = _home([{**f, "value": False} if f["name"] == "مصعد" else f for f in HOME_FEATURES])
+    assert row.get("elevator") is None
