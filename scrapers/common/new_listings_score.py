@@ -253,6 +253,10 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
                     and float(stored.get(col)) == 1 and any(SINGLE_HALL.search(x) for x in lines)):
                 out[name] = MATCH
+            if (name in SINGLE_ROOM and out[name] == MISMATCH and stored.get(col) is not None
+                    and float(stored.get(col)) == 1 and any(SINGLE_ROOM[name].search(x) for x in lines)
+                    and not room_figure_stated(name, lines)):
+                out[name] = MATCH
             # A home described FLOOR BY FLOOR states no total (🆕 2026-11-05): Property Finder's CRM block «تفاصيل الدور
             # الأرضي عدد المجالس: 1 ، دورات المياه: 3 ، الصالات: 1 ، غرف النوم: 2» (23817495, whose API says 5 bedrooms)
             # and muhaysini's «الدور الارضي: مجلس ودورة مياه … الدور الاول : غرفتين … دورة مياه» (23814169) count ONE
@@ -408,6 +412,87 @@ def facade_stated(lines: list[str], kw: str) -> bool:
 PER_FLOOR = re.compile(r"(?:تفاصيل\s+)?الدور\s*:?\s*(?:الارضي|الاول|الثاني|الثالث|العلوي)")
 PER_FLOOR_COUNTS = frozenset({"living_rooms", "majlis_rooms", "bathrooms"})
 SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
+# ONE bedroom / bathroom is written as the bare noun in a components list: sadiqeltajer 25456611 (2026-11-08 score,
+# backlog 1350) «المكونات : صاله . غرفه . دورة مياة», stored 1 / 1, scored MISMATCH because the same description's
+# area «246» and street «15» were the only figures. A service room («غرفة خادمة», «حمام سباحة») is not one, and a
+# room word with a figure beside it anywhere on the page («3 غرف», «غرف النوم: 2») leaves the count to that figure.
+_NOT_A_BEDROOM = r"(?:لل|ال|ل)?(?:خادمه|خادمات|سائق|حارس|غسيل|كهرباء|تخزين|ملابس|طعام|جلوس|سينما|العاب|معيشه|الخادمه)"
+SINGLE_ROOM = {
+    "bedrooms": re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?غرفه(?:\s+(?:ال)?نوم)?(?![\u0621-\u064A])"
+                           r"(?!\s+" + _NOT_A_BEDROOM + r"(?![\u0621-\u064A]))"),
+    "bathrooms": re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?(?:دوره\s+(?:ال)?مياه|حمام)(?![\u0621-\u064A])"
+                            r"(?!\s+(?:ال)?(?:سباحه|بخار)(?![\u0621-\u064A]))"),
+}
+ROOM_FIGURE = {
+    "bedrooms": re.compile(r"\d\s*(?:ال)?غرف|غرف(?:ه)?(?:\s*(?:ال)?نوم)?\s*[:：]?\s*\d"),
+    "bathrooms": re.compile(r"\d\s*(?:ال)?(?:حمام|دور(?:ه|ات)\s+(?:ال)?مياه)|(?:حمام(?:ات)?|دور(?:ه|ات)\s+(?:ال)?مياه)\s*[:：]?\s*\d"),
+}
+_ROOM_WORD = {"bedrooms": r"غرف", "bathrooms": r"حمام|دور(?:ه|ات)\s+(?:ال)?مياه"}
+_MANY_ROOMS = {
+    "bedrooms": re.compile(r"غرفت(?:ين|ان)|(?<![\u0621-\u064A])(?:ال)?غرف(?![\u0621-\u064A])"
+                           r"|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+bed", re.I),
+    "bathrooms": re.compile(r"حمام(?:ين|ان|ات)|دورت(?:ين|ان)\s*(?:ال)?مياه|دورات\s+(?:ال)?مياه"
+                            r"|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+bath", re.I),
+}
+
+
+_TOKEN = re.compile(r"[\u0621-\u064A]+|[A-Za-z]+|\d+(?:[.,]\d+)?\+?")
+_ROOM_WINDOW = 4
+_ROOM_TOKEN = {
+    "bedrooms": re.compile(r"(?:و|ب|لل|ال)*غرف(?:ه|ة|تين|تان)?|bedrooms?|rooms?", re.I),
+    "bathrooms": re.compile(r"(?:و|ب|لل|ال)*(?:حمام(?:ات|ين|ان)?|دور(?:ه|ة|ات|تين|تان))|bathrooms?|baths?|wc", re.I),
+}
+_FIELD_STOP = re.compile(r"(?:و|ب|ال)*(?:شارع|عرض|مساحه|مساحة|عمر|سعر|طابق|دور|الدور|ادوار|واجهه|واجهة|"
+                         r"street|width|area|age|price|floor)", re.I)
+_UNIT_AFTER = re.compile(r"(?:م|متر|مترمربع|m|sqm|ريال|sar)$", re.I)
+
+
+def _token_count(toks: list[str], k: int) -> int | None:
+    """The room count token k states, or None: a 1-2 digit figure not followed by a unit, or a number word."""
+    t = toks[k]
+    nxt = toks[k + 1] if k + 1 < len(toks) else ""
+    if re.fullmatch(r"\d{1,2}\+?", t):
+        return None if _UNIT_AFTER.match(nxt) else int(t.rstrip("+"))
+    if t in WORD_NUMBERS:
+        return WORD_NUMBERS[t]
+    return EN_NUMBERS.get(t.lower())
+
+
+def room_figure_stated(name: str, lines: list[str]) -> bool:
+    """Does the page give this room count as a figure anywhere — beside the word, as a number word, or as the
+    bare value on the line next to it («غرف النوم» / «3»)? Then the bare singular noun never decides it."""
+    word = _ROOM_WORD[name]
+    # A dual («غرفتين», «حمامين», «دورتين مياه»), a bare plural («غرف», «حمامات», «دورات مياه») or an English count
+    # («two bedrooms») is a count too: the bare singular never outvotes it (CodeRabbit on #11280).
+    if any(_MANY_ROOMS[name].search(x) for x in lines):
+        return True
+    room_tok = _ROOM_TOKEN[name]
+    for i, x in enumerate(lines):
+        if ROOM_FIGURE[name].search(x):
+            return True
+        toks = _TOKEN.findall(x)
+        hits = [k for k, t in enumerate(toks) if room_tok.fullmatch(t)]
+        # Any count within _ROOM_WINDOW tokens of THIS room word — a digit, or a number word the comparator itself
+        # reads (WORD_NUMBERS / EN_NUMBERS) — states the count, unless every such count is 1: «غرفه نوم ماستر عددها
+        # ثلاث», «2 bedrooms», «حمام: two» (CodeRabbit on #11280). An area «بمساحه 246 م» four tokens away from the
+        # word is outside the window only when it is farther; a figure followed by a unit is never a room count.
+        other = _ROOM_TOKEN["bathrooms" if name == "bedrooms" else "bedrooms"]
+        counts = []
+        for h in hits:
+            for step in (-1, 1):            # walk out from the word; another room type's word ends its reach
+                for k in range(h + step, h + step * (_ROOM_WINDOW + 1), step):
+                    if not 0 <= k < len(toks) or other.fullmatch(toks[k]) or _FIELD_STOP.fullmatch(toks[k]):
+                        break               # «غرفه نوم، شارع 15»: the 15 is the street's (CodeRabbit on #11280)
+                    if (c := _token_count(toks, k)) is not None:
+                        counts.append(c)
+        if counts and any(c != 1 for c in counts):
+            return True
+        if hits and any(0 <= j < len(lines) and _token_count([lines[j].strip()], 0) not in (None, 1)
+                        for j in (i - 1, i + 1)):
+            return True                     # the bare value on the next line («غرف النوم» / «3»)
+    return False
+
+
 # The facades in English, as a REGA licence block prints them. A compound one too: haraj 22820527 prints
 # «واجهة العقار: South west» and we store «جنوب غرب» (re-score 41406084400, 2026-11-02, scored MISMATCH).
 FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
@@ -764,16 +849,26 @@ _CARD_START = re.compile(r'<div[^>]*class="[^"]*\bcard-item\b')
 # alshawaf 21664551 (2026-10-30, re-read runs 41089939871 / 41090169747): the node's own table says «المساحة 250م»
 # (stored 250), and the «related listings» Views table under it (`…duplicate-of-frontpage-block-1`, trap 1 in
 # scrapers/alshawaf/run.py) prints other plots' «المساحة 422.22م»; the area scored MISMATCH and capped the night.
+# alshawaf 22426 (2026-11-08, backlog 1357): the related table under the node carried no «frontpage-block» id, so its
+# cell «المساحة 500م» survived the cut and scored our 375 (the node's own «<th>المساحة</th><td>375م</td>») MISMATCH.
+# A related row is a Views LISTING row (`headers="view-changed-table-column"`, the /table index's title cell); the
+# node's own facts are a th/td table that never carries it. The scraper reads only the node block (trap 1).
 _SIMILAR_BLOCK = {"ashab.sa": ('id="similar-properties"', "عقارات مشابهة"),
-                  "alshawaf.com.sa": ("duplicate-of-frontpage-block-1",)}
+                  "alshawaf.com.sa": ("duplicate-of-frontpage-block-1", "view-changed-table-column")}
+# The node block marker: a stop that comes BEFORE it would cut the ad itself, so for these hosts a stop is only
+# honoured after the ad's own block has started.
+_AD_BLOCK_START = {"alshawaf.com.sa": "duplicate-of-node-block-1"}
 
 
 def drop_similar_block(url: str | None, body: str) -> str:
     for host, stops in _SIMILAR_BLOCK.items():
         if host in (url or "") and body:
+            start = body.find(_AD_BLOCK_START[host]) if host in _AD_BLOCK_START else 0
+            if start < 0:      # the ad's own block is not on this page: cut nothing (CodeRabbit on #11280)
+                continue
             for stop in stops:
-                if (k := body.find(stop)) > 0:
-                    body = body[:k]
+                if (k := body.find(stop, start)) > 0:
+                    body = body[:max(body.rfind("<", 0, k), 0) or k]   # cut at the tag, not inside it
     return body
 
 

@@ -61,3 +61,32 @@ def test_alshawaf_related_table_is_not_the_ads_area():
 
 def test_alshawaf_without_the_cut_misreads_the_area():
     assert _area(ALSHAWAF) == S.MISMATCH
+
+
+# alshawaf 22426 (2026-11-08, backlog 1357): the related table under the node carried no «frontpage-block» id, so
+# its cell «المساحة 500م» survived and scored our 375 a MISMATCH. A related row is a Views listing row
+# (`headers="view-changed-table-column"`); the node's own th/td table never carries it.
+URL_22426 = "https://alshawaf.com.sa/22426"
+NODE_22426 = ('<div id="block-edux-views-block-duplicate-of-node-block-1"><table>'
+              '<tr><th>الحي</th><td>المحدود</td></tr><tr><th>المساحة</th>\n<td>\n375م\n</td></tr></table></div>')
+RELATED_22426 = ('<div class="view"><table><tr><td headers="view-changed-table-column"><a href="/22000">أرض</a></td>'
+                 '<td headers="view-nothing-3-table-column" class="views-field views-field-nothing-3">'
+                 'المساحة 500م<br></td></tr></table></div>')
+
+
+def _area_375(body):
+    return S.compare_listing({"area_m2": 375}, S.page_evidence(body))["area"]
+
+
+def test_alshawaf_related_listing_rows_are_cut_without_a_block_id():
+    page = NODE_22426 + RELATED_22426
+    scoped = S.scope_to_its_ad(URL_22426, page)
+    assert "500" not in scoped and "375م" in scoped and 'headers="' not in scoped
+    assert _area_375(scoped) != S.MISMATCH
+    assert _area_375(page) == S.MISMATCH          # the uncut page really does misread it
+
+
+def test_alshawaf_a_listing_row_before_the_node_never_cuts_the_ad():
+    # A stop is honoured only after the node block starts, so a header row above it cannot cut the ad away.
+    scoped = S.scope_to_its_ad(URL_22426, RELATED_22426 + NODE_22426)
+    assert "375م" in scoped
