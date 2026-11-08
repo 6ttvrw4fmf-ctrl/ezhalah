@@ -381,12 +381,11 @@ ROOM_FIGURE = {
 }
 _COUNT_WORD = r"(?:واحد|واحده|اثنين|اثنان|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثمانيه|تسع|تسعه|عشر|عشره)"
 _ROOM_WORD = {"bedrooms": r"غرف", "bathrooms": r"حمام|دور(?:ه|ات)\s+(?:ال)?مياه"}
-_EN_COUNT = re.compile(r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b", re.I)
 _MANY_ROOMS = {
     "bedrooms": re.compile(r"غرفت(?:ين|ان)|(?<![\u0621-\u064A])(?:ال)?غرف(?![\u0621-\u064A])"
-                           r"|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+bed", re.I),
+                           r"|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+bed", re.I),
     "bathrooms": re.compile(r"حمام(?:ين|ان|ات)|دورت(?:ين|ان)\s*(?:ال)?مياه|دورات\s+(?:ال)?مياه"
-                            r"|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+bath", re.I),
+                            r"|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+bath", re.I),
 }
 
 
@@ -403,13 +402,13 @@ def room_figure_stated(name: str, lines: list[str]) -> bool:
             return True
         if not re.search(word, x):
             continue
-        if _EN_COUNT.search(x):            # «غرفة نوم: two» (CodeRabbit on #11280)
+        if EN_NUMBER.search(x):            # «غرفة نوم: two» (CodeRabbit on #11280)
             return True
         if re.search(r"(?<![\u0621-\u064A])" + _COUNT_WORD + r"\s+(?:ال)?(?:" + word + r")"
                      r"|(?:" + word + r")\S*(?:\s+(?:ال)?نوم)?\s*[:：]?\s*" + _COUNT_WORD + r"(?![\u0621-\u064A])", x):
             return True
         if any(0 <= j < len(lines) and (re.fullmatch(r"\s*(?:\d{1,2}\+?|" + _COUNT_WORD + r")\s*", lines[j])
-                                        or _EN_COUNT.fullmatch(lines[j].strip()))
+                                        or EN_NUMBER.fullmatch(lines[j].strip()))
                for j in (i - 1, i + 1)):
             return True
     return False
