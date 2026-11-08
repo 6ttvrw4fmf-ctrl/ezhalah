@@ -496,6 +496,23 @@ WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len,
                                + r")\s*(?:سنوات|سنين|سنه|غرف|غرفه|صالات|دورات مياه)?\s*$")
 
 
+# «سنتين» / «سنتان» alone on a value line (the dual states TWO), with an optional unit word after it.
+DUAL_VALUE_LINE = re.compile(r"^\s*(?:سنتين|سنتان|عامين|عامان|غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان)\s*$")
+# «اكثر من عشر سنوات», «أكثر من 10 سنوات», «+10 سنوات»: an open bucket whose floor is the figure (norm folds أ→ا).
+AGE_FLOOR = re.compile(r"(?:اكثر|أكثر|فوق|اعلى|أعلى)\s+من\s+([\d٠-٩]{1,3}|" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
+                       + r")(?![\u0621-\u064A\d])\s*(?:سنوات|سنه|سنة|سنين|عام|اعوام|أعوام)?")
+
+
+def _age_floor(line: str, own: bool) -> Optional[float]:
+    """The floor of an open age bucket on this line. A neighbour line must be nothing but the bucket («اكثر من عشر
+    سنوات»); the label's own line may carry it after the label («عمر العقار: اكثر من عشر سنوات»)."""
+    m = AGE_FLOOR.search(line or "")
+    if not m or (not own and line[:m.start()].strip()):
+        return None
+    v = m.group(1)
+    return float(WORD_NUMBERS[v]) if v in WORD_NUMBERS else float(v.translate(_DIGITS))
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
     # A LABEL («keyword:») that ENDS its line, its value cut off, states nothing ON that line: haraj's meta
@@ -568,6 +585,25 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
             worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
             worded.add(2)
+        # A label/value page prints the figure on its OWN line, before or after the label (🔬 2026-11-08, backlog 1615,
+        # pages re-read via net.http_get): abaad 577 «عمر العقار» / «سنتين» (stored 2); aqarcity 28335 renders its
+        # spec as «ثلاث سنوات» / «عمر العقار» — the value FIRST (stored 3, the site's JSON-LD «عمر العقار: ثلاث
+        # سنوات»). Only a line that is nothing but the worded figure counts, on either side.
+        for i in kw_hits:
+            for j in (i - 1, i + 1):
+                if 0 <= j < len(lines):
+                    m = WORDED_VALUE_LINE.match(lines[j])
+                    if m:
+                        worded.add(WORD_NUMBERS[m.group(1)])
+                    if DUAL_VALUE_LINE.match(lines[j]):
+                        worded.add(2)
+        # An OPEN age bucket «اكثر من عشر سنوات» is a floor, not a count (abaad 1261, aqarcity 29885: stored 10): a stored
+        # age at or above the floor agrees with it, below it contradicts it. On the label's line or its own value line.
+        if kw == AGE_KW:
+            floors = [f for i in kw_hits for j in (i - 1, i, i + 1) if 0 <= j < len(lines)
+                      for f in [_age_floor(lines[j], own=(j == i))] if f is not None]
+            if floors:
+                return MATCH if any(float(stored) >= f for f in floors) else MISMATCH
         if worded:
             return MATCH if float(stored) in worded else MISMATCH
         if kw == AGE_KW and (NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)) or any(
