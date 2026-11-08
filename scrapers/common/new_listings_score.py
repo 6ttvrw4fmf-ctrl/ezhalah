@@ -505,7 +505,7 @@ AGE_FLOOR = re.compile(r"(?:اكثر|أكثر|فوق|اعلى|أعلى)\s+من\s
 AGE_UNIT = re.compile(r"(?:سنوات|سنه|سنة|سنين|سنتين|سنتان|عامين|عامان|عام|اعوام|أعوام)(?![\u0621-\u064A])")
 
 
-def _age_floor(line: str, own: bool) -> Optional[float]:
+def _age_floor(line: str, own: bool) -> float | None:
     """The floor of an open age bucket on this line. A neighbour line must be nothing but the bucket («اكثر من عشر
     سنوات»); the label's own line may carry it after the label («عمر العقار: اكثر من عشر سنوات»)."""
     m = AGE_FLOOR.search(line or "")

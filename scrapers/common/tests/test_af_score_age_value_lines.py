@@ -165,4 +165,4 @@ def test_a_value_before_the_label_belongs_to_its_own_field():
 def test_month_and_partial_floors_are_not_year_floors():
     assert S._age_floor("اكثر من 10 اشهر", own=False) is None
     assert S._age_floor("اكثر من عشر سنوات في السوق", own=False) is None
-    assert cmp(1, ["عمر العقار", "اكثر من 10 اشهر"]) != S.MISMATCH
+    assert cmp(1, ["عمر العقار", "اكثر من 10 اشهر"]) == S.PAGE_SILENT
