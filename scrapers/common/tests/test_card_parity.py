@@ -2,7 +2,7 @@
 from scrapers.common import card_parity as cp
 from scrapers.common.new_listings_score import MATCH, MISMATCH, PAGE_SILENT, UNREADABLE
 
-STORED = {"platform": "tuba", "city_ar": "الرياض", "district_ar": "حي النرجس", "deal_ar": "بيع", "type_ar": "شقة",
+STORED = {"platform": "aqar", "city_ar": "الرياض", "district_ar": "حي النرجس", "deal_ar": "بيع", "type_ar": "شقة",
           "price_total": 850000, "area_m2": 140, "bedrooms": 3, "bathrooms": 2, "license_number": "7200767759",
           "card_licence": "7200767759", "has_photo": True}
 LINES = ["شقة للبيع في حي النرجس الرياض", "السعر 850,000 ريال", "المساحة 140 م²", "3 غرف نوم", "2 دورات مياه",
@@ -14,7 +14,7 @@ CARD = {"text": "SAR 850,000 | 140 م² | 3 غرف | 2 حمام | حي النر�
 
 
 def _judge(stored=STORED, card=CARD, page=PAGE, link="ok", photo=True):
-    return cp.judge(stored, card, page, platform="tuba", link_kind=link, page_photo=photo)
+    return cp.judge(stored, card, page, platform="aqar", link_kind=link, page_photo=photo)
 
 
 def test_a_faithful_card_matches_every_field():
@@ -31,7 +31,7 @@ def test_planted_licence_not_on_card_is_caught():          # the 11-06 Falcon fi
 def test_planted_dead_link_is_caught():                    # the 11-05 Dwelleo finding
     assert _judge(link="dead")["link"] == MISMATCH
     assert _judge(card={**CARD, "opened_ok": False})["link"] == MISMATCH
-    assert cp.judge(STORED, CARD, PAGE, platform="tuba", link_kind="moved", link_repaired=True,
+    assert cp.judge(STORED, CARD, PAGE, platform="aqar", link_kind="moved", link_repaired=True,
                     page_photo=True)["link"] == cp.REPAIRED
 
 
@@ -190,3 +190,10 @@ def test_stored_of_reads_a_rows_panel_licence():      # CodeRabbit on #11140: ex
     stored, url = stored_of(C(), "aqargate_listings", 1)
     assert stored["card_licence"] == "7200111222"
     assert url == "https://x/1"
+
+
+def test_a_total_rooms_site_card_never_matches_a_bedroom_count():
+    # 👑 2026-11-08: tuba / aqarcity print only REGA total rooms; a bedroom count on their card is never the source's.
+    tuba = dict(STORED, platform="tuba")
+    v = cp.judge(tuba, CARD, PAGE, platform="tuba", link_kind="ok", page_photo=True)
+    assert v["bedrooms"] == MISMATCH, v
