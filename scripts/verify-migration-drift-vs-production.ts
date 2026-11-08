@@ -37,7 +37,7 @@
 //   node --experimental-strip-types scripts/verify-migration-drift-vs-production.ts
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { buildRepoMigrationVersions, listMigrationFiles } from './build-repo-migration-versions.cjs';
-import { findCommittedNotApplied, findDuplicateMigrationVersions, driftIsClean } from './lib/migrationDrift.ts';
+import { findCommittedNotApplied, findDuplicateMigrationVersions, driftIsClean, driftAlertIsDue } from './lib/migrationDrift.ts';
 
 const { url: URL_BASE, key: ANON_KEY } = resolvePublicSupabase();
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -119,12 +119,21 @@ const drifted = !driftIsClean({
   duplicate_versions: dupVersions,
   duplicate_overloads: dups,
 });
+// 🔧 2026-11-08: the P1 waits while the auto-mirror is still inside its window (driftAlertIsDue); the exit code does not.
+const alertDue = drifted && driftAlertIsDue({
+  missing_in_git: missing,
+  missing_in_prod: missingInProd,
+  duplicate_versions: dupVersions,
+  duplicate_overloads: dups,
+}, new Date());
 
 // Best-effort dashboard side-effect. Never lets a write failure mask (or fake) the actual gate —
 // the exit code below is decided from `drifted` alone, computed before this block runs.
 if (SERVICE_ROLE_KEY) {
   try {
-    if (drifted) {
+    if (drifted && !alertDue) {
+      console.warn('⏳ drift is only migrations applied < 3 h ago whose mirror PR is still in flight — gate RED, P1 not raised yet.');
+    } else if (drifted) {
       const detail = {
         missing_in_git_count: missing.length,
         missing_in_git_details: result.missing_in_git_details,
