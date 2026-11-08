@@ -880,9 +880,17 @@ export async function ensureClusterMap(): Promise<Map<number, string>> {
     let read = true;
     if (supabase) {
       try {
-        const { data, error } = await supabase.from('loc_city_cluster').select('city_id,cluster_key');
-        if (error || !data) throw new Error(`loc_city_cluster: ${error?.message ?? 'resolved without data'}`);
-        for (const r of (data as any[])) m.set(r.city_id, r.cluster_key);
+        // BOUNDED (owner 2026-11-08): ensureCityFieldIndex awaits this AFTER its own 15 s timer is cleared, so an
+        // unbounded read that stalled left the city pool «…» forever (map → back → Trending with no numbers).
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), 8000);
+        try {
+          const { data, error } = await supabase.from('loc_city_cluster').select('city_id,cluster_key').abortSignal(ac.signal);
+          if (error || !data) throw new Error(`loc_city_cluster: ${error?.message ?? 'resolved without data'}`);
+          for (const r of (data as any[])) m.set(r.city_id, r.cluster_key);
+        } finally {
+          clearTimeout(t);
+        }
       } catch { read = false; }
     }
     // Memoise ONLY a real read. On failure `_clusterMap` stays null, so the next caller retries.
@@ -935,7 +943,7 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
   const inflight = _cityFieldPromises.get(key);
   if (inflight) return inflight;
   _cityPoolStatus.set(key, 'loading');
-  const p = (async () => {
+  const load = (async () => {
     if (!supabase) {
       _cityPoolStatus.set(key, 'error');
       _cityFieldPromises.delete(key);
@@ -1064,9 +1072,24 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
       return [];
     }
   })();
+  // HARD DEADLINE (owner 2026-11-08): a load that never settles (a stall before the fetch starts, where the abort
+  // signal cannot reach) stayed in _cityFieldPromises forever, so every later focus re-awaited it and the Top-6
+  // showed «…» for the life of the tab. After 20 s the stuck load is dropped: callers get [] (status 'error' → the
+  // UI never claims a count) and the next focus starts a fresh load. scripts/verify-city-pool-load-never-sticks.ts
+  const p: Promise<CityOption[]> = Promise.race([
+    load,
+    new Promise<CityOption[]>((resolve) => setTimeout(() => {
+      if (_cityFieldPromises.get(key) === p) {
+        _cityPoolStatus.set(key, 'error');
+        _cityFieldPromises.delete(key);
+      }
+      resolve([]);
+    }, CITY_POOL_DEADLINE_MS)),
+  ]);
   _cityFieldPromises.set(key, p);
   return p;
 }
+export const CITY_POOL_DEADLINE_MS = 20000;
 
 // The six cities every scope ranks at the top; only their NAMES are used, as a stand-in until the real pool loads.
 const PROVISIONAL_TOP_CITY_NAMES = ['الرياض', 'جدة', 'مكة المكرمة', 'المدينة المنورة', 'الدمام', 'الخبر'];
