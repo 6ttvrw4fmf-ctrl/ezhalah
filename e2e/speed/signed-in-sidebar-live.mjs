@@ -56,8 +56,9 @@ try {
     // 1. ☰ → the sidebar with the saved chats on screen. The hamburger is the one top-bar control that keeps the consent
     //    card up (data-consent-keep) and carries the 44 px tap floor (data-tap44) — src/app/index.tsx.
     let t = Date.now();
-    const hamb = page.locator('[data-tap44][data-consent-keep]').first();
-    if (await hamb.count()) await hamb.click({ timeout: 10_000 }); else await page.mouse.click(35, 40);
+    // The control itself, never a blind tap at a coordinate (verify-live-clicks-are-witnessed): a missing hamburger
+    // fails the run and says so.
+    await page.locator('[data-tap44][data-consent-keep]').first().click({ timeout: 10_000 });
     await until((title) => {
       const marker = document.querySelector('[data-testid="sidebar-search-btn"]');
       const open = !!marker && marker.getBoundingClientRect().width > 0;
