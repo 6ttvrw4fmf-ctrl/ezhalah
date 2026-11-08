@@ -732,3 +732,16 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   aqargate's price rules keyed on a field the move dropped. Rule: the day a crawler changes scheme, read every row still
   on the old scheme against the new site's complete catalogue and adjudicate it the same day — a correct UNKNOWN keeps a
   dead card on screen forever.
+- **④ An un-mirrored migration blocks EVERYONE's deploy, yours included — and the owner's fix with it.** 🔧 11-08:
+  `deploy-frontend.yml` was refused three times by the drift gate (11:43 and 12:43 on ♻️'s five lifecycle migrations before
+  their mirrors merged; 13:53 on 🔧's own three), then `auto-deploy-merged-fixes.yml` stood down for 3 h after «3 failures
+  in a row». The owner's one-tap fix (#11313, merged ~11:40) reached ezhalah.com at 15:30 — four hours later — only because
+  🔧 dispatched the deploy by hand once the last mirror (#11345) was on main. Rule: open the mirror PR the moment
+  `apply_migration` returns; when CodeRabbit is limited, spend each freed slot on the deploy-blocking mirror first; the
+  drift guard's `mirror (auto)` lane (#11347) is a backstop, not the plan; and after the mirrors land, dispatch
+  `deploy-frontend.yml` yourself rather than wait for the 3 h re-arm.
+- **⑤ CodeRabbit's included allowance SHRINKS with every attempt, rate-limited ones and pushes included.** 🔧 11-08: 39
+  attempts in 7 days → 4 reviews/hour at 13:36; 43 attempts → 3/hour at 15:24. Blind re-requests and «one more push» are
+  the attempts that cost the fleet its slots. Rule: read «Next included review available in N minutes» on the latest
+  rate-limited comment and re-request at that minute, one PR per freed slot, deploy-blocking mirrors before guards and
+  docs; a small nit is carried into the next real push, never pushed alone.
