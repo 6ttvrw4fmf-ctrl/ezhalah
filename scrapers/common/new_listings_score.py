@@ -502,7 +502,7 @@ DUAL_VALUE_LINE = re.compile(r"^\s*(?:سنتين|سنتان|عامين|عاما�
 AGE_FLOOR = re.compile(r"(?:اكثر|أكثر|فوق|اعلى|أعلى)\s+من\s+([\d٠-٩]{1,3}|" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
                        + r")(?![\u0621-\u064A\d])\s*(?:سنوات|سنه|سنة|سنين|عام|اعوام|أعوام)(?![\u0621-\u064A])")
 # a year word: «اكثر من 10 اشهر» (months) is never a year floor, and a value line before the label must name years
-AGE_UNIT = re.compile(r"(?:سنوات|سنه|سنة|سنين|سنتين|سنتان|عام|اعوام|أعوام)(?![\u0621-\u064A])")
+AGE_UNIT = re.compile(r"(?:سنوات|سنه|سنة|سنين|سنتين|سنتان|عامين|عامان|عام|اعوام|أعوام)(?![\u0621-\u064A])")
 
 
 def _age_floor(line: str, own: bool) -> Optional[float]:
