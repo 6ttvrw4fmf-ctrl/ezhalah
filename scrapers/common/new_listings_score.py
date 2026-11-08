@@ -231,6 +231,9 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                         out[name] = MATCH
                         break
         elif kind == "number":
+            if name == "bedrooms" and stored.get("platform") in TOTAL_ROOMS_PLATFORMS:
+                out[name] = _cmp_bedrooms_beside_total_rooms(stored.get(col), lines, whole, kw)
+                continue
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
             # An OPEN bucket «+7 غرف نوم» / «7+ حمامات» is a floor, not a count: Property Finder 24671162 (score run
             # 42343488034, 2026-11-07) prints «+7» while its own payload's bedrooms_value is 20 (bathrooms 9), and the
@@ -314,6 +317,41 @@ def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = ""
         if not any(dist(o, m) < min(dist(k, m) for k in near) for o in others):
             return True
     return False
+
+
+# «عدد الغرف» on these sites is REGA's numberOfRooms: the TOTAL room count, never bedrooms (👑 owner 2026-11-08, backlog
+# 1519/1520: «store and show it as TOTAL ROOMS … never as bedrooms»; aqarcity 2026-07-28, tuba trap 3, haraj parse.py). The
+# bedrooms keyword «غرف» also hits that label, so the score read a total-rooms figure as a bedroom statement: a NULL
+# bedrooms beside «عدد الغرف: 4» scored WE_MISS (pushing a parser to copy the total in), and a stored 4 copied from it
+# scored MATCH (blind to exactly the bug the owner ruled out). Here the label and its value are not a bedroom statement:
+# the ad's own «4 غرف وصالة» still is. A stored count that only the total-rooms figure supports is a MISMATCH.
+TOTAL_ROOMS_PLATFORMS = frozenset({"tuba", "aqarcity", "haraj"})
+TOTAL_ROOMS = re.compile(r"عدد\s*(?:ال)?غرف(?!\s*(?:ال)?نوم)\s*[:：]?\s*(\d{1,3})?")
+_BARE_COUNT_LINE = re.compile(r"^\s*(\d{1,3})\s*(?:غرف|غرفه)?\s*$")
+
+
+def _cmp_bedrooms_beside_total_rooms(stored, lines: list[str], whole: str, kw: str) -> str:
+    totals: set[float] = set()
+    kept: list[str] = []
+    skip_next = False
+    for i, x in enumerate(lines):
+        if skip_next:
+            skip_next = False
+            m = _BARE_COUNT_LINE.match(x)
+            if m:
+                totals.add(float(m.group(1)))
+                kept.append("")
+                continue
+        for m in TOTAL_ROOMS.finditer(x):
+            if m.group(1):
+                totals.add(float(m.group(1)))
+            elif not x[m.end():].strip():
+                skip_next = True          # label/value lines: «عدد الغرف» / «4»
+        kept.append(TOTAL_ROOMS.sub(" ", x))
+    verdict = _cmp_number(stored, kept, "\n".join(kept), kw)
+    if stored is not None and verdict != MATCH and float(stored) in totals:
+        return MISMATCH                   # the total rooms stored as bedrooms
+    return verdict
 
 
 ROOM_KW = {"bedrooms": r"غرف|غرفه نوم", "bathrooms": r"حمام|دوره مياه|دورات مياه|دوره المياه|دورات المياه"}
