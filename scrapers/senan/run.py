@@ -113,7 +113,15 @@ def site_changed_probe(s: Any, get_timeout: int = 25) -> str:
         seg = "/" + path.strip("/").split("/")[0]
         shapes[seg] = shapes.get(seg, 0) + 1
     top = sorted(shapes.items(), key=lambda kv: -kv[1])[:8]
-    return (f"homepage {r.status_code} at {host}; title={title.group(1).strip() if title else None!r}; "
+    sm = ""
+    for path in ("/sitemap.xml", "/robots.txt"):
+        try:
+            sr = s.get(f"https://{host}{path}", timeout=get_timeout)
+            locs = re.findall(r"<loc>\s*([^<\s]+)", sr.text or "") or re.findall(r"(?im)^sitemap:\s*(\S+)", sr.text or "")
+            sm += f" {path} {sr.status_code} n={len(locs)} first={locs[:4]};"
+        except Exception as e:  # noqa: BLE001
+            sm += f" {path} {type(e).__name__};"
+    return (f"homepage {r.status_code} at {host};{sm} title={title.group(1).strip() if title else None!r}; "
             f"generator={gen.group(1) if gen else None!r}; link paths={top}; api routes named: {sorted(apis)[:12]}")
 
 
