@@ -54,6 +54,10 @@ const addKeyboardRoom = (input) => input.evaluate((el) => {
 
 async function checkListOpens(page, input, label, typed) {
   await addKeyboardRoom(input);
+  const pre = await input.boundingBox();
+  const diag = () => input.evaluate((el) => { const out = []; let p = el; while (p) { if (p.scrollTop || p.scrollHeight > p.clientHeight + 2) out.push(`${p.tagName}.${p.scrollTop}/${p.scrollHeight}/${p.clientHeight}/${getComputedStyle(p).overflowY}`); p = p.parentElement; } return out.join(' > ') + ` | win ${scrollY} vv ${visualViewport?.offsetTop}/${visualViewport?.height}`; });
+  console.log(`DIAG ${label} before: y=${Math.round(pre?.y ?? -1)} ${await diag()}`);
+  setTimeout(async () => console.log(`DIAG ${label} +600ms: ${await diag().catch(() => '')}`), 600);
   const before = await visibleTexts(page);
   const t0 = Date.now();
   await input.tap();
