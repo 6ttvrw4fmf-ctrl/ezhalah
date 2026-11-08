@@ -95,6 +95,7 @@ async function load(source: string): Promise<Lifted> {
     { header: 'export function clusterMapLoaded(', endsWith: /\}$/ },
     { header: 'export async function ensureClusterMap(', endsWith: /^\}$/ },
     { header: 'export function applyClusterUnion(', endsWith: /^\}$/ },
+    { header: 'export function retryStuck<T>(', endsWith: /^\}$/ },
     { header: 'export async function ensureCityFieldIndex(', endsWith: /^\}$/ },
     { header: 'const _districtCache', endsWith: LINE },
     { header: 'const _districtPromises', endsWith: LINE },

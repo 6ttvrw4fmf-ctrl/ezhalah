@@ -96,6 +96,7 @@ async function load(source: string): Promise<Lifted> {
   return await liftSymbols(file, [
     { header: 'export const TABLE_SCOPE_KEYS = ', endsWith: /;$/ },
     { header: 'export function tableScopeOf(', endsWith: /^\}$/ },
+    { header: 'export function retryStuck<T>(', endsWith: /^\}$/ },
     { header: 'export async function ensureCityFieldIndex(', endsWith: /^\}$/ },
     { header: 'export async function ensureDistrictOptions(', endsWith: /^\}$/ },
   ], ['TABLE_SCOPE_KEYS', 'tableScopeOf', 'ensureCityFieldIndex', 'ensureDistrictOptions', 'setClient'],
