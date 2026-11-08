@@ -1521,8 +1521,15 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             if stop > hs:
                 svc_from, svc_to = starts_at[hs], (starts_at[stop] if stop < len(words) else len(t))
             svc_on = stop == len(words)
-        elif svc_on and "." not in sep and "\n" not in sep and not any(_svc_stops(w) for w in words):
-            svc_from, svc_to = 0, len(t)
+        elif svc_on and "." not in sep and "\n" not in sep:
+            # the heading carried on from the clause before covers THIS clause up to its first stop word: «بالقرب من
+            # جميع الخدمات التي تحتاجها، وتشمل: 🕌 جامع 🛒 سوبرماركت 🌿 حديقة … 🏢 مميزات العمارة» (aqar 13447339,
+            # backlog 1507) — the own cue «مميزات» at the END used to drop the whole carried range, so the AREA's
+            # mosque / market / garden before it read as the flat's own (🔬 2026-11-08)
+            stop = next((k for k, w in enumerate(words) if _svc_stops(w)), len(words))
+            if stop > 0:
+                svc_from, svc_to = 0, (starts_at[stop] if stop < len(words) else len(t))
+            svc_on = stop == len(words)
         else:
             svc_on = False
         n_words = len(words)
@@ -2240,6 +2247,9 @@ def selftest() -> None:
         ("جلسة خارجية، مطبخ مجهز بموقد سيراميكي", {}, ("fire_pit",)),
         ("مطبخ فيه فرن.\nموقد حجري في الصالة", {"fire_pit": True}, ()),
         ("مطبخ فيه فرن! موقد حجري في الصالة", {"fire_pit": True}, ()),
+        # 1507: a carried nearby-services heading runs up to the first own cue, not «all or nothing» (aqar 13447339)
+        ("شقة مميزة في موقع ممتاز ومخدوم، بالقرب من جميع الخدمات التي تحتاجها، وتشمل: 🕌 جامع 🛒 سوبرماركت 🍽️ مطاعم 🌿 حديقة 💊 صيدلية 🧺 مغسلة 📚 قرطاسية 🏢 مميزات العمارة: • عمارة هادئة", {}, ("garden", "mosque", "market")),
+        ("بالقرب من جميع الخدمات، وتشمل: مسجد وبقالة 🏢 مميزات المجمع يوجد حديقة خاصة", {"garden": True}, ("mosque",)),
         ("موقد حجري في الصالة؟ مطبخ فيه فرن", {"fire_pit": True}, ()),
         ("بيت شعر كبير", {"bait_shaar": True}, ()),
         ("خيمة شعر", {"bait_shaar": True, "tent": True}, ()),
