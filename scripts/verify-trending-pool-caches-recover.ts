@@ -84,6 +84,7 @@ async function load(source: string): Promise<Lifted> {
     { header: 'const CITY_FIELD_POOLS', endsWith: LINE },
     { header: 'const _cityFieldPromises', endsWith: LINE },
     { header: 'const POOL_TTL_MS', endsWith: LINE },
+    { header: 'export const CITY_POOL_DEADLINE_MS', endsWith: LINE },
     { header: 'const _cityPoolFetchedAt', endsWith: LINE },
     { header: 'const _cityPoolStatus', endsWith: LINE },
     { header: 'const _districtPoolStatus', endsWith: LINE },
@@ -94,6 +95,7 @@ async function load(source: string): Promise<Lifted> {
     { header: 'export function clusterMapLoaded(', endsWith: /\}$/ },
     { header: 'export async function ensureClusterMap(', endsWith: /^\}$/ },
     { header: 'export function applyClusterUnion(', endsWith: /^\}$/ },
+    { header: 'export function retryStuck<T>(', endsWith: /^\}$/ },
     { header: 'export async function ensureCityFieldIndex(', endsWith: /^\}$/ },
     { header: 'const _districtCache', endsWith: LINE },
     { header: 'const _districtPromises', endsWith: LINE },
@@ -127,9 +129,11 @@ const client = (log: Log, ok: { clusters: boolean }) => ({
   from: () => ({
     select: () => {
       log.cluster++;
-      return ok.clusters
+      const res = ok.clusters
         ? Promise.resolve({ data: CLUSTER_ROWS, error: null })
         : Promise.resolve({ data: null, error: { message: 'FetchError: network request failed' } });
+      // The read is bounded (.abortSignal, verify-city-pool-load-never-sticks.ts), like supabase-js's builder.
+      return Object.assign(res, { abortSignal: () => res });
     },
   }),
   rpc: (name: string) => ({
@@ -287,8 +291,8 @@ mustCatch('a cluster failure that is never retried (dead _clusterPromise kept)',
 // M3 — the `?? []` that hid the error in the first place: a null `data` read as zero rows.
 mustCatch('a null data response read as a genuine empty cluster table',
   !holds(await probe(await load(mutate([
-    /^        if \(error \|\| !data\) throw new Error\(.*\n/m, '',
-  ], [/^        for \(const r of \(data as any\[\]\)\)/m, '        for (const r of ((data as any[]) ?? []))'])))));
+    /^          if \(error \|\| !data\) throw new Error\(.*\n/m, '',
+  ], [/^          for \(const r of \(data as any\[\]\)\)/m, '          for (const r of ((data as any[]) ?? []))'])))));
 
 // M4 — DEFECT B, city half: keep the settled promise, and POOL_TTL_MS goes inert again.
 mustCatch('a settled city pool promise left in the dedupe map (POOL_TTL_MS inert)',

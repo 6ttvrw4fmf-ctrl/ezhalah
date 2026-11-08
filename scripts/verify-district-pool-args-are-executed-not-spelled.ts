@@ -99,6 +99,8 @@ async function load(source: string): Promise<Lifted> {
     { header: 'const typesKey = ', endsWith: /;$/ },
     { header: 'const afKey = ', endsWith: /^\};$/ },
     { header: 'const districtCacheKey = ', endsWith: /;$/ },
+    { header: 'export const CITY_POOL_DEADLINE_MS', endsWith: /;$/ },
+    { header: 'export function retryStuck<T>(', endsWith: /^\}$/ },
     { header: 'export async function ensureDistrictOptions(', endsWith: /^\}$/ },
   ], ['ensureDistrictOptions', 'setClient', 'clearCaches'],
   // clearCaches is appended, not stubbed: each probe must start cold, or the memo would answer the

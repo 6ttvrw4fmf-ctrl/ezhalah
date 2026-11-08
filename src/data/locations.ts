@@ -880,9 +880,17 @@ export async function ensureClusterMap(): Promise<Map<number, string>> {
     let read = true;
     if (supabase) {
       try {
-        const { data, error } = await supabase.from('loc_city_cluster').select('city_id,cluster_key');
-        if (error || !data) throw new Error(`loc_city_cluster: ${error?.message ?? 'resolved without data'}`);
-        for (const r of (data as any[])) m.set(r.city_id, r.cluster_key);
+        // BOUNDED (owner 2026-11-08): ensureCityFieldIndex awaits this AFTER its own 15 s timer is cleared, so an
+        // unbounded read that stalled left the city pool «…» forever (map → back → Trending with no numbers).
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), 8000);
+        try {
+          const { data, error } = await supabase.from('loc_city_cluster').select('city_id,cluster_key').abortSignal(ac.signal);
+          if (error || !data) throw new Error(`loc_city_cluster: ${error?.message ?? 'resolved without data'}`);
+          for (const r of (data as any[])) m.set(r.city_id, r.cluster_key);
+        } finally {
+          clearTimeout(t);
+        }
       } catch { read = false; }
     }
     // Memoise ONLY a real read. On failure `_clusterMap` stays null, so the next caller retries.
@@ -935,7 +943,7 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
   const inflight = _cityFieldPromises.get(key);
   if (inflight) return inflight;
   _cityPoolStatus.set(key, 'loading');
-  const p = (async () => {
+  const attempt = () => (async (): Promise<CityOption[]> => {
     if (!supabase) {
       _cityPoolStatus.set(key, 'error');
       _cityFieldPromises.delete(key);
@@ -1064,8 +1072,34 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
       return [];
     }
   })();
+  // NEVER STUCK (owner 2026-11-08: «make sure it never happens no matter what u click»). See retryStuck below.
+  const p: Promise<CityOption[]> = retryStuck(attempt, () => {
+    if (_cityFieldPromises.get(key) === p) { _cityPoolStatus.set(key, 'error'); _cityFieldPromises.delete(key); }
+  });
   _cityFieldPromises.set(key, p);
   return p;
+}
+// A load that never settles (a stall before the fetch starts, where the abort signal cannot reach) used to stay in
+// the dedupe map forever: every later focus re-awaited it and the Top-6 showed «…» for the life of the tab (map →
+// back, owner 2026-11-08). Each attempt now gets CITY_POOL_DEADLINE_MS; a stuck one is abandoned and a FRESH one
+// starts by itself, so whoever is waiting (the open city box, the district list) gets real numbers without a tap.
+// After the last attempt the caller gets [] and the pool reads 'error' — never a made-up count.
+// scripts/verify-city-pool-load-never-sticks.ts
+// 3 s (owner 2026-11-08: «never slow, always fast as possible»). A slow attempt is NOT lost: it keeps running and still
+// answers if it finishes first; 5 tries keep the box trying ~15 s before it gives up.
+export const CITY_POOL_DEADLINE_MS = 3000;
+export function retryStuck<T>(attempt: () => Promise<T[]>, giveUp: () => void, tries = 5): Promise<T[]> {
+  return new Promise<T[]>((resolve) => {
+    let t: ReturnType<typeof setTimeout>;
+    const go = (left: number) => {
+      attempt().then((v) => { clearTimeout(t); resolve(v); }, () => { clearTimeout(t); resolve([]); });
+      t = setTimeout(() => {
+        if (left > 1) go(left - 1);
+        else { giveUp(); resolve([]); }
+      }, CITY_POOL_DEADLINE_MS);
+    };
+    go(tries);
+  });
 }
 
 // The six cities every scope ranks at the top; only their NAMES are used, as a stand-in until the real pool loads.
@@ -1150,7 +1184,7 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal | null, c
   const inflight = _districtPromises.get(key);
   if (inflight) return inflight;
   _districtPoolStatus.set(key, 'loading');
-  const p = (async () => {
+  const attempt = () => (async (): Promise<DistrictOption[]> => {
     if (!supabase) {
       _districtPoolStatus.set(key, 'error');
       _districtPromises.delete(key);
@@ -1218,6 +1252,10 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal | null, c
       return [];
     }
   })();
+  // NEVER STUCK — same as the city pool (retryStuck above).
+  const p: Promise<DistrictOption[]> = retryStuck(attempt, () => {
+    if (_districtPromises.get(key) === p) { _districtPoolStatus.set(key, 'error'); _districtPromises.delete(key); }
+  });
   _districtPromises.set(key, p);
   return p;
 }
