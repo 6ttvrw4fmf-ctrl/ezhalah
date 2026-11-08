@@ -61,18 +61,19 @@ def test_muhaysini_maps_a_glued_abu_spelling(word, district):
     assert _muhaysini(word) == (district, word)          # the card keeps the source's own words
 
 
-def test_muhaysini_maps_jeddah_almuntazahat():
+@pytest.mark.parametrize("word", ["المنتزهات", "حي المنتزهات", "حي المتنزهات"])
+def test_muhaysini_maps_jeddah_almuntazahat(word):
     # 2026-11-08 (rule G): 5 Jeddah ads «المنتزهات» (25112123 deed line «حي المنتزهات بمدينة جدة») = catalog «حي المتنزهات».
     rec = copy.deepcopy(MT.RECORDS["SHOWROOM_RENT_ANNUAL_IN_PROSE"])
     rec["City"] = {"id": 1, "name": "جدة"}
     rec["Region"] = {"id": 2, "name": "منطقة مكة المكرمة"}
-    rec["Neighborhood"]["name"] = "المنتزهات"
+    rec["Neighborhood"]["name"] = word
     loc = ((rec.get("AdValidator") or {}).get("advertisement") or {}).get("location")
     if isinstance(loc, dict):                       # the REGA block's region is the hint the mapper reads first
-        loc.update({"region": "منطقة مكة المكرمة", "city": "جدة", "district": "المنتزهات"})
+        loc.update({"region": "منطقة مكة المكرمة", "city": "جدة", "district": word})
     row, _category, why = M.map_listing(rec)
     assert row is not None, why
-    assert (row["city_id"], row["district_ar"], row["neighborhood"]) == (JEDDAH, "حي المتنزهات", "المنتزهات")
+    assert (row["city_id"], row["district_ar"], row["neighborhood"]) == (JEDDAH, "حي المتنزهات", word)
 
 
 def test_muhaysini_catalogued_and_unknown_words_are_unchanged():
@@ -95,3 +96,26 @@ def test_ashab_maps_almuraydisiyah():
 def test_sadiqeltajer_maps_almuraydisiyah():
     text = "الموقع حسب الصك القصيم - بريدة - المريدسية اعلانات مشابهة"
     assert S.resolve_district_words(text, BURAIDAH) == ("حي المريديسية", "المريدسية")
+
+
+@pytest.mark.parametrize("word", ["المنتزهات", "حي المنتزهات"])
+def test_jeddah_spelling_alias_does_not_resolve_in_another_city(word):
+    # The same spelling in Madinah must not borrow Jeddah's catalog entry.
+    assert _muhaysini(word) == (None, word)
+
+
+def test_jeddah_spelling_alias_requires_a_catalogued_target(monkeypatch):
+    monkeypatch.setitem(L._DISTRICT_BY_CITY, JEDDAH, set())
+    monkeypatch.delitem(L._DISTRICT_AR_BY_CITY, (JEDDAH, L.norm_district_tok("حي المتنزهات")))
+    rec = copy.deepcopy(MT.RECORDS["SHOWROOM_RENT_ANNUAL_IN_PROSE"])
+    rec["City"] = {"id": 1, "name": "جدة"}
+    rec["Region"] = {"id": 2, "name": "منطقة مكة المكرمة"}
+    rec["Neighborhood"]["name"] = "المنتزهات"
+    rec["AdValidator"]["advertisement"]["location"].update(
+        region="منطقة مكة المكرمة", city="جدة", district="المنتزهات",
+    )
+    row, _category, why = M.map_listing(rec)
+    assert row is not None, why
+    assert row["city_id"] == JEDDAH
+    assert row["district_ar"] is None
+    assert row["neighborhood"] == "المنتزهات"
