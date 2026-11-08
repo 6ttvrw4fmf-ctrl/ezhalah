@@ -50,6 +50,7 @@ from curl_cffi import requests as cc  # noqa: E402 — honest client: no imperso
 from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.page_pin import pin_from_page  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 SOURCE = "شركة مقام للتطوير العقاري"
@@ -195,6 +196,17 @@ def _common(ad: str, url: str, name: str, ptype: str, city: Optional[str], distr
     }
 
 
+def _project_pin(p: Optional[dict]) -> Optional[tuple]:
+    """The project's own pin from its /projects record's mapUrl: the «!3d…!4d…» place shape, else any shape
+    page_pin reads («?q=», «@lat,lng», «ll=», a maps.app.goo.gl link followed). None when it carries none."""
+    url = (p or {}).get("mapUrl") or ""
+    m = _PIN.search(url)
+    if m:
+        return m.group(1), m.group(2)
+    got = pin_from_page(url) if url else {}
+    return (got["latitude"], got["longitude"]) if got.get("latitude") is not None else None
+
+
 def map_unit(uid: int, u: dict, projects_by_name: dict[str, dict]) -> tuple[Optional[tuple[dict, str]], str]:
     if u["status"] != _LIVE_UNIT:
         return None, f"status_{u['status']}"
@@ -212,8 +224,11 @@ def map_unit(uid: int, u: dict, projects_by_name: dict[str, dict]) -> tuple[Opti
     cat = "commercial" if (u.get("category_ar") or "").startswith("تجاري") else "residential"
     ld = u.get("ld") or {}
     price_raw = (ld.get("offers") or {}).get("price") or u.get("price_text")
+    # A unit page with no Maps link (مقام 17's units, re-read 42451335417) takes its PROJECT's own pin — the
+    # parent page is place 4 of the four-place rule (rakez precedent). Never a city centre, never geocoded.
+    unit_pin = u.get("pin") or _project_pin(proj)
     row = _common(f"{PREFIX}U{uid}", f"{SITE}/units/{uid}", f"{u['name']} ({u['unit_number']})", ptype,
-                  u.get("city"), u.get("district"), u.get("pin"), price_raw)
+                  u.get("city"), u.get("district"), unit_pin, price_raw)
     area = _num((u.get("area") or "").replace("م²", ""))
     beds, baths = _num(u.get("bedrooms")), _num(u.get("bathrooms"))
     pin, por = row.pop("_pin"), row.pop("_por")
@@ -245,9 +260,8 @@ def map_whole_project(pid: int, p: dict, unit_projects: set[str]) -> tuple[Optio
         return None, f"project_status_{p.get('status')}"
     if p.get("hidePrice") or not _num(p.get("price")):
         return None, "project_without_price"
-    pin_m = _PIN.search(p.get("mapUrl") or "")
     row = _common(f"{PREFIX}P{pid}", f"{SITE}/projects/{pid}", p.get("title") or "", "Building", p.get("city"),
-                  p.get("neighborhood"), (pin_m.group(1), pin_m.group(2)) if pin_m else None, p.get("price"))
+                  p.get("neighborhood"), _project_pin(p), p.get("price"))
     pin, _ = row.pop("_pin"), row.pop("_por")
     area = _num((p.get("unitsArea") or "").replace("م²", ""))
     row.update({"area_m2": round(area, 2) if area else None, "project_name": p.get("title"),

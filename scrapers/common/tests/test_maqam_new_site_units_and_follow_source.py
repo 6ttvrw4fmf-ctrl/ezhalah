@@ -175,3 +175,34 @@ def test_complete_needs_every_listed_page():
     w = {"units": {1: {}}, "listed": 1, "projects": {1: {}}, "listed_projects": 1, "bad": {}}
     assert R.complete(w)
     assert not R.complete({**w, "bad": {"unit_unparsed": 1}}) and not R.complete({**w, "listed": 2})
+
+
+def _no_map(page: str) -> str:
+    import re
+    return re.sub(r'<a href="https://www\.google\.com/maps[^"]*">m</a>', "", page)
+
+
+def test_a_unit_page_without_a_map_link_takes_its_projects_own_pin():
+    """Four-place rule, place 4 (the parent page): مقام 17's unit pages carry no Maps link (re-read
+    42451335417, 2026-11-08); the unit takes the pin its PROJECT's mapUrl publishes, in any shape."""
+    projects = {"مقام 18": {**PROJECTS["مقام 18"], "mapUrl": "https://www.google.com/maps?q=24.8455,46.6512"}}
+    u = R.parse_unit(_no_map(_unit_page()))
+    assert u["pin"] is None
+    (row, _), _ = R.map_unit(114, u, projects)
+    assert (row["additional_info"]["latitude"], row["additional_info"]["longitude"]) == (24.8455, 46.6512)
+
+
+def test_a_units_own_pin_wins_and_no_map_anywhere_stays_unpinned():
+    projects = {"مقام 18": {**PROJECTS["مقام 18"], "mapUrl": "https://www.google.com/maps?q=24.1111,46.2222"}}
+    (row, _), _ = R.map_unit(91, R.parse_unit(_unit_page()), projects)
+    assert row["additional_info"]["latitude"] == 24.84975                       # the unit's own link
+    (row, _), _ = R.map_unit(114, R.parse_unit(_no_map(_unit_page())), PROJECTS)  # project has no mapUrl
+    assert "latitude" not in row["additional_info"]
+
+
+def test_a_whole_project_reads_a_q_shaped_map_url():
+    p = {"id": "13", "title": "مقام 13 البيع بالكامل", "status": "available", "statusLabel": "متاح",
+         "price": "11,500,000", "neighborhood": "الياسمين", "city": "الرياض",
+         "mapUrl": "https://maps.google.com/?q=24.8231,46.6402"}
+    (row, _), _ = R.map_whole_project(13, p, unit_projects=set())
+    assert row["additional_info"]["latitude"] == 24.8231
