@@ -42,3 +42,15 @@ def test_existing_shapes_unchanged():
     assert cmp(0, ["عمر العقار", "جديد"]) == S.MATCH
     assert cmp(9, ["عمر العقار: 9 سنوات"]) == S.MATCH
     assert cmp(None, ["عمر العقار", "سنتين"]) in (S.WE_MISS, S.PAGE_SILENT)
+
+
+def test_a_value_before_the_label_belongs_to_its_own_field():
+    # CodeRabbit on #11299: the age's «ثلاث سنوات» is not the bedrooms' value
+    lines = ["عمر العقار", "ثلاث سنوات", "غرف النوم", "اربع غرف"]
+    assert S._cmp_number(3, lines, "\n".join(lines), S.ROOM_KW["bedrooms"]) != S.MATCH
+
+
+def test_month_and_partial_floors_are_not_year_floors():
+    assert S._age_floor("اكثر من 10 اشهر", own=False) is None
+    assert S._age_floor("اكثر من عشر سنوات في السوق", own=False) is None
+    assert cmp(1, ["عمر العقار", "اكثر من 10 اشهر"]) != S.MISMATCH

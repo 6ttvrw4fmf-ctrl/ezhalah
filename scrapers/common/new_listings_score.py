@@ -500,14 +500,16 @@ WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len,
 DUAL_VALUE_LINE = re.compile(r"^\s*(?:سنتين|سنتان|عامين|عامان|غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان)\s*$")
 # «اكثر من عشر سنوات», «أكثر من 10 سنوات», «+10 سنوات»: an open bucket whose floor is the figure (norm folds أ→ا).
 AGE_FLOOR = re.compile(r"(?:اكثر|أكثر|فوق|اعلى|أعلى)\s+من\s+([\d٠-٩]{1,3}|" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
-                       + r")(?![\u0621-\u064A\d])\s*(?:سنوات|سنه|سنة|سنين|عام|اعوام|أعوام)?")
+                       + r")(?![\u0621-\u064A\d])\s*(?:سنوات|سنه|سنة|سنين|عام|اعوام|أعوام)(?![\u0621-\u064A])")
+# a year word: «اكثر من 10 اشهر» (months) is never a year floor, and a value line before the label must name years
+AGE_UNIT = re.compile(r"(?:سنوات|سنه|سنة|سنين|سنتين|سنتان|عام|اعوام|أعوام)(?![\u0621-\u064A])")
 
 
 def _age_floor(line: str, own: bool) -> Optional[float]:
     """The floor of an open age bucket on this line. A neighbour line must be nothing but the bucket («اكثر من عشر
     سنوات»); the label's own line may carry it after the label («عمر العقار: اكثر من عشر سنوات»)."""
     m = AGE_FLOOR.search(line or "")
-    if not m or (not own and line[:m.start()].strip()):
+    if not m or (not own and (line[:m.start()].strip() or line[m.end():].strip())):
         return None
     v = m.group(1)
     return float(WORD_NUMBERS[v]) if v in WORD_NUMBERS else float(v.translate(_DIGITS))
@@ -591,12 +593,19 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # سنوات»). Only a line that is nothing but the worded figure counts, on either side.
         for i in kw_hits:
             for j in (i - 1, i + 1):
-                if 0 <= j < len(lines):
-                    m = WORDED_VALUE_LINE.match(lines[j])
-                    if m:
-                        worded.add(WORD_NUMBERS[m.group(1)])
-                    if DUAL_VALUE_LINE.match(lines[j]):
-                        worded.add(2)
+                if not 0 <= j < len(lines):
+                    continue
+                # a value BEFORE the label must be this field's own: an AGE value («… سنوات») that no other label
+                # claims — «عمر العقار» / «ثلاث سنوات» / «غرف النوم» / «اربع غرف» gives the bedrooms nothing from the
+                # age line above them (CodeRabbit on #11299)
+                if j == i - 1 and (kw != AGE_KW or not AGE_UNIT.search(lines[j])
+                                   or (j >= 1 and re.search(_NEXT_LABEL, lines[j - 1]))):
+                    continue
+                m = WORDED_VALUE_LINE.match(lines[j])
+                if m:
+                    worded.add(WORD_NUMBERS[m.group(1)])
+                if DUAL_VALUE_LINE.match(lines[j]) and (kw == AGE_KW) == bool(re.match(r"^\s*(?:سنت|عام)", lines[j])):
+                    worded.add(2)
         # An OPEN age bucket «اكثر من عشر سنوات» is a floor, not a count (abaad 1261, aqarcity 29885: stored 10): a stored
         # age at or above the floor agrees with it, below it contradicts it. On the label's line or its own value line.
         if kw == AGE_KW:
