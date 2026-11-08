@@ -62,7 +62,9 @@ reviews:
         - Hides or deactivates listings in bulk without a guard (collapse guard, 3 complete misses, or proof the ad page is gone).
     - path: "supabase/migrations/**"
       instructions: |
-        - Every applied migration needs a byte-exact mirror (sql/mirrors/, cron changes in sql/mirrors/cron_schedule.json) in the same PR.
+        - The file in supabase/migrations/ IS the byte-exact mirror of what production executed (AGENTS.md «Migration drift guard»);
+          do NOT ask for a copy under sql/mirrors/. sql/mirrors/ holds only registry JSON: a liveness-registry change needs
+          sql/mirrors/liveness_registry.json and a cron change sql/mirrors/cron_schedule.json in the same PR.
         - CREATE OR REPLACE of an existing function/view must start from the LIVE definition and change only the intended
           lines; a full replace silently drops a concurrent migration's edits.
         - Long rebuilds must `set local client_min_messages = warning` (the Management API drops at ~120 s).
