@@ -919,8 +919,11 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         else:
             rent_period = rent_period_for(body, unit, price, title_raw)
     area = _float(pi.get("مساحة العقار"))
-    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
-    price_per_meter = None
+    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217). The page was read and
+    # publishes no rate, so the NULL is SETTLED: AUTHORITATIVE_NULL clears a rate an older parser stored
+    # (owner 2026-11-07 row 3076: 2292952 kept «200,000» per m² beside its 200,000 rent — a plain None is
+    # dropped by the upsert). Only the land-rent proof below writes a real rate.
+    price_per_meter: Any = db.AUTHORITATIVE_NULL
 
     # Land-rent JSON-LD trap (live 2026-08-03, 18 rows source-verified): for some rent ads the
     # JSON-LD offers.price carries the source's per-metre rate while the page itself displays the

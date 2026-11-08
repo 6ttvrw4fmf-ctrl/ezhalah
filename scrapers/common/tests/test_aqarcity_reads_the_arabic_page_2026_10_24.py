@@ -80,3 +80,11 @@ def test_the_side_of_the_price_that_does_not_apply_is_cleared():
     from scrapers.common import db
     row, _ = R.map_listing(page(LD_AR, "ar", DL), "https://www.aqarcity.net/property/27257")
     assert row["transaction_type"] == "Buy" and row["price_annual"] is db.AUTHORITATIVE_NULL
+
+
+def test_a_page_with_no_rate_clears_a_stored_rate():
+    # Owner 2026-11-07 (row 3076): 2292952 held price_per_meter = its 200,000 rent from an older read; the
+    # parser emitted None, which the upsert drops, so the copy stayed. A page with no rate settles the box.
+    from scrapers.common import db
+    row, _ = R.map_listing(page(LD_AR, "ar", DL), "https://www.aqarcity.net/property/27257")
+    assert row["price_per_meter"] is db.AUTHORITATIVE_NULL
