@@ -716,16 +716,24 @@ _CARD_START = re.compile(r'<div[^>]*class="[^"]*\bcard-item\b')
 # alshawaf 21664551 (2026-10-30, re-read runs 41089939871 / 41090169747): the node's own table says «المساحة 250م»
 # (stored 250), and the «related listings» Views table under it (`…duplicate-of-frontpage-block-1`, trap 1 in
 # scrapers/alshawaf/run.py) prints other plots' «المساحة 422.22م»; the area scored MISMATCH and capped the night.
+# alshawaf 22426 (2026-11-08, backlog 1357): the related table under the node carried no «frontpage-block» id, so its
+# cell «المساحة 500م» survived the cut and scored our 375 (the node's own «<th>المساحة</th><td>375م</td>») MISMATCH.
+# A related row is a Views LISTING row (`headers="view-changed-table-column"`, the /table index's title cell); the
+# node's own facts are a th/td table that never carries it. The scraper reads only the node block (trap 1).
 _SIMILAR_BLOCK = {"ashab.sa": ('id="similar-properties"', "عقارات مشابهة"),
-                  "alshawaf.com.sa": ("duplicate-of-frontpage-block-1",)}
+                  "alshawaf.com.sa": ("duplicate-of-frontpage-block-1", "view-changed-table-column")}
+# The node block marker: a stop that comes BEFORE it would cut the ad itself, so for these hosts a stop is only
+# honoured after the ad's own block has started.
+_AD_BLOCK_START = {"alshawaf.com.sa": "duplicate-of-node-block-1"}
 
 
 def drop_similar_block(url: str | None, body: str) -> str:
     for host, stops in _SIMILAR_BLOCK.items():
         if host in (url or "") and body:
+            start = body.find(_AD_BLOCK_START[host]) if host in _AD_BLOCK_START else -1
             for stop in stops:
-                if (k := body.find(stop)) > 0:
-                    body = body[:k]
+                if (k := body.find(stop, max(start, 0))) > 0:
+                    body = body[:max(body.rfind("<", 0, k), 0) or k]   # cut at the tag, not inside it
     return body
 
 
