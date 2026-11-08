@@ -922,7 +922,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217). The page was read and
     # publishes no rate, so the NULL is SETTLED: AUTHORITATIVE_NULL clears a rate an older parser stored
     # (owner 2026-11-07 row 3076: 2292952 kept «200,000» per m² beside its 200,000 rent — a plain None is
-    # dropped by the upsert). Only the land-rent proof below writes a real rate.
+    # dropped by the upsert). Only the land-rent proof below writes a real rate; a land-rent page whose
+    # displayed total is missing keeps None (unknown), never the settled NULL.
     price_per_meter: Any = db.AUTHORITATIVE_NULL
 
     # Land-rent JSON-LD trap (live 2026-08-03, 18 rows source-verified): for some rent ads the
@@ -939,6 +940,10 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     if is_rent and price and area:
         cands = re.findall(r'btnPriceHead[^>]*>\s*([\d,٬.]+)', body)
         cands += re.findall(r"ال[إا]يجار\s*السنوي\s*(?:للأرض)?\s*:?\s*([\d,٬.]+)", body)
+        if not cands:
+            # The displayed total was not on the page we got (a partial read): the rate is UNKNOWN, not
+            # absent, so a previously proven rate must survive (CodeRabbit, PR #11247).
+            price_per_meter = None
         for c in cands:
             try:
                 cand = _price_round(float(c.replace(",", "").replace("٬", "")))
