@@ -81,13 +81,18 @@ try {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], locale: 'ar' });
   // THE OWNER'S SCREEN, NOT A FIRST-TIME GUEST'S (probe 2026-11-08 21:30): the cookie card (252 px) and Google's one-tap
   // sheet (144 px) shrank the Filter's scroll box to 268 px, so a centred input still sat high and the robot PASSED on the
-  // buggy site. The owner was signed in with cookies answered: no card, no sheet, a full-height box.
-  await ctx.addInitScript(() => { try { localStorage.setItem('ezhalah:cookieConsent', 'necessary'); } catch {} });
+  // buggy site. The owner was signed in: no card, no sheet, a full-height box. The card shows to every guest on every
+  // visit (owner 2026-09-13), so it is answered below; the one-tap sheet is never loaded.
   await ctx.route(/accounts\.google\.com\/gsi\//, (r) => r.abort());
   const page = await ctx.newPage();
   await page.goto(`${BASE}/?iphonerobot=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.getByText('بحث', { exact: true }).first().waitFor({ state: 'visible', timeout: 60_000 });
-  await page.getByText('الضروري فقط', { exact: true }).tap({ timeout: 3_000 }).catch(() => {});
+  const necessary = page.getByText('الضروري فقط', { exact: true });
+  const cardGone = await necessary.waitFor({ state: 'visible', timeout: 15_000 })
+    .then(() => necessary.tap())
+    .then(() => page.getByTestId('cookie-consent').waitFor({ state: 'detached', timeout: 5_000 }))
+    .then(() => true, () => false);
+  say(cardGone, 'setup: the cookie card answered and gone (it shrinks the Filter box)', cardGone ? 'gone' : 'still on screen or never appeared');
   await page.waitForTimeout(2_000);
 
   const city = page.getByPlaceholder('اختر المدينة', { exact: true });
