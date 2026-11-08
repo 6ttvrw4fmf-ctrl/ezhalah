@@ -272,6 +272,10 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
     basis = None
     if price and ptype in LAND_TYPES:
         basis = land_price_basis(price, area, free_text)
+    # A figure the ad settles as the TOTAL clears a rate an older read stored (owner 2026-11-07 row 3076: 18562597 kept
+    # 600,000 in both boxes; a plain None is dropped by the upsert).
+    if price and basis == "total":
+        price_per_meter = db.AUTHORITATIVE_NULL
     if price and basis == "per_meter":
         price_per_meter = price
         if p["deal"] == "Buy":
