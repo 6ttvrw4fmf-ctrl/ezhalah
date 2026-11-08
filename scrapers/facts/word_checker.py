@@ -762,6 +762,34 @@ def _starts(word: str, stems: tuple[str, ...]) -> bool:
     return any(word.startswith(x) or w.startswith(x) for x in stems)
 
 
+# «موقد» is both a fire pit («موقد نار / حطب», «موقد (مشب)», «جلسة خارجية مع موقد») and the kitchen cooktop («مطبخ مجهز
+# بالفرن والموقد», «موقد سيراميكي», «موقد أربعة عيون كهربائي», «ثلاجة، موقد، غلاية»). 🔬 2026-11-08 two-way sample: 28 of 30
+# served apartment «موقد» yeses were the stove. A fire cue near the word keeps it; a kitchen / appliance word near it
+# (and no fire cue) makes it the stove. Neither → unchanged (a bare «موقد» in a chalet stays the fire pit it was).
+_FIRE_CUES = tuple(_n(w) for w in ("نار", "النار", "حطب", "الحطب", "للحطب", "بالحطب", "مشب", "المشب", "فحم", "الفحم", "جمر",
+                                   "خارجي", "خارجيه", "شتوي", "شتويه", "حوش", "الحوش", "جلسه", "الجلسه", "تدفئه", "fire"))
+_STOVE_CUES = tuple(_n(w) for w in ("فرن", "الفرن", "افران", "شفاط", "الشفاط", "ثلاج", "الثلاج", "ميكرو", "الميكرو", "مايكرو",
+                                    "المايكرو", "مكرو", "غلاي", "الغلاي", "غساله", "الغساله", "مطبخ", "المطبخ", "طبخ", "الطبخ",
+                                    "طهي", "الطهي", "عين", "عيون", "سيراميك", "مسطح", "سطحي", "كهرب", "غاز", "الغاز", "بوتجاز",
+                                    "built", "اجهز", "الاجهز", "ادوات", "صحون", "الصحون", "فريزر", "قهوه", "القهوه", "اسطوان",
+                                    "مزدوج", "انفرا", "حراري", "ستيل", "اطباق", "الاطباق"))
+
+
+def _stove_not_fire(clauses: list, ci: int, t: str, s: int, e: int) -> bool:
+    """True when this «موقد» is the kitchen cooktop: a stove word within 7 words and no fire cue within 4. The window
+    crosses clause breaks — «ثلاجة، فرن، موقد، غلاية» puts every item in its own clause."""
+    ws, we = _word_bounds(t, s, e)
+    if not _strip_wa(_bare(t[ws:we])).startswith(("موقد", "الموقد")):
+        return False
+    before = " ".join(c[2] for c in clauses[max(0, ci - 3):ci]).split() + t[:ws].split()
+    after = t[we:].split() + " ".join(c[2] for c in clauses[ci + 1:ci + 4]).split()
+    close = [_bare(w) for w in before[-4:] + after[:4]]
+    if any(_starts(w, _FIRE_CUES) for w in close):
+        return False
+    wide = [_bare(w) for w in before[-7:] + after[:7]]
+    return any(_starts(w, _STOVE_CUES) for w in wide)
+
+
 def _bare(w: str) -> str:
     """A context word without its proclitics: «بدورة» → «دوره», «لحمام» → «حمام», «وبخزان» → «خزان»."""
     w = w[1:] if w.startswith("و") and len(w) > 3 else w
@@ -1472,6 +1500,10 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
                 for m in rx.finditer(t):
                     v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in,
                                        list_in or m.end() <= item_end or svc_from <= m.start() < svc_to)
+                    if v is True and fact == "fire_pit" and _stove_not_fire(clauses, ci, t, m.start(), m.end()):
+                        v = None                     # «مطبخ … (ثلاجة، فرن، موقد، شفاط)», «موقد سيراميكي»: the kitchen
+                                                     # cooktop, not a fire pit (🔬 2026-11-08: 28 of 30 served apartment
+                                                     # «موقد» yeses were the stove)
                     if v is not None:
                         bool_hits.setdefault(fact, {}).setdefault(v, (ci, qs, qe))
         # what this clause hands to the next one: a cue (or a cued utility list going on), a «nearby» heading
@@ -2160,6 +2192,19 @@ def selftest() -> None:
         ("جلسة نار وحطب", {"fire_pit": True}, ()),
         ("موقد خارجي", {"fire_pit": True}, ()),
         ("موقد غاز في المطبخ", {}, ("fire_pit",)),
+        # 🔬 2026-11-08: the kitchen cooktop is not a fire pit (28 of 30 served apartment «موقد» yeses) — real sentences
+        ("المطبخ والأجهزة: - 6 مكيفات سبليت. - ميكروويف. - شواية. - موقد سيراميكي. - جميع الأجهزة إيطالية الصنع", {}, ("fire_pit",)),
+        ("مطبخ مفتوح ومجهز بالفرن والموقد وغسالة الصحون وغسالة الملابس", {}, ("fire_pit",)),
+        ("مطبخ متكامل يحتوي على ثلاجة، فرن، مايكرويف، موقد، غسالة، وغلاية", {}, ("fire_pit",)),
+        ("مطبخ كامل بجميع الأجهزة الكهربائية وأدوات الطبخ ومنها فرن كهربائي أو ميكرويف ، موقد أربعة عيون كهربائي، ثلاجة كبيرة", {}, ("fire_pit",)),
+        ("مطبخ راكب + موقد و شفاط - مجهزه كامل الشقة بمكيفات اسبلت", {}, ("fire_pit",)),
+        ("ومطبخ يحتوي على موقد مسطح ,ثلاجة , مايكرو ويف وايضا على دورتين مياة", {}, ("fire_pit",)),
+        ("تحتوي على مكيف جديد وحمام مع سخان ومطبخ راكب وخزانة كبيرة ومؤثثة سرير مع مرتبة وغاز وموقد عينين", {}, ("fire_pit",)),
+        # … while a fire cue keeps it, even inside a kitchen list
+        ("ومطبخ مجهز بثلاجة وغلاية وفرن وفريزر وموقد حطب، بالإضافة إلى دورات مياه", {"fire_pit": True}, ()),
+        ("ومطبخ متوفر به فرن,ثلاجه,غلايه وفريزر مستقل و العديد من المرافق مثل ركن شواء,موقد حطب,مسطح اخضر", {"fire_pit": True}, ()),
+        ("وادوات نظافة وجلسة خارجية مع موقد نار وادواتة التراثية", {"fire_pit": True}, ()),
+        ("المكان مزود بغرفة مستقلة تحتوي على موقد (مشب) يضفي لمسة دفء", {"fire_pit": True}, ()),
         ("بيت شعر كبير", {"bait_shaar": True}, ()),
         ("خيمة شعر", {"bait_shaar": True, "tent": True}, ()),
         ("بدون بيت شعر", {"bait_shaar": False}, ()),
