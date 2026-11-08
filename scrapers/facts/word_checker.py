@@ -326,7 +326,7 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "for_newlyweds": ["^عرسان", "^للعرسان", "^للعرايس", "re:شهر (?:ال)?عسل", "honeymoon", "newlyweds"],
     # a bare «بقي» also means «remaining» («بقي شقة واحدة») — only next to دباب / بانشي
     "quad_bikes": ["^دباب", "^دبابات", "^بانشي", "re:(?:دباب|دبابات|بانشي) (?:و)?بقي", "re:بقي (?:و)?(?:دباب|دبابات|بانشي)", "quad bike", "atv"],
-    "horses_stable": ["^خيل$", "^خيول$", "^اسطبل", "^اصطبل", "re:ركوب (?:ال)?خيل", "horse riding", "stable"],
+    "horses_stable": ["^خيل$", "^خيول$", "^اسطبل", "^اصطبل", "re:ركوب (?:ال)?خيل", "horse riding", "horse stable", "stables"],   # bare «stable» is «stable returns» (P2 13085, 2026-11-08)
     # «جمال» alone is beauty — only «ركوب الجمال»
     "camels": ["re:(?:(?<= )|^)(?:و|ال|وال|بال)?ابل(?!\\w)", "^هجن$", "re:ركوب (?:ال)?(?:جمال|ابل|هجن)", "camels"],
     "toilets_on_site": ["re:دورات (?:ال)?مياه", "re:دوره (?:ال)?مياه", "^حمامات", "^حمام$", "toilets"],
@@ -2253,6 +2253,10 @@ def selftest() -> None:
         ("دبابات للتأجير", {"quad_bikes": True}, ()),
         ("بقي شقة واحدة", {}, ("quad_bikes",)),
         ("اسطبل خيل", {"horses_stable": True}, ()),
+        # 🔬 2026-11-08 P2 13085: English «stable» is an adjective in investment ads (aqar 6981031, 15537845, maqrat 13605153)
+        ("Ideal opportunity for investors seeking stable returns", {}, ("horses_stable",)),
+        ("Suitable for investment and generating stable annual income", {}, ("horses_stable",)),
+        ("Farm with horse stables and a guest house", {"horses_stable": True}, ()),
         ("ركوب الخيل", {"horses_stable": True}, ()),
         ("خيول للركوب", {"horses_stable": True}, ()),
         ("مزرعة الخيليين", {}, ("horses_stable",)),
