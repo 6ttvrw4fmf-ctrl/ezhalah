@@ -331,6 +331,8 @@ _BARE_COUNT_LINE = re.compile(r"^\s*(\d{1,3})\s*(?:غرف|غرفه)?\s*$")
 
 
 def _cmp_bedrooms_beside_total_rooms(stored, lines: list[str], whole: str, kw: str) -> str:
+    """Bedrooms on a total-rooms site: blank «عدد الغرف» and its value (inline or the next line), compare what is left
+    with the normal number rule, and score a stored count that only the total supports as a MISMATCH."""
     totals: set[float] = set()
     kept: list[str] = []
     skip_next = False

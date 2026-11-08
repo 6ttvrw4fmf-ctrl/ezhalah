@@ -7,10 +7,12 @@ from scrapers.common.new_listings_score import MATCH, MISMATCH, PAGE_SILENT, com
 
 
 def _page(*lines):
+    """A page whose evidence lines are exactly `lines`."""
     return {"title": "", "meta": {}, "evidence_lines": list(lines), "text_head": ""}
 
 
 def _beds(platform, stored, *lines):
+    """The score's bedrooms verdict for a stored count on that page."""
     return compare_listing({"platform": platform, "bedrooms": stored}, _page(*lines), skip_price=True)["bedrooms"]
 
 
