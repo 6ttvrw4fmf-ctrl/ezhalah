@@ -394,6 +394,8 @@ _ROOM_TOKEN = {
     "bedrooms": re.compile(r"(?:و|ب|لل|ال)*غرف(?:ه|ة|تين|تان)?|bedrooms?|rooms?", re.I),
     "bathrooms": re.compile(r"(?:و|ب|لل|ال)*(?:حمام(?:ات|ين|ان)?|دور(?:ه|ة|ات|تين|تان))|bathrooms?|baths?|wc", re.I),
 }
+_FIELD_STOP = re.compile(r"(?:و|ب|ال)*(?:شارع|عرض|مساحه|مساحة|عمر|سعر|طابق|دور|الدور|ادوار|واجهه|واجهة|"
+                         r"street|width|area|age|price|floor)", re.I)
 _UNIT_AFTER = re.compile(r"(?:م|متر|مترمربع|m|sqm|ريال|sar)$", re.I)
 
 
@@ -431,8 +433,8 @@ def room_figure_stated(name: str, lines: list[str]) -> bool:
         for h in hits:
             for step in (-1, 1):            # walk out from the word; another room type's word ends its reach
                 for k in range(h + step, h + step * (_ROOM_WINDOW + 1), step):
-                    if not 0 <= k < len(toks) or other.fullmatch(toks[k]):
-                        break
+                    if not 0 <= k < len(toks) or other.fullmatch(toks[k]) or _FIELD_STOP.fullmatch(toks[k]):
+                        break               # «غرفه نوم، شارع 15»: the 15 is the street's (CodeRabbit on #11280)
                     if (c := _token_count(toks, k)) is not None:
                         counts.append(c)
         if counts and any(c != 1 for c in counts):

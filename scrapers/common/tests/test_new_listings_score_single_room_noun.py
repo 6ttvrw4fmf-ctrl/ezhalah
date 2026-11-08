@@ -86,3 +86,11 @@ def test_a_nearby_count_other_than_one_is_never_outvoted(field, text):
 ])
 def test_an_agreeing_one_or_another_rooms_count_does_not_block(field, text):
     assert _score({field: 1}, text)[field] == S.MATCH
+
+
+@pytest.mark.parametrize("field,text", [
+    ("bedrooms", "غرفه نوم، شارع 15"),                 # the street width's figure is not a room count (CodeRabbit)
+    ("bathrooms", "دورة مياه، عرض 20"),
+])
+def test_another_fields_figure_does_not_block_the_bare_noun(field, text):
+    assert _score({field: 1}, text)[field] == S.MATCH
