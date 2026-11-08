@@ -35,6 +35,9 @@ mustCatch('a robot that swallows its failure', !loud(js.replace('process.exit(fa
 const room = (s: string) => /await addKeyboardRoom\(input\);/.test(s) && /room\.style\.height = `\$\{innerHeight\}px`/.test(s);
 check('gives the page the keyboard\'s scroll room before every tap (without it a headless phone cannot show the bug)', room(js));
 mustCatch('the keyboard room removed (the 2026-11-08 probe passed on the buggy site without it)', !room(js.replace('await addKeyboardRoom(input);', '')));
+const ownerScreen = (s: string) => /setItem\('ezhalah:cookieConsent'/.test(s) && /accounts\\\.google\\\.com/.test(s) && /r\.abort\(\)/.test(s);
+check('walks the signed-in owner\'s screen: cookie choice preset, Google one-tap sheet blocked (they shrank the box)', ownerScreen(js));
+mustCatch('the cookie card left on screen (the 11-08 probe passed on the buggy site that way)', !ownerScreen(js.replace("setItem('ezhalah:cookieConsent'", "getItem('x'")));
 mustCatch('the district box dropped from the walk', !walks(js.replace("getByTestId('district-input')", "getByTestId('x')")));
 
 if (failed) { console.error(`\n❌ verify-iphone-robot-wired: ${failed} check(s) failed`); process.exit(1); }

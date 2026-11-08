@@ -79,6 +79,11 @@ async function checkListOpens(page, input, label, typed) {
 
 try {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], locale: 'ar' });
+  // THE OWNER'S SCREEN, NOT A FIRST-TIME GUEST'S (probe 2026-11-08 21:30): the cookie card (252 px) and Google's one-tap
+  // sheet (144 px) shrank the Filter's scroll box to 268 px, so a centred input still sat high and the robot PASSED on the
+  // buggy site. The owner was signed in with cookies answered: no card, no sheet, a full-height box.
+  await ctx.addInitScript(() => { try { localStorage.setItem('ezhalah:cookieConsent', 'necessary'); } catch {} });
+  await ctx.route(/accounts\.google\.com\/gsi\//, (r) => r.abort());
   const page = await ctx.newPage();
   await page.goto(`${BASE}/?iphonerobot=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.getByText('بحث', { exact: true }).first().waitFor({ state: 'visible', timeout: 60_000 });
