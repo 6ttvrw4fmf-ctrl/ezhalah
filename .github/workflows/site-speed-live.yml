@@ -41,6 +41,14 @@ jobs:
         env:
           BASE_URL: https://ezhalah.com
         run: node e2e/speed/site-speed-live.mjs
+      # Owner 2026-11-08 (iPhone on a VPN: the signed-in sidebar and a saved chat «take sooooo long to load and pop»):
+      # the guest journey above never opened ☰ or a saved chat. Runs even when the guest journey is red, so both verdicts
+      # reach the bridge below in one run. Logic: e2e/speed/signed-in-sidebar-live.mjs.
+      - name: Signed-in sidebar and a saved chat on the same phone, 4G and a VPN line
+        if: always()
+        env:
+          BASE_URL: https://ezhalah.com
+        run: node e2e/speed/signed-in-sidebar-live.mjs
 
       # Unattended: a red run must reach a human. One open alert per workflow file; the next green run resolves it.
       - name: Bridge this run's result to alert_event
