@@ -83,6 +83,8 @@ try {
   // sheet (144 px) shrank the Filter's scroll box to 268 px, so a centred input still sat high and the robot PASSED on the
   // buggy site. The owner was signed in: no card, no sheet, a full-height box. The card shows to every guest on every
   // visit (owner 2026-09-13), so it is answered below; the one-tap sheet is never loaded.
+  // PROBE ONLY: simulate #11362 (scroll to the top, not the centre) to prove the robot goes green on the fix.
+  await ctx.addInitScript(() => { const o = Element.prototype.scrollIntoView; Element.prototype.scrollIntoView = function (a) { return o.call(this, a && typeof a === 'object' && a.block === 'center' ? { ...a, block: 'start' } : a); }; });
   await ctx.route(/accounts\.google\.com\/gsi\//, (r) => r.abort());
   const page = await ctx.newPage();
   await page.goto(`${BASE}/?iphonerobot=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
