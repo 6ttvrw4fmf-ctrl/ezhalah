@@ -40,7 +40,7 @@ def test_label_value_lines_are_the_total_too():
 
 
 def test_a_bedroom_label_is_still_bedrooms():
-    assert _beds("tuba", 3, "عدد غرف النوم: 3") == MATCH
+    assert _beds("haraj", 3, "عدد غرف النوم: 3") == MATCH
 
 
 def test_other_platforms_keep_their_reading():
@@ -62,7 +62,7 @@ def test_total_room_formats_are_excluded_on_every_affected_platform(platform, li
     assert _beds(platform, stored, *lines) == expected
 
 
-@pytest.mark.parametrize("platform", ["tuba", "aqarcity", "haraj"])
+@pytest.mark.parametrize("platform", ["haraj"])
 @pytest.mark.parametrize("stored, expected", [(None, WE_MISS), (3, MATCH), (4, MISMATCH)])
 def test_distinct_bedroom_statement_survives_total_removal(platform, stored, expected):
     assert _beds(platform, stored, "عدد الغرف: 4", "3 غرف نوم") == expected
@@ -80,8 +80,8 @@ def test_removing_total_preserves_independent_bedroom_evidence(lines):
 
 @pytest.mark.parametrize("label", ["عدد غرف النوم: 3", "عدد الغرف النوم: 3"])
 def test_total_label_exclusion_does_not_remove_explicit_bedroom_labels(label):
-    assert _beds("tuba", 3, label) == MATCH
-    assert _beds("tuba", None, label) == WE_MISS
+    assert _beds("haraj", 3, label) == MATCH
+    assert _beds("haraj", None, label) == WE_MISS
 
 
 @pytest.mark.parametrize("stored", [None, 3])
@@ -107,3 +107,16 @@ def test_stored_count_unsupported_by_any_statement_is_page_silent():
 def test_total_room_filter_is_limited_to_the_named_platforms(platform):
     assert _beds(platform, None, "عدد الغرف: 4 غرف") == WE_MISS
     assert _beds(platform, 4, "عدد الغرف: 4 غرف") == MATCH
+
+
+# aqarcity 25437035 (re-read 42460062892, 2026-11-08): title «200 م²، 6 غرف» and the spec cell «المساحة 6» / «الغرف» —
+# every figure is REGA's total; tuba's UI calls the same total «غرف النوم». No bedroom statement exists on either site.
+AQARCITY_PAGE = ("فيلا للبيع في حي الصواري - الخبر | 200 م²، 6 غرف | 970,000 ر.س", "200 م²", "المساحة 6", "الغرف")
+
+
+@pytest.mark.parametrize("platform", ["aqarcity", "tuba"])
+def test_total_rooms_only_sites_never_state_bedrooms(platform):
+    assert _beds(platform, None, *AQARCITY_PAGE) == PAGE_SILENT
+    assert _beds(platform, 6, *AQARCITY_PAGE) == MISMATCH
+    assert _beds(platform, None, "عدد غرف النوم: 3") == PAGE_SILENT       # tuba's label for the REGA total
+    assert _beds(platform, 3, "3 غرف نوم") == MISMATCH                    # the scraper never writes bedrooms here
