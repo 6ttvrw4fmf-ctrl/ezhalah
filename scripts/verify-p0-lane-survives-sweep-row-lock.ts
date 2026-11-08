@@ -145,13 +145,19 @@ if (probeFound.length) {
   const noOverlap = touch.sql.replace(/\s*and \(status = ''running'' or end_time >= v_t0\)\)/, ' and status = \'\'running\'\')');
   if (noOverlap === touch.sql) { failed = true; console.error('❌ mutation «drop the overlap clause» did not apply — the proof is stale'); }
   else if (probeProblems(noOverlap).length === 0) { failed = true; console.error('❌ mutation «drop the overlap clause» was NOT caught'); }
-  // (3) a later patch that reverts to the running-only probe (new spelling as anchor, old spelling as replacement) is caught.
-  const revert = `do $$ declare d text; begin
+  // (3) a later patch that reverts to the running-only probe (new spelling as anchor, old spelling as replacement) is
+  //     caught — and caught by the ORDERING rule alone: the fixture is today's patch (stamp and new probe present)
+  //     followed by the revert, so neither the «no probe» nor the «no stamp» rule can fire.
+  const revert = `${touch.sql}
+do $$ declare d text; begin
   select pg_get_functiondef('public.mon_run_p0_detectors'::regproc) into d;
-  d := replace(d, E'where jobid = 38 and start_time <= clock_timestamp()\\n and (status = ''running'' or end_time >= v_t0)) into v_sweep_on;',
+  d := replace(d, E'where jobid = 38 and start_time <= clock_timestamp()\\n                      and (status = ''running'' or end_time >= v_t0)) into v_sweep_on;',
                   E'where jobid = 38 and status = ''running'') into v_sweep_on;');
   execute d; end $$;`;
-  if (probeProblems(revert).length === 0) { failed = true; console.error('❌ mutation «revert to the running-only probe» was NOT caught'); }
+  const revertProblems = probeProblems(revert);
+  if (revertProblems.length !== 1 || !/LAST probe spelling/.test(revertProblems[0])) {
+    failed = true; console.error(`❌ mutation «revert to the running-only probe» was NOT caught by the ordering rule alone: ${JSON.stringify(revertProblems)}`);
+  }
   if (!failed) console.log('✓ 3/3 probe mutations caught (pre-fix definition, dropped overlap clause, revert patch)');
 }
 process.exit(failed ? 1 : 0);
