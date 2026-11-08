@@ -326,7 +326,7 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "for_newlyweds": ["^عرسان", "^للعرسان", "^للعرايس", "re:شهر (?:ال)?عسل", "honeymoon", "newlyweds"],
     # a bare «بقي» also means «remaining» («بقي شقة واحدة») — only next to دباب / بانشي
     "quad_bikes": ["^دباب", "^دبابات", "^بانشي", "re:(?:دباب|دبابات|بانشي) (?:و)?بقي", "re:بقي (?:و)?(?:دباب|دبابات|بانشي)", "quad bike", "atv"],
-    "horses_stable": ["^خيل$", "^خيول$", "^اسطبل", "^اصطبل", "re:ركوب (?:ال)?خيل", "horse riding", "stable"],
+    "horses_stable": ["^خيل$", "^خيول$", "^اسطبل", "^اصطبل", "re:ركوب (?:ال)?خيل", "horse riding", "horse stable", "stables"],   # bare «stable» is «stable returns» (P2 13085, 2026-11-08)
     # «جمال» alone is beauty — only «ركوب الجمال»
     "camels": ["re:(?:(?<= )|^)(?:و|ال|وال|بال)?ابل(?!\\w)", "^هجن$", "re:ركوب (?:ال)?(?:جمال|ابل|هجن)", "camels"],
     "toilets_on_site": ["re:دورات (?:ال)?مياه", "re:دوره (?:ال)?مياه", "^حمامات", "^حمام$", "toilets"],
@@ -760,6 +760,52 @@ def _word_bounds(t: str, s: int, e: int) -> tuple[int, int]:
 def _starts(word: str, stems: tuple[str, ...]) -> bool:
     w = word[1:] if word.startswith("و") and len(word) > 3 else word
     return any(word.startswith(x) or w.startswith(x) for x in stems)
+
+
+# «موقد» is both a fire pit («موقد نار / حطب», «موقد (مشب)», «جلسة خارجية مع موقد») and the kitchen cooktop («مطبخ مجهز
+# بالفرن والموقد», «موقد سيراميكي», «موقد أربعة عيون كهربائي», «ثلاجة، موقد، غلاية»). 🔬 2026-11-08 two-way sample: 28 of 30
+# served apartment «موقد» yeses were the stove. Order of evidence (CodeRabbit on #11295):
+#   1. a cooktop word right after it («موقد سيراميكي / كهرباء / مسطح / غاز / عينين») → the stove;
+#   2. a fire word within 4 («نار», «حطب», «مشب», «فحم») → the fire pit;
+#   3. a seating / outdoor word right beside it («جلسة خارجية مع موقد», «موقد خارجي») → the fire pit;
+#   4. a kitchen / appliance word within 7, in the same sentence → the stove.
+# Neither → unchanged (a bare «موقد» in a chalet stays the fire pit it was). The window crosses list commas — «ثلاجة،
+# فرن، موقد» puts each item in its own clause — but never «.», «!», «؟» or a new line: «مطبخ فيه فرن.\nموقد حجري في
+# الصالة» keeps its fire pit.
+_FIRE_CUES = tuple(_n(w) for w in ("نار", "النار", "حطب", "الحطب", "للحطب", "بالحطب", "مشب", "المشب", "فحم", "الفحم", "جمر",
+                                   "تدفئه", "fire", "wood"))
+_FIRE_NEAR = tuple(_n(w) for w in ("خارجي", "خارجيه", "شتوي", "شتويه", "حوش", "الحوش", "جلسه", "الجلسه"))
+_COOKTOP_AFTER = tuple(_n(w) for w in ("سيراميك", "مسطح", "سطحي", "كهرب", "غاز", "الغاز", "عين", "عيون", "بوتجاز", "built",
+                                       "انفرا", "حراري", "مزدوج", "طبخ", "طهي", "ستيل", "اربع", "اربعه", "ثلاث", "خمس"))
+_STOVE_CUES = tuple(_n(w) for w in ("فرن", "الفرن", "افران", "شفاط", "الشفاط", "ثلاج", "الثلاج", "ميكرو", "الميكرو", "مايكرو",
+                                    "المايكرو", "مكرو", "غلاي", "الغلاي", "غساله", "الغساله", "مطبخ", "المطبخ", "طبخ", "الطبخ",
+                                    "طهي", "الطهي", "عين", "عيون", "سيراميك", "مسطح", "سطحي", "كهرب", "غاز", "الغاز", "بوتجاز",
+                                    "built", "اجهز", "الاجهز", "ادوات", "صحون", "الصحون", "فريزر", "قهوه", "القهوه", "اسطوان",
+                                    "مزدوج", "انفرا", "حراري", "ستيل", "اطباق", "الاطباق"))
+_SENTENCE_END = re.compile(r"[.!?؟\n]")
+
+
+def _stove_not_fire(raw: str, clauses: list, ci: int, t: str, s: int, e: int) -> bool:
+    """True when this «موقد» is the kitchen cooktop (see the order above)."""
+    ws, we = _word_bounds(t, s, e)
+    if not _strip_wa(_bare(t[ws:we])).startswith(("موقد", "الموقد")):
+        return False
+    before, after = t[:ws].split(), t[we:].split()
+    for k in range(ci - 1, max(-1, ci - 4), -1):      # earlier clauses, only across a list separator
+        if _SENTENCE_END.search(raw[clauses[k][0] + len(clauses[k][1]):clauses[k + 1][0]]):
+            break
+        before = clauses[k][2].split() + before
+    for k in range(ci + 1, min(len(clauses), ci + 4)):
+        if _SENTENCE_END.search(raw[clauses[k - 1][0] + len(clauses[k - 1][1]):clauses[k][0]]):
+            break
+        after = after + clauses[k][2].split()
+    if any(_starts(_bare(w), _COOKTOP_AFTER) for w in after[:2]):
+        return True
+    if any(_starts(_bare(w), _FIRE_CUES) for w in before[-4:] + after[:4]):
+        return False
+    if any(_starts(_bare(w), _FIRE_NEAR) for w in before[-2:] + after[:2]):
+        return False
+    return any(_starts(_bare(w), _STOVE_CUES) for w in before[-7:] + after[:7])
 
 
 def _bare(w: str) -> str:
@@ -1472,6 +1518,10 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
                 for m in rx.finditer(t):
                     v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in,
                                        list_in or m.end() <= item_end or svc_from <= m.start() < svc_to)
+                    if v is True and fact == "fire_pit" and _stove_not_fire(raw, clauses, ci, t, m.start(), m.end()):
+                        v = None                     # «مطبخ … (ثلاجة، فرن، موقد، شفاط)», «موقد سيراميكي»: the kitchen
+                                                     # cooktop, not a fire pit (🔬 2026-11-08: 28 of 30 served apartment
+                                                     # «موقد» yeses were the stove)
                     if v is not None:
                         bool_hits.setdefault(fact, {}).setdefault(v, (ci, qs, qe))
         # what this clause hands to the next one: a cue (or a cued utility list going on), a «nearby» heading
@@ -2160,6 +2210,22 @@ def selftest() -> None:
         ("جلسة نار وحطب", {"fire_pit": True}, ()),
         ("موقد خارجي", {"fire_pit": True}, ()),
         ("موقد غاز في المطبخ", {}, ("fire_pit",)),
+        # 🔬 2026-11-08: the kitchen cooktop is not a fire pit (28 of 30 served apartment «موقد» yeses) — real sentences
+        ("المطبخ والأجهزة: - 6 مكيفات سبليت. - ميكروويف. - شواية. - موقد سيراميكي. - جميع الأجهزة إيطالية الصنع", {}, ("fire_pit",)),
+        ("مطبخ مفتوح ومجهز بالفرن والموقد وغسالة الصحون وغسالة الملابس", {}, ("fire_pit",)),
+        ("مطبخ متكامل يحتوي على ثلاجة، فرن، مايكرويف، موقد، غسالة، وغلاية", {}, ("fire_pit",)),
+        ("مطبخ كامل بجميع الأجهزة الكهربائية وأدوات الطبخ ومنها فرن كهربائي أو ميكرويف ، موقد أربعة عيون كهربائي، ثلاجة كبيرة", {}, ("fire_pit",)),
+        ("مطبخ راكب + موقد و شفاط - مجهزه كامل الشقة بمكيفات اسبلت", {}, ("fire_pit",)),
+        ("ومطبخ يحتوي على موقد مسطح ,ثلاجة , مايكرو ويف وايضا على دورتين مياة", {}, ("fire_pit",)),
+        ("تحتوي على مكيف جديد وحمام مع سخان ومطبخ راكب وخزانة كبيرة ومؤثثة سرير مع مرتبة وغاز وموقد عينين", {}, ("fire_pit",)),
+        # … while a fire cue keeps it, even inside a kitchen list
+        ("ومطبخ مجهز بثلاجة وغلاية وفرن وفريزر وموقد حطب، بالإضافة إلى دورات مياه", {"fire_pit": True}, ()),
+        ("ومطبخ متوفر به فرن,ثلاجه,غلايه وفريزر مستقل و العديد من المرافق مثل ركن شواء,موقد حطب,مسطح اخضر", {"fire_pit": True}, ()),
+        ("وادوات نظافة وجلسة خارجية مع موقد نار وادواتة التراثية", {"fire_pit": True}, ()),
+        ("المكان مزود بغرفة مستقلة تحتوي على موقد (مشب) يضفي لمسة دفء", {"fire_pit": True}, ()),
+        # CodeRabbit on #11295: a seating word must not veto a cooktop, and the previous SENTENCE lends no stove word
+        ("جلسة خارجية، مطبخ مجهز بموقد سيراميكي", {}, ("fire_pit",)),
+        ("مطبخ فيه فرن.\nموقد حجري في الصالة", {"fire_pit": True}, ()),
         ("بيت شعر كبير", {"bait_shaar": True}, ()),
         ("خيمة شعر", {"bait_shaar": True, "tent": True}, ()),
         ("بدون بيت شعر", {"bait_shaar": False}, ()),
@@ -2208,6 +2274,10 @@ def selftest() -> None:
         ("دبابات للتأجير", {"quad_bikes": True}, ()),
         ("بقي شقة واحدة", {}, ("quad_bikes",)),
         ("اسطبل خيل", {"horses_stable": True}, ()),
+        # 🔬 2026-11-08 P2 13085: English «stable» is an adjective in investment ads (aqar 6981031, 15537845, maqrat 13605153)
+        ("Ideal opportunity for investors seeking stable returns", {}, ("horses_stable",)),
+        ("Suitable for investment and generating stable annual income", {}, ("horses_stable",)),
+        ("Farm with horse stables and a guest house", {"horses_stable": True}, ()),
         ("ركوب الخيل", {"horses_stable": True}, ()),
         ("خيول للركوب", {"horses_stable": True}, ()),
         ("مزرعة الخيليين", {}, ("horses_stable",)),
