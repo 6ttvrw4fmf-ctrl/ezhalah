@@ -50,6 +50,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 const PRELUDE = `
 let supabase: any = null;
 const setClient = (c: any) => { supabase = c; };
+const reportError = (_e: unknown, _c?: unknown, _o?: unknown) => {}; // src/lib/observability stub: the give-up report is pinned by verify-location-pool-failures-are-reported.ts
 type Deal = any; type Category = any; type AfParams = any;
 type CityOption = any; type DistrictOption = any; type PoolStatus = any;
 `;

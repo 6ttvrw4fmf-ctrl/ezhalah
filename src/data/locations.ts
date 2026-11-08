@@ -8,6 +8,7 @@
 import raw from './sa-locations.json';
 import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, populatedDistrictRows, orderCityBoxRows, cityOutweighsDistricts, liveDistrictKey, type CatalogCity, type CatalogDistrict, type LiveDistrictRow } from '../lib/locationSuggest';
 import { supabase } from '@/lib/supabase';
+import { reportError } from '@/lib/observability';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
@@ -891,7 +892,12 @@ export async function ensureClusterMap(): Promise<Map<number, string>> {
         } finally {
           clearTimeout(t);
         }
-      } catch { read = false; }
+      } catch (e) {
+        read = false;
+        // A FAILED READ IS REPORTED (CodeRabbit Major on #11172): the pool still falls back to uncollapsed counts and the
+        // next caller retries, but operators now see a stalled or refused loc_city_cluster read. No user data.
+        reportError(e, { where: 'ensureClusterMap' }, { level: 'warning', fingerprint: ['location-pool', 'cluster-read'] });
+      }
     }
     // Memoise ONLY a real read. On failure `_clusterMap` stays null, so the next caller retries.
     if (read) _clusterMap = m;
@@ -1075,6 +1081,8 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
   // NEVER STUCK (owner 2026-11-08: «make sure it never happens no matter what u click»). See retryStuck below.
   const p: Promise<CityOption[]> = retryStuck(attempt, () => {
     if (_cityFieldPromises.get(key) === p) { _cityPoolStatus.set(key, 'error'); _cityFieldPromises.delete(key); }
+    // GIVE-UP IS REPORTED (CodeRabbit Major on #11172): a box that exhausted every attempt must not be invisible to us.
+    reportError(new Error('city pool load gave up after every attempt'), { pool: 'city' }, { level: 'warning', fingerprint: ['location-pool', 'give-up', 'city'] });
   });
   _cityFieldPromises.set(key, p);
   return p;
@@ -1255,6 +1263,7 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal | null, c
   // NEVER STUCK — same as the city pool (retryStuck above).
   const p: Promise<DistrictOption[]> = retryStuck(attempt, () => {
     if (_districtPromises.get(key) === p) { _districtPoolStatus.set(key, 'error'); _districtPromises.delete(key); }
+    reportError(new Error('district pool load gave up after every attempt'), { pool: 'district' }, { level: 'warning', fingerprint: ['location-pool', 'give-up', 'district'] });
   });
   _districtPromises.set(key, p);
   return p;
