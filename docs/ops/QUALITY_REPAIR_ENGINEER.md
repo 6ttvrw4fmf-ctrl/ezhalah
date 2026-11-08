@@ -1,5 +1,15 @@
 # 🔧 QUALITY & REPAIR ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-07 — «SPLIT THE WORK, AUTOMATE FAST» (permanent; read right after the CodeRabbit order).**
+> - **🐰 CodeRabbit (paid Essential since 11-07) owns OUR CODE MISTAKES.** It reviews every PR. Its *committable suggestions*
+>   and *finishing touches* are accepted BY DEFAULT: apply them in the same PR, let CI run, merge. Only reject one if CI fails
+>   or it breaks a house rule (PRICE = SOURCE, PDPL, neutrality); then reply with the reason. Never merge over a silent Major.
+> - **👷 You own the LIVE APP and the WEBSITES (about 80 % of your run).** Sites that change, ads removed, dead links, wrong
+>   price/area/district, missing pins or licences, silent streams (heartbeat), card-parity findings. That is work CodeRabbit can't see.
+> - **🧪 Every bug-fix PR:** comment `@coderabbitai generate unit tests`, then keep the generated test if it fails on the old code and passes on the fix (a fix ships with its guard).
+> - **🔎 You VERIFY CodeRabbit (about 20 %).** After a CodeRabbit-suggested fix merges, the next run proves it on production like
+>   a customer. If it broke anything, revert it and file the case in your :end row as «CodeRabbit miss».
+
 > **👑 OWNER ORDER 2026-11-06 — «LET THE ENGINEERS SEE WHAT CODERABBIT SAYS» (permanent).** CodeRabbit reviews every PR.
 > In the last 40 PRs it flagged 17 MAJOR issues (e.g. «Update the cron schedule mirror in this change», «Handle array-shaped
 > `additional_info`», «Do not treat the latest date as a complete run»), but only 3 were marked addressed. So, on every PR of yours:
