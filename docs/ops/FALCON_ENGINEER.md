@@ -1,5 +1,9 @@
 # 🦅 الصقر — The Falcon (owner, 2026-10-04)
 
+> **🔒 MERGE LOCK 2026-11-08 (owner: «fully automate with the engineers and CodeRabbit»).** `safe-pr-merge.ts` (and so the robot) REFUSES a PR
+> with ANY unresolved CodeRabbit Major/Critical thread (#11247 was green with 9 unanswered Majors on PRICE = SOURCE). Fix it or answer it with
+> evidence, then RESOLVE the thread. Before writing :end, re-read the threads on EVERY PR you opened this run — reviews keep arriving after your last push.
+
 > **👑 OWNER ORDER 2026-11-07 — «SPLIT THE WORK, AUTOMATE FAST» (permanent; read right after the CodeRabbit order).**
 > - **🐰 CodeRabbit (paid Essential since 11-07) owns OUR CODE MISTAKES.** It reviews every PR. Its *committable suggestions*
 >   and *finishing touches* are accepted BY DEFAULT: apply them in the same PR, let CI run, merge. Only reject one if CI fails
