@@ -4,8 +4,8 @@
 //   ☰          the sidebar («محادثة جديدة» + «الأخيرة», the saved chats)
 //   a row      a saved chat from «الأخيرة», until the conversation is on screen
 // This robot measures both, on the same mid-range phone the guest watch uses, twice: on 4G and on a VPN-like line
-// (+300 ms RTT), against the owner's budgets: sidebar ≤ 1 s, saved chat ≤ 3 s. Its cards budget is the guest watch's
-// own search budget, because a seeded chat holds no transcript and so re-runs its search like a chat from another device.
+// (+300 ms RTT), against the owner's budgets: sidebar ≤ 1 s, saved chat ≤ 3 s. It stops at the conversation: a seeded chat
+// holds no transcript, so what follows is a fresh search (the guest watch's own step), not the saved chat's paint.
 //
 // SIGNED-IN STATE IS SEEDED CLIENT-SIDE, exactly as e2e/journeys/harness.mjs does (a local Supabase session object +
 // `history:<sub>` in localStorage): no backend account, no secret, the same code path the app runs for a returning
@@ -18,7 +18,7 @@ import { chromium, devices } from '@playwright/test';
 import { seedInitScript, THREE_CHATS, SUB } from '../journeys/harness.mjs';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah.com';
-export const BUDGET = { sidebarMs: 1_000, historyChatMs: 3_000, historyCardsMs: 25_000 };
+export const BUDGET = { sidebarMs: 1_000, historyChatMs: 3_000 };
 // The same phone and CPU as site-speed-live.mjs; the second line adds the round trip a VPN costs (owner's report).
 export const LINES = [
   { name: '4G', latency: 150, downloadThroughput: 1_500_000, uploadThroughput: 375_000 },
@@ -77,10 +77,6 @@ try {
     results[`historyChatMs_${line.name}`] = Date.now() - t;
     say(results[`historyChatMs_${line.name}`] <= BUDGET.historyChatMs, `${line.name} · saved chat: row tap until the conversation is on screen`, results[`historyChatMs_${line.name}`], BUDGET.historyChatMs);
 
-    // 3. … and until its first result card is on screen (a seeded chat re-runs its search: the guest watch's search budget).
-    await page.getByText('اضغط هنا 👆', { exact: false }).first().waitFor({ state: 'visible', timeout: 90_000 });
-    results[`historyCardsMs_${line.name}`] = Date.now() - t;
-    say(results[`historyCardsMs_${line.name}`] <= BUDGET.historyCardsMs, `${line.name} · saved chat: row tap until the first card is on screen`, results[`historyCardsMs_${line.name}`], BUDGET.historyCardsMs);
     await ctx.close();
   }
 } catch (e) {
