@@ -53,10 +53,15 @@ mustCatch('the VPN line removed', !sidebarBudgets(sb.replace("name: 'VPN', laten
 check('a missed budget or a broken signed-in journey fails the run', loud(sb));
 // CodeRabbit on #11331: a width > 0 passes while the drawer is still off-screen or the conversation is still fading in.
 // Both timings wait for the element to be SEEN: inside the viewport and not faded/hidden by itself or an ancestor.
-const seenByAPerson = (s: string) => (s.match(/r\.left < innerWidth && r\.top < innerHeight/g) ?? []).length >= 2
+// All FOUR viewport edges, in both timings: a drawer parked off-screen to the left has right <= 0 and would pass a
+// left/top-only test (CodeRabbit on #11331).
+const FOUR_EDGES = /r\.right > 0 && r\.bottom > 0 && r\.left < innerWidth && r\.top < innerHeight/g;
+const seenByAPerson = (s: string) => (s.match(FOUR_EDGES) ?? []).length >= 2
   && (s.match(/parseFloat\(cs\.opacity\) < 0\.9/g) ?? []).length >= 2;
-check('both signed-in timings wait for the element to be on screen and not faded (viewport + opacity walk)', seenByAPerson(sb));
-mustCatch('a timing that settles for width > 0 again', !seenByAPerson(sb.replace(/r\.left < innerWidth && r\.top < innerHeight/, 'true')));
+check('both signed-in timings wait for the element to be on screen (all four viewport edges) and not faded (opacity walk)', seenByAPerson(sb));
+mustCatch('a timing that settles for width > 0 again', !seenByAPerson(sb.replace(/r\.right > 0 && r\.bottom > 0 && r\.left < innerWidth && r\.top < innerHeight/, 'true')));
+mustCatch('a timing that drops the right edge (a drawer parked off-screen to the left would count)', !seenByAPerson(sb.replace(/r\.right > 0 && /, '')));
+mustCatch('a timing that drops the opacity walk', !seenByAPerson(sb.replace(/parseFloat\(cs\.opacity\) < 0\.9/, 'false')));
 mustCatch('a signed-in journey that swallows its own failure', !loud(sb.replace('process.exit(1)', 'process.exit(0)')));
 // pg_cron starts it (GitHub ran the schedule ~3×/day): two bundle steps ~30 min apart in the newest bundle migration
 const trig = readFileSync(new URL('../supabase/migrations/20261105172415_speed_robot_started_by_pg_cron.sql', import.meta.url), 'utf8');
