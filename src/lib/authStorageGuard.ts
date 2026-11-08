@@ -50,3 +50,12 @@ export function dropUnrefreshableStoredSessions(storage: StorageLike | null | un
   } catch { /* storage blocked (private mode): nothing to clean, and nothing was readable by auth-js either */ }
   return removed;
 }
+
+/** True when a Supabase session is stored on this device (the same key auth-js reads). Never throws. */
+export function hasStoredSession(storage: Pick<StorageLike, 'length' | 'key'> | null | undefined): boolean {
+  try {
+    if (!storage) return false;
+    for (let i = 0; i < storage.length; i++) if (KEY_RE.test(storage.key(i) ?? '')) return true;
+  } catch { /* storage blocked */ }
+  return false;
+}

@@ -150,3 +150,9 @@ def test_a_labelled_bathroom_total_is_the_total(monkeypatch):
     assert "bathrooms" not in W.facts_of(W.clean_text(None, "• مجلس مستقل بدورة مياه • صالة • 3 دورات مياه"))
     monkeypatch.setattr(W, "_BATH_LABEL", _re.compile(r"(?!x)x"))
     assert W.facts_of(W.clean_text(None, cases[0][0])).get("bathrooms") is None, "undoing the labelled-total rule changed nothing"
+
+
+def test_lock_catches_kitchen_stove_as_fire_pit(monkeypatch):
+    # 🔬 2026-11-08: «مطبخ … فرن، موقد، شفاط» is the cooktop; without the rule the lock must go red on fire_pit
+    monkeypatch.setattr(W, "_stove_not_fire", lambda *a, **k: False)
+    assert "fire_pit" in _changed_facts(_diffs(_rows()))

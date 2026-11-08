@@ -162,6 +162,17 @@ def ld_ticked_features(ld: Optional[dict]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+# The JSON-LD amenityFeature checklist ticks home amenities too, by name (🆕 2026-11-08): measured on active rows,
+# «موقف سيارات» 239 · «مصعد» 184 · «مدخل خاص» 88 · «غرفة خادمة» 84 · «مطبخ راكب» 60 · «تكييف مركزي» 24, and none of
+# them reached the Advanced Filter unless the prose repeated it (branch dry re-score 42460326413: aqarcity parking
+# we_miss 7 of 10, elevator 6 of 10, on pages whose structured props tick them). A tick is a YES; an unticked name
+# is silence (only utilities on a land read an unticked name as «no», see land_utilities). Structured beats prose.
+CHECKLIST_AMENITY_COLS = {
+    "موقف سيارات": "parking", "Parking": "parking", "مصعد": "elevator", "Elevator": "elevator",
+    "مدخل خاص": "private_entrance", "غرفة خادمة": "maid_room", "مطبخ راكب": "kitchen",
+    "تكييف مركزي": "air_conditioner",
+}
+
 # Amenities the description may state. NOT the utilities: خدمات العقار publishes those structurally.
 PROSE_AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "parking", "maid_room",
                                    "driver_room", "laundry_room", "balcony_terrace", "private_entrance",
@@ -1015,6 +1026,10 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     for col, val in normalize.amenities_from_lines(description).items():
         if col in PROSE_AMENITY_COLUMNS:
             amenities[col] = val
+    # The site's own structured checklist wins over the prose (a contradictory checklist keeps what is ticked).
+    for name in ticked:
+        if (col := CHECKLIST_AMENITY_COLS.get(str(name).strip())):
+            amenities[col] = True
 
     # ── additional_info: every remaining valuable field (NO name, NO phone) ──
     info: dict[str, Any] = {
