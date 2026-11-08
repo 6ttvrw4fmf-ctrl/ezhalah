@@ -33,3 +33,17 @@ def test_a_wrong_count_beside_the_bare_noun_still_mismatches():
 def test_service_rooms_and_stated_figures_never_vouch_for_one(text):
     out = _score({"bedrooms": 1, "bathrooms": 1}, text)
     assert out["bedrooms"] == S.MISMATCH and out["bathrooms"] == S.MISMATCH
+
+
+@pytest.mark.parametrize("text", [
+    "المكونات: غرفه | غرف النوم | 3 | دورات المياه | 2",   # the figure is the next line's bare value (CodeRabbit)
+    "غرفه نوم ماستر و ثلاث غرف نوم و دورتين مياه وحمامين",   # a number word states the count
+    "غرفه المعيشه بمساحه 40 م",                               # a living room is not a bedroom
+])
+def test_a_count_stated_elsewhere_or_a_living_room_never_vouches_for_one(text):
+    assert _score({"bedrooms": 1}, text)["bedrooms"] != S.MATCH
+
+
+def test_alshawaf_without_its_node_block_is_not_cut():
+    page = '<div><table><tr><td headers="view-changed-table-column">x</td></tr></table></div><p>المساحة 375 م²</p>'
+    assert S.scope_to_its_ad("https://alshawaf.com.sa/1", page) == page

@@ -249,7 +249,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 out[name] = MATCH
             if (name in SINGLE_ROOM and out[name] == MISMATCH and stored.get(col) is not None
                     and float(stored.get(col)) == 1 and any(SINGLE_ROOM[name].search(x) for x in lines)
-                    and not any(ROOM_FIGURE[name].search(x) for x in lines)):
+                    and not room_figure_stated(name, lines)):
                 out[name] = MATCH
             # A home described FLOOR BY FLOOR states no total (🆕 2026-11-05): Property Finder's CRM block «تفاصيل الدور
             # الأرضي عدد المجالس: 1 ، دورات المياه: 3 ، الصالات: 1 ، غرف النوم: 2» (23817495, whose API says 5 bedrooms)
@@ -368,7 +368,7 @@ SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صا
 # backlog 1350) «المكونات : صاله . غرفه . دورة مياة», stored 1 / 1, scored MISMATCH because the same description's
 # area «246» and street «15» were the only figures. A service room («غرفة خادمة», «حمام سباحة») is not one, and a
 # room word with a figure beside it anywhere on the page («3 غرف», «غرف النوم: 2») leaves the count to that figure.
-_NOT_A_BEDROOM = r"(?:ال)?(?:خادمه|خادمات|سائق|حارس|غسيل|كهرباء|تخزين|ملابس|طعام|جلوس|سينما|العاب|الخادمه)"
+_NOT_A_BEDROOM = r"(?:ال)?(?:خادمه|خادمات|سائق|حارس|غسيل|كهرباء|تخزين|ملابس|طعام|جلوس|سينما|العاب|معيشه|الخادمه)"
 SINGLE_ROOM = {
     "bedrooms": re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?غرفه(?:\s+(?:ال)?نوم)?(?![\u0621-\u064A])"
                            r"(?!\s+" + _NOT_A_BEDROOM + r"(?![\u0621-\u064A]))"),
@@ -379,6 +379,28 @@ ROOM_FIGURE = {
     "bedrooms": re.compile(r"\d\s*(?:ال)?غرف|غرف(?:ه)?(?:\s*(?:ال)?نوم)?\s*[:：]?\s*\d"),
     "bathrooms": re.compile(r"\d\s*(?:ال)?(?:حمام|دور(?:ه|ات)\s+(?:ال)?مياه)|(?:حمام(?:ات)?|دور(?:ه|ات)\s+(?:ال)?مياه)\s*[:：]?\s*\d"),
 }
+_COUNT_WORD = r"(?:واحد|واحده|اثنين|اثنان|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثمانيه|تسع|تسعه|عشر|عشره)"
+_ROOM_WORD = {"bedrooms": r"غرف", "bathrooms": r"حمام|دور(?:ه|ات)\s+(?:ال)?مياه"}
+
+
+def room_figure_stated(name: str, lines: list[str]) -> bool:
+    """Does the page give this room count as a figure anywhere — beside the word, as a number word, or as the
+    bare value on the line next to it («غرف النوم» / «3»)? Then the bare singular noun never decides it."""
+    word = _ROOM_WORD[name]
+    for i, x in enumerate(lines):
+        if ROOM_FIGURE[name].search(x):
+            return True
+        if not re.search(word, x):
+            continue
+        if re.search(r"(?<![\u0621-\u064A])" + _COUNT_WORD + r"\s+(?:ال)?(?:" + word + r")"
+                     r"|(?:" + word + r")\S*(?:\s+(?:ال)?نوم)?\s*[:：]?\s*" + _COUNT_WORD + r"(?![\u0621-\u064A])", x):
+            return True
+        if any(0 <= j < len(lines) and re.fullmatch(r"\s*(?:\d{1,2}\+?|" + _COUNT_WORD + r")\s*", lines[j])
+               for j in (i - 1, i + 1)):
+            return True
+    return False
+
+
 # The facades in English, as a REGA licence block prints them. A compound one too: haraj 22820527 prints
 # «واجهة العقار: South west» and we store «جنوب غرب» (re-score 41406084400, 2026-11-02, scored MISMATCH).
 FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
@@ -749,9 +771,11 @@ _AD_BLOCK_START = {"alshawaf.com.sa": "duplicate-of-node-block-1"}
 def drop_similar_block(url: str | None, body: str) -> str:
     for host, stops in _SIMILAR_BLOCK.items():
         if host in (url or "") and body:
-            start = body.find(_AD_BLOCK_START[host]) if host in _AD_BLOCK_START else -1
+            start = body.find(_AD_BLOCK_START[host]) if host in _AD_BLOCK_START else 0
+            if start < 0:      # the ad's own block is not on this page: cut nothing (CodeRabbit on #11280)
+                continue
             for stop in stops:
-                if (k := body.find(stop, max(start, 0))) > 0:
+                if (k := body.find(stop, start)) > 0:
                     body = body[:max(body.rfind("<", 0, k), 0) or k]   # cut at the tag, not inside it
     return body
 
