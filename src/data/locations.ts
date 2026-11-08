@@ -1085,9 +1085,10 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
 // starts by itself, so whoever is waiting (the open city box, the district list) gets real numbers without a tap.
 // After the last attempt the caller gets [] and the pool reads 'error' — never a made-up count.
 // scripts/verify-city-pool-load-never-sticks.ts
-// 7 s (owner 2026-11-08: «make it 7»). A slow attempt is NOT lost: it keeps running and still answers if it finishes first.
-export const CITY_POOL_DEADLINE_MS = 7000;
-export function retryStuck<T>(attempt: () => Promise<T[]>, giveUp: () => void, tries = 3): Promise<T[]> {
+// 3 s (owner 2026-11-08: «never slow, always fast as possible»). A slow attempt is NOT lost: it keeps running and still
+// answers if it finishes first; 5 tries keep the box trying ~15 s before it gives up.
+export const CITY_POOL_DEADLINE_MS = 3000;
+export function retryStuck<T>(attempt: () => Promise<T[]>, giveUp: () => void, tries = 5): Promise<T[]> {
   return new Promise<T[]>((resolve) => {
     let t: ReturnType<typeof setTimeout>;
     const go = (left: number) => {
