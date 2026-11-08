@@ -54,14 +54,6 @@ const addKeyboardRoom = (input) => input.evaluate((el) => {
 
 async function checkListOpens(page, input, label, typed) {
   await addKeyboardRoom(input);
-  const pre = await input.boundingBox();
-  const diag = () => input.evaluate((el) => { const out = []; let p = el; while (p) { if (p.scrollTop || p.scrollHeight > p.clientHeight + 2) out.push(`${p.tagName}.${p.scrollTop}/${p.scrollHeight}/${p.clientHeight}/${getComputedStyle(p).overflowY}`); p = p.parentElement; } return out.join(' > ') + ` | win ${scrollY} vv ${visualViewport?.offsetTop}/${visualViewport?.height}`; });
-  await page.screenshot({ path: `diag-${label.replace(/\W+/g, '-')}.png` }).catch(() => {});
-  console.log(`DIAG fixed: ${await page.evaluate(() => [...document.querySelectorAll('body *')].filter((e) => { const cs = getComputedStyle(e); const r = e.getBoundingClientRect(); return (cs.position === 'fixed' || cs.position === 'absolute') && r.height > 80 && r.top > 200 && r.width > 200; }).slice(0, 6).map((e) => { const r = e.getBoundingClientRect(); return `${e.tagName}@${Math.round(r.top)}+${Math.round(r.height)} «${(e.innerText || '').slice(0, 60).replace(/\n/g, ' ')}»`; }).join(' || '))}`);
-  console.log(`DIAG hit: ${await input.evaluate((el) => { const r = el.getBoundingClientRect(); const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); const chain = []; let p = h; for (let i = 0; p && i < 4; i++, p = p.parentElement) chain.push(`${p.tagName}${p.getAttribute('data-testid') ? '#' + p.getAttribute('data-testid') : ''}«${(p.innerText || '').slice(0, 40).replace(/\n/g, ' ')}»`); return `input ${Math.round(r.top)}-${Math.round(r.bottom)} same=${h === el} ${chain.join(' < ')}`; })}`);
-  console.log(`DIAG bottom: ${await page.evaluate(() => [...new Set([430, 500, 560, 620].map((y) => { const e = document.elementFromPoint(195, y); return `${y}:${e?.tagName}«${(e?.innerText || '').slice(0, 50).replace(/\n/g, ' ')}»`; }))].join(' | '))}`);
-  console.log(`DIAG ${label} before: y=${Math.round(pre?.y ?? -1)} ${await diag()}`);
-  setTimeout(async () => console.log(`DIAG ${label} +600ms: ${await diag().catch(() => '')}`), 600);
   const before = await visibleTexts(page);
   const t0 = Date.now();
   await input.tap();
@@ -87,12 +79,20 @@ async function checkListOpens(page, input, label, typed) {
 
 try {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], locale: 'ar' });
-  await ctx.addInitScript(() => { try { localStorage.setItem('ezhalah:cookieConsent', 'necessary'); } catch {} });
+  // THE OWNER'S SCREEN, NOT A FIRST-TIME GUEST'S (probe 2026-11-08 21:30): the cookie card (252 px) and Google's one-tap
+  // sheet (144 px) shrank the Filter's scroll box to 268 px, so a centred input still sat high and the robot PASSED on the
+  // buggy site. The owner was signed in: no card, no sheet, a full-height box. The card shows to every guest on every
+  // visit (owner 2026-09-13), so it is answered below; the one-tap sheet is never loaded.
   await ctx.route(/accounts\.google\.com\/gsi\//, (r) => r.abort());
   const page = await ctx.newPage();
   await page.goto(`${BASE}/?iphonerobot=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.getByText('بحث', { exact: true }).first().waitFor({ state: 'visible', timeout: 60_000 });
-  await page.getByText('الضروري فقط', { exact: true }).tap({ timeout: 3_000 }).catch(() => {});
+  const necessary = page.getByText('الضروري فقط', { exact: true });
+  const cardGone = await necessary.waitFor({ state: 'visible', timeout: 15_000 })
+    .then(() => necessary.tap())
+    .then(() => page.getByTestId('cookie-consent').waitFor({ state: 'detached', timeout: 5_000 }))
+    .then(() => true, () => false);
+  say(cardGone, 'setup: the cookie card answered and gone (it shrinks the Filter box)', cardGone ? 'gone' : 'still on screen or never appeared');
   await page.waitForTimeout(2_000);
 
   const city = page.getByPlaceholder('اختر المدينة', { exact: true });
