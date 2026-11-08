@@ -156,6 +156,38 @@ export async function getRequiredContexts(slug: string, base: string): Promise<R
   return { known: false, why: `could not read required_status_checks for ${base} from either protection endpoint` };
 }
 
+/** CodeRabbit marks a Major/Critical comment with its severity icon (major-16.svg) and a bold «Major» label. */
+export const isCodeRabbitMajor = (body: string) => /(major|critical)-16\.svg|\*\*\s*_?(Major|Critical)\b/i.test(body);
+
+/** Titles of UNRESOLVED CodeRabbit Major/Critical review threads. Throws when unreadable (the caller fails closed). */
+export async function getOpenCodeRabbitMajors(slug: string, n: string): Promise<string[]> {
+  const [owner, name] = slug.split('/');
+  const out: string[] = [];
+  let after: string | null = null;
+  for (;;) {
+    const r = (await api('/graphql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `query($o:String!,$r:String!,$n:Int!,$a:String){repository(owner:$o,name:$r){pullRequest(number:$n){
+          reviewThreads(first:100,after:$a){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:1){nodes{author{login} body}}}}}}}`,
+        variables: { o: owner, r: name, n: Number(n), a: after },
+      }),
+    })) as any;
+    const t = r?.data?.repository?.pullRequest?.reviewThreads;
+    if (!t) throw new Error(`could not read review threads of PR #${n}: ${JSON.stringify(r?.errors ?? r).slice(0, 300)}`);
+    for (const th of t.nodes) {
+      const c = th.comments.nodes[0];
+      if (th.isResolved || !c || !/coderabbit/i.test(c.author?.login ?? '') || !isCodeRabbitMajor(c.body)) continue;
+      // The headline is the first bold sentence («**Preserve a separately published rate.**»), after the severity line.
+      const title = [...c.body.matchAll(/\*\*([^*\n]+?\.)\*\*/g)][0]?.[1] ?? c.body.replace(/<[^>]*>/g, '').trim().slice(0, 80);
+      out.push(title.trim());
+    }
+    if (!t.pageInfo.hasNextPage) return out;
+    after = t.pageInfo.endCursor;
+  }
+}
+
 /** Merge, pinned to the exact SHA the gate verified.
  *
  *  `gh pr merge` cannot do this: it merges whatever the head is at the moment the call lands. If a

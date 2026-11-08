@@ -23,7 +23,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { decideMerge, type CheckRun } from './lib/mergeGate.ts';
-import { getPr, getChecks, getRequiredContexts, mergePr, repoSlug } from './lib/githubApi.ts';
+import { getPr, getChecks, getRequiredContexts, getOpenCodeRabbitMajors, mergePr, repoSlug } from './lib/githubApi.ts';
 
 // Cloud sessions route egress through a policy proxy that injects the real GitHub credential, and
 // Node's built-in fetch ignores HTTPS_PROXY unless NODE_USE_ENV_PROXY is set BEFORE the process
@@ -61,11 +61,14 @@ async function main() {
     conclusion: (c.conclusion ?? null) as CheckRun['conclusion'],
   }));
 
+  const openReviewMajors = await getOpenCodeRabbitMajors(slug, prNumber!).catch((e) => { console.error(String(e)); return null; });
+
   console.log(`PR #${prNumber} @ ${pr.headSha.slice(0, 7)} (base ${pr.baseRef})`);
   console.log(`  required contexts: ${required.known ? (required.contexts.join(', ') || '(none configured)') + ` [${required.source}]` : `UNREADABLE — ${required.why}`}`);
   for (const c of checks) console.log(`  ${c.context}: ${c.conclusion ?? 'PENDING'}`);
   console.log(`  mergeable=${pr.mergeable} mergeStateStatus=${pr.mergeStateStatus}`);
   console.log(`  files: ${pr.files.join(', ')}`);
+  console.log(`  open CodeRabbit Majors: ${openReviewMajors === null ? 'UNREADABLE' : openReviewMajors.length}`);
 
   const verdict = decideMerge({
     requiredContexts: required.known ? required.contexts : [],
@@ -75,6 +78,7 @@ async function main() {
     mergeStateStatus: pr.mergeStateStatus,
     expectedFiles,
     actualFiles: pr.files,
+    openReviewMajors,
   });
 
   if (!verdict.allow) {

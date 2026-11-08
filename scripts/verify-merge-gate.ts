@@ -171,6 +171,19 @@ mustCatch('a skip exemption widened to ANY optional check would wrongly allow a 
 mustCatch('a skip exemption that ignores the REQUIRED list would wrongly allow a required CodeRabbit that skipped',
   !decideMerge({ requiredContexts: ['CodeRabbit'], requiredContextsKnown: true, checks: [{ context: 'CodeRabbit', conclusion: 'SKIPPED' }], ...CLEAN }).allow);
 
+mustCatch('a gate that ignores unresolved CodeRabbit Majors would merge #11247 (9 unanswered, PRICE = SOURCE)',
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN, openReviewMajors: ['Preserve a separately published rate.'] }).allow);
+mustCatch('a gate that treats UNREADABLE review threads as "none open" would wrongly allow',
+  !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN, openReviewMajors: null }).allow);
+check('zero open CodeRabbit Majors + all green → ALLOWED',
+  decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN, openReviewMajors: [] }).allow);
+{
+  const { isCodeRabbitMajor } = await import('./lib/githubApi.ts');
+  check('CodeRabbit severity marker: Major icon + bold label detected, Minor not',
+    isCodeRabbitMajor('<img src="https://x/review-comment-icons-v1/major-16.svg"> **Major** · x')
+      && isCodeRabbitMajor('_🟠 Major_ **Major** · Data') && !isCodeRabbitMajor('<img src="https://x/amber-16.svg"> **Minor** · x'));
+}
+
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
 console.log('\n✓ the merge gate requires explicit SUCCESS on every required check, every time\n');

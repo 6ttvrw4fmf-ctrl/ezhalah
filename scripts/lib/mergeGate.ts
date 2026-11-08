@@ -31,6 +31,10 @@ export type MergeGateInput = {
   mergeStateStatus: string;         // GitHub's own composite: CLEAN / BEHIND / BLOCKED / DIRTY / UNSTABLE / ...
   expectedFiles?: string[];         // optional: the file list verified right after PR creation
   actualFiles?: string[];           // the file list read again right now, immediately before merge
+  // Unresolved CodeRabbit Major/Critical threads on the PR (owner 2026-11-08, «fully automate with the engineers and
+  // CodeRabbit»): #11247 was green + CLEAN with 9 unanswered Majors, several on PRICE = SOURCE, and the robot was about
+  // to merge it. null = the threads could not be read → blocks. Omitted = not checked (pure unit tests only).
+  openReviewMajors?: string[] | null;
 };
 
 export type MergeGateResult = { allow: boolean; reasons: string[] };
@@ -100,6 +104,13 @@ export function decideMerge(input: MergeGateInput): MergeGateResult {
   const badStates = ['BLOCKED', 'DIRTY', 'UNSTABLE'];
   if (badStates.includes(input.mergeStateStatus.toUpperCase())) {
     reasons.push(`mergeStateStatus is ${input.mergeStateStatus}`);
+  }
+
+  // 3b. every CodeRabbit Major/Critical is fixed or answered — the engineer (or CodeRabbit itself) resolves the thread.
+  if (input.openReviewMajors === null) {
+    reasons.push('CodeRabbit review threads could not be read — refusing rather than merging over an unanswered Major');
+  } else if (input.openReviewMajors?.length) {
+    reasons.push(`${input.openReviewMajors.length} unresolved CodeRabbit Major/Critical thread(s): ${input.openReviewMajors.slice(0, 5).join(' | ')} — fix or answer each, then resolve it`);
   }
 
   // 4. the file list, if an expectation was recorded, must be unchanged — catches a shared-worktree
