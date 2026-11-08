@@ -1716,7 +1716,10 @@ export default function Home() {
                     // area. Web-only — native RN handles this via KeyboardAvoidingView elsewhere.
                     if (Platform.OS === 'web') {
                       setTimeout(() => {
-                        (cityRef.current as unknown as Element | null)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+                        // 'start' on the field's ANCHOR, not 'center' on the input (owner iPhone 2026-11-08): iOS 26 Safari
+                        // centres in the full screen, which puts the input right on the keyboard's top edge and its list
+                        // UNDER the keyboard. The top of the screen is always above the keyboard, so the list has room.
+                        (cityAnchorRef.current as unknown as Element | null)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
                       }, 380);
                     }
                     // Focus with no text yet → immediately show the Top 6 (spec: "When the user
@@ -1937,7 +1940,7 @@ export default function Home() {
                     // where a user actually taps into a keyboard-obscured input.
                     if (Platform.OS === 'web') {
                       setTimeout(() => {
-                        (districtRef.current as unknown as Element | null)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+                        (districtAnchorRef.current as unknown as Element | null)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); // see the City field
                       }, 380);
                     }
                     // Empty focus → Top-6 popular districts in the chosen city. Same race-guard as the

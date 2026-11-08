@@ -196,6 +196,12 @@ check('index.tsx placeholder text is "Which city?" (renders أي مدينة؟), 
 // now TWO assertions instead of one — the call site still reaches the writer, AND the writer still
 // carries the exact scoped call — which is strictly stronger than matching one inline occurrence.
 // (The cohort guard itself is executed, not read, by verify-suggestion-writes-carry-their-cohort.ts.)
+// iPhone keyboard (owner 2026-11-08, «I can't click on the district»): on focus each field scrolls its ANCHOR to the
+// top of the screen. Centring the input put it on the keyboard's edge and its list UNDER the keyboard (iOS 26 Safari).
+check('City + District focus scroll their anchor to the TOP (block start), never centre the input under the keyboard',
+  /cityAnchorRef\.current[^;]*scrollIntoView\?\.\(\{ block: 'start'/.test(indexSrc)
+  && /districtAnchorRef\.current[^;]*scrollIntoView\?\.\(\{ block: 'start'/.test(indexSrc)
+  && !/(cityRef|districtRef)\.current[^;]*scrollIntoView\?\.\(\{ block: 'center'/.test(indexSrc));
 const cityWriter = (() => {
   const at = indexSrc.indexOf('const writeCitySuggestionsForCohort = (');
   if (at < 0) return '';
