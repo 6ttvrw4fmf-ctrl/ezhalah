@@ -60,9 +60,21 @@ try {
     // fails the run and says so.
     await page.locator('[data-tap44][data-consent-keep]').first().click({ timeout: 10_000 });
     await until((title) => {
+      // Seen by a person, not merely laid out: the element intersects the viewport (the drawer mounts off-screen at a
+      // negative offset before it slides in) and neither it nor an ancestor is faded or hidden (the saved-chat page
+      // turn fades the conversation wrapper in). A width > 0 alone passed both of those too early.
+      const seen = (e) => {
+        const r = e.getBoundingClientRect();
+        if (!(r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight)) return false;
+        for (let n = e, i = 0; n && i < 12; n = n.parentElement, i++) {
+          const cs = getComputedStyle(n);
+          if (cs.visibility === 'hidden' || cs.display === 'none' || parseFloat(cs.opacity) < 0.9) return false;
+        }
+        return true;
+      };
       const marker = document.querySelector('[data-testid="sidebar-search-btn"]');
-      const open = !!marker && marker.getBoundingClientRect().width > 0;
-      const row = [...document.querySelectorAll('*')].some((e) => e.childElementCount === 0 && (e.textContent ?? '').trim() === title && e.getBoundingClientRect().width > 0);
+      const open = !!marker && seen(marker);
+      const row = [...document.querySelectorAll('*')].some((e) => e.childElementCount === 0 && (e.textContent ?? '').trim() === title && seen(e));
       return open && row;
     }, FIRST_CHAT);
     results[`sidebarMs_${line.name}`] = Date.now() - t;
@@ -72,9 +84,20 @@ try {
     await page.waitForTimeout(800);
     t = Date.now();
     await page.getByText(FIRST_CHAT, { exact: true }).first().click({ timeout: 10_000 });
-    await until(() => location.pathname === '/agent'
-      && !document.querySelector('[data-testid="sidebar-search-btn"]')
-      && [...document.querySelectorAll('*')].some((e) => e.childElementCount === 0 && /الرياض/.test(e.textContent ?? '') && e.getBoundingClientRect().width > 0));
+    await until(() => {
+      const seen = (e) => {
+        const r = e.getBoundingClientRect();
+        if (!(r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight)) return false;
+        for (let n = e, i = 0; n && i < 12; n = n.parentElement, i++) {
+          const cs = getComputedStyle(n);
+          if (cs.visibility === 'hidden' || cs.display === 'none' || parseFloat(cs.opacity) < 0.9) return false;
+        }
+        return true;
+      };
+      return location.pathname === '/agent'
+        && !document.querySelector('[data-testid="sidebar-search-btn"]')
+        && [...document.querySelectorAll('*')].some((e) => e.childElementCount === 0 && /الرياض/.test(e.textContent ?? '') && seen(e));
+    });
     results[`historyChatMs_${line.name}`] = Date.now() - t;
     say(results[`historyChatMs_${line.name}`] <= BUDGET.historyChatMs, `${line.name} · saved chat: row tap until the conversation is on screen`, results[`historyChatMs_${line.name}`], BUDGET.historyChatMs);
 

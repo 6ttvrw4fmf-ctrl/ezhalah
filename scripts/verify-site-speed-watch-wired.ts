@@ -51,6 +51,12 @@ check('it keeps the owner\'s budgets (sidebar ≤ 1 s, saved chat ≤ 3 s), meas
 mustCatch('the sidebar budget removed', !sidebarBudgets(sb.replace(/say\(results\[`sidebarMs_\$\{line\.name\}`\] <= BUDGET\.sidebarMs/, 'void (0')));
 mustCatch('the VPN line removed', !sidebarBudgets(sb.replace("name: 'VPN', latency: 450", "name: 'VPN', latency: 150")));
 check('a missed budget or a broken signed-in journey fails the run', loud(sb));
+// CodeRabbit on #11331: a width > 0 passes while the drawer is still off-screen or the conversation is still fading in.
+// Both timings wait for the element to be SEEN: inside the viewport and not faded/hidden by itself or an ancestor.
+const seenByAPerson = (s: string) => (s.match(/r\.left < innerWidth && r\.top < innerHeight/g) ?? []).length >= 2
+  && (s.match(/parseFloat\(cs\.opacity\) < 0\.9/g) ?? []).length >= 2;
+check('both signed-in timings wait for the element to be on screen and not faded (viewport + opacity walk)', seenByAPerson(sb));
+mustCatch('a timing that settles for width > 0 again', !seenByAPerson(sb.replace(/r\.left < innerWidth && r\.top < innerHeight/, 'true')));
 mustCatch('a signed-in journey that swallows its own failure', !loud(sb.replace('process.exit(1)', 'process.exit(0)')));
 // pg_cron starts it (GitHub ran the schedule ~3×/day): two bundle steps ~30 min apart in the newest bundle migration
 const trig = readFileSync(new URL('../supabase/migrations/20261105172415_speed_robot_started_by_pg_cron.sql', import.meta.url), 'utf8');
