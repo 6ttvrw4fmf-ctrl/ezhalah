@@ -69,9 +69,12 @@ check('a raw email passed by mistake leaves only as a hash, never the address', 
 identifyUser(null); sent.length = 0; fire();
 check('signed out: no user on the warnings', sent.every((e) => !e.user));
 
-// Mutation: if scrubEvent let the inherited email through, the check must catch it.
-const leaky = scrubEvent({ user: { id: 'x', email: 'leak@example.com' } } as SentryEventShape);
-check('(mutation) the PII matcher sees an email when one is present', PII.test(JSON.stringify({ email: 'leak@example.com' })) && !PII.test(JSON.stringify(leaky)));
+// MUTATION PROOFS — the same predicates applied to deliberately broken events.
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
+const unscrubbed = { user: { id: 'yalnashw@asu.edu', email: 'leak@example.com', username: 'يوسف النشوان' }, level: 'warning' } as unknown as SentryEventShape;
+mustCatch('a beforeSend that skips scrubEvent (the inherited email/name reach the event)', !noPii([unscrubbed]));
+mustCatch('a raw sub kept as user.id (the pre-#11370 identifyUser)', !noPii([{ user: { id: 'yalnashw@asu.edu' } } as SentryEventShape]));
+mustCatch('a warning sent at the default level', !([{ level: 'error' }] as any[]).every((e) => e.level === 'warning'));
 
 __setSentryForTest(null);
 if (failed) { console.error(`\n❌ verify-location-warnings-carry-no-pii: ${failed} check(s) failed`); process.exit(1); }
