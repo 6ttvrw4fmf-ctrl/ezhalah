@@ -106,7 +106,15 @@ def site_changed_probe(s: Any, get_timeout: int = 25) -> str:
         except Exception:  # noqa: BLE001
             continue
     host = re.sub(r"^https?://([^/]+).*$", r"\1", str(getattr(r, "url", "")) or BASE)
-    return f"homepage {r.status_code} at {host}; api routes named: {sorted(apis)[:12]}"
+    title = re.search(r"<title[^>]*>([^<]{0,80})", text)
+    gen = re.search(r'<meta[^>]+name="generator"[^>]+content="([^"]{0,60})"', text)
+    shapes: dict[str, int] = {}
+    for path in re.findall(r'href="(?:https?://[^/"]*senanrealestate\.sa)?(/[^"#?]{1,80})"', text):
+        seg = "/" + path.strip("/").split("/")[0]
+        shapes[seg] = shapes.get(seg, 0) + 1
+    top = sorted(shapes.items(), key=lambda kv: -kv[1])[:8]
+    return (f"homepage {r.status_code} at {host}; title={title.group(1).strip() if title else None!r}; "
+            f"generator={gen.group(1) if gen else None!r}; link paths={top}; api routes named: {sorted(apis)[:12]}")
 
 
 def main() -> int:

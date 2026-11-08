@@ -20,7 +20,7 @@ class _Sess:
     def get(self, url, **_):
         if url.endswith(".js"):
             return _R(200, 'fetch("/api/public/listings?page="+n)', url)
-        return _R(200, '<html><script src="/assets/index-abc.js"></script><a href="/api/v3/units">x</a></html>',
+        return _R(200, '<html><script src="/assets/index-abc.js"></script><title>سنان العقارية</title><a href="/api/v3/units">x</a><a href="/units/12">u</a></html>',
                   "https://www.senanrealestate.sa/")
 
 
@@ -28,6 +28,7 @@ def test_a_dead_route_reports_the_homepage_and_the_routes_it_names():
     out = S.site_changed_probe(_Sess())
     assert "homepage 200 at www.senanrealestate.sa" in out
     assert "/api/public/listings" in out and "/api/v3/units" in out
+    assert "title='سنان العقارية'" in out and "('/units', 1)" in out
 
 
 def test_the_probe_never_raises_on_a_network_error():
