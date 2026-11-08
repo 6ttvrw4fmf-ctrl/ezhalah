@@ -37,7 +37,23 @@ const newRowsBelow = (page, before, topY) => page.evaluate(({ before, topY }) =>
 const visibleTexts = (page) => page.evaluate(() => [...document.querySelectorAll('div,span')]
   .filter((e) => e.childElementCount === 0 && e.getBoundingClientRect().width > 0).map((e) => (e.textContent || '').trim()).filter(Boolean));
 
+// KEYBOARD ROOM: when the iOS keyboard opens, Safari lets the page scroll further by the keyboard's height, which is how
+// scrollIntoView({block:'center'}) could carry the input down to the keyboard's top edge. A headless phone has no
+// keyboard and so no extra room: the first probe run (2026-11-08 21:20, production WITH the bug) passed for exactly that
+// reason. Give the input's scroll container the same room (one screen of spacer) before every tap.
+const addKeyboardRoom = (input) => input.evaluate((el) => {
+  let sc = el.parentElement;
+  while (sc && !(/(auto|scroll)/.test(getComputedStyle(sc).overflowY) && sc.scrollHeight > sc.clientHeight)) sc = sc.parentElement;
+  const host = sc ? (sc.firstElementChild || sc) : document.body;
+  if (host.querySelector(':scope > [data-ez-keyboard-room]')) return;
+  const room = document.createElement('div');
+  room.setAttribute('data-ez-keyboard-room', '');
+  room.style.height = `${innerHeight}px`;
+  host.appendChild(room);
+});
+
 async function checkListOpens(page, input, label, typed) {
+  await addKeyboardRoom(input);
   const before = await visibleTexts(page);
   const t0 = Date.now();
   await input.tap();

@@ -32,6 +32,9 @@ check('a FAIL or a broken journey exits 1 (never a silent pass), with the robot 
 mustCatch('a looser keyboard zone', !rules(js.replace('KEYBOARD_TOP_SHARE = 0.55;', 'KEYBOARD_TOP_SHARE = 0.9;')));
 mustCatch('a slower tap allowance', !rules(js.replace('TAP_ANSWER_MS = 3_000;', 'TAP_ANSWER_MS = 10_000;')));
 mustCatch('a robot that swallows its failure', !loud(js.replace('process.exit(failed ? 1 : 0)', 'process.exit(0)')));
+const room = (s: string) => /await addKeyboardRoom\(input\);/.test(s) && /room\.style\.height = `\$\{innerHeight\}px`/.test(s);
+check('gives the page the keyboard\'s scroll room before every tap (without it a headless phone cannot show the bug)', room(js));
+mustCatch('the keyboard room removed (the 2026-11-08 probe passed on the buggy site without it)', !room(js.replace('await addKeyboardRoom(input);', '')));
 mustCatch('the district box dropped from the walk', !walks(js.replace("getByTestId('district-input')", "getByTestId('x')")));
 
 if (failed) { console.error(`\n❌ verify-iphone-robot-wired: ${failed} check(s) failed`); process.exit(1); }
