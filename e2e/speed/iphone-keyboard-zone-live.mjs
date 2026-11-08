@@ -85,6 +85,8 @@ async function checkListOpens(page, input, label, typed) {
 
 try {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], locale: 'ar' });
+  await ctx.addInitScript(() => { try { localStorage.setItem('ezhalah:cookieConsent', 'necessary'); } catch {} });
+  await ctx.route(/accounts\.google\.com\/gsi\//, (r) => r.abort());
   const page = await ctx.newPage();
   await page.goto(`${BASE}/?iphonerobot=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.getByText('بحث', { exact: true }).first().waitFor({ state: 'visible', timeout: 60_000 });
