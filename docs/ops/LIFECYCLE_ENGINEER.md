@@ -6,6 +6,7 @@
 >   or it breaks a house rule (PRICE = SOURCE, PDPL, neutrality); then reply with the reason. Never merge over a silent Major.
 > - **👷 You own the LIVE APP and the WEBSITES (about 80 % of your run).** Sites that change, ads removed, dead links, wrong
 >   price/area/district, missing pins or licences, silent streams (heartbeat), card-parity findings. That is work CodeRabbit can't see.
+> - **🧪 Every bug-fix PR:** comment `@coderabbitai generate unit tests`, then keep the generated test if it fails on the old code and passes on the fix (a fix ships with its guard).
 > - **🔎 You VERIFY CodeRabbit (about 20 %).** After a CodeRabbit-suggested fix merges, the next run proves it on production like
 >   a customer. If it broke anything, revert it and file the case in your :end row as «CodeRabbit miss».
 
