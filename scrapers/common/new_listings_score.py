@@ -231,6 +231,12 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                         out[name] = MATCH
                         break
         elif kind == "number":
+            if name == "bedrooms" and stored.get("platform") in TOTAL_ROOMS_ONLY_PLATFORMS:
+                out[name] = PAGE_SILENT if stored.get(col) is None else MISMATCH
+                continue
+            if name == "bedrooms" and stored.get("platform") in TOTAL_ROOMS_PLATFORMS:
+                out[name] = _cmp_bedrooms_beside_total_rooms(stored.get(col), lines, whole, kw)
+                continue
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
             # An OPEN bucket «+7 غرف نوم» / «7+ حمامات» is a floor, not a count: Property Finder 24671162 (score run
             # 42343488034, 2026-11-07) prints «+7» while its own payload's bedrooms_value is 20 (bathrooms 9), and the
@@ -314,6 +320,48 @@ def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = ""
         if not any(dist(o, m) < min(dist(k, m) for k in near) for o in others):
             return True
     return False
+
+
+# «عدد الغرف» on these sites is REGA's numberOfRooms: the TOTAL room count, never bedrooms (👑 owner 2026-11-08, backlog
+# 1519/1520: «store and show it as TOTAL ROOMS … never as bedrooms»; aqarcity 2026-07-28, tuba trap 3, haraj parse.py). The
+# bedrooms keyword «غرف» also hits that label, so the score read a total-rooms figure as a bedroom statement: a NULL
+# bedrooms beside «عدد الغرف: 4» scored WE_MISS (pushing a parser to copy the total in), and a stored 4 copied from it
+# scored MATCH (blind to exactly the bug the owner ruled out). Here the label and its value are not a bedroom statement:
+# the ad's own «4 غرف وصالة» still is. A stored count that only the total-rooms figure supports is a MISMATCH.
+TOTAL_ROOMS_PLATFORMS = frozenset({"tuba", "aqarcity", "haraj"})
+# On these two EVERY room count the page prints is REGA's total: aqarcity's title «200 م²، 6 غرف» and its «الغرف» / «6»
+# cell (re-read 42460062892, 25437035, 2026-11-08), tuba's numberOfRooms that its UI labels «غرف النوم» (scrapers/tuba/run.py
+# trap 3). Neither scraper ever writes bedrooms, so the page never states one: NULL is silence, any stored count is wrong.
+# The branch dry re-score of 11-08 (42459382375) still read aqarcity bedrooms as we_miss 8 of 10 from those lines.
+TOTAL_ROOMS_ONLY_PLATFORMS = frozenset({"tuba", "aqarcity"})
+TOTAL_ROOMS = re.compile(r"عدد\s*(?:ال)?غرف(?!\s*(?:ال)?نوم)\s*[:：]?\s*(\d{1,3})?")
+_BARE_COUNT_LINE = re.compile(r"^\s*(\d{1,3})\s*(?:غرف|غرفه)?\s*$")
+
+
+def _cmp_bedrooms_beside_total_rooms(stored, lines: list[str], whole: str, kw: str) -> str:
+    """Bedrooms on a total-rooms site: blank «عدد الغرف» and its value (inline or the next line), compare what is left
+    with the normal number rule, and score a stored count that only the total supports as a MISMATCH."""
+    totals: set[float] = set()
+    kept: list[str] = []
+    skip_next = False
+    for i, x in enumerate(lines):
+        if skip_next:
+            skip_next = False
+            m = _BARE_COUNT_LINE.match(x)
+            if m:
+                totals.add(float(m.group(1)))
+                kept.append("")
+                continue
+        for m in TOTAL_ROOMS.finditer(x):
+            if m.group(1):
+                totals.add(float(m.group(1)))
+            elif not x[m.end():].strip():
+                skip_next = True          # label/value lines: «عدد الغرف» / «4»
+        kept.append(TOTAL_ROOMS.sub(" ", x))
+    verdict = _cmp_number(stored, kept, "\n".join(kept), kw)
+    if stored is not None and verdict != MATCH and float(stored) in totals:
+        return MISMATCH                   # the total rooms stored as bedrooms
+    return verdict
 
 
 ROOM_KW = {"bedrooms": r"غرف|غرفه نوم", "bathrooms": r"حمام|دوره مياه|دورات مياه|دوره المياه|دورات المياه"}

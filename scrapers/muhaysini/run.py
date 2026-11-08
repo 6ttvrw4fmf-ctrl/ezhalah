@@ -309,7 +309,11 @@ from scrapers.common.source_pin import sa_pin  # noqa: E402
 from scrapers.common.arabic_location import city_ar_for, find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 
 _DISTRICT_SPELLING = {(14, norm_district_tok("أبوكبير")): "حي ابو كبير",
-                      (14, norm_district_tok("أبوبريقاء")): "حي ابو بريقاء"}
+                      (14, norm_district_tok("أبوبريقاء")): "حي ابو بريقاء",
+                      # جدة 2026-11-08 (rule G, unknown_named_districts: 5 ads): «المنتزهات» is the catalogued «حي
+                      # المتنزهات» with its ن/ت swapped; the ads' own deed line says «حي المنتزهات بمدينة جدة» and their
+                      # pins (21.476, 39.289) sit 2 km from the catalogued district's served ads (21.496, 39.287).
+                      (18, norm_district_tok("المنتزهات")): "حي المتنزهات"}
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402

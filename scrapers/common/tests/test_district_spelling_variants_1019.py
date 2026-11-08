@@ -24,16 +24,19 @@ import scrapers.ashab.run as A
 import scrapers.muhaysini.run as M
 import scrapers.sadiqeltajer.run as S
 
-MADINAH, BURAIDAH = 14, 11
-CATALOG = {MADINAH: ["حي ابو كبير", "حي ابو بريقاء", "حي شظاة"], BURAIDAH: ["حي المريديسية", "حي الرمال"]}
+MADINAH, BURAIDAH, JEDDAH = 14, 11, 18
+CATALOG = {MADINAH: ["حي ابو كبير", "حي ابو بريقاء", "حي شظاة"], BURAIDAH: ["حي المريديسية", "حي الرمال"],
+           JEDDAH: ["حي المتنزهات"]}
 
 
 @pytest.fixture(autouse=True)
 def _catalog(monkeypatch):
-    monkeypatch.setattr(L, "_CITY", {"المدينه المنوره": [(MADINAH, 3)], "بريده": [(BURAIDAH, 4)]})
-    monkeypatch.setattr(L, "_CID_AR", {MADINAH: "المدينه المنوره", BURAIDAH: "بريده"})
-    monkeypatch.setattr(L, "_REGION_NORM", {L.norm_ar("منطقة المدينة المنورة"): 3, L.norm_ar("منطقة القصيم"): 4})
-    monkeypatch.setattr(L, "_REGION_AR_FOR", {3: "منطقة المدينة المنورة", 4: "منطقة القصيم"})
+    monkeypatch.setattr(L, "_CITY", {"المدينه المنوره": [(MADINAH, 3)], "بريده": [(BURAIDAH, 4)],
+                                       "جده": [(JEDDAH, 2)]})
+    monkeypatch.setattr(L, "_CID_AR", {MADINAH: "المدينه المنوره", BURAIDAH: "بريده", JEDDAH: "جده"})
+    monkeypatch.setattr(L, "_REGION_NORM", {L.norm_ar("منطقة المدينة المنورة"): 3, L.norm_ar("منطقة القصيم"): 4,
+                                                  L.norm_ar("منطقة مكة المكرمة"): 2})
+    monkeypatch.setattr(L, "_REGION_AR_FOR", {3: "منطقة المدينة المنورة", 4: "منطقة القصيم", 2: "منطقة مكة المكرمة"})
     monkeypatch.setattr(L, "_DISTRICT_BY_CITY", {c: {L.norm_district_tok(d) for d in ds} for c, ds in CATALOG.items()})
     monkeypatch.setattr(L, "_DISTRICT_AR_BY_NORM", {L.norm_district_tok(d): d for ds in CATALOG.values() for d in ds})
     monkeypatch.setattr(L, "_DISTRICT_AR_BY_CITY",
@@ -58,6 +61,21 @@ def test_muhaysini_maps_a_glued_abu_spelling(word, district):
     assert _muhaysini(word) == (district, word)          # the card keeps the source's own words
 
 
+@pytest.mark.parametrize("word", ["المنتزهات", "حي المنتزهات", "حي المتنزهات"])
+def test_muhaysini_maps_jeddah_almuntazahat(word):
+    # 2026-11-08 (rule G): 5 Jeddah ads «المنتزهات» (25112123 deed line «حي المنتزهات بمدينة جدة») = catalog «حي المتنزهات».
+    rec = copy.deepcopy(MT.RECORDS["SHOWROOM_RENT_ANNUAL_IN_PROSE"])
+    rec["City"] = {"id": 1, "name": "جدة"}
+    rec["Region"] = {"id": 2, "name": "منطقة مكة المكرمة"}
+    rec["Neighborhood"]["name"] = word
+    loc = ((rec.get("AdValidator") or {}).get("advertisement") or {}).get("location")
+    if isinstance(loc, dict):                       # the REGA block's region is the hint the mapper reads first
+        loc.update({"region": "منطقة مكة المكرمة", "city": "جدة", "district": word})
+    row, _category, why = M.map_listing(rec)
+    assert row is not None, why
+    assert (row["city_id"], row["district_ar"], row["neighborhood"]) == (JEDDAH, "حي المتنزهات", word)
+
+
 def test_muhaysini_catalogued_and_unknown_words_are_unchanged():
     assert _muhaysini("حي شظاة")[0] == "حي شظاة"
     assert _muhaysini("أبوعروة")[0] is None             # not a mapped spelling: stays unknown, never guessed
@@ -78,3 +96,26 @@ def test_ashab_maps_almuraydisiyah():
 def test_sadiqeltajer_maps_almuraydisiyah():
     text = "الموقع حسب الصك القصيم - بريدة - المريدسية اعلانات مشابهة"
     assert S.resolve_district_words(text, BURAIDAH) == ("حي المريديسية", "المريدسية")
+
+
+@pytest.mark.parametrize("word", ["المنتزهات", "حي المنتزهات"])
+def test_jeddah_spelling_alias_does_not_resolve_in_another_city(word):
+    # The same spelling in Madinah must not borrow Jeddah's catalog entry.
+    assert _muhaysini(word) == (None, word)
+
+
+def test_jeddah_spelling_alias_requires_a_catalogued_target(monkeypatch):
+    monkeypatch.setitem(L._DISTRICT_BY_CITY, JEDDAH, set())
+    monkeypatch.delitem(L._DISTRICT_AR_BY_CITY, (JEDDAH, L.norm_district_tok("حي المتنزهات")))
+    rec = copy.deepcopy(MT.RECORDS["SHOWROOM_RENT_ANNUAL_IN_PROSE"])
+    rec["City"] = {"id": 1, "name": "جدة"}
+    rec["Region"] = {"id": 2, "name": "منطقة مكة المكرمة"}
+    rec["Neighborhood"]["name"] = "المنتزهات"
+    rec["AdValidator"]["advertisement"]["location"].update(
+        region="منطقة مكة المكرمة", city="جدة", district="المنتزهات",
+    )
+    row, _category, why = M.map_listing(rec)
+    assert row is not None, why
+    assert row["city_id"] == JEDDAH
+    assert row["district_ar"] is None
+    assert row["neighborhood"] == "المنتزهات"
