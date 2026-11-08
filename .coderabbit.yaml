@@ -2,6 +2,20 @@
 # Ezhalah house rules for CodeRabbit (owner 2026-11-06: «teach CodeRabbit our rules»).
 # Each rule below caused a real production bug before; flag any change that breaks one as Major.
 language: en-US
+# Teach CodeRabbit HOW EZHALAH WORKS (owner 2026-11-07: «tell it how Ezhalah works»): it reads these as review guidelines.
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md"
+      - "docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md"
+      - "docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md"
+      - "docs/ops/LISTING_LIVENESS.md"
+      - "docs/ops/CAPTURED_FIELD_CLASSIFICATION.md"
+  learnings:
+    scope: auto
 reviews:
   # chill (owner 2026-11-07, paid Essential): fewer nitpicks; Majors are still raised and engineers must fix or answer them.
   profile: chill
@@ -15,6 +29,12 @@ reviews:
     ignore_title_keywords:
       - "mirror (auto)"
       - "chore(deploy): record approved"
+  # Paid finishing touches: engineers ask «@coderabbitai generate unit tests» on every bug-fix PR, so each fix ships a test.
+  finishing_touches:
+    unit_tests:
+      enabled: true
+    docstrings:
+      enabled: false
   tools:
     gitleaks:
       enabled: true
