@@ -6,7 +6,8 @@
 
 > **🎯 BETTER RUN 2026-11-09 (owner 11-08: «wire those engineers so they do a better job in the next run»). Four habits, every run:**
 > 1. **ONE PUSH PER PR.** Finish the change, run its own tests locally, then push ONCE, plus ONE push to answer CodeRabbit (and one
->    more per valid Major/Critical a LATER review finds — the existing exception below still holds; batch everything else).
+>    more per valid Major/Critical a LATER review finds, and any push needed to resolve a conflict with main — the existing
+>    exceptions below still hold; batch everything else).
 >    On 11-08 one PR got 9 pushes: CI cancelled itself 6 times, and each push spends one of CodeRabbit's ~3–5 reviews an hour that all
 >    seven routines share (20 of 48 PRs went unreviewed). The owner keeps the current plan, so reviews are scarce: don't waste them.
 > 2. **A REPEAT IS NOT A FIX.** 35 `repeat_bug:*` P1s are open (a bug that came back after a «fix»). Before you close any alert, look for its
