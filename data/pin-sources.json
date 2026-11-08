@@ -757,9 +757,9 @@
     "propertyfinder": {
       "pin_source": "page-json",
       "floor_pct": 95,
-      "proof_url": "https://github.com/6ttvrw4fmf-ctrl/ezhalah/actions/runs/42279053408",
+      "proof_url": "https://www.propertyfinder.sa/ar/plp/rent/villa-for-rent-ar-riyadh-ar-%D8%A7%D9%84%D8%B1%D9%8A%D8%A7%D8%B6-%D8%B3%D8%AF%D8%B1%D8%A9-52417188.html",
       "proven_on": "2026-11-06",
-      "note": "each ad's own payload property.location.coordinates (scrapers/propertyfinder/run.py); 4,553 of 4,558 served ads pinned on 2026-11-08. Same row as migration 20261106203732 (🦅 falcon), whose JSON half was never added."
+      "note": "each ad's own payload property.location.coordinates (scrapers/propertyfinder/run.py); 4,553 of 4,558 served ads pinned on 2026-11-08; the proof ad (52417188) is stored at 24.8577, 46.7428 from its own payload; source re-read run 42279053408. Same row as migration 20261106203732 (🦅 falcon), whose JSON half was never added."
     },
     "qmra": {
       "pin_source": "none",
