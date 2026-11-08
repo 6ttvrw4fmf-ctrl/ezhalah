@@ -2,7 +2,7 @@
 //   node --experimental-strip-types scripts/verify-unrefreshable-stored-session-is-dropped.ts   (npm test)
 // Executes the real functions against a stub storage; also pins that supabase.ts runs it before createClient.
 import { readFileSync } from 'node:fs';
-import { dropUnrefreshableStoredSessions, isUnrefreshableSession } from '../src/lib/authStorageGuard.ts';
+import { dropUnrefreshableStoredSessions, hasStoredSession, isUnrefreshableSession } from '../src/lib/authStorageGuard.ts';
 
 let failed = 0;
 const check = (l: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${l}`); };
@@ -46,4 +46,12 @@ mustCatch('the real predicate is not vacuous', same(verdicts(isUnrefreshableSess
 const src = readFileSync(new URL('../src/lib/supabase.ts', import.meta.url), 'utf8');
 const g = src.indexOf('dropUnrefreshableStoredSessions(window.localStorage)'), c = src.indexOf('createClient(url');
 check('supabase.ts drops the dead session BEFORE createClient', g > 0 && c > g);
+// One Tap must not prompt a SIGNED-IN visitor on a slow network (owner 2026-11-08, VPN): a stored session waits for
+// the server's answer (STORED_SESSION_WAIT_MS) instead of the 2.5 s «signed out» default.
+check('a stored sb-*-auth-token counts as a stored session; other keys do not',
+  hasStoredSession(st({ 'sb-xyz-auth-token': refreshable })) && !hasStoredSession(st({ other: refreshable })) && !hasStoredSession(null));
+const tap = readFileSync(new URL('../src/components/GoogleOneTap.tsx', import.meta.url), 'utf8');
+check('GoogleOneTap waits STORED_SESSION_WAIT_MS (≥ 10 s) when a session is stored, before defaulting to «signed out»',
+  /hasStoredSession\(window\.localStorage\) \? STORED_SESSION_WAIT_MS : GETUSER_TIMEOUT_MS/.test(tap)
+    && Number(tap.match(/STORED_SESSION_WAIT_MS = (\d+)/)?.[1]) >= 10000 && /setTimeout\([^\n]*decide\(true\)[^\n]*\}, wait\)/.test(tap));
 if (failed) { console.error(`${failed} check(s) failed`); process.exit(1); }

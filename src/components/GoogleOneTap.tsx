@@ -51,6 +51,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { markJustSignedIn } from '@/lib/loginWelcome';
+import { hasStoredSession } from '@/lib/authStorageGuard';
 import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
 
@@ -126,6 +127,12 @@ export function installTypingGuard(
 const FEDCM_FALLBACK_MS = 4000;
 // getUser() must never be able to stall the prompt indefinitely (see the bounded race below).
 const GETUSER_TIMEOUT_MS = 2500;
+// Owner 2026-11-08 (phone on a VPN, greeted «صباح الخير يوسف» yet shown «Sign in to ezhalah.com with Google»): a slow
+// network made getUser() miss the 2.5 s bound, and the timeout's «signed out» default prompted a SIGNED-IN visitor.
+// When this device stores a session, wait for the server's real answer up to this ceiling instead. A deleted
+// account / revoked token still gets the prompt: the server answers with an error, or the ceiling passes.
+// (Dead sessions with nothing to refresh are already dropped at boot — authStorageGuard.ts.)
+export const STORED_SESSION_WAIT_MS = 15000;
 
 type Diag = {
   fedcmSupported: boolean;
@@ -166,7 +173,8 @@ export default function GoogleOneTap() {
     // visitor is still protected by the store `user` gate below and by the cancel-on-sign-in effect.
     const decide = (v: boolean) => { if (!cancelled) setSignedOut(v); };
     let settled = false;
-    const t = setTimeout(() => { if (!settled) { settled = true; decide(true); } }, GETUSER_TIMEOUT_MS);
+    const wait = hasStoredSession(window.localStorage) ? STORED_SESSION_WAIT_MS : GETUSER_TIMEOUT_MS;
+    const t = setTimeout(() => { if (!settled) { settled = true; decide(true); } }, wait);
     supabase.auth.getUser()
       .then(({ data, error }) => { if (!settled) { settled = true; clearTimeout(t); decide(!!error || !data?.user); } })
       .catch(() => { if (!settled) { settled = true; clearTimeout(t); decide(true); } })
