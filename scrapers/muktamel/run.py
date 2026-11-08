@@ -668,7 +668,8 @@ def page_bathrooms(html: Optional[str]) -> Optional[int]:
         return None
     cut = html.find("window.__NUXT__")
     m = _PAGE_BATHS_RE.search(html if cut < 0 else html[:cut])
-    return int(m.group(1)) if m else None
+    v = int(m.group(1)) if m else 0
+    return v if v > 0 else None      # a rendered «0» is the form's empty default (the payload's 0 is NULL too): silence
 
 
 def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
