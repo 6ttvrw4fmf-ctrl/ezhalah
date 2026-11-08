@@ -2,7 +2,7 @@
 -- Prepared 2026-11-04 PM on branch fix/detectors-inline-guard-reaffirm (docs/ops/owner-apply/2026-11-04-detectors-reaffirm)
 -- and never applied: LIMB A's scratch cleanup carries DELETE text, which the Supabase connector holds for a human.
 -- Applied through apply-migration.yml instead (owner 2026-11-04: «database changes without the question»).
--- The four detectors themselves were fixed in place by 20261108134701 (raise_once_detectors_reaffirm) (the guard → else).
+-- The four detectors themselves were fixed in place by the «raise_once_detectors_reaffirm» migration of the same morning (the guard → else).
 -- The production watcher had the same blind spot: LIMB B searched only for the literal «elsif not v_open then»
 -- and so never saw the inline «elsif not exists (select 1 from public.alert_event … resolved_at is null) then»
 -- spelling the four detectors above used. LIMB B now matches both spellings; LIMB A is unchanged.
