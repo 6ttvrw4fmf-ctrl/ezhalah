@@ -167,6 +167,9 @@ type SentryLike = {
 };
 
 let SentryImpl: SentryLike | null = null;
+/** TEST ONLY: swap in a recording Sentry so a barrier can EXECUTE identifyUser/reportError and read the events
+ *  they would send (scripts/verify-location-warnings-carry-no-pii.ts). Never called by app code. */
+export function __setSentryForTest(impl: SentryLike | null): void { SentryImpl = impl; }
 let initialized = false;
 let hadDsn = false;
 
