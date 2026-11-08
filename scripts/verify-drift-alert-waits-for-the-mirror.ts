@@ -17,6 +17,23 @@ const cases: Array<[string, boolean, boolean]> = [
 ];
 const fail = cases.filter(([, got, want]) => got !== want).map(([name, got]) => `${name}: got ${got}`);
 
+// Mutation proof: a broken predicate must be caught by the same table.
+type Pred = typeof driftAlertIsDue;
+const table = (p: Pred) => [
+  p({ ...empty, missing_in_git: ['20261108013000'] }, now) === false,
+  p({ ...empty, missing_in_git: ['20261107230000'] }, now) === true,
+  p({ ...empty, missing_in_prod: ['x.sql'] }, now) === true,
+  p({ ...empty, missing_in_git: ['rega_land'] }, now) === true,
+];
+function mutation(name: string, mutant: Pred) {
+  if (table(mutant).every(Boolean)) fail.push(`mutation NOT caught: ${name}`);
+}
+if (!table(driftAlertIsDue).every(Boolean)) fail.push('the real predicate fails its own table');
+mutation('the alert never waits (old behaviour, flaps on every apply)', () => true);
+mutation('the alert waits forever on missing_in_git', (r, n) => driftAlertIsDue({ ...r, missing_in_git: [] }, n));
+mutation('other drift conditions wait too', (r, n) => (r.missing_in_git ?? []).length > 0 && driftAlertIsDue(r, n));
+mutation('an unparsable version is treated as young', (r, n) => driftAlertIsDue({ ...r, missing_in_git: (r.missing_in_git ?? []).filter((v) => /^\d{14}$/.test(v)) }, n));
+
 // The gate itself must not wait: the script still decides its exit code from `drifted`, never from `alertDue`.
 const script = readFileSync(new URL('./verify-migration-drift-vs-production.ts', import.meta.url), 'utf8');
 if (!/driftAlertIsDue\(/.test(script)) fail.push('the drift script no longer asks driftAlertIsDue()');
