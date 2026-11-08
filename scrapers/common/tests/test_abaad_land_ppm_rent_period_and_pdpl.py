@@ -680,3 +680,23 @@ def test_a_small_figure_in_both_boxes_is_not_guessed_either_way():
     rec = {**LAND_SALE, "id": 17069999, "price": "900", "total_price": "900", "space": "600"}
     row, _ = _row(rec)
     assert row["price_per_meter"] == 900
+
+
+@pytest.mark.parametrize("price,total,area,cleared", [
+    ("100000", "100000", "2", True),
+    ("99999", "99999", "600", False),
+    ("100000", "100000", "1", False),
+    ("100000", "100000", "0", False),
+    ("100000", "100000", None, False),
+    ("100000", "100000", "unknown", False),
+    ("100000", "100001", "600", False),
+    ("100000", None, "600", False),
+])
+def test_duplicate_land_rate_requires_total_threshold_and_proven_area(price, total, area, cleared):
+    """Only a large duplicated total on a plot larger than 1 m² settles an absent rate."""
+    row, _ = _row({**LAND_SALE, "price": price, "total_price": total, "space": area})
+    if cleared:
+        assert row["price_per_meter"] is R.db.AUTHORITATIVE_NULL
+    else:
+        assert row["price_per_meter"] == int(price)
+    assert row["price_total"] == (int(total) if total else None)

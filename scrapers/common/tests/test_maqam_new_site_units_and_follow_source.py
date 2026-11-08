@@ -206,3 +206,45 @@ def test_a_whole_project_reads_a_q_shaped_map_url():
          "mapUrl": "https://maps.google.com/?q=24.8231,46.6402"}
     (row, _), _ = R.map_whole_project(13, p, unit_projects=set())
     assert row["additional_info"]["latitude"] == 24.8231
+
+
+@pytest.mark.parametrize("map_url", [
+    "https://www.google.com/maps/place/x/@24.1111,46.2222,17z/data=!3d24.8455!4d46.6512",
+    "https://www.google.com/maps/@24.8455,46.6512,17z",
+    "https://maps.google.com/?ll=24.8455,46.6512",
+    "https://maps.google.com/?q=24.8455%2C46.6512",
+])
+def test_project_map_shapes_reach_both_units_and_whole_projects(map_url):
+    project = {**PROJECTS["مقام 18"], "mapUrl": map_url, "price": "11500000", "city": "الرياض"}
+    unit = R.parse_unit(_no_map(_unit_page()))
+    (unit_row, _), why = R.map_unit(114, unit, {"مقام 18": project})
+    assert not why
+    (project_row, _), why = R.map_whole_project(1, project, unit_projects=set())
+    assert not why
+    for row in (unit_row, project_row):
+        assert (row["additional_info"]["latitude"], row["additional_info"]["longitude"]) == (24.8455, 46.6512)
+
+
+@pytest.mark.parametrize("map_url", [None, "", "https://maps.google.com/?q=0.0000,0.0000",
+                                     "https://maps.google.com/?q=51.5074,-0.1278", "not a map"])
+def test_unusable_parent_pin_leaves_both_coordinates_absent(map_url):
+    project = {**PROJECTS["مقام 18"], "mapUrl": map_url, "price": "11500000", "city": "الرياض"}
+    (unit_row, _), _ = R.map_unit(114, R.parse_unit(_no_map(_unit_page())), {"مقام 18": project})
+    (project_row, _), _ = R.map_whole_project(1, project, unit_projects=set())
+    for row in (unit_row, project_row):
+        assert "latitude" not in row["additional_info"]
+        assert "longitude" not in row["additional_info"]
+
+
+def test_a_unit_with_no_matching_parent_does_not_borrow_another_projects_pin():
+    projects = {"مقام 19": {**PROJECTS["مقام 19"], "mapUrl": "https://maps.google.com/?q=24.8455,46.6512"}}
+    assert R.map_unit(114, R.parse_unit(_no_map(_unit_page())), projects) == (None, "project_unmatched")
+
+
+def test_unit_pin_prevents_even_reading_the_parent_map(monkeypatch):
+    def unexpected_parent_read(_project):
+        pytest.fail("a unit's own pin must win without resolving the parent map")
+    monkeypatch.setattr(R, "_project_pin", unexpected_parent_read)
+    (row, _), why = R.map_unit(91, R.parse_unit(_unit_page()), PROJECTS)
+    assert not why
+    assert (row["additional_info"]["latitude"], row["additional_info"]["longitude"]) == (24.84975, 46.7841667)
