@@ -139,8 +139,10 @@ export function scrubEvent(event: SentryEventShape): SentryEventShape | null {
     // KEEP `id` (that's `sub` — the pseudonymous identifier that lets us group errors per user for
     // triage, deliberately not a phone/email/name). Strip every direct-PII field, including any
     // future ones the SDK adds — anything outside the allowlist is dropped.
+    // Defence in depth: an id that is not already our one-way hash (an SDK default, a future caller
+    // passing the raw sub) is hashed here, so an email or a name can never leave the device as `id`.
     const id = typeof event.user.id === 'string' ? event.user.id : undefined;
-    event.user = id ? { id: scrubString(id) } : undefined;
+    event.user = id ? { id: PSEUDONYMOUS_ID.test(id) ? id : pseudonymousId(id) } : undefined;
   }
   if (Array.isArray(event.breadcrumbs)) event.breadcrumbs = event.breadcrumbs.map((b) => scrubValue(b));
   if (event.extra) event.extra = scrubValue(event.extra);
@@ -308,11 +310,28 @@ export function reportMessage(msg: string, context?: Record<string, unknown>): v
   }
 }
 
-/** Identify the current user by their `sub` (pseudonymous). Pass null on sign-out. */
+/**
+ * A ONE-WAY id for Sentry (CodeRabbit Major on #11370, 2026-11-08). `AuthUser.sub` is `email || name`
+ * (src/lib/auth.ts), not a hash — sending it as `user.id` put the customer's email or name on every
+ * event, against this file's own rule 2. 64-bit FNV-1a (two 32-bit lanes) keeps per-user grouping for
+ * triage and cannot be read back. Pure, sync, no dependency.
+ */
+export function pseudonymousId(sub: string): string {
+  let h1 = 0x811c9dc5, h2 = 0x050c5d1f;
+  for (let i = 0; i < sub.length; i++) {
+    const c = sub.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ c, 0x01000193 ^ 0x5bd1e995) >>> 0;
+  }
+  return 'u_' + h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+}
+const PSEUDONYMOUS_ID = /^u_[0-9a-f]{16}$/;
+
+/** Identify the current user by a ONE-WAY hash of their `sub` (never the raw value). Pass null on sign-out. */
 export function identifyUser(sub: string | null): void {
   if (!SentryImpl) return;
   try {
-    if (sub) SentryImpl.setUser({ id: sub });
+    if (sub) SentryImpl.setUser({ id: pseudonymousId(sub) });
     else SentryImpl.setUser(null);
   } catch {}
 }
