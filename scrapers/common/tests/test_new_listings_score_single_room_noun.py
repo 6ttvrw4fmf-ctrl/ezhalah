@@ -57,6 +57,9 @@ def test_alshawaf_without_its_node_block_is_not_cut():
     ("bathrooms", "المكونات: دورة مياه | حمامين بمساحه 200"),
     ("bathrooms", "دورة مياه . two bathrooms . 240 sqm"),
     ("bathrooms", "دورة مياه و دورات مياه للضيوف بمساحه 300"),
+    ("bedrooms", "غرفه نوم: two بمساحه 200"),                       # English word beside an Arabic label
+    ("bathrooms", "حمام: two بمساحه 200"),
+    ("bedrooms", "غرف النوم | two | غرفه"),                        # English value on the next line
 ])
 def test_a_dual_plural_or_english_count_is_never_outvoted_by_the_bare_noun(field, text):
     assert _score({field: 1}, text)[field] != S.MATCH
