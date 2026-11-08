@@ -42,11 +42,11 @@ jobs:
           BASE_URL: https://ezhalah.com
         run: node e2e/speed/iphone-keyboard-zone-live.mjs
       - name: Screenshot of a red run
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: iphone-robot-fail
-          path: iphone-robot-fail.png
+          path: '*.png'
           if-no-files-found: ignore
       # Unattended: a red run must reach a human. One open alert per workflow file; the next green run resolves it.
       - name: Bridge this run's result to alert_event

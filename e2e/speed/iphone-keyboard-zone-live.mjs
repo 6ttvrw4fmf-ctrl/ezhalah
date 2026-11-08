@@ -56,6 +56,8 @@ async function checkListOpens(page, input, label, typed) {
   await addKeyboardRoom(input);
   const pre = await input.boundingBox();
   const diag = () => input.evaluate((el) => { const out = []; let p = el; while (p) { if (p.scrollTop || p.scrollHeight > p.clientHeight + 2) out.push(`${p.tagName}.${p.scrollTop}/${p.scrollHeight}/${p.clientHeight}/${getComputedStyle(p).overflowY}`); p = p.parentElement; } return out.join(' > ') + ` | win ${scrollY} vv ${visualViewport?.offsetTop}/${visualViewport?.height}`; });
+  await page.screenshot({ path: `diag-${label.replace(/\W+/g, '-')}.png` }).catch(() => {});
+  console.log(`DIAG fixed: ${await page.evaluate(() => [...document.querySelectorAll('body *')].filter((e) => { const cs = getComputedStyle(e); const r = e.getBoundingClientRect(); return (cs.position === 'fixed' || cs.position === 'absolute') && r.height > 80 && r.top > 200 && r.width > 200; }).slice(0, 6).map((e) => { const r = e.getBoundingClientRect(); return `${e.tagName}@${Math.round(r.top)}+${Math.round(r.height)} «${(e.innerText || '').slice(0, 60).replace(/\n/g, ' ')}»`; }).join(' || '))}`);
   console.log(`DIAG ${label} before: y=${Math.round(pre?.y ?? -1)} ${await diag()}`);
   setTimeout(async () => console.log(`DIAG ${label} +600ms: ${await diag().catch(() => '')}`), 600);
   const before = await visibleTexts(page);
