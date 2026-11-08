@@ -162,7 +162,6 @@ export const IN_APP_PREVIEW_HOSTS = [
   'map.earthapp.com.sa',
   'senanrealestate.sa',
   'bahadhabab-res.com',
-  'property.maqamco.sa',
   'erapulse.sa',
   'jawher2030.com',
   'm3tmd.com',
@@ -216,6 +215,9 @@ export const IN_APP_PREVIEW_HOSTS = [
   'mrajhi.com.sa',
   'asasmakeen.com',
   'almajdiah.com',
+  // 2026-11-07: Maqam left property.maqamco.sa (Nuzul) for its own maqamco.sa, which sends X-Frame-Options SAMEORIGIN
+  // and frame-ancestors 'self', so its ads open Ezhalah's ad page first instead of the old in-app frame.
+  'maqamco.sa',
 ] as const;
 export function inAppPreviewHost(url: string | null | undefined): string | null {
   if (!url) return null;
