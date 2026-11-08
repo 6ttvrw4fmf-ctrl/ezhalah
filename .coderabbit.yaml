@@ -3,12 +3,29 @@
 # Each rule below caused a real production bug before; flag any change that breaks one as Major.
 language: en-US
 reviews:
-  profile: assertive
+  # chill (owner 2026-11-07, paid Essential): fewer nitpicks; Majors are still raised and engineers must fix or answer them.
+  profile: chill
   request_changes_workflow: false
   high_level_summary: true
   auto_review:
     enabled: true
     drafts: false
+    # Robot-made PRs with nothing to judge, skipped to save the plan's monthly reviews (overages are OFF).
+    # A SKIPPED CodeRabbit never blocks a merge (scripts/lib/mergeGate.ts ADVISORY_MAY_SKIP).
+    ignore_title_keywords:
+      - "mirror (auto)"
+      - "chore(deploy): record approved"
+  tools:
+    gitleaks:
+      enabled: true
+    ruff:
+      enabled: true
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    eslint:
+      enabled: true
   path_instructions:
     - path: "**/*"
       instructions: |
