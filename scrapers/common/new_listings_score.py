@@ -368,7 +368,7 @@ SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صا
 # backlog 1350) «المكونات : صاله . غرفه . دورة مياة», stored 1 / 1, scored MISMATCH because the same description's
 # area «246» and street «15» were the only figures. A service room («غرفة خادمة», «حمام سباحة») is not one, and a
 # room word with a figure beside it anywhere on the page («3 غرف», «غرف النوم: 2») leaves the count to that figure.
-_NOT_A_BEDROOM = r"(?:ال)?(?:خادمه|خادمات|سائق|حارس|غسيل|كهرباء|تخزين|ملابس|طعام|جلوس|سينما|العاب|معيشه|الخادمه)"
+_NOT_A_BEDROOM = r"(?:لل|ال|ل)?(?:خادمه|خادمات|سائق|حارس|غسيل|كهرباء|تخزين|ملابس|طعام|جلوس|سينما|العاب|معيشه|الخادمه)"
 SINGLE_ROOM = {
     "bedrooms": re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?غرفه(?:\s+(?:ال)?نوم)?(?![\u0621-\u064A])"
                            r"(?!\s+" + _NOT_A_BEDROOM + r"(?![\u0621-\u064A]))"),

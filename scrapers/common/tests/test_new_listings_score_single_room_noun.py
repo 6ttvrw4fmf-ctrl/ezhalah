@@ -39,6 +39,7 @@ def test_service_rooms_and_stated_figures_never_vouch_for_one(text):
     "المكونات: غرفه | غرف النوم | 3 | دورات المياه | 2",   # the figure is the next line's bare value (CodeRabbit)
     "غرفه نوم ماستر و ثلاث غرف نوم و دورتين مياه وحمامين",   # a number word states the count
     "غرفه المعيشه بمساحه 40 م",                               # a living room is not a bedroom
+    "غرفه للسائق بمساحه 40 م",                                # «لل» + a service room (CodeRabbit)
 ])
 def test_a_count_stated_elsewhere_or_a_living_room_never_vouches_for_one(text):
     assert _score({"bedrooms": 1}, text)["bedrooms"] != S.MATCH
