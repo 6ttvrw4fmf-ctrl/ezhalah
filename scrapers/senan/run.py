@@ -43,6 +43,7 @@ area, rooms, REGA licence line). MEASURED 2026-09-24 (live API, every id fetched
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -86,6 +87,28 @@ def walk_session() -> tuple[Any, list[str]]:
                                  headers=dict(session().headers))
 
 
+def site_changed_probe(s: Any, get_timeout: int = 25) -> str:
+    """Rulebook «a down site must fail two checks» (owner 2026-10-25): our API route answering 404 while the
+    homepage answers 200 means the site CHANGED (maqam left this same Nuzul engine for its own site on
+    2026-11-07). Report the homepage status, its final host, and the /api/ routes its own scripts name —
+    the aqargate recipe — so the next run can rebuild the route. Read-only; never raises."""
+    try:
+        r = s.get(f"{BASE}/", timeout=get_timeout, allow_redirects=True)
+    except Exception as e:  # noqa: BLE001
+        return f"homepage: {type(e).__name__}"
+    text = r.text or ""
+    apis: set[str] = set(re.findall(r"[\"'`](/api/[A-Za-z0-9_\-/.]{2,80})", text))
+    for js in re.findall(r'<script[^>]+src="([^"]+\.js)"', text)[:8]:
+        try:
+            jr = s.get(js if js.startswith("http") else f"{BASE}{js if js.startswith('/') else '/' + js}",
+                       timeout=get_timeout)
+            apis |= set(re.findall(r"[\"'`](/api/[A-Za-z0-9_\-/.]{2,80})", jr.text or ""))
+        except Exception:  # noqa: BLE001
+            continue
+    host = re.sub(r"^https?://([^/]+).*$", r"\1", str(getattr(r, "url", "")) or BASE)
+    return f"homepage {r.status_code} at {host}; api routes named: {sorted(apis)[:12]}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -104,7 +127,8 @@ def main() -> int:
     try:
         ids, complete = fetch_ids(s, BASE, limit=args.limit)
         if not ids:
-            raise RuntimeError(f"{BASE}{API_PATH} returned no properties (route {' '.join(route)})")
+            raise RuntimeError(f"{BASE}{API_PATH} returned no properties (route {' '.join(route)})"
+                               f" | {site_changed_probe(s)}")
         print(f"{SOURCE}: {len(ids)} units discovered (complete={complete})", flush=True)
         for i, pid in enumerate(ids, 1):
             d, verdict = fetch_detail(s, BASE, pid)
