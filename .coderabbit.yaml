@@ -2,13 +2,50 @@
 # Ezhalah house rules for CodeRabbit (owner 2026-11-06: «teach CodeRabbit our rules»).
 # Each rule below caused a real production bug before; flag any change that breaks one as Major.
 language: en-US
+# Teach CodeRabbit HOW EZHALAH WORKS (owner 2026-11-07: «tell it how Ezhalah works»): it reads these as review guidelines.
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md"
+      - "docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md"
+      - "docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md"
+      - "docs/ops/LISTING_LIVENESS.md"
+      - "docs/ops/CAPTURED_FIELD_CLASSIFICATION.md"
+  learnings:
+    scope: auto
 reviews:
-  profile: assertive
+  # chill (owner 2026-11-07, paid Essential): fewer nitpicks; Majors are still raised and engineers must fix or answer them.
+  profile: chill
   request_changes_workflow: false
   high_level_summary: true
   auto_review:
     enabled: true
     drafts: false
+    # Robot-made PRs with nothing to judge, skipped to save the plan's monthly reviews (overages are OFF).
+    # A SKIPPED CodeRabbit never blocks a merge (scripts/lib/mergeGate.ts ADVISORY_MAY_SKIP).
+    ignore_title_keywords:
+      - "mirror (auto)"
+      - "chore(deploy): record approved"
+  # Paid finishing touches: engineers ask «@coderabbitai generate unit tests» on every bug-fix PR, so each fix ships a test.
+  finishing_touches:
+    unit_tests:
+      enabled: true
+    docstrings:
+      enabled: false
+  tools:
+    gitleaks:
+      enabled: true
+    ruff:
+      enabled: true
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    eslint:
+      enabled: true
   path_instructions:
     - path: "**/*"
       instructions: |
@@ -19,6 +56,9 @@ reviews:
         - Recommends a property or says best / good deal / better (neutrality), or surfaces a source's own badges.
         - Lets Gathern or Aqar Monthly appear in Buy, or shows an off-plan project as a normal listing.
         - Treats a failed or partial fetch/crawl as «no results» or as proof an ad is gone.
+        - Is a SYMPTOM-ONLY fix (owner 2026-11-07: 66 % of new alerts were the same bugs coming back): it repairs data
+          rows, re-runs a job or widens a threshold WITHOUT changing the code/rule that produced the bug, or it ships
+          no test/detector that would fail if the bug returned. Ask: «why did this happen, and what stops it next time?»
         - Hides or deactivates listings in bulk without a guard (collapse guard, 3 complete misses, or proof the ad page is gone).
     - path: "supabase/migrations/**"
       instructions: |
