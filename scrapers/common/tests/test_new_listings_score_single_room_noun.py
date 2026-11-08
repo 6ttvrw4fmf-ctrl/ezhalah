@@ -48,3 +48,15 @@ def test_a_count_stated_elsewhere_or_a_living_room_never_vouches_for_one(text):
 def test_alshawaf_without_its_node_block_is_not_cut():
     page = '<div><table><tr><td headers="view-changed-table-column">x</td></tr></table></div><p>المساحة 375 م²</p>'
     assert S.scope_to_its_ad("https://alshawaf.com.sa/1", page) == page
+
+
+@pytest.mark.parametrize("field,text", [
+    ("bedrooms", "المكونات: غرفه | غرفتين نوم بمساحه 200"),        # a dual is a count (CodeRabbit)
+    ("bedrooms", "غرفه . two bedrooms . 240 sqm"),                  # an English count
+    ("bedrooms", "غرفه ماستر و غرف للاطفال بمساحه 300"),            # a bare plural
+    ("bathrooms", "المكونات: دورة مياه | حمامين بمساحه 200"),
+    ("bathrooms", "دورة مياه . two bathrooms . 240 sqm"),
+    ("bathrooms", "دورة مياه و دورات مياه للضيوف بمساحه 300"),
+])
+def test_a_dual_plural_or_english_count_is_never_outvoted_by_the_bare_noun(field, text):
+    assert _score({field: 1}, text)[field] != S.MATCH

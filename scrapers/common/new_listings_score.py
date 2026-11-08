@@ -381,12 +381,22 @@ ROOM_FIGURE = {
 }
 _COUNT_WORD = r"(?:واحد|واحده|اثنين|اثنان|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثمانيه|تسع|تسعه|عشر|عشره)"
 _ROOM_WORD = {"bedrooms": r"غرف", "bathrooms": r"حمام|دور(?:ه|ات)\s+(?:ال)?مياه"}
+_MANY_ROOMS = {
+    "bedrooms": re.compile(r"غرفت(?:ين|ان)|(?<![\u0621-\u064A])(?:ال)?غرف(?![\u0621-\u064A])"
+                           r"|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+bed", re.I),
+    "bathrooms": re.compile(r"حمام(?:ين|ان|ات)|دورت(?:ين|ان)\s*(?:ال)?مياه|دورات\s+(?:ال)?مياه"
+                            r"|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+bath", re.I),
+}
 
 
 def room_figure_stated(name: str, lines: list[str]) -> bool:
     """Does the page give this room count as a figure anywhere — beside the word, as a number word, or as the
     bare value on the line next to it («غرف النوم» / «3»)? Then the bare singular noun never decides it."""
     word = _ROOM_WORD[name]
+    # A dual («غرفتين», «حمامين», «دورتين مياه»), a bare plural («غرف», «حمامات», «دورات مياه») or an English count
+    # («two bedrooms») is a count too: the bare singular never outvotes it (CodeRabbit on #11280).
+    if any(_MANY_ROOMS[name].search(x) for x in lines):
+        return True
     for i, x in enumerate(lines):
         if ROOM_FIGURE[name].search(x):
             return True
