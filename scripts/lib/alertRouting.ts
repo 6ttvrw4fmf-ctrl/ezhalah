@@ -222,6 +222,8 @@ export const ALERT_ROUTINE_LABELS: readonly string[] = Object.values(ROUTINES).m
  * not a bin.
  */
 export function routineForKind(kind: string): RoutineNumber {
+  // 🔧 2026-11-08: «repeat_bug:<kind>» (mon_detect_repeat_bug) belongs to whoever owns <kind>.
+  if (kind.startsWith('repeat_bug:')) return routineForKind(kind.slice('repeat_bug:'.length));
   for (const rule of ROUTING_RULES) if (rule.test.test(kind)) return rule.routine;
   return FALLBACK_ROUTINE;
 }

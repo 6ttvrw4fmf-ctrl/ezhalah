@@ -256,3 +256,21 @@ export function driftIsClean(r: DriftReport): boolean {
     (r.duplicate_overloads?.length ?? 0) === 0
   );
 }
+
+/**
+ * Does this drift deserve the P1 `migration_drift` ALERT yet? (🔧 2026-11-08 — the alert flapped 24× in 7 days.)
+ * Every legitimate apply is `missing_in_git` until its byte-exact mirror PR merges (migration-auto-mirror.yml opens it
+ * after 20 min; the robot merges it), so the alert opened on every apply and closed ~2 h later on its own.
+ * The GATE is unchanged — the job still exits 1 and safe-deploy still refuses on ANY drift. Only the alert waits:
+ * a `missing_in_git` version younger than `graceHours` (its 14-digit UTC version is the authoring time) is the
+ * mirror pipeline still working. Any other drift condition, an older version, or an unparsable one raises at once.
+ */
+export function driftAlertIsDue(r: DriftReport, now: Date, graceHours = 3): boolean {
+  if ((r.missing_in_prod?.length ?? 0) || (r.duplicate_versions?.length ?? 0) || (r.duplicate_overloads?.length ?? 0)) return true;
+  return (r.missing_in_git ?? []).some((v) => {
+    const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(v);
+    if (!m) return true;
+    const t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+    return now.getTime() - t >= graceHours * 3600_000;
+  });
+}

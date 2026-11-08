@@ -320,6 +320,7 @@ timing so tonight's proofs land inside your 2 hours. (🆕 night 2: 4/12; 🔬 n
 > ✅ One plain first line: «Everything is perfectly good.» / «Not good: <what> and I have not fixed it yet.»
 > 📊 **Fix rates (proof rows, not end-row claims):** ⚡ X/Y · 🆕 X/Y · 🔬 X/Y · ♻️ X/Y · you X/Y — name any engineer whose `issues_fixed` exceeds its PASS proof rows
 > 📊 **Pins:** served ads with a map pin N% (Δ vs yesterday) · platforms below their declared floor: none / <platform pct<floor> · publishes-but-0%: none — from `pin_coverage_by_platform()` vs `ops_pin_source_declared` (the rakez lesson, 2026-10-30: a site at 0% that publishes pins is a P1, never «the site has no pins» until you looked in all four places)
+> ♻️ **Repeat rate: X % (7 d)** (Δ vs last week; owner target < 20 %) — `select repeat_pct from ops_repeat_rate_weekly where period = 'last 7 d'`; open repeat P1s N (`kind like 'repeat_bug:%'`) and the top 3 from `ops_repeat_bugs` by `reopens_7d` with their lane. A `repeat_bug` P1 closes ONLY by 48 h without a reopen (`mon_detect_repeat_bug()` closes it and its backlog item itself) — never by hand, and a symptom fix does not count.
 > 🚦 ⚡ GREEN/RED — <reason with the number> · 🆕 GREEN/RED — … · 🔬 GREEN/RED — … · ♻️ GREEN/RED — …
 > 🔧 **Repaired today:** N listings · <what> · before → after
 > 🔢 **Numbers a customer sees:** matched N of 5 scopes · dead listings still counted: N · sync age: N minutes
