@@ -327,7 +327,11 @@ export function pseudonymousId(sub: string): string {
 }
 const PSEUDONYMOUS_ID = /^u_[0-9a-f]{16}$/;
 
-/** Identify the current user by a ONE-WAY hash of their `sub` (never the raw value). Pass null on sign-out. */
+/**
+ * Identify the current user. Callers pass the auth account's random UUID (AuthUser.accountId), never
+ * `sub`: an unkeyed hash of an email or a name can be matched by hashing guesses (CodeRabbit, #11370).
+ * The value is still hashed so even a mistaken caller cannot put a raw value on the event. null = none.
+ */
 export function identifyUser(sub: string | null): void {
   if (!SentryImpl) return;
   try {

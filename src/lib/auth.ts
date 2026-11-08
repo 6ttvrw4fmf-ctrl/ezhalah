@@ -120,7 +120,7 @@ export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
   const nameAr = spelled && typeof meta.nameAr === 'string' && meta.nameAr.trim() ? meta.nameAr.trim() : undefined;
   const nameEn = spelled && typeof meta.nameEn === 'string' && meta.nameEn.trim() ? meta.nameEn.trim() : undefined;
   const uiLocale = meta.ui_locale === 'en' || meta.ui_locale === 'ar' ? meta.ui_locale : undefined;
-  return { method, name, ...(nameAr ? { nameAr } : {}), ...(nameEn ? { nameEn } : {}), initials: initialsFrom(name, sub), sub, namePromptSeen: meta.name_prompt_seen === true, createdAt: u?.created_at, lastSignInAt: u?.last_sign_in_at, ...(uiLocale ? { uiLocale } : {}) };
+  return { method, name, ...(nameAr ? { nameAr } : {}), ...(nameEn ? { nameEn } : {}), initials: initialsFrom(name, sub), sub, namePromptSeen: meta.name_prompt_seen === true, createdAt: u?.created_at, lastSignInAt: u?.last_sign_in_at, ...(uiLocale ? { uiLocale } : {}), ...(typeof u?.id === 'string' && u.id ? { accountId: u.id } : {}) };
 }
 
 // THE INTERFACE LANGUAGE FOLLOWS THE ACCOUNT (owner 2026-10-27: «the phone and laptop same account … same things»).

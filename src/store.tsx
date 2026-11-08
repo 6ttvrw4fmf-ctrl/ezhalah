@@ -50,6 +50,7 @@ export type AuthUser = {
   createdAt?: string; // auth user created_at / last_sign_in_at — a fresh SIGN-UP gets «وش نناديك؟» (lib/loginWelcome isFreshSignUp)
   lastSignInAt?: string;
   uiLocale?: 'ar' | 'en'; // user_metadata.ui_locale — the account's interface language, the same on every device
+  accountId?: string; // the auth account's random UUID (auth.users.id) — the ONLY id Sentry may see (never sub: email/name)
 };
 
 // snapshot = the results the search actually returned, saved WITH the entry so reopening a saved
@@ -319,7 +320,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // errors from one user groups correctly for triage. `sub` is the email/e164 identifier the app
   // already uses everywhere internally — never phone/email/name (observability.ts's scrubEvent
   // enforces the field allowlist independently, so a future field addition here can not leak PII).
-  useEffect(() => { identifyUser(user?.sub ?? null); }, [user]);
+  // Sentry identifies a user by the account's random UUID, never by `sub` (= email || name, CodeRabbit Major on #11370).
+  useEffect(() => { identifyUser(user?.accountId ?? null); }, [user]);
   const [searchCount, setSearchCount] = useState(0);
   // Keep the user's name bilingual: when we only know one script (e.g. Google gives a Latin name),
   // generate the other once in the background so the Arabic UI can show the Arabic spelling without
