@@ -1561,6 +1561,11 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # crawl's own prune cannot reach them: its coverage guard trips (re-saw 1,560 of 1,968) and the
     # refused-prune reading skips tables of 1,000+ rows. Second reader: lifecycle-spot-check 11-07.
     "sakani",
+    # 2026-11-08 (♻️): aqarcity. Its shadow passes (fleet_liveness:aqarcity, 11-07 14:39 / 20:59, 11-08 03:53 /
+    # 07:21 UTC) read the same struck ads dead every time and could hide none, so ads aqarcity had removed
+    # waited for three crawl misses on screen (AC30220 dead-visible 11-07). Second reader 11-08
+    # (lifecycle-spot-check 42474692308, site-oracle, canaries 5/5) read all 4 struck ads gone: 4 of 4 agree.
+    "aqarcity",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
