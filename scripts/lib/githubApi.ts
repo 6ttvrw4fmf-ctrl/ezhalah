@@ -156,8 +156,12 @@ export async function getRequiredContexts(slug: string, base: string): Promise<R
   return { known: false, why: `could not read required_status_checks for ${base} from either protection endpoint` };
 }
 
-/** CodeRabbit marks a Major/Critical comment with its severity icon (major-16.svg) and a bold «Major» label. */
-export const isCodeRabbitMajor = (body: string) => /(major|critical)-16\.svg|\*\*\s*_?(Major|Critical)\b/i.test(body);
+/** CodeRabbit marks a Major/Critical comment with its severity icon (major-16.svg) and a bold «Major» label on its
+ *  FIRST line. Only that line is read: a Minor's own prose can quote «**Major**» (it did on #11294). */
+export const isCodeRabbitMajor = (body: string) =>
+  /(major|critical)-16\.svg|\*\*\s*_?(Major|Critical)\b|_\S*\s*(Major|Critical)_/i.test(
+    body.replace(/<!--[\s\S]*?-->/g, '').trim().split('\n')[0] ?? '');
+const CODERABBIT_LOGINS = new Set(['coderabbitai', 'coderabbit[bot]', 'coderabbitai[bot]']);
 
 /** Titles of UNRESOLVED CodeRabbit Major/Critical review threads. Throws when unreadable (the caller fails closed). */
 export async function getOpenCodeRabbitMajors(slug: string, n: string): Promise<string[]> {
@@ -175,10 +179,11 @@ export async function getOpenCodeRabbitMajors(slug: string, n: string): Promise<
       }),
     })) as any;
     const t = r?.data?.repository?.pullRequest?.reviewThreads;
-    if (!t) throw new Error(`could not read review threads of PR #${n}: ${JSON.stringify(r?.errors ?? r).slice(0, 300)}`);
+    // A partial answer (data + errors) can drop a thread's author and hide its Major, so any error fails closed.
+    if (r?.errors?.length || !t) throw new Error(`could not read review threads of PR #${n}: ${JSON.stringify(r?.errors ?? r).slice(0, 300)}`);
     for (const th of t.nodes) {
       const c = th.comments.nodes[0];
-      if (th.isResolved || !c || !/coderabbit/i.test(c.author?.login ?? '') || !isCodeRabbitMajor(c.body)) continue;
+      if (th.isResolved || !c || !CODERABBIT_LOGINS.has(c.author?.login ?? '') || !isCodeRabbitMajor(c.body)) continue;
       // The headline is the first bold sentence («**Preserve a separately published rate.**»), after the severity line.
       const title = [...c.body.matchAll(/\*\*([^*\n]+?\.)\*\*/g)][0]?.[1] ?? c.body.replace(/<[^>]*>/g, '').trim().slice(0, 80);
       out.push(title.trim());

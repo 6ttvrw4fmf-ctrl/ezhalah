@@ -181,7 +181,9 @@ check('zero open CodeRabbit Majors + all green → ALLOWED',
   const { isCodeRabbitMajor } = await import('./lib/githubApi.ts');
   check('CodeRabbit severity marker: Major icon + bold label detected, Minor not',
     isCodeRabbitMajor('<img src="https://x/review-comment-icons-v1/major-16.svg"> **Major** · x')
-      && isCodeRabbitMajor('_🟠 Major_ **Major** · Data') && !isCodeRabbitMajor('<img src="https://x/amber-16.svg"> **Minor** · x'));
+      && isCodeRabbitMajor('_🟠 Major_ **Major** · Data') && !isCodeRabbitMajor('<img src="https://x/amber-16.svg"> **Minor** · x')
+      // A Minor whose prose quotes «**Major**» is still a Minor (#11294's own review).
+      && !isCodeRabbitMajor('<!-- x -->\n\n<img src="https://x/amber-16.svg"> **Minor** · x\n\nIf a reviewer posts a `**Major**` comment'));
 }
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
