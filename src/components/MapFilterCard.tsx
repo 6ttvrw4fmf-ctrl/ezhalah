@@ -4,8 +4,13 @@
 // price. No transaction here (the «شراء ▾» button beside it already says it) and no city or district (the map
 // shows where you are looking). The button at the bottom carries the live count of pins the choice leaves in
 // view; pressing it closes the card and the pins follow (owner: «whatever the user keeps he gets it in terms of pins»).
+//
+// ON A PHONE IT IS FULL SCREEN (owner 2026-11-09, Zillow's mobile filter: «making it like this in terms of the results
+// on top and full screen … we include our things»): the live count is the title («158,514 نتيجة»), X top right, and a
+// bar fixed at the bottom with «مسح الكل» and «عرض الإعلانات». A wider screen keeps the centered card.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { OptionBox, FieldLabel } from '@/components/ui';
@@ -26,6 +31,8 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
   countPins: (f: MapFilterState) => Promise<number | null>;
 }) {
   const { t, isRTL } = useI18n();
+  const phone = useWindowDimensions().width < PHONE_MAX;
+  const insets = useSafeAreaInsets();
   const [f, setF] = useState<MapFilterState>(value);
   const [count, setCount] = useState<number | null>(null);
   const seq = useRef(0);
@@ -43,13 +50,13 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
   const toggleBed = (b: '1' | '2' | '3' | '4' | '5+') => setF((x) => ({ ...x, beds: x.beds.includes(b) ? x.beds.filter((y) => y !== b) : [...x.beds, b] }));
 
   return (
-    <Modal transparent animationType="fade" visible onRequestClose={onClose}>
-      <View style={s.backdrop}>
+    <Modal transparent animationType={phone ? 'slide' : 'fade'} visible onRequestClose={onClose}>
+      <View style={[s.backdrop, phone && s.backdropFull]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t('Close')} />
-        <View style={s.card} testID="map-filter-card">
-          {/* Title left, X top RIGHT — always (owner 2026-11-02). */}
-          <View style={s.head}>
-            <Text style={s.title}>{t('Filter')}</Text>
+        <View style={[s.card, phone && s.cardFull]} testID={phone ? 'map-filter-full' : 'map-filter-card'}>
+          {/* Title left, X top RIGHT — always (owner 2026-11-02). On a phone the title IS the live count (Zillow). */}
+          <View style={[s.head, phone && { paddingTop: 12 + insets.top }]}>
+            <Text style={s.title} testID="map-filter-title">{phone && count !== null ? t('{n} results', { n: count.toLocaleString('en-US') }) : t('Filter')}</Text>
             <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-filter-close" style={s.close}>
               <Ionicons name="close" size={22} color={colors.ink} />
             </Pressable>
@@ -89,15 +96,27 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
               <Range icon={RANGE_ICON.priceFrom} label={t('From')} unit={t('SAR')} value={f.priceMin} onChange={(v) => setF((x) => ({ ...x, priceMin: digits(v) }))} testID="map-filter-price-min" />
               <Range icon={RANGE_ICON.priceTo} label={t('To')} unit={t('SAR')} value={f.priceMax} onChange={(v) => setF((x) => ({ ...x, priceMax: digits(v) }))} testID="map-filter-price-max" />
             </View>
-            {isNarrowed(f) ? (
+            {!phone && isNarrowed(f) ? (
               <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} accessibilityRole="button" style={s.reset}><Text style={s.resetT}>{t('Clear all')}</Text></Pressable>
             ) : null}
           </ScrollView>
-          <View style={s.foot}>
-            <Pressable style={s.apply} onPress={() => onApply(f)} accessibilityRole="button" testID="map-filter-apply">
-              <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
-            </Pressable>
-          </View>
+          {phone ? (
+            // Fixed bottom bar (Zillow «Reset all filters» | «Apply»): clear on the start side, the button fills the rest.
+            <View style={[s.foot, s.footRow, { flexDirection: isRTL ? 'row-reverse' : 'row', paddingBottom: 12 + insets.bottom }]}>
+              <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} disabled={!isNarrowed(f)} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
+                <Text style={[s.resetT, !isNarrowed(f) && { color: colors.muted }]}>{t('Clear all')}</Text>
+              </Pressable>
+              <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(f)} accessibilityRole="button" testID="map-filter-apply">
+                <Text style={s.applyT}>{t('Show listings')}</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={s.foot}>
+              <Pressable style={s.apply} onPress={() => onApply(f)} accessibilityRole="button" testID="map-filter-apply">
+                <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       </View>
     </Modal>
@@ -116,13 +135,20 @@ function Range({ icon, label, unit, value, onChange, testID }: { icon: unknown; 
   );
 }
 
+/** Below this width the filter is a phone screen: full screen, count on top, fixed bottom bar. */
+export const PHONE_MAX = 768;
+
 const s = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(36,35,43,0.45)', alignItems: 'center', justifyContent: 'center', padding: 14 },
+  backdropFull: { padding: 0, justifyContent: 'flex-start' },
+  cardFull: { flex: 1, maxWidth: '100%', maxHeight: '100%', borderRadius: 0, borderWidth: 0 },
+  footRow: { alignItems: 'center', gap: 14 },
+  footClear: { paddingVertical: 10, paddingHorizontal: 4 },
   card: { width: '100%', maxWidth: 560, maxHeight: '88%', backgroundColor: colors.surface, borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: colors.tintLine },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.tint, borderBottomWidth: 1, borderBottomColor: colors.tintLine },
   title: { fontSize: 18, fontWeight: '800', color: colors.ink },
   close: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  body: { flexGrow: 0 },
+  body: { flexGrow: 0, flexShrink: 1 },
   bodyInner: { padding: 14, gap: 10 },
   row: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },

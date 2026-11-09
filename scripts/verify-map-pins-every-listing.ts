@@ -167,6 +167,13 @@ check('the filter card is the site\'s own tiles (OptionBox + the same icons), X 
 const groupsRx = /const groups = useMemo\(\(\) => \(f\.category \? groupsFor\(f\.category as Macro\) : \[\]\), \[f\.category\]\);/;
 check('the map filter shows the property groups only after a category is picked', groupsRx.test(cardSrc) && /\{f\.category \? \(\s*<>\s*<FieldLabel>\{t\('Property group'\)\}/.test(cardSrc));
 mustCatch('groups shown before a category (both lists mixed)', !groupsRx.test(cardSrc.replace(': []), [f.category]);', ": [...groupsFor('Residential'), ...groupsFor('Commercial')]), [f.category]);")));
+// Owner 2026-11-09 (Zillow's mobile filter): on a phone the filter is FULL SCREEN, the live count is the title, and a
+// fixed bottom bar carries «مسح الكل» + «عرض الإعلانات». A wider screen keeps the centered card.
+const fullRx = /const phone = useWindowDimensions\(\)\.width < PHONE_MAX;/;
+check('on a phone the map filter is full screen with the live count on top and a Clear / Show bar at the bottom',
+  fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /phone && count !== null \? t\('\{n\} results'/.test(cardSrc)
+  && /testID="map-filter-clear"/.test(cardSrc) && /export const PHONE_MAX = 768;/.test(cardSrc));
+mustCatch('a phone filter that is still the small centered card', !/phone && s\.cardFull/.test(cardSrc.replace('phone && s.cardFull', 'false && s.cardFull')));
 // A tap must NOT resize the map (owner 2026-11-02: «when I click it then I see the others, it's weird»): switching to
 // full screen on the tap re-laid the map out, reloaded the pins and reshuffled them around the tapped one. The sheet
 // opens over the map exactly as it is.
