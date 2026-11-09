@@ -96,6 +96,8 @@ _AREA_RE = re.compile(r"<h2>المساحة الداخلية</h2>\s*<p>([^<]*)</p
 _BEDS_RE = re.compile(r"([\d٠-٩]{1,2})\s*غرف(?:ة|ه)?\s*نوم")
 _BATHS_RE = re.compile(r"([\d٠-٩]{1,2})\s*دور(?:ات|ة|ه)\s*مياه")
 _UNITS_RE = re.compile(r"([\d٠-٩]{1,4})\s*وحد(?:ة|ات)\s*سكنية")
+# «رخصة المعلن : 7200345489» — the project page's REGA AD licence (71/72xxxxxxxx; a FAL licence is 1xxxxxxxxx).
+_LICENCE_RE = re.compile(r"رخص[ةه]\s*(?:المعلن|الإعلان|الاعلان)\s*:?\s*(7[12]\d{8})(?!\d)")
 _PHOTO_RE = re.compile(r'(?:src|href)="(https?://(?:i\d\.wp\.com/)?hasaadestate\.com/wp-content/uploads/[^"]+?\.(?:jpe?g|webp))(?:\?[^"]*)?"', re.I)
 
 
@@ -283,9 +285,13 @@ def parse_project(page_html: str) -> dict[str, Any]:
         e = _encode(u)
         if e not in photos:
             photos.append(e)
+    # The REGA ad licence the project page prints once for all its units («رخصة المعلن : 7200345489», مسكني 8 —
+    # card parity 2026-11-09: on the page, on 0 cards). Only the REGA ad-licence shape 71/72xxxxxxxx counts.
+    lm = _LICENCE_RE.search(plain(page_html))
     return {"post_id": m.group(1) if m else None, "title": title, "city": city, "district": district,
             "status_chip": plain(cm.group(1)) if cm else "", "units": units, "photos": photos,
             "lift": project_has_lift(page_html),
+            "licence": lm.group(1) if lm else None,
             "units_total": normalize.to_int(um.group(1)) if um else None}
 
 
@@ -366,6 +372,7 @@ def map_units(url: str, project: dict[str, Any]) -> tuple[list[dict], dict[str, 
             "area_raw": u.get("area_raw"), "specs": u["specs"],
             "project_units_total": project.get("units_total"),
             "project_status": project.get("status_chip") or None,
+            "rega_ad_license_number": project.get("licence"),      # the card's «رقم رخصة الإعلان» row
         }.items() if v not in (None, "", {}, [])}
         rows.append(row)
     return rows, skips
