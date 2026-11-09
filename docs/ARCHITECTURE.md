@@ -483,6 +483,24 @@ most-shared spot (`map_pin_snap`, refreshed hourly by `map_pin_snap_refresh_ar()
 tapping it lists every ad. Two DIFFERENT sites keep their own spot (owner 2026-11-03: same-site copies stay, cross-site
 is normal) — but see the next rule: their heads never overlap on screen. Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`, `20261105071552`).
 
+**Map tab: a listing with NO exact location shows as its district's marker, never as a house's spot (owner 2026-11-09,
+permanent: «include the ones with no pins … make it professional … «موقع غير محدد» / «No exact location» … when the
+user clicks he sees them»; «make sure it's live for all the ones with no pins»).** ~15,300 listings name their district
+or city but their website never says where the property is (checked on the 8 biggest sites 2026-11-09), and no sure
+twin lends them a pin (`map_pin_borrow`). From district zoom inward (`showNoPin()`: exact-point views, no drawn
+boundary) the map draws ONE marker per district at the district's centre — the median of its PINNED listings, the same
+centre the district label uses — the app's dark purple with a white edge, a crossed-out pin, the count and the tag
+«موقع غير محدد» / «No exact location» under it (src/lib/mapNoPin.ts, `noPinElement` in AppleMap.web.tsx). A listing whose
+district has no pinned listing, or that names only its city, sits under its CITY's marker (`loc_city_center`, district
+''); only a listing with no city at all stays search-only. A tap opens the same card sheet a pin opens, titled by the
+district with a note that the source gave no exact location. The server half: `map_nopin_ar` (one row per such listing
+with its centre and the filter fields) is rebuilt hourly by `map_nopin_refresh_ar()` inside the :53 map job right
+after `map_grid_refresh_ar()` (which refreshes the centres); `map_nopin_markers_ar()` is the read — one row per
+district in view under the pins' own filter, ~6 ms. The blue pins, the dots feed, the area labels and the count pill
+are untouched: a real spot stays a real spot, and a failed marker read keeps the markers already drawn (A FAILED FETCH
+IS NOT AN EMPTY ANSWER). Guard: `scripts/verify-map-no-pin-district-marker.ts` (migrations `20261109045105`,
+`20261109045753`).
+
 **Map tab: zooming in goes COUNTRY → REGION → CITY → DISTRICT → pins, every name in the UI language (owner 2026-11-05,
 permanent: «first thing Saudi, the total number, then region, then city, and then district»; «I switched to English — why
 does it show Arabic? It should change automatically»).** `areaLevelFor()` (src/lib/mapAreas.ts): > 12° one «السعودية /
