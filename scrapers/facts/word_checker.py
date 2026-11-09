@@ -568,7 +568,8 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "tent": ((), ()),
     "two_sections": ((), ("نوم", "ماستر", "رئيسيه", "رئيسيين", "رئيسيتين")),              # «جناحين نوم» are bedrooms
     "for_youth": (("شارع", "حي", "طريق", "مركز", "نادي", "مخطط", "مسجد", "جامع"), ()),                    # «شارع الشباب» is an address
-    "toilets_on_site": ((), ("سباحه", "بخار", "مغربي", "تركي", "شمسي", "شمس", "زاجل")),   # «حمام سباحة» is the pool
+    "toilets_on_site": (("كيشاني", "سيراميك", "السيراميك", "بلاط", "عازل", "العازل", "عزل", "سخانات", "سخان", "طارده"),   # the home's
+                        ("سباحه", "بخار", "مغربي", "تركي", "شمسي", "شمس", "زاجل")),   # bathrooms' tiles / insulation / heaters (🔬 11-09)   # «حمام سباحة» is the pool
     "lighting": ((), ("طبيعيه", "طبيعي")),                                              # «إضاءة طبيعية» is daylight
     "palms": (("حي", "شارع", "طريق", "مخطط", "مجمع", "مركز", "برج", "فندق", "مول", "واحه"), ()),   # «حي النخيل»
     "fruit_trees": (("حي", "شارع", "طريق", "مخطط", "مجمع", "عصير", "محل"), ()),
@@ -1128,6 +1129,13 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                                                      # project's corner unit, not this ad's plot (P2 13085, 2026-11-06)
     if fact == "laundry_room" and p2 and p2[-1] in ("حي", "بحي", "العدل"):
         return None, s, e                            # «حي العدل الغسالة»: a Makkah district, not a washing machine
+    if fact == "reception" and re.match(r"^(?:ل|لل)استقبال(?:ك|كم|كن|كي)$", _n(t[ws:we]).lstrip("و")):
+        return None, s, e                            # «جاهزة لاستقبالك», «بيتك جاهز لاستقبالك»: «ready to welcome YOU»,
+                                                     # marketing, never a reception desk (P2 13085, 5 of 5 aqar, 🔬 2026-11-09)
+    if fact == "toilets_on_site" and _n(t[ws:we]).lstrip("و").startswith("للحمام"):
+        return None, s, e                            # «عزل مائي للحمامات», «سخانات للحمامات والمطبخ», «السيراميك للحمامات»:
+                                                     # work done FOR the home's own bathrooms, not toilets on the site
+                                                     # (P2 13085, 5 of 5 aqar, 🔬 2026-11-09)
     if fact == "pumps" and _n(t[ws:we]).lstrip("و").startswith("بمضخه"):
         return None, s, e                            # «بمضخة» = equipped WITH a pump: the pool's, well's, tank's or fire
                                                      # system's («مسبح … بمضخه وفلتر», «بئر ارتوازي بمضخة», «خزان … مزود
@@ -2229,6 +2237,15 @@ def selftest() -> None:
         ("لا يوجد سماعات", {"sound_system": False}, ()),
         ("جلسة نار وحطب", {"fire_pit": True}, ()),
         ("موقد خارجي", {"fire_pit": True}, ()),
+        # 🔬 2026-11-09 (P2 13085): «لاستقبالك» is a welcome, «للحمامات» work for the home's bathrooms — real aqar sentences
+        ("لا تشيل هم التجهيز… بيتك شبه مكتمل وجاهز لاستقبالك 🌟", {}, ("reception",)),
+        ("شقة متكاملة تجمع بين الراحة والخصوصية وسهولة المعيشة، وجاهزة لاستقبالك!", {}, ("reception",)),
+        ("🔑 أحضر حقائبك… شقتك جاهزة لاستقبالك!", {}, ("reception",)),
+        ("👈عزل مائي للحمامات والمطابخ 👈عزل حرارى للسطوح", {}, ("toilets_on_site",)),
+        ("🔸️تم عمل العازل للحمامات بالكامل.", {}, ("toilets_on_site",)),
+        ("🔸️تم الانتهاء من عمل فرشة النظافه لكامل الدور . 🔸كيشاني الحمامات جاهز.", {}, ("toilets_on_site",)),
+        ("• مكيفات راكبة ❄️ • سخانات للحمامات والمطبخ • موقف سيارة خاص في القبو", {}, ("toilets_on_site",)),
+        ("كاميرات مراقبة لحماية العقار. 🎥 شبوك طاردة للحمام. جميع الخدمات واصلة", {}, ("toilets_on_site",)),   # pigeons
         ("موقد غاز في المطبخ", {}, ("fire_pit",)),
         # 🔬 2026-11-08: the kitchen cooktop is not a fire pit (28 of 30 served apartment «موقد» yeses) — real sentences
         ("المطبخ والأجهزة: - 6 مكيفات سبليت. - ميكروويف. - شواية. - موقد سيراميكي. - جميع الأجهزة إيطالية الصنع", {}, ("fire_pit",)),
