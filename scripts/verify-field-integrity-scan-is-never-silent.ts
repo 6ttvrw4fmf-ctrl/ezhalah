@@ -15,6 +15,7 @@
 // Mutation-proven at the bottom against synthetic inputs.
 
 import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 const MIGRATIONS = 'supabase/migrations';
@@ -112,19 +113,123 @@ export function unreadableReplaces(sql: string): string[] {
 // (one per price arm), SKIP_RAISE ×1, SKIP_RESOLVE ×1. Every later replace() patch is REPLAYED over this reference;
 // a patch that alters any snippet — even partially («then true or public.field_integrity_served_raw…») — fails.
 // A patch that is meant to change a safeguard must update this reference in the same PR: a reviewed decision.
-const norm = (t: string): string => t.replace(/\s+/g, ' ').trim();
+const norm = (t: string): string => t.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
 export const SAFEGUARDS: Array<{ name: string; text: string; count: number }> = [
-  { name: 'served-raw guard clause (both price arms)', count: 2, text: norm(`and case when greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0)) >= 100000000
-      or (x.area_m2 > 0 and greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0))::numeric / nullif(x.area_m2, 0) > 500000)
-      or x.area_m2::numeric > 1000000
-      then public.field_integrity_served_raw(x.tableoid, x.id, coalesce(x.price_total, x.price_annual))
-      else false end`) },
   { name: 'skipped-table alert', count: 1, text: norm(`n := n + public.mon_raise('P2','field_integrity', rec.platform,
       'field_integrity_table_skipped:'||rec.tn,`) },
   { name: 'skipped-table alert resolve', count: 1, text: norm(`update public.alert_event set resolved_at = now()
       where kind='field_integrity' and resolved_at is null
       and dedup_key = 'field_integrity_table_skipped:'||rec.tn;`) },
 ];
+// ── E. the two price arms IN FULL, from «count(*) filter (where … phone/ID band» through «from public.%I x», exactly as
+// production runs them. Measured 2026-11-09: comment-stripped + whitespace-normalised, this text is byte-identical to
+// pg_get_functiondef(mon_detect_field_integrity) on aannarbkwcymrotzwdbo (md5 below). Patches are replayed over the
+// WHOLE arms, so an edit that crosses a safeguard's edge («else false end),» → «else false end or true),») is seen,
+// and the result is judged STRUCTURALLY: each arm's filter must stay a pure top-level AND chain carrying the guard.
+const ARMS_REFERENCE = `count(*) filter (where active and (price_total  between 100000000 and 101000000
+                                          or price_total  between 500000000 and 599999999
+                                          or price_annual between 100000000 and 101000000
+                                          or price_annual between 500000000 and 599999999)
+                            and not (coalesce(source_capture->'price_evidence'->>'origin', '') = 'api'
+                                     and coalesce(source_capture->'price_evidence'->>'field', '') ~ 'landTotalPrice$'
+                                     and coalesce(source_capture->'price_evidence'->>'stored', '') ~ '^[0-9]+$'
+                                     and (source_capture->'price_evidence'->>'stored')::numeric
+                                         = coalesce(price_total, price_annual))
+                            and not exists (select 1 from public.ops_price_source_verified v
+                                             where v.source_table = %L and v.listing_id = id)
+                            and case when greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0)) >= 100000000
+                                      or (x.area_m2 > 0 and greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0))::numeric / nullif(x.area_m2, 0) > 500000)
+                                      or x.area_m2::numeric > 1000000
+                                 then public.field_integrity_served_raw(x.tableoid, x.id, coalesce(x.price_total, x.price_annual))
+                                 else false end),
+          count(*) filter (where active and (
+                             (area_m2 is not null and area_m2 > 0
+                               and ((price_total  is not null and price_total::numeric/area_m2  > 2000000)
+                                 or (price_annual is not null and price_annual::numeric/area_m2 > 500000)))
+                             or (area_m2::numeric > 1000000 and coalesce(property_type,'') !~ '^أرض'
+                                 and coalesce(property_type,'') <> all(%L::text[])))
+                            and not exists (select 1 from public.ops_price_source_verified v
+                                             where v.source_table = %L and v.listing_id = id)
+                            and case when greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0)) >= 100000000
+                                      or (x.area_m2 > 0 and greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0))::numeric / nullif(x.area_m2, 0) > 500000)
+                                      or x.area_m2::numeric > 1000000
+                                 then public.field_integrity_served_raw(x.tableoid, x.id, coalesce(x.price_total, x.price_annual))
+                                 else false end
+                            and not exists (select 1 from public.search_listings_ar s
+                                             where s.source_table = %L and s.listing_id = x.id
+                                               and s.price_total is distinct from x.price_total
+                                               and s.area_m2 > 0
+                                               and coalesce(s.price_total, 0)::numeric / s.area_m2 <= 2000000
+                                               and coalesce(s.price_annual, 0)::numeric / s.area_m2 <= 500000))
+        from public.%I x`;
+export const ARMS_REFERENCE_MD5 = '1e636809971c914b72d0f5f925694cf3';
+const GUARD = norm(`and case when greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0)) >= 100000000
+      or (x.area_m2 > 0 and greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0))::numeric / nullif(x.area_m2, 0) > 500000)
+      or x.area_m2::numeric > 1000000
+      then public.field_integrity_served_raw(x.tableoid, x.id, coalesce(x.price_total, x.price_annual))
+      else false end`);
+
+/** The predicate inside each «count(*) filter (where …)», cut at its matching parenthesis (quotes respected). */
+export function filterPredicates(text: string): string[] {
+  const out: string[] = [];
+  const open = /count\(\*\) filter \(where /g;
+  for (const m of text.matchAll(open)) {
+    let depth = 0, q = false, i = m.index! + m[0].length;
+    const from = i;
+    for (; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === "'") { if (text[i + 1] === "'") i++; else q = false; } continue; }
+      if (c === "'") q = true; else if (c === '(') depth++;
+      else if (c === ')') { if (depth === 0) break; depth--; }
+    }
+    out.push(i < text.length ? text.slice(from, i) : '');           // '' = unterminated → judged broken
+  }
+  return out;
+}
+
+/** True when a predicate carries an OR at its own top level — outside every parenthesis, string and CASE … END
+ *  (the guard's own «case when … or … then» is nesting, not a disjunction of the filter). */
+export function hasTopLevelOr(pred: string): boolean {
+  let depth = 0, caseDepth = 0, q = false;
+  for (let i = 0; i < pred.length; i++) {
+    const c = pred[i];
+    if (q) { if (c === "'") { if (pred[i + 1] === "'") i++; else q = false; } continue; }
+    if (c === "'") { q = true; continue; }
+    if (c === '(') { depth++; continue; }
+    if (c === ')') { depth--; continue; }
+    if (depth !== 0 || (i > 0 && /\w/.test(pred[i - 1]))) continue;      // only whole words at paren depth 0
+    const word = /^[a-z_]+/i.exec(pred.slice(i))?.[0]?.toLowerCase();
+    if (word === 'case') caseDepth++;
+    else if (word === 'end' && caseDepth > 0) caseDepth--;
+    else if (word === 'or' && caseDepth === 0) return true;
+    if (word) i += word.length - 1;
+  }
+  return false;
+}
+
+/** Judges replayed arm text: both price arms present once, each a pure top-level AND chain that carries the guard. */
+export function armDamage(text: string): string[] {
+  const preds = filterPredicates(text);
+  const phone = preds.filter((p) => /between 500000000 and 599999999/.test(p));
+  const mag = preds.filter((p) => /::numeric\/area_m2 > 2000000/.test(p));
+  const out: string[] = [];
+  for (const [label, arm] of [['phone/ID', phone], ['extreme-magnitude', mag]] as const) {
+    if (arm.length !== 1) { out.push(`${label} arm no longer found intact`); continue; }
+    if (!arm[0].includes(GUARD)) out.push(`${label} arm lost the served-raw guard clause`);
+    if (hasTopLevelOr(arm[0])) out.push(`${label} arm gained a top-level OR, so it can count prices customers are not served`);
+  }
+  if (preds.length !== 2 || (phone.length === 1 && mag.length === 1 && phone[0] === mag[0])) out.push(`the two price arms are no longer two separate filters (found ${preds.length})`);
+  if (!/ from public\.%I x$/.test(text)) out.push('the arms no longer end at «from public.%I x»');
+  return out;
+}
+
+/** Replays a patch over the full production arms and judges the result structurally. */
+export function replayArms(sql: string): string[] {
+  let body = norm(ARMS_REFERENCE);
+  for (const { old, neu } of patchPairs(sql)) { const o = norm(old); if (o) body = body.split(o).join(norm(neu)); }
+  return armDamage(body);
+}
+
 const occurrences = (hay: string, needle: string): number => (needle ? hay.split(needle).length - 1 : 0);
 /** Replays a patch's old_X → new_X edits over the production safeguard reference; names every snippet it alters. */
 export function replayDamage(sql: string): string[] {
@@ -173,7 +278,7 @@ export function problems(files: F[]): string[] {
     }
     if (patchRemoves(f.sql, SERVED_RAW)) out.push(`${f.name} removes the served-raw check from a price arm through a replace() patch`);
     if (isFunctionPatch(f.sql)) {
-      const damaged = replayDamage(f.sql);
+      const damaged = [...replayDamage(f.sql), ...replayArms(f.sql)];
       if (damaged.length) out.push(`${f.name} alters production safeguard text when replayed: ${damaged.join(', ')} — if intended, update SAFEGUARDS in this barrier in the same PR`);
       const bad = unreadableReplaces(f.sql);
       if (patchPairs(f.sql).length === 0 || bad.length) out.push(`${f.name} patches mon_detect_field_integrity in a shape this barrier cannot read — every rewrite must be replace(v, old_X, new_X) with declared constants: ${bad.join('; ') || 'no readable pairs'}`);
@@ -246,6 +351,15 @@ mustCatch("a partial replacement that flips the clause's «and case» to «or ca
 mustCatch('a partial replacement that turns «else false end» into «else true end»', ALTERS.test(diag(patchQ(`  old_p constant text := 'else false end';\n  new_p constant text := 'else true end';`, `  execute replace(v, old_p, new_p);`))));
 mustCatch('a partial replacement inside the skipped-table resolve', ALTERS.test(diag(patchQ(`  old_p constant text := 'and resolved_at is null';\n  new_p constant text := 'and false';`, `  execute replace(v, old_p, new_p);`))));
 mustPass('a patch whose old text is not in any safeguard (an unrelated arm) passes replay', !ALTERS.test(diag(patchQ(`  old_p constant text := 'bedrooms > 1000';\n  new_p constant text := 'bedrooms > 2000';`, `  execute replace(v, old_p, new_p);`))));
+// the reference is pinned to what production was measured to run — editing it is a deliberate, visible act
+mustPass('ARMS_REFERENCE is the production-measured text (md5 pin)', createHash('md5').update(norm(ARMS_REFERENCE)).digest('hex') === ARMS_REFERENCE_MD5);
+mustPass('the unpatched production arms judge clean', armDamage(norm(ARMS_REFERENCE)).length === 0);
+const CROSS = (o: string, n: string) => diag(patchQ(`  old_p constant text := '${o}';\n  new_p constant text := '${n}';`, `  execute replace(v, old_p, new_p);`));
+mustCatch("CodeRabbit's boundary-crossing edit «else false end),» → «else false end or true),» (phone arm)", /phone\/ID arm gained a top-level OR/.test(CROSS('else false end),', 'else false end or true),')));
+mustCatch('a boundary-crossing «or true» appended to the magnitude arm before its final «))»', /extreme-magnitude arm gained a top-level OR/.test(CROSS('<= 500000))', '<= 500000) or true)')));
+mustCatch('an «or true» inserted ahead of the guard clause', /gained a top-level OR/.test(CROSS('and case when greatest', 'or true and case when greatest')));
+mustCatch('an edit that splices the two arms together', /no longer two separate filters/.test(CROSS('else false end), count(*) filter (where active and (', 'else false end and (')));
+mustPass('a nested «or» inside the arm (a new band in the phone list) is not a top-level OR', !/gained a top-level OR/.test(CROSS('or price_annual between 500000000 and 599999999)', 'or price_annual between 500000000 and 599999999 or price_annual between 900000000 and 900000001)')));
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
