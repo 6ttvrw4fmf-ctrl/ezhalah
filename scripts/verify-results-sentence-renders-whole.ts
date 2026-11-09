@@ -115,6 +115,16 @@ check('   …and it is reported as the reveal never committing',
 // 7 — the count parser reads nothing (exactly what #331 observed).
 mustCatch('7 — an unreadable count fails', sentenceProblems(reading({ quoted: null })));
 
+// THE COUNT FOLLOWS THE CARDS (src/lib/honestTotal.ts): `total − dropped` is honest, and ONLY that number.
+mustPass('7b — a sentence exactly one dropped card below the RPC total is the honest total (run 42597206618: 73350 over 73351)',
+  sentenceProblems(reading({ quoted: 73350, rpcTotal: 73351, numbersInSentence: [73350], droppedAtHydration: 1 })));
+mustCatch('7c — MUTATION: the same sentence with NO dropped card is still a wrong total',
+  sentenceProblems(reading({ quoted: 73350, rpcTotal: 73351, numbersInSentence: [73350], droppedAtHydration: 0 })));
+mustCatch('7d — MUTATION: a sentence lower than the drop explains is still a wrong total',
+  sentenceProblems(reading({ quoted: 73349, rpcTotal: 73351, numbersInSentence: [73349], droppedAtHydration: 1 })));
+mustCatch('7e — MUTATION: a drop never excuses a sentence ABOVE the total',
+  sentenceProblems(reading({ quoted: 73352, rpcTotal: 73351, numbersInSentence: [73352], droppedAtHydration: 1 })));
+
 // 8 — the sentence is whole but quotes a DIFFERENT number than the RPC served.
 const m8 = sentenceProblems(reading({ quoted: 21384, numbersInSentence: [21384] }));
 mustCatch('8 — a sentence that does not carry the true total fails', m8);

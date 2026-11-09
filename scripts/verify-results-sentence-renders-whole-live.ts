@@ -133,6 +133,12 @@ const ok: string[] = [];
 async function main() {
   const code = await withPage(false, async (page: any) => {
     let rpcTotal: number | null = null;
+    // Every total_count the wire carried (three pages → three answers) and every row it served. If the totals
+    // disagree among themselves the index moved under the run — no verdict (exit 2), exactly as the sweep's
+    // onOneIndex() bracket reads it; the rows served minus the cards on screen is what the app subtracts
+    // from the total (src/lib/honestTotal.ts), so it is measured here rather than assumed.
+    const rpcTotals = new Set<number>();
+    let rowsServed = 0;
     let lastResponseAt = Date.now();
     page.on('response', async (res: any) => {
       if (!res.url().includes(SEARCH_RPC)) return;
@@ -142,8 +148,10 @@ async function main() {
       if ((req.p_limit ?? 0) <= 1) return;      // §41.5 — p_limit 1 is autocomplete, not a search
       try {
         const body = await res.json();
+        if (Array.isArray(body)) rowsServed += body.length;
         if (Array.isArray(body) && body.length && body[0]?.total_count != null) {
           rpcTotal = Number(body[0].total_count);
+          rpcTotals.add(rpcTotal);
         }
       } catch { /* a non-JSON body is not evidence of anything */ }
     });
@@ -201,9 +209,18 @@ async function main() {
 
     console.log(`\n«عرض المزيد» presses : ${presses}`);
     console.log(`cards on screen      : ${cards}`);
-    console.log(`RPC total_count      : ${rpcTotal}`);
+    console.log(`RPC total_count      : ${rpcTotal}${rpcTotals.size > 1 ? ` (the wire carried ${[...rpcTotals].join(', ')})` : ''}`);
+    console.log(`rows served / cards  : ${rowsServed} / ${cards}`);
     console.log(`sentence @t0         : ${JSON.stringify(first)}`);
     console.log(`sentence @t+45s      : ${JSON.stringify(second)}`);
+
+    if (rpcTotals.size > 1) {
+      // Two different totals for one search inside one run = the index was rebuilt under it (the :22 sync).
+      // The sentence quotes whichever answer it was built from; comparing it with a later answer describes two
+      // databases. UNDECIDED, never a verdict — the same reading e2e/live-sweep/sweep.mjs onOneIndex() gives.
+      console.log(`UNDECIDED: the index moved under the run (total_count ${[...rpcTotals].join(' → ')}) — no verdict in either direction.`);
+      return 2;
+    }
 
     if (presses < 2) {
       // Not a product failure by itself — a cohort that ends before two presses simply cannot
@@ -224,12 +241,16 @@ async function main() {
       rpcTotal,
       numbersInSentence: second ? allNumbers(second) : [],
       evidence: truncationEvidence(bodyText),
+      droppedAtHydration: Math.max(0, rowsServed - cards),
     });
 
     if (problems.length) { fail.push(...problems); return 1; }
     ok.push('the settled sentence contains no unpaired surrogate — no half-emoji is rendered');
     ok.push('the sentence is stable across a 45s idle — the reveal committed');
-    ok.push(`a whole shipped template matched and carries the RPC total ${rpcTotal}`);
+    const dropped = Math.max(0, rowsServed - cards);
+    ok.push(resultsFoundCount(bodyText) === rpcTotal
+      ? `a whole shipped template matched and carries the RPC total ${rpcTotal}`
+      : `a whole shipped template matched and carries the honest total ${rpcTotal} − ${dropped} card(s) the raw hydration dropped (src/lib/honestTotal.ts)`);
     return 0;
   });
 
