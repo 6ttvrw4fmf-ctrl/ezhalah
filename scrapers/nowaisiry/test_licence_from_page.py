@@ -1,6 +1,11 @@
 """🔧 2026-11-09 (card_parity_card_missing:nowaisiry:licence): the REGA ad licence is printed only in the page's offer
 table («رقم الترخيص» → 7100312611); the REST post the scraper reads carries it nowhere, so no card showed a licence."""
-from scrapers.nowaisiry import run
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scrapers.nowaisiry import run  # noqa: E402
 
 # verbatim from the live page of the post whose card parity sampled 7100312611 (2026-11-09)
 PAGE = ('<div><h3 id="brxe-xofxzc" class="brxe-heading offer-table-item-title">رقم الترخيص</h3>'
@@ -27,3 +32,10 @@ def test_map_listing_puts_it_on_the_card_key():
     assert row["additional_info"]["rega_ad_license_number"] == "7100312611"
     row, _ = run.map_listing(post, None)                                                 # page unread → unknown
     assert "rega_ad_license_number" not in row["additional_info"]
+
+
+if __name__ == "__main__":   # CI runs per-scraper barriers as scripts
+    test_the_page_licence_is_read()
+    test_nothing_is_invented()
+    test_map_listing_puts_it_on_the_card_key()
+    print("✓ nowaisiry: the page's own ad licence reaches the card key")
