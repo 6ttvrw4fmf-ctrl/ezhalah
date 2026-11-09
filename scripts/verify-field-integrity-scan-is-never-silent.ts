@@ -65,10 +65,14 @@ const cases: Array<[string, F[], boolean]> = [
   ['an unrelated later migration passes', [guard, skip, { name: '20261110000000_c.sql', sql: 'select 1 / x.area_m2 > 2; exception when others then continue;' }], true],
 ];
 let bad = 0;
+const mustCatch = (label: string, caught: boolean) => { if (!caught) { console.error(`✗ mutation proof «${label}» not caught`); bad++; } };
+const mustPass = (label: string, ok: boolean) => { if (!ok) { console.error(`✗ «${label}» should pass`); bad++; } };
 for (const [label, files, expectOk] of cases) {
   const ok = problems(files).length === 0;
-  if (ok !== expectOk) { console.error(`✗ mutation proof «${label}»: expected ${expectOk ? 'pass' : 'fail'}`); bad++; }
+  if (expectOk) mustPass(label, ok); else mustCatch(label, !ok);
 }
+mustCatch('a later patch reintroducing the bare division', problems([guard, skip, { name: '20261110000000_d.sql', sql: 'mon_detect_field_integrity … greatest(0,1)::numeric / x.area_m2 > 500000' }]).length > 0);
+mustCatch('a later patch reintroducing the silent skip', problems([guard, skip, { name: '20261110000000_e.sql', sql: 'mon_detect_field_integrity\n    exception when others then continue;\n' }]).length > 0);
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
