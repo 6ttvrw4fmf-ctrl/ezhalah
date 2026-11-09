@@ -600,8 +600,19 @@ def _age_floor(line: str, own: bool) -> Optional[float]:
     return float(WORD_NUMBERS[v]) if v in WORD_NUMBERS else float(v.translate(_DIGITS))
 
 
+# A per-metre PRICE line is not an area statement: alshawaf's own node table prints «سعر المتر» / «1,800» (and its index
+# «المتر 1,800»), and the area keyword «متر» read it as a stated area, so our 587 (the node's «المساحة» / «587م») scored
+# MISMATCH and capped the 2026-11-09 night at 85 % (re-read run 42578333590: 25868220 / 25868063 / 25868148). An area
+# says «587 متر» — the figure BEFORE the word; «(سعر) المتر N» — the definite word before the figure — is a price.
+PER_METRE_PRICE = re.compile(r"سعر\s+(?:ال)?متر|(?<![ء-ي])المتر\s*[:：]?\s*[\d٠-٩]")
+# The bare area label of a th/td table («<th>المساحة</th><td>587م</td>» → lines «المساحه» / «587م»).
+AREA_LABEL_LINE = re.compile(r"^\s*(?:ال)?مساحه(?:\s+(?:ال)?(?:ارض|الارض|العقار))?\s*[:：]?\s*$")
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
+    if "مساحه" in kw:
+        kw_hits = [i for i in kw_hits if not (PER_METRE_PRICE.search(lines[i]) and not re.search(r"مساحه|م²|م2", lines[i]))]
     # A LABEL («keyword:») that ENDS its line, its value cut off, states nothing ON that line: haraj's meta
     # description is cut off at «…نوع العقار: Apartment سعر الوحدة: 27000 عمر العقار:» (21839193, re-read run
     # 41288305920, 2026-11-01), and the other field's 27000 before it read as a stated age, scoring our 9 a
@@ -610,6 +621,10 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     if not AREA_UNIT.search(kw):
         lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
     page_states = any(re.search(r"\d", lines[i]) for i in kw_hits)
+    if "مساحه" in kw and not page_states:
+        # a th/td area («المساحه» / «587م») states the figure on the line under its label
+        page_states = any(AREA_LABEL_LINE.match(lines[i]) and i + 1 < len(lines)
+                          and re.match(r"^\s*[\d٠-٩][\d٠-٩.,]*\s*م\s*$", lines[i + 1]) for i in kw_hits)
     if stored is None:
         return WE_MISS if page_states else PAGE_SILENT
     pat = _num_pattern(stored)
@@ -639,6 +654,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
             if pat.search(lines[i]):
                 return MATCH
             if any(0 <= j < len(lines) and bare.match(lines[j]) for j in (i - 1, i + 1)):
+                return MATCH
+            # The value line right under a BARE area label may glue its «م» (alshawaf «المساحة» / «587م», 2026-11-09).
+            # Only under the label itself — a glued «422.22م» elsewhere (the related table) keeps meaning nothing.
+            if ("مساحه" in kw and AREA_LABEL_LINE.match(lines[i]) and i + 1 < len(lines)
+                    and re.match(r"^\s*" + pat.pattern + r"\s*م\s*$", lines[i + 1])):
                 return MATCH
         # area_m2 is an integer column (backlog #123), so a page «232.8 م²» is stored as its nearest whole
         # number, 233. tuba 18258569 (2026-10-17): «المساحة:» / «232.8 م²» read as a contradiction of any
