@@ -70,6 +70,8 @@ const check = (label: string, ok: boolean, detail = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && detail ? `\n        ${detail}` : ''}`);
 };
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught, 'MUTANT SURVIVED — the checks above are blind to the defect this file exists to catch');
 
 async function verdicts(src: string) {
   const m = await lift(src);
@@ -103,10 +105,9 @@ const m1 = REAL.replace(/\n  if \(!liveVoicePresent\(sessionVoice\)\) return fal
 const m2 = REAL.replace(/\n  if \(best && !liveVoicePresent\(best\)\) return 'still-resolving';/, '');
 check('(mutation) the mutants really differ from the source', m1 !== REAL && m2 !== REAL);
 const v1 = await verdicts(m1);
-check('(mutation) catches speakReadAloud «starting» on a stale voice (the #856 dead control)',
-  v1.stale.started === true, 'MUTANT SURVIVED');
+mustCatch('speakReadAloud «starting» on a stale voice (the #856 dead control)', v1.stale.started === true);
 const v2 = await verdicts(m2);
-check('(mutation) catches a stale-voice refusal that says nothing', v2.stale.message === null, 'MUTANT SURVIVED');
+mustCatch('a stale-voice refusal that says nothing', v2.stale.message === null);
 
 if (failed) { console.error(`\n✗ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ a 🔊 tap against a stale voice refuses out loud');
