@@ -78,8 +78,16 @@ export function patchPairs(sql: string): Array<{ old: string; neu: string }> {
 /** A migration that rewrites mon_detect_field_integrity from its live text (pg_get_functiondef + replace) —
  *  if patchPairs cannot read its pairs, the barrier cannot judge it and must fail closed. */
 export function isFunctionPatch(sql: string): boolean {
-  // any call form (pg_get_functiondef(p.oid), a regprocedure literal …) and any rewrite function: fail closed
-  return FN.test(sql) && /\bpg_get_functiondef\s*\(/i.test(codeLines(sql));
+  // any rewrite shape fails closed — a regprocedure/regproc literal of THIS function, a pg_proc lookup by its name, or
+  // pg_get_functiondef over something that names it. A migration that only names the function in a data row (a
+  // repair-guarantee enrolment, 20261109140000) while reading ANOTHER function's definition is not a patch of it.
+  const code = codeLines(sql);
+  if (!FN.test(code) || !/\bpg_get_functiondef\s*\(/i.test(code)) return false;
+  const literal = /mon_detect_field_integrity\s*\(\s*\)\s*'\s*::\s*regproc(edure)?/i.test(code) || /'public\.mon_detect_field_integrity'\s*::\s*regproc/i.test(code);
+  // any pg_proc predicate that names it before the statement ends: proname = '…', proname in ('…'), = any(array['…']), ~ '…'
+  const lookup = /\bproname\b[^;]*?mon_detect_field_integrity/i.test(code);
+  const argNamesIt = [...code.matchAll(/\bpg_get_functiondef\s*\(([^;]*?)\)\s*[;,)]/gi)].some((m) => FN.test(m[1]));
+  return literal || lookup || argNamesIt;
 }
 
 /** Every replace(...) call in a function patch, and whether each one is a form this barrier can judge:
@@ -334,6 +342,11 @@ const cases: Array<[string, F[], boolean]> = [
   ['a later redefine without nullif fails', [served, guard, skip, { name: '20261110000000_c.sql', sql: "create or replace function public.mon_detect_field_integrity() 'field_integrity_table_skipped:'||rec.tn" }], false],
   ['a later silent handler fails', [served, guard, skip, { name: '20261110000000_c.sql', sql: 'mon_detect_field_integrity\n    exception when others then continue;\n' }], false],
   ['an unrelated later migration passes', [served, guard, skip, { name: '20261110000000_c.sql', sql: 'select 1 / x.area_m2 > 2; exception when others then continue;' }], true],
+  ['a later migration that only NAMES the detector in a registry row while reading another function passes', [served, guard, skip, { name: '20261110000000_e.sql', sql: "insert into public.ops_repair_guarantee_registry (detector) values ('mon_detect_field_integrity');\ndo $$ declare roster text := pg_get_functiondef('public.mon_run_all_detectors()'::regprocedure); begin null; end $$;" }], true],
+  ['a later migration that reads THIS function by regprocedure literal with an unreadable rewrite fails', [served, guard, skip, { name: '20261110000000_f.sql', sql: "do $$ declare v text := pg_get_functiondef('public.mon_detect_field_integrity()'::regprocedure); begin execute replace(v, 'a', 'b'); end $$;" }], false],
+  ['a later migration that finds THIS function through pg_proc with proname IN (…) and a namespace filter, with an unreadable rewrite, fails (CodeRabbit #11508)', [served, guard, skip, { name: '20261110000000_h.sql', sql: "do $$ declare v text; begin select pg_get_functiondef(p.oid) into v from pg_proc p where p.proname in ('mon_detect_field_integrity') and p.pronamespace = 'public'::regnamespace; execute replace(v, 'a', 'b'); end $$;" }], false],
+  ['a later migration that finds THIS function through pg_proc with proname = any(array[…]) and an unreadable rewrite fails', [served, guard, skip, { name: '20261110000000_i.sql', sql: "do $$ declare v text; begin select pg_get_functiondef(p.oid) into v from pg_proc p where p.proname = any(array['mon_detect_field_integrity']); execute replace(v, 'a', 'b'); end $$;" }], false],
+  ['a later migration that finds THIS function through pg_proc with an unreadable rewrite fails', [served, guard, skip, { name: '20261110000000_g.sql', sql: "do $$ declare v text; begin select pg_get_functiondef(p.oid) into v from pg_proc p where p.proname = 'mon_detect_field_integrity'; execute replace(v, 'a', 'b'); end $$;" }], false],
 ];
 let bad = 0;
 const mustCatch = (label: string, caught: boolean) => { if (!caught) { console.error(`✗ mutation proof «${label}» not caught`); bad++; } };
