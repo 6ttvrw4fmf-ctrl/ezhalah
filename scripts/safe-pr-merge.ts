@@ -22,7 +22,8 @@
 // the caller to remember.
 
 import { spawnSync } from 'node:child_process';
-import { decideMerge, type CheckRun } from './lib/mergeGate.ts';
+import { decideMerge, RATE_LIMITED, type CheckRun } from './lib/mergeGate.ts';
+import { DB_LANE_FILE, MIGRATION_FILE } from './pr-migrations-match-production.ts';
 import { getPr, getChecks, getRequiredContexts, getOpenCodeRabbitMajors, hasCodeRabbitReview, mergePr, repoSlug } from './lib/githubApi.ts';
 
 // Cloud sessions route egress through a policy proxy that injects the real GitHub credential, and
@@ -47,6 +48,18 @@ if (!prNumber || !/^\d+$/.test(prNumber)) {
 const expectFlagIdx = process.argv.indexOf('--expect-files');
 const expectedFiles = expectFlagIdx >= 0 ? process.argv[expectFlagIdx + 1].split(',').map((s) => s.trim()).filter(Boolean) : undefined;
 
+// 0b‴: is this PR a PROVEN mirror of production? Measured, never assumed: every file a migration / sql/mirrors file,
+// at least one migration, and scripts/pr-migrations-match-production.ts (the automerge database lane's own proof)
+// exits 0 at the exact head being merged. No production credentials, a failed fetch, any other file → false.
+function measureMirrorOfProduction(pr: string, headSha: string, files: string[]): boolean {
+  if (!files.length || !files.every((f) => DB_LANE_FILE.test(f)) || !files.some((f) => MIGRATION_FILE.test(f))) return false;
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) return false;
+  const fetched = spawnSync('git', ['fetch', '-q', 'origin', `refs/pull/${pr}/head`], { stdio: 'inherit' });
+  if (fetched.status !== 0) return false;
+  const proof = spawnSync(process.execPath, [...process.execArgv, 'scripts/pr-migrations-match-production.ts', headSha, ...files], { stdio: 'inherit' });
+  return proof.status === 0;
+}
+
 async function main() {
   const slug = repoSlug();
   const pr = await getPr(slug, prNumber!);
@@ -65,12 +78,16 @@ async function main() {
   const openReviewMajors = await getOpenCodeRabbitMajors(slug, prNumber!).catch((e) => { console.error(String(e)); return null; });
   const codeRabbitReviewed = await hasCodeRabbitReview(slug, prNumber!).catch((e) => { console.error(String(e)); return false; });
 
+  // Only measured when it can matter: CodeRabbit is rate-limited and has never reviewed this PR.
+  const rabbitLimited = checks.some((c) => c.context === 'CodeRabbit' && String(c.conclusion ?? '').toUpperCase() === 'NEUTRAL' && RATE_LIMITED.test(c.title ?? ''));
+  const mirrorOfProduction = rabbitLimited && !codeRabbitReviewed ? measureMirrorOfProduction(prNumber!, pr.headSha, pr.files) : false;
+
   console.log(`PR #${prNumber} @ ${pr.headSha.slice(0, 7)} (base ${pr.baseRef})`);
   console.log(`  required contexts: ${required.known ? (required.contexts.join(', ') || '(none configured)') + ` [${required.source}]` : `UNREADABLE — ${required.why}`}`);
   for (const c of checks) console.log(`  ${c.context}: ${c.conclusion ?? 'PENDING'}`);
   console.log(`  mergeable=${pr.mergeable} mergeStateStatus=${pr.mergeStateStatus}`);
   console.log(`  files: ${pr.files.join(', ')}`);
-  console.log(`  open CodeRabbit Majors: ${openReviewMajors === null ? 'UNREADABLE' : openReviewMajors.length}; CodeRabbit reviewed before: ${codeRabbitReviewed}`);
+  console.log(`  open CodeRabbit Majors: ${openReviewMajors === null ? 'UNREADABLE' : openReviewMajors.length}; CodeRabbit reviewed before: ${codeRabbitReviewed}; proven mirror of production: ${mirrorOfProduction}`);
 
   const verdict = decideMerge({
     requiredContexts: required.known ? required.contexts : [],
@@ -82,6 +99,7 @@ async function main() {
     actualFiles: pr.files,
     openReviewMajors,
     codeRabbitReviewed,
+    mirrorOfProduction,
   });
 
   if (!verdict.allow) {
