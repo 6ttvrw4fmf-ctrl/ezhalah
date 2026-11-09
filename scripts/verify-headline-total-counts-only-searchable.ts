@@ -31,7 +31,10 @@ export function totalProblems(migs: Array<{ f: string; sql: string }>): string[]
   const def = (viewMig.sql.match(VIEW) ?? [])[1] ?? '';
   const out: string[] = [];
   if (!/from\s+public\.search_listings_ar\b/i.test(def)) out.push(`${view} does not count search_listings_ar`);
-  if (!/\bwhere\b[\s\S]*\bproduction_ready\b/i.test(def)) out.push(`${view} counts rows that are not production_ready (search cannot reach them)`);
+  // The TOP-LEVEL predicate, right after the table: a production_ready inside an aggregate's FILTER (where …) or a
+  // comment would leave the count itself unfiltered (CodeRabbit on #11427).
+  const viewSql = def.replace(/--[^\n]*/g, '');
+  if (!/from\s+public\.search_listings_ar\s+where\s+(?:\(\s*)?production_ready\b/i.test(viewSql)) out.push(`${view} counts rows that are not production_ready (search cannot reach them)`);
   return out;
 }
 
@@ -46,6 +49,11 @@ if (last) {
   mustCatch('the production_ready filter dropped', totalProblems(swap(/\n\s*where production_ready;/, ';')).length > 0);
   mustCatch('the function pointed back at the old every-row view',
     totalProblems(swap(/from public\.loader_scale_stats_ready_mv;\n\$function\$/, 'from public.loader_scale_stats_total_mv;\n$function$')).length > 0);
+  mustCatch('production_ready moved into an aggregate filter, the count left unfiltered',
+    totalProblems(swap(/filter \(where district_ar is not null and district_ar <> ''\)\)::integer as district_count\n  from public\.search_listings_ar\n  where production_ready;/,
+      "filter (where production_ready and district_ar is not null and district_ar <> ''))::integer as district_count\n  from public.search_listings_ar;")).length > 0);
+  mustCatch('production_ready kept only in a comment',
+    totalProblems(swap(/\n\s*where production_ready;/, '\n  -- where production_ready\n;')).length > 0);
   mustCatch('the view counting another table', totalProblems(swap(/from public\.search_listings_ar\n/, 'from public.some_other_table\n')).length > 0);
 } else {
   check('the migration that built loader_scale_stats_ready_mv is committed', false);
