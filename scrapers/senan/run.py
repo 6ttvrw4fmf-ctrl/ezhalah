@@ -98,13 +98,20 @@ def site_changed_probe(s: Any, get_timeout: int = 25) -> str:
         return f"homepage: {type(e).__name__}"
     text = r.text or ""
     apis: set[str] = set(re.findall(r"[\"'`](/api/[A-Za-z0-9_\-/.]{2,80})", text))
+    js_failed, js_first_err = 0, None       # a failed script read is COUNTED and named, never swallowed (CodeRabbit #11247)
     for js in re.findall(r'<script[^>]+src="([^"]+\.js)"', text)[:8]:
         try:
             jr = s.get(js if js.startswith("http") else f"{BASE}{js if js.startswith('/') else '/' + js}",
                        timeout=get_timeout)
-            apis |= set(re.findall(r"[\"'`](/api/[A-Za-z0-9_\-/.]{2,80})", jr.text or ""))
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            js_failed += 1
+            js_first_err = js_first_err or f"{type(e).__name__} at {js[:60]}"
             continue
+        if jr.status_code != 200:
+            js_failed += 1
+            js_first_err = js_first_err or f"HTTP {jr.status_code} at {js[:60]}"
+            continue
+        apis |= set(re.findall(r"[\"'`](/api/[A-Za-z0-9_\-/.]{2,80})", jr.text or ""))
     host = re.sub(r"^https?://([^/]+).*$", r"\1", str(getattr(r, "url", "")) or BASE)
     title = re.search(r"<title[^>]*>([^<]{0,80})", text)
     gen = re.search(r'<meta[^>]+name="generator"[^>]+content="([^"]{0,60})"', text)
@@ -121,7 +128,7 @@ def site_changed_probe(s: Any, get_timeout: int = 25) -> str:
             sm += f" {path} {sr.status_code} n={len(locs)} first={locs[:4]};"
         except Exception as e:  # noqa: BLE001
             sm += f" {path} {type(e).__name__};"
-    return (f"homepage {r.status_code} at {host};{sm} title={title.group(1).strip() if title else None!r}; "
+    return (f"homepage {r.status_code} at {host};{sm} scripts failed={js_failed} first={js_first_err!r}; title={title.group(1).strip() if title else None!r}; "
             f"generator={gen.group(1) if gen else None!r}; link paths={top}; api routes named: {sorted(apis)[:12]}")
 
 

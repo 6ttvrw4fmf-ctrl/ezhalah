@@ -919,12 +919,18 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         else:
             rent_period = rent_period_for(body, unit, price, title_raw)
     area = _float(pi.get("مساحة العقار"))
-    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217). The page was read and
-    # publishes no rate, so the NULL is SETTLED: AUTHORITATIVE_NULL clears a rate an older parser stored
-    # (owner 2026-11-07 row 3076: 2292952 kept «200,000» per m² beside its 200,000 rent — a plain None is
-    # dropped by the upsert). Only the land-rent proof below writes a real rate; a land-rent page whose
-    # displayed total is missing keeps None (unknown), never the settled NULL.
-    price_per_meter: Any = db.AUTHORITATIVE_NULL
+    if not area:
+        # JSON-LD floorSize fallback, read BEFORE the rate is decided (CodeRabbit, PR #11247): an area the
+        # table omits but the JSON-LD states must not leave the rate «unknown» for the wrong reason.
+        fs = ld.get("floorSize") or {}
+        area = _float(fs.get("value")) if isinstance(fs, dict) else None
+    # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217). Only a page that was
+    # read WITH its price and its area settles «this ad publishes no rate»: then AUTHORITATIVE_NULL clears a
+    # rate an older parser stored (owner 2026-11-07 row 3076: 2292952 kept «200,000» per m² beside its
+    # 200,000 rent — a plain None is dropped by the upsert). A page missing either keeps None (UNKNOWN), so
+    # a previously proven rate survives (CodeRabbit, PR #11247). Only the land-rent proof below writes a
+    # real rate; a land-rent page whose displayed total is missing also keeps None.
+    price_per_meter: Any = db.AUTHORITATIVE_NULL if (price and area) else None
 
     # Land-rent JSON-LD trap (live 2026-08-03, 18 rows source-verified): for some rent ads the
     # JSON-LD offers.price carries the source's per-metre rate while the page itself displays the

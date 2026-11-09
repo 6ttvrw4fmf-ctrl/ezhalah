@@ -36,3 +36,14 @@ def test_the_probe_never_raises_on_a_network_error():
         def get(self, *a, **k):
             raise ConnectionError("x")
     assert S.site_changed_probe(Bad()) == "homepage: ConnectionError"
+
+
+def test_a_failed_script_read_is_counted_and_named():
+    # CodeRabbit (PR #11247): a swallowed script error hid why a route list was empty.
+    class Half(_Sess):
+        def get(self, url, **kw):
+            if url.endswith(".js"):
+                return _R(500, "", url)
+            return super().get(url, **kw)
+    out = S.site_changed_probe(Half())
+    assert "scripts failed=1" in out and "HTTP 500" in out

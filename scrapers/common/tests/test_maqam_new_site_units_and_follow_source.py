@@ -206,3 +206,33 @@ def test_a_whole_project_reads_a_q_shaped_map_url():
          "mapUrl": "https://maps.google.com/?q=24.8231,46.6402"}
     (row, _), _ = R.map_whole_project(13, p, unit_projects=set())
     assert row["additional_info"]["latitude"] == 24.8231
+
+
+class _Hop:
+    def __init__(self, status, loc=None):
+        self.status_code, self.headers, self.text = status, ({"location": loc} if loc else {}), ""
+
+
+def test_a_short_map_link_is_resolved_honestly_once_per_project(monkeypatch):
+    """CodeRabbit (PR #11247): the short-link hop uses our own bot UA (no impersonation, no proxy), keeps the
+    honest client's one-request-per-gap clock, reads only the redirect, and runs ONCE per link per run."""
+    R._SHORT_PIN_CACHE.clear()
+    calls, sleeps = [], []
+    def get(url, headers=None, allow_redirects=True, timeout=None):
+        calls.append((url, headers, allow_redirects))
+        return _Hop(302, "https://www.google.com/maps/place/x/@24.812345,46.623456,17z")
+    monkeypatch.setattr(R.cc, "get", get)
+    monkeypatch.setattr(R.time, "sleep", lambda d: sleeps.append(d))
+    R.H._last[0] = R.time.time()
+    p = {"mapUrl": "https://maps.app.goo.gl/AbCdEf123"}
+    assert R._project_pin(p) == R._project_pin(p)
+    assert len(calls) == 1
+    assert calls[0][1] == {"User-Agent": R.H.UA} and calls[0][2] is False
+    assert sleeps and sleeps[0] > 0                                     # waited for the shared gap
+
+
+def test_a_wall_on_the_hop_stops_and_leaves_no_pin(monkeypatch):
+    R._SHORT_PIN_CACHE.clear()
+    monkeypatch.setattr(R.cc, "get", lambda *a, **k: _Hop(429))
+    monkeypatch.setattr(R.time, "sleep", lambda d: None)
+    assert R._project_pin({"mapUrl": "https://maps.app.goo.gl/Wall999"}) is None
