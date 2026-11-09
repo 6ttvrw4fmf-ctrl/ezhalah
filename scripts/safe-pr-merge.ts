@@ -23,7 +23,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { decideMerge, type CheckRun } from './lib/mergeGate.ts';
-import { getPr, getChecks, getRequiredContexts, getOpenCodeRabbitMajors, mergePr, repoSlug } from './lib/githubApi.ts';
+import { getPr, getChecks, getRequiredContexts, getOpenCodeRabbitMajors, hasCodeRabbitReview, mergePr, repoSlug } from './lib/githubApi.ts';
 
 // Cloud sessions route egress through a policy proxy that injects the real GitHub credential, and
 // Node's built-in fetch ignores HTTPS_PROXY unless NODE_USE_ENV_PROXY is set BEFORE the process
@@ -59,16 +59,18 @@ async function main() {
   const checks: CheckRun[] = (await getChecks(slug, pr.headSha)).map((c) => ({
     context: c.context,
     conclusion: (c.conclusion ?? null) as CheckRun['conclusion'],
+    title: c.title ?? null,
   }));
 
   const openReviewMajors = await getOpenCodeRabbitMajors(slug, prNumber!).catch((e) => { console.error(String(e)); return null; });
+  const codeRabbitReviewed = await hasCodeRabbitReview(slug, prNumber!).catch((e) => { console.error(String(e)); return false; });
 
   console.log(`PR #${prNumber} @ ${pr.headSha.slice(0, 7)} (base ${pr.baseRef})`);
   console.log(`  required contexts: ${required.known ? (required.contexts.join(', ') || '(none configured)') + ` [${required.source}]` : `UNREADABLE — ${required.why}`}`);
   for (const c of checks) console.log(`  ${c.context}: ${c.conclusion ?? 'PENDING'}`);
   console.log(`  mergeable=${pr.mergeable} mergeStateStatus=${pr.mergeStateStatus}`);
   console.log(`  files: ${pr.files.join(', ')}`);
-  console.log(`  open CodeRabbit Majors: ${openReviewMajors === null ? 'UNREADABLE' : openReviewMajors.length}`);
+  console.log(`  open CodeRabbit Majors: ${openReviewMajors === null ? 'UNREADABLE' : openReviewMajors.length}; CodeRabbit reviewed before: ${codeRabbitReviewed}`);
 
   const verdict = decideMerge({
     requiredContexts: required.known ? required.contexts : [],
@@ -79,6 +81,7 @@ async function main() {
     expectedFiles,
     actualFiles: pr.files,
     openReviewMajors,
+    codeRabbitReviewed,
   });
 
   if (!verdict.allow) {
