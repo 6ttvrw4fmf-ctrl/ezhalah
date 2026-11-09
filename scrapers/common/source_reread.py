@@ -215,6 +215,28 @@ def _label_value_lines(body: str) -> list[str]:
     return out
 
 
+# A FEATURE-BLOCK pair: vmksa renders the ad's own REGA block as «<div class="feature-block"><i …></i><h2>واجهة العقار
+# </h2><span>شرقية</span></div>» (vm-ksa.com/ar/ads/742, re-read via net.http_get 2026-11-09). Split on tags the bare
+# value «شرقية» is neither EVIDENCE nor a SHORT_VALUE, and the block sits past text_head's 1,500 characters, so the
+# score saw only the site's SEARCH-FORM label «واجهة العقار» near the top and called our stored facade wrong: 9 of 12
+# vmksa direction answers MISMATCH in dry run 42593890418 (stored «شرق» = the page's «شرقية», backlog 1512). The pair is
+# rejoined as one line «LABEL VALUE». Only a field label (EVIDENCE, a facade or the street width): a deed / licence
+# number in the same grid is never printed (PDPL).
+_FEATURE_PAIR = re.compile(r'<div class="feature-block"[^>]*>\s*(?:<i\b[^>]*>\s*</i>)?\s*<h2[^>]*>([^<]{1,40})</h2>\s*'
+                           r'<span[^>]*>([^<]{1,80})</span>', re.S)
+_FEATURE_LABEL = re.compile(r"واجهة|الواجهة|عرض الشارع")
+
+
+def _feature_block_lines(body: str) -> list[str]:
+    out = []
+    for m in _FEATURE_PAIR.finditer(body or ""):
+        label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()
+        value = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
+        if label and value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)):
+            out.append(f"{label} {value}")
+    return out
+
+
 # A chip whose NUMBER comes first: abaad prints «<strong>6</strong> حمام», «<strong>8</strong> غرف نوم»,
 # «<strong>3</strong> صالات». The visible-text split puts each figure on the line BEFORE its label, so
 # _with_values glued every label to the NEXT chip's figure («حمام 8», «غرف نوم 3») and the score called
@@ -258,7 +280,7 @@ def page_evidence(body: str) -> dict:
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
         "evidence_lines": (_payload_area_lines(body) + _payload_place_lines(body) + _label_value_lines(body)
-                           + _number_first_lines(body) + _with_values(lines))[:400],
+                           + _number_first_lines(body) + _feature_block_lines(body) + _with_values(lines))[:400],
         "text_head": " | ".join(lines)[:1500],
     }
 
