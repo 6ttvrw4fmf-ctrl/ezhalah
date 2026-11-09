@@ -1708,6 +1708,7 @@ const AR: Record<string, string> = {
   'and {n} identical listings from the same site': 'و{n} إعلانات مطابقة من الموقع نفسه',
   'Show listings': 'عرض الإعلانات',
   'Show {n} listings': 'عرض {n} إعلان',
+  '{n} results': '{n} نتيجة',
   'SAR': 'ر.س',
   'Listing': 'الإعلان',
   'Could not load this listing. Try again.': 'تعذّر تحميل الإعلان. حاول مرة أخرى.',
