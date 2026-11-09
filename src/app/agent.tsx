@@ -717,16 +717,19 @@ export default function Agent() {
   // THAT chat — named after its latest search, or «محادثة من يوسف» when it has none. Guests and an empty
   // screen keep the homepage share. Phone: the phone's own share menu with the link alone (the card holds
   // the title). Desktop: the link is copied and the pill says so.
-  // AN INVITATION TO JOIN (owner 2026-10-23): the Share under a reply with no results to show (a «هلا», a
-  // question, a search that found nothing) sends a personal welcome — card «يوسف يرحّب بك للانضمام إلى إزهله»,
-  // popup with the same words — and, as the message text, the top Share's marketing line («ليش تدوّر في 148
-  // موقع؟ إزهله يدوّر عنك»). A guest has no name to invite with: the plain link with that same line.
-  const inviteFor = (): { shareUrl?: string; shareText?: string } => {
+  // A REPLY WITH NO CARDS SHARES THE CHAT TOO (owner 2026-11-08: «the one below user shares the chat — doesn't need
+  // to include property card — don't say what, just say chat»). The Share under a «هلا», a question or a search
+  // that found nothing saves a COPY of this conversation like any other reply (chatShareUrl, q = null), so the
+  // link's card reads «محادثة من يوسف على إزهله» and the sign-in popup «يوسف شاركك محادثة»; a signed-in friend
+  // goes straight in. It replaces the 2026-10-23 «join Ezhalah» invitation here. If the copy cannot be saved,
+  // the invitation link is the fallback (never a dead tap). A guest has no name to share with: the plain
+  // link with the top Share's line, unchanged.
+  const chatOnlyShareFor = (): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
     const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
-    const text = shareLead(loc, liveSiteCount());
-    const payload = user ? encodeInvitePayload(pickName(user, loc), loc) : null;
     const origin = shareOrigin();
-    return { shareUrl: payload ? shareLink(origin, payload) : origin, shareText: text };
+    const payload = user ? encodeInvitePayload(pickName(user, loc), loc) : null;
+    if (!payload) return { shareUrl: origin, shareText: shareLead(loc, liveSiteCount()) };
+    return { shareUrl: shareLink(origin, payload), prepareShare: () => chatShareUrl(null), shareText: SHARE_INVITE_LINE[loc] };
   };
   const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
     if (!user || !q) return {};
@@ -4609,7 +4612,7 @@ export default function Agent() {
                     ) : null}
                     {/* 👍👎 + Share under a plain reply too (owner 2026-10-23): its Share is the invitation to join. */}
                     {!m.refine && (!m.typing || doneTyping[m.id]) ? (
-                      <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(txt, [], undefined, locale)} {...inviteFor()} />
+                      <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(txt, [], undefined, locale)} {...chatOnlyShareFor()} />
                     ) : null}
                   </View>
                 );
@@ -4738,7 +4741,7 @@ export default function Agent() {
                     // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
                     // must not vanish merely because listing count = 0; the user is rating the answer, and
                     // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
-                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} {...inviteFor()} />
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} {...chatOnlyShareFor()} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).

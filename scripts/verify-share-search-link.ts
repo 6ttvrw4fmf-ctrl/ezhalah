@@ -172,8 +172,15 @@ mustCatch('the 512 px logo that WhatsApp draws as a big banner', !smallSquare(51
   check('Home opens the sign-in popup with the welcome for a guest who opens an invite',
     /const inv = decodeInvitePayload\(raw\);/.test(home) && /if \(!user\) openAuth\(shareJoinNote\(/.test(home));
   const ag = fsx.readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
-  check('a plain reply and a no-results reply both carry the invitation Share, with the top Share\'s line as text',
-    (ag.match(/\{\.\.\.inviteFor\(\)\}/g) ?? []).length >= 2 && /const text = shareLead\(loc, liveSiteCount\(\)\);/.test(ag) && /encodeInvitePayload\(pickName\(user, loc\), loc\)/.test(ag));
+  // Owner 2026-11-08: the Share under a reply with no cards shares THE CHAT (q = null → «محادثة من يوسف على إزهله»),
+  // not the invitation; the invitation link is only its fallback when the copy cannot be saved.
+  const chatOnlyRx = /prepareShare: \(\) => chatShareUrl\(null\)/;
+  check('a plain reply and a no-results reply both share the chat (a saved copy, card «محادثة من …»)',
+    (ag.match(/\{\.\.\.chatOnlyShareFor\(\)\}/g) ?? []).length >= 2 && chatOnlyRx.test(ag)
+    && !/\{\.\.\.inviteFor\(\)\}/.test(ag) && /shareLead\(loc, liveSiteCount\(\)\)/.test(ag));
+  check('a chat with no search: card «محادثة من يوسف على إزهله», popup «يوسف شاركك محادثة»',
+    shareTitle('يوسف', null, 'ar') === 'محادثة من يوسف على إزهله' && shareInviteNote('يوسف', null, 'ar') === 'يوسف شاركك محادثة');
+  mustCatch('a no-cards reply that goes back to the invitation', !chatOnlyRx.test(ag.replace('prepareShare: () => chatShareUrl(null), ', '')));
   mustCatch('an invite link read as a broken link (the plain «إزهله» card)', !card.includes('og:title" content="إزهله"'));
 }
 
