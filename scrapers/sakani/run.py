@@ -713,12 +713,12 @@ _ACCESS_WHY = re.compile(r"about our access|no answer from the source|HTTP 5\d\d
 _oracle_renewed = 0
 
 
-def _probe_once(ad_number: str, uid: str, purpose: str) -> tuple[str, str]:
+def _probe_once(ad_number: str, uid: str, purpose: str, attempts: int = ORACLE_ATTEMPTS) -> tuple[str, str]:
     return LivenessProbe(platform="sakani",
                          signal=lambda st, b, mv: _signal(st, b, mv, purpose),
                          session=_oracle_session,
                          url_for=lambda _a: f"{DETAIL}{uid}",
-                         attempts=ORACLE_ATTEMPTS, backoff=PAUSE * 4).verify_gone(ad_number)
+                         attempts=attempts, backoff=PAUSE * 4).verify_gone(ad_number)
 
 
 # OWNER RULE 2026-11-04 («Yes, use your picks», decision 1): a REMOVED sakani unit answers HTTP 403 with
@@ -760,7 +760,20 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
     if not m:
         return "unknown", f"{ad_number!r} is not a {PREFIX}/{SALE_PREFIX}<id> ad number"
     purpose = _PURPOSE_OF[m.group(1)]
-    verdict, why = _probe_once(ad_number, m.group(2), purpose)
+    # ONE QUICK READ FIRST (⚡ 2026-11-09, repeat_bug:run_duration_explosion:fleet_liveness:sakani, 6 raises in
+    # 7 days). A removed unit answers the blank 403 on EVERY read, and the oracle used to spend all
+    # ORACLE_ATTEMPTS on it — sleeping 6 + 12 + 18 + 24 s — before the owner rule was even asked: ~65 s per
+    # removed unit. 11-08 08:33: 177 of 355 probes were removals and the run took 203 min (1.7 rows/min against
+    # a 14 rows/min norm). A live (200) or a 404 still decides on the first read; a blank 403 goes straight to
+    # the owner rule (its own two reads + the live control — unchanged, so this can never add a death); only a
+    # challenge or no answer earns the slow retries below, exactly as before.
+    verdict, why = _probe_once(ad_number, m.group(2), purpose, attempts=1)
+    if verdict == "unknown" and "HTTP 403" in (why or ""):
+        by_status = _removed_by_owner_rule(ad_number, m.group(2))
+        if by_status:
+            return by_status
+    if verdict == "unknown":
+        verdict, why = _probe_once(ad_number, m.group(2), purpose)
     while True:
         if verdict == "unknown" and "HTTP 403" in (why or ""):
             by_status = _removed_by_owner_rule(ad_number, m.group(2))
