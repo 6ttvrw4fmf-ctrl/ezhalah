@@ -53,7 +53,7 @@ if (helper) {
   mustCatch('default cap changed', !foldsLicenceTwins(helper.s.replace('p_max integer default 5', 'p_max integer default 50')));
 }
 if (verifyLast) {
-  mustCatch('the check lifting a fact back up to the search count', !checksAfterDedup(verifyLast.s.replace('if c < r.a then update public.welcome_insight set a = c', 'if c <> r.a then update public.welcome_insight set a = c')));
+  mustCatch('the check lifting a fact back up to the search count', !checksAfterDedup(verifyLast.s.replaceAll('if c < r.a then update public.welcome_insight set a = c', 'if c <> r.a then update public.welcome_insight set a = c')));
   mustCatch('the top district ranked on raw copies again', !checksAfterDedup(verifyLast.s.replace('welcome_unique_district_counts(r.city_ar, k.repro_deal, k.repro_types)', 'public.search_listings_ar s')));
 }
 
