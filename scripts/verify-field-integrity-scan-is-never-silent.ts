@@ -215,7 +215,11 @@ export function armDamage(text: string): string[] {
   const out: string[] = [];
   for (const [label, arm] of [['phone/ID', phone], ['extreme-magnitude', mag]] as const) {
     if (arm.length !== 1) { out.push(`${label} arm no longer found intact`); continue; }
-    if (!arm[0].includes(GUARD)) out.push(`${label} arm lost the served-raw guard clause`);
+    const at = arm[0].indexOf(GUARD);
+    if (at < 0) out.push(`${label} arm lost the served-raw guard clause`);
+    // the guard must be a WHOLE conjunct: followed by the end of the filter or by « and …» — never wrapped or
+    // compared («… else false end is not null», «… end = false»), which would keep its text but switch it off
+    else if (!/^(?:$| and )/.test(arm[0].slice(at + GUARD.length))) out.push(`${label} arm's guard clause is no longer a whole conjunct (something follows it: «${arm[0].slice(at + GUARD.length, at + GUARD.length + 40)}»)`);
     if (hasTopLevelOr(arm[0])) out.push(`${label} arm gained a top-level OR, so it can count prices customers are not served`);
   }
   if (preds.length !== 2 || (phone.length === 1 && mag.length === 1 && phone[0] === mag[0])) out.push(`the two price arms are no longer two separate filters (found ${preds.length})`);
@@ -223,11 +227,16 @@ export function armDamage(text: string): string[] {
   return out;
 }
 
-/** Replays a patch over the full production arms and judges the result structurally. */
+/** Replays a patch over the full production arms. The arms are FROZEN: any change to their text fails, because a
+ *  static check cannot prove what an arbitrary SQL edit does (2026-11-09: «… else false end is not null» kept the
+ *  guard text, added no OR, and still switched it off). A deliberate change updates ARMS_REFERENCE and its md5 in
+ *  the same PR — where armDamage() then judges the NEW text structurally — so it is always a reviewed decision. */
 export function replayArms(sql: string): string[] {
-  let body = norm(ARMS_REFERENCE);
+  const ref = norm(ARMS_REFERENCE);
+  let body = ref;
   for (const { old, neu } of patchPairs(sql)) { const o = norm(old); if (o) body = body.split(o).join(norm(neu)); }
-  return armDamage(body);
+  if (body === ref) return [];
+  return ['changes the price-arm text (frozen) — update ARMS_REFERENCE and ARMS_REFERENCE_MD5 in the same PR if intended', ...armDamage(body)];
 }
 
 const occurrences = (hay: string, needle: string): number => (needle ? hay.split(needle).length - 1 : 0);
@@ -359,7 +368,12 @@ mustCatch("CodeRabbit's boundary-crossing edit «else false end),» → «else f
 mustCatch('a boundary-crossing «or true» appended to the magnitude arm before its final «))»', /extreme-magnitude arm gained a top-level OR/.test(CROSS('<= 500000))', '<= 500000) or true)')));
 mustCatch('an «or true» inserted ahead of the guard clause', /gained a top-level OR/.test(CROSS('and case when greatest', 'or true and case when greatest')));
 mustCatch('an edit that splices the two arms together', /no longer two separate filters/.test(CROSS('else false end), count(*) filter (where active and (', 'else false end and (')));
-mustPass('a nested «or» inside the arm (a new band in the phone list) is not a top-level OR', !/gained a top-level OR/.test(CROSS('or price_annual between 500000000 and 599999999)', 'or price_annual between 500000000 and 599999999 or price_annual between 900000000 and 900000001)')));
+mustPass('a nested «or» inside the arm (a new band in the phone list) is not a top-level OR', !/gained a top-level OR/.test(armDamage(norm(ARMS_REFERENCE).replace('or price_annual between 500000000 and 599999999)', 'or price_annual between 500000000 and 599999999 or price_annual between 900000000 and 900000001)')).join('\n')));
+mustCatch("CodeRabbit's «else false end),» → «else false end is not null),» (no OR, guard text kept) — frozen arms", /changes the price-arm text \(frozen\)/.test(CROSS('else false end),', 'else false end is not null),')));
+mustCatch('…and the same edit is judged structurally too, so a reference update cannot smuggle it in', /guard clause is no longer a whole conjunct/.test(armDamage(norm(ARMS_REFERENCE).replace('else false end),', 'else false end is not null),')).join('\n')));
+mustCatch('a guard compared to false («end = false») is not a whole conjunct', /no longer a whole conjunct/.test(armDamage(norm(ARMS_REFERENCE).replace('else false end and not exists', 'else false end = false and not exists')).join('\n')));
+mustCatch('a harmless-looking edit to an arm still fails while the arms are frozen', /frozen/.test(CROSS('price_total between 100000000 and 101000000', 'price_total between 100000000 and 101000001')));
+mustPass('an edit outside both arms (another count) leaves the frozen arms untouched', !/frozen/.test(CROSS('bedrooms > 1000', 'bedrooms > 2000')));
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
