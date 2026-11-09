@@ -103,7 +103,15 @@ ok('mon_detect_field_integrity has a committed migration definition', played.bod
 // Emptied 2026-11-02: rpcReplay now reads E'…' literals and `a || E'…'` concatenations, so
 // 20260826070355 replays. Its replayed body was compared with production: identical apart from the
 // letter case of the CREATE header that pg_get_functiondef normalises.
-const UNREPLAYABLE: Record<string, string> = {};
+// Re-grown 2026-11-08 (🔧, owner 3295 «fix the ones that come back, the root»): a DO-block edit (and two follow-ups
+// 20261108220500 / 20261108221500 the replay reports under this first one) that splice ONE
+// clause into both arms with replace(pg_get_functiondef(...)) — «count a row only while a customer is served the raw
+// figure». COST, stated: the replay judges the body BEFORE that clause. That is acceptable for THIS barrier because every
+// assertion here (both bands, both price columns, the phone-price alert key) is outside the spliced text and each
+// migration aborts unless its anchor occurs exactly twice; production's body was read after apply (bands + key intact).
+const UNREPLAYABLE: Record<string, string> = {
+  '20261108220000_field_integrity_counts_what_customers_are_served.sql': 'splices the served-raw clause after the ops_price_source_verified test in both arms',
+};
 for (const u of played.unresolved) {
   const file = u.replace(/\s*\(.*\)$/, '');
   ok(`unreplayable edit is pinned: ${file}`, Boolean(UNREPLAYABLE[file]),
