@@ -30,9 +30,24 @@ const SERVED_RAW = /public\.field_integrity_served_raw\(x\.tableoid,\s*x\.id,\s*
 /** How many served-raw calls a migration's executable text carries (replace() anchor constants excluded). */
 export const servedRawArms = (sql: string): number => (codeLines(sql).match(SERVED_RAW) || []).length;
 // a full definition carries the call twice; a replace() patch carries it once in its constant and ASSERTS it lands twice
-/** A migration that puts the served-raw check into BOTH price arms (full text, or a patch asserting two hits). */
-export const installsBothArms = (sql: string): boolean =>
-  servedRawArms(sql) >= 2 || ((sql.match(SERVED_RAW) || []).length >= 1 && /\)\s*<>\s*2\s+then/.test(sql));
+// The two price arms, told apart by their own thresholds: the phone/ID band and the extreme price-per-m² test.
+const PHONE_ARM = /between\s+500000000\s+and\s+599999999/;
+const MAGNITUDE_ARM = /::numeric\s*\/\s*area_m2\s*>\s*2000000\b/;
+/** Which price arms of a full function text carry the served-raw call — judged per `count(*) filter (…)` arm,
+ *  so two calls in one arm can never stand in for a missing call in the other. */
+export function servedRawByArm(sql: string): { phone: boolean; magnitude: boolean } {
+  const one = new RegExp(SERVED_RAW.source);
+  const arms = codeLines(sql).split(/count\(\*\)\s+filter\s*\(\s*where/i);
+  return {
+    phone: arms.some((a) => PHONE_ARM.test(a) && one.test(a)),
+    magnitude: arms.some((a) => MAGNITUDE_ARM.test(a) && one.test(a)),
+  };
+}
+/** A migration that puts the served-raw check into BOTH price arms (full text judged per arm, or a patch asserting two hits). */
+export const installsBothArms = (sql: string): boolean => {
+  const by = servedRawByArm(sql);
+  return (by.phone && by.magnitude) || ((sql.match(SERVED_RAW) || []).length >= 1 && /\)\s*<>\s*2\s+then/.test(sql));
+};
 
 type F = { name: string; sql: string };
 
@@ -89,7 +104,11 @@ export function problems(files: F[]): string[] {
   const servedIdx = sorted.findIndex((f) => FN.test(f.sql) && installsBothArms(f.sql));
   if (servedIdx < 0) out.push('no migration installs the served-raw check into both price arms of mon_detect_field_integrity');
   else for (const f of sorted.slice(servedIdx + 1)) {
-    if (REDEFINE.test(f.sql) && servedRawArms(f.sql) < 2) out.push(`${f.name} redefines mon_detect_field_integrity with the served-raw check in fewer than both price arms`);
+    if (REDEFINE.test(f.sql)) {
+      const by = servedRawByArm(f.sql);
+      if (!by.phone) out.push(`${f.name} redefines mon_detect_field_integrity without the served-raw check in the phone/ID price arm`);
+      if (!by.magnitude) out.push(`${f.name} redefines mon_detect_field_integrity without the served-raw check in the extreme-magnitude arm`);
+    }
     if (patchRemoves(f.sql, SERVED_RAW)) out.push(`${f.name} removes the served-raw check from a price arm through a replace() patch`);
     if (isFunctionPatch(f.sql) && patchPairs(f.sql).length === 0) out.push(`${f.name} patches mon_detect_field_integrity in a shape this barrier cannot read (declare old_X/new_X text constants)`);
   }
@@ -98,7 +117,9 @@ export function problems(files: F[]): string[] {
 
 // ── mutation proofs ──────────────────────────────────────────────────────────────────────────────────────────
 const ARM = 'then public.field_integrity_served_raw(x.tableoid, x.id, coalesce(x.price_total, x.price_annual))';
-const served: F = { name: '20261108221500_s.sql', sql: `-- mon_detect_field_integrity\nphone arm ${ARM}\nmagnitude arm ${ARM}` };
+const PHONE = 'count(*) filter (where price_total between 500000000 and 599999999';
+const MAG = 'count(*) filter (where price_total::numeric/area_m2 > 2000000';
+const served: F = { name: '20261108221500_s.sql', sql: `-- mon_detect_field_integrity\n${PHONE} ${ARM}),\n${MAG} ${ARM})` };
 const guard: F = { name: '20261108235000_a.sql', sql: "old_div constant text := $a$coalesce(x.price_annual, 0))::numeric / x.area_m2 > 500000)$a$;\nnew_div constant text := $a$coalesce(x.price_annual, 0))::numeric / nullif(x.area_m2, 0) > 500000)$a$;\n-- mon_detect_field_integrity" };
 const skip: F = { name: '20261109001500_b.sql', sql: "old_exc constant text := $a$    exception when others then continue;  -- x\n$a$;\n-- mon_detect_field_integrity\n'field_integrity_table_skipped:'||rec.tn" };
 const cases: Array<[string, F[], boolean]> = [
@@ -120,11 +141,14 @@ for (const [label, files, expectOk] of cases) {
 }
 mustCatch('a later patch reintroducing the bare division', problems([served, guard, skip, { name: '20261110000000_d.sql', sql: 'mon_detect_field_integrity … greatest(0,1)::numeric / x.area_m2 > 500000' }]).length > 0);
 mustCatch('a later patch reintroducing the silent skip', problems([served, guard, skip, { name: '20261110000000_e.sql', sql: 'mon_detect_field_integrity\n    exception when others then continue;\n' }]).length > 0);
-const redefineWith = (arms: number) => ({ name: '20261110000000_f.sql', sql: `create or replace function public.mon_detect_field_integrity() x::numeric / nullif(x.area_m2, 0) > 500000 'field_integrity_table_skipped:'||rec.tn ${Array(arms).fill(ARM).join(' ')}` });
-mustCatch('a redefine that drops the served-raw check from the phone/ID arm', problems([served, guard, skip, redefineWith(1)]).length > 0);
-mustCatch('a redefine that drops the served-raw check from the extreme-magnitude arm', problems([served, guard, skip, redefineWith(1)]).length > 0);
-mustCatch('a redefine that drops it from both arms', problems([served, guard, skip, redefineWith(0)]).length > 0);
-mustPass('a redefine that keeps both arms', problems([served, guard, skip, redefineWith(2)]).length === 0);
+const redefineWith = (phoneCalls: number, magCalls: number): F => ({ name: '20261110000000_f.sql', sql: `create or replace function public.mon_detect_field_integrity() x::numeric / nullif(x.area_m2, 0) > 500000 'field_integrity_table_skipped:'||rec.tn\n${PHONE} ${Array(phoneCalls).fill(ARM).join(' ')}),\n${MAG} ${Array(magCalls).fill(ARM).join(' ')})` });
+const errs = (f: F) => problems([served, guard, skip, f]);
+mustCatch('a redefine that drops the served-raw check from the phone/ID arm only', errs(redefineWith(0, 1)).some((e) => /phone\/ID/.test(e)) && !errs(redefineWith(0, 1)).some((e) => /extreme-magnitude/.test(e)));
+mustCatch('a redefine that drops the served-raw check from the extreme-magnitude arm only', errs(redefineWith(1, 0)).some((e) => /extreme-magnitude/.test(e)) && !errs(redefineWith(1, 0)).some((e) => /phone\/ID/.test(e)));
+mustCatch('a redefine with TWO calls in the phone arm and none in the magnitude arm', errs(redefineWith(2, 0)).some((e) => /extreme-magnitude/.test(e)));
+mustCatch('a redefine with TWO calls in the magnitude arm and none in the phone arm', errs(redefineWith(0, 2)).some((e) => /phone\/ID/.test(e)));
+mustCatch('a redefine that drops it from both arms', errs(redefineWith(0, 0)).length >= 2);
+mustPass('a redefine that keeps both arms', errs(redefineWith(1, 1)).length === 0);
 mustCatch('an install with the check in only one arm', problems([{ ...served, sql: `-- mon_detect_field_integrity\n${ARM}` }, guard, skip]).length > 0);
 const patch = (oldText: string, newText: string): F => ({ name: '20261110000000_p.sql', sql: `-- mon_detect_field_integrity\ndo $m$ declare v text;\n  old_x constant text := $a$${oldText}$a$;\n  new_x constant text := $a$${newText}$a$;\nbegin v := pg_get_functiondef('public.mon_detect_field_integrity()'::regprocedure);\n  execute replace(v, old_x, new_x); end $m$;` });
 mustCatch('a replace() patch that swaps the served-raw call for «true»', problems([served, guard, skip, patch(ARM, 'then true')]).length > 0);
