@@ -36,15 +36,24 @@ export const installsBothArms = (sql: string): boolean =>
 
 type F = { name: string; sql: string };
 
-/** The `old_X` / `new_X` constant pairs of a `replace(v, old_X, new_X)` patch migration, matched by suffix. */
+/** The `old_X` / `new_X` constant pairs of a `replace(v, old_X, new_X)` patch migration, matched by suffix.
+ *  Reads any dollar quote (`$a$`, `$o$`, `$$` …) and plain '…' strings with '' escapes. */
 export function patchPairs(sql: string): Array<{ old: string; neu: string }> {
   const consts = new Map<string, { old?: string; neu?: string }>();
-  for (const m of sql.matchAll(/\b(old|new)_(\w+)\s+constant\s+text\s*:=\s*\$a\$([\s\S]*?)\$a\$/g)) {
+  const DECL = /\b(old|new)_(\w+)\s+(?:constant\s+)?text\s*:=\s*(?:\$(\w*)\$([\s\S]*?)\$\3\$|'((?:[^']|'')*)')/g;
+  for (const m of sql.matchAll(DECL)) {
+    const val = m[4] ?? m[5].replace(/''/g, "'");
     const e = consts.get(m[2]) ?? {};
-    if (m[1] === 'old') e.old = m[3]; else e.neu = m[3];
+    if (m[1] === 'old') e.old = val; else e.neu = val;
     consts.set(m[2], e);
   }
   return [...consts.values()].filter((e) => e.old !== undefined && e.neu !== undefined).map((e) => ({ old: e.old!, neu: e.neu! }));
+}
+
+/** A migration that rewrites mon_detect_field_integrity from its live text (pg_get_functiondef + replace) —
+ *  if patchPairs cannot read its pairs, the barrier cannot judge it and must fail closed. */
+export function isFunctionPatch(sql: string): boolean {
+  return FN.test(sql) && /pg_get_functiondef\s*\(\s*'public\.mon_detect_field_integrity/.test(sql) && /\breplace\s*\(/.test(sql);
 }
 
 /** True when a replace() patch swaps text carrying `marker` for text that no longer carries it. */
@@ -82,6 +91,7 @@ export function problems(files: F[]): string[] {
   else for (const f of sorted.slice(servedIdx + 1)) {
     if (REDEFINE.test(f.sql) && servedRawArms(f.sql) < 2) out.push(`${f.name} redefines mon_detect_field_integrity with the served-raw check in fewer than both price arms`);
     if (patchRemoves(f.sql, SERVED_RAW)) out.push(`${f.name} removes the served-raw check from a price arm through a replace() patch`);
+    if (isFunctionPatch(f.sql) && patchPairs(f.sql).length === 0) out.push(`${f.name} patches mon_detect_field_integrity in a shape this barrier cannot read (declare old_X/new_X text constants)`);
   }
   return out;
 }
@@ -121,6 +131,11 @@ mustCatch('a replace() patch that swaps the served-raw call for «true»', probl
 mustCatch('a replace() patch that swaps the nullif division back to a bare one', problems([served, guard, skip, patch('::numeric / nullif(x.area_m2, 0) > 500000', '::numeric / x.area_m2 > 500000')]).length > 0);
 mustCatch("a replace() patch that drops the skipped-table alert", problems([served, guard, skip, patch("'field_integrity_table_skipped:'||rec.tn", "'x'")]).length > 0);
 mustPass('a replace() patch that keeps the served-raw call while changing its guard', problems([served, guard, skip, patch(`and ${ARM}`, `and case when y ${ARM} else false end`)]).length === 0);
+const patchQ = (decl: string): F => ({ name: '20261110000000_q.sql', sql: `-- mon_detect_field_integrity\ndo $m$ declare v text;\n${decl}\nbegin v := pg_get_functiondef('public.mon_detect_field_integrity()'::regprocedure);\n  execute replace(v, old_x, new_x); end $m$;` });
+mustCatch('a $o$/$n$-quoted patch that drops the served-raw call', problems([served, guard, skip, patchQ(`  old_x constant text := $o$${ARM}$o$;\n  new_x constant text := $n$then true$n$;`)]).length > 0);
+mustCatch("a '…'-quoted patch that drops the served-raw call", problems([served, guard, skip, patchQ(`  old_x constant text := '${ARM}';\n  new_x constant text := 'then true';`)]).length > 0);
+mustCatch('a patch in a shape the barrier cannot read (inline replace literals)', problems([served, guard, skip, { name: '20261110000000_r.sql', sql: `-- mon_detect_field_integrity\ndo $m$ declare v text; begin v := pg_get_functiondef('public.mon_detect_field_integrity()'::regprocedure);\n  execute replace(v, 'x' || 'y', 'z'); end $m$;` }]).length > 0);
+mustPass("a '…'-quoted patch that keeps the call (with a '' escape) passes", problems([served, guard, skip, patchQ(`  old_x constant text := 'and ${ARM}';\n  new_x constant text := 'and case when y = ''z'' ${ARM} else false end';`)]).length === 0);
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
