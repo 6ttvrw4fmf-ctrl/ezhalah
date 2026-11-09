@@ -35,6 +35,7 @@ import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelF
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 import { onSurface } from '@/lib/mapSurface';
@@ -685,6 +686,30 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       });
       return el;
     };
+    // THE DISTRICT MARKER (owner 2026-11-09, src/lib/mapNoPin.ts): the listings of one district that have no exact
+    // location, as ONE pin-sized pill at the district's centre — the app's dark purple with a white edge, a crossed-out
+    // pin, the count, and the tag «موقع غير محدد» under it, so it never reads as a house's spot. A tap opens the same
+    // card sheet a pin opens (pick with cell 0).
+    const noPinElement = (row: PinRow) => {
+      const el = document.createElement('div');
+      el.setAttribute('data-testid', 'map-no-pin');
+      el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;touch-action:none;font-family:-apple-system,system-ui,sans-serif';
+      const pill = document.createElement('div');
+      pill.style.cssText = `display:flex;align-items:center;gap:5px;direction:ltr;background:${NO_PIN_COLOR};border:2px solid #fff;border-radius:14px;padding:0 9px 0 7px;height:22px;color:#fff;font-weight:700;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,.35)`;
+      pill.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><path d="M4 4l16 16"/></svg>';
+      pill.appendChild(document.createTextNode(noPinHead(row.n)));
+      const tag = document.createElement('div');
+      tag.style.cssText = `margin-top:-2px;background:#fff;color:${NO_PIN_COLOR};font-size:9.5px;font-weight:600;border-radius:7px;padding:1px 6px;box-shadow:0 1px 2px rgba(0,0,0,.25);white-space:nowrap`;
+      tag.textContent = noPinTag(loc);
+      el.append(pill, tag);
+      let down: { x: number; y: number } | null = null;
+      el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      el.addEventListener('pointerup', (e) => {
+        const d = down; down = null;
+        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 10) { e.stopPropagation(); pick(row, 0); }
+      });
+      return el;
+    };
     const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; keyed.clear(); };
     // EVERY SPOT, AT ANY ZOOM (owner 2026-11-02: «even when I am zoomed out they all show»): zoomed out with no
     // narrowing (deal only), the dots feed — every pinned listing's 1 km cell, downloaded once — is painted on a canvas
@@ -861,6 +886,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // SMOOTH (owner 2026-11-03: «I want it to feel smooth»): a close view the dots feed (already on the phone) says holds
       // more than CROWD_ESTIMATE listings is crowded without asking the network; only a view that may fit as pins reads.
       // The place for the count pill, read alongside the pins (a few ms on the pin index) for the visible view only.
+      // The district markers for listings with no exact location, read alongside the pins (src/lib/mapNoPin.ts).
+      const noPinRead: Promise<NoPinRow[] | 'unknown'> = showNoPin(cell, pins) ? fetchMapNoPin(paddedBox(center, span), pins) : Promise.resolve([]);
       const placeRead = cell === 0 ? fetchViewPlace({ s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 }) : Promise.resolve(null);
       const dots = cell === 0 && !narrowed ? await fetchMapDots() : 'unknown';
       if (my !== seq || mapRef.current !== m) return;
@@ -917,12 +944,22 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // head would change (count, deal, price, cell size) is replaced.
       const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}`;
       const next = new Map<string, PinRow>(); for (const row of rows) next.set(keyOf(row), row);
+      // The district markers join the same diff. A FAILED marker read keeps the markers already on the map (A FAILED
+      // FETCH IS NOT AN EMPTY ANSWER: a marker that vanished after an error would read as «no such listings here»).
+      const noPin = await noPinRead;
+      if (my !== seq || mapRef.current !== m) return;
+      if (noPin !== 'unknown') for (const r of noPin) next.set(noPinKey(r), noPinPinRow(r));
+      else for (const [k, a] of keyed) if (isNoPinKey(k)) next.set(k, (a as { data: { pin: PinRow } }).data.pin);
       for (const [k, a] of keyed) if (!next.has(k)) { m.removeAnnotation(a); keyed.delete(k); }
       for (const [k, row] of next) {
         if (keyed.has(k)) continue;
-        const a = new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell, cell === 0 && drawCell > 0), {
-          data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -6),
-        });
+        // A district marker is its own annotation: centred on the district's centre, cell 0 (a tap opens the sheet),
+        // drawn above its neighbours.
+        const a = row.noPin
+          ? new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => noPinElement(row), { data: { pin: row, cell: 0 }, calloutEnabled: false, displayPriority: 1000 })
+          : new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell, cell === 0 && drawCell > 0), {
+            data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -6),
+          });
         keyed.set(k, a); m.addAnnotation(a);
       }
       mine = [...keyed.values()];
