@@ -174,6 +174,14 @@ check('on a phone the map filter is full screen with the live count on top and a
   fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /phone && count !== null \? t\('\{n\} results'/.test(cardSrc)
   && /testID="map-filter-clear"/.test(cardSrc) && /export const PHONE_MAX = 768;/.test(cardSrc));
 mustCatch('a phone filter that is still the small centered card', !/phone && s\.cardFull/.test(cardSrc.replace('phone && s.cardFull', 'false && s.cardFull')));
+// Owner 2026-11-09: the «نوع الصفقة» popup is bigger, with «تطبيق» at the bottom. Ticks edit a DRAFT; only Apply
+// hands them to the map (so the pins show exactly what was applied); X / a tap outside leaves the map as it was.
+const dealSrc = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
+const draftRx = /const toggle = \(id: MapDeal\) => setDraft\(\(d\) => nextDeals\(d, id\)\);/;
+check('the deal popup ticks a draft, and only «تطبيق» sends it to the map',
+  draftRx.test(dealSrc) && /const apply = \(\) => \{ setDeals\(\(\) => draft\); setOpen\(false\); \};/.test(dealSrc)
+  && /testID="map-deal-apply"/.test(dealSrc) && /const on = draft\.includes\(d\.id\);/.test(dealSrc) && /maxWidth: 440/.test(dealSrc));
+mustCatch('a tick that changes the map at once again (no Apply)', !draftRx.test(dealSrc.replace('setDraft((d) => nextDeals(d, id))', 'setDeals((d) => nextDeals(d, id))')));
 // A tap must NOT resize the map (owner 2026-11-02: «when I click it then I see the others, it's weird»): switching to
 // full screen on the tap re-laid the map out, reloaded the pins and reshuffled them around the tapped one. The sheet
 // opens over the map exactly as it is.
