@@ -211,6 +211,7 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'Hall': 'Commercial Building', 'Cinema': 'Commercial Building', // قاعة/سينما → Commercial Building (Specialized Facilities retired 2026-07-07; card still shows raw Hall/Cinema)
   'Gas Station': 'Gas Station', 'Station': 'Gas Station', 'محطة بنزين': 'Gas Station',
   'سكن عمال': 'Staff Housing',
+  'Staff Housing': 'Staff Housing',     // the English stored form (same rule as Compound, 🔧 2026-11-04)
   // مرافق خدمية expansion (owner decision 2026-09-11, ops_incident #172): the source publishes these
   // REAL Arabic types (dealapp: مستشفى «مستشفى / مركز صحي للإيجار», مركز أعمال ×3, منتجع, موقع صراف),
   // but they were absent from known_type_ar so the search-index trigger (enforce_price_size_sanity)
@@ -241,6 +242,7 @@ const RAW_TO_CLEAN: Record<string, string> = {
   // verified live-in-DB before mapping (never guessed). [[feedback_ambiguous-mapping-ask-first-rule]]
   'إستراحة': 'Rest House',              // aqarcity hamza spelling variant of استراحة (11 rows, res table)
   'مجمع': 'Residential Building',       // sanadak bare form of مجمع سكني (8 rows, res table)
+  'Compound': 'Residential Building',   // wasalt/aqargate store the English word (EN_TO_AR → مجمع); counted by the chip, so the card fetch must know it too (🔧 2026-11-04)
   'برج': 'Residential Building',        // sanadak bare tower, distinct from برج اتصالات (1 row, res table)
 };
 
@@ -291,7 +293,12 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // label), flooding the RPC candidate set + total_count with Commercial Buildings.
   // مجمع/برج added 2026-07-27: sanadak bare forms, verified live as res-table-only (8 + 1 rows) —
   // same reasoning as مجمع سكني above, kinds stays ['res'].
-  'Residential Building':{ rawTypes: ['Building', 'مجمع سكني', 'مجمع', 'برج'], kinds: ['res'] },
+  // 'Compound' added 2026-11-04 (🔧): wasalt/aqargate STORE the English word (EN_TO_AR maps it to مجمع, so the index
+  // counts the row under this chip) but the raw-table card fetch (keptFiltersReq → .in('property_type', rawTypes)) did
+  // not ask for it — the Filter said «1» and drew no card (wasalt 13993632, customer-journey 41837852546). The rule is
+  // executed by scripts/verify-card-fetch-keeps-what-the-count-counted.ts: every stored English type the index maps
+  // into a chip's labels must be in that chip's rawTypes.
+  'Residential Building':{ rawTypes: ['Building', 'مجمع سكني', 'مجمع', 'برج', 'Compound'], kinds: ['res'] },
   // Residential — Villas & Houses
   'Villa':               { rawTypes: ['Villa', 'Palace', 'House'], kinds: ['res'] }, // فيلا search includes raw قصر + بيت (House folded in — few raw listings, owner request 2026-07-20); تاون هاوس moved to Duplex (owner 2026-10-12)
   'Duplex':              { rawTypes: ['Duplex', 'تاون هاوس'], kinds: BOTH }, // تاون هاوس = town house, filed under Duplex (owner 2026-10-12); // BOTH: see Studio note — october maps "duplex"→'Duplex' then routes it commercial via category_for_type
@@ -334,7 +341,7 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   'Self Storage':        { rawTypes: ['Self Storage', 'تخزين ذاتي'], kinds: BOTH },
   // ('Service Facilities' is DERIVED from SERVICE_FACILITY_TYPES right after this object — single source of truth.)
   'Gas Station':         { rawTypes: ['Gas Station', 'Station', 'محطة بنزين'], kinds: BOTH },
-  'Staff Housing':       { rawTypes: ['سكن عمال'], kinds: BOTH },
+  'Staff Housing':       { rawTypes: ['سكن عمال', 'Staff Housing'], kinds: BOTH }, // + the English stored form (same rule as Compound, 2026-11-04)
   // Commercial — Plots (physically in RES tables on Aqar → both)
   'Commercial Land':     { rawTypes: ['Commercial Land', 'أرض تجاري', 'أرض تجارية', 'أرض سكني تجاري'], kinds: BOTH },
   'Industrial Land':     { rawTypes: ['Industrial Land', 'أرض صناعي', 'أرض صناعية'], kinds: BOTH },
