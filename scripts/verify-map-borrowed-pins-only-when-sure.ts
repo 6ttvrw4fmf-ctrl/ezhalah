@@ -33,6 +33,7 @@ const RULES: Array<[string, RegExp]> = [
 // The hourly schedule lives in the NEWEST migration that names the borrow refresh in a cron command: it must run the
 // borrow refresh right before the map rebuild, inside that hourly job (20261109031432).
 const CRON_RULE = /cron\.alter_job\([\s\S]*jobname = 'map_grid_refresh_ar'[\s\S]*select public\.map_pin_borrow_refresh_ar\(\); select public\.map_grid_refresh_ar\(\);/;
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 const problems = (sql: string) => RULES.filter(([, re]) => !re.test(sql)).map(([l]) => l);
 
 check('a committed migration defines map_pin_borrow_refresh_ar()', !!file);
@@ -44,7 +45,7 @@ const cronSql = cronFile ? readFileSync(join(dir, cronFile), 'utf8') : '';
 check(`the borrowed list is rebuilt every hour, right before the map rebuild (${cronFile})`, CRON_RULE.test(cronSql));
 mustCatchCron: {
   const m = cronSql.replace('select public.map_pin_borrow_refresh_ar(); ', '');
-  check('(mutation) catches the hourly map job no longer rebuilding the borrowed list', m !== cronSql && !CRON_RULE.test(m));
+  mustCatch('the hourly map job no longer rebuilding the borrowed list', m !== cronSql && !CRON_RULE.test(m));
 }
 
 // Mutations: loosening any certainty clause must be caught.
@@ -59,7 +60,7 @@ const MUT: Array<[string, string, string]> = [
 ];
 for (const [label, from, to] of MUT) {
   const m = sql.replace(from, to);
-  check(`(mutation) catches ${label}`, m !== sql && problems(m).length > 0);
+  mustCatch(label, m !== sql && problems(m).length > 0);
 }
 
 if (failed) { console.error(`\n❌ verify-map-borrowed-pins-only-when-sure: ${failed} check(s) failed`); process.exit(1); }
