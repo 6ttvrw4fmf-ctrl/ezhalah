@@ -4,7 +4,7 @@
 --
 -- ROOT CAUSE (proven from the row and the migration log): nothing hid it today. It has been inactive since
 -- 2026-07-10 14:27:37.481433 (ops_legacy_pin_backup_20260717 holds that stamp; 187 siblings of the same July
--- prune carry the identical value). Migration 20261109124411 (adjudicated_rows_stay_hidden_through_crawl_upsert,
+-- prune carry the identical value). The adjudication-guard migration «adjudicated_rows_stay_hidden_through_crawl_upsert» (production version ending …124411,
 -- applied 12:44:11) ran a SELF-TEST step 4 that picked ONE REAL non-adjudicated inactive dealapp row with
 -- `limit 1`, flipped it active=true and back to active=false «-- restore». The restore was not a restore:
 -- trg_set_deactivated_at NULLs deactivated_at on the flip to true and stamps now() on the flip back, so the row
@@ -17,7 +17,7 @@
 update public.dealapp_residential_listings d
    set deactivated_at = b.deactivated_at
   from public.ops_legacy_pin_backup_20260717 b
- where d.id = 646452 and d.active = false
+ where d.id = 646452 and not d.active
    and b.source_table = 'dealapp_residential_listings' and b.listing_id = d.id
    and d.deactivated_at >= '2026-11-09 12:44:00+00' and d.deactivated_at < '2026-11-09 12:45:00+00'
    and b.deactivated_at = '2026-07-10 14:27:37.481433+00';
