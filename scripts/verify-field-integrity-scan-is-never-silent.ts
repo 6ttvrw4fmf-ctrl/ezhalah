@@ -163,6 +163,13 @@ const ARMS_REFERENCE = `count(*) filter (where active and (price_total  between 
                                                and coalesce(s.price_annual, 0)::numeric / s.area_m2 <= 500000))
         from public.%I x`;
 export const ARMS_REFERENCE_MD5 = '1e636809971c914b72d0f5f925694cf3';
+// 120 characters of production text on EACH side of the arms (measured 2026-11-09, same normalisation). Freezing the
+// arms PLUS these margins makes the freeze complete for edits of any length: an old_X that reaches into the arms from
+// outside must contain a whole margin (≥ 12 chars, so a 12-char run matches), and an old_X that lies inside the
+// widened text — however short, e.g. «0)), count(» at the phone arm's edge — is a substring of it.
+const ARMS_MARGIN_BEFORE = "action_type = 'Rent' and price_annual < 500), count(*) filter (where active and (price_total = 0 or price_annual = 0)),";
+const ARMS_MARGIN_AFTER = "$f$, ph, ph, unit_types, rec.tn, rec.tn, land_types, rec.tn, rec.tn, rec.tn) into loc_ph, beds_odd, rent_active, rent_t";
+export const ARMS_WIDENED_MD5 = 'bd06b03c20731a505791c45b6e7ae124';
 /** The newest committed migration whose effect the reference already contains (measured 2026-11-09 after it ran). */
 export const ARMS_REFERENCE_AFTER = '20261109010000';
 const GUARD = norm(`and case when greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0)) >= 100000000
@@ -237,16 +244,18 @@ export function replayArms(sql: string, name = ''): string[] {
   // The reference was measured AFTER every migration up to this version ran; those are already inside it.
   if (name && name.slice(0, 14) <= ARMS_REFERENCE_AFTER) return [];
   const ref = norm(ARMS_REFERENCE);
+  const widened = `${ARMS_MARGIN_BEFORE} ${ref} ${ARMS_MARGIN_AFTER}`;
   // ORDER-INDEPENDENT: a patch is judged by whether ANY of its old_X texts touches the arms — shares a 12-char run
   // with them, which also catches an old_X that straddles an arm's edge. Replaying in some order can be undone by
   // another order (2026-11-09, CodeRabbit: declare a→b, call b then a), so the ORDER is never trusted.
-  const touches = (o: string) => o.length > 0 && Array.from({ length: Math.max(1, o.length - 11) }, (_, i) => o.slice(i, i + 12)).some((w) => ref.includes(w));
+  const touches = (o: string) => o.length > 0 && (widened.includes(o)
+    || Array.from({ length: Math.max(1, o.length - 11) }, (_, i) => o.slice(i, i + 12)).some((w) => widened.includes(w)));
   const hits = patchPairs(sql).map((p) => norm(p.old)).filter(touches);
   if (!hits.length) return [];
   // also say WHAT the edit would do (declaration-order replay, judged structurally) — information, not the verdict
   let body = ref;
   for (const { old, neu } of patchPairs(sql)) { const o = norm(old); if (o) body = body.split(o).join(norm(neu)); }
-  return [...armDamage(body), `changes the price-arm text (frozen): ${hits.map((h) => `«${h.slice(0, 50)}»`).join(', ')} — update ARMS_REFERENCE, ARMS_REFERENCE_MD5 and ARMS_REFERENCE_AFTER in the same PR if intended`];
+  return [...armDamage(body), `changes the price-arm text (frozen): ${hits.map((h) => `«${h.slice(0, 50)}»`).join(', ')} — update ARMS_REFERENCE, its margins, both md5s and ARMS_REFERENCE_AFTER in the same PR if intended`];
 }
 
 const occurrences = (hay: string, needle: string): number => (needle ? hay.split(needle).length - 1 : 0);
@@ -387,6 +396,10 @@ mustPass('an edit outside both arms (another count) leaves the frozen arms untou
 mustCatch("CodeRabbit's order trick: declare a (guard → «is not null») then b (back), CALL b then a", /frozen/.test(diag(patchQ(`  old_a constant text := 'else false end),';\n  new_a constant text := 'else false end is not null),';\n  old_b constant text := 'else false end is not null),';\n  new_b constant text := 'else false end),';`, `  v := replace(v, old_b, new_b);\n  v := replace(v, old_a, new_a);\n  execute v;`))));
 mustCatch('an old_X that straddles the start of the phone arm (text before it + its first words)', /frozen/.test(CROSS('loc_ph, count(*) filter (where active and (price_total', 'loc_ph, count(*) filter (where true or (price_total')));
 mustPass('a migration already inside the reference (version ≤ ARMS_REFERENCE_AFTER) is not re-judged by the freeze', replayArms(`  old_a constant text := 'else false end),';\n  new_a constant text := 'x';`, '20261108235000_x.sql').length === 0);
+mustPass('the widened reference (margins + arms) is the production-measured text (md5 pin)', createHash('md5').update(`${ARMS_MARGIN_BEFORE} ${norm(ARMS_REFERENCE)} ${ARMS_MARGIN_AFTER}`).digest('hex') === ARMS_WIDENED_MD5);
+mustCatch("CodeRabbit's short boundary edit «0)),\\n count(» → «0)),\\n count(*) + count(» (crosses the phone arm's edge by < 12 chars)", /frozen/.test(diag(patchQ(`  old_p constant text := $old$0)),\n          count($old$;\n  new_p constant text := $new$0)),\n          count(*) + count($new$;`, `  execute replace(v, old_p, new_p);`))));
+mustCatch('a 5-character edit wholly inside an arm («end),»)', /frozen/.test(CROSS('end),', 'end) or true,')));
+mustCatch('an edit that reaches into the arms from past the after-margin', /frozen/.test(CROSS('rec.tn) into loc_ph, beds_odd', 'rec.tn) into beds_odd, loc_ph')));
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
