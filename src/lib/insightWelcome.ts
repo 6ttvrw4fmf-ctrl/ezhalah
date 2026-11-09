@@ -93,7 +93,9 @@ export function fillGreeting(text: string | null, greetingIndex: number | null, 
 }
 
 // ── the facts ──────────────────────────────────────────────────────────────────────────────────────────
-export type InsightTemplate = { id: number; kind: string; personal: boolean; ar: string; en: string };
+// day_bound (migration 20261109055302): the template says «أمس» / «آخر 7 أيام» / «آخر 30 يوم» or states a count, so
+// it is true only on the Riyadh day its pack was built for. Missing (an older read) is treated as true.
+export type InsightTemplate = { id: number; kind: string; personal: boolean; ar: string; en: string; day_bound?: boolean };
 export type Insight = {
   id: number; kind: string; region: string | null; city: string | null; city_id: number | null;
   district: string | null; district2: string | null; type: string | null; a: number | string | null; b: number | string | null;
@@ -223,8 +225,13 @@ export function chooseInsightLine(
     }
     return null;
   };
-  const personal = pack.templates.filter((t) => t.personal);
-  const general = pack.templates.filter((t) => !t.personal);
+  // A PACK FROM ANOTHER DAY NEVER SAYS «أمس», «آخر 7 أيام» OR A COUNT (owner 2026-10-27 «we can go to jail»; 2026-11-09
+  // «those numbers count needs to be exact»). The first open of a day may read the last 36 h's pack (never pop up late);
+  // only its templates explicitly marked day_bound = false are usable then. A pack with no day is never today's.
+  const today = pack.day != null && pack.day === riyadhDate(now);
+  const usable = today ? pack.templates : pack.templates.filter((t) => t.day_bound === false);
+  const personal = usable.filter((t) => t.personal);
+  const general = usable.filter((t) => !t.personal);
   if (opts.district && rand() < 1 / 3) {
     const p = pick(pairsOf(personal, mine), false);
     if (p) return p;
@@ -236,6 +243,9 @@ export function chooseInsightLine(
   return pick(pairsOf(general, (f) => !opts.city || !sameCity(f.city, opts.city)), true)
     ?? pick(pairsOf(general, () => true), true);
 }
+
+/** The Riyadh calendar date (YYYY-MM-DD) of an instant — the same day welcome_insights_pick stamps on its pack. */
+export const riyadhDate = (t: number): string => new Date(t + 3 * 3600_000).toISOString().slice(0, 10);
 
 /** Cache ids for insight lines: 2000 + template id (WELCOME_LINES use 1–99, sign-in lines 101–105). */
 export const INSIGHT_ID_BASE = 2000;
