@@ -491,7 +491,7 @@ drawn at the pin of another listing when EITHER (1) the same government ad licen
 city, district, deal, type, size and bedrooms (price may differ), NO other detail both ads state disagrees (bathrooms,
 halls, floor, age ±1, street width, facing, street fronts), at least two of them agree, and at most 10 look-alikes. Either
 way every matching twin must sit on ONE spot (≤ 0.0015°, ~150 m); anything less certain gets no pin and stays in search.
-`map_pin_borrow` is rebuilt hourly at :47 by `map_pin_borrow_refresh_ar()` (new listings follow on their own); the map
+`map_pin_borrow` is rebuilt hourly by `map_pin_borrow_refresh_ar()`, run inside the :53 map rebuild job right before `map_grid_refresh_ar()` (new listings follow on their own); the map
 reads `map_listing_points_ar` (own pins + borrowed) in `map_pins_ar` and `map_grid_refresh_ar`. Map only: the listing's
 stored data stays the source's, and the pin-coverage monitors still measure what sites published. 542 borrowed the day it
 shipped (391 licence, 151 details). Never loosen a rule to raise the count — a pin in the wrong place is worse than none.

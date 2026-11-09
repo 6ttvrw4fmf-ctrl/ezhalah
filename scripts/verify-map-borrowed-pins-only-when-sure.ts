@@ -29,13 +29,23 @@ const RULES: Array<[string, RegExp]> = [
   ['a shared default (office) pin never lends itself', /pin as materialized \([\s\S]*not exists \(select 1 from public\.ops_default_pin_register r/],
   ['only listings with no pin of their own borrow', /from public\.search_listings_ar x\s+where x\.latitude is null or x\.longitude is null/],
   ['the map reads own pins + borrowed pins', /create or replace view public\.map_listing_points_ar as[\s\S]*union all[\s\S]*from public\.map_pin_borrow b/],
-  ['the borrowed list is rebuilt every hour (new listings follow the rule)', /cron\.schedule\('map-pin-borrow-refresh', '47 \* \* \* \*'/],
 ];
+// The hourly schedule lives in the NEWEST migration that names the borrow refresh in a cron command: it must run the
+// borrow refresh right before the map rebuild, inside that hourly job (20261109031432).
+const CRON_RULE = /cron\.alter_job\([\s\S]*jobname = 'map_grid_refresh_ar'[\s\S]*select public\.map_pin_borrow_refresh_ar\(\); select public\.map_grid_refresh_ar\(\);/;
 const problems = (sql: string) => RULES.filter(([, re]) => !re.test(sql)).map(([l]) => l);
 
 check('a committed migration defines map_pin_borrow_refresh_ar()', !!file);
 const sql = file ? readFileSync(join(dir, file), 'utf8') : '';
 for (const [label, re] of RULES) check(label, re.test(sql));
+const cronFile = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().reverse()
+  .find((f) => /cron\.(schedule|alter_job)\([\s\S]*map_pin_borrow_refresh_ar\(\)/.test(readFileSync(join(dir, f), 'utf8')));
+const cronSql = cronFile ? readFileSync(join(dir, cronFile), 'utf8') : '';
+check(`the borrowed list is rebuilt every hour, right before the map rebuild (${cronFile})`, CRON_RULE.test(cronSql));
+mustCatchCron: {
+  const m = cronSql.replace('select public.map_pin_borrow_refresh_ar(); ', '');
+  check('(mutation) catches the hourly map job no longer rebuilding the borrowed list', m !== cronSql && !CRON_RULE.test(m));
+}
 
 // Mutations: loosening any certainty clause must be caught.
 const MUT: Array<[string, string, string]> = [
