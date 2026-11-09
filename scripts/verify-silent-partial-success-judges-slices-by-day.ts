@@ -20,6 +20,9 @@
  * run, and the check block carries gathern's exact shape (case __chk_batch), which must stay quiet.
  * Same night (alert 12600, migration 20261103052107): wasalt_enrich_ar_* labels count their PENDING queue,
  * not a capture, so they are left out like liveness/cleanup labels (case wasalt_enrich_ar___chk).
+ * ⚡ 2026-11-09 (repeat_bug:silent_partial_success:wasalt_enum_shard, migration 20261109053644): the wasalt enum
+ * batch's three ~30,000-row shards end 00:30-01:16 UTC, so the 22:59/23:59 sweeps judged half a day (68,604 of
+ * ~166,700) four nights in seven. A label with a slice in flight (ok null, < 6 h) waits; case __chk_inflight.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -48,6 +51,9 @@ function problems(cand: string, det: string): string[] {
   if (!(/not like '%\\_enrich\\_%'/.test(cand) && /'wasalt_enrich_ar___chk'/.test(cand))) {
     out.push('an enrichment queue label (rows_seen = pending work) is not judged as a capture (alert 12600)');
   }
+  if (!(/f\.ok is null\s+and f\.started_at > now\(\) - interval '6 hours'/.test(cand) && /'__chk_inflight'/.test(cand))) {
+    out.push('a sliced batch with a slice still in flight is not judged on its day yet, and case (g) checks it (⚡ 2026-11-09)');
+  }
   if (!/mon_silent_partial_success_candidates\(\)/.test(det)) out.push('the detector reads its candidates from that function');
   return out;
 }
@@ -70,6 +76,8 @@ mutation('the check block assertion dropped', cand.replace(/hits is distinct fro
 mutation('the sliced day back on the rolling now() window', cand.replace(/d\.bday = 0/g, 'd.day_ago = 0'));
 mutation('the mid-batch case dropped from the check block', cand.replace(/'__chk_batch'/g, "'__chk_other'"));
 mutation('enrichment queues judged as captures again', cand.replace(/not like '%\\_enrich\\_%'/g, "not like '%__none__%'"));
+mutation('an in-flight batch judged on half a day again', cand.replace(/f\.ok is null/g, 'f.ok is false'));
+mutation('the in-flight case dropped from the check block', cand.replace(/'__chk_inflight'/g, "'__chk_other2'"));
 mutation('the detector bypassing the candidate function', cand, det.replace(/mon_silent_partial_success_candidates\(\)/g, 'scrape_runs'));
 
 if (failures) { console.error(`\n✗ ${failures} check(s) failed`); process.exit(1); }
