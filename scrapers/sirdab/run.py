@@ -283,6 +283,21 @@ def _make_reader(control: Optional[dict], *, url_for=None, session=None):
         verdict, w = probe(PREFIX + "00000000-0000-0000-0000-000000000000", url=neg)
         sees_death, why = verdict == "gone", f"negative control {neg}: {verdict} ({w})"
     print(f"  sirdab reader: {why}", flush=True)
+    # SCRATCH DIAGNOSTIC (not for merge): what do the negative page and a live control page carry?
+    import re as _re
+    for lab, u in (("NEG", neg), ("CTL", ctl_url)):
+        try:
+            r = s.get(u, timeout=40)
+            b = r.text or ""
+            t = _re.search(r"<title>(.*?)</title>", b, _re.S)
+            print(f"  DIAG {lab} {r.status_code} len={len(b)} url={r.url} title={t.group(1)[:120] if t else None!r}", flush=True)
+            for kw in ("NEXT_NOT_FOUND", "notFound", "not-found", "404", "غير موجود", "لم يتم", "\"ad\":", "\"id\":\""):
+                i = b.find(kw)
+                print(f"     {kw!r}: {b.count(kw)} {b[max(0,i-80):i+120]!r}" if i >= 0 else f"     {kw!r}: 0", flush=True)
+            rid = (ctl_ad or "")[3:]
+            print(f"     ctl record id {rid!r} in body: {rid in b if rid else None}; slug in body: {u.rsplit('/',1)[1] in b}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"  DIAG {lab} error {e}", flush=True)
     live_ctl = {"ok": None}
 
     def canary() -> tuple[bool, str]:
