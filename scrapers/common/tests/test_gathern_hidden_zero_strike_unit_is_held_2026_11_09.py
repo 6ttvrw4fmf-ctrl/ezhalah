@@ -10,6 +10,8 @@ and the filter must be the one PostgREST receives — this test records it inste
 import sys
 import types
 
+import pytest
+
 sys.path.insert(0, ".")
 for _n in ("supabase", "dotenv"):
     sys.modules.setdefault(_n, types.ModuleType(_n))
@@ -92,3 +94,101 @@ def test_an_active_unstruck_row_is_not_read_at_all(monkeypatch):
     monkeypatch.setattr(R.db, "sb", lambda: types.SimpleNamespace(table=lambda _n: _Filtering(stored)))
     monkeypatch.setattr(R._probe, "fetch", _no_fetch)
     assert R.held_strikes(_rows("GTH5")) == {}
+
+
+@pytest.mark.parametrize("status,body", [
+    (404, "not found"), (410, "gone"), (403, "blocked"),
+    (429, "rate limited"), (503, "unavailable"), (None, ""), (200, ""),
+])
+def test_hidden_zero_strike_unit_keeps_its_state_without_affirmative_evidence(
+    monkeypatch, status, body,
+):
+    stored = [{"ad_number": "GTH1", "missing_count": 0, "active": False}]
+    rows = _rows("GTH1")
+    original = rows[0].copy()
+    stamped = _wire(monkeypatch, stored, {"1": (status, body)})
+
+    assert R.held_strikes(rows) == {"GTH1": (0, False)}
+    assert stamped == []
+    assert rows == [original]
+
+
+def test_mixed_feed_checks_only_hidden_or_struck_rows_and_stamps_only_live_ones(monkeypatch):
+    stored = [
+        {"ad_number": "GTH1", "missing_count": 0, "active": False},
+        {"ad_number": "GTH2", "missing_count": 1, "active": True},
+        {"ad_number": "GTH3", "missing_count": 3, "active": False},
+        {"ad_number": "GTH4", "missing_count": 0, "active": True},
+        # Hidden in storage but absent from this feed: must not be probed.
+        {"ad_number": "GTH99", "missing_count": 0, "active": False},
+    ]
+    rows = _rows("GTH1", "GTH2", "GTH3", "GTH4", "GTH5")
+    monkeypatch.setattr(R.db, "sb", lambda: types.SimpleNamespace(table=lambda _n: _Filtering(stored)))
+    pages = {rows[0]["listing_url"]: (200, "unit", False),
+             rows[1]["listing_url"]: (503, "unavailable", False),
+             rows[2]["listing_url"]: (404, "gone", False)}
+    fetched = []
+
+    def fetch(url):
+        fetched.append(url)
+        return pages[url]
+
+    monkeypatch.setattr(R._probe, "fetch", fetch)
+    # Use the real marker so the assertion verifies the row that the upsert will receive.
+    assert R.held_strikes(rows) == {"GTH2": (1, True), "GTH3": (3, False)}
+    assert fetched == list(pages)
+    assert rows[0][R.db._DIRECT_ALIVE_KEY] == "gathern.held_strikes.own_page_live"
+    assert all(R.db._DIRECT_ALIVE_KEY not in row for row in rows[1:])
+
+
+@pytest.mark.parametrize("opens", [False, True])
+def test_hidden_zero_strike_home_redirect_requires_own_arabic_page(monkeypatch, opens):
+    from scrapers.gathern import liveness
+
+    rows = _rows("GTH1")
+    stored = [{"ad_number": "GTH1", "missing_count": 0, "active": False}]
+    monkeypatch.setattr(R.db, "sb", lambda: types.SimpleNamespace(table=lambda _n: _Filtering(stored)))
+    monkeypatch.setattr(R._probe, "fetch", lambda url: (200, "home page", True))
+    session = object()
+    monkeypatch.setattr(R, "_oracle_session", lambda: session)
+    checked = []
+
+    def opens_at_ar_view(actual_session, url):
+        assert actual_session is session
+        checked.append(url)
+        return opens
+
+    monkeypatch.setattr(liveness, "_opens_at_ar_view", opens_at_ar_view)
+    assert R.held_strikes(rows) == ({} if opens else {"GTH1": (0, False)})
+    assert checked == [rows[0]["listing_url"]]
+    if opens:
+        assert rows[0][R.db._DIRECT_ALIVE_KEY] == "gathern.held_strikes.ar_view_opens"
+    else:
+        assert R.db._DIRECT_ALIVE_KEY not in rows[0]
+
+
+@pytest.mark.parametrize("count,expected_sizes", [(0, []), (200, [200]), (201, [200, 1])])
+def test_hidden_zero_strike_filter_applies_to_each_query_batch(monkeypatch, count, expected_sizes):
+    rows = _rows(*(f"GTH{i}" for i in range(count)))
+    stored = [{"ad_number": row["ad_number"], "missing_count": 0, "active": False}
+              for row in rows]
+    batches = []
+
+    class BatchedFiltering(_Filtering):
+        def in_(self, col, vals):
+            batches.append(list(vals))
+            return super().in_(col, vals)
+
+    monkeypatch.setattr(R.db, "sb", lambda: types.SimpleNamespace(table=lambda _n: BatchedFiltering(stored)))
+    fetched = []
+
+    def fetch(url):
+        fetched.append(url)
+        return 404, "gone", False
+
+    monkeypatch.setattr(R._probe, "fetch", fetch)
+    assert R.held_strikes(rows) == {row["ad_number"]: (0, False) for row in rows}
+    assert [len(batch) for batch in batches] == expected_sizes
+    assert [ad for batch in batches for ad in batch] == [row["ad_number"] for row in rows]
+    assert fetched == [row["listing_url"] for row in rows]
+    assert all(R.db._DIRECT_ALIVE_KEY not in row for row in rows)
