@@ -118,6 +118,16 @@ export const TYPE_EN: Record<string, string> = {
 };
 
 const fmt = (v: number) => Math.trunc(v).toLocaleString('en-US');
+/** «أكثر من N» / "more than N" for a count that moves through the day (owner 2026-11-09: «More than»). N is a round number
+ *  STRICTLY below the count with room to spare — at least 0.5% (or 1) under it, then down to two leading digits (tens
+ *  below 100): 14,083 → 14,000; 163 → 160; 37 → 30. Measured drift between the 3-hourly rebuilds: 0.15% on average, 34 ads
+ *  at most on 14,083. Under 11 there is no round number worth saying: null, and the fact is skipped. */
+export function moreThan(v: number): number | null {
+  const lim = Math.trunc(v) - Math.max(1, Math.ceil(v * 0.005));
+  if (lim < 10) return null;
+  const mag = lim < 100 ? 10 : 10 ** (Math.floor(Math.log10(lim)) - 1);
+  return Math.floor(lim / mag) * mag;
+}
 const num = (v: unknown): number | null => {
   const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -135,6 +145,8 @@ export function renderInsight(t: InsightTemplate, f: Insight, en: NameEn): { ar:
   const vEn: Record<string, string> = { g: GREETING_SLOT, n: NAME };
   const need = (key: string) => t.ar.includes(`{${key}}`) || t.en.includes(`{${key}}`);
   if (need('a')) { const a = num(f.a); if (a == null) return null; vAr.a = vEn.a = fmt(a); }
+  // {a_more}: the sentence itself says «أكثر من» / "more than"; the number is moreThan(a), never the exact count.
+  if (need('a_more')) { const a = num(f.a); const m = a == null ? null : moreThan(a); if (m == null) return null; vAr.a_more = vEn.a_more = fmt(m); }
   if (need('b')) { const b = num(f.b); if (b == null) return null; vAr.b = vEn.b = fmt(b); }
   if (need('region')) {
     if (!f.region || !REGION_EN[f.region]) return null;
