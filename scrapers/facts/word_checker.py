@@ -868,6 +868,11 @@ def _bare_l(w: str) -> str:
     return w
 
 
+# A two-word object of a prepared word: «تسليك واي فاي» lays cabling for Wi-Fi, never for a fitted AC before it
+# (CodeRabbit on #11470; «واي» alone looks like «و + اي» to the single-word check above).
+_PREPARABLE_PHRASES = ((_n("واي"), _n("فاي")),)
+
+
 def _prepared_applies(before: list[str], after: list[str], hit: str = "") -> bool:
     # «تمديد نحاس للمكيفات», «تأسيس كامل لمصعد»: a hit that starts with «ل / لل» is the prepared word's own object
     if hit.startswith("ل") and any(_starts(w, _PREPARED) for w in before[-3:]):
@@ -883,6 +888,7 @@ def _prepared_applies(before: list[str], after: list[str], hit: str = "") -> boo
             continue
         nxt = after[k + 1] if k + 1 < len(after) else ""
         if nxt and ((_starts(_bare_l(nxt), _PREPARABLE) and not (nxt.startswith("و") and _strip_wa(nxt) != nxt))
+                    or tuple(after[k + 1:k + 3]) in _PREPARABLE_PHRASES or _strip_wa(nxt) in ("وايفاي", "wifi")
                     or (_starts(_strip_wa(w), _PREP_VERBAL) and not _starts(_bare_l(nxt), _PREP_MAKE))):
             continue                                # it governs the next word, not this hit
         return True
@@ -1039,7 +1045,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # «تأسيس» governs the elevator after it, not the pool before (🔬 2026-11-06 two-way sample, aqar 17595 / 83389)
     public = public and fact != "pool"
     if (any(_starts(w, _PREPARED) for w in gp[-2:] + gn[:2]) if public
-            else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:3]), t[ws:we])) or "prepared for" in " ".join(n2):
+            else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:4]), t[ws:we])) or "prepared for" in " ".join(n2):
         return None, s, e
     if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) for w in p2):
         return None, s, e
@@ -2252,6 +2258,7 @@ def selftest() -> None:
         # … while fitted AC beside the conduits still reads yes
         ("جميع المكيفات المركبة من ماركة جري نوع كونسيل وجميع تسليك مكيفات الغرفة مجهزة لنظام السبلت", {"air_conditioner": True}, ()),
         ("مكيفات راكبة وتسليك إنترنت", {"air_conditioner": True}, ()),   # CodeRabbit on #11470
+        ("مكيفات راكبة وتسليك واي فاي", {"air_conditioner": True}, ()),
         ("مطبخ راكب ومكيفات راكبة وتسليك دش", {"air_conditioner": True, "kitchen": True}, ()),
         # 🔬 2026-11-09 (P2 13085): «لاستقبالك» is a welcome, «للحمامات» work for the home's bathrooms — real aqar sentences
         ("لا تشيل هم التجهيز… بيتك شبه مكتمل وجاهز لاستقبالك 🌟", {}, ("reception",)),
