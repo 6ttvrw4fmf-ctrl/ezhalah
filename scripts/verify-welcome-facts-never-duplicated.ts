@@ -27,11 +27,18 @@ function distinctPack(src: string): boolean {
 }
 
 check(`the served welcome_insights_pick (${latest || 'none found'}) builds the pack from a pool distinct by id`, !!latest && distinctPack(sql));
-check('the migration proves no duplicate id against production when applied', /if n <> u then raise exception 'one fact once/.test(sql));
+// The proof runs in the migration that made the pack distinct; a later redefinition (20261109055302 added day_bound
+// to the templates) must keep the distinct pool, checked above, and the fix migration must still carry its proof.
+const firstDistinct = defining.find((f) => distinctPack(readFileSync(new URL(f, DIR), 'utf8'))) ?? '';
+const fixSql = firstDistinct ? readFileSync(new URL(firstDistinct, DIR), 'utf8') : '';
+check(`the migration that made the pack distinct (${firstDistinct || 'none'}) proves no duplicate id against production when applied`,
+  /if n <> u then raise exception 'one fact once/.test(fixSql));
+check('every definition from that fix on keeps the distinct pool',
+  !!firstDistinct && defining.slice(defining.indexOf(firstDistinct)).every((f) => distinctPack(readFileSync(new URL(f, DIR), 'utf8'))));
 const MUT = '(select distinct on (id) * from pool) pool';
 mustCatch('back to the raw pool (171 rows, 169 facts)', !distinctPack(sql.replace(MUT, 'pool')));
 mustCatch('distinct on a different column', !distinctPack(sql.replace(MUT, '(select distinct on (kind) * from pool) pool')));
-const previous = defining.at(-2);
+const previous = firstDistinct ? defining[defining.indexOf(firstDistinct) - 1] : undefined;
 mustCatch(`the definition before this fix (${previous}) fails`, !!previous && !distinctPack(readFileSync(new URL(previous, DIR), 'utf8')));
 
 if (failed) { console.error(`\n❌ verify-welcome-facts-never-duplicated: ${failed} check(s) failed.`); process.exit(1); }
