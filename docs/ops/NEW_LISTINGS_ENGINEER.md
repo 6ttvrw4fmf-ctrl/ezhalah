@@ -580,9 +580,9 @@ district».
    - **Plain «أرض» arrivals get the word reader's land verdict (owner 2026-11-08, rows 3303/3304).** An ad whose source
      type is just «أرض» is read from its title + description: clear words → also searchable under that land group;
      no or mixed words → searchable under EVERY land group; the card still says «أرض» (TYPE = SOURCE). Every night:
-     `select count(*) n, count(t.listing_id) read from search_listings_ar s left join listing_text_facts t
+     `select count(*) n, count(t.listing_id) filter (where t.stale_at is null) read from search_listings_ar s left join listing_text_facts t
      using (source_table, listing_id) where s.first_seen_at > now() - interval '24 hours' and s.production_ready
-     and s.type_ar = 'أرض'` must read `read = n` (11-09: 53 / 53). Once the reader's land-kind fact exists (routed
+     and s.type_ar = 'أرض'` must read `read = n` (11-09 07:20 UTC: 53 / 53; a stale read — text changed since — does not count). Once the reader's land-kind fact exists (routed
      to 🔧, backlog «ROUTED by 🆕 2026-11-09»), every arrival must also carry the verdict, and one plain-«أرض»
      arrival is proven by a customer journey under a land group (journey-lib.mjs needs the «أرض» mapping first;
      11-09 run 42578477633 answered UNKNOWN for that reason).
