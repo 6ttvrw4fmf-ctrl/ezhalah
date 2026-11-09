@@ -71,6 +71,25 @@ export function isFunctionPatch(sql: string): boolean {
   return FN.test(sql) && /pg_get_functiondef\s*\(\s*'public\.mon_detect_field_integrity/.test(sql) && /\breplace\s*\(/.test(sql);
 }
 
+/** Every replace(...) call in a function patch, and whether each one is a form this barrier can judge:
+ *  replace(<var>, old_X, new_X) or replace(<var>, old_X, '') with old_X/new_X declared constants. Anything else —
+ *  an inline literal, a concatenation, a second unrelated rewrite — is unreadable, so the patch must fail closed. */
+export function unreadableReplaces(sql: string): string[] {
+  const code = sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+  const declared = new Set([...code.matchAll(/\b(old|new)_(\w+)\s+(?:constant\s+)?text\s*:=/g)].map((m) => `${m[1]}_${m[2]}`));
+  const calls = [...code.matchAll(/\breplace\s*\(/gi)].length;
+  let readable = 0;
+  const bad: string[] = [];
+  for (const m of code.matchAll(/\breplace\s*\(\s*(\w+)\s*,\s*([^,()]+?)\s*,\s*([^,()]+?)\s*\)/gi)) {
+    const [, , from, to] = m;
+    const sfx = from.replace(/^old_/, '');
+    const ok = /^old_\w+$/.test(from) && declared.has(from) && (to === "''" || (to === `new_${sfx}` && declared.has(to)));
+    if (ok) readable++; else bad.push(m[0]);
+  }
+  if (readable + bad.length < calls) bad.push(`${calls - readable - bad.length} replace(...) call(s) with nested or unparseable arguments`);
+  return bad;
+}
+
 /** True when a replace() patch swaps text carrying `marker` for text that no longer carries it. */
 export function patchRemoves(sql: string, marker: RegExp): boolean {
   const m = new RegExp(marker.source, marker.flags.replace('g', ''));
@@ -110,7 +129,10 @@ export function problems(files: F[]): string[] {
       if (!by.magnitude) out.push(`${f.name} redefines mon_detect_field_integrity without the served-raw check in the extreme-magnitude arm`);
     }
     if (patchRemoves(f.sql, SERVED_RAW)) out.push(`${f.name} removes the served-raw check from a price arm through a replace() patch`);
-    if (isFunctionPatch(f.sql) && patchPairs(f.sql).length === 0) out.push(`${f.name} patches mon_detect_field_integrity in a shape this barrier cannot read (declare old_X/new_X text constants)`);
+    if (isFunctionPatch(f.sql)) {
+      const bad = unreadableReplaces(f.sql);
+      if (patchPairs(f.sql).length === 0 || bad.length) out.push(`${f.name} patches mon_detect_field_integrity in a shape this barrier cannot read — every rewrite must be replace(v, old_X, new_X) with declared constants: ${bad.join('; ') || 'no readable pairs'}`);
+    }
   }
   return out;
 }
@@ -160,6 +182,9 @@ mustCatch('a $o$/$n$-quoted patch that drops the served-raw call', problems([ser
 mustCatch("a '…'-quoted patch that drops the served-raw call", problems([served, guard, skip, patchQ(`  old_x constant text := '${ARM}';\n  new_x constant text := 'then true';`)]).length > 0);
 mustCatch('a patch in a shape the barrier cannot read (inline replace literals)', problems([served, guard, skip, { name: '20261110000000_r.sql', sql: `-- mon_detect_field_integrity\ndo $m$ declare v text; begin v := pg_get_functiondef('public.mon_detect_field_integrity()'::regprocedure);\n  execute replace(v, 'x' || 'y', 'z'); end $m$;` }]).length > 0);
 mustPass("a '…'-quoted patch that keeps the call (with a '' escape) passes", problems([served, guard, skip, patchQ(`  old_x constant text := 'and ${ARM}';\n  new_x constant text := 'and case when y = ''z'' ${ARM} else false end';`)]).length === 0);
+mustCatch('a readable unrelated pair followed by an inline-literal replace that removes the call', problems([served, guard, skip, patchQ(`  old_ok text := 'unrelated';\n  new_ok text := 'unrelated';\nbegin null; end; do $z$ declare v text; begin v := replace(v, old_ok, new_ok);\n  v := replace(v, 'public.field_integrity_served_raw(x.tableoid, x.id, coalesce(x.price_total, x.price_annual))', 'true');`)]).length > 0);
+mustCatch('a replace whose replacement is a concatenation', problems([served, guard, skip, patchQ(`  old_x constant text := 'a';\n  new_x constant text := 'b';\n  v2 text := replace(v, old_x, new_x || 'c');`)]).length > 0);
+mustCatch('a replace nested inside another expression the reader cannot split', problems([served, guard, skip, patchQ(`  old_x constant text := 'a';\n  new_x constant text := 'b';\n  v2 text := replace(upper(v), old_x, new_x);`)]).length > 0);
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
