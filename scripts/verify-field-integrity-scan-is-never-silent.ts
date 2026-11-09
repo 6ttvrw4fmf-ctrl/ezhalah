@@ -163,6 +163,8 @@ const ARMS_REFERENCE = `count(*) filter (where active and (price_total  between 
                                                and coalesce(s.price_annual, 0)::numeric / s.area_m2 <= 500000))
         from public.%I x`;
 export const ARMS_REFERENCE_MD5 = '1e636809971c914b72d0f5f925694cf3';
+/** The newest committed migration whose effect the reference already contains (measured 2026-11-09 after it ran). */
+export const ARMS_REFERENCE_AFTER = '20261109010000';
 const GUARD = norm(`and case when greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0)) >= 100000000
       or (x.area_m2 > 0 and greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0))::numeric / nullif(x.area_m2, 0) > 500000)
       or x.area_m2::numeric > 1000000
@@ -231,12 +233,20 @@ export function armDamage(text: string): string[] {
  *  static check cannot prove what an arbitrary SQL edit does (2026-11-09: «… else false end is not null» kept the
  *  guard text, added no OR, and still switched it off). A deliberate change updates ARMS_REFERENCE and its md5 in
  *  the same PR — where armDamage() then judges the NEW text structurally — so it is always a reviewed decision. */
-export function replayArms(sql: string): string[] {
+export function replayArms(sql: string, name = ''): string[] {
+  // The reference was measured AFTER every migration up to this version ran; those are already inside it.
+  if (name && name.slice(0, 14) <= ARMS_REFERENCE_AFTER) return [];
   const ref = norm(ARMS_REFERENCE);
+  // ORDER-INDEPENDENT: a patch is judged by whether ANY of its old_X texts touches the arms — shares a 12-char run
+  // with them, which also catches an old_X that straddles an arm's edge. Replaying in some order can be undone by
+  // another order (2026-11-09, CodeRabbit: declare a→b, call b then a), so the ORDER is never trusted.
+  const touches = (o: string) => o.length > 0 && Array.from({ length: Math.max(1, o.length - 11) }, (_, i) => o.slice(i, i + 12)).some((w) => ref.includes(w));
+  const hits = patchPairs(sql).map((p) => norm(p.old)).filter(touches);
+  if (!hits.length) return [];
+  // also say WHAT the edit would do (declaration-order replay, judged structurally) — information, not the verdict
   let body = ref;
   for (const { old, neu } of patchPairs(sql)) { const o = norm(old); if (o) body = body.split(o).join(norm(neu)); }
-  if (body === ref) return [];
-  return ['changes the price-arm text (frozen) — update ARMS_REFERENCE and ARMS_REFERENCE_MD5 in the same PR if intended', ...armDamage(body)];
+  return [...armDamage(body), `changes the price-arm text (frozen): ${hits.map((h) => `«${h.slice(0, 50)}»`).join(', ')} — update ARMS_REFERENCE, ARMS_REFERENCE_MD5 and ARMS_REFERENCE_AFTER in the same PR if intended`];
 }
 
 const occurrences = (hay: string, needle: string): number => (needle ? hay.split(needle).length - 1 : 0);
@@ -287,7 +297,7 @@ export function problems(files: F[]): string[] {
     }
     if (patchRemoves(f.sql, SERVED_RAW)) out.push(`${f.name} removes the served-raw check from a price arm through a replace() patch`);
     if (isFunctionPatch(f.sql)) {
-      const damaged = [...replayDamage(f.sql), ...replayArms(f.sql)];
+      const damaged = [...replayDamage(f.sql), ...replayArms(f.sql, f.name)];
       if (damaged.length) out.push(`${f.name} alters production safeguard text when replayed: ${damaged.join(', ')} — if intended, update SAFEGUARDS in this barrier in the same PR`);
       const bad = unreadableReplaces(f.sql);
       if (patchPairs(f.sql).length === 0 || bad.length) out.push(`${f.name} patches mon_detect_field_integrity in a shape this barrier cannot read — every rewrite must be replace(v, old_X, new_X) with declared constants: ${bad.join('; ') || 'no readable pairs'}`);
@@ -335,7 +345,7 @@ const patch = (oldText: string, newText: string): F => ({ name: '20261110000000_
 mustCatch('a replace() patch that swaps the served-raw call for «true»', problems([served, guard, skip, patch(ARM, 'then true')]).length > 0);
 mustCatch('a replace() patch that swaps the nullif division back to a bare one', problems([served, guard, skip, patch('::numeric / nullif(x.area_m2, 0) > 500000', '::numeric / x.area_m2 > 500000')]).length > 0);
 mustCatch("a replace() patch that drops the skipped-table alert", problems([served, guard, skip, patch("'field_integrity_table_skipped:'||rec.tn", "'x'")]).length > 0);
-mustPass('a replace() patch that keeps the served-raw call while changing its guard', problems([served, guard, skip, patch(`and ${ARM}`, `and case when y ${ARM} else false end`)]).length === 0);
+mustPass('a replace() patch that keeps the served-raw call while changing its guard is not judged a REMOVAL', !problems([served, guard, skip, patch(`and ${ARM}`, `and case when y ${ARM} else false end`)]).some((e) => /removes the served-raw check/.test(e)));
 const patchQ = (decl: string, body: string): F => ({ name: '20261110000000_q.sql', sql: `-- mon_detect_field_integrity\ndo $m$ declare v text; n int;\n${decl}\nbegin v := pg_get_functiondef('public.mon_detect_field_integrity()'::regprocedure);\n${body}\nend $m$;` });
 const diag = (f: F) => problems([served, guard, skip, f]).join('\n');
 const REMOVES = /removes the served-raw check/;
@@ -352,8 +362,8 @@ mustCatch("an unrelated readable pair, then new_drop declared with an initialize
 mustCatch('a constant whose initializer is a concatenation (not one whole literal)', /cannot read[\s\S]*new_x/.test(diag(patchQ(`  old_x constant text := 'and ${ARM}';\n  new_x constant text := 'and ' || 'true';`, RUN_X))));
 mustCatch('a replace whose replacement argument is a concatenation', UNREADABLE.test(diag(patchQ(KEEP_PAIR, `  execute replace(v, old_x, new_x || 'c');`))));
 mustCatch('a replace nested inside another expression the reader cannot split', UNREADABLE.test(diag(patchQ(KEEP_PAIR, `  execute replace(upper(v), old_x, new_x);`))));
-mustPass("a '…'-quoted pair that keeps the call (with a '' escape)", diag(patchQ(KEEP_PAIR, RUN_X)) === '');
-mustPass("the match-count idiom length(replace(v, old_x, '')) beside a pair that keeps the call", diag(patchQ(KEEP_PAIR, `  n := (length(v) - length(replace(v, old_x, ''))) / length(old_x);\n${RUN_X}`)) === '');
+mustPass("a '…'-quoted pair that keeps the call (with a '' escape) is readable and not a removal", !/cannot read|removes the served-raw check/.test(diag(patchQ(KEEP_PAIR, RUN_X))));
+mustPass("the match-count idiom length(replace(v, old_x, '')) beside a pair that keeps the call is readable", !/cannot read|deletes body text/.test(diag(patchQ(KEEP_PAIR, `  n := (length(v) - length(replace(v, old_x, ''))) / length(old_x);\n${RUN_X}`))));
 const ALTERS = /alters production safeguard text/;
 mustCatch("a PARTIAL replacement «then true or public.field_integrity_served_raw» that keeps the call text but disables it", ALTERS.test(diag(patchQ(`  old_part constant text := 'then public.field_integrity_served_raw';\n  new_part constant text := 'then true or public.field_integrity_served_raw';`, `  execute replace(v, old_part, new_part);`))));
 mustCatch("a partial replacement that flips the clause's «and case» to «or case»", ALTERS.test(diag(patchQ(`  old_p constant text := 'and case when greatest';\n  new_p constant text := 'or case when greatest';`, `  execute replace(v, old_p, new_p);`))));
@@ -374,6 +384,9 @@ mustCatch('…and the same edit is judged structurally too, so a reference updat
 mustCatch('a guard compared to false («end = false») is not a whole conjunct', /no longer a whole conjunct/.test(armDamage(norm(ARMS_REFERENCE).replace('else false end and not exists', 'else false end = false and not exists')).join('\n')));
 mustCatch('a harmless-looking edit to an arm still fails while the arms are frozen', /frozen/.test(CROSS('price_total between 100000000 and 101000000', 'price_total between 100000000 and 101000001')));
 mustPass('an edit outside both arms (another count) leaves the frozen arms untouched', !/frozen/.test(CROSS('bedrooms > 1000', 'bedrooms > 2000')));
+mustCatch("CodeRabbit's order trick: declare a (guard → «is not null») then b (back), CALL b then a", /frozen/.test(diag(patchQ(`  old_a constant text := 'else false end),';\n  new_a constant text := 'else false end is not null),';\n  old_b constant text := 'else false end is not null),';\n  new_b constant text := 'else false end),';`, `  v := replace(v, old_b, new_b);\n  v := replace(v, old_a, new_a);\n  execute v;`))));
+mustCatch('an old_X that straddles the start of the phone arm (text before it + its first words)', /frozen/.test(CROSS('loc_ph, count(*) filter (where active and (price_total', 'loc_ph, count(*) filter (where true or (price_total')));
+mustPass('a migration already inside the reference (version ≤ ARMS_REFERENCE_AFTER) is not re-judged by the freeze', replayArms(`  old_a constant text := 'else false end),';\n  new_a constant text := 'x';`, '20261108235000_x.sql').length === 0);
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
