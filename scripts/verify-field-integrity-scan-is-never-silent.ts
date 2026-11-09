@@ -78,7 +78,8 @@ export function patchPairs(sql: string): Array<{ old: string; neu: string }> {
 /** A migration that rewrites mon_detect_field_integrity from its live text (pg_get_functiondef + replace) —
  *  if patchPairs cannot read its pairs, the barrier cannot judge it and must fail closed. */
 export function isFunctionPatch(sql: string): boolean {
-  return FN.test(sql) && /pg_get_functiondef\s*\(\s*'public\.mon_detect_field_integrity/.test(sql) && /\breplace\s*\(/.test(sql);
+  // any call form (pg_get_functiondef(p.oid), a regprocedure literal …) and any rewrite function: fail closed
+  return FN.test(sql) && /\bpg_get_functiondef\s*\(/i.test(codeLines(sql));
 }
 
 /** Every replace(...) call in a function patch, and whether each one is a form this barrier can judge:
@@ -87,7 +88,7 @@ export function isFunctionPatch(sql: string): boolean {
 export function unreadableReplaces(sql: string): string[] {
   const code = sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
   const declared = new Set(parsedConsts(code).keys()); // parsed values only — a declared-but-unparsed name is unreadable
-  const callStarts = [...code.matchAll(/\breplace\s*\(/gi)].map((m) => m.index!);
+  const callStarts = [...code.matchAll(/\b\w*(?:replace|translate|overlay)\s*\(/gi)].map((m) => m.index!);
   const judged = new Set<number>();
   let readable = 0;
   const bad: string[] = [];
@@ -303,6 +304,8 @@ export function problems(files: F[]): string[] {
       const by = servedRawByArm(f.sql);
       if (!by.phone) out.push(`${f.name} redefines mon_detect_field_integrity without the served-raw check in the phone/ID price arm`);
       if (!by.magnitude) out.push(`${f.name} redefines mon_detect_field_integrity without the served-raw check in the extreme-magnitude arm`);
+      // a full redefinition bypasses the replace()-patch freeze, so it must carry the frozen production arms verbatim
+      if (f.name.slice(0, 14) > ARMS_REFERENCE_AFTER && !norm(f.sql).includes(norm(ARMS_REFERENCE))) out.push(`${f.name} redefines mon_detect_field_integrity with price-arm text that differs from the frozen production reference — update ARMS_REFERENCE and its md5 pins in the same PR if intended`);
     }
     if (patchRemoves(f.sql, SERVED_RAW)) out.push(`${f.name} removes the served-raw check from a price arm through a replace() patch`);
     if (isFunctionPatch(f.sql)) {
@@ -348,7 +351,7 @@ mustCatch('a redefine that drops the served-raw check from the extreme-magnitude
 mustCatch('a redefine with TWO calls in the phone arm and none in the magnitude arm', errs(redefineWith(2, 0)).some((e) => /extreme-magnitude/.test(e)));
 mustCatch('a redefine with TWO calls in the magnitude arm and none in the phone arm', errs(redefineWith(0, 2)).some((e) => /phone\/ID/.test(e)));
 mustCatch('a redefine that drops it from both arms', errs(redefineWith(0, 0)).length >= 2);
-mustPass('a redefine that keeps both arms', errs(redefineWith(1, 1)).length === 0);
+mustPass('a redefine that keeps both arms raises no per-arm served-raw error', !errs(redefineWith(1, 1)).some((e) => /without the served-raw check in the/.test(e)));
 mustCatch('an install with the check in only one arm', problems([{ ...served, sql: `-- mon_detect_field_integrity\n${ARM}` }, guard, skip]).length > 0);
 const patch = (oldText: string, newText: string): F => ({ name: '20261110000000_p.sql', sql: `-- mon_detect_field_integrity\ndo $m$ declare v text;\n  old_x constant text := $a$${oldText}$a$;\n  new_x constant text := $a$${newText}$a$;\nbegin v := pg_get_functiondef('public.mon_detect_field_integrity()'::regprocedure);\n  execute replace(v, old_x, new_x); end $m$;` });
 mustCatch('a replace() patch that swaps the served-raw call for «true»', problems([served, guard, skip, patch(ARM, 'then true')]).length > 0);
@@ -400,6 +403,14 @@ mustPass('the widened reference (margins + arms) is the production-measured text
 mustCatch("CodeRabbit's short boundary edit «0)),\\n count(» → «0)),\\n count(*) + count(» (crosses the phone arm's edge by < 12 chars)", /frozen/.test(diag(patchQ(`  old_p constant text := $old$0)),\n          count($old$;\n  new_p constant text := $new$0)),\n          count(*) + count($new$;`, `  execute replace(v, old_p, new_p);`))));
 mustCatch('a 5-character edit wholly inside an arm («end),»)', /frozen/.test(CROSS('end),', 'end) or true,')));
 mustCatch('an edit that reaches into the arms from past the after-margin', /frozen/.test(CROSS('rec.tn) into loc_ph, beds_odd', 'rec.tn) into beds_odd, loc_ph')));
+const REDEF = (arms: string): F => ({ name: '20261110000000_r.sql', sql: `create or replace function public.mon_detect_field_integrity() returns integer language plpgsql as $fn$ begin\n  execute format($f$ select ${arms} $f$);\n  n := n + public.mon_raise('P2','field_integrity', rec.platform, 'field_integrity_table_skipped:'||rec.tn, '{}');\nend $fn$;` });
+mustCatch('a full redefinition that keeps both served-raw calls but ends a guard with «else true end»', /differs from the frozen production reference/.test(problems([served, guard, skip, REDEF(norm(ARMS_REFERENCE).replace('else false end),', 'else true end),'))]).join('\n')));
+mustCatch('a full redefinition that appends «or true» after a guard', /differs from the frozen production reference/.test(problems([served, guard, skip, REDEF(norm(ARMS_REFERENCE).replace('else false end),', 'else false end or true),'))]).join('\n')));
+mustPass('a full redefinition carrying the frozen arms verbatim passes', problems([served, guard, skip, REDEF(ARMS_REFERENCE)]).length === 0);
+mustCatch('a regexp_replace() patch that drops the served-raw call is unreadable', /cannot read/.test(diag(patchQ('', `  execute regexp_replace(v, 'public\\.field_integrity_served_raw\\([^)]*\\)\\)', 'true');`))));
+mustCatch('a regexp_replace() hidden beside an unrelated readable pair is still named', /cannot read[\s\S]*regexp_replace/.test(diag(patchQ(OK_PAIR, `  v := replace(v, old_ok, new_ok);\n  v := regexp_replace(v, 'else false end', 'else true end');\n  execute v;`))));
+mustCatch('translate()/overlay() rewrites are unreadable too', /cannot read/.test(diag(patchQ('', `  execute overlay(v placing 'true' from 10 for 5);`))));
+mustCatch('a patch reading the definition as pg_get_functiondef(p.oid) is still judged as a patch', /frozen|cannot read|removes/.test(problems([served, guard, skip, { name: '20261110000000_o.sql', sql: `-- mon_detect_field_integrity\ndo $m$ declare v text;\n  old_p constant text := 'else false end),';\n  new_p constant text := 'else true end),';\nbegin select pg_get_functiondef(p.oid) into v from pg_proc p where p.proname = 'mon_detect_field_integrity';\n  execute replace(v, old_p, new_p); end $m$;` }]).join('\n')));
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
