@@ -635,12 +635,36 @@ def _licence_on_card(r: dict[str, Any]) -> None:
     replaces the whole column, so inventing one here would erase the stored panel."""
     lic = r.get("license_number")
     info = r.get("additional_info", _MISSING)
-    if info is _MISSING or not isinstance(lic, str) or not _REGA_AD_LICENCE.match(lic.strip()):
+    if info is _MISSING:
         return
+    if not isinstance(lic, str) or not _REGA_AD_LICENCE.match(lic.strip()):
+        # 🔧 2026-11-09 (card_parity_card_missing, 13 alerts): many ads state the licence ONLY in their own text
+        # («ترخيص الإعلان: 7100295545», «Advertisement License: 7200421226») and the scraper never parsed it, so
+        # the card had no licence row while the source page showed one — aqar 401, abeea 114, aldarim 57 live.
+        # Read it from the ad's own description: one REGA ad-licence-shaped number (71/72 + 8 digits) behind an
+        # ad-licence label, never a bare number, and nothing when the text states two different licences.
+        # aqar publishes its licence as a structured payload field (aqar/enrich_residential.ad_licence), and where
+        # both exist the prose disagrees on 181 of 7,064 live rows (advertisers paste an older licence): the
+        # structured field is the source's statement there, so aqar never falls back to its prose.
+        if _PROSE_LICENCE_DISTRUSTED.search(str(r.get("listing_url") or "")):
+            return
+        lic = _licence_from_text(r.get("description"))
+        if lic is None:
+            return
     if info is None:
         r["additional_info"] = {"rega_ad_license_number": lic.strip()}
     elif isinstance(info, dict) and not str(info.get("rega_ad_license_number") or "").strip():
         info["rega_ad_license_number"] = lic.strip()
+
+
+_REGA_AD_LICENCE_SHAPE = re.compile(r"^7[12]\d{8}$")
+_PROSE_LICENCE_DISTRUSTED = re.compile(r"^https?://(?:[a-z]+\.)?aqar\.fm/", re.I)
+
+
+def _licence_from_text(text: Any) -> str | None:
+    from scrapers.common.normalize import ad_licence_from_prose
+    lic = ad_licence_from_prose(text) if isinstance(text, str) else None
+    return lic if lic and _REGA_AD_LICENCE_SHAPE.match(lic) else None
 
 
 def _fold_price_evidence(r: dict[str, Any]) -> None:

@@ -941,13 +941,20 @@ def street_from_prose(text) -> tuple[Optional[int], Optional[str]]:
 # on «ترخيص» and one whole 10-digit number: a bare digit grab is the price trap the masar tests guard.
 # «رخصة الإعلان: 7200661580» (amaall, 🔧 2026-11-07) says the same thing; «رخصة» counts only WITH «الإعلان», because
 # a bare «رخصة» is as often the broker's FAL licence, which is not the ad's.
+# Between the label and the number the prose carries decoration — «:*», «( », «: - », «| », «: [», «((», «\\»,
+# a direction mark (aqar prose, 🔧 2026-11-09: 225 of 337 live cards missed on it). Punctuation only, at most 8
+# characters: a word between label and number (a phone label, «فال») still breaks the match.
+_LIC_SEP = r"[\s:：/#*()\[\]{}|\\\-–ـ«»\"'\u200e\u200f]{0,8}"
 _AD_LICENCE_RE = re.compile(
-    r"(?:ترخيص\s*(?:(?:ال)?[إا]علان(?:ي|ى)?\s*)?|رخص[ةه]\s*(?:ال)?[إا]علان(?:ي|ى)?\s*)"
-    r"(?:رقم\s*)?[:：/]?\s*([\d٠-٩]{10})(?![\d٠-٩])")
+    r"(?:(?:ترخيص\s*(?:(?:ال)?[إا]علان(?:ي|ى|ها)?(?:\s*(?:ال)?عقاري)?)?|رخص[ةه]\s*(?:ال)?[إا]علان(?:ي|ى)?(?:\s*(?:ال)?عقاري)?)"
+    r"(?:\s*\(?\s*(?:الهيئة العامة للعقار|معتمد)\s*\)?)?" + _LIC_SEP + r"(?:رقم" + _LIC_SEP + r")?([\d٠-٩]{10})(?![\d٠-٩])"
+    # «Advertisement License: 7200421226» (abeea, 🔧 2026-11-09: 114 live cards). Only the AD licence label in
+    # English: a bare "License" is as often the broker's FAL licence.
+    r"|(?i:\b(?:advertis(?:e|ing|ement)|ad)\s+licen[cs]e)" + _LIC_SEP + r"(?:(?i:no\.?|number)" + _LIC_SEP + r")?([\d٠-٩]{10})(?![\d٠-٩]))")
 
 
 def ad_licence_from_prose(text) -> Optional[str]:
-    found = {m.group(1).translate(_TRANS) for m in _AD_LICENCE_RE.finditer(str(text or ""))}
+    found = {(m.group(1) or m.group(2)).translate(_TRANS) for m in _AD_LICENCE_RE.finditer(str(text or ""))}
     return found.pop() if len(found) == 1 else None
 
 
