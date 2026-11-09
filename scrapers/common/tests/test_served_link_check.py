@@ -1,4 +1,9 @@
 """served_link_check (2026-11-05): the Dwelleo shapes, measured that day, classify and repair right."""
+import random
+from unittest.mock import Mock
+
+import pytest
+
 from scrapers.common import served_link_check as S
 
 OLD = "https://www.dwelleo.sa/ar/properties/3-bedroom-apartment-for-rent-in-hiteen-riyadh-1"
@@ -102,3 +107,113 @@ def test_check_site_opens_the_customer_address(monkeypatch):
     row = S.check_site(None, "gathern", 1, rng=random.Random(0), night="2026-11-09", write=False)
     assert "https://gathern.co/ar/view/9/unit/8" in seen and "https://gathern.co/view/9/unit/8" not in seen
     assert row["ok"] == 1 and row["dead"] == 0
+
+
+@pytest.mark.parametrize(("stored", "expected"), [
+    ("http://www.gathern.co/view/1/unit/2/", "http://www.gathern.co/ar/view/1/unit/2/"),
+    ("https://WWW.GATHERN.CO/EN/view/1/unit/2", "https://WWW.GATHERN.CO/ar/view/1/unit/2"),
+    ("https://gathern.co/view/1/unit/2?next=%2Fen%2Fview%2F3#photos",
+     "https://gathern.co/ar/view/1/unit/2?next=%2Fen%2Fview%2F3#photos"),
+    ("https://gathern.co/ar/view/1/unit/2?lang=en#photos",
+     "https://gathern.co/ar/view/1/unit/2?lang=en#photos"),
+])
+def test_customer_url_preserves_the_listing_and_url_components(stored, expected):
+    assert S.customer_url(stored) == expected
+    assert S.customer_url(expected) == expected  # localization is idempotent
+
+
+@pytest.mark.parametrize("url", [
+    "", None,
+    "https://gathern.co/", "https://gathern.co/ar", "https://gathern.co/en/search",
+    "https://gathern.co/preview/1/unit/2", "https://gathern.co/viewing/1/unit/2",
+    "https://gathern.co.evil.test/view/1/unit/2",
+    "https://fakegathern.co/view/1/unit/2", "https://other.test/gathern.co/view/1/unit/2",
+    "https://other.test/view/1?next=https://gathern.co/view/1/unit/2",
+    "/view/1/unit/2", "not a URL",
+])
+def test_customer_url_leaves_non_listing_and_unrelated_urls_untouched(url):
+    assert S.customer_url(url) == url
+
+
+@pytest.fixture
+def check_one_link(monkeypatch):
+    """Run the real checker with only transport, sampling and pacing replaced."""
+    def run(stored, status=200, landed=None, *, write=False, home_status=200):
+        listing = {"listing_url": stored, "table": "gathern_listings", "id": 17}
+        original = listing.copy()
+        transport = Mock(side_effect=[(home_status, None), (status, landed)])
+        client = Mock()
+        monkeypatch.setattr(S, "sample", lambda *a, **k: [listing])
+        monkeypatch.setattr(S, "open_link", transport)
+        monkeypatch.setattr(S.time, "sleep", lambda *_: None)
+        row = S.check_site(client, "gathern", 1, rng=random.Random(0),
+                           night="2026-11-09", write=write)
+        assert listing == original  # even write mode must preserve the sampled stored URL
+        return row, client, transport
+    return run
+
+
+@pytest.mark.parametrize("prefix", ["", "/ar", "/en"])
+@pytest.mark.parametrize("write", [False, True])
+def test_localized_success_never_repairs_the_stored_url(check_one_link, prefix, write):
+    stored = f"https://gathern.co{prefix}/view/9/unit/8"
+    opened = "https://gathern.co/ar/view/9/unit/8"
+    row, client, transport = check_one_link(stored, landed=opened, write=write)
+    assert [call.args[0] for call in transport.call_args_list] == ["https://gathern.co/", opened]
+    assert {key: row[key] for key in ("sampled", "ok", "moved", "repaired", "dead", "unknown")} == {
+        "sampled": 1, "ok": 1, "moved": 0, "repaired": 0, "dead": 0, "unknown": 0,
+    }
+    assert row["dead_sample"] == []
+    client.table.assert_not_called()
+
+
+@pytest.mark.parametrize(("status", "landed", "kind"), [
+    (404, None, "dead"), (410, None, "dead"),
+    (403, None, "unknown"), (429, None, "unknown"), (500, None, "unknown"),
+    (None, None, "unknown"), (200, "https://gathern.co/ar", "unknown"),
+    (200, None, "ok"),
+    (200, "https://gathern.co/ar/view/9/unit/7", "moved"),
+])
+def test_localized_result_is_counted_but_dead_sample_keeps_stored_url(check_one_link, status, landed, kind):
+    stored = "https://gathern.co/en/view/9/unit/8"
+    row, client, transport = check_one_link(stored, status, landed, write=True)
+    assert transport.call_args.args == ("https://gathern.co/ar/view/9/unit/8",)
+    assert row["sampled"] == 1
+    assert row[kind] == 1
+    assert sum(row[key] for key in ("ok", "moved", "dead", "unknown")) == 1
+    assert row["dead_sample"] == ([stored] if kind == "dead" else [])
+    assert row["repaired"] == 0
+    client.table.assert_not_called()
+
+
+@pytest.mark.parametrize("write", [False, True])
+def test_localized_move_retains_original_repair_contract(check_one_link, monkeypatch, write):
+    stored = "https://gathern.co/en/view/9/unit/8"
+    landed = "https://gathern.co/new/view/9/unit/8"
+    repair = Mock(wraps=S.repairable)
+    monkeypatch.setattr(S, "repairable", repair)
+    row, client, _ = check_one_link(stored, landed=landed, write=write)
+    repair.assert_called_once_with(stored, landed)
+    assert row["moved"] == row["repaired"] == 1
+    if write:
+        client.table.assert_called_once_with("gathern_listings")
+        client.table.return_value.update.assert_called_once_with({"listing_url": landed})
+        client.table.return_value.update.return_value.eq.assert_called_once_with("id", 17)
+        client.table.return_value.update.return_value.eq.return_value.execute.assert_called_once_with()
+    else:
+        client.table.assert_not_called()
+
+
+def test_home_page_wall_prevents_even_localized_listing_checks(check_one_link):
+    row, client, transport = check_one_link("https://gathern.co/view/9/unit/8", home_status=403, write=True)
+    transport.assert_called_once_with("https://gathern.co/")
+    assert row["home_status"] == 403
+    assert row["sampled"] == row["dead"] == row["repaired"] == 0
+    client.table.assert_not_called()
+
+
+def test_check_site_keeps_other_sites_address(check_one_link):
+    row, client, transport = check_one_link(OLD, landed=OLD, write=True)
+    assert transport.call_args.args == (OLD,)
+    assert row["ok"] == 1 and row["repaired"] == 0
+    client.table.assert_not_called()
