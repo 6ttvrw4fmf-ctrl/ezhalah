@@ -138,6 +138,40 @@ check('CodeRabbit rate-limited with an open Major → BLOCKED',
   !decideMerge({ ...RL, codeRabbitReviewed: true, openReviewMajors: ['Make the area division safe.'] }).allow);
 check('CodeRabbit NEUTRAL for any other reason → BLOCKED',
   !decideMerge({ ...RL, checks: [...allGreen, { ...limited, title: 'Review failed' }], codeRabbitReviewed: true, openReviewMajors: [] }).allow);
+// 0b‴ (owner 2026-11-09, «Do both»): a PR that is ONLY the copy of SQL production already ran passes a rate-limited
+// CodeRabbit that never read it. The proof is the caller's; the file-shape half is checked here too.
+const COPY = ['supabase/migrations/20261109124506_x.sql', 'sql/mirrors/cron_schedule.json'];
+const CP = { ...RL, codeRabbitReviewed: false, openReviewMajors: [] as string[], actualFiles: COPY, copyOfProduction: true };
+check('copy of production, CodeRabbit rate-limited and never read it, no open Major → ALLOWED (ten mirrors froze every deploy)',
+  decideMerge(CP).allow);
+check('…the same PR without the proof → BLOCKED', !decideMerge({ ...CP, copyOfProduction: false }).allow && !decideMerge({ ...CP, copyOfProduction: undefined }).allow);
+check('…a proof that is not exactly `true` → BLOCKED', !decideMerge({ ...CP, copyOfProduction: 'yes' as unknown as boolean }).allow);
+check('…with one file outside the database lane → BLOCKED', !decideMerge({ ...CP, actualFiles: [...COPY, 'scripts/x.ts'] }).allow);
+check('…with no migration file at all (mirrors only) → BLOCKED', !decideMerge({ ...CP, actualFiles: ['sql/mirrors/cron_schedule.json'] }).allow);
+check('…with the file list missing or empty → BLOCKED', !decideMerge({ ...CP, actualFiles: undefined }).allow && !decideMerge({ ...CP, actualFiles: [] }).allow);
+check('…with an open Major → BLOCKED', !decideMerge({ ...CP, openReviewMajors: ['Guard the drop.'] }).allow);
+check('…with unreadable review threads → BLOCKED', !decideMerge({ ...CP, openReviewMajors: null }).allow && !decideMerge({ ...CP, openReviewMajors: undefined }).allow);
+check('…when CodeRabbit is REQUIRED → BLOCKED', !decideMerge({ ...CP, requiredContexts: [...REQ, 'CodeRabbit'] }).allow);
+check('…when CodeRabbit is NEUTRAL for another reason, FAILED, CANCELLED or pending → BLOCKED',
+  (['Review failed', null] as const).every((title) => !decideMerge({ ...CP, checks: [...allGreen, { ...limited, title }] }).allow)
+  && (['FAILURE', 'CANCELLED', null] as const).every((c) => !decideMerge({ ...CP, checks: [...allGreen, { ...limited, conclusion: c }] }).allow));
+check('…when a required check is not SUCCESS → BLOCKED', !decideMerge({ ...CP, checks: [...allGreen.slice(1), { ...allGreen[0], conclusion: 'FAILURE' }, limited] }).allow);
+{
+  const lane = await import('./pr-migrations-match-production.ts');
+  const gate = await import('./lib/mergeGate.ts');
+  check('the gate\'s copy-lane patterns are the database lane\'s own (they cannot drift apart)',
+    gate.COPY_LANE_FILE.source === lane.DB_LANE_FILE.source && gate.COPY_MIGRATION_FILE.source === lane.MIGRATION_FILE.source);
+  check('judge() is the proof: a byte of difference, an unapplied version or an unreadable file is not a copy',
+    lane.judge([{ path: COPY[0], text: 'select 1;' }], new Map([['20261109124506', 'select 1;']])).ok
+    && !lane.judge([{ path: COPY[0], text: 'select 2;' }], new Map([['20261109124506', 'select 1;']])).ok
+    && !lane.judge([{ path: COPY[0], text: 'select 1;' }], new Map()).ok
+    && !lane.judge([{ path: COPY[0], text: null }], new Map([['20261109124506', 'select 1;']])).ok);
+  const src = (await import('node:fs')).readFileSync(new URL('./safe-pr-merge.ts', import.meta.url), 'utf8');
+  check('safe-pr-merge.ts computes the proof itself (judge() over the head SHA and ops_migration_sql), never takes it from a flag',
+    /copyOfProduction: copy\?\.ok === true/.test(src) && /judge\(files, applied\)/.test(src) && /getFileAtRef\(slug, path, headSha\)/.test(src)
+    && /rpc\/ops_migration_sql/.test(src) && !/--copy|argv[^\n]*copy/i.test(src));
+  check('…and a missing key or a failed read is NOT a proof', /if \(!URL_BASE \|\| !KEY\) return \{ ok: false/.test(src) && /if \(!r\.ok\) return \{ ok: false/.test(src) && /catch \(e\) \{\n    return \{ ok: false/.test(src));
+}
 check('CodeRabbit SKIPPED when it IS required → BLOCKED (rule 1 governs)',
   !decideMerge({ requiredContexts: [...REQ, 'CodeRabbit'], requiredContextsKnown: true, checks: [...allGreen, rabbit('SKIPPED')], ...CLEAN }).allow);
 
@@ -186,6 +220,10 @@ mustCatch('a skip exemption that ignores the REQUIRED list would wrongly allow a
 
 mustCatch('a rate-limit pass that skips the «reviewed before» test would merge a PR CodeRabbit never read',
   !decideMerge({ ...RL, openReviewMajors: [] }).allow);
+mustCatch('a copy-only pass that trusts the proof flag alone would merge code CodeRabbit never read',
+  !decideMerge({ ...RL, codeRabbitReviewed: false, openReviewMajors: [], copyOfProduction: true, actualFiles: ['src/app.tsx', 'supabase/migrations/20261109124506_x.sql'] }).allow);
+mustCatch('a copy-only pass that trusts the file names alone would merge a migration production never ran',
+  !decideMerge({ ...RL, codeRabbitReviewed: false, openReviewMajors: [], actualFiles: ['supabase/migrations/20261109124506_x.sql'] }).allow);
 mustCatch('a rate-limit pass widened to a REQUIRED CodeRabbit would bypass branch protection',
   !decideMerge({ ...RL, requiredContexts: [...REQ, 'CodeRabbit'], codeRabbitReviewed: true, openReviewMajors: [] }).allow);
 mustCatch('a gate that ignores unresolved CodeRabbit Majors would merge #11247 (9 unanswered, PRICE = SOURCE)',

@@ -203,6 +203,15 @@ export async function hasCodeRabbitReview(slug: string, n: string): Promise<bool
   }
 }
 
+/** One file's text at an exact commit (the PR head the gate is about to merge), or null when it cannot be read whole.
+ *  null is never "empty": the caller treats it as unproven and refuses. */
+export async function getFileAtRef(slug: string, path: string, sha: string): Promise<string | null> {
+  const r = (await api(`/repos/${slug}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${sha}`)) as { type?: string; encoding?: string; content?: string; size?: number } | null;
+  if (!r || r.type !== 'file' || r.encoding !== 'base64' || typeof r.content !== 'string') return null;
+  const buf = Buffer.from(r.content, 'base64');
+  return typeof r.size === 'number' && buf.length !== r.size ? null : buf.toString('utf8');
+}
+
 /** Merge, pinned to the exact SHA the gate verified.
  *
  *  `gh pr merge` cannot do this: it merges whatever the head is at the moment the call lands. If a

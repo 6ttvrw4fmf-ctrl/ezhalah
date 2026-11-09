@@ -37,6 +37,10 @@ export type MergeGateInput = {
   openReviewMajors?: string[] | null;
   // CodeRabbit has posted at least one review on this PR (any commit). Only an explicit `true` counts.
   codeRabbitReviewed?: boolean;
+  // The caller PROVED (scripts/pr-migrations-match-production.ts judge(), reading ops_migration_sql) that every
+  // migration file in this PR is exactly what production already ran. Only an explicit `true` counts; an unreadable
+  // production, a missing key or one byte of difference is not a proof. See rule 0b‴.
+  copyOfProduction?: boolean;
 };
 
 export type MergeGateResult = { allow: boolean; reasons: string[] };
@@ -59,11 +63,26 @@ export const ADVISORY_MAY_SKIP = ['CodeRabbit'];
 // 5 h on that NEUTRAL while the drift gate refused every deploy. It passes ONLY when CodeRabbit already reviewed this
 // PR AND its threads were read with no open Major (rule 3b still runs) AND it is not required.
 export const RATE_LIMITED = /rate limited/i;
+// 0b‴ (owner 2026-11-09, «Do both»): a COPY-ONLY PR passes a rate-limited CodeRabbit even when CodeRabbit never read
+// it. Measured that day: the reviewer gave about one review an hour, ten migrations production had already run sat in
+// mirror PRs it never reached, engineer-automerge refused all of them every 15 minutes for «check "CodeRabbit" is
+// NEUTRAL», and the drift gate refused four frontend deploys in a row (08:43-19:43 UTC). Merging such a PR changes
+// nothing in production: it is the git copy of SQL that already ran. Copy-only means BOTH: every file is a database
+// lane file (supabase/migrations/<14 digits>_*.sql or sql/mirrors/*) with at least one migration among them, AND the
+// caller proved every migration equals what production ran. Everything else still blocks: a required CodeRabbit, its
+// FAILURE / CANCELLED / pending, a NEUTRAL for another reason, unreadable threads, an open Major, any other file.
+// The two patterns are the database lane's own (scripts/pr-migrations-match-production.ts); verify-merge-gate.ts
+// fails if they drift apart.
+export const COPY_MIGRATION_FILE = /^supabase\/migrations\/(\d{14})_[A-Za-z0-9_]+\.sql$/;
+export const COPY_LANE_FILE = /^(supabase\/migrations\/\d{14}_[A-Za-z0-9_]+\.sql|sql\/mirrors\/[A-Za-z0-9_.-]+)$/;
+export const isCopyLane = (files: string[] | undefined): files is string[] =>
+  Array.isArray(files) && files.length > 0 && files.every((f) => COPY_LANE_FILE.test(f)) && files.some((f) => COPY_MIGRATION_FILE.test(f));
+const copyOnly = (input: MergeGateInput) => input.copyOfProduction === true && isCopyLane(input.actualFiles);
 const advisorySkip = (c: CheckRun, input: MergeGateInput) => {
   if (!ADVISORY_MAY_SKIP.includes(c.context) || input.requiredContexts.includes(c.context)) return false;
   const k = normaliseConclusion(c.conclusion);
   return k === 'SKIPPED'
-    || (k === 'NEUTRAL' && RATE_LIMITED.test(c.title ?? '') && input.codeRabbitReviewed === true
+    || (k === 'NEUTRAL' && RATE_LIMITED.test(c.title ?? '') && (input.codeRabbitReviewed === true || copyOnly(input))
       && Array.isArray(input.openReviewMajors) && input.openReviewMajors.length === 0);
 };
 

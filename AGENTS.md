@@ -470,6 +470,17 @@ and mutation-proven in `scripts/lib/mergeGate.ts` / `scripts/verify-merge-gate.t
 before merge" prose rule by enforcing the "again" half automatically — pass the file list from your
 post-creation check as `--expect-files` and the tool does the second verification for you.
 
+**CodeRabbit is advisory, and the gate has exactly three ways past it (rules 0b′/0b″/0b‴ in
+`scripts/lib/mergeGate.ts`; never a fourth without the owner).** SKIPPED passes. A rate-limited NEUTRAL
+passes when CodeRabbit already reviewed the PR and no Major is open. And (owner 2026-11-09, «Do both»)
+a rate-limited NEUTRAL passes on a PR CodeRabbit never read **only when the PR is nothing but the git
+copy of SQL production already ran**: every file is `supabase/migrations/<14 digits>_*.sql` or
+`sql/mirrors/*`, and `safe-pr-merge.ts` itself proves each migration equals `ops_migration_sql` at the
+head SHA it merges (no key, a failed read or one byte of difference = no proof = refused). Earned that
+day: ten such copies waited on a reviewer giving about one review an hour while the drift gate refused
+four frontend deploys in a row. Any other file in the PR, an open Major, unreadable threads, or a
+required CodeRabbit still blocks. Guard: `scripts/verify-merge-gate.ts`.
+
 # Autonomous engineering authority (owner-granted, 2026-08-04; extended to every session 2026-09-13)
 
 **Every agent session in this repo is AUTONOMOUS for safe operational work — a named routine, an
