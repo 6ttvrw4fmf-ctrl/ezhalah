@@ -36,7 +36,9 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
     return () => clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  const groups = useMemo(() => (f.category ? groupsFor(f.category as Macro) : [...groupsFor('Residential'), ...groupsFor('Commercial')]), [f.category]);
+  // GROUPS ONLY AFTER A CATEGORY (owner 2026-11-08: «commercial then residential … don't show the group until user
+  // selects … similar to the filter»): «سكني» / «تجاري» come first; that category's groups appear once one is picked.
+  const groups = useMemo(() => (f.category ? groupsFor(f.category as Macro) : []), [f.category]);
   const toggleGroup = (g: string) => setF((x) => ({ ...x, groups: x.groups.includes(g) ? x.groups.filter((y) => y !== g) : [...x.groups, g] }));
   const toggleBed = (b: '1' | '2' | '3' | '4' | '5+') => setF((x) => ({ ...x, beds: x.beds.includes(b) ? x.beds.filter((y) => y !== b) : [...x.beds, b] }));
 
@@ -60,12 +62,16 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
                   onPress={() => setF((x) => ({ ...x, category: x.category === cat ? null : cat, groups: [] }))} />
               ))}
             </View>
-            <FieldLabel>{t('Property group')}</FieldLabel>
-            <View style={s.wrap}>
-              {groups.map((g) => (
-                <OptionBox key={g.group} label={t(g.group)} img={groupImg(g.group)} selected={f.groups.includes(g.group)} onPress={() => toggleGroup(g.group)} style={s.cell} />
-              ))}
-            </View>
+            {f.category ? (
+              <>
+                <FieldLabel>{t('Property group')}</FieldLabel>
+                <View style={s.wrap}>
+                  {groups.map((g) => (
+                    <OptionBox key={g.group} label={t(g.group)} img={groupImg(g.group)} selected={f.groups.includes(g.group)} onPress={() => toggleGroup(g.group)} style={s.cell} />
+                  ))}
+                </View>
+              </>
+            ) : null}
             <FieldLabel>{t('Bedrooms')}</FieldLabel>
             <View style={s.wrap}>
               {(['any', '1', '2', '3', '4', '5+'] as const).map((opt) => (

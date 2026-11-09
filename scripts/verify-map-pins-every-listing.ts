@@ -163,6 +163,10 @@ check('the map screen feeds the deal button into the pins and clears the sheet o
 check('the Filter button opens the centered filter card; Apply feeds the pins and counts in view', /onFilter=\{\(\) => setFilterOpen\(true\)\} filterOn=\{isNarrowed\(mapFilter\)\}/.test(screen) && /<MapFilterCard value=\{mapFilter\}/.test(screen) && /countPins=\{\(f\) => M\.countPinsInView\(\{ deals, \.\.\.pinFilterOf\(f\) \}\)\}/.test(screen));
 const cardSrc = readFileSync(join(root, 'src/components/MapFilterCard.tsx'), 'utf8');
 check('the filter card is the site\'s own tiles (OptionBox + the same icons), X top right, no transaction section', /<OptionBox compact key=\{cat\} label=\{t\(cat\)\} img=\{categoryImg\(cat\)\}/.test(cardSrc) && /img=\{groupImg\(g\.group\)\}/.test(cardSrc) && /img=\{BED_IMG\[opt\]\}/.test(cardSrc) && /testID="map-filter-close"/.test(cardSrc) && !/DEALS|MapDeal\b/.test(cardSrc));
+// Owner 2026-11-08: «سكني» / «تجاري» first; the groups appear only once a category is picked (like the Filter home).
+const groupsRx = /const groups = useMemo\(\(\) => \(f\.category \? groupsFor\(f\.category as Macro\) : \[\]\), \[f\.category\]\);/;
+check('the map filter shows the property groups only after a category is picked', groupsRx.test(cardSrc) && /\{f\.category \? \(\s*<>\s*<FieldLabel>\{t\('Property group'\)\}/.test(cardSrc));
+mustCatch('groups shown before a category (both lists mixed)', !groupsRx.test(cardSrc.replace(': []), [f.category]);', ": [...groupsFor('Residential'), ...groupsFor('Commercial')]), [f.category]);")));
 // A tap must NOT resize the map (owner 2026-11-02: «when I click it then I see the others, it's weird»): switching to
 // full screen on the tap re-laid the map out, reloaded the pins and reshuffled them around the tapped one. The sheet
 // opens over the map exactly as it is.
