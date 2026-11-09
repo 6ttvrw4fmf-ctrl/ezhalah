@@ -14,6 +14,7 @@ import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { idsByTable, orderLike, pinHead, type PinRow } from '@/lib/mapPins';
+import { translitPlace } from '@/lib/translitPlace';
 
 
 export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: () => void }) {
@@ -42,8 +43,10 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
   // «why does it load like this»): never a blank sheet with only a spinner.
   // A DISTRICT MARKER (src/lib/mapNoPin.ts, owner 2026-11-09): titled by its district, never by a price — these listings
   // have no exact location, and the note says so before the first card.
+  // In English the place name is written in English letters too («88 listings in An Narjis»), like the cards do.
+  const place = row.noPin ? (row.noPin.district || row.noPin.city) : '';
   const title = row.noPin
-    ? t('{n} listings in {district}', { n: row.n, district: row.noPin.district || row.noPin.city })
+    ? t('{n} listings in {district}', { n: row.n, district: isRTL ? place : translitPlace(place) })
     : row.n > 1
       ? t('{n} listings at this spot', { n: row.n })
       : `${t('Listing')} · ${pinHead(row, isRTL ? 'ar' : 'en')}`;
