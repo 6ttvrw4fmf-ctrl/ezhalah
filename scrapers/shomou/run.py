@@ -355,14 +355,25 @@ def main() -> int:
                                       com_ads={r["ad_number"] for r in com}, source=SOURCE)
         # Complete walk only: an expired ad is on the index but not in the kept set → pruned today.
         complete = unreadable == 0 and cut == 0 and not index_cut and len(nids) > 0 and not a.limit
+        # ♻️ 2026-11-09: the index was read to its end and every ad page reached was readable, only the
+        # deadline stopped the page walk. The INDEX is then complete: an ad missing from it really left the
+        # site's list, while an ad on it that we did not reach is merely unread. So the unreached ads count
+        # as seen (protected, never probed) and prune_unseen re-checks only the ads that dropped off the
+        # index, each by its default direct read (404/410 only, 3 strikes). Before this, the 22-min deadline
+        # cut 68 of 1,046 pages on 11-09 (520 on 11-07), no prune ran, and SHQ8303 stayed served after its
+        # page went 404 (dead-visible score 11-09: shomou 1 gone of 5, over the line).
+        index_whole = unreadable == 0 and cut > 0 and not index_cut and len(nids) > 0 and not a.limit
+        unreached = {f"{PREFIX}{n}" for n in nids[len(nids) - cut:]} if index_whole else set()
+        if index_whole:
+            print(f"  index complete, {cut} ad page(s) unread: pruning only ads absent from the index", flush=True)
         for tbl, rr in ((RES_TABLE, res), (COM_TABLE, com)):
-            if complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+            if complete or index_whole:
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr} | unreached, source=SOURCE)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
-        if not complete:
+        if not (complete or index_whole):
             print(f"  NOT pruning: {unreadable} of {len(nids)} page(s) unreadable, {cut} not reached", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(nids), rows_upserted=len(res) + len(com),
                              check_tables=["shomou_residential_listings", "shomou_commercial_listings"],
