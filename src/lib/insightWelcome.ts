@@ -128,6 +128,16 @@ export function moreThan(v: number): number | null {
   const mag = lim < 100 ? 10 : 10 ** (Math.floor(Math.log10(lim)) - 1);
   return Math.floor(lim / mag) * mag;
 }
+/** «ما لا يقل عن N» / "at least N" for a count that can still fall through the day (an ad deleted after the build).
+ *  N is at or below the count with room: at least 0.5% (or 1) under it, then down to two leading digits (tens from
+ *  20 to 99, exact below 20): 120 → 110; 4,312 → 4,200; 7 → 6. Below 2 there is nothing to say: null, fact skipped. */
+export function atLeast(v: number): number | null {
+  const lim = Math.trunc(v) - Math.max(1, Math.ceil(v * 0.005));
+  if (lim < 2) return null;
+  if (lim < 20) return lim;
+  const mag = lim < 100 ? 10 : 10 ** (Math.floor(Math.log10(lim)) - 1);
+  return Math.floor(lim / mag) * mag;
+}
 const num = (v: unknown): number | null => {
   const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -147,6 +157,9 @@ export function renderInsight(t: InsightTemplate, f: Insight, en: NameEn): { ar:
   if (need('a')) { const a = num(f.a); if (a == null) return null; vAr.a = vEn.a = fmt(a); }
   // {a_more}: the sentence itself says «أكثر من» / "more than"; the number is moreThan(a), never the exact count.
   if (need('a_more')) { const a = num(f.a); const m = a == null ? null : moreThan(a); if (m == null) return null; vAr.a_more = vEn.a_more = fmt(m); }
+  // {a_least} / {b_least}: the sentence says «ما لا يقل عن» / "at least"; the number is atLeast(), never the exact count.
+  if (need('a_least')) { const a = num(f.a); const m = a == null ? null : atLeast(a); if (m == null) return null; vAr.a_least = vEn.a_least = fmt(m); }
+  if (need('b_least')) { const b = num(f.b); const m = b == null ? null : atLeast(b); if (m == null) return null; vAr.b_least = vEn.b_least = fmt(m); }
   if (need('b')) { const b = num(f.b); if (b == null) return null; vAr.b = vEn.b = fmt(b); }
   if (need('region')) {
     if (!f.region || !REGION_EN[f.region]) return null;
