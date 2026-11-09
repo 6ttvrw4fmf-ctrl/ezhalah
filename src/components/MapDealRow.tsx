@@ -162,8 +162,13 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
   const deals = dealsProp ?? dealsLocal;
   const setDeals = (f: (d: MapDeal[]) => MapDeal[]) => { const next = f(deals); setDealsLocal(next); onDeals?.(next); };
   const [open, setOpen] = useState(false);
+  // TICKS ARE A DRAFT UNTIL «تطبيق» (owner 2026-11-09: «make it a bit big … and add apply below»): the popup edits a
+  // copy; Apply hands it to the map (the pins follow exactly that), X / a tap outside drops it and the map stays as it was.
+  const [draft, setDraft] = useState<MapDeal[]>(deals);
+  const openPopup = () => { setDraft(deals); setOpen(true); };
+  const apply = () => { setDeals(() => draft); setOpen(false); };
   // Untick only while another stays ticked: the map always has at least one deal.
-  const toggle = (id: MapDeal) => setDeals((d) => (d.includes(id) ? (d.length > 1 ? d.filter((x) => x !== id) : d) : DEALS.filter((x) => x.id === id || d.includes(x.id)).map((x) => x.id)));
+  const toggle = (id: MapDeal) => setDraft((d) => nextDeals(d, id));
   const label = deals.length === DEALS.length ? t('All') : DEALS.filter((d) => deals.includes(d.id)).map((d) => t(d.label)).join(t(', '));
 
   return (
@@ -174,7 +179,7 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
       {/* The transaction button: the chosen deal, outlined in plum so it reads as «this is set». */}
       <Pressable
         style={({ pressed, hovered }: any) => [s.btn, s.btnActive, hovered && s.btnHover, pressed && s.btnPressed]}
-        onPress={() => setOpen(true)}
+        onPress={openPopup}
         accessibilityRole="button"
         accessibilityLabel={t('Transaction')}
         testID="map-deal-btn"
@@ -208,7 +213,7 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
               </Pressable>
             </View>
             {DEALS.map((d) => {
-              const on = deals.includes(d.id);
+              const on = draft.includes(d.id);
               return (
                 <Pressable
                   key={d.id}
@@ -218,16 +223,24 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
                   accessibilityState={{ checked: on }}
                   testID={`map-deal-${d.id}`}
                 >
-                  <View style={[s.box, on && s.boxOn]}>{on ? <Ionicons name="checkmark" size={15} color={colors.onFill} /> : null}</View>
+                  <View style={[s.box, on && s.boxOn]}>{on ? <Ionicons name="checkmark" size={19} color={colors.onFill} /> : null}</View>
                   <Text style={[s.optionText, on && s.optionTextOn]}>{t(d.label)}</Text>
                 </Pressable>
               );
             })}
+            <Pressable style={({ pressed }: any) => [s.apply, pressed && s.btnPressed]} onPress={apply} accessibilityRole="button" testID="map-deal-apply">
+              <Text style={s.applyT}>{t('Apply')}</Text>
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
     </View>
   );
+}
+
+/** Pure: tick or untick one deal; the last ticked deal cannot be unticked (the map always shows at least one). */
+export function nextDeals(d: MapDeal[], id: MapDeal): MapDeal[] {
+  return d.includes(id) ? (d.length > 1 ? d.filter((x) => x !== id) : d) : DEALS.filter((x) => x.id === id || d.includes(x.id)).map((x) => x.id);
 }
 
 const GLASS = 'rgba(255,255,255,0.42)';
@@ -268,14 +281,16 @@ const s = StyleSheet.create({
   // collapsed to its content and the card sat at the top (owner 2026-10-31: «on the phone it doesn't pop up in the
   // centre of the screen»). Explicit edges centre it on every browser.
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(36,35,43,0.28)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  card: { width: '100%', maxWidth: 320, backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.tintLine, padding: 18, ...cardShadow, shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
-  cardHead: { minHeight: 28, justifyContent: 'center', marginBottom: 6, paddingRight: 32 },
+  card: { width: '100%', maxWidth: 440, backgroundColor: colors.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.tintLine, padding: 22, ...cardShadow, shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+  cardHead: { minHeight: 32, justifyContent: 'center', marginBottom: 10, paddingRight: 36 },
   close: { position: 'absolute', right: 0, top: 0, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  cardTitle: { fontSize: 15, fontWeight: '800', color: colors.ink },
-  option: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 6, borderRadius: 10 },
+  cardTitle: { fontSize: 19, fontWeight: '800', color: colors.ink },
+  option: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, paddingHorizontal: 8, borderRadius: 12 },
   optionHover: { backgroundColor: colors.tint },
-  box: { width: 22, height: 22, borderRadius: 7, borderWidth: 2, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  box: { width: 28, height: 28, borderRadius: 8, borderWidth: 2, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   boxOn: { borderColor: colors.primary, backgroundColor: colors.selFill },
-  optionText: { fontSize: 15, color: colors.ink },
+  optionText: { fontSize: 18, color: colors.ink },
+  apply: { marginTop: 16, backgroundColor: colors.primary, borderRadius: 999, paddingVertical: 15, alignItems: 'center' },
+  applyT: { color: '#fff', fontSize: 17, fontWeight: '800' },
   optionTextOn: { fontWeight: '700', color: colors.primary },
 });

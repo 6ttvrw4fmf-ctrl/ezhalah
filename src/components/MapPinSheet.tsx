@@ -14,6 +14,7 @@ import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { idsByTable, orderLike, pinHead, type PinRow } from '@/lib/mapPins';
+import { translitPlace } from '@/lib/translitPlace';
 
 
 export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: () => void }) {
@@ -40,9 +41,16 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
 
   // The head's own words show at once — the price («650 ألف») or the count — while the cards load (owner 2026-11-02:
   // «why does it load like this»): never a blank sheet with only a spinner.
-  const title = row.n > 1
-    ? t('{n} listings at this spot', { n: row.n })
-    : `${t('Listing')} · ${pinHead(row, isRTL ? 'ar' : 'en')}`;
+  // A DISTRICT MARKER (src/lib/mapNoPin.ts, owner 2026-11-09): titled by its district, never by a price — these listings
+  // have no exact location, and the note says so before the first card.
+  // In English the place name is written in English letters too («88 listings in An Narjis»), like the cards do.
+  const place = row.noPin ? (row.noPin.district || row.noPin.city) : '';
+  const title = row.noPin
+    ? t('{n} listings in {district}', { n: row.n, district: isRTL ? place : translitPlace(place) })
+    : row.n > 1
+      ? t('{n} listings at this spot', { n: row.n })
+      : `${t('Listing')} · ${pinHead(row, isRTL ? 'ar' : 'en')}`;
+  const shown = row.ids?.length ?? 0;
   return (
     <View style={s.sheet} testID="map-pin-sheet">
       <View style={[s.head, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
@@ -51,6 +59,15 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       </View>
+      {row.noPin ? (
+        <View style={s.noPinNote} testID="map-pin-sheet-no-pin-note">
+          <Ionicons name="location-outline" size={15} color={colors.muted} />
+          <Text style={s.noPinText}>
+            {t('The source site gives no exact location for these listings; they are shown at the centre of the district.')}
+            {row.n > shown && shown > 0 ? ` ${t('Showing the first {k} of {n}', { k: shown, n: row.n })}` : ''}
+          </Text>
+        </View>
+      ) : null}
       {cards === null ? (
         <View style={s.center}><ActivityIndicator color={colors.primary} /></View>
       ) : failed && !cards.length ? (
@@ -81,4 +98,6 @@ const s = StyleSheet.create({
   card: { },
   center: { padding: 24, alignItems: 'center' },
   note: { color: colors.muted, fontSize: 13, textAlign: 'center', padding: 8 },
+  noPinNote: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.tintLine },
+  noPinText: { flex: 1, color: colors.muted, fontSize: 12.5, lineHeight: 17 },
 });
