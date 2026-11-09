@@ -166,6 +166,21 @@ _TITLE_A = re.compile(r'<a href="/(?:index\.php/)?\d+">(.*?)</a>', re.S)
 _IMG = re.compile(r'<img[^>]*src="([^"]+)"')
 _DATE = re.compile(r'<time datetime="([\d-]{10})')
 _AREA = re.compile(r"المساحة\s*([\d,٠-٩.]+)\s*م")
+
+
+def area_whole_metres(raw) -> Optional[int]:
+    """«507.63م» → 508: the source's m² to the NEAREST whole metre (area_m2 is an integer column, backlog #123; the
+    fleet rounds, tuba `_area`). `N.to_int` truncates a 1-2 digit fraction — right for a price in whole riyals, wrong
+    for an area: 25868057 «507.63م» was stored 507 and 25868148 «362.5م» 362 (🆕 2026-11-09, branch re-score
+    42580392761). Thousands commas are dropped; anything that is not one number is None (never guessed)."""
+    if raw is None:
+        return None
+    s = str(raw).translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")).replace("٫", ".").replace("٬", "").replace(",", "")
+    m = re.search(r"(\d+(?:\.\d+)?)", s)
+    if not m:
+        return None
+    n = int(float(m.group(1)) + 0.5)
+    return n if n > 0 else None
 _AGE = re.compile(r"العمر\s*([^\n]+)")
 _STREET = re.compile(r"شارع\s*([^\n]+)")
 _DIMS = re.compile(r"الأطوال\s*([^\n]+)")
@@ -695,7 +710,7 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
             amount = detail["price"]["amount"]
             basis_from = "detail_amount"
 
-    area_m2 = N.to_int(fields.get("المساحة") or ix["area_raw"])
+    area_m2 = area_whole_metres(fields.get("المساحة") or ix["area_raw"])
     price_total = price_annual = price_per_meter = rent_period = None
     if amount is not None and p["basis"] == "per_sqm":
         # PRICE = SOURCE: a per-m² rate is not a total, and area is NEVER multiplied here. The
