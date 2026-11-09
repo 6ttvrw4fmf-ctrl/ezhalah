@@ -197,3 +197,15 @@ def test_a_total_rooms_site_card_never_matches_a_bedroom_count():
     tuba = dict(STORED, platform="tuba")
     v = cp.judge(tuba, CARD, PAGE, platform="tuba", link_kind="ok", page_photo=True)
     assert v["bedrooms"] == MISMATCH, v
+
+
+def test_exit_code_is_red_when_ads_were_picked_but_no_card_was_read():
+    """CodeRabbit on #10958: run_journeys() ignored the journey's exit code, so a PR dry-run that read every source
+    page and not one card still returned 0. Ads picked + production quiet + zero cards = the journey died = red."""
+    base = {"ads": 6, "cards": 0, "sources": 6, "sites": 3, "pick_errors": 0, "busy_chunks": 0}
+    assert cp.exit_code(base) == 1
+    assert cp.exit_code({**base, "cards": 1}) == 0                      # one card read: the journey ran
+    assert cp.exit_code({**base, "busy_chunks": 1}) == 0                # cards skipped on purpose: not a death
+    assert cp.exit_code({**base, "ads": 0, "sites": 0}) == 0            # nothing to sample is a quiet, honest green
+    assert cp.exit_code({**base, "ads": 0, "sites": 0, "pick_errors": 2}) == 1   # picking failed: red
+    assert cp.exit_code({**base, "cards": 6, "sites": 0}) == 1          # ads read but no site row written: red
