@@ -79,3 +79,26 @@ def test_a_different_ad_or_a_deeper_path_is_still_moved():
     assert classify("https://www.alhoshan.sa/properties/1013", 200,
                     "https://www.alhoshan.sa/properties/1013/a/b") == "moved"
     assert classify("https://macsaib.sa/property/x-y", 200, "https://macsaib.sa/ar/projects/x-y") == "moved"
+
+
+def test_gathern_is_opened_where_the_customer_opens_it():
+    """Night 11-08: /view/ read a bare 404 on two live units the Arabic app opens at /ar/view/ (adLocale.ts)."""
+    stored = "https://gathern.co/view/174185/unit/246182"
+    assert S.customer_url(stored) == "https://gathern.co/ar/view/174185/unit/246182"
+    assert S.customer_url("https://gathern.co/en/view/1/unit/2") == "https://gathern.co/ar/view/1/unit/2"
+    assert S.customer_url("https://gathern.co/ar/view/1/unit/2") == "https://gathern.co/ar/view/1/unit/2"
+    other = "https://www.dwelleo.sa/ar/properties/x-1"
+    assert S.customer_url(other) == other                            # every other site untouched
+    # a landing on the same /ar/ address is ok, never «moved»
+    assert S.classify(S.customer_url(stored), 200, S.customer_url(stored)) == "ok"
+
+
+def test_check_site_opens_the_customer_address(monkeypatch):
+    seen = []
+    monkeypatch.setattr(S, "sample", lambda *a, **k: [{"listing_url": "https://gathern.co/view/9/unit/8", "table": "t", "id": 1}])
+    monkeypatch.setattr(S, "open_link", lambda u: (seen.append(u), (200, u))[1])
+    monkeypatch.setattr(S.time, "sleep", lambda *_: None)
+    import random
+    row = S.check_site(None, "gathern", 1, rng=random.Random(0), night="2026-11-09", write=False)
+    assert "https://gathern.co/ar/view/9/unit/8" in seen and "https://gathern.co/view/9/unit/8" not in seen
+    assert row["ok"] == 1 and row["dead"] == 0

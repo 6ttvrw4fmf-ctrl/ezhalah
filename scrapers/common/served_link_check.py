@@ -133,6 +133,22 @@ def broken(row: dict) -> bool:
     return decided >= MIN_DECIDED and 2 * (row["dead"] + row["moved"]) >= decided
 
 
+# THE ADDRESS THE CUSTOMER OPENS, not the one we store (🔗 Click Guardian 2026-11-09). src/lib/adLocale.ts
+# never opens Gathern's unprefixed /view/… (7 of 280 live units answered it with a redirect home, backlog
+# 768): the Arabic app opens /ar/view/…, the English app /en/view/…. This check read the stored /view/ and
+# called two live units dead on night 11-08 (gathern 174185/unit/246182 + 246183: bare 404 on /view/ from
+# CI twice, while gathern's liveness read their /ar/view/ ALIVE at 02:38 and the crawl listed them at 04:21;
+# the customer journey's own evidence shows a gathern card opening gathern.co/ar/view/…). The check now
+# opens what the Arabic app opens, so a «dead» is a page a customer would really hit.
+_GATHERN_VIEW = re.compile(r"^(https?://(?:www\.)?gathern\.co)(?:/(?:ar|en))?(/view/.*)$", re.I)
+
+
+def customer_url(url: str) -> str:
+    """The URL the Arabic app opens for a stored listing_url (pure; mirrors localizeAdUrl(url, 'ar'))."""
+    m = _GATHERN_VIEW.match(url or "")
+    return f"{m.group(1)}/ar{m.group(2)}" if m else url
+
+
 def open_link(url: str) -> tuple[int | None, str | None]:
     """(status, landed URL). wasalt and walled reads go through the deletion tier's own transport
     (cleanup._probe: wasalt's browser, the fallback profiles), which reports status only."""
@@ -170,8 +186,9 @@ def check_site(client, platform: str, shown: int, *, rng: random.Random, night: 
         return row
     for r in picked:
         time.sleep(pace)
-        status, landed = open_link(r["listing_url"])
-        kind = classify(r["listing_url"], status, landed)
+        opened = customer_url(r["listing_url"])
+        status, landed = open_link(opened)
+        kind = classify(opened, status, landed)
         row["sampled"] += 1
         row[kind] += 1
         if kind == "moved":
