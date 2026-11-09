@@ -69,6 +69,7 @@ from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common.arabic_location import catalog_district, to_catalog
 from scrapers.common.http_liveness import LivenessProbe
+from scrapers.common.posting_date import site_posting_date
 
 BASE = "https://arkaanalaqar.com"
 SOURCE = "Arkaan"
@@ -564,6 +565,10 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
         "title": _redact(ld.get("name")) or _redact(item.get("title_text")),
         "description": _redact(detail.get("ad_text")),
         "photo_urls": photos,
+        # The site's own posting date (JSON-LD datePosted, «2026-11-07»). It reached additional_info.date_posted
+        # only, so date_added was NULL on all 2,493 rows. `last_updated_text` is the card's refresh note and is
+        # never read as a posting date.
+        "date_added": site_posting_date(ld.get("datePosted")),
         "additional_info": info,
         "price_evidence": evidence,
         # Complete source payload, captured once so a future field never needs a re-scrape.
