@@ -1023,6 +1023,14 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         # guessing WHICH answer disagreed. Field names and keys only — never a value, URL, name or phone (PDPL).
         if (mm := sorted(k for k, v in af_only.items() if v == MISMATCH)):
             print(f"  mismatch {key} fields {mm}", flush=True)
+            if "direction_ar" in mm:   # DEBUG branch only — never merged
+                from scrapers.common.new_listings_score import norm as _nm
+                _ls = [_nm(x) for x in ([page.get("title") or ""] + list((page.get("meta") or {}).values())
+                                        + (page.get("evidence_lines") or []) + (page.get("text_head") or "").split(" | "))]
+                print(f"    DBG stored={stored.get('direction_ar')!r} raw={results.get('direction_ar')} jsonld={bool(page.get('jsonld'))}", flush=True)
+                for _i, _x in enumerate(_ls):
+                    if "واجه" in _x or "شرق" in _x or "غرب" in _x or "جنوب" in _x or "شمال" in _x:
+                        print(f"    DBG line {_i}: {_x[:140]!r}", flush=True)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
         answers = offered(customer_answers(ad_lines, af_only, platform, page, texts.get((table, rid))), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
