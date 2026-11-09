@@ -35,7 +35,7 @@ if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/drift-held-in-open-pr
   const resp = JSON.parse(readFileSync(process.argv[2] ?? die('usage: drift-held-in-open-prs.ts <response.json>'), 'utf8'));
   const missing: string[] = resp.missing_in_git;
   if (!Array.isArray(missing) || !missing.length) die('no missing_in_git list in the response');
-  const slug = process.env.GITHUB_REPOSITORY ?? '6ttvrw4fmf-ctrl/ezhalah';
+  const slug = process.env.GITHUB_REPOSITORY || '6ttvrw4fmf-ctrl/ezhalah';
   const gh = (...a: string[]) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   const prs = JSON.parse(gh('pr', 'list', '-R', slug, '--state', 'open', '--limit', '300', '--json', 'number,headRefOid,files')) as
     Array<{ number: number; headRefOid: string; files: Array<{ path: string }> }>;
