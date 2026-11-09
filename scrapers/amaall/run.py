@@ -166,6 +166,19 @@ def _redact(text: Optional[str]) -> Optional[str]:
     return re.sub(r"\s{2,}", " ", t).strip() or None
 
 
+def _meta_strings(meta: dict, depth: int = 3) -> list[tuple[str, str]]:
+    """Every (key, text) a Houzez property_meta states, lists unwrapped and the «additional features»
+    title/value dicts walked in order (so «الترخيص الاعلاني» is read next to its number) — read-only."""
+    out: list[tuple[str, str]] = []
+    for k, v in (meta or {}).items():
+        for x in (v if isinstance(v, list) else [v]):
+            if isinstance(x, dict) and depth > 0:
+                out.extend(_meta_strings(x, depth - 1))
+            elif isinstance(x, (str, int, float)) and not isinstance(x, bool) and str(x).strip():
+                out.append((str(k), str(x)))
+    return out
+
+
 def _meta1(meta: dict, key: str) -> Any:
     """WP serialises single-value meta as a 1-element list; unwrap without assuming either shape.
     NOT for genuinely multi-valued meta — that mistake cost shmoualshmal 9 of its 10 photos."""
@@ -422,7 +435,10 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     }
     # The REGA ad licence the ad states in its own text («رخصة الإعلان: 7200661580»), read BEFORE _redact():
     # card parity found it on amaall's page and on 0 of 28 cards (🔧 2026-11-07).
-    lic = normalize.ad_licence_from_prose(body)
+    # … or in a Houzez meta field the body never carries («الترخيص الاعلاني: 7200807823» among the page's
+    # «عرض الشارع / الواجهة» facts — card parity 2026-11-09, on the page and on 0 of 3 sampled cards).
+    lic = normalize.ad_licence_from_prose(body) or normalize.ad_licence_from_prose(
+        " ".join(v for _, v in _meta_strings(meta)))
     if lic:
         row["license_number"] = lic
         row["additional_info"]["rega_ad_license_number"] = lic
