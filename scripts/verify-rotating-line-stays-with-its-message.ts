@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url';
 const root = join(import.meta.dirname, '..');
 let failures = 0;
 const check = (name: string, ok: boolean) => { console.log(`  ${ok ? '✓' : '✗'} ${name}`); if (!ok) failures++; };
+const mustCatch = (name: string, caught: boolean) => check(`(mutation) caught: ${name}`, caught);
 
 type Pick = (a: { lang: 'ar' | 'en'; name: string | null; count?: string; stableKey?: string }) => string;
 const PICKERS = [
@@ -53,7 +54,7 @@ for (const { file, fn } of PICKERS) {
   check(`${fn}: the same message shows the same line on a second device / after a refresh / for a shared copy`, r.same);
   check(`${fn}: different messages still rotate (${r.variety} distinct lines over ${ids.length * 4} picks)`, r.variety >= 30);
   const m = await stable(file, fn, fn + '-mut', (s) => s.replace('stableIndex(args.stableKey, pool.length)', 'Math.floor(Math.random() * pool.length)'));
-  check(`${fn}: (mutation) a random pick per device again is caught`, !m.same);
+  mustCatch(`${fn}: a random pick per device again`, !m.same);
 }
 
 if (failures) { console.error(`\n✗ ${failures} check(s) failed`); process.exit(1); }
