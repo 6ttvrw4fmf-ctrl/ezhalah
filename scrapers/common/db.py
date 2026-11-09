@@ -1402,6 +1402,23 @@ _READ_GONE_DONE: set[str] = set()
 # struck twice in one run and the collapse cap holds across both readings.
 _READ_GONE_STRUCK: dict[str, set[str]] = {}
 
+# What strike_read_gone() READ after a refused prune, per table, until end_run() writes it into the run's
+# notes (2026-11-09). A tripped guard used to leave only «prune guard tripped: …» in the notes, so
+# mon_detect_enumeration_incomplete() read superoffice — whose robots.txt-respecting window can never list
+# the whole catalogue (owner decision 4, 2026-11-03) and which then reads EVERY unseen office's own page —
+# as «delisted ads are NOT being retired». The marker says what the direct reads decided:
+#   «unseen read directly: <table> unseen=U read=R gone=G live=L unknown=K unread=U-R»
+# unread=0 ⇒ a partial WALK with a complete direct VERDICT; the detector does not raise on it.
+# unread>0 (the read cap) or no marker ⇒ raised exactly as before.
+_READ_GONE_REPORT: dict[str, dict[str, int]] = {}
+
+
+def read_gone_report_line(table: str, counts: dict[str, int]) -> str:
+    """The one line end_run() appends per table; mon_detect_enumeration_incomplete() parses `unread=`."""
+    return (f"unseen read directly: {table} unseen={counts['unseen']} read={counts['read']} "
+            f"gone={counts['gone']} live={counts['live']} unknown={counts['unknown']} "
+            f"unread={max(0, counts['unseen'] - counts['read'])}")
+
 
 def _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, n_active,
                                    max_prune_frac, min_active_guard, grace) -> None:
@@ -1468,21 +1485,34 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
     own_oracle = verify_gone is not None
     if verify_gone is None:
         verify_gone = own_page_status_oracle(c, table, seen)
-    unseen = sorted((r for r in rows if r["ad_number"] not in seen and r["ad_number"] not in struck_before),
-                    key=lambda r: str(r.get("last_seen_at") or ""))[:max_reads]
+    unseen_all = sorted((r for r in rows if r["ad_number"] not in seen and r["ad_number"] not in struck_before),
+                        key=lambda r: str(r.get("last_seen_at") or ""))
+    unseen = unseen_all[:max_reads]
     gone: list[str] = []
     live: list[str] = []
+    # the run-ledger report (2026-11-09): what the direct reads decided, so a tripped guard whose every
+    # unseen row was read is told apart from one that left rows unread (see _READ_GONE_REPORT).
+    # the LAST reading of a table wins: a caller's own-oracle pass after the default status pass supersedes it.
+    report = {"unseen": len(unseen_all), "read": 0, "gone": 0, "live": 0, "unknown": 0}
+    _READ_GONE_REPORT[table] = report
     for r in unseen:
         try:
             got = verify_gone(r["ad_number"])
         except Exception as e:  # noqa: BLE001 — an oracle that throws is UNKNOWN, never gone
             print(f"{table}: verify_gone({r['ad_number']}) raised {type(e).__name__}: {e} → unknown")
+            report["read"] += 1
+            report["unknown"] += 1
             continue
         verdict = str((got[0] if isinstance(got, (tuple, list)) else got) or "unknown").lower()
+        report["read"] += 1
         if verdict == "gone":
             gone.append(r["ad_number"])
+            report["gone"] += 1
         elif verdict == "live" and own_oracle:
             live.append(r["ad_number"])
+            report["live"] += 1
+        else:
+            report["unknown"] += 1
     # A LIVE READING IS AN ANSWER TOO (2026-10-31, ♻️). This used to keep only «gone», so an unseen ad
     # whose own page the site's own oracle read live stayed unverified and kept its strikes forever:
     # albukaeri's walk re-saw 6 of 12 every night, and 6 shown ads had no reading recorded since
@@ -2095,6 +2125,11 @@ def end_run(
         tag = "prune guard tripped: " + "; ".join(_PRUNE_TRIPS)
         final_notes = f"{final_notes} | {tag}" if final_notes else tag
         _PRUNE_TRIPS.clear()
+    if _READ_GONE_REPORT:
+        # what the direct reads behind the refused prune decided (2026-11-09) — see _READ_GONE_REPORT
+        tag = " | ".join(read_gone_report_line(t, c) for t, c in sorted(_READ_GONE_REPORT.items()))
+        final_notes = f"{final_notes} | {tag}" if final_notes else tag
+        _READ_GONE_REPORT.clear()
     _execute(
         sb().table("scrape_runs").update(
             {
