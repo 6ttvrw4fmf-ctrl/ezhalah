@@ -476,8 +476,12 @@ _LIST_WORDS = frozenset(_n(w) for w in (
 # PREPARED / POSSIBLE: the thing is not there yet — no row (the scrapers' _PREPARED_ONLY + «possible» words).
 # «موسس / موسسة» is «مؤسس» typed without the hamza (🔬 2026-11-04 elevator precision sample: aqar 17753855
 # «موسسة مصعد», 14874158 «موسس مصعد» served lift = yes; 2 of 25 sampled yeses).
+# «تسليك» is the conduit laid FOR a fixture, not the fixture: «الشقه يوجد بها تسليك مكيف اسبلت للصاله» (aqar 15702793),
+# «تسليك التكييف جاهز» (manafe project 297's spec list). 🔬 2026-11-09: 6 of 12 served aqar AC yeses whose text says
+# «تسليك … مكيف/تكييف» had no other AC statement; the af-score asked AC of manafe 13707996 / 13708034 for the same words.
 _PREPARED = tuple(_n(w) for w in N._PREPARED_ONLY + ("تمديد", "تمديدات", "امكانيه", "بالامكان", "قابل",
-                                                        "قابليه", "يمكن", "ممكن", "يصلح", "موسس", "موسسه"))
+                                                        "قابليه", "يمكن", "ممكن", "يصلح", "موسس", "موسسه",
+                                                        "تسليك", "وتسليك", "تسليكات"))
 _PREPARED_PLACE = tuple(_n(w) for w in ("مكان", "مساحه", "موقع"))   # «مكان مسبح», «مكان للمصعد»
 _PLACE_FACTS = frozenset({"pool", "elevator"})
 # NEARBY: about the street, not the unit — no row. The scrapers' _PROXIMITY plus the words a view/distance uses.
@@ -2229,6 +2233,13 @@ def selftest() -> None:
         ("لا يوجد سماعات", {"sound_system": False}, ()),
         ("جلسة نار وحطب", {"fire_pit": True}, ()),
         ("موقد خارجي", {"fire_pit": True}, ()),
+        # 🔬 2026-11-09: «تسليك» (conduits laid) is a preparation, not fitted AC — real sentences
+        ("مكونه من 3غرف +3حمامات + مطبخ امريكي مع صاله الشقه يوجد بها تسليك مكيف اسبلت للصاله", {}, ("air_conditioner",)),
+        ("منتهي من الكهرباء واللياسه والسباكه وتسليك تكيف سبيلت اللياسه داخلي وخارجي", {}, ("air_conditioner",)),
+        ("ملاحظه :تسليك المكيفات جميعها اسبلت كذلك الفله بناء شخصي", {}, ("air_conditioner",)),
+        ("المواصفات أرضيات سيراميك أسقف جبس دش مركزي مصعد خدمة انترنت حمامات تسليك التكييف جاهز كاميرات مراقبة", {}, ("air_conditioner",)),
+        # … while fitted AC beside the conduits still reads yes
+        ("جميع المكيفات المركبة من ماركة جري نوع كونسيل وجميع تسليك مكيفات الغرفة مجهزة لنظام السبلت", {"air_conditioner": True}, ()),
         ("موقد غاز في المطبخ", {}, ("fire_pit",)),
         # 🔬 2026-11-08: the kitchen cooktop is not a fire pit (28 of 30 served apartment «موقد» yeses) — real sentences
         ("المطبخ والأجهزة: - 6 مكيفات سبليت. - ميكروويف. - شواية. - موقد سيراميكي. - جميع الأجهزة إيطالية الصنع", {}, ("fire_pit",)),
