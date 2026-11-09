@@ -52,3 +52,13 @@ def test_the_old_reader_lost_it():
         assert compare_listing({"direction_ar": "شرق"}, page("شرقية"))["direction_ar"] == MISMATCH
     finally:
         R._feature_block_lines = saved
+
+
+def test_a_bare_singular_year_after_the_age_label_is_one_year():
+    # aqarcity_residential_listings:2292614 (2026-11-09 score), the description's real line
+    from scrapers.common.new_listings_score import AGE_KW, _cmp_number, norm
+    line = norm("المساحة :109 متر مربع. سطح مع غرفة بمساحة 75 متر مربع. عمر العقار: سنة. بناء على الكود السعودي.")
+    assert _cmp_number(1, [line], line, AGE_KW) == MATCH
+    assert _cmp_number(5, [line], line, AGE_KW) == MISMATCH
+    other = norm("المساحة :109 متر مربع. عمر العقار: سنتين.")
+    assert _cmp_number(1, [other], other, AGE_KW) != MATCH       # «سنتين» is two, never one

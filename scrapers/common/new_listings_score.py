@@ -670,6 +670,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         worded |= {EN_NUMBERS[m.group(1).lower()] for i in kw_hits for m in EN_NUMBER.finditer(lines[i])}
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
             worded.add(1)
+        # A bare singular year right after the age label is ONE year: aqarcity 30135 (aqarcity_residential_listings:
+        # 2292614, 2026-11-09 score) prints «… المساحة :109 متر مربع … عمر العقار: سنة. …» on one line; stored 1, and
+        # the line's 109 made «page states» true, so the night scored it a MISMATCH.
+        if kw == AGE_KW and any(re.search(r"عمر العقار\s*[:：]?\s*(?:سنه|سنة|عام)(?![\u0621-\u064A])", lines[i]) for i in kw_hits):
+            worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
             worded.add(2)
         # A label/value page prints the figure on its OWN line, before or after the label (🔬 2026-11-08, backlog 1615,
