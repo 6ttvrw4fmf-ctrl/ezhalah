@@ -636,7 +636,7 @@ def test_a_price_cell_with_no_label_and_no_figure_prices_nothing() -> None:
     assert row is not None, why
     assert row["transaction_type"] == "Rent"
     assert (row["price_total"], row["price_annual"], row["price_per_meter"]) == (None, None, None)
-    assert row["area_m2"] == 1779             # the source's own 1,779.62م
+    assert row["area_m2"] == 1780             # the source's own 1,779.62م, to the nearest whole metre (fleet rule, #123)
 
 
 # ══ TRAP 3: basis — a rate is not a total ═══════════════════════════════════════════════════════
@@ -646,7 +646,7 @@ def test_per_metre_label_never_fills_price_total() -> None:
     assert row["price_per_meter"] == 1200
     # a rate with no total: AUTHORITATIVE_NULL, so a total an older read stored is cleared (SHW22164, 2026-10-18)
     assert row["price_total"] is db.AUTHORITATIVE_NULL
-    assert row["area_m2"] == 472              # 472.5م — and 1200 * 472 is NEVER written anywhere
+    assert row["area_m2"] == 473              # 472.5م to the nearest metre — and 1200 * 473 is NEVER written anywhere
     assert row["additional_info"]["price_basis"] == "per_sqm"
 
 

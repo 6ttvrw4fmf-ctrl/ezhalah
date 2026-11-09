@@ -93,7 +93,9 @@ export function fillGreeting(text: string | null, greetingIndex: number | null, 
 }
 
 // ── the facts ──────────────────────────────────────────────────────────────────────────────────────────
-export type InsightTemplate = { id: number; kind: string; personal: boolean; ar: string; en: string };
+// day_bound (migration 20261109055302): the template says «أمس» / «آخر 7 أيام» / «آخر 30 يوم» or states a count, so
+// it is true only on the Riyadh day its pack was built for. Missing (an older read) is treated as true.
+export type InsightTemplate = { id: number; kind: string; personal: boolean; ar: string; en: string; day_bound?: boolean };
 export type Insight = {
   id: number; kind: string; region: string | null; city: string | null; city_id: number | null;
   district: string | null; district2: string | null; type: string | null; a: number | string | null; b: number | string | null;
@@ -116,6 +118,26 @@ export const TYPE_EN: Record<string, string> = {
 };
 
 const fmt = (v: number) => Math.trunc(v).toLocaleString('en-US');
+/** «أكثر من N» / "more than N" for a count that moves through the day (owner 2026-11-09: «More than»). N is a round number
+ *  STRICTLY below the count with room to spare — at least 0.5% (or 1) under it, then down to two leading digits (tens
+ *  below 100): 14,083 → 14,000; 163 → 160; 37 → 30. Measured drift between the 3-hourly rebuilds: 0.15% on average, 34 ads
+ *  at most on 14,083. Under 11 there is no round number worth saying: null, and the fact is skipped. */
+export function moreThan(v: number): number | null {
+  const lim = Math.trunc(v) - Math.max(1, Math.ceil(v * 0.005));
+  if (lim < 10) return null;
+  const mag = lim < 100 ? 10 : 10 ** (Math.floor(Math.log10(lim)) - 1);
+  return Math.floor(lim / mag) * mag;
+}
+/** «ما لا يقل عن N» / "at least N" for a count that can still fall through the day (an ad deleted after the build).
+ *  N is at or below the count with room: at least 0.5% (or 1) under it, then down to two leading digits (tens from
+ *  20 to 99, exact below 20): 120 → 110; 4,312 → 4,200; 7 → 6. Below 2 there is nothing to say: null, fact skipped. */
+export function atLeast(v: number): number | null {
+  const lim = Math.trunc(v) - Math.max(1, Math.ceil(v * 0.005));
+  if (lim < 2) return null;
+  if (lim < 20) return lim;
+  const mag = lim < 100 ? 10 : 10 ** (Math.floor(Math.log10(lim)) - 1);
+  return Math.floor(lim / mag) * mag;
+}
 const num = (v: unknown): number | null => {
   const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -133,6 +155,11 @@ export function renderInsight(t: InsightTemplate, f: Insight, en: NameEn): { ar:
   const vEn: Record<string, string> = { g: GREETING_SLOT, n: NAME };
   const need = (key: string) => t.ar.includes(`{${key}}`) || t.en.includes(`{${key}}`);
   if (need('a')) { const a = num(f.a); if (a == null) return null; vAr.a = vEn.a = fmt(a); }
+  // {a_more}: the sentence itself says «أكثر من» / "more than"; the number is moreThan(a), never the exact count.
+  if (need('a_more')) { const a = num(f.a); const m = a == null ? null : moreThan(a); if (m == null) return null; vAr.a_more = vEn.a_more = fmt(m); }
+  // {a_least} / {b_least}: the sentence says «ما لا يقل عن» / "at least"; the number is atLeast(), never the exact count.
+  if (need('a_least')) { const a = num(f.a); const m = a == null ? null : atLeast(a); if (m == null) return null; vAr.a_least = vEn.a_least = fmt(m); }
+  if (need('b_least')) { const b = num(f.b); const m = b == null ? null : atLeast(b); if (m == null) return null; vAr.b_least = vEn.b_least = fmt(m); }
   if (need('b')) { const b = num(f.b); if (b == null) return null; vAr.b = vEn.b = fmt(b); }
   if (need('region')) {
     if (!f.region || !REGION_EN[f.region]) return null;
@@ -223,8 +250,13 @@ export function chooseInsightLine(
     }
     return null;
   };
-  const personal = pack.templates.filter((t) => t.personal);
-  const general = pack.templates.filter((t) => !t.personal);
+  // A PACK FROM ANOTHER DAY NEVER SAYS «أمس», «آخر 7 أيام» OR A COUNT (owner 2026-10-27 «we can go to jail»; 2026-11-09
+  // «those numbers count needs to be exact»). The first open of a day may read the last 36 h's pack (never pop up late);
+  // only its templates explicitly marked day_bound = false are usable then. A pack with no day is never today's.
+  const today = pack.day != null && pack.day === riyadhDate(now);
+  const usable = today ? pack.templates : pack.templates.filter((t) => t.day_bound === false);
+  const personal = usable.filter((t) => t.personal);
+  const general = usable.filter((t) => !t.personal);
   if (opts.district && rand() < 1 / 3) {
     const p = pick(pairsOf(personal, mine), false);
     if (p) return p;
@@ -236,6 +268,9 @@ export function chooseInsightLine(
   return pick(pairsOf(general, (f) => !opts.city || !sameCity(f.city, opts.city)), true)
     ?? pick(pairsOf(general, () => true), true);
 }
+
+/** The Riyadh calendar date (YYYY-MM-DD) of an instant — the same day welcome_insights_pick stamps on its pack. */
+export const riyadhDate = (t: number): string => new Date(t + 3 * 3600_000).toISOString().slice(0, 10);
 
 /** Cache ids for insight lines: 2000 + template id (WELCOME_LINES use 1–99, sign-in lines 101–105). */
 export const INSIGHT_ID_BASE = 2000;

@@ -16,7 +16,7 @@ export type CheckConclusion =
   | 'SUCCESS' | 'FAILURE' | 'CANCELLED' | 'TIMED_OUT' | 'SKIPPED' | 'NEUTRAL'
   | 'ACTION_REQUIRED' | 'STALE' | 'STARTUP_FAILURE' | null;
 
-export type CheckRun = { context: string; conclusion: CheckConclusion };
+export type CheckRun = { context: string; conclusion: CheckConclusion; title?: string | null };
 
 export type MergeGateInput = {
   requiredContexts: string[];       // from branch protection — the contract, not a guess
@@ -35,6 +35,8 @@ export type MergeGateInput = {
   // CodeRabbit»): #11247 was green + CLEAN with 9 unanswered Majors, several on PRICE = SOURCE, and the robot was about
   // to merge it. null = the threads could not be read → blocks. Omitted = not checked (pure unit tests only).
   openReviewMajors?: string[] | null;
+  // CodeRabbit has posted at least one review on this PR (any commit). Only an explicit `true` counts.
+  codeRabbitReviewed?: boolean;
 };
 
 export type MergeGateResult = { allow: boolean; reasons: string[] };
@@ -52,8 +54,18 @@ export function normaliseConclusion(c: string | null | undefined): CheckConclusi
 // that one context, only SKIPPED, and only while it is NOT required: its FAILURE/CANCELLED/pending still block, and
 // if branch protection ever makes it required, rule 1 governs and SKIPPED blocks again.
 export const ADVISORY_MAY_SKIP = ['CodeRabbit'];
-const advisorySkip = (c: CheckRun, required: string[]) =>
-  normaliseConclusion(c.conclusion) === 'SKIPPED' && ADVISORY_MAY_SKIP.includes(c.context) && !required.includes(c.context);
+// 0b″ (owner 2026-11-09, «Yes, merge»): a rate-limited CodeRabbit reports NEUTRAL «Review rate limited» and never
+// re-reviews by itself. #11367 (three byte-exact mirrors) had every Major CodeRabbit raised fixed and resolved, yet sat
+// 5 h on that NEUTRAL while the drift gate refused every deploy. It passes ONLY when CodeRabbit already reviewed this
+// PR AND its threads were read with no open Major (rule 3b still runs) AND it is not required.
+export const RATE_LIMITED = /rate limited/i;
+const advisorySkip = (c: CheckRun, input: MergeGateInput) => {
+  if (!ADVISORY_MAY_SKIP.includes(c.context) || input.requiredContexts.includes(c.context)) return false;
+  const k = normaliseConclusion(c.conclusion);
+  return k === 'SKIPPED'
+    || (k === 'NEUTRAL' && RATE_LIMITED.test(c.title ?? '') && input.codeRabbitReviewed === true
+      && Array.isArray(input.openReviewMajors) && input.openReviewMajors.length === 0);
+};
 
 export function decideMerge(input: MergeGateInput): MergeGateResult {
   const reasons: string[] = [];
@@ -70,7 +82,7 @@ export function decideMerge(input: MergeGateInput): MergeGateResult {
   // means a branch with NO protection configured (requiredContexts legitimately []) is still not a
   // free pass. Strictly stricter than the required-only rule — never a substitute for it.
   for (const c of input.checks) {
-    if (advisorySkip(c, input.requiredContexts)) continue;
+    if (advisorySkip(c, input)) continue;
     if (normaliseConclusion(c.conclusion) !== 'SUCCESS') {
       reasons.push(`check "${c.context}" is ${normaliseConclusion(c.conclusion) ?? 'PENDING'}, not SUCCESS`);
     }
