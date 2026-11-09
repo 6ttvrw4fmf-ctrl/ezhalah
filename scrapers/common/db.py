@@ -660,9 +660,9 @@ def _stated_rega_ad_licence(r: dict[str, Any], info) -> Optional[str]:
     """The REGA ad licence this row states, in priority: the column, the panel's license_number key, the ad's words."""
     from scrapers.common import normalize
     for v in (r.get("license_number"), info.get("license_number") if isinstance(info, dict) else None):
-        v = str(v or "").strip()
-        if _REGA_AD_LICENCE.match(v):
-            return v
+        # A licence is the text the source printed: a bare number (int) is not one (test_licence_reaches_the_card).
+        if isinstance(v, str) and _REGA_AD_LICENCE.match(v.strip()):
+            return v.strip()
     return normalize.ad_licence_from_prose(" ".join(str(r.get(k) or "") for k in ("description", "title")))
 
 
