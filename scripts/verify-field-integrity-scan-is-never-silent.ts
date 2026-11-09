@@ -25,6 +25,12 @@ const GUARDED = /::numeric\s*\/\s*nullif\(x\.area_m2,\s*0\)\s*>\s*500000/;
 const BARE = /::numeric\s*\/\s*x\.area_m2\s*>/;
 const SKIP_ALERT = /'field_integrity_table_skipped:'\s*\|\|\s*rec\.tn/;
 const SILENT = /exception\s+when\s+others\s+then\s+continue\s*;/i;
+// C. both price arms (phone/ID band + extreme magnitude) count a row only while a customer is served that raw figure
+const SERVED_RAW = /public\.field_integrity_served_raw\(x\.tableoid,\s*x\.id,\s*coalesce\(x\.price_total,\s*x\.price_annual\)\)/g;
+export const servedRawArms = (sql: string): number => (codeLines(sql).match(SERVED_RAW) || []).length;
+// a full definition carries the call twice; a replace() patch carries it once in its constant and ASSERTS it lands twice
+export const installsBothArms = (sql: string): boolean =>
+  servedRawArms(sql) >= 2 || ((sql.match(SERVED_RAW) || []).length >= 1 && /\)\s*<>\s*2\s+then/.test(sql));
 
 type F = { name: string; sql: string };
 
@@ -49,20 +55,28 @@ export function problems(files: F[]): string[] {
     if (SILENT.test(codeLines(f.sql))) out.push(`${f.name} reintroduces a silent «exception when others then continue»`);
     if (REDEFINE.test(f.sql) && !SKIP_ALERT.test(f.sql)) out.push(`${f.name} redefines mon_detect_field_integrity without the skipped-table alert`);
   }
+  const servedIdx = sorted.findIndex((f) => FN.test(f.sql) && installsBothArms(f.sql));
+  if (servedIdx < 0) out.push('no migration installs the served-raw check into both price arms of mon_detect_field_integrity');
+  else for (const f of sorted.slice(servedIdx + 1)) {
+    if (REDEFINE.test(f.sql) && servedRawArms(f.sql) < 2) out.push(`${f.name} redefines mon_detect_field_integrity with the served-raw check in fewer than both price arms`);
+  }
   return out;
 }
 
 // ── mutation proofs ──────────────────────────────────────────────────────────────────────────────────────────
+const ARM = 'then public.field_integrity_served_raw(x.tableoid, x.id, coalesce(x.price_total, x.price_annual))';
+const served: F = { name: '20261108221500_s.sql', sql: `-- mon_detect_field_integrity\nphone arm ${ARM}\nmagnitude arm ${ARM}` };
 const guard: F = { name: '20261108235000_a.sql', sql: "old_div constant text := $a$coalesce(x.price_annual, 0))::numeric / x.area_m2 > 500000)$a$;\nnew_div constant text := $a$coalesce(x.price_annual, 0))::numeric / nullif(x.area_m2, 0) > 500000)$a$;\n-- mon_detect_field_integrity" };
 const skip: F = { name: '20261109001500_b.sql', sql: "old_exc constant text := $a$    exception when others then continue;  -- x\n$a$;\n-- mon_detect_field_integrity\n'field_integrity_table_skipped:'||rec.tn" };
 const cases: Array<[string, F[], boolean]> = [
-  ['the real pair passes', [guard, skip], true],
-  ['no guard install fails', [skip], false],
-  ['no skip-alert install fails', [guard], false],
-  ['a later patch with a bare division fails', [guard, skip, { name: '20261110000000_c.sql', sql: 'mon_detect_field_integrity … greatest(0,1)::numeric / x.area_m2 > 500000' }], false],
-  ['a later redefine without nullif fails', [guard, skip, { name: '20261110000000_c.sql', sql: "create or replace function public.mon_detect_field_integrity() 'field_integrity_table_skipped:'||rec.tn" }], false],
-  ['a later silent handler fails', [guard, skip, { name: '20261110000000_c.sql', sql: 'mon_detect_field_integrity\n    exception when others then continue;\n' }], false],
-  ['an unrelated later migration passes', [guard, skip, { name: '20261110000000_c.sql', sql: 'select 1 / x.area_m2 > 2; exception when others then continue;' }], true],
+  ['the real set passes', [served, guard, skip], true],
+  ['no guard install fails', [served, skip], false],
+  ['no skip-alert install fails', [served, guard], false],
+  ['no served-raw install fails', [guard, skip], false],
+  ['a later patch with a bare division fails', [served, guard, skip, { name: '20261110000000_c.sql', sql: 'mon_detect_field_integrity … greatest(0,1)::numeric / x.area_m2 > 500000' }], false],
+  ['a later redefine without nullif fails', [served, guard, skip, { name: '20261110000000_c.sql', sql: "create or replace function public.mon_detect_field_integrity() 'field_integrity_table_skipped:'||rec.tn" }], false],
+  ['a later silent handler fails', [served, guard, skip, { name: '20261110000000_c.sql', sql: 'mon_detect_field_integrity\n    exception when others then continue;\n' }], false],
+  ['an unrelated later migration passes', [served, guard, skip, { name: '20261110000000_c.sql', sql: 'select 1 / x.area_m2 > 2; exception when others then continue;' }], true],
 ];
 let bad = 0;
 const mustCatch = (label: string, caught: boolean) => { if (!caught) { console.error(`✗ mutation proof «${label}» not caught`); bad++; } };
@@ -71,8 +85,14 @@ for (const [label, files, expectOk] of cases) {
   const ok = problems(files).length === 0;
   if (expectOk) mustPass(label, ok); else mustCatch(label, !ok);
 }
-mustCatch('a later patch reintroducing the bare division', problems([guard, skip, { name: '20261110000000_d.sql', sql: 'mon_detect_field_integrity … greatest(0,1)::numeric / x.area_m2 > 500000' }]).length > 0);
-mustCatch('a later patch reintroducing the silent skip', problems([guard, skip, { name: '20261110000000_e.sql', sql: 'mon_detect_field_integrity\n    exception when others then continue;\n' }]).length > 0);
+mustCatch('a later patch reintroducing the bare division', problems([served, guard, skip, { name: '20261110000000_d.sql', sql: 'mon_detect_field_integrity … greatest(0,1)::numeric / x.area_m2 > 500000' }]).length > 0);
+mustCatch('a later patch reintroducing the silent skip', problems([served, guard, skip, { name: '20261110000000_e.sql', sql: 'mon_detect_field_integrity\n    exception when others then continue;\n' }]).length > 0);
+const redefineWith = (arms: number) => ({ name: '20261110000000_f.sql', sql: `create or replace function public.mon_detect_field_integrity() x::numeric / nullif(x.area_m2, 0) > 500000 'field_integrity_table_skipped:'||rec.tn ${Array(arms).fill(ARM).join(' ')}` });
+mustCatch('a redefine that drops the served-raw check from the phone/ID arm', problems([served, guard, skip, redefineWith(1)]).length > 0);
+mustCatch('a redefine that drops the served-raw check from the extreme-magnitude arm', problems([served, guard, skip, redefineWith(1)]).length > 0);
+mustCatch('a redefine that drops it from both arms', problems([served, guard, skip, redefineWith(0)]).length > 0);
+mustPass('a redefine that keeps both arms', problems([served, guard, skip, redefineWith(2)]).length === 0);
+mustCatch('an install with the check in only one arm', problems([{ ...served, sql: `-- mon_detect_field_integrity\n${ARM}` }, guard, skip]).length > 0);
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
