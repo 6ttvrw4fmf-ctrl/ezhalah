@@ -83,8 +83,13 @@ export function unreadableReplaces(sql: string): string[] {
   for (const m of code.matchAll(/\breplace\s*\(\s*(\w+)\s*,\s*([^,()]+?)\s*,\s*([^,()]+?)\s*\)/gi)) {
     const [, , from, to] = m;
     const sfx = from.replace(/^old_/, '');
-    const ok = /^old_\w+$/.test(from) && declared.has(from) && (to === "''" || (to === `new_${sfx}` && declared.has(to)));
-    if (ok) readable++; else bad.push(m[0]);
+    const isOld = /^old_\w+$/.test(from) && declared.has(from);
+    // replace(v, old_X, '') only COUNTS matches when it sits inside length(…); anywhere else it deletes text from
+    // the function body, which must be declared as new_X := '' so patchRemoves() can judge it like any other edit.
+    const counting = to === "''" && /\blength\s*\(\s*$/i.test(code.slice(0, m.index));
+    const ok = isOld && (counting || (to === `new_${sfx}` && declared.has(to)));
+    if (ok) readable++;
+    else bad.push(to === "''" ? `${m[0]} deletes body text outside a length() count — declare new_${sfx} := '' instead` : m[0]);
   }
   if (readable + bad.length < calls) bad.push(`${calls - readable - bad.length} replace(...) call(s) with nested or unparseable arguments`);
   return bad;
@@ -185,6 +190,9 @@ mustPass("a '…'-quoted patch that keeps the call (with a '' escape) passes", p
 mustCatch('a readable unrelated pair followed by an inline-literal replace that removes the call', problems([served, guard, skip, patchQ(`  old_ok text := 'unrelated';\n  new_ok text := 'unrelated';\nbegin null; end; do $z$ declare v text; begin v := replace(v, old_ok, new_ok);\n  v := replace(v, 'public.field_integrity_served_raw(x.tableoid, x.id, coalesce(x.price_total, x.price_annual))', 'true');`)]).length > 0);
 mustCatch('a replace whose replacement is a concatenation', problems([served, guard, skip, patchQ(`  old_x constant text := 'a';\n  new_x constant text := 'b';\n  v2 text := replace(v, old_x, new_x || 'c');`)]).length > 0);
 mustCatch('a replace nested inside another expression the reader cannot split', problems([served, guard, skip, patchQ(`  old_x constant text := 'a';\n  new_x constant text := 'b';\n  v2 text := replace(upper(v), old_x, new_x);`)]).length > 0);
+mustCatch("an unrelated readable pair followed by a bare deletion replace(v, old_drop, '')", problems([served, guard, skip, patchQ(`  old_ok constant text := 'unrelated';\n  new_ok constant text := 'unrelated';\n  old_drop constant text := 'and case when y ${ARM} else false end';\n  v2 text := replace(replace(v, old_ok, new_ok), old_drop, '');\n  v3 text := replace(v, old_drop, '');`)]).length > 0);
+mustCatch("a declared empty replacement new_drop := '' that drops the served-raw call", problems([served, guard, skip, patchQ(`  old_drop constant text := 'and case when y ${ARM} else false end';\n  new_drop constant text := '';`)]).length > 0);
+mustPass("the match-count idiom length(replace(v, old_x, '')) with a pair that keeps the call", problems([served, guard, skip, patchQ(`  old_x constant text := 'and ${ARM}';\n  new_x constant text := 'and case when y ${ARM} else false end';\n  n int := (length(v) - length(replace(v, old_x, ''))) / length(old_x);`)]).length === 0);
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
