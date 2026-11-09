@@ -15,6 +15,8 @@
 --      so an exact-count fact is checked as «the search holds AT LEAST the fact» — the shown number is only ever
 --      repaired DOWN to the search (never up to it), and the top district is ranked on the same de-duplicated set
 --      (welcome_unique_district_counts) and must be reachable with at least as many ads as the fact ranks.
+-- (The cap counts a licence over the WHOLE set, as the owner said; the apply-time proof below keeps every other
+-- licence under it so the city/type/deal halves of the key are exercised on their own.)
 -- Edits are made in place on the LIVE definitions (replace with an exactly-once assertion), so nothing of a
 -- concurrent change is dropped. Proof at apply time: a hand-made set with a cross-site twin, a same-site twin, a
 -- different-city namesake, a 6-copy broker number and licence-less rows folds to exactly the expected rows.
@@ -148,9 +150,12 @@ begin
     ('aqar',   1, '7200000001', 1, 'أرض سكنية', 'بيع'),   -- a property on two sites …
     ('wasalt', 2, '7200000001', 1, 'أرض سكنية', 'بيع'),   -- … counts once
     ('aqar',   3, '7200000001', 1, 'أرض سكنية', 'بيع'),   -- and its repost on the first site counts in that once
-    ('aqar',   4, '7200000001', 2, 'أرض سكنية', 'بيع'),   -- the same number in another city: a different property, kept
-    ('aqar',   5, '7200000001', 1, 'فيلا',      'بيع'),   -- another type: kept
-    ('haraj',  6, '7200000001', 1, 'أرض سكنية', 'إيجار'), -- another deal: kept
+    ('aqar',   4, '7200000003', 2, 'أرض سكنية', 'بيع'),   -- a licence shared by two cities: a different property, kept …
+    ('aqar',  40, '7200000003', 3, 'أرض سكنية', 'بيع'),   -- … (both copies stay: the key carries the city)
+    ('aqar',   5, '7200000004', 1, 'فيلا',      'بيع'),   -- one licence, two types: both kept
+    ('aqar',  50, '7200000004', 1, 'شقة',       'بيع'),
+    ('haraj',  6, '7200000005', 1, 'أرض سكنية', 'إيجار'), -- one licence, sale and rent: both kept
+    ('haraj', 60, '7200000005', 1, 'أرض سكنية', 'بيع'),
     ('aqar',  10, null,         1, 'أرض سكنية', 'بيع'),   -- no licence: never folded here
     ('aqar',  11, null,         1, 'أرض سكنية', 'بيع'),
     ('aqar',  12, 'ABC',        1, 'أرض سكنية', 'بيع');   -- not a numeric licence: kept
@@ -158,8 +163,8 @@ begin
   select count(*) into before_n from zz_lic_fold;
   folded := public.welcome_fold_licence_twins('zz_lic_fold');
   select count(*) into after_n from zz_lic_fold;
-  if before_n <> 15 or folded <> 2 or after_n <> 13 then
-    raise exception 'PROOF: licence fold expected 15 → 13 rows (2 folded), got % → % (% folded)', before_n, after_n, folded;
+  if before_n <> 18 or folded <> 2 or after_n <> 16 then
+    raise exception 'PROOF: licence fold expected 18 → 16 rows (2 folded), got % → % (% folded)', before_n, after_n, folded;
   end if;
   if (select count(*) from zz_lic_fold where license_number = '7200000001' and city_id = 1 and type_ar = 'أرض سكنية' and deal_ar = 'بيع') <> 1 then
     raise exception 'PROOF: the twin trio did not fold to one copy';

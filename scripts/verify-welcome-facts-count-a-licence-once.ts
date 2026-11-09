@@ -44,7 +44,7 @@ check(`the recount's governing migration (${auditLast?.f ?? 'none'}) folds licen
 check(`the check's governing migration (${verifyLast?.f ?? 'none'}) compares search ≥ fact and ranks districts de-duplicated`, !!verifyLast && checksAfterDedup(verifyLast.s));
 const rule = files.find(({ s }) => B.test(s) && A.test(s));
 check(`the migration that made the rule (${rule?.f ?? 'none'}) proves the fold on a hand-made set at apply time`,
-  !!rule && /PROOF: licence fold expected 15 → 13 rows/.test(rule.s) && /a 6-copy broker number was folded/.test(rule.s));
+  !!rule && /PROOF: licence fold expected 18 → 16 rows/.test(rule.s) && /a 6-copy broker number was folded/.test(rule.s));
 
 if (helper) {
   mustCatch('cap removed (a broker number on 233 ads folded to one)', !foldsLicenceTwins(helper.s.replace("group by 1 having count(*) <= %2$s", 'group by 1')));
