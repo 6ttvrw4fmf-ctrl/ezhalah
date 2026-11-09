@@ -483,6 +483,20 @@ most-shared spot (`map_pin_snap`, refreshed hourly by `map_pin_snap_refresh_ar()
 tapping it lists every ad. Two DIFFERENT sites keep their own spot (owner 2026-11-03: same-site copies stay, cross-site
 is normal) — but see the next rule: their heads never overlap on screen. Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`, `20261105071552`).
 
+**Map tab: a listing with NO pin borrows its twin's pin — ONLY when we are sure it is the same property (owner
+2026-11-09, permanent: «make it a rule»; «just match the ones that you are confident about — if something doesn't match,
+keep them on a side»).** ~15,900 listings have no pin because their site never says where the property is (checked
+2026-11-09 on the 8 biggest: no map on the ad, or only the agency office's map — never ours to guess). A no-pin listing is
+drawn at the pin of another listing when EITHER (1) the same government ad licence number in the same city, OR (2) same
+city, district, deal, type, size and bedrooms (price may differ), NO other detail both ads state disagrees (bathrooms,
+halls, floor, age ±1, street width, facing, street fronts), at least two of them agree, and at most 10 look-alikes. Either
+way every matching twin must sit on ONE spot (≤ 0.0015°, ~150 m); anything less certain gets no pin and stays in search.
+`map_pin_borrow` is rebuilt hourly by `map_pin_borrow_refresh_ar()`, run inside the :53 map rebuild job right before `map_grid_refresh_ar()` (new listings follow on their own); the map
+reads `map_listing_points_ar` (own pins + borrowed) in `map_pins_ar` and `map_grid_refresh_ar`. Map only: the listing's
+stored data stays the source's, and the pin-coverage monitors still measure what sites published. 542 borrowed the day it
+shipped (391 licence, 151 details). Never loosen a rule to raise the count — a pin in the wrong place is worse than none.
+Guard: `scripts/verify-map-borrowed-pins-only-when-sure.ts` (migration `20261109015850`).
+
 **Map tab: zooming in goes COUNTRY → REGION → CITY → DISTRICT → pins, every name in the UI language (owner 2026-11-05,
 permanent: «first thing Saudi, the total number, then region, then city, and then district»; «I switched to English — why
 does it show Arabic? It should change automatically»).** `areaLevelFor()` (src/lib/mapAreas.ts): > 12° one «السعودية /
