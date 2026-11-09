@@ -61,6 +61,8 @@ const dateOf = (m: Mapped | null): string | null | undefined => (m && !('error' 
 
 const sites = (pyCall(ROOT, FIX, 'run_all', [[]]) as Site[][])[0];
 check('the fixture registry lists sites', sites.length > 0, 'no site registered');
+// Every group file listed in posting_date_fixture_more.GROUP_MODULES is imported unconditionally, so a deleted or
+// misnamed group fails the python call above instead of silently dropping its sites.
 check('wasalt is registered (92,079 active rows, the largest site that was undated)', sites.some((s) => s.site === 'wasalt'));
 
 // ── 3. EVERY SITE'S REAL MAPPER ───────────────────────────────────────────────────────────────
@@ -83,8 +85,10 @@ for (const s of sites) {
 for (const s of sites) {
   if (!s.helper_off) continue;
   if (err(s.helper_off)) { check(`MUTATION ${s.site}/helper-off: python threw`, false, err(s.helper_off)!); continue; }
-  check(`MUTATION: catches ${s.site} writing its date without site_posting_date()`, dateOf(s.helper_off) === null,
-    `with the reader switched off the mapper still wrote ${show(dateOf(s.helper_off))}`);
+  const off = s.helper_off as Exclude<Mapped, { error: string }>;
+  // The ad must still map: a skipped ad answers NULL too, and would prove nothing about a side door.
+  check(`MUTATION: catches ${s.site} writing its date without site_posting_date()`, off.mapped === true && off.date_added === null,
+    `mapped=${off.mapped}; with the reader switched off the mapper wrote ${show(off.date_added)}`);
 }
 
 // 4b. Each site's declared wrong reading: the mutant must answer differently from the real mapper.
@@ -95,7 +99,10 @@ for (const s of sites) {
     if (file !== modFile) { check(`MUTATION ${label}: must edit the site's own module ${modFile}, not ${file}`, false); continue; }
     if (!applied) { check(`MUTATION ${label}: ANCHOR DRIFTED — mutant never applied`, false); continue; }
     if (err(real) || err(mutant)) { check(`MUTATION ${label}: python threw`, false, (err(real) ?? err(mutant))!); continue; }
-    check(`MUTATION: catches ${label}`, dateOf(mutant) !== dateOf(real), `mutant still answered ${show(dateOf(mutant))}`);
+    // The mutant must still produce a row: «no row» is not the wrong date it was built to produce.
+    const mm = mutant as Exclude<Mapped, { error: string }>;
+    check(`MUTATION: catches ${label}`, mm.mapped === true && dateOf(mutant) !== dateOf(real),
+      `mutant mapped=${mm.mapped}, answered ${show(dateOf(mutant))}`);
   }
 }
 

@@ -42,11 +42,7 @@ GROUP_MODULES = [
 def _groups():
     out = []
     for name in GROUP_MODULES:
-        try:
-            out.append(importlib.import_module(name))
-        except ModuleNotFoundError as e:
-            if e.name != name:          # the group exists but something IT imports is missing: loud
-                raise
+        out.append(importlib.import_module(name))   # a listed group that is missing fails LOUDLY
     return out
 
 
