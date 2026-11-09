@@ -107,6 +107,32 @@ export function unreadableReplaces(sql: string): string[] {
   return bad;
 }
 
+// ── D. replay: the safeguard text, word for word as production runs it (whitespace-normalised) ──────────────────
+// Measured 2026-11-09 against pg_get_functiondef(mon_detect_field_integrity) on aannarbkwcymrotzwdbo: GUARD_CLAUSE ×2
+// (one per price arm), SKIP_RAISE ×1, SKIP_RESOLVE ×1. Every later replace() patch is REPLAYED over this reference;
+// a patch that alters any snippet — even partially («then true or public.field_integrity_served_raw…») — fails.
+// A patch that is meant to change a safeguard must update this reference in the same PR: a reviewed decision.
+const norm = (t: string): string => t.replace(/\s+/g, ' ').trim();
+export const SAFEGUARDS: Array<{ name: string; text: string; count: number }> = [
+  { name: 'served-raw guard clause (both price arms)', count: 2, text: norm(`and case when greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0)) >= 100000000
+      or (x.area_m2 > 0 and greatest(coalesce(x.price_total, 0), coalesce(x.price_annual, 0))::numeric / nullif(x.area_m2, 0) > 500000)
+      or x.area_m2::numeric > 1000000
+      then public.field_integrity_served_raw(x.tableoid, x.id, coalesce(x.price_total, x.price_annual))
+      else false end`) },
+  { name: 'skipped-table alert', count: 1, text: norm(`n := n + public.mon_raise('P2','field_integrity', rec.platform,
+      'field_integrity_table_skipped:'||rec.tn,`) },
+  { name: 'skipped-table alert resolve', count: 1, text: norm(`update public.alert_event set resolved_at = now()
+      where kind='field_integrity' and resolved_at is null
+      and dedup_key = 'field_integrity_table_skipped:'||rec.tn;`) },
+];
+const occurrences = (hay: string, needle: string): number => (needle ? hay.split(needle).length - 1 : 0);
+/** Replays a patch's old_X → new_X edits over the production safeguard reference; names every snippet it alters. */
+export function replayDamage(sql: string): string[] {
+  let body = SAFEGUARDS.flatMap((g) => Array(g.count).fill(g.text)).join(' … ');
+  for (const { old, neu } of patchPairs(sql)) { const o = norm(old); if (o) body = body.split(o).join(norm(neu)); }
+  return SAFEGUARDS.filter((g) => occurrences(body, g.text) < g.count).map((g) => g.name);
+}
+
 /** True when a replace() patch swaps text carrying `marker` for text that no longer carries it. */
 export function patchRemoves(sql: string, marker: RegExp): boolean {
   const m = new RegExp(marker.source, marker.flags.replace('g', ''));
@@ -147,6 +173,8 @@ export function problems(files: F[]): string[] {
     }
     if (patchRemoves(f.sql, SERVED_RAW)) out.push(`${f.name} removes the served-raw check from a price arm through a replace() patch`);
     if (isFunctionPatch(f.sql)) {
+      const damaged = replayDamage(f.sql);
+      if (damaged.length) out.push(`${f.name} alters production safeguard text when replayed: ${damaged.join(', ')} — if intended, update SAFEGUARDS in this barrier in the same PR`);
       const bad = unreadableReplaces(f.sql);
       if (patchPairs(f.sql).length === 0 || bad.length) out.push(`${f.name} patches mon_detect_field_integrity in a shape this barrier cannot read — every rewrite must be replace(v, old_X, new_X) with declared constants: ${bad.join('; ') || 'no readable pairs'}`);
     }
@@ -212,6 +240,12 @@ mustCatch('a replace whose replacement argument is a concatenation', UNREADABLE.
 mustCatch('a replace nested inside another expression the reader cannot split', UNREADABLE.test(diag(patchQ(KEEP_PAIR, `  execute replace(upper(v), old_x, new_x);`))));
 mustPass("a '…'-quoted pair that keeps the call (with a '' escape)", diag(patchQ(KEEP_PAIR, RUN_X)) === '');
 mustPass("the match-count idiom length(replace(v, old_x, '')) beside a pair that keeps the call", diag(patchQ(KEEP_PAIR, `  n := (length(v) - length(replace(v, old_x, ''))) / length(old_x);\n${RUN_X}`)) === '');
+const ALTERS = /alters production safeguard text/;
+mustCatch("a PARTIAL replacement «then true or public.field_integrity_served_raw» that keeps the call text but disables it", ALTERS.test(diag(patchQ(`  old_part constant text := 'then public.field_integrity_served_raw';\n  new_part constant text := 'then true or public.field_integrity_served_raw';`, `  execute replace(v, old_part, new_part);`))));
+mustCatch("a partial replacement that flips the clause's «and case» to «or case»", ALTERS.test(diag(patchQ(`  old_p constant text := 'and case when greatest';\n  new_p constant text := 'or case when greatest';`, `  execute replace(v, old_p, new_p);`))));
+mustCatch('a partial replacement that turns «else false end» into «else true end»', ALTERS.test(diag(patchQ(`  old_p constant text := 'else false end';\n  new_p constant text := 'else true end';`, `  execute replace(v, old_p, new_p);`))));
+mustCatch('a partial replacement inside the skipped-table resolve', ALTERS.test(diag(patchQ(`  old_p constant text := 'and resolved_at is null';\n  new_p constant text := 'and false';`, `  execute replace(v, old_p, new_p);`))));
+mustPass('a patch whose old text is not in any safeguard (an unrelated arm) passes replay', !ALTERS.test(diag(patchQ(`  old_p constant text := 'bedrooms > 1000';\n  new_p constant text := 'bedrooms > 2000';`, `  execute replace(v, old_p, new_p);`))));
 if (bad) process.exit(1);
 
 const files = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).map((name) => ({ name, sql: readFileSync(join(MIGRATIONS, name), 'utf8') }));
