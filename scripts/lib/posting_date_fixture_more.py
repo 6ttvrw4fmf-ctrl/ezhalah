@@ -18,10 +18,15 @@ file. Each group module exposes:
 
 Nothing here maps or decides anything: the posting-date logic under test lives in the scrapers.
 """
+import contextlib
 import importlib
+import os
+import sys
 import types
 
 from scripts.lib.posting_date_fixture import _seed_catalog
+
+_ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 
 GROUP_MODULES = [
     "scripts.lib.posting_date_fixture_g0",
@@ -69,7 +74,6 @@ def mapped_without_helper(platform, builder_args):
     site's own run.py and any shared engine it calls. A site whose date still reaches `date_added`
     is writing it some other way (unchecked shape, no Saudi-time conversion); a positive case must
     therefore come back None here."""
-    import sys
     reg, _ = _registry()
     _seed_catalog()
     importlib.import_module(reg[platform][0])
@@ -100,5 +104,38 @@ def mapped(platform, builder_args, mutated_source=None):
         mod.__dict__["__file__"] = real.__file__
         mod.__dict__["__name__"] = "mutant"
         exec(compile(mutated_source, "mutant.py", "exec"), mod.__dict__)
-    row, why = call(mod, build(*builder_args))
+    # A scraper's progress print must never reach stdout: the barrier reads stdout as the JSON answer.
+    with contextlib.redirect_stdout(sys.stderr):
+        row, why = call(mod, build(*builder_args))
     return {"mapped": bool(row), "date_added": (row or {}).get("date_added"), "why": why}
+
+
+def _safe(fn, *a):
+    try:
+        return fn(*a)
+    except Exception as e:  # noqa: BLE001 — one broken site must not hide the others' answers
+        return {"error": f"{type(e).__name__}: {e}"[-400:]}
+
+
+def run_all():
+    """Every site's answers in ONE process: [{site, module, cases: [[args, want, why, got]], helper_off,
+    mutations: [[label, file, applied, real, mutant]]}]. `got`/`real`/`mutant` are mapped() answers or
+    {"error": ...}. The barrier judges them; nothing is judged here."""
+    out = []
+    for p in platforms():
+        site = p["site"]
+        rep = {"site": site, "module": p["module"], "cases": [], "helper_off": None, "mutations": []}
+        for args, want, why in p["cases"]:
+            rep["cases"].append([args, want, why, _safe(mapped, site, args)])
+        pos = next((c for c in p["cases"] if isinstance(c[1], str)), None)
+        if pos:
+            rep["helper_off"] = _safe(mapped_without_helper, site, pos[0])
+        for label, rel, find, replace, args in p["mutations"]:
+            with open(os.path.join(_ROOT, rel), encoding="utf-8") as fh:
+                real_src = fh.read()
+            mutated = real_src.replace(find, replace)
+            applied = mutated != real_src
+            rep["mutations"].append([label, rel, applied, _safe(mapped, site, args),
+                                     _safe(mapped, site, args, mutated) if applied else None])
+        out.append(rep)
+    return out

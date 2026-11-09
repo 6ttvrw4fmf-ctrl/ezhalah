@@ -53,6 +53,7 @@ from scrapers.common.page_pin import pin_from_html  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://sa.opensooq.com"
 LIST = BASE + "/ar/" + urllib.parse.quote("عقارات")
@@ -222,6 +223,13 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "description": redact_pii(desc) or None,
         "property_type": ptype,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",   # deal is validated above
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the SERP item's `inserted_date`, the day the
+        # ad was created (287056816 «2026-09-12», first seen 2026-09-27). It is monotonic with the ad id on
+        # 87/87 active rows and never later than our first sighting. NOT `posted_at` — the page's «تاريخ
+        # النشر» (13-09-2026 there): it is re-stamped after the ad is public (288395686 was live to us on
+        # 2026-10-10 07:48 and now says 11-10-2026), and near now it is relative («قبل ساعة»). Never
+        # `expired_at` (the end date).
+        "date_added": site_posting_date(x.get("inserted_date")),
         "city": normalize.map_city(city_ar) if city_ar else None,
         "city_ar": city_ar,
         "city_id": city_id,

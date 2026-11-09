@@ -98,6 +98,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://almotmkenah.com"
 SOURCE = "Almotmkenah"
@@ -395,6 +396,15 @@ def _bathrooms(description: Optional[str]) -> Optional[int]:
     return normalize.to_int(hits[0]) if len(hits) == 1 and hits[0] else None
 
 
+_ENTRY_DATE_RE = re.compile(r"(\d{1,2})[-/](\d{1,2})[-/](\d{4})", re.ASCII)
+
+
+def _entry_date(raw: Optional[str]) -> Optional[str]:
+    """«8-10-2025» (day-month-year, as the header prints «تاريخ الادخال») → «2025-10-08»; else None."""
+    m = _ENTRY_DATE_RE.fullmatch((raw or "").strip())
+    return site_posting_date(f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}") if m else None
+
+
 def map_listing(raw: dict) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). Anything unprovable is a skip or a NULL, never a guess."""
     fields = raw["fields"]
@@ -463,6 +473,11 @@ def map_listing(raw: dict) -> tuple[Optional[dict], str, str]:
         **amenities,
         "property_type": property_type,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the header strip's «تاريخ الادخال»
+        # (entry date), printed D-M-YYYY. The order is proven by the site's own values: «21-12-2025»
+        # (MTM35, live 2026-11-09), «26-3-2026», «31-7-2025» — and MTM50's «8-10-2025» is followed by
+        # «آخر تحديث: 20-12-2025 19:46». Never «آخر تحديث» (the last edit).
+        "date_added": _entry_date(raw.get("date_added")),
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,

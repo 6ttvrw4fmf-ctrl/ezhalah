@@ -51,60 +51,51 @@ const SQL_SHAPES = [...fnBody.matchAll(/if r ~ '([^']+)' then/g)].map((m) => new
 check('lifted the four shapes public.source_posted_at reads', SQL_SHAPES.length === 4, `found ${SQL_SHAPES.length}`);
 const sqlReads = (s: string) => SQL_SHAPES.some((re) => re.test(s.trim()));
 
-// ── 2. THE REGISTRY ───────────────────────────────────────────────────────────────────────────
-type Case = [unknown[], string | null, string];
-type Mutation = [string, string, string, string, unknown[]];
-type Site = { site: string; module: string; cases: Case[]; mutations: Mutation[] };
-type Mapped = { mapped: boolean; date_added: string | null; why: string };
+// ── 2. THE REGISTRY — every site's answers, computed in ONE python process ──────────────────────
+type Mapped = { mapped: boolean; date_added: string | null; why: string } | { error: string };
+type CaseOut = [unknown[], string | null, string, Mapped];
+type MutOut = [string, string, boolean, Mapped, Mapped | null];
+type Site = { site: string; module: string; cases: CaseOut[]; helper_off: Mapped | null; mutations: MutOut[] };
+const err = (m: Mapped | null): string | null => (m && 'error' in m ? m.error : null);
+const dateOf = (m: Mapped | null): string | null | undefined => (m && !('error' in m) ? m.date_added : undefined);
 
-const sites = (pyCall(ROOT, FIX, 'platforms', [[]]) as Site[][])[0];
+const sites = (pyCall(ROOT, FIX, 'run_all', [[]]) as Site[][])[0];
 check('the fixture registry lists sites', sites.length > 0, 'no site registered');
 check('wasalt is registered (92,079 active rows, the largest site that was undated)', sites.some((s) => s.site === 'wasalt'));
 
 // ── 3. EVERY SITE'S REAL MAPPER ───────────────────────────────────────────────────────────────
-const firstPositive: Record<string, Case> = {};
 for (const s of sites) {
   const pos = s.cases.filter(([, want]) => typeof want === 'string');
   const neg = s.cases.filter(([, want]) => want === null);
   check(`${s.site}: has a live-page case and a no-date case`, pos.length > 0 && neg.length > 0,
     `${pos.length} dated, ${neg.length} undated`);
-  if (pos.length) firstPositive[s.site] = pos[0];
-
-  let out: Mapped[];
-  try { out = pyCall(ROOT, FIX, 'mapped', s.cases.map(([a]) => [s.site, a, null])) as Mapped[]; }
-  catch (e) { check(`${s.site}: mapper ran`, false, (e as Error).message.split('\n').slice(-3).join(' | ')); continue; }
-  s.cases.forEach(([args, want, why], i) => {
-    check(`${s.site}: the ad maps (${why})`, out[i].mapped === true, `skipped: ${out[i].why}`);
-    check(`${s.site}: date_added = ${show(want)} — ${why}`, out[i].date_added === want, `got ${show(out[i].date_added)} for ${show(args)}`);
-    if (out[i].date_added !== null) check(`${s.site}:   …in a shape the SQL reader counts`, sqlReads(out[i].date_added as string));
-  });
+  for (const [args, want, why, got] of s.cases) {
+    if (err(got)) { check(`${s.site}: mapper ran (${why})`, false, err(got)!); continue; }
+    const g = got as Exclude<Mapped, { error: string }>;
+    check(`${s.site}: the ad maps (${why})`, g.mapped === true, `skipped: ${g.why}`);
+    check(`${s.site}: date_added = ${show(want)} — ${why}`, g.date_added === want, `got ${show(g.date_added)} for ${show(args)}`);
+    if (g.date_added !== null) check(`${s.site}:   …in a shape the SQL reader counts`, sqlReads(g.date_added));
+  }
 }
 
 // ── 4. MUTATION PROOFS ────────────────────────────────────────────────────────────────────────
-// 4a. The shared reader switched off everywhere: a dated case must lose its date.
+// 4a. The shared reader switched off in every loaded scraper module: a dated case must lose its date.
 for (const s of sites) {
-  const pos = firstPositive[s.site];
-  if (!pos) continue;
-  let got: Mapped;
-  try { got = (pyCall(ROOT, FIX, 'mapped_without_helper', [[s.site, pos[0]]]) as Mapped[])[0]; }
-  catch (e) { check(`MUTATION ${s.site}/helper-off: python threw — ${(e as Error).message.split('\n').slice(-2).join(' | ')}`, false); continue; }
-  check(`MUTATION: catches ${s.site} writing its date without site_posting_date()`, got.date_added === null,
-    `with the reader switched off the mapper still wrote ${show(got.date_added)}`);
+  if (!s.helper_off) continue;
+  if (err(s.helper_off)) { check(`MUTATION ${s.site}/helper-off: python threw`, false, err(s.helper_off)!); continue; }
+  check(`MUTATION: catches ${s.site} writing its date without site_posting_date()`, dateOf(s.helper_off) === null,
+    `with the reader switched off the mapper still wrote ${show(dateOf(s.helper_off))}`);
 }
 
-// 4b. Each site's declared wrong reading. The mutant must answer differently from the real mapper.
+// 4b. Each site's declared wrong reading: the mutant must answer differently from the real mapper.
 // An anchor that no longer matches is LOUD: a mutant that was never applied proves nothing.
 for (const s of sites) {
   const modFile = s.module.replace(/\./g, '/') + '.py';
-  for (const [label, file, find, replace, args] of s.mutations) {
+  for (const [label, file, applied, real, mutant] of s.mutations) {
     if (file !== modFile) { check(`MUTATION ${label}: must edit the site's own module ${modFile}, not ${file}`, false); continue; }
-    const real = readFileSync(join(ROOT, file), 'utf8');
-    const mutated = real.replace(find, replace);
-    if (mutated === real) { check(`MUTATION ${label}: ANCHOR DRIFTED — mutant never applied`, false); continue; }
-    try {
-      const [want, got] = pyCall(ROOT, FIX, 'mapped', [[s.site, args, null], [s.site, args, mutated]]) as Mapped[];
-      check(`MUTATION: catches ${label}`, got.date_added !== want.date_added, `mutant still answered ${show(got.date_added)}`);
-    } catch (e) { check(`MUTATION ${label}: python threw — ${(e as Error).message.split('\n').slice(-2).join(' | ')}`, false); }
+    if (!applied) { check(`MUTATION ${label}: ANCHOR DRIFTED — mutant never applied`, false); continue; }
+    if (err(real) || err(mutant)) { check(`MUTATION ${label}: python threw`, false, (err(real) ?? err(mutant))!); continue; }
+    check(`MUTATION: catches ${label}`, dateOf(mutant) !== dateOf(real), `mutant still answered ${show(dateOf(mutant))}`);
   }
 }
 

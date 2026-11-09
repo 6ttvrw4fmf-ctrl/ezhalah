@@ -171,6 +171,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http_liveness import (LivenessProbe, live_control_url,  # noqa: E402
                                            removal_by_owner_approved_status)
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://sakani.sa"
 SOURCE = "سكني"
@@ -588,6 +589,10 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
         "direction": _FACE.get(face),
         "property_age": _age(d, lic),
         "license_number": str(lic.get("ad_license_number") or "").strip() or None,   # the AD licence
+        # The unit's own `publish_date` («2026-11-08») from its market_units record — NOT the REGA licence,
+        # which carries only end_date. Read live 2026-11-09: /marketUnitsApi/v6/market_units/25492 →
+        # publish_date 2026-11-08, licence end_date 2027-03-04; first seen by us 2026-11-09.
+        "date_added": site_posting_date(d.get("publish_date") or rich.get("publish_date")),
         "photo_urls": _photos(rich, d) or None,
         **_amenities(d),
     }

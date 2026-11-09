@@ -43,6 +43,7 @@ import copy
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
 from scrapers.common.pii import redact_pii
+from scrapers.common.posting_date import site_posting_date
 
 # PDPL: advertiser/agent identity + contact inside advertisement_response — never stored.
 _PII = {"advertiserId", "advertiserName", "responsibleEmployeeName",
@@ -518,6 +519,22 @@ def market_ad_number(rec: dict, legacy_by_licence: Optional[dict[str, str]] = No
     return None
 
 
+def market_posted(rec: dict) -> Optional[str]:
+    """The ad's posting date = the marketplace record's `createdAt` (set once when the ad is created; it
+    is NOT the REGA licence `creationDate` / `adLicenseEndDate`). `publishedAt`/`reviewedAt` are not
+    used: a review re-stamps them (2026-09-20 18:28 on imported ads first seen here in June).
+    An ad imported from the WordPress site (regaData.wp_id) carries WordPress's LOCAL post time with a
+    false «Z»: read as UTC, 5 of 119 such rows were posted up to 2h56m AFTER we first saw them; read as
+    Saudi time, none (2026-11-09) — so that «Z» is dropped. Native ads (millisecond stamps) are real
+    UTC. Checked live on marketplace/912: createdAt 2026-11-09T02:56:29.376Z, first seen 04:22:41Z."""
+    raw = rec.get("createdAt")
+    rg = rec.get("regaData")
+    if isinstance(raw, str) and isinstance(rg, dict) and rg.get("wp_id") not in (None, "") \
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z", raw.strip()):
+        raw = raw.strip()[:19]
+    return site_posting_date(raw)
+
+
 def _market_photo(u: Any) -> Optional[str]:
     if not isinstance(u, str) or not u.strip():
         return None
@@ -617,6 +634,7 @@ def map_marketplace(rec: dict, legacy_by_licence: Optional[dict[str, str]] = Non
         "listing_url": MARKET_PAGE.format(id=int(mid)),
         "source": "Aqargate",
         "active": True,
+        "date_added": market_posted(rec),
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": _int(rec.get("area")),

@@ -61,6 +61,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
 from scrapers.common.source_pin import sa_pin  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://www.amaall.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -396,6 +397,10 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "ad_number": f"{PREFIX}{int(hashlib.md5((p.get('slug') or str(p.get('id'))).encode()).hexdigest()[:12], 16)}",
         "listing_url": link,
         "source": SOURCE,
+        # Posting date = the WordPress post's date_gmt (UTC, so «Z»; `modified_gmt` is an edit). Live
+        # 2026-11-09: post 24146 date_gmt 2026-09-16T07:20:06 = the page's JSON-LD datePublished
+        # «2026-09-16T07:20:06+00:00»; first seen 2026-09-18 04:24 UTC.
+        "date_added": site_posting_date(p["date_gmt"] + "Z") if isinstance(p.get("date_gmt"), str) else None,
         "active": not gone,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",

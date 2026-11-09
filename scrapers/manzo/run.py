@@ -35,6 +35,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 API = "https://api.manzo.com.sa/property/v1/properties"
 SITE = "https://manzo.com.sa/ar/property/"
@@ -273,6 +274,11 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "bathrooms": apt.get("bathrooms") or None,
         "property_age": normalize.age_from_completion_year(d.get("property_age"), this_year=dt.date.today().year),
         "license_number": d.get("ad_licence_number"),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20). The detail record's `listing_date` is what the ad
+        # page prints as JSON-LD datePosted — measured 2026-11-09 on JoZJ5Qoy (2026-11-07T14:42:47.378618Z both) and
+        # on VPWG5qo8, unchanged from the value first captured 2026-10-11; none of 1,446 is later than our first sighting.
+        # Never ad_licence_expires_at (the REGA licence) or deed_date.
+        "date_added": site_posting_date(d.get("listing_date")),
         "photo_urls": photos,  # [] (never None): the upsert skips None, so an ad that lost its photos kept the old ones (2026-10-27)
         **row_price,
     }

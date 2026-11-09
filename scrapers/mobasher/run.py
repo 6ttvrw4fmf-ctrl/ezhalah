@@ -45,6 +45,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 API = ("https://discovery-api.prod.mobasher.sa/api/v1/discovery/direct-sale"
        "?includeTotal=true&pageSize=50&status=ACTIVE&categoryType=RealEstate")
@@ -135,6 +136,11 @@ def map_listing(x: dict, facts: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "ad_number": f"{PREFIX}{x.get('documentId') or x.get('sourceEntityId')}",
         "listing_url": SITE + urllib.parse.quote(x.get("slugAr") or ""),
         "source": SOURCE,
+        # Posting date = the feed row's createdAtUtc — real UTC: it equals the documentId ObjectId's own
+        # creation second (live 2026-11-09: 6a6b511d… → 2026-07-30T13:26:53Z, first seen 2026-09-27).
+        # publishedAtUtc/sortDateUtc are equal today but are the re-sortable copies; updatedAtUtc and
+        # endDateUtc (listing expiry) are never read.
+        "date_added": site_posting_date(x.get("createdAtUtc")),
         "active": True,
         "title": redact_pii(title) or None,
         "description": redact_pii(desc) or None,
