@@ -22,6 +22,23 @@ update public.dealapp_residential_listings d
    and d.deactivated_at >= '2026-11-09 12:44:00+00' and d.deactivated_at < '2026-11-09 12:45:00+00'
    and b.deactivated_at = '2026-07-10 14:27:37.481433+00';
 
+-- Guarantee: the class this repairs — a listing stamped «deactivated» with no page reading behind it — is watched by
+-- mon_detect_unverified_inactivation() (daily; the same view audit-invariants.yml reads), enrolled here as the rule requires.
+insert into public.ops_repair_guarantee_registry (repair_version, repair_name, invariant, detector, registered_by) values
+  ('20261109142000', 'dealapp_646452_deactivated_at_restored_after_self_test_restamp',
+   'No listing carries a deactivated_at inside the last 24 hours without a GONE/SUPERSEDED/kill ledger row for it (ops_stale_inactivation_probe, *_liveness_detail) or an adjudication; a migration self-test that flips a real row and back re-stamps it and is caught here.',
+   'mon_detect_unverified_inactivation', 'qa 2026-11-09 (alert data_live_check_failed audit-invariants.yml)')
+on conflict do nothing;
+do $$
+declare roster text := pg_get_functiondef('public.mon_run_all_detectors()'::regprocedure);
+begin
+  if to_regproc('public.mon_detect_unverified_inactivation') is null then raise exception 'enrolment names a detector that does not exist'; end if;
+  if position('mon_detect_unverified_inactivation' in roster) = 0
+     and not exists (select 1 from cron.job j where j.active and position('mon_detect_unverified_inactivation' in j.command) > 0) then
+    raise exception 'enrolment names a detector nothing runs: mon_detect_unverified_inactivation';
+  end if;
+end $$;
+
 -- Proof (reads only): exactly one row carries the July stamp again, and the 24-hour invariant no longer counts
 -- it. Writes no listing or ops row beyond the one repaired above.
 do $$
