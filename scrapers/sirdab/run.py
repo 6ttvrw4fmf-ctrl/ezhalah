@@ -227,6 +227,88 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
     return (row, category), ""
 
 
+# ── LIVENESS READER (♻️ 2026-11-09, backlog 1627) ───────────────────────────────────────────────
+# The 09:05 dead-visible score voided sirdab every night: a status read of this Next.js site answers 200
+# for an ad that cannot exist (…/ads/<uuid ending 000000000000>), so «status-only» could not see a dead
+# ad (564 shown ads, never measured). This reads the ad's OWN page by its stored listing_url:
+#   404/410                                  → gone
+#   200 carrying this ad's own record id      → live (ad_number = SRD + the record id, page url = its slug)
+#   200 with Next's notFound() marker and no id → gone (same framework shape as vmksa, measured there)
+#   anything else (shell, block, redirect)    → no opinion = UNKNOWN
+# It is READ-ONLY tonight: it feeds the lifecycle spot check and the dead-visible score, never
+# prune_unseen, until it has agreed with itself on paced re-reads (fleet lesson 2026-11-06 ②).
+# And it must be able to SEE death before it is believed at all: every reader it builds first opens a
+# negative control (the control ad's own url with its id token zeroed). If that does not read gone,
+# every verdict it gives is UNKNOWN — blindness never reads as health (lesson 2026-10-31).
+SIRDAB_TABLES = ("sirdab_commercial_listings", "sirdab_residential_listings")
+
+
+def _own_signal(record_id: str):
+    def signal(status, body, moved):
+        if status in (404, 410):
+            return "gone"
+        if status != 200 or moved or not body:
+            return None
+        if record_id and record_id in body:
+            return "live"
+        return "gone" if "NEXT_NOT_FOUND" in body else None
+    return signal
+
+
+def _negative_url(url: Optional[str]) -> Optional[str]:
+    """The control's own url with its trailing id token replaced by zeros (an ad that cannot exist)."""
+    if not url or "/ads/" not in url:
+        return None
+    head, _, tok = url.rstrip("/").rpartition("/")
+    return f"{head}/{'0' * len(tok)}" if len(tok) >= 8 else None
+
+
+def _make_reader(control: Optional[dict], *, url_for=None, session=None):
+    from scrapers.common.http_liveness import LivenessProbe, stored_listing_url
+    s = session or cc.Session(impersonate="chrome")
+    url_for = url_for or stored_listing_url(SIRDAB_TABLES)
+
+    def probe(ad_number: str, url: Optional[str] = None) -> tuple[str, str]:
+        rid = ad_number[len(PREFIX):] if (ad_number or "").startswith(PREFIX) else ""
+        if not rid:
+            return "unknown", f"{ad_number!r} is not a sirdab ad number"
+        return LivenessProbe(platform=SLUG, signal=_own_signal(rid), session=lambda: s,
+                             url_for=lambda _a: url or url_for(ad_number)).verify_gone(ad_number)
+
+    ctl_ad = (control or {}).get("ad_number") if isinstance(control, dict) else control
+    ctl_url = (control or {}).get("listing_url") if isinstance(control, dict) else None
+    neg = _negative_url(ctl_url)
+    sees_death, why = False, "no control ad to build a negative control from"
+    if neg:
+        verdict, w = probe(PREFIX + "00000000-0000-0000-0000-000000000000", url=neg)
+        sees_death, why = verdict == "gone", f"negative control {neg}: {verdict} ({w})"
+    print(f"  sirdab reader: {why}", flush=True)
+    live_ctl = {"ok": None}
+
+    def canary() -> tuple[bool, str]:
+        if live_ctl["ok"] is None:
+            v, w = probe(ctl_ad) if ctl_ad else ("unknown", "no positive control")
+            live_ctl["ok"], live_ctl["why"] = v == "live", f"positive control {ctl_ad}: {v} ({w})"
+        return live_ctl["ok"], live_ctl["why"]
+
+    def read(ad_number: str) -> tuple[str, str]:
+        time.sleep(1.0)                          # ≤ 1 request/second between row reads
+        if not sees_death:
+            return "unknown", f"reader cannot see a dead ad here — {why}"
+        verdict, w = probe(ad_number)
+        if verdict == "gone":
+            ok, cw = canary()
+            if not ok:
+                return "unknown", f"removal withheld — {cw} (would have been: {w})"
+        return verdict, w
+    return read
+
+
+def spot_check_oracle(control=None):
+    """The lifecycle spot check / dead-visible score reader (lifecycle_spot_check.CRAWL_ORACLES)."""
+    return _make_reader(control)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
