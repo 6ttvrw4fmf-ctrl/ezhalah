@@ -67,6 +67,26 @@ mutation('the bare 24 h shard window back', def.replace(MISS, "r.started_at > no
 mutation('a shard window so wide a skipped day hides', def.replace(MISS, "r.started_at > now() - interval '72 hours'"));
 mutation('the rolling 24 h coverage window back', def.replace(SEEN, "last_seen_at > now() - interval '24 hours'"));
 mutation('a coverage window so wide a short fleet hides', def.replace(SEEN, "last_seen_at > now() - interval '96 hours'"));
+// Exercise both edges of the accepted range, independently of the shard-run window.
+for (const hours of [26, 48]) {
+  const candidate = def.replace(SEEN, `last_seen_at > now() - interval '${hours} hours'`);
+  const errors = problems(candidate);
+  if (candidate === def || errors.length) {
+    failures++;
+    console.error(`  ✗ coverage window boundary ${hours} h: ${errors.join('; ')}`);
+  } else {
+    console.log(`  ✓ coverage window boundary ${hours} h is accepted`);
+  }
+}
+for (const hours of [25, 49]) {
+  mutation(`coverage window just outside the allowed range (${hours} h)`,
+    def.replace(SEEN, `last_seen_at > now() - interval '${hours} hours'`));
+}
+mutation('coverage has no freshness predicate', def.replace(SEEN, 'true'));
+mutation('coverage counts stale rows instead of recent rows', def.replace(SEEN,
+  "last_seen_at < now() - interval '30 hours'"));
+mutation('coverage query start marker missing', def.replace('select count(*), count(*) filter',
+  'select count(*), sum(1) filter'));
 mutation('in-flight runs counted as blocked again', def.replace('and finished_at is not null', ''));
 mutation('the definition missing', '');
 
