@@ -32,26 +32,37 @@ def _reader(monkeypatch, pages):
 
 
 NEG = sd._negative_url(CTL["listing_url"])
-NOT_FOUND = '<script>self.__next_f.push([1,"{\\"digest\\":\\"NEXT_NOT_FOUND\\"}"])</script>'
+# The shapes measured from CI on 2026-11-09 (spot-check 42609553513): both pages carry Next's 404 template
+# text; only the title and the record id tell them apart.
+TEMPLATE = '\\"notFound\\":[[[\\"$\\",\\"title\\",null,{\\"children\\":\\"404: This page could not be found.\\"}]'
+PAD = "x" * 60_000
+NOT_FOUND = "<title>سوق سرداب - مستودعات، احواش، ورش، محلات وغيرها</title>" + TEMPLATE + PAD
+LIVE = "<title>مستودع للإيجار بمساحة 900 م2 | سرداب</title>" + TEMPLATE + PAD + f'\\"id\\":\\"{RID}\\"'
 
 
 def test_live_page_with_own_record_id_is_live_and_not_found_page_is_gone(monkeypatch):
-    pages = {NEG: (200, NOT_FOUND), CTL["listing_url"]: (200, f'..."id":"{RID}"...'),
+    pages = {NEG: (200, NOT_FOUND), CTL["listing_url"]: (200, LIVE),
              URLS["SRD" + GONE_RID]: (200, NOT_FOUND)}
     read = _reader(monkeypatch, pages)
     assert read("SRD" + RID)[0] == "live"
     assert read("SRD" + GONE_RID)[0] == "gone"
 
 
-def test_a_shell_without_the_ads_id_or_marker_is_no_verdict(monkeypatch):
-    pages = {NEG: (200, NOT_FOUND), CTL["listing_url"]: (200, f'"id":"{RID}"'),
-             URLS["SRD" + GONE_RID]: (200, "<html>app shell</html>")}
+def test_a_live_ad_page_of_ANOTHER_ad_is_not_gone(monkeypatch):
+    # an ad's own title but not this ad's record id (a re-used slug): no verdict, never gone
+    pages = {NEG: (200, NOT_FOUND), CTL["listing_url"]: (200, LIVE), URLS["SRD" + GONE_RID]: (200, LIVE)}
+    assert _reader(monkeypatch, pages)("SRD" + GONE_RID)[0] == "unknown"
+
+
+def test_a_shell_or_short_page_is_no_verdict(monkeypatch):
+    pages = {NEG: (200, NOT_FOUND), CTL["listing_url"]: (200, LIVE),
+             URLS["SRD" + GONE_RID]: (200, "<title>سوق سرداب</title><html>app shell</html>")}
     assert _reader(monkeypatch, pages)("SRD" + GONE_RID)[0] == "unknown"
 
 
 def test_a_reader_that_cannot_see_death_says_nothing(monkeypatch):
     # the impossible ad reads 200 like a live page (the status-only blindness): every verdict is UNKNOWN
-    pages = {NEG: (200, "<html>shell</html>"), CTL["listing_url"]: (200, f'"id":"{RID}"'),
+    pages = {NEG: (200, "<html>shell</html>"), CTL["listing_url"]: (200, LIVE),
              URLS["SRD" + GONE_RID]: (200, NOT_FOUND)}
     read = _reader(monkeypatch, pages)
     assert read("SRD" + RID)[0] == "unknown"

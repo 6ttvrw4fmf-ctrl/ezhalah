@@ -233,14 +233,20 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
 # ad (564 shown ads, never measured). This reads the ad's OWN page by its stored listing_url:
 #   404/410                                  → gone
 #   200 carrying this ad's own record id      → live (ad_number = SRD + the record id, page url = its slug)
-#   200 with Next's notFound() marker and no id → gone (same framework shape as vmksa, measured there)
-#   anything else (shell, block, redirect)    → no opinion = UNKNOWN
+#   200 with the store's GENERIC title and no record id → gone. Measured from CI 2026-11-09 (spot-check
+#     42609553513): a made-up ad answers 200, 117 KB, title «سوق سرداب - مستودعات، احواش، ورش، محلات
+#     وغيرها», no record id; a live ad answers 200, 206 KB, its OWN title («مستودع للإيجار بمساحة 900 م2 |
+#     سرداب») and its record id. Both carry Next's 404 template text, so that text is NOT a signal.
+#   anything else (shell, block, redirect, a short page) → no opinion = UNKNOWN
 # It is READ-ONLY tonight: it feeds the lifecycle spot check and the dead-visible score, never
 # prune_unseen, until it has agreed with itself on paced re-reads (fleet lesson 2026-11-06 ②).
 # And it must be able to SEE death before it is believed at all: every reader it builds first opens a
 # negative control (the control ad's own url with its id token zeroed). If that does not read gone,
 # every verdict it gives is UNKNOWN — blindness never reads as health (lesson 2026-10-31).
 SIRDAB_TABLES = ("sirdab_commercial_listings", "sirdab_residential_listings")
+_TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
+_STORE_TITLE = "سوق سرداب"        # the store's own title: the page for an ad that does not exist
+_MIN_FULL_PAGE = 50_000            # a full render (117 KB for not-found); a short body is a shell/block
 
 
 def _own_signal(record_id: str):
@@ -251,7 +257,11 @@ def _own_signal(record_id: str):
             return None
         if record_id and record_id in body:
             return "live"
-        return "gone" if "NEXT_NOT_FOUND" in body else None
+        m = _TITLE_RE.search(body)
+        title = (m.group(1) if m else "").strip()
+        if len(body) >= _MIN_FULL_PAGE and title.startswith(_STORE_TITLE) and "| سرداب" not in title:
+            return "gone"
+        return None
     return signal
 
 
