@@ -1,8 +1,7 @@
--- PREPARED, NOT APPLIED. Nothing in this file has been run against production (2026-11-09).
--- It lives in docs/ops/pending/ and NOT in supabase/migrations/ on purpose: a file there claims a migration was applied.
--- APPLY ORDER (README.md): scraper change merged → 01 backfill → one crawl of sakan and aqarcity → THIS file.
--- Applied before that, it would truthfully name dealapp, arkaan, mustqr, therc, aqarcity and sakan, whose new rows
--- carry no date today.
+-- AN ALARM FOR «A SITE PUBLISHES A POSTING DATE AND WE STOPPED STORING IT» (owner 2026-11-09).
+-- Applied after the backfill in 20261109210500, so the platforms whose captured date was only just written to
+-- date_added are not named for work already done. aqarcity and sakan hold no captured date on their stored rows:
+-- they are named, truthfully, until the fixed scrapers (same PR) have crawled them once.
 --
 -- WHY
 -- Every time-window welcome fact counts an ad by the date its SITE says it was posted: date_added, read by

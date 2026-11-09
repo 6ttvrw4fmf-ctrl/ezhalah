@@ -1,23 +1,20 @@
--- PREPARED, NOT APPLIED. Nothing in this file has been run against production (2026-11-09).
--- It lives in docs/ops/pending/ and NOT in supabase/migrations/ on purpose: a file there claims a migration was applied.
+-- THE SITE'S OWN POSTING DATE, COPIED INTO date_added WHERE THE SCRAPER HAD CAPTURED IT BUT NEVER WROTE IT
+-- (owner 2026-11-09: «get their date, it's a must … our fast check relies on that date, not ours»).
 --
--- WHAT IT DOES
--- Copies the listing SITE'S OWN posting date, which these scrapers already captured in the row, into date_added —
--- ONLY where date_added is NULL. date_added is what every time-window welcome fact counts by, through
--- public.source_posted_at(text) (migration 20261026122758, docs/ARCHITECTURE.md §20). Until it is filled these ads are
--- in no window at all.
+-- date_added is what every time-window welcome fact counts by, through public.source_posted_at(text) (migration
+-- 20261026122758, docs/ARCHITECTURE.md §20). Eleven tables held the site's date inside the row's capture and left
+-- date_added NULL, so those ads were in no window at all. The scrapers are fixed in the same PR
+-- (scrapers/common/posting_date.py); this fills the rows already stored.
 --
--- The value written is exactly what scrapers/common/posting_date.py site_posting_date() writes for the same input, so a
--- row filled here and a row filled by the next crawl read the same:
---   · a stamp with a zone («…Z», «+00:00», «+03:00») → the SAME INSTANT written in Saudi time, «YYYY-MM-DDTHH:MM:SS+03:00»
+-- The value written is exactly what site_posting_date() writes for the same input, so a row filled here and a row
+-- filled by the next crawl read the same:
+--   · a stamp with a zone («…Z», «+00:00», «+03:00») → the SAME INSTANT in Saudi time, «YYYY-MM-DDTHH:MM:SS+03:00»
 --     (the card prints the day textually, so a UTC stamp would show the day before for an ad posted after midnight);
 --   · «YYYY-MM-DD» → kept as published.
 -- Never our own first_seen_at / scraped_at, never a licence date, never a bump or «last updated» date. A captured value
 -- public.source_posted_at() cannot read is left alone: unknown stays NULL.
 --
--- BEFORE-COUNTS, measured read-only on production 2026-11-09 (pg_stat_activity quiet: 0 active authenticator queries).
--- «fill» = rows with date_added NULL AND a captured site date public.source_posted_at() reads.
---
+-- BEFORE-COUNTS, read-only on production 2026-11-09. «fill» = date_added NULL and a captured, readable site date.
 --   table                          captured in                              fill, ACTIVE rows   fill, ALL rows
 --   dealapp_residential_listings   additional_info->>'date_posted'                    55,566           71,332
 --   dealapp_commercial_listings    additional_info->>'date_posted'                     2,732            3,419
@@ -30,29 +27,23 @@
 --   tawia_residential_listings     additional_info->>'date_posted'                         4               10
 --   eydah_residential_listings     additional_info->>'date_posted'                         1                1
 --   eydah_commercial_listings      additional_info->>'date_posted'                         1                1
---                                                                              ------------     ------------
 --                                                                                     62,085           79,456
+-- Not here — nothing captured, only a re-crawl with the scraper fix fills them: aqarcity (676 active), sakan (2,377 active).
 --
--- On every one of those rows, measured the same day: 0 captured values unreadable, 0 posted later than
--- scraped_at + 1 day, 0 in the future — the three things welcome_posting_date_check (20261028033700) distrusts a table
--- for. A 3 % sample of dealapp and every row of the other tables was run through the expression below: the instant
--- never moved and the written day always equalled the Saudi day of the captured stamp.
---
--- NOT IN THIS FILE — nothing captured, so there is nothing to copy; only a re-crawl with the scraper fix fills them:
---   aqarcity  602 residential + 74 commercial active rows with date_added NULL (862 + 86 all rows)
---   sakan   2,227 residential + 150 commercial active rows with date_added NULL (3,184 + 156 all rows)
---
--- BATCHES (docs/ops/FALCON_ENGINEER.md: row repairs at most 25,000 per batch)
--- One run of this file fills at most 20,000 rows IN TOTAL and stops. Run it again until it reports «0 rows left»:
--- 79,456 rows → 4 runs. Each run is its own transaction. It is safe to re-run and safe to stop half-way: it only ever
--- touches rows whose date_added is still NULL. Rows another session holds (a crawl mid-upsert) are skipped, not waited
--- on, and are picked up by the next run.
---
--- BEFORE EACH RUN: check pg_stat_activity (active authenticator queries > 8, or any query running > 5 s → wait).
--- This is a data repair, not a schema change. If it is applied through apply_migration, each run is its own migration
--- and each needs its byte-exact mirror in supabase/migrations/ (AGENTS.md «Migration drift guard»).
+-- BATCHES (docs/ops/FALCON_ENGINEER.md: row repairs at most 25,000 per batch). The work is a FUNCTION, so each call is
+-- its own bounded transaction and answers with rows: at most 20,000 rows per call, all tables together. This migration
+-- makes ONE call; the rest are `select * from public.ops_backfill_source_posting_date();` until rows_left is 0
+-- everywhere. Safe to repeat and safe to stop half-way: it only touches rows whose date_added is still NULL, skips rows
+-- a crawl holds mid-upsert, and raises (rolling the call back) if a written value is not the captured instant.
+-- The function stays: it is the mop-up for rows stored between this fill and the fixed scrapers' first crawl.
+-- Standing watch: mon_detect_source_posting_date_fill_regressed() (same PR) alarms when a site that publishes a date
+-- stops getting it stored on new rows.
 
-do $$
+create or replace function public.ops_backfill_source_posting_date(p_budget integer default 20000)
+ returns table (tbl text, filled integer, rows_left bigint)
+ language plpgsql
+ set search_path = public
+as $function$
 declare
   -- (table, the jsonb column holding the capture, the key inside it)
   spec constant text[][] := array[
@@ -69,8 +60,8 @@ declare
     ['eydah_commercial_listings',    'additional_info', 'date_posted']
   ];
   zoned  constant text := '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$';
-  budget int := 20000;          -- the whole run, all tables together
-  i int; t text; col text; k text; v int; v_left bigint; v_bad bigint; total int := 0; left_all bigint := 0;
+  budget int := least(greatest(coalesce(p_budget, 0), 0), 20000);   -- the whole call, all tables together
+  i int; t text; col text; k text; v int; v_left bigint; v_bad bigint;
 begin
   for i in 1 .. array_length(spec, 1) loop
     t := spec[i][1]; col := spec[i][2]; k := spec[i][3];
@@ -109,12 +100,11 @@ begin
                                       is distinct from date_trunc('second', public.source_posted_at(captured)))
           from w
       $q$, t, col, k, zoned, budget) into v, v_bad;
-      -- PROOF, every run: what was written must be readable and must be the captured instant.
+      -- PROOF, every call: what was written must be readable and must be the captured instant.
       if v_bad > 0 then
         raise exception 'PROOF: % of the % rows written to % are not the captured site date — rolled back', v_bad, v, t;
       end if;
       budget := budget - v;
-      total := total + v;
     end if;
 
     execute format($q$
@@ -124,14 +114,26 @@ begin
          and public.source_posted_at(s.%2$I->>%3$L) <= coalesce(s.scraped_at, now()) + interval '1 day'
          and public.source_posted_at(s.%2$I->>%3$L) <= now()
     $q$, t, col, k) into v_left;
-    left_all := left_all + v_left;
 
-    raise notice '%: filled % rows this run, % rows left', t, v, v_left;
+    tbl := t; filled := v; rows_left := v_left;
+    return next;
   end loop;
+end $function$;
+comment on function public.ops_backfill_source_posting_date(integer) is
+  'Copies the listing site''s own posting date, already captured in the row, into date_added where date_added is NULL. At most 20,000 rows per call, all tables together; answers one row per table (filled, rows_left). Raises if a written value is not the captured instant. Never writes our own first_seen_at / scraped_at. Watched by mon_detect_source_posting_date_fill_regressed().';
+revoke all on function public.ops_backfill_source_posting_date(integer) from public, anon, authenticated;
+grant execute on function public.ops_backfill_source_posting_date(integer) to service_role;
 
+-- The first bounded call. The others are made one at a time, each when the database is quiet.
+do $$
+declare r record; total int := 0; left_all bigint := 0;
+begin
+  for r in select * from public.ops_backfill_source_posting_date() loop
+    total := total + r.filled; left_all := left_all + r.rows_left;
+    raise notice '%: filled % rows, % rows left', r.tbl, r.filled, r.rows_left;
+  end loop;
   if total > 25000 then
-    raise exception 'this run would change % rows, over the 25,000 batch rule — rolled back', total;
+    raise exception 'this call changed % rows, over the 25,000 batch rule — rolled back', total;
   end if;
-  raise notice 'TOTAL: filled % rows this run, % rows left. %', total, left_all,
-    case when left_all = 0 then 'Done.' else 'Run this file again.' end;
+  raise notice 'TOTAL: filled % rows, % rows left', total, left_all;
 end $$;
