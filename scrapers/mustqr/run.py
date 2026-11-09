@@ -54,6 +54,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize
 from scrapers.common.page_pin import pin_from_page, short_maps_link
 from scrapers.common.pii import redact_pii
+from scrapers.common.posting_date import site_posting_date
 
 SITE = "https://mustqr.sa"
 PROJECT = "https://jzhotxuqwkpykavxpgeu.supabase.co"
@@ -807,6 +808,10 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
         "description": description,
         "photo_urls": photo_urls,
         "video_url": video_url,
+        # The API's own created_at — the moment the office posted the ad. It was kept in
+        # additional_info.mustqr_created_at only, so date_added was NULL on all 1,743 rows. updated_at moves
+        # with every edit and is never read as a posting date.
+        "date_added": site_posting_date(p.get("created_at")),
         "additional_info": extras,
     }
     row.update(_price_fields(p, is_rent))

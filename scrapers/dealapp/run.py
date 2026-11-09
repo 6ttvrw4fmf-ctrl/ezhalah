@@ -65,6 +65,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import city_by_own_pin, norm_ar  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.dealapp import liveness as dealapp_liveness  # noqa: E402
 
 SOURCE = "Deal App"
@@ -1293,6 +1294,11 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "title": _redact(name) or None,
         "description": _redact(schema.get("description")),
         "photo_urls": _images(schema),
+        # THE SITE'S OWN POSTING DATE (owner 2026-10-26: every time-window fact counts by it). The schema's
+        # datePosted was kept in additional_info.date_posted only, so date_added was NULL on all 74,751 rows
+        # and no dealapp ad could ever count as «posted yesterday». Measured 2026-11-09 on those rows: every
+        # value readable, none later than the day we first saw the ad (so it is not a bump date).
+        "date_added": site_posting_date(schema.get("datePosted")),
         "additional_info": info,
         **af_answers(aprops, _redact(schema.get("description"))),
     }
