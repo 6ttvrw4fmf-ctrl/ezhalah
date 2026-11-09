@@ -331,6 +331,24 @@ def begin_run(platform: str) -> int:
     return run_id
 
 
+def record_run_progress(run_id: Optional[int], *, rows_seen: int, rows_upserted: int) -> None:
+    """Stamp the real counts on an OPEN run row before a long tail (prune / oracle phase).
+
+    `_finalize_open_run_on_signal` deliberately does not guess counts, so a job killed after its rows
+    were written used to land as rows_seen=0 / rows_upserted=0 — sakani 2026-11-09 04:35 wrote 1,629
+    rows at 06:02 and was cancelled at 07:04 inside the prune, and the row read like an empty source
+    (crawl_went_silent fired). A scraper that calls this once its writes are done leaves the truth on
+    the row whatever happens next; end_run() still overwrites it with the final figures. Conditional
+    on the row still being open, never raises, nothing for a dry run."""
+    if run_id is None:
+        return
+    try:
+        _execute(sb().table("scrape_runs").update({"rows_seen": rows_seen, "rows_upserted": rows_upserted})
+                 .is_("ok", "null").eq("id", run_id), what="scrape_runs.progress")
+    except Exception as e:  # noqa: BLE001 — bookkeeping must never stop a run
+        print(f"  ⚠ scrape_runs progress stamp failed ({type(e).__name__}: {e})", flush=True)
+
+
 def upsert_aqar_residential(row: dict[str, Any]) -> None:
     """Upsert one Aqar residential row, keyed on `ad_number`."""
     row = dict(row)
