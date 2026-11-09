@@ -126,3 +126,63 @@ def test_a_challenge_still_earns_every_retry(monkeypatch):
     (verdict, _), s = _run(monkeypatch, {AD_URL: [CHALLENGE], CTRL_URL: [LIVE]})
     assert verdict == "unknown"
     assert s.calls.count(AD_URL) >= 1 + R.ORACLE_ATTEMPTS
+
+
+@pytest.mark.parametrize("prefix,purpose", [(R.PREFIX, "rent"), (R.SALE_PREFIX, "sale")])
+@pytest.mark.parametrize("outcome", ["live", "gone"])
+def test_decisive_first_read_needs_no_retry_or_control(monkeypatch, prefix, purpose, outcome):
+    answer = ((200, _LIVE.replace("sale", purpose), "application/json") if outcome == "live"
+              else (404, '{"message":"not found"}', "application/json"))
+    s = _Sess({AD_URL: [answer]})
+    monkeypatch.setattr(R, "_oracle_sess", s)
+    monkeypatch.setattr(R, "live_control_url", lambda *a, **k: pytest.fail("no control needed"))
+    monkeypatch.setattr(L.time, "sleep", lambda *_: pytest.fail("decisive read must not sleep"))
+
+    verdict, _ = R._verify_gone(f"{prefix}{AD}")
+
+    assert verdict == outcome
+    assert s.calls == [AD_URL]
+
+
+@pytest.mark.parametrize("initial", [CHALLENGE, (503, "unavailable", "text/plain"),
+                                     (200, "not JSON", "application/json")])
+def test_unknown_quick_read_can_recover_on_the_last_retry(monkeypatch, initial):
+    rent = (200, _LIVE.replace("sale", "rent"), "application/json")
+    answers = [initial] * R.ORACLE_ATTEMPTS + [rent]
+    (verdict, _), s = _run(monkeypatch, {AD_URL: answers})
+
+    assert verdict == "live"
+    assert s.calls == [AD_URL] * (1 + R.ORACLE_ATTEMPTS)
+
+
+def test_blank_first_read_with_failed_owner_proof_can_recover(monkeypatch):
+    rent = (200, _LIVE.replace("sale", "rent"), "application/json")
+    # The quick read is blank; the owner's shape check sees a challenge. Retry normally.
+    (verdict, _), s = _run(monkeypatch, {AD_URL: [BLANK, CHALLENGE, rent]})
+
+    assert verdict == "live"
+    assert s.calls == [AD_URL] * 3
+
+
+def test_removal_after_a_challenge_still_requires_the_owner_proof(monkeypatch):
+    (verdict, why), s = _run(monkeypatch, {AD_URL: [CHALLENGE, CHALLENGE, BLANK],
+                                         CTRL_URL: [LIVE]})
+
+    assert verdict == "gone" and "owner rule" in why
+    assert s.calls[-3:] == [AD_URL, AD_URL, CTRL_URL]
+
+
+@pytest.mark.parametrize("control_answer", [CHALLENGE, (503, "unavailable", "text/plain")])
+def test_early_owner_rule_never_removes_without_a_live_control(monkeypatch, control_answer):
+    (verdict, _), s = _run(monkeypatch, {AD_URL: [BLANK], CTRL_URL: [control_answer]})
+
+    assert verdict == "unknown"
+    assert CTRL_URL in s.calls
+    assert s.calls.count(AD_URL) >= 1 + R.ORACLE_ATTEMPTS
+
+
+def test_a_persistent_server_failure_exhausts_retries_without_removal(monkeypatch):
+    (verdict, _), s = _run(monkeypatch, {AD_URL: [(503, "unavailable", "text/plain")]})
+
+    assert verdict == "unknown"
+    assert s.calls == [AD_URL] * (1 + R.ORACLE_ATTEMPTS)
