@@ -632,15 +632,38 @@ def _licence_on_card(r: dict[str, Any]) -> None:
     the fleet-wide form of the owner's 11-04 Property Finder finding. Copy the stored licence verbatim
     (10 digits, the REGA ad-licence shape) into the card's key when the row writes additional_info and
     does not already carry the key. A row that does not write additional_info is left alone: an upsert
-    replaces the whole column, so inventing one here would erase the stored panel."""
-    lic = r.get("license_number")
+    replaces the whole column, so inventing one here would erase the stored panel.
+
+    The licence the row ALREADY HOLDS counts wherever the scraper put it (card parity 2026-11-09, 12 platforms
+    «we miss it» while the source page printed the licence): a `license_number` column, the panel's own
+    `license_number` key (fursaghyr: 9 of 9 live ads), or the ad's own words in description/title («ترخيص
+    الإعلان العقاري: 7201204886» jurash, «رقم الترخيص الإعلاني: 7201102134» october, «رخصة الإعلان: 7100318476»
+    aqar — 5,100 live ads fleet-wide on 11-09). Only the REGA ad-licence shape 71/72xxxxxxxx stated ONCE
+    (normalize.ad_licence_from_prose) — never a FAL licence, never a guess between two numbers. A licence found
+    in the text also fills an EMPTY `license_number` the scraper declares, so the index's licence (the Advanced
+    Filter's «مرخص», the ad page) says what the card says."""
     info = r.get("additional_info", _MISSING)
-    if info is _MISSING or not isinstance(lic, str) or not _REGA_AD_LICENCE.match(lic.strip()):
+    if info is _MISSING or not (info is None or isinstance(info, dict)):
         return
+    lic = _stated_rega_ad_licence(r, info)
+    if not lic:
+        return
+    if "license_number" in r and not str(r.get("license_number") or "").strip():
+        r["license_number"] = lic
     if info is None:
-        r["additional_info"] = {"rega_ad_license_number": lic.strip()}
-    elif isinstance(info, dict) and not str(info.get("rega_ad_license_number") or "").strip():
-        info["rega_ad_license_number"] = lic.strip()
+        r["additional_info"] = {"rega_ad_license_number": lic}
+    elif not str(info.get("rega_ad_license_number") or "").strip():
+        info["rega_ad_license_number"] = lic
+
+
+def _stated_rega_ad_licence(r: dict[str, Any], info) -> Optional[str]:
+    """The REGA ad licence this row states, in priority: the column, the panel's license_number key, the ad's words."""
+    from scrapers.common import normalize
+    for v in (r.get("license_number"), info.get("license_number") if isinstance(info, dict) else None):
+        v = str(v or "").strip()
+        if _REGA_AD_LICENCE.match(v):
+            return v
+    return normalize.ad_licence_from_prose(" ".join(str(r.get(k) or "") for k in ("description", "title")))
 
 
 def _fold_price_evidence(r: dict[str, Any]) -> None:
