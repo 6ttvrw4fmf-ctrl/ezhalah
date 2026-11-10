@@ -334,7 +334,7 @@ export async function dismissAuthInvitation(page, budgetMs = 6000) {
   const shown = `[data-testid="${await invitation.getAttribute('data-testid')}"]`;
   const close = await invitation.$('[data-testid="auth-popup-close"]');
   if (close) await close.click().catch(() => {});
-  
+  else await page.mouse.click(10, 10).catch(() => {});  // the empty ground, well clear of the card
   return invitationSettled(page, 8000, shown);
 }
 

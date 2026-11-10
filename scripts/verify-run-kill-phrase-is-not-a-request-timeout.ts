@@ -62,13 +62,17 @@ else {
     fail.push(`${detFile}: the detector carries its own second phrase list (notes ~* …)`);
 }
 
-// Mutation proof: the list as it was before the fix must be caught, in both directions.
+// Mutation proof: each broken phrase list must be caught by the same predicate the real list passes.
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) fail.push(`MUTATION NOT CAUGHT: ${label}`);
+};
 const OLD = 'SIGINT|SIGKILL|timed out|timeout-minutes|operation was canceled|was cancelled|killed by';
-const oldProblems = problems(OLD);
-if (!oldProblems.some((p) => p.includes('40002')) || !oldProblems.some((p) => p.includes('runner lost')))
-  fail.push('MUTATION NOT CAUGHT: the pre-fix phrase list passes this guard');
-if (!problems('SIGINT|killed').some((p) => p.includes('killed=0')))
-  fail.push('MUTATION NOT CAUGHT: bare «killed» (which matches the healthy metric killed=0) passes');
+mustCatch('the pre-fix list reads a quoted request timeout as a kill',
+  problems(OLD).some((x) => x.includes('40002')));
+mustCatch('the pre-fix list does not see «runner lost»',
+  problems(OLD).some((x) => x.includes('runner lost')));
+mustCatch('bare «killed» reads the healthy metric killed=0 as a kill',
+  problems('SIGINT|killed').some((x) => x.includes('killed=0')));
 
 if (fail.length) {
   console.error('✗ run-kill phrase guard:\n  ' + fail.join('\n  '));
