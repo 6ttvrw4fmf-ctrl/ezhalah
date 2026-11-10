@@ -1664,8 +1664,17 @@ def _stamp_seen_alive(table: str, seen_ads, verify_gone, *, source: Optional[str
     return out
 
 
-def own_page_status_oracle(c, table: str, seen, *, session=None):
+def own_page_status_oracle(c, table: str, seen, *, session=None, live_page=None):
     """verify_gone for a prune_unseen caller that supplied none (see the call site).
+
+    `live_page(ad_number, stored_row, body) -> bool` (2026-11-10) is a crawler's OWN reader of its
+    source's ad page: True only when this 200 body, still on the ad's own path, is THIS ad, published.
+    Without it a 200 is «no opinion», so an ad its site still serves but its list stopped carrying sat
+    at grace for ever (manzo, nawafeth, arsh: P1 served_after_source_gone on five live pages). With it
+    that page answers LIVE and prune_unseen clears the strikes through the liveness contract. It can
+    only ever ADD a live answer: a 404/410 is read before it, it is never asked about a moved page, an
+    exception or a falsy answer is no opinion, and no removal fires unless a control page this crawl
+    saw is recognised by the same reader (a reader the site's redesign blinded removes nothing).
 
     Each at-grace row is read at its own stored `listing_url`. Before any removal a known-live control
     must answer: up to three ads THIS crawl just saw, read the same way, at least one of which answers
@@ -1706,12 +1715,28 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
             except Exception:  # noqa: BLE001
                 continue
             if r.status_code == 200 and (r.text or "") and _own_page_status_signal(
-                    r.status_code, r.text, False) is None:
+                    r.status_code, r.text, False) is None and (
+                    live_page is None or reads_live(ad, r.text)):
                 state["v"] = (True, f"control {ad} answers 200")
                 break
         return state["v"]
 
-    probe = LivenessProbe(platform=table, signal=_own_page_status_signal, session=lambda: s,
+    def reads_live(ad_number: str, body: str) -> bool:
+        try:
+            return live_page(ad_number, row_of(ad_number), body) is True
+        except Exception:  # noqa: BLE001 — a reader that broke has no opinion
+            return False
+
+    asking = [""]
+
+    def signal(status, body, path_changed):
+        said = _own_page_status_signal(status, body, path_changed)
+        if said is None and live_page is not None and status == 200 and not path_changed and body \
+                and reads_live(asking[0], body):
+            return "live"
+        return said
+
+    probe = LivenessProbe(platform=table, signal=signal, session=lambda: s,
                           url_for=url_for, canary=canary, attempts=1, backoff=0.0)
     reads = [0]
 
@@ -1731,6 +1756,7 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
         if ended:
             return "gone", f"{OWN_PAGE_ORACLE}: the ad's own published end date {ended} has passed"
         reads[0] += 1
+        asking[0] = str(ad_number)
         verdict, why = probe.verify_gone(ad_number)
         if verdict == "unknown" and _BLOCK_WHY.search(why or ""):
             second = second_reader(ad_number)
