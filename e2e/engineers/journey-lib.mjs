@@ -137,6 +137,11 @@ export const TYPE_UI = {
   'سكن عمال': { cat: 'تجاري', group: G.cbld, tap: 'سكن عمال' },
   'أرض تجارية': { cat: 'تجاري', group: G.cplot, tap: 'أرض تجارية' },
   'أرض صناعية': { cat: 'تجاري', group: G.cplot, tap: 'أرض صناعية' },
+  // A plot whose source states NO usage keeps the source's bare word «أرض» ('Other Land', macro تجاري). The owner
+  // made it a type with NO box (2026-10-11, src/data/propertyTypes.ts UNBOXED_TYPES): a customer finds it by
+  // category + place + price/area, never by a type tap. 8,335 served rows (aqar 4,930, haraj 3,405 on 2026-11-10)
+  // were UNKNOWN to every journey until this row existed. group/tap null = «choose the category, tap no type».
+  'أرض': { cat: 'تجاري', group: null, tap: null },
 };
 // A type the catalog calls «both» (known_type_ar macro both — today only «عمارة») lives in BOTH
 // categories, and the SOURCE TABLE decides which one a customer must open: a building stored in a
@@ -272,6 +277,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   // residential table and «مبنى تجاري» in a commercial one (Falcon 2026-10-09)
   assert.equal(typeUi('عمارة', 'aqar_residential_listings').tap, 'عمارة سكنية');
   assert.equal(typeUi('عمارة', 'aldarim_commercial_listings').tap, 'مبنى تجاري');
+  assert.deepEqual(typeUi('أرض', 'haraj_residential_listings'), { cat: 'تجاري', group: null, tap: null });
   assert.equal(typeUi('عمارة', 'aldarim_commercial_listings').cat, 'تجاري');
   assert.equal(typeUi('محل', 'aldarim_commercial_listings')?.cat ?? null, typeUi('محل')?.cat ?? null);
   assert.equal(priceOf({ platform: 'gathern', deal_ar: 'إيجار', price_total: 500 }), null,

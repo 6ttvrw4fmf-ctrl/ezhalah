@@ -282,10 +282,12 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       await tap(`حي ${districtBare}`, 6000).catch(() => tap(districtBare, 6000));
     }
 
-    step(`type ${ui.cat} → ${ui.group} → ${ui.tap}`);
+    step(`type ${ui.cat} → ${ui.group ?? '(no type: an unboxed type is found by category alone)'} → ${ui.tap ?? '—'}`);
     await tap(ui.cat).catch(() => {});                    // category may already be the default tab
-    await tap(ui.group);
-    await tap(ui.tap).catch(() => log(`    ! no «${ui.tap}» box (group-level search)`));
+    if (ui.group) {
+      await tap(ui.group);
+      await tap(ui.tap).catch(() => log(`    ! no «${ui.tap}» box (group-level search)`));
+    }
 
     // ranges around the listing's own values (customer behaviour; never written over the source)
     const fillRange = async (tid, v) => {
