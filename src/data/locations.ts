@@ -1644,7 +1644,10 @@ export function districtWordIsTypo(probeF: string, tf: string): boolean {
 // Live districts literally NAMED what the user typed (normDist equality — never a word inside a longer
 // name), strongest first. See «THE NAME AS TYPED WINS» in liveDistrictLookup.
 function liveNamedExactly(raw: string): LiveDistrict[] {
-  const typed = normDist(raw);
+  return liveNamedExactlyKey(normDist(raw));
+}
+/** The same equality on an already-normalised key (normDist space) — the city-stripped probe of a «حي X، المدينة» input. */
+function liveNamedExactlyKey(typed: string): LiveDistrict[] {
   return typed.length < 2 ? [] : LIVE_DISTRICTS.filter((d) => normDist(d.district) === typed).sort((a, b) => b.n - a.n);
 }
 
@@ -1684,7 +1687,21 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // is that district, so when the town-scoped path finds nothing — or the «town» swallowed the whole
   // input after an explicit «حي» — fall back to those exactly-named districts, in whatever city they are.
   // A bare city name with no «حي» still stays that city (EXACT LOCATION ONLY, defect abha-city-rescope).
-  const namedExactly = () => liveNamedExactly(raw);
+  // WITH AN EXPLICIT CITY the typed name is the probe AFTER the city was cut out («حي الفحياء، المجمعة» → «الفاء»),
+  // never the whole phrase: comparing the whole phrase found nothing, so a «حي» inside the word plus a named city
+  // lost the district outright (CodeRabbit on #11683, 2026-11-10). The city still scopes the rows (callers below).
+  // The city-cut rows are SCOPED to the named city (EXACT LOCATION ONLY): «حي الفحياء، الرياض» must never answer
+  // Al Majmaah's district because its name happens to match — only the whole-phrase rows keep the «town inside the
+  // district's own name» semantics the callers below rely on (CodeRabbit on #11683, second round).
+  const inNamedCity = (d: LiveDistrict) => {
+    const dc = flatLoc(d.city);
+    return dc === cityKey || dc === cityKeyAr || (!!cityKeyAr && flatLoc(CITY_AR_DISPLAY[dc] || '') === cityKeyAr);
+  };
+  const namedExactly = () => {
+    const whole = liveNamedExactly(raw);
+    const cut = cityKey && probe !== normDist(raw) ? liveNamedExactlyKey(probe).filter(inNamedCity) : [];
+    return cut.length ? [...whole, ...cut.filter((d) => !whole.includes(d))].sort((a, b) => b.n - a.n) : whole;
+  };
   if (probe.length < 2) return DISTRICT_MARKER.test(raw) ? namedExactly() : []; // input is just a city (or nothing district-specific)
   if (cityKey) {
     // The town was READ OUT OF the text — if the exact name typed lives only in OTHER cities, the town
@@ -1753,6 +1770,20 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // — search nothing extra rather than a different place (project_exact-location-only-rule).
   if (!out.length && new Set(typoHits.map((h) => h.word)).size === 1) out.push(...typoHits.map((h) => h.d));
   if (!out.length && cityKey) return namedExactly(); // the «city» we scoped to was part of the district's own name
+  // THE NAME AS TYPED WINS, also when «حي» sits INSIDE the word (🔧 2026-11-10, district-name-sweep red since 11-07):
+  // normDist strips every «حي», so «حي البحيرات» probes as «البرات», «حي الفحياء» as «الفاء», «اليحيى» as «الى» — the
+  // whole-word match above finds none of their Arabic rows, only the English twin rows the catalog bridge adds
+  // («Al-Buhayrat», Jeddah). The multi-city branch then saw ONE city and sent 327 Mecca ads' name to Jeddah, and
+  // the Majmaah / Hofuf names were lost outright (647 listings on the 11-10 sweep, 335 of them البحيرات). The rows
+  // whose normalised name EQUALS the typed one (both sides normalised alike) always belong to the answer; a city
+  // the user named still scopes them.
+  for (const d of namedExactly()) {
+    if (cityKey) {
+      const dc = flatLoc(d.city);
+      if (dc !== cityKey && dc !== cityKeyAr && flatLoc(CITY_AR_DISPLAY[dc] || '') !== cityKeyAr) continue;
+    }
+    if (!out.includes(d)) out.push(d);
+  }
   out.sort((a, b) => b.n - a.n); // strongest (most listings) first
   return out;
 }
