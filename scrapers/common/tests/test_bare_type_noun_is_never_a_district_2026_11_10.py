@@ -34,3 +34,4 @@ def test_a_district_named_with_its_article_still_matches(monkeypatch):
     assert L.find_district_in_text("أرض للبيع في بريدة في الشقة", CITY) is not None
     assert L.find_district_in_text("شقة للإيجار في بريدة في الصفراء", CITY) is not None
     assert L.find_district_in_text("أرض للبيع حي الشقة", CITY) is not None
+

@@ -241,7 +241,9 @@ def map_listing(slug: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         "city_ar": city_ar,
         "city_id": city_id,
         "region_id": region_id,
-        "district_ar": district_ar,
+        # The ad page was read: no catalogued district in its own fields is the source's answer, so a district an
+        # older read inferred (the bare «شقة» read as «حي الشقة», ⚡ 2026-11-10) is cleared, not kept as None would.
+        "district_ar": district_ar or db.AUTHORITATIVE_NULL,
         "neighborhood": district_raw,
         "area_m2": normalize.to_int(facts.get("متر مربع")),
         "bedrooms": normalize.to_int(facts.get("غرف نوم")) if property_type in _DWELLINGS else None,
