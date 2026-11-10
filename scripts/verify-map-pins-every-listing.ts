@@ -143,8 +143,11 @@ check('foldDuplicates keeps the first of each key, counts the copies, keeps orde
 mustCatch('a fold that merges different listings (different key folded together)', foldDuplicates(dupCards, (c) => c.k).length !== 1);
 mustCatch('a fold that drops a copy without counting it', folded.reduce((a, f) => a + f.copies, 0) === dupCards.length);
 const sheetSrc = readFileSync(join(root, 'src/components/MapPinSheet.tsx'), 'utf8');
-check('the sheet shows every card the pin holds, as each site published it (owner 2026-11-03: same-site copies stay)', /\{cards\.map\(\(l\) => \(/.test(sheetSrc) && !/foldDuplicates\(cards/.test(sheetSrc));
-mustCatch('a sheet that folds same-site copies away (reverted at the owner\'s word)', !/foldDuplicates\(cards/.test(sheetSrc));
+// Owner 2026-11-10 (the final pin rule) replaced «every copy is its own card»: ads PROVEN to be one property fold into
+// one card, and every folded ad stays on screen as a named link under it. The fold itself is executed in
+// verify-map-same-property-is-one-card.ts; here: nothing may be dropped on the way to the screen.
+check('the sheet folds proven-same ads into one card and names every other ad under it as a link', /foldSameProperty\(cards, factsOf\)\.map\(\(\{ main, others \}\) => \(/.test(sheetSrc) && /\{others\.map\(\(o\) => \(\s*<Pressable key=\{`\$\{o\.sourceTable\}#\$\{o\.id\}`\} onPress=\{\(\) => \{ void openListing\(o\); \}\}/.test(sheetSrc) && !/foldDuplicates\(cards/.test(sheetSrc));
+mustCatch('a sheet that drops same-site copies instead of naming them (foldDuplicates keeps one and shows nothing else)', !/foldDuplicates\(cards/.test(sheetSrc));
 check('a committed migration restores map_pins_ar and the grid without the same-site fold', (() => { const dir = join(root, 'supabase/migrations'); const f = readdirSync(dir).filter((x) => /map_same_site_copies_stay/.test(x)).pop(); if (!f) return false; const sql = readFileSync(join(dir, f), 'utf8'); return !/row_number\(\) over \(partition by k\.source_table/.test(sql) && !/distinct on \(u\.source_table/.test(sql) && /select k\.la, k\.lo, count\(\*\)::int,/.test(sql) && !/same_site_dupes/.test(sql); })());
 check('the sheet shows the head\'s own words (price or count) at once while the cards load', /\$\{t\('Listing'\)\} · \$\{pinHead\(row, isRTL \? 'ar' : 'en'\)\}/.test(sheetSrc));
 // AN INVISIBLE OUTLINE IS NOT CLICKABLE (measured live 2026-11-02, phone: a tap between two pins in central Riyadh flew
@@ -221,7 +224,7 @@ mustCatch('a tick that changes the map at once again (no Apply)', !draftRx.test(
 check('a tapped pin opens the card sheet over the map AS IT IS (no full-screen switch on the tap)', /onPinSelect=\{\(row\) => \{ setPinRow\(row\); \}\}/.test(screen) && /<MapPinSheet row=\{pinRow\} onClose=/.test(screen));
 mustCatch('a tap that flips the map to full screen (the reshuffle the owner saw)', !/onPinSelect=\{[^}]*setFull\(true\)/.test(screen));
 const sheet = readFileSync(join(root, 'src/components/MapPinSheet.tsx'), 'utf8');
-check('the sheet loads every listing through fetchListingCards (the search\'s own card path) and opens with openListing', /fetchListingCards\(table, ids\)/.test(sheet) && /openListing\(l\)/.test(sheet) && /<ResultCard listing=\{l\}/.test(sheet));
+check('the sheet loads every listing through fetchListingCards (the search\'s own card path) and opens with openListing', /fetchListingCards\(table, ids\)/.test(sheet) && /openListing\(main\)/.test(sheet) && /openListing\(o\)/.test(sheet) && /<ResultCard listing=\{main\}/.test(sheet));
 check('the sheet says a failed load is a failed load, never «no listings»', /if \(!all\.length && \(row\.ids\?\.length \?\? 0\) > 0\) setFailed\(true\);/.test(sheet));
 check('a committed migration creates map_pins_ar with the price and the filter arguments', readdirSync(join(root, 'supabase/migrations')).some((f) => { const t = readFileSync(join(root, 'supabase/migrations', f), 'utf8'); return /create function public\.map_pins_ar\(/.test(t) && /p_price_min numeric/.test(t) && /price numeric, platform text/.test(t); }));
 

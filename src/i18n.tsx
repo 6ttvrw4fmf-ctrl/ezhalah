@@ -1719,6 +1719,8 @@ const AR: Record<string, string> = {
   'Listing': 'الإعلان',
   'Could not load this listing. Try again.': 'تعذّر تحميل الإعلان. حاول مرة أخرى.',
   'Some listings could not be loaded.': 'تعذّر تحميل بعض الإعلانات.',
+  'Same property, {n} more ads:': 'نفس العقار، {n} إعلانات أخرى:',
+  'from {price}': 'من {price}',
   '{n} bedrooms': '{n} غرف',
   'Same district and type, area within 20% of this ad, same bedrooms when stated. Each property once, nearest first, prices as published.': 'نفس الحي والنوع، والمساحة ضمن 20% من هذا الإعلان، ونفس عدد الغرف عند ذكره. كل عقار مرة واحدة، الأقرب أولاً، والأسعار كما نُشرت.',
   'Tap «Show the similar listings» under our half to see the ads closest to this one (same district and type, area within 20%, same bedrooms when stated), each on its own website at its published price.': 'اضغط «عرض الإعلانات المشابهة» تحت جانبنا لترى أقرب الإعلانات لهذا الإعلان (نفس الحي والنوع، والمساحة ضمن 20%، ونفس عدد الغرف عند ذكره)، كلٌّ في موقعه الأصلي وبسعره المنشور.',
