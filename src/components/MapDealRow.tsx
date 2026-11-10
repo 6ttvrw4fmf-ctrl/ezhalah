@@ -11,6 +11,7 @@ import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'r
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
+import { hitsToShow } from '@/lib/placeSearch';
 import { suggestPlaces, flyToPlace, clearPlaceMark, routeBetween, type PlaceSuggestion } from '@/components/AppleMap';
 import { KIND_LABEL, type PlaceKind } from '@/lib/placeKind';
 
@@ -34,15 +35,23 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
 }) {
   const { t, isRTL, locale } = useI18n();
   const [q, setQ] = useState(value);
-  const [hits, setHits] = useState<PlaceSuggestion[]>([]);
+  // The rows AND the words they were found for (src/lib/placeSearch.ts): a list never shows under other words.
+  const [found, setFound] = useState<{ q: string; rows: PlaceSuggestion[] } | null>(null);
+  const hits = hitsToShow(q, found);
+  const setHits = (rows: PlaceSuggestion[], forQ = q) => setFound(rows.length ? { q: forQ, rows } : null);
   const [focused, setFocused] = useState(false);
+  // A finger is down on a suggestion: the field's blur must not close the list under it (a 0.35 s tap lost it, live).
+  const pressing = useRef(false);
+  // The pressed row can vanish mid-press (a newer answer replaced the list); RN Web then never calls its onPressOut, so
+  // the flag is cleared whenever the list itself changes (review of #11635).
+  useEffect(() => { pressing.current = false; }, [found]);
   const seq = useRef(0);
   const inputRef = useRef<TextInput>(null);
   useEffect(() => { setQ(value); }, [value]);
   useEffect(() => {
     const id = ++seq.current;
     if (q.trim().length < 2 || q === value) { setHits([]); return; }
-    const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r); }); }, 220);
+    const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r, q); }); }, 180);
     return () => clearTimeout(h);
   }, [q, locale, value]);
   // THE KEYBOARD CLOSES ON A PICK (owner 2026-11-02, phone: «doesn't look nice on a phone» — the keyboard stayed up
@@ -59,7 +68,7 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
           value={q}
           onChangeText={setQ}
           onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 150)}
+          onBlur={() => setTimeout(() => { if (!pressing.current) setFocused(false); }, 150)}
           placeholder={placeholder}
           placeholderTextColor={colors.muted}
           accessibilityLabel={placeholder}
@@ -76,7 +85,8 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
       {open ? (
         <View style={s.hits} testID={`${testID}-hits`}>
           {hits.slice(0, 6).map((p, i) => (
-            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
+            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPressIn={() => { pressing.current = true; }}
+              onPressOut={() => { setTimeout(() => { pressing.current = false; if (!inputRef.current?.isFocused?.()) setFocused(false); }, 0); }} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
               <Ionicons name={KIND_ICON[p.kind ?? 'place']} size={16} color={colors.primary} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={s.hitTop}>
@@ -106,7 +116,8 @@ export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
     <PlaceField
       value={value}
       placeholder={t('Region, city, landmark, district or street')}
-      onPick={(p) => { setValue(p.displayLines[0]); onPick?.(); flyToPlace(p); }}
+      // The same words the field shows after a pick (p.name), so the text does not jump to Apple's raw first line.
+      onPick={(p) => { setValue(p.name ?? p.displayLines[0]); onPick?.(); flyToPlace(p); }}
       onClear={() => { setValue(''); clearPlaceMark(); }}
       testID="map-search"
     />
@@ -121,7 +132,7 @@ const TO = '#c84646';
  *  Once both are picked, Apple's driving route draws with a soft band around it and the map fits it; `onRouted`
  *  opens the full-screen map. */
 export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onRouted?: () => void }) {
-  const { t } = useI18n();
+  const { t, isRTL } = useI18n();
   const [from, setFrom] = useState<PlaceSuggestion | null>(null);
   const [to, setTo] = useState<PlaceSuggestion | null>(null);
   const [failed, setFailed] = useState(false);
@@ -134,7 +145,8 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
   const swap = () => { const a = from, b = to; setFrom(b); setTo(a); go(b, a); };
   return (
     <View style={s.routeWrap} testID="map-route-fields">
-      <View style={s.routeHead}>
+      {/* X top right in both languages (owner 2026-11-10: «x for everything must always be on the top right no matter what»). */}
+      <View style={[s.routeHead, isRTL && { flexDirection: 'row-reverse', justifyContent: 'flex-end', gap: 8 }]}>
         <Text style={s.routeTitle}>{t('Route')}</Text>
         <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-route-close">
           <Ionicons name="close" size={20} color={colors.muted} />
@@ -142,13 +154,13 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
       </View>
       {/* The fields SAY what can be typed (owner 2026-11-01: «it doesn't show clearly that the user can type a street,
           landmark, district…»). */}
-      <PlaceField value={from?.displayLines[0] ?? ''} placeholder={`${t('From')}: ${t('Region, city, landmark, district or street')}`} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
+      <PlaceField value={from ? (from.name ?? from.displayLines[0]) : ''} placeholder={`${t('From')}: ${t('Region, city, landmark, district or street')}`} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
       <View style={s.swapRow}>
         <Pressable style={s.swapBtn} onPress={swap} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Swap')} testID="map-route-swap">
           <Ionicons name="swap-vertical" size={18} color={colors.primary} />
         </Pressable>
       </View>
-      <PlaceField value={to?.displayLines[0] ?? ''} placeholder={`${t('To')}: ${t('Region, city, landmark, district or street')}`} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
+      <PlaceField value={to ? (to.name ?? to.displayLines[0]) : ''} placeholder={`${t('To')}: ${t('Region, city, landmark, district or street')}`} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
       {failed ? <Text style={s.routeFail}>{t('No route found between these two places')}</Text> : null}
     </View>
   );
@@ -162,8 +174,13 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
   const deals = dealsProp ?? dealsLocal;
   const setDeals = (f: (d: MapDeal[]) => MapDeal[]) => { const next = f(deals); setDealsLocal(next); onDeals?.(next); };
   const [open, setOpen] = useState(false);
+  // TICKS ARE A DRAFT UNTIL «تطبيق» (owner 2026-11-09: «make it a bit big … and add apply below»): the popup edits a
+  // copy; Apply hands it to the map (the pins follow exactly that), X / a tap outside drops it and the map stays as it was.
+  const [draft, setDraft] = useState<MapDeal[]>(deals);
+  const openPopup = () => { setDraft(deals); setOpen(true); };
+  const apply = () => { setDeals(() => draft); setOpen(false); };
   // Untick only while another stays ticked: the map always has at least one deal.
-  const toggle = (id: MapDeal) => setDeals((d) => (d.includes(id) ? (d.length > 1 ? d.filter((x) => x !== id) : d) : DEALS.filter((x) => x.id === id || d.includes(x.id)).map((x) => x.id)));
+  const toggle = (id: MapDeal) => setDraft((d) => nextDeals(d, id));
   const label = deals.length === DEALS.length ? t('All') : DEALS.filter((d) => deals.includes(d.id)).map((d) => t(d.label)).join(t(', '));
 
   return (
@@ -174,7 +191,7 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
       {/* The transaction button: the chosen deal, outlined in plum so it reads as «this is set». */}
       <Pressable
         style={({ pressed, hovered }: any) => [s.btn, s.btnActive, hovered && s.btnHover, pressed && s.btnPressed]}
-        onPress={() => setOpen(true)}
+        onPress={openPopup}
         accessibilityRole="button"
         accessibilityLabel={t('Transaction')}
         testID="map-deal-btn"
@@ -208,7 +225,7 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
               </Pressable>
             </View>
             {DEALS.map((d) => {
-              const on = deals.includes(d.id);
+              const on = draft.includes(d.id);
               return (
                 <Pressable
                   key={d.id}
@@ -218,16 +235,24 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
                   accessibilityState={{ checked: on }}
                   testID={`map-deal-${d.id}`}
                 >
-                  <View style={[s.box, on && s.boxOn]}>{on ? <Ionicons name="checkmark" size={15} color={colors.onFill} /> : null}</View>
+                  <View style={[s.box, on && s.boxOn]}>{on ? <Ionicons name="checkmark" size={19} color={colors.onFill} /> : null}</View>
                   <Text style={[s.optionText, on && s.optionTextOn]}>{t(d.label)}</Text>
                 </Pressable>
               );
             })}
+            <Pressable style={({ pressed }: any) => [s.apply, pressed && s.btnPressed]} onPress={apply} accessibilityRole="button" testID="map-deal-apply">
+              <Text style={s.applyT}>{t('Apply')}</Text>
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
     </View>
   );
+}
+
+/** Pure: tick or untick one deal; the last ticked deal cannot be unticked (the map always shows at least one). */
+export function nextDeals(d: MapDeal[], id: MapDeal): MapDeal[] {
+  return d.includes(id) ? (d.length > 1 ? d.filter((x) => x !== id) : d) : DEALS.filter((x) => x.id === id || d.includes(x.id)).map((x) => x.id);
 }
 
 const GLASS = 'rgba(255,255,255,0.42)';
@@ -268,14 +293,16 @@ const s = StyleSheet.create({
   // collapsed to its content and the card sat at the top (owner 2026-10-31: «on the phone it doesn't pop up in the
   // centre of the screen»). Explicit edges centre it on every browser.
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(36,35,43,0.28)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  card: { width: '100%', maxWidth: 320, backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.tintLine, padding: 18, ...cardShadow, shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
-  cardHead: { minHeight: 28, justifyContent: 'center', marginBottom: 6, paddingRight: 32 },
+  card: { width: '100%', maxWidth: 440, backgroundColor: colors.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.tintLine, padding: 22, ...cardShadow, shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+  cardHead: { minHeight: 32, justifyContent: 'center', marginBottom: 10, paddingRight: 36 },
   close: { position: 'absolute', right: 0, top: 0, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  cardTitle: { fontSize: 15, fontWeight: '800', color: colors.ink },
-  option: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 6, borderRadius: 10 },
+  cardTitle: { fontSize: 19, fontWeight: '800', color: colors.ink },
+  option: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, paddingHorizontal: 8, borderRadius: 12 },
   optionHover: { backgroundColor: colors.tint },
-  box: { width: 22, height: 22, borderRadius: 7, borderWidth: 2, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  box: { width: 28, height: 28, borderRadius: 8, borderWidth: 2, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   boxOn: { borderColor: colors.primary, backgroundColor: colors.selFill },
-  optionText: { fontSize: 15, color: colors.ink },
+  optionText: { fontSize: 18, color: colors.ink },
+  apply: { marginTop: 16, backgroundColor: colors.primary, borderRadius: 999, paddingVertical: 15, alignItems: 'center' },
+  applyT: { color: '#fff', fontSize: 17, fontWeight: '800' },
   optionTextOn: { fontWeight: '700', color: colors.primary },
 });

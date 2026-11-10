@@ -171,6 +171,7 @@ const card = new N().add(new N(), new N().add(new N()));
 const iframe = new N(true);
 const fixedBox = new N().add(iframe);
 body.add(card, fixedBox);
+const lateIframe = new N(true);   // in the page, matching now, but never watched (it had no src when added)
 const watched = [iframe, fixedBox];
 const rec = (r: Partial<{ type: string; target: N; addedNodes: N[]; removedNodes: N[] }>) =>
   ({ type: 'childList', target: body, addedNodes: [], removedNodes: [], ...r }) as unknown as MutationRecord;
@@ -186,6 +187,9 @@ const cases: Case[] = [
   ['the prompt restyled (slide-in, hide)', [rec({ type: 'attributes', target: iframe })], true],
   ['an ancestor of the prompt restyled', [rec({ type: 'attributes', target: body })], true],
   ['one relevant record among card noise', [rec({ addedNodes: [card] }), rec({ type: 'attributes', target: fixedBox })], true],
+  // 2026-11-10 (WebKit, journey-sweep 42624835985): an iframe added BEFORE its src, so it was never watched.
+  ['an unwatched iframe gaining the prompt src', [rec({ type: 'attributes', target: lateIframe })], true],
+  ['an unwatched card image changing src', [rec({ type: 'attributes', target: card.kids[0] })], false],
 ];
 const runCases = (fn: typeof mutationTouchesPrompt) =>
   cases.every(([, records, want]) => fn(records, 'x', watched as unknown as Node[]) === want);
@@ -197,6 +201,11 @@ check('MUTATION — the old "every mutation re-measures" observer is caught', !r
 check('MUTATION — ignoring an ancestor restyle is caught',
   !runCases((records, sel, w) => Array.from(records).some((r) => r.type === 'childList'
     ? mutationTouchesPrompt([r], sel, w) : w.includes(r.target))));
+check('MUTATION — a node that only STARTS matching (late src) being ignored is caught',
+  !runCases((records, sel, w) => Array.from(records).some((r) => r.type === 'childList'
+    ? mutationTouchesPrompt([r], sel, w) : (w as unknown as N[]).some((x) => x === r.target || (r.target as unknown as N).contains(x)))));
+check('the prompt observer listens for src changes (a late src is how the card becomes a prompt)',
+  /attributeFilter: \['style', 'class', 'src'\]/.test(insetSrc));
 check('observePromptInsets routes its MutationObserver through mutationTouchesPrompt',
   /new MutationObserver\(\(records\) => \{ if \(mutationTouchesPrompt\(records, selector, watched\)\) tick\(\); \}\)/.test(insetSrc)
   && !/new MutationObserver\(tick\)/.test(insetSrc));

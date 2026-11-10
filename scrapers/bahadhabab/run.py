@@ -56,6 +56,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
 from scrapers.common.pii import redact_pii
+from scrapers.common.posting_date import site_posting_date
 from scrapers.common.source_pin import pin_dict
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
@@ -402,6 +403,11 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "photo_urls": _photos(L),
         "property_age": None if property_type in AGELESS_TYPES
                         else _age_from_year_built(L.get("year_built")),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the Nuzul API item's own `created_at` (UTC «Z»).
+        # Measured live 2026-11-09 on bahadhabab 39116:
+        # created_at 2025-08-28T16:31:13.000000Z, updated_at 17:05:46 — the same value we stored.
+        # The ad page prints no date of its own. Never updated_at (an edit) or availability_date.
+        "date_added": site_posting_date(L.get("created_at")),
         "rega_location_verified": bool(L.get("rega_ad_number")),
         # Owner 2026-10-20: the API item's own latitude/longitude (strings). The panel rows keep their
         # legacy shape under "rows" (src/data/remote.ts buildAdditionalInfo unwraps it); the index reads

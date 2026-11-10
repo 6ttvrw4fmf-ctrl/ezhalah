@@ -45,6 +45,7 @@ from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
 from scrapers.common.source_pin import pin_dict
 from scrapers.common.http import retry_smarter_session
+from scrapers.common.posting_date import site_posting_date
 
 # PDPL: never store these containers (advertiser / brokerage identity).
 _PII = {"advertiser", "brokerageBadge", "brokerageContract"}
@@ -345,6 +346,11 @@ def map_listing(p: dict, photos: Optional[list[str]] = None) -> tuple[Optional[d
         # a failed fetch (photos=None) degrades to the list item's primaryImageUrl, and an empty
         # source gallery stays [] — fewer images on failure, never a wrong or invented one.
         "photo_urls": photos if photos else ([photo] if photo else []),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the API item's `createdAt` (UTC «Z»), which the ad page
+        # publishes as <meta property="article:published_time"> — measured 2026-11-09 on /properties/1047: both
+        # 2026-09-19T22:10:11.804396Z. Never lastPriceChangedAt (a price edit), googleExportLastAt (a feed export),
+        # scheduledPublishAt / listingExpiresAt / adLicenseFeePaidAt.
+        "date_added": site_posting_date(p.get("createdAt")),
         "rega_location_verified": bool(p.get("advertisingLicenseNumber")),
         # Owner 2026-10-20: the search API item's own latitude/longitude — under item.specs (numbers, e.g. 24.5149529,46.7431743).
         # Rows keep their legacy shape under "rows" (buildAdditionalInfo unwraps it); the index reads the pin.

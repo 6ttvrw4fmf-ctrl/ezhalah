@@ -34,8 +34,11 @@ the tables' zz_redact_pii trigger on top).
 LIVENESS («own full list = the check»): a side is COMPLETE when every page was read and the unique ads reach
 98% of the smallest total_count the site printed during the walk (a short side is walked a second time and
 merged — the default order drifts a few ads while we read). prune_unseen runs per table only when BOTH sides
-that feed it are complete; an ad absent from 3 complete crawls in a row is hidden (its own page is robots-403,
-so the complete list is the only reading there is). A partial walk, a wall or an exception prunes nothing.
+that feed it are complete; an ad absent from 3 complete crawls in a row is HIDDEN (its own page is robots-403,
+so the complete list is the only reading there is) — owner decision 2026-11-10 for THIS SITE ONLY, the one named
+exception to «absence never hides» (LISTING_LIVENESS.md §7.3, liveness_policies.COMPLETE_LIST_ABSENCE_HIDES).
+Hidden, never deleted; an ad the list shows again comes back by the upsert. A partial walk, a wall or an
+exception prunes nothing.
 
     python -m scrapers.propertyfinder.run --dry-run      # walk + map, write nothing
     python -m scrapers.propertyfinder.run                # upsert (staged tables)
@@ -55,6 +58,7 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, norm_district_tok, resolve  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.liveness_policies import COMPLETE_LIST_ABSENCE_VERDICT  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.propertyfinder import crawl as C  # noqa: E402
 
@@ -373,11 +377,14 @@ def main() -> int:
 
 
 def _absent_from_complete_list(ad_number: str) -> tuple[str, str]:
-    """prune_unseen's answer at grace. The ad's own page is robots-403, so we cannot read it — and absence from the
-    category lists is a CANDIDATE, never a kill (LISTING_LIVENESS.md §2; the only list-presence exception, wasalt's,
-    changes what counts as verified, never what counts as dead). The strike is held: UNKNOWN. ♻️ 2026-11-06 — it used
-    to return «gone» here, an absence-only kill; a removal signal for this site is an owner decision."""
-    return "unknown", "absent from 3 consecutive COMPLETE category-list walks; own page is robots-403 — held (absence never kills)"
+    """prune_unseen's answer at grace: «absent», never «gone». The ad's own page is robots-403 and is never fetched,
+    so nothing here read a removal. OWNER DECISION 2026-11-10, this site only (LISTING_LIVENESS.md §7.3): an ad
+    missing from 3 COMPLETE list walks in a row is HIDDEN. db.prune_unseen honours «absent» only for a platform named
+    in liveness_policies.COMPLETE_LIST_ABSENCE_HIDES; main() calls it only when every side feeding the table walked
+    completely. The row is kept, never deleted, and the next walk that lists it again un-hides it (the upsert)."""
+    return COMPLETE_LIST_ABSENCE_VERDICT, ("absent from 3 consecutive COMPLETE category-list walks; own page is "
+                                           "robots-403, never read — hidden by owner decision 2026-11-10, returns "
+                                           "when the list shows it again")
 
 
 if __name__ == "__main__":
