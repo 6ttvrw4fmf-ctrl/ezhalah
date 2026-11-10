@@ -22,6 +22,7 @@ const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches 
 const PRELUDE = `
 import { bathroomsForCard } from '${pathToFileURL(join(root, 'src/lib/indexBathrooms.ts')).href}';
 type Listing = any;
+const reportMessage = (_m: string, _c?: any) => {};
 const bounded = (p: any) => p;
 const SEARCHABLE_TABLES = ['aqar_residential_listings'];
 const listSelectFor = (_t: string) => '*';

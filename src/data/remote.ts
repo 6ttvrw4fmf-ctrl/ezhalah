@@ -8,6 +8,7 @@ import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
 import { bathroomsForCard } from '@/lib/indexBathrooms';
+import { reportMessage } from '@/lib/observability';
 import { honestTotal } from '@/lib/honestTotal';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { normalizeType, queryForSelection, queryForTypes, storedRawTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
@@ -2035,6 +2036,9 @@ export async function fetchListingCards(table: string, ids: number[]): Promise<L
   // below it — never worse than before, and never a blank-for-error.
   const loc = await bounded(supabase.from('search_listings_ar').select('listing_id,region_ar,city_ar,district_ar,bathrooms')
     .eq('source_table', table).in('listing_id', ids).limit(ids.length));
+  // A FAILED FETCH IS NOT AN EMPTY ANSWER: the fallback below keeps every card, but the failure is reported, never
+  // swallowed (CodeRabbit Major on #11678) — a silent index read would silently drop the Arabic place AND the bath count.
+  if (loc.error) reportMessage('fetchListingCards: search_listings_ar read failed', { table, ids: ids.length, error: String((loc.error as { message?: string }).message ?? loc.error) });
   const arById = new Map<number, { region: string; city: string; district: string }>();
   const bathsById = new Map<number, unknown>();
   for (const x of ((loc.error ? null : loc.data) ?? []) as { listing_id: number; region_ar: string | null; city_ar: string | null; district_ar: string | null; bathrooms?: unknown }[]) {
