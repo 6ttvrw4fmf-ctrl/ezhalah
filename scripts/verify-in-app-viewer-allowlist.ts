@@ -360,7 +360,9 @@ check('but the FRAME receiving the real ad page with X-Frame-Options is a refusa
 check('…and so is a CSP frame-ancestors that is not *', /frame-ancestors 'self'/.test(guard.frameRefusal({ status: 200, xfo: '', csp: "default-src 'self'; frame-ancestors 'self'", text: adPage }) ?? ''));
 check('no frame document answer at all is inconclusive (never invented)', guard.frameRefusal(null) === null);
 check('the top-level wall branch skips ONLY a wall: a full ad page with the header still fails as REFUSES framing', /if \(wall\) \{ topWall\.add\(u\); continue; \}\n\s*fail\(`\$\{site\.host\}: \$\{u\} now REFUSES framing/.test(guardSrc));
-check('an unreadable top-level body is inconclusive, never classified as a wall', /const body = await res\.text\(\)\.catch\(\(\) => null\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(body === null\) \{ console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc));
+check('an unreadable top-level body is inconclusive, never classified as a wall', /const body = await res\.text\(\)\.catch\(\(\) => null\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(body === null\) \{ topUnreadable\.add\(u\); console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc));
+check('an unreadable top-level body never becomes a 99,999 ms sample: a blank frame over it is inconclusive unless the frame proves a refusal', /topUnreadable\.add\(u\);/.test(guardSrc) && /if \(seen === null && topUnreadable\.has\(u\) && !frameRefusal\(frameDoc\)\) \{ console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc));
+check('a given-but-empty ONLY_HOSTS is refused (the bridge already reads it as partial)', /if \(\(process\.env\.ONLY_HOSTS \?\? ''\) !== '' && !only\.length\) fail\(/.test(guardSrc));
 check('the frame body read is awaited before the refusal decision', /if \(frameDoc\?\.ready\) await frameDoc\.ready;\n\s*const refusal = frameRefusal\(frameDoc\);/.test(guardSrc) && /d\.ready = r\.text\(\)\.then/.test(guardSrc));
 check('the exclusion branch consults the frame\'s evidence before excluding', /topWall\.has\(u\)\) \{\n\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(frameDoc\?\.ready\) await frameDoc\.ready;\n\s*const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc));
 check('the top-level log line carries no <title> (PDPL: a listing title can name a person or a phone)', !/title «\$\{title\}»/.test(guardSrc) && !/const title = \/<title/.test(guardSrc));
@@ -378,6 +380,8 @@ mustCatch('an unreadable body read as an empty page (a wall)',
   !/const body = await res\.text\(\)\.catch\(\(\) => null\);/.test(guardSrc.replace("const body = await res.text().catch(() => null);", "const body = await res.text().catch(() => '');")));
 mustCatch('a refusal decided before the frame body arrived',
   !/if \(frameDoc\?\.ready\) await frameDoc\.ready;\n\s*const refusal = frameRefusal\(frameDoc\);/.test(guardSrc.replace('if (frameDoc?.ready) await frameDoc.ready;\n', '')));
+mustCatch('an unreadable body that still measures the blank frame (the 99,999 trap)',
+  !/if \(seen === null && topUnreadable\.has\(u\) && !frameRefusal\(frameDoc\)\) \{ console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc.replace('if (seen === null && topUnreadable.has(u) && !frameRefusal(frameDoc)) {', 'if (false) {')));
 mustCatch('the <title> back in the log', /title «\$\{title\}»/.test(guardSrc.replace('${body.length} chars${wall', '${body.length} chars, title «${title}»${wall')));
 
 // A suffix match without the dot boundary (the lookalike mutant).

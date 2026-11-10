@@ -145,6 +145,9 @@ try {
   const runSites = only.length ? SITES.filter((s) => only.includes(s.host)) : SITES;
   const unknown = only.filter((h) => !SITES.some((s) => s.host === h));
   if (unknown.length) fail(`ONLY_HOSTS names ${unknown.join(', ')} — not in SITES; a filter that selects nothing must not read as a green run`);
+  // A filter that was GIVEN but names nothing (spaces / commas) is refused too: the workflow's alert bridge already
+  // reads such a run as partial, so running every site here would be a full run whose verdict reaches no alert.
+  if ((process.env.ONLY_HOSTS ?? '') !== '' && !only.length) fail('ONLY_HOSTS was given but names no host — refusing to run every site under a partial-run label');
   if (only.length) console.log(`! partial run: ${runSites.map((s) => s.host).join(', ')} (ONLY_HOSTS)`);
   for (const site of runSites) {
     let urls;
@@ -157,6 +160,7 @@ try {
     // phone — a WAF on datacenter egress, not a framing refusal, yet it read ✗ on every run for two days.
     const topStatus = new Map();
     const topWall = new Set();
+    const topUnreadable = new Set();   // top-level 2xx whose body could not be read: step 2 treats a blank frame as inconclusive
     for (const u of urls) {
       const res = await fetch(u, { headers: { 'User-Agent': devices['iPhone 13'].userAgent }, redirect: 'follow' }).catch(() => null);
       topStatus.set(u, res ? res.status : 0);
@@ -181,7 +185,7 @@ try {
         // page (thousands of characters, no wall words) that still carries the header, and that still fails here.
         const body = await res.text().catch(() => null);
         // An unreadable body is neither the ad page nor a wall: say so and leave it to step 2 (CodeRabbit, #11680).
-        if (body === null) { console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa} but the body could not be read: header check inconclusive`); continue; }
+        if (body === null) { topUnreadable.add(u); console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa} but the body could not be read: header check inconclusive`); continue; }
         const wall = isBotWall(body);
         // No <title> in the log: a listing's title can carry a phone number or a person's name (PDPL). Server + size say enough.
         console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa}; server ${res.headers.get('server') ?? '?'}, ${body.length} chars${wall ? ' → a bot wall to this egress, not the ad page: header check skipped' : ''}`);
@@ -228,6 +232,8 @@ try {
       // challenge page — excluded and reported, never ✗. A 200 page that stays blank is still measured (99,999).
       const top = topStatus.get(u) ?? 0;
       if (seen === null && (top === 0 || top >= 400)) { console.log(`· ${site.host}: ${u} — top-level load answered HTTP ${top || 'nothing'} to this egress (WAF / block / outage), excluded as inconclusive`); continue; }
+      if (seen === null && frameDoc?.ready) await frameDoc.ready;
+      if (seen === null && topUnreadable.has(u) && !frameRefusal(frameDoc)) { console.log(`· ${site.host}: ${u} — top-level body unreadable and the frame stayed blank without proving a refusal: excluded as inconclusive`); continue; }
       if (seen === null && topWall.has(u)) {
         // The top-level fetch hit a wall, but the FRAME is its own request: if the frame received a real ad page (not a
         // wall, not an error) that still carried a refusing header, that is a real refusal and fails here.
