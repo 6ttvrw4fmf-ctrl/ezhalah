@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
-const { planMirrors, safeName, versionTime, GRACE_MINUTES, MAX_PER_RUN } = await import('./auto-mirror-migrations.mjs');
+const { planMirrors, safeName, versionTime, GRACE_MINUTES, MAX_PER_RUN, CLAIM_MINUTES } = await import('./auto-mirror-migrations.mjs');
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`); if (!ok) failed++; };
 const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); if (!caught) failed++; };
@@ -33,12 +33,29 @@ mustCatch('a robot with no grace period (races the session that applied it)',
   planMirrors([{ version: '20261027215500', name: 'x' }], now, []).length === 0);
 check('a stale mirror/<version> branch with NO open PR does not block the mirror (🔧 2026-11-03: four 🔬 versions sat unmirrored 2 h 37 min)',
   (() => { const p = planMirrors([{ version: '20261027201642', name: 'x' }], now, [], ['mirror/20261027201642']); return p.length === 1 && p[0].branch === 'mirror/20261027201642-auto'; })());
-check('an OPEN PR on mirror/<version> still claims the version',
-  planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642'], ['mirror/20261027201642']).length === 0);
+check('an OPEN PR on mirror/<version> still claims a version applied less than CLAIM_MINUTES ago',
+  planMirrors([{ version: '20261027210558', name: 'x' }], now, ['mirror/20261027210558'], ['mirror/20261027210558']).length === 0);
+// 2026-11-10 (repeat_bug:migration_drift): a person's claim is bounded. 27 of 61 mirrors took > 3 h behind a PR that was not moving.
+const stale = planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642'], ['mirror/20261027201642']);
+check(`a person's open mirror PR stops holding the version ${CLAIM_MINUTES} min after the apply — the robot mirrors it on -auto`,
+  stale.length === 1 && stale[0].branch === 'mirror/20261027201642-auto', JSON.stringify(stale));
+check('the robot never pushes to a person\'s claimed branch, even when the branch list is the default',
+  planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642'])[0]?.branch === 'mirror/20261027201642-auto');
+check('the claim window is longer than the grace and shorter than the 3 h drift-alert window',
+  CLAIM_MINUTES > GRACE_MINUTES && CLAIM_MINUTES + 60 <= 180);
+{ // Mutation proof: the pre-11-10 predicate (a claim never expires) executed on the same input must leave the version unmirrored.
+  const neverExpires = (missingIn: any[], nowIn: Date, takenIn: string[]) => missingIn.filter((m) => {
+    const t = versionTime(m.version); return t && nowIn.getTime() - t.getTime() >= GRACE_MINUTES * 60_000 && !takenIn.includes(`mirror/${m.version}`);
+  });
+  mustCatch('a claim that never expires (the 11-08/11-09 shape: #11367, #11444, #11445 held versions 6–14 h)',
+    neverExpires([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642']).length === 0 && stale.length === 1);
+  mustCatch('a claim that expires at once (the robot races every session\'s own mirror PR)',
+    planMirrors([{ version: '20261027210558', name: 'x' }], now, ['mirror/20261027210558']).length === 0);
+}
 mustCatch('a robot that reads a bare branch as a claim (the 11-03 shape)',
   planMirrors([{ version: '20261027201642', name: 'x' }], now, [], ['mirror/20261027201642']).length !== 0);
 mustCatch('a robot that ignores an existing mirror branch (duplicate PRs)',
-  planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642']).length === 0);
+  planMirrors([{ version: '20261027210558', name: 'x' }], now, ['mirror/20261027210558']).length === 0);
 
 check('an OPEN PR on mirror/<version>-auto is a claim too (2026-11-04: the robot re-mirrored its own open PR)',
   planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642-auto'], ['mirror/20261027201642', 'mirror/20261027201642-auto']).length === 0);

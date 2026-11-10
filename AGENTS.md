@@ -709,6 +709,12 @@ after the point of no return is not a guard. Knowing about this class is demonst
 avoid it — on 2026-09-27 one session did it twice four hours apart, the second time after being
 caught by the first and writing the rule down.
 
+**The same run asks a REPAIR for its registry row (2026-11-10).** A migration that UPDATEs listing rows is
+refused by that check until you pass `--repair-will-be-enrolled`, and it prints the exact
+`insert into ops_repair_guarantee_registry …` to run right after the apply (or the waiver line to add to
+`scripts/repair-enrollment-waivers.txt`). Skipping it pages `seam_check_failed` within 30 minutes — seven times in
+seven days before the check asked. Guard: `scripts/verify-repair-is-asked-for-before-apply.ts`.
+
 **The guard checks all FOUR drift conditions (owner extended it 2026-08-21), in both directions:**
 1. **applied-but-not-committed** — a migration live in prod with no git file (the classic drift).
 2. **committed-but-not-applied** — a git migration file whose version was never applied to prod.

@@ -5,7 +5,10 @@
 
 export type AreaLevel = 'country' | 'region' | 'city' | 'district';
 /** One label. At region level `city` holds the region's name; at country level, the country's. */
-export type AreaRow = { city: string; district: string; lat: number; lng: number; n: number };
+/** `at`: where a region's label is drawn (REGION_LABEL_AT); `lat`/`lng` stay the count-weighted centre a tap zooms to.
+ *  `offLabel`: the label point is outside the view (not drawn, still counted); `offCount`: the weighted centre is outside
+ *  the view (drawn, not counted) — the count and the labels are decided separately (review of #11608). */
+export type AreaRow = { city: string; district: string; lat: number; lng: number; n: number; at?: { lat: number; lng: number }; offLabel?: true; offCount?: true };
 
 // ZOOM GOES COUNTRY → REGION → CITY → DISTRICT → PINS (owner 2026-11-05: «when the user zooms in, first thing Saudi, the
 // total number, then region, then city, and then district»). The map opens on the whole Kingdom (latitude span 17-18°),
@@ -28,14 +31,23 @@ export function areaLevelFor(latitudeDelta: number): AreaLevel | null {
   return null;
 }
 
-/** A count in few characters: 245, 3.4 ألف / 3.4K, 1.2 مليون / 1.2M. */
-export function areaCount(n: number, loc: 'ar' | 'en'): string {
-  const one = (v: number) => (v < 10 ? (Math.round(v * 10) / 10).toString() : Math.round(v).toString());
-  if (n >= 1_000_000) return loc === 'ar' ? `${one(n / 1_000_000)} مليون` : `${one(n / 1_000_000)}M`;
-  if (n >= 1_000) return loc === 'ar' ? `${one(n / 1_000)} ألف` : `${one(n / 1_000)}K`;
-  return String(n);
+/** THE MAP OPENS ON THE REGIONS — NO «السعودية» BUBBLE (owner 2026-11-09: «no need Saudi Arabia, we just show the
+ *  regions, then from the region to cities, district»; it replaced 2026-11-05's one-country-label opening). The
+ *  whole-Kingdom zoom shows the 13 region labels; the pill below still names the country and its total. */
+export function areaLevelShown(latitudeDelta: number): AreaLevel | null {
+  const level = areaLevelFor(latitudeDelta);
+  return level === 'country' ? 'region' : level;
 }
 
+/** A count, exact (owner 2026-11-09: the bubble said «300 ألف» over a pill saying 299,996 — «how come map says 300,000
+ *  and the number below isn't accurate»): 245, 3,412, 299,996 — the same digits the pill prints. */
+export function areaCount(n: number, _loc: 'ar' | 'en'): string {
+  return Math.round(n).toLocaleString('en-US');
+}
+
+/** A box holding the whole Kingdom: the country total is read over it, never over the view — a pan at the opening zoom
+ *  leaves some regions off screen, and the pill must not call their remainder «السعودية» (review of #11592). */
+export const COUNTRY_BOX = { s: 16, w: 34, n: 33, e: 56 };
 /** The country label's place and name. */
 export const COUNTRY_CENTER = { lat: 23.9, lng: 45.1 };
 export const COUNTRY_NAME = { ar: 'السعودية', en: 'Saudi Arabia' } as const;
@@ -45,6 +57,17 @@ export const REGION_EN: Record<string, string> = {
   'منطقة القصيم': 'Qassim Region', 'منطقة المدينة المنورة': 'Madinah Region', 'منطقة عسير': 'Asir Region',
   'منطقة جازان': 'Jazan Region', 'منطقة حائل': 'Hail Region', 'منطقة تبوك': 'Tabuk Region', 'منطقة الباحة': 'Al Bahah Region',
   'منطقة الحدود الشمالية': 'Northern Borders Region', 'منطقة نجران': 'Najran Region', 'منطقة الجوف': 'Al Jouf Region',
+};
+/** WHERE EACH REGION'S LABEL SITS (owner 2026-11-09: the map opens on the regions). At a region's count-weighted centre
+ *  the labels pile up — measured live 2026-11-09 on a 390×844 phone, 5 of 13 were hidden behind bigger neighbours
+ *  (المنطقة الشرقية's 35,775 behind الرياض). So each label sits at a fixed point inside its region, spread apart; a
+ *  tap still zooms to the count-weighted centre (`lat`/`lng`), where the listings are. */
+export const REGION_LABEL_AT: Record<string, { lat: number; lng: number }> = {
+  'منطقة الرياض': { lat: 23.6, lng: 45.6 }, 'المنطقة الشرقية': { lat: 21.6, lng: 50.6 }, 'منطقة القصيم': { lat: 25.9, lng: 43.3 },
+  'منطقة حائل': { lat: 27.8, lng: 41.6 }, 'منطقة الحدود الشمالية': { lat: 30.0, lng: 42.6 }, 'منطقة الجوف': { lat: 29.6, lng: 37.9 },
+  'منطقة تبوك': { lat: 27.4, lng: 36.9 }, 'منطقة المدينة المنورة': { lat: 24.6, lng: 38.6 }, 'منطقة مكة المكرمة': { lat: 22.4, lng: 40.2 },
+  'منطقة الباحة': { lat: 20.6, lng: 41.4 }, 'منطقة عسير': { lat: 18.8, lng: 42.8 }, 'منطقة جازان': { lat: 17.0, lng: 42.4 },
+  'منطقة نجران': { lat: 18.6, lng: 47.5 },
 };
 /**
  * The label's name in the UI language (owner 2026-11-05: «I switched to English — why does it show Arabic in here? It
@@ -86,7 +109,7 @@ export function bubbleTapSpan(cell: number, latitudeDelta: number): number {
 }
 
 /** The labels' total — the count pill's number. */
-export const areasTotal = (rows: AreaRow[]): number => rows.reduce((a, r) => a + r.n, 0);
+export const areasTotal = (rows: AreaRow[]): number => rows.reduce((a, r) => a + (r.offCount ? 0 : r.n), 0);
 
 /** ONLY THE PLACES THAT MATTER AT THIS ZOOM (owner 2026-11-03, a country-view screenshot: «the numbers 1 … look a bit
  *  weird»). «الحزم 1», «يدمة 2», «طبرجل 8» sat beside «الرياض 98 ألف» and, by taking the space, hid Makkah, Buraidah
@@ -98,7 +121,7 @@ export const LABEL_MIN = 10;
 export function visibleAreas(rows: AreaRow[], level: AreaLevel = 'district'): AreaRow[] {
   // The country label and the 13 regions always show: a region is an administrative area, not a crowd of small towns
   // (Al Jouf's ~400 listings are 0.2% of Riyadh Region's — the share rule would hide it).
-  if (level === 'country' || level === 'region') return rows;
+  if (level === 'country' || level === 'region') return rows.filter((r) => !r.offLabel);
   const max = rows.reduce((m, r) => Math.max(m, r.n), 0);
   // A SMALL TOWN SHOWS ITS PLACES (owner 2026-11-05, Umluj: «0 listings» — its districts hold 1-2 listings each, so the
   // LABEL_MIN floor hid every one of them and the map over Umluj was empty while the pill counted 6). The floor exists
@@ -150,7 +173,13 @@ export function areasFromFeed(feed: AreaFeedRow[], level: AreaLevel, deals: stri
     const regions: AreaRow[] = [];
     for (const [name, g] of by) {
       const lat = g.la / g.n, lng = g.lo / g.n;
-      if (lat >= box.s && lat <= box.n && lng >= box.w && lng <= box.e) regions.push({ city: name, district: '', lat, lng, n: g.n });
+      // Drawn by where the LABEL is, counted by where the LISTINGS are (review of #11608): a view over Dammam counts the
+      // Eastern Province even when its label point is off screen, and a label on screen shows even when its weighted
+      // centre is not. A tap still zooms to the weighted centre.
+      const at = REGION_LABEL_AT[name]; const p = at ?? { lat, lng };
+      const inside = (q: { lat: number; lng: number }) => q.lat >= box.s && q.lat <= box.n && q.lng >= box.w && q.lng <= box.e;
+      const drawn = inside(p), counted = inside({ lat, lng });
+      if (drawn || counted) regions.push({ city: name, district: '', lat, lng, n: g.n, ...(at ? { at } : {}), ...(drawn ? {} : { offLabel: true as const }), ...(counted ? {} : { offCount: true as const }) });
     }
     return regions.sort((x, y) => y.n - x.n).slice(0, limit);
   }
@@ -184,7 +213,9 @@ export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en
 export function areaPlace(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
   center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): { name: string; n: number } | null {
   if (level === 'country') { const n = rows.reduce((t, a) => t + a.n, 0); return n > 0 ? { name: COUNTRY_NAME[loc], n } : null; }
-  const onScreen = rows.filter((a) => inView(a, center, span));
+  // A region is on screen where its label is drawn OR where its listings are (review of #11608); anything else by its
+  // own point.
+  const onScreen = rows.filter((a) => (!a.offLabel && a.at && inView(a.at, center, span)) || inView(a, center, span));
   const seen = onScreen.length ? onScreen : rows;
   const total = seen.reduce((t, a) => t + a.n, 0);
   if (!total) return null;

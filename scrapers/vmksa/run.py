@@ -449,6 +449,20 @@ def _make_verify_gone(control_ad: Optional[str]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
+def spot_check_oracle(control=None):
+    """The lifecycle spot check / dead-visible score reads vmksa the way prune does (♻️ 2026-11-09,
+    backlog 1627): by the crawl's measured own-page signal (`_own_signal`: the ad's own object = live,
+    Next's NEXT_NOT_FOUND = gone), not by HTTP status — a status read of /ar/ads/9999999 answers 200,
+    so the 09:05 score voided vmksa every night. `control` is the known-live row (dict) or an ad number."""
+    ad = control.get("ad_number") if isinstance(control, dict) else control
+    verify = _make_verify_gone(ad)
+
+    def paced(ad_number: str):
+        time.sleep(1.0)                 # ≤ 1 request/second between the spot check's row reads
+        return verify(ad_number)
+    return paced
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")

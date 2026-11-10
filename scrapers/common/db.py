@@ -973,6 +973,12 @@ def _page_gone_holds_for(table: str, ads: list[str]) -> dict[str, tuple[int, boo
     """Read what `page_gone_holds` needs for one batch: two indexed reads, only for rows that are
     hidden. A failed read holds nothing (today's behaviour) and says so loudly — it never blocks
     ingestion."""
+    from scrapers.common.liveness_policies import complete_list_absence_hides
+    if complete_list_absence_hides(table):
+        # Owner decision 2026-11-10 (LISTING_LIVENESS.md §7.3): this site's ads are hidden on complete-list
+        # absence and its own pages are never read, so no ledger row of its is an own-page «gone». The list
+        # showing the ad again is the only reading there is: it un-hides the row.
+        return {}
     hidden: list[dict[str, Any]] = []
     probes: list[dict[str, Any]] = []
     try:
@@ -1186,6 +1192,11 @@ def prune_unseen(
                     never missing from the platform, only from its index.
       • 'unknown' → hold: the strike is recorded, but nothing is deactivated. An unreachable source
                     is not evidence (§4: timeout/403/429/5xx ≠ inactive).
+      • 'absent'  → ONLY for a platform named in liveness_policies.COMPLETE_LIST_ABSENCE_HIDES
+                    (propertyfinder, owner decision 2026-11-10, LISTING_LIVENESS.md §7.3): the row is
+                    HIDDEN on complete-list absence, recorded under its own oracle name
+                    (COMPLETE_LIST_ABSENCE_ORACLE) so the record never reads as an own-page verdict.
+                    From any other platform 'absent' is held exactly like 'unknown'.
     A caller that passes no `verify_gone` keeps the previous behaviour byte-for-byte, so this is
     opt-in per platform and only for platforms with a control-validated oracle.
 
@@ -1254,7 +1265,10 @@ def prune_unseen(
         if doomed and verify_gone is not None:
             # Only rows about to be deactivated are probed — a strike that is merely ticking up
             # costs nothing and needs no network call.
+            from scrapers.common.liveness_policies import (
+                COMPLETE_LIST_ABSENCE_ORACLE, COMPLETE_LIST_ABSENCE_VERDICT as _ABSENT, complete_list_absence_hides)
             confirmed_gone, still_live = [], []
+            absent_hidden: list[str] = []   # the ONE named site's complete-list absences (owner 2026-11-10)
             why: dict[str, str] = {}   # ad_number → the oracle's stated REASON, recorded as evidence
             for ad in ads:
                 try:
@@ -1271,12 +1285,18 @@ def prune_unseen(
                 except Exception as e:  # an oracle that throws is UNKNOWN, never "gone"
                     print(f"{table}: verify_gone({ad}) raised {type(e).__name__}: {e} → unknown")
                     verdict, note = "unknown", f"oracle raised {type(e).__name__}: {e}"
+                if verdict == _ABSENT:
+                    if complete_list_absence_hides(table):
+                        absent_hidden.append(ad)
+                    else:   # absence never hides (§2): only the named site's «absent» is honoured
+                        note = (f"«absent» refused: {table.split('_', 1)[0]} is not in "
+                                f"COMPLETE_LIST_ABSENCE_HIDES — held as unknown" + (f" | {note}" if note else ""))
                 why[ad] = note
                 if verdict == "gone":
                     confirmed_gone.append(ad)
                 elif verdict == "live":
                     still_live.append(ad)
-            held = len(ads) - len(confirmed_gone) - len(still_live)
+            held = len(ads) - len(confirmed_gone) - len(still_live) - len(absent_hidden)
             if still_live:
                 # Self-heal: the source serves it, so it was never missing — only un-indexed.
                 #
@@ -1321,7 +1341,7 @@ def prune_unseen(
                              what=table + ".prune_selfheal")
             if held:
                 # Record the strike but do NOT deactivate on an unreachable source.
-                pending = [a for a in ads if a not in set(confirmed_gone) | set(still_live)]
+                pending = [a for a in ads if a not in set(confirmed_gone) | set(still_live) | set(absent_hidden)]
                 _probe_iso = datetime.now(timezone.utc).isoformat()
                 for i in range(0, len(pending), 200):
                     _execute(c.table(table).update({"missing_count": new_missing,
@@ -1335,11 +1355,16 @@ def prune_unseen(
             # this: a deactivation on an oracle-required platform with no matching GONE row is a P1.
             # Monitoring must never fail the prune itself — the rows are written either way.
             try:
-                decided = set(confirmed_gone) | set(still_live)
+                decided = set(confirmed_gone) | set(still_live) | set(absent_hidden)
                 evidence = (
                     [{"source_table": table, "ad_number": a, "verdict": "GONE",
                       "oracle": "prune_unseen.verify_gone", "listing_url": "",
                       "note": why.get(a) or ""} for a in confirmed_gone]
+                    # The named site's hide: a ledger row of its own oracle name, so SQL can always tell
+                    # «hidden on complete-list absence by owner decision» from «its own page read gone».
+                    + [{"source_table": table, "ad_number": a, "verdict": "GONE",
+                        "oracle": COMPLETE_LIST_ABSENCE_ORACLE, "listing_url": "",
+                        "note": why.get(a) or ""} for a in absent_hidden]
                     + [{"source_table": table, "ad_number": a, "verdict": "LIVE",
                         "oracle": "prune_unseen.verify_gone", "listing_url": "",
                         "note": why.get(a) or ""} for a in still_live]
@@ -1363,7 +1388,7 @@ def prune_unseen(
             # invisible to the hidden counts, the unverified-hide monitor, auto-recovery and the
             # 30-day clock. The trigger keeps a value it is given, so both paths agree.
             _now = datetime.now(timezone.utc).isoformat()
-            ads, payload = confirmed_gone, {
+            ads, payload = confirmed_gone + absent_hidden, {
                 "missing_count": new_missing, "active": False,
                 "deactivated_at": _now, "last_liveness_probe_at": _now}
             if not ads:
@@ -1664,8 +1689,17 @@ def _stamp_seen_alive(table: str, seen_ads, verify_gone, *, source: Optional[str
     return out
 
 
-def own_page_status_oracle(c, table: str, seen, *, session=None):
+def own_page_status_oracle(c, table: str, seen, *, session=None, live_page=None):
     """verify_gone for a prune_unseen caller that supplied none (see the call site).
+
+    `live_page(ad_number, stored_row, body) -> bool` (2026-11-10) is a crawler's OWN reader of its
+    source's ad page: True only when this 200 body, still on the ad's own path, is THIS ad, published.
+    Without it a 200 is «no opinion», so an ad its site still serves but its list stopped carrying sat
+    at grace for ever (manzo, nawafeth, arsh: P1 served_after_source_gone on five live pages). With it
+    that page answers LIVE and prune_unseen clears the strikes through the liveness contract. It can
+    only ever ADD a live answer: a 404/410 is read before it, it is never asked about a moved page, an
+    exception or a falsy answer is no opinion, and no removal fires unless a control page this crawl
+    saw is recognised by the same reader (a reader the site's redesign blinded removes nothing).
 
     Each at-grace row is read at its own stored `listing_url`. Before any removal a known-live control
     must answer: up to three ads THIS crawl just saw, read the same way, at least one of which answers
@@ -1706,12 +1740,28 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
             except Exception:  # noqa: BLE001
                 continue
             if r.status_code == 200 and (r.text or "") and _own_page_status_signal(
-                    r.status_code, r.text, False) is None:
+                    r.status_code, r.text, False) is None and (
+                    live_page is None or reads_live(ad, r.text)):
                 state["v"] = (True, f"control {ad} answers 200")
                 break
         return state["v"]
 
-    probe = LivenessProbe(platform=table, signal=_own_page_status_signal, session=lambda: s,
+    def reads_live(ad_number: str, body: str) -> bool:
+        try:
+            return live_page(ad_number, row_of(ad_number), body) is True
+        except Exception:  # noqa: BLE001 — a reader that broke has no opinion
+            return False
+
+    asking = [""]
+
+    def signal(status, body, path_changed):
+        said = _own_page_status_signal(status, body, path_changed)
+        if said is None and live_page is not None and status == 200 and not path_changed and body \
+                and reads_live(asking[0], body):
+            return "live"
+        return said
+
+    probe = LivenessProbe(platform=table, signal=signal, session=lambda: s,
                           url_for=url_for, canary=canary, attempts=1, backoff=0.0)
     reads = [0]
 
@@ -1731,6 +1781,7 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
         if ended:
             return "gone", f"{OWN_PAGE_ORACLE}: the ad's own published end date {ended} has passed"
         reads[0] += 1
+        asking[0] = str(ad_number)
         verdict, why = probe.verify_gone(ad_number)
         if verdict == "unknown" and _BLOCK_WHY.search(why or ""):
             second = second_reader(ad_number)

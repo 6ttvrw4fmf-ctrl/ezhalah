@@ -204,6 +204,48 @@ def fetch_images(s: cc.Session, posts: list[dict]) -> dict[int, list[str]]:
     return out
 
 
+# The ad page's own licence cell: <div class="listing_detail col-md-6 licinse"><strong>رخصة الإعلان:</strong> N</div>
+# (the theme's spelling). WP REST carries no property_meta for this site, so the licence exists nowhere else.
+_LICENCE_CELL_RE = re.compile(r'<div[^>]*class="[^"]*\blisting_detail\b[^"]*\blicinse\b[^"]*"[^>]*>(.*?)</div>', re.S)
+
+
+def licence_from_ad_page(page_html: str) -> Optional[str]:
+    """The REGA ad licence this ad's own page prints, or None.
+
+    Card parity 2026-11-09 (alert 13688): the page prints «رخصة الإعلان: 7200575239» and 0 of 2 sampled
+    cards showed a licence, because this scraper never opened the page. Read ONLY from the ad's own
+    detail cell, never from the whole page: the page also renders a related-properties block (the same
+    trap fetch_images documents), and a bare 10-digit number elsewhere is not this ad's licence.
+    Exactly one distinct licence, or nothing: two different numbers is unknown, never a pick.
+    """
+    found = set()
+    for cell in _LICENCE_CELL_RE.findall(page_html or ""):
+        lic = normalize.ad_licence_from_prose(_clean(cell))
+        if lic:
+            found.add(lic)
+    return found.pop() if len(found) == 1 else None
+
+
+def fetch_licences(s: cc.Session, posts: list[dict]) -> dict[int, str]:
+    """{wp_post_id: REGA ad licence} from each ad's own page. A page that cannot be read gives no entry,
+    so the row carries no licence key and a licence stored by an earlier crawl survives."""
+    out: dict[int, str] = {}
+    for p in posts:
+        pid, link = p.get("id"), p.get("link")
+        if not isinstance(pid, int) or not isinstance(link, str) or not link.startswith("https://alta.com.sa/"):
+            continue
+        try:
+            r = s.get(link, timeout=40)
+            if r.status_code != 200:
+                continue
+            lic = licence_from_ad_page(r.text)
+        except Exception:
+            continue                    # a lost page costs the licence line, never a wrong one
+        if lic:
+            out[pid] = lic
+    return out
+
+
 def fetch_listings(s: cc.Session) -> list[dict]:
     out: list[dict] = []
     # Records WHY enumeration stopped. A timeout, a 403 and a genuinely empty source are three
@@ -243,7 +285,8 @@ def fetch_listings(s: cc.Session) -> list[dict]:
 
 
 def map_listing(p: dict, tax: dict[str, dict[int, str]],
-                images: Optional[dict[int, list[str]]] = None) -> tuple[Optional[dict], str]:
+                images: Optional[dict[int, list[str]]] = None,
+                licences: Optional[dict[int, str]] = None) -> tuple[Optional[dict], str]:
     link = p.get("link")
     if not link:
         return None, "residential"
@@ -350,6 +393,10 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "price_published": bool(price),
     }
     row["additional_info"] = {k: v for k, v in info.items() if v not in (None, "", [], {})}
+    lic = (licences or {}).get(p.get("id"))
+    if lic:
+        row["license_number"] = lic
+        row["additional_info"]["rega_ad_license_number"] = lic
     # The site's own feature checklist (property_features: «مصعد», «غرفة خادمة», «مدخل سيارة» …) is its
     # amenity statement. It was kept in additional_info and never reached a column, so elevator and maid room
     # read NULL on the one ad that ticks them (🔬 2026-10-25, ops_af_score alta 0 of 3). A ticked term is yes;
@@ -500,9 +547,11 @@ def main() -> int:
         print(f"{SOURCE}: {len(posts)} posts from WP REST"
               f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
+        licences = fetch_licences(s, posts)
+        print(f"{SOURCE}: {len(licences)} of {len(posts)} ad pages print a REGA ad licence")
         unmapped: dict[str, int] = {}
         for p in posts:
-            row, cat = map_listing(p, tax, images)
+            row, cat = map_listing(p, tax, images, licences)
             if not row:
                 names = tax.get('property_category') or {}
                 for tid in (p.get('property_category') or []):
