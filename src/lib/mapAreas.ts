@@ -5,7 +5,7 @@
 
 export type AreaLevel = 'country' | 'region' | 'city' | 'district';
 /** One label. At region level `city` holds the region's name; at country level, the country's. */
-export type AreaRow = { city: string; district: string; lat: number; lng: number; n: number };
+export type AreaRow = { city: string; district: string; lat: number; lng: number; n: number; at?: { lat: number; lng: number } };
 
 // ZOOM GOES COUNTRY → REGION → CITY → DISTRICT → PINS (owner 2026-11-05: «when the user zooms in, first thing Saudi, the
 // total number, then region, then city, and then district»). The map opens on the whole Kingdom (latitude span 17-18°),
@@ -54,6 +54,17 @@ export const REGION_EN: Record<string, string> = {
   'منطقة القصيم': 'Qassim Region', 'منطقة المدينة المنورة': 'Madinah Region', 'منطقة عسير': 'Asir Region',
   'منطقة جازان': 'Jazan Region', 'منطقة حائل': 'Hail Region', 'منطقة تبوك': 'Tabuk Region', 'منطقة الباحة': 'Al Bahah Region',
   'منطقة الحدود الشمالية': 'Northern Borders Region', 'منطقة نجران': 'Najran Region', 'منطقة الجوف': 'Al Jouf Region',
+};
+/** WHERE EACH REGION'S LABEL SITS (owner 2026-11-09: the map opens on the regions). At a region's count-weighted centre
+ *  the labels pile up — measured live 2026-11-09 on a 390×844 phone, 5 of 13 were hidden behind bigger neighbours
+ *  (المنطقة الشرقية's 35,775 behind الرياض). So each label sits at a fixed point inside its region, spread apart; a
+ *  tap still zooms to the count-weighted centre (`lat`/`lng`), where the listings are. */
+export const REGION_LABEL_AT: Record<string, { lat: number; lng: number }> = {
+  'منطقة الرياض': { lat: 23.6, lng: 45.6 }, 'المنطقة الشرقية': { lat: 21.6, lng: 50.6 }, 'منطقة القصيم': { lat: 25.9, lng: 43.3 },
+  'منطقة حائل': { lat: 27.8, lng: 41.6 }, 'منطقة الحدود الشمالية': { lat: 30.0, lng: 42.6 }, 'منطقة الجوف': { lat: 29.6, lng: 37.9 },
+  'منطقة تبوك': { lat: 27.4, lng: 36.9 }, 'منطقة المدينة المنورة': { lat: 24.6, lng: 38.6 }, 'منطقة مكة المكرمة': { lat: 22.4, lng: 40.2 },
+  'منطقة الباحة': { lat: 20.6, lng: 41.4 }, 'منطقة عسير': { lat: 18.8, lng: 42.8 }, 'منطقة جازان': { lat: 17.0, lng: 42.4 },
+  'منطقة نجران': { lat: 18.6, lng: 47.5 },
 };
 /**
  * The label's name in the UI language (owner 2026-11-05: «I switched to English — why does it show Arabic in here? It
@@ -159,7 +170,7 @@ export function areasFromFeed(feed: AreaFeedRow[], level: AreaLevel, deals: stri
     const regions: AreaRow[] = [];
     for (const [name, g] of by) {
       const lat = g.la / g.n, lng = g.lo / g.n;
-      if (lat >= box.s && lat <= box.n && lng >= box.w && lng <= box.e) regions.push({ city: name, district: '', lat, lng, n: g.n });
+      if (lat >= box.s && lat <= box.n && lng >= box.w && lng <= box.e) regions.push({ city: name, district: '', lat, lng, n: g.n, ...(REGION_LABEL_AT[name] ? { at: REGION_LABEL_AT[name] } : {}) });
     }
     return regions.sort((x, y) => y.n - x.n).slice(0, limit);
   }

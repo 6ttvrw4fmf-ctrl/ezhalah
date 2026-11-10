@@ -5,7 +5,7 @@
 // shape: un-narrowed views read the labels first, a failed read falls back to the dots, labels are keyed and tappable.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, visibleAreas, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
+import { areaLevelFor, areaLevelShown, COUNTRY_BOX, REGION_LABEL_AT, REGION_EN, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, visibleAreas, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -28,6 +28,20 @@ mustCatch('the Saudi bubble coming back on the opening view', areaLevelShown(17)
   check('the country total counts every region, even ones a pan left off screen', whole.length === 1 && whole[0].n === 150);
   mustCatch('a panned view\'s partial sum named «السعودية»', areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], panned).reduce((t, a) => t + a.n, 0) !== whole[0].n);
   check('the opening zoom reads the country total over COUNTRY_BOX for the pill', /await fetchMapAreas\(COUNTRY_BOX, 'country', pins\.deals\)/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+}
+{
+  // Region labels sit at fixed, spread-out points (live 2026-11-09: 5 of 13 hidden behind neighbours at the weighted centres).
+  const pts = Object.entries(REGION_LABEL_AT);
+  check('every one of the 13 regions has a label point', Object.keys(REGION_EN).every((r) => REGION_LABEL_AT[r]) && pts.length === 13);
+  // Measured on the live phone photo (390×844, opening zoom): «منطقة الرياض 118,428» is ~4.6° of longitude wide and
+  // ~1.7° of latitude tall (it sits above its point). No two label boxes may meet.
+  const clash = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => Math.abs(a.lng - b.lng) < 4.6 && Math.abs(a.lat - b.lat) < 1.7;
+  const clashes = pts.flatMap(([x, p], i) => pts.slice(i + 1).filter(([, q]) => clash(p, q)).map(([y]) => `${x}/${y}`));
+  check(`no two region labels overlap at the opening zoom${clashes.length ? ' — ' + clashes.join(', ') : ''}`, clashes.length === 0);
+  const feed = [{ city: 'الدمام', district: '', lat: 26.4, lng: 50.1, buy: 9, rent: 0, short: 0, isCity: true, region: 'المنطقة الشرقية' }] as unknown as Parameters<typeof areasFromFeed>[0];
+  const [east] = areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], COUNTRY_BOX);
+  check('the label sits at its point; a tap still zooms to where the listings are', east.at === REGION_LABEL_AT['المنطقة الشرقية'] && east.lat === 26.4 && east.lng === 50.1);
+  mustCatch('labels piled at the weighted centres (الشرقية behind الرياض, as measured live)', clash({ lat: 26.0, lng: 49.6 }, { lat: 24.7, lng: 46.7 }));
 }
 check('city zoom shows one label per DISTRICT', areaLevelFor(2.5) === 'district' && areaLevelFor(0.5) === 'district' && areaLevelFor(0.07) === 'district');
 check('close in shows price pins (no label level)', areaLevelFor(0.06) === null && areaLevelFor(0.02) === null);
