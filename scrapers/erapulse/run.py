@@ -60,7 +60,7 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.named_city import single_named_city  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.posting_date import site_posting_date  # noqa: E402
-from scrapers.common.inblaj_platform import parse_type_ar  # noqa: E402
+from scrapers.common.type_from_title import canonical_type_from_title  # noqa: E402
 
 SITE = "https://erapulse.sa"
 API = "https://api.erapulse.sa"
@@ -341,9 +341,9 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
         # warehouse we stored as «Apartment» — «فله مودرن -حي الربوة للبيع» (648074), «ارض للبيع - حي الواحه»
         # (646391), «شاليه بحي التوفيق» (648063), «مستودع / حوش بمحافظة الشماسية» (2203407). The title the
         # office typed names the property; the closed vocabulary reader shared with the inblaj tenants
-        # (parse_type_ar: longest token first, Arabic-letter boundaries, so «حي الشقة» is never a «شقة»).
-        word = parse_type_ar(p.get("title") or "", "")
-        property_type = N.map_type_exact(word) if word else None
+        # (scrapers/common/type_from_title.py → parse_type_ar: longest token first, Arabic-letter boundaries,
+        # so «حي الشقة» is never a «شقة»).
+        property_type = canonical_type_from_title(p.get("title"))
         type_source = "title" if property_type else None
     if not property_type:
         # The site states no specific type and neither does the title: the coarse top-level type only
