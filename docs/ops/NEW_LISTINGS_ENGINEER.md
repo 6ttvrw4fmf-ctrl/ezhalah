@@ -1,5 +1,26 @@
 # 🆕 NEW LISTINGS ENGINEER — Ezhalah
 
+> **OWNER ORDER 2026-11-09 — «do good in the next run» (read before your tasks; every engineer).**
+> The numbers it answers: 11-09 proven fixes 19 of 53 (36 %, was 50 % on 11-08); 🔗 0 proven for 2 nights while claiming fixes;
+> 🔬 over-claimed (4 of 14); ⚡ 1 of 7. Open bugs 168: the OLD ones fell to 101, but checkers born since 11-07 added 67
+> (card_parity_* 29 open, repeat_bug:* , af_new_listing_capture_regression). Only 13 of 97 PRs got a CodeRabbit review.
+> 1. **A fix counts only with proof on the live site.** Say «fixed» only when you can name the check that passed AFTER the merge
+>    (query, URL, run id + UTC time). No proof yet → write it as «⏳ dated: <job> at <UTC>», never as fixed. Over-claiming = 0 for the night.
+> 2. **Root cause or it is not a fix.** Change the code/rule that made the bug AND add a check that fails if it comes back.
+>    Repairing rows, re-running a job or widening a threshold alone is a symptom fix (66 % of alerts were repeats on 11-07).
+> 3. **Job 1 = the open alerts with your `owner_routine` from the new checkers** (card parity, repeat_bug, capture regression),
+>    oldest first, before any new hunting. 🔧 QA owns card_parity_*; ♻️/🔧 own repeat_bug:* of their lane.
+> 4. **Fewer, bigger PRs.** CodeRabbit gives ~24 reviews a day for ALL of us (one GitHub author). One PR per root cause; put the
+>    migration's mirror INSIDE the fix PR (do not open a separate «mirror:» PR); no docs-only PRs during a run. Max 4 PRs per run.
+> 5. **Never apply a migration to production before its PR exists.** Open the PR with the exact file first, then apply.
+>    (Five deploys in a row were refused 11-08 → 11-09 by migrations applied before their PRs.) A PR stuck on CodeRabbit
+>    «rate limited»: comment `@coderabbitai review` once; never open a duplicate PR.
+> 6. **Your score = your open bugs went DOWN (owner 2026-11-09).** At :start AND :end run
+>    `select count(*) from alert_event where resolved_at is null and owner_routine = '<your routine>'` and write both numbers in :end.
+>    A night is GOOD only if end < start, with every closed alert closed by a proven fix (rule 1), not by hiding or resolving by hand.
+>    Equal or higher = a bad night whatever else you did: write why, and the ONE root cause you will hit first next run.
+
+
 > **🔒 MERGE LOCK 2026-11-08 (owner: «fully automate with the engineers and CodeRabbit»).** `safe-pr-merge.ts` (and so the robot) REFUSES a PR
 > with ANY unresolved CodeRabbit Major/Critical thread (#11247 was green with 9 unanswered Majors on PRICE = SOURCE). Fix it or answer it with
 > evidence, then RESOLVE the thread. Before writing :end, re-read the threads on EVERY PR you opened this run — reviews keep arriving after your last push.
@@ -577,6 +598,15 @@ district».
      Flag a field that dropped (trapped or broken parser), a field stuck on one value, unknown
      turning into "no", or a sudden jump with no source change;
    - RNPL, when it's yes, carries the whole offer as published.
+   - **Plain «أرض» arrivals get the word reader's land verdict (owner 2026-11-08, rows 3303/3304).** An ad whose source
+     type is just «أرض» is read from its title + description: clear words → also searchable under that land group;
+     no or mixed words → searchable under EVERY land group; the card still says «أرض» (TYPE = SOURCE). Every night:
+     `select count(*) n, count(t.listing_id) filter (where t.stale_at is null) read from search_listings_ar s left join listing_text_facts t
+     using (source_table, listing_id) where s.first_seen_at > now() - interval '24 hours' and s.production_ready
+     and s.type_ar = 'أرض'` must read `read = n` (11-09 07:20 UTC: 53 / 53; a stale read — text changed since — does not count). Once the reader's land-kind fact exists (routed
+     to 🔧, backlog «ROUTED by 🆕 2026-11-09»), every arrival must also carry the verdict, and one plain-«أرض»
+     arrival is proven by a customer journey under a land group (journey-lib.mjs needs the «أرض» mapping first;
+     11-09 run 42578477633 answered UNKNOWN for that reason).
 
    Old listings can look fine while new ones break, which is why you exist.
 6. **Re-read against the original ad.** About 10 new listings a night, aimed at the scorecard's

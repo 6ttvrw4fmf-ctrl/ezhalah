@@ -1,0 +1,84 @@
+{
+ "id": "1456",
+ "slugs": {
+  "ar": "شقة-للبيع-في-حي-الدوحة-الجنوبية-الظهران",
+  "en": "apartment-for-sale-in-dhahran"
+ },
+ "title": {
+  "ar": "شقة للبيع في حي الدوحة الجنوبية - الظهران",
+  "en": "Apartment for Sale in Dhahran"
+ },
+ "description": {
+  "ar": "🏢 فرصة ذهبية | شقة تمليك للبيع في الدوحة الجنوبية، الدمام\n\n📍 الموقع\n▪️ الظهران، حي الدوحة الجنوبية\n▪️ قريبة من إيكيا والظهران مول والأفنيوز ومدارس إنترناشونال\n▪️ شارع تجاري يضم جميع الخدمات\n▪️ الواجهة الشرقية على شارع عرض 18 م\n\n📐 المساحة والمكونات\n▪️ المساحة: 190.66 م²\n▪️ عمر العقار: 12 سنة\n▪️ مجلس رجال بمدخل مستقل ومجلس نساء\n▪️ 3 غرف نوم و3 حمامات\n▪️ صالة ومطبخ بدواليب كوكفو وغرفة غسيل\n▪️ غرفة سائق\n\n✨ التجديدات والتجهيزات\n▪️ تجديد كامل للشقة وأبواب جديدة\n▪️ مواد سباكة وكهرباء جديدة ودهانات جوتن",
+  "en": "🏢 Golden Opportunity | Freehold Apartment for Sale in Al Doha Al Janoubiyah, Dammam\n\n📍 Location\n▪️ Al Dhahran, Al Doha Al Janoubiyah district\n▪️ Close to IKEA, Dhahran Mall, The Avenues, and international schools\n▪️ Commercial street with all services\n▪️ Eastern frontage on an 18 m wide street\n\n📐 Area and Components\n▪️ Area: 190.66 sqm\n▪️ Property age: 12 years\n▪️ Men's majlis with separate entrance and women's majlis\n▪️ 3 bedrooms and 3 bathrooms\n▪️ Living room and kitchen with Cocvo cabinets a"
+ },
+ "address": {
+  "ar": "الدوحة الجنوبية، الظهران، المملكة العربية السعودية",
+  "en": "South Doha, Dhahran, Saudi Arabia"
+ },
+ "type": [
+  "apartment"
+ ],
+ "location": [
+  "الظهران"
+ ],
+ "status": [
+  "for-sale"
+ ],
+ "features": [],
+ "price": "700000",
+ "price_per_sqm": "3671.46",
+ "price_period": {
+  "ar": "",
+  "en": ""
+ },
+ "area": "190.66",
+ "land_area": null,
+ "rooms": null,
+ "bedrooms": null,
+ "bathrooms": null,
+ "garage": null,
+ "year_built": null,
+ "property_id": "DH26346",
+ "fal_license": "1200041097",
+ "featured_image": "https://crm.aoujestates.com/uploads/images/81488bc586c44e2f962d3227c228bbc3.png",
+ "images": [
+  "https://crm.aoujestates.com/uploads/images/81488bc586c44e2f962d3227c228bbc3.png",
+  "https://crm.aoujestates.com/uploads/images/0e4cf2c61b694e51bec15a56af802712.jpeg"
+ ],
+ "videos": [],
+ "pdfs": [],
+ "floor_plans": [],
+ "floor_plans_detail": [],
+ "additional_details": [
+  {
+   "label": {
+    "ar": "رقم ترخيص الإعلان العقاري",
+    "en": "Ad License"
+   },
+   "value": {
+    "ar": "7201206226",
+    "en": "7201206226"
+   }
+  },
+  {
+   "label": {
+    "ar": "رقم رخصه فال",
+    "en": "FAL Number"
+   },
+   "value": {
+    "ar": "1200041097",
+    "en": "1200041097"
+   }
+  }
+ ],
+ "verified": false,
+ "geo": {
+  "lat": 26.32994652,
+  "lng": 50.1770134
+ },
+ "map_url": "https://www.google.com/maps?q=26.329946517944336,50.1770133972168&z=17&hl=en",
+ "location_url": null,
+ "date": "2026-10-31T07:47:05.852110+00:00",
+ "is_featured": false
+}

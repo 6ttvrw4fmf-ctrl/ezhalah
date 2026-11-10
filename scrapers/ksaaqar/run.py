@@ -54,6 +54,7 @@ from scrapers.common.arabic_location import (  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://ksaaqar.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -708,7 +709,7 @@ def fetch_listings(s: cc.Session, limit: int = 0) -> list[dict]:
     out: list[dict] = []
     for page in range(1, 60):
         r = _get(s, f"{REST}/ad_post?per_page=100&page={page}"
-                    f"&_fields=id,link,slug,title,content,class_list,date,modified")
+                    f"&_fields=id,link,slug,title,content,class_list,date,date_gmt,modified")
         if r is None:
             if page == 1:
                 return []
@@ -813,6 +814,14 @@ def parse_description_amenities(page_html: str) -> dict[str, bool]:
     return normalize.prose_amenities(text, skip=_PROSE_SKIP) if text is not None else {}
 
 
+def posted_at(post: dict) -> Optional[str]:
+    """The ad_post's WordPress publish instant → date_added. `date_gmt` is UTC with no zone mark; never
+    `modified` (an edit). Read live 2026-11-09 on ad_post 29304: date_gmt «2026-10-30T15:41:53» = the page's
+    JSON-LD datePublished «2026-10-30T15:41:53+00:00»; first seen by us 2026-11-07."""
+    g = post.get("date_gmt")
+    return site_posting_date(g.strip() + "Z") if isinstance(g, str) and g.strip() else None
+
+
 def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason) — every skip names its own reason for the run notes."""
     link = post.get("link")
@@ -883,6 +892,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
     row: dict[str, Any] = {
         "ad_number": ad_number(post),
         "listing_url": link,
+        "date_added": posted_at(post),          # WordPress date_gmt — see posted_at()
         "source": SOURCE,
         "active": True,
         "property_type": property_type,

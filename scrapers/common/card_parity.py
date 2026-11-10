@@ -46,7 +46,8 @@ from urllib.parse import urlsplit
 
 from scrapers.common.db import sb
 from scrapers.common.new_listings_score import (
-    MATCH, MISMATCH, PAGE_SILENT, PROSE_ONLY_DISTRICT, SKIP_PRICE, STORED, UNREADABLE, WE_MISS,
+    CONTACT_LINE, DISTRICT_ON_PAGE, MATCH, MISMATCH, PAGE_SILENT, PROSE_ONLY_DISTRICT, SKIP_PRICE, STORED,
+    UNREADABLE, WE_MISS,
     closed_ad_page, compare_listing, is_other_ads_page, load_owner_district_aliases, norm, norm_district,
     page_lacks_its_ad, scope_to_its_ad,
 )
@@ -160,6 +161,86 @@ def card_shows(field: str, stored: dict, card_text: str) -> bool | None:
     return None
 
 
+_PRICE_WORD = r"(?:ريال|ر\.س|SAR)"
+_FIGURE = r"\d[\d,٬]*(?:\.\d+)?"
+
+
+def _figure(s: str) -> float:
+    return float(s.replace(",", "").replace("٬", ""))
+
+
+def _price_as_the_page_prints_it(stored: dict, page: dict, verdict: str) -> str:
+    """Three ways a page states OUR price that the shared comparator reads as another one. Each was proven
+    on the real page (2026-11-09) and each stays wrong the moment the page prints a different figure.
+
+    1. A printed zero is not a price. macsaib 13604785: the office publishes no price, its page says
+       «… 370 م² - 0 ريال», we store none. A real figure beside the currency word keeps WE_MISS.
+    2. The page's own per-metre label carries our stored rate. macsaib 13604800: «السعر للمتر: 750», we
+       store 750 per metre and no total. Another figure on that label (or «0») stays MISMATCH.
+    3. The page prints our stored per-metre rate as its price and our total is that rate × the area.
+       villassa 13108884: the ad page prints «1,400 ريال», the site's own list card 700,000 for the same
+       500 m² plot; we store both. Any other figure on a price line stays MISMATCH.
+    """
+    lines = [str(x).translate(_DIG) for x in ([page.get("title") or ""] + list((page.get("meta") or {}).values())
+                                              + list(page.get("evidence_lines") or [])
+                                              + (page.get("text_head") or "").split(" | ")) if x]
+    total, annual = stored.get("price_total"), stored.get("source_price_annual") or stored.get("price_annual")
+    ppm, area = stored.get("price_per_meter"), stored.get("area_m2")
+    beside = [_figure(a or b) for x in lines for a, b in re.findall(
+        rf"({_FIGURE})\s*{_PRICE_WORD}|{_PRICE_WORD}\s*[:：]?\s*({_FIGURE})", x)]
+    if verdict == WE_MISS and not (total or annual or ppm):
+        # every currency line that carries a digit must carry a zero BESIDE the currency word and nothing else there
+        bare = [x for x in lines if re.search(_PRICE_WORD, x) and re.search(r"\d", x)
+                and not re.search(rf"{_FIGURE}\s*{_PRICE_WORD}|{_PRICE_WORD}\s*[:：]?\s*{_FIGURE}", x)]
+        return PAGE_SILENT if beside and not bare and all(v == 0 for v in beside) else verdict
+    if verdict != MISMATCH or not ppm:
+        return verdict
+    rate = float(ppm)
+    if not (total or annual):
+        labelled = [_figure(m) for x in lines for m in re.findall(
+            rf"سعر\s*(?:ال|لل)?متر(?:\s*المربع)?\s*[:：]?\s*({_FIGURE})", x)]
+        return MATCH if labelled and all(v == rate for v in labelled) else verdict
+    if total and area and beside and abs(float(total) - rate * float(area)) < rate:
+        printed = [v for v in beside if v]
+        return MATCH if printed and all(v in (rate, float(total)) for v in printed) else verdict
+    return verdict
+
+
+# The OFFICE's own branch addresses, printed under every ad of the site: never the ad's district.
+_OFFICE_ADDRESS = re.compile(r"موقعنا الجغرافي|العنوان\s+(?:الاول|الثاني)(?!\S)")
+_DISTRICT_LABEL = re.compile(r"(?<!\S)الحي\s*[:：]\s*")
+_NEXT_LABEL = r"(?=\s*$|\s*[|،,]|\s+\S+\s*[:：])"
+
+
+def _district_as_the_page_states_it(stored: dict, page: dict) -> str:
+    """Two ways a page that does NOT contradict our district scored MISMATCH. Each was proven on the real
+    page (2026-11-09); a page that names another district of its own still scores MISMATCH.
+
+    1. The page's own labelled field carries our district. fursaghyr 4367079: «الحي: أم الجود المدينة: مكة
+       المكرمة» is what we store, and the only «حي X» the comparator saw was the deed prose («حي واحة مكة
+       التطويري الأول … مساحة الوحدة»). Every «الحي:» label on the page must carry our district, whole.
+    2. The only district named is the office's own address. sqcc 13707588: the ad page states no district
+       (ours comes from the site's list card) and its footer prints «العنوان الاول الدمام حي احد … العنوان
+       الثاني جدة حي السامر» under every ad. The page said nothing about the ad's district.
+    """
+    d = norm_district(stored.get("district_ar") or "")
+    if not d:
+        return MISMATCH
+    text = norm(page.get("_text") or "")
+    labels = [text[m.end():] for m in _DISTRICT_LABEL.finditer(text)]
+    if labels and all(re.match(r"(?:حي\s+)?" + re.escape(d) + _NEXT_LABEL, rest) for rest in labels):
+        return MATCH
+    lines = [norm(str(x)) for x in ([page.get("title") or ""] + list((page.get("meta") or {}).values())
+                                    + list(page.get("evidence_lines") or [])
+                                    + (page.get("text_head") or "").split(" | ")) if x]
+    naming = [x for x in lines if DISTRICT_ON_PAGE.search(x) and not CONTACT_LINE.search(x)]
+    if naming and not labels and all(
+            _OFFICE_ADDRESS.search(x) and not DISTRICT_ON_PAGE.search(x[:_OFFICE_ADDRESS.search(x).start()])
+            for x in naming):
+        return PAGE_SILENT
+    return MISMATCH
+
+
 def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, link_kind: str | None,
           link_repaired: bool = False, page_photo: bool | None = None) -> dict[str, str]:
     """One ad: every field's verdict. `card` None = the journey never reached the card (render checks skipped);
@@ -175,6 +256,10 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
                  if re.search(r"للمتر|المتر|/\s*م", x) and re.search(r"ريال|ر\.س|سعر|SAR", x, re.I) for m in re.findall(r"\d[\d,٬]*(?:\.\d+)?", x.translate(_DIG))]
         if any(abs(round(r * area) - total) < 1 for r in rates if r):
             src["price"] = MATCH
+    if page and src.get("price") in (MISMATCH, WE_MISS):
+        src["price"] = _price_as_the_page_prints_it(stored, page, src["price"])
+    if page and src.get("district") == MISMATCH:
+        src["district"] = _district_as_the_page_states_it(stored, page)
     for f in SOURCE_FIELDS:
         v = src.get(f, UNREADABLE if page is None else PAGE_SILENT)
         if f == "price" and platform in SKIP_PRICE:

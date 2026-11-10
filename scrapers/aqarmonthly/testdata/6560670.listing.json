@@ -1,0 +1,40 @@
+{
+ "_note": "Aqar Monthly unit 6560670 — the Listing record the sa.aqar.fm unit page embedded on 2026-11-09, trimmed to the fields scrapers/aqarmonthly asks Listing.get for (imgs dropped). price = the stored row's price_annual 59,400 ÷ 12 (the booking-price call is a separate request). create_time 1769291538 = 2026-01-24T21:52:18Z; published_at/last_update kept to prove only create_time is read.",
+ "listing": {
+  "id": 6560670,
+  "category": 101,
+  "beds": 1,
+  "area": 110,
+  "rooms": 0,
+  "furnished": 1,
+  "content": "شقة فندقية شاشة 65 شاهد واي قاي مجاني دخول ذاتي موقف خاص",
+  "content_en": null,
+  "address": "شارع عبدالملك بن العباس ، حي المهدية ، الرياض ، منطقة الرياض",
+  "city_id": 21,
+  "district_id": 588,
+  "lift": 0,
+  "ketchen": 1,
+  "ac": 1,
+  "car_entrance": 0,
+  "special_entrance": true,
+  "two_entrances": false,
+  "wc": 1,
+  "location": {
+   "lat": 24.648737,
+   "lng": 46.518517
+  },
+  "create_time": 1769291538,
+  "published_at": 1769291539,
+  "last_update": 1794080683,
+  "uri": "شارع-عبدالملك-بن-العباس-حي-المهدية-الرياض-منطقة-الرياض-6560670",
+  "imgs": [],
+  "extended_details": {
+   "special_parking": null,
+   "laundry_room": null
+  }
+ },
+ "price": {
+  "discounted_price": "4950",
+  "total_price": null
+ }
+}

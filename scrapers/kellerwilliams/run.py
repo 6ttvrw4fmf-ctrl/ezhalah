@@ -75,6 +75,28 @@ _NEVER_STORE = ("list_agent_office", "co_list_agent_office", "sell_agent_office"
 _FEATURES = {("interior_features", "has_elevator"): "elevator", ("structure", "has_parking"): "parking"}
 
 
+
+# The unit's FLOOR, from the ad's own labelled line only (🔬 2026-11-09 blind-spot hunt): the API carries no floor
+# (`structure.stories` is null) and 0 of 163 ads had one, while 5 state it — «الدور: الرابع (4th Floor)»
+# (kellerwilliams_residential_listings:24214414, payload re-read 2026-11-09). A bare «الدور» in a sentence, a floor
+# COUNT («3 أدوار») or two different stated floors stay NULL (silence is never a guess). Flats and floors only.
+_FLOOR_ORD = {"الارضي": 0, "الأرضي": 0, "ارضي": 0, "أرضي": 0, "الاول": 1, "الأول": 1, "الثاني": 2, "الثالث": 3,
+              "الرابع": 4, "الخامس": 5, "السادس": 6, "السابع": 7, "الثامن": 8, "التاسع": 9, "العاشر": 10}
+_FLOOR_LABEL = re.compile(r"(?<![\u0621-\u064A])الدور\s*[:：]\s*("
+                          + "|".join(sorted(map(re.escape, _FLOOR_ORD), key=len, reverse=True))
+                          + r"|[0-9٠-٩]{1,2})(?![\u0621-\u064A0-9٠-٩])")
+_FLOOR_TYPES = ("Apartment", "Floor", "Studio", "Duplex", "Office")
+
+
+def floor_of(desc: Optional[str], ptype: Optional[str]) -> Optional[int]:
+    if not desc or ptype not in _FLOOR_TYPES:
+        return None
+    found = set()
+    for m in _FLOOR_LABEL.finditer(desc):
+        v = m.group(1)
+        found.add(_FLOOR_ORD[v] if v in _FLOOR_ORD else int(v.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))))
+    return found.pop() if len(found) == 1 else None
+
 def _allowed(url: str) -> bool:
     return url == API
 
@@ -236,6 +258,7 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     prose = {c: v for c, v in amenity_answers(f"{title or ''}\n{desc or ''}", PROSE_COLS, {"balcony": "balcony_terrace"}).items()
              if c not in feats}
     lic = str(x.get("mls_number") or "").strip()
+    floor = floor_of(desc, ptype)
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{x['_id']}",
         "listing_url": f"{SITE}/propertydetails/{x['list_uuid']}" if x.get("list_uuid") else None,
@@ -246,7 +269,7 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "neighborhood": loc["neighborhood"], "area_m2": area,
         "bedrooms": _int(x.get("total_bed")) if rooms else None,
         "bathrooms": _int(x.get("total_bath")) if rooms else None,
-        "license_number": (re.match(r"\d{10}", lic) or [None])[0],
+        "license_number": (re.match(r"\d{10}", lic) or [None])[0], "floor_number": floor,
         "photo_urls": [p.get("ph_url") for p in (x.get("photos") or []) if isinstance(p, dict) and p.get("ph_url")] or None,
         "date_added": x.get("list_dt"), "last_update": x.get("kw_updated_at"),
         **prose, **feats, **price_fields(x, deal, f"{title or ''}\n{desc or ''}"),

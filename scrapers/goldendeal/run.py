@@ -152,6 +152,7 @@ from scrapers.common.honest_fetch import WALL_WORDS  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 
 class Tenant(NamedTuple):
@@ -497,6 +498,11 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
         "street_width_m": next(iter(widths.values())) if len(widths) == 1 else None,   # trap 7
         "direction": N.one_direction(FACADE_AR.get(facade or "", ""), diagonal=True) or None,
         "license_number": _licence(L.get("rega_ad_number")),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20), for every tenant of this engine (yameen too): the
+        # Nuzul API item's own `created_at` (UTC «Z»). Measured live 2026-11-09 on goldendeal 48712: created_at
+        # 2026-05-03T23:51:47.000000Z, updated_at 2026-08-01 (an edit, never used); yameen 39907: 2025-10-07T06:01:24Z.
+        # The ad page prints no date of its own. Never updated_at or availability_date.
+        "date_added": site_posting_date(L.get("created_at")),
         "electricity": _positive(L.get("has_electricity")),            # the «الخدمات» strip lists
         "water_supply": _positive(L.get("has_water")),                 # only what is 1; a 0 is
         "sanitation": _positive(L.get("has_sewage")),                  # never printed → silence

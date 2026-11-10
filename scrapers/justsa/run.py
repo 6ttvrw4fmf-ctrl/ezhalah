@@ -63,6 +63,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://just.sa"
 SOURCE = "فقط نقطة العقارية"
@@ -252,6 +253,12 @@ def map_listing(u: dict, detail: Optional[dict[str, Any]]) -> tuple[Optional[dic
         "direction": normalize.one_direction(u.get("facade"), diagonal=True),
         "property_age": normalize.exact_age(specs.get("عمر العقار")),
         "license_number": (str(u.get("license_number") or "").strip() or d.get("license_number") or None),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the unit's `created_at` — the date the ad page prints
+        # beside its calendar icon (measured 2026-11-09: /l/738 prints 2026-10-12 = created_at 2026-10-12 20:29:22,
+        # while updated_at is 2026-11-04). No zone, and it IS SAUDI TIME, kept as published: unit 745's photo is named
+        # offer_20261109_200648 by the same PHP clock (created_at 20:05:37) and the server stamps the file Last-Modified
+        # 17:06:49 GMT, i.e. that clock runs at +03:00. Never updated_at (an edit).
+        "date_added": site_posting_date(u.get("created_at")),
         "photo_urls": photos[:20] or None,
         "price_evidence": normalize.price_evidence(
             field="units[].price", raw=price_raw, stored=price,

@@ -1,0 +1,90 @@
+{
+ "_id": "6adc9897a27068f565fe8ce3",
+ "type": "Rent",
+ "customPropertyNumber": "",
+ "nameEn": "Satel 107 Unit 503",
+ "nameAr": null,
+ "titleEn": "One Baedroom Apartment with Balcony - Satel 107",
+ "titleAr": "",
+ "beds": 1,
+ "baths": 1,
+ "parking": true,
+ "parkingType": "underground",
+ "parkingSpots": 1,
+ "kitchen": "with-appliances",
+ "floorArea": 61,
+ "priceGroup": "annual",
+ "price": 81000,
+ "furnishing": "Unfurnished",
+ "acType": "concealed",
+ "featured": 0,
+ "displayOrder": 235,
+ "status": "Available",
+ "postStatus": "Published",
+ "virtualTour": null,
+ "labelText": "",
+ "isPinned": false,
+ "createdAt": "2026-10-24T11:37:59.282Z",
+ "propertyNumber": "C0109",
+ "isExactMatch": 0,
+ "slug": "one-baedroom-apartment-with-balcony---satel-107",
+ "address": {
+  "_id": "6adca9a9a27068f565fe8e00",
+  "propertyId": "6adc9897a27068f565fe8ce3",
+  "houseNo": "",
+  "addressLine1En": "",
+  "addressLine1Ar": "6437 العليا، 2684، الورود، الرياض 12251، السعودية",
+  "addressLine2En": "",
+  "addressLine2Ar": "",
+  "cityEn": "Riyadh",
+  "cityAr": "الرياض",
+  "subCityEn": "Al Wurud",
+  "subCityAr": "الورود",
+  "postalCode": "12251",
+  "lat": 24.717494387254572,
+  "lng": 46.67398226719748,
+  "location": {
+   "type": "Point",
+   "coordinates": [
+    46.67398226719748,
+    24.717494387254572
+   ]
+  },
+  "__v": 0
+ },
+ "lng": 46.67398226719748,
+ "lat": 24.717494387254572,
+ "catName": "Residential",
+ "subCatName": "Apartments",
+ "cityEn": "Riyadh",
+ "cityAr": "الرياض",
+ "subCityEn": "Al Wurud",
+ "subCityAr": "الورود",
+ "featuredImage": {
+  "_id": "6adc98fe91c0a2bd3a8936f6",
+  "filename": "5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w1200.webp",
+  "filepath": "https://satel-resources.nyc3.digitaloceanspaces.com/5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w1200.webp",
+  "fileAccessPath": "https://satel-resources.nyc3.digitaloceanspaces.com/5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w1200.webp?AWSAccessKeyId=DO00TPJ7YKUZNR2Y86VX&Expires=1792842882&Signature=RdMzOvk9KMDtSHMJ1tybVEJQjTk%3D",
+  "srcset": "https://satel-resources.nyc3.digitaloceanspaces.com/5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w400.webp 400w, https://satel-resources.nyc3.digitaloceanspaces.com/5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w800.webp 800w, https://satel-resources.nyc3.digitaloceanspaces.com/5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w1200.webp 1200w",
+  "variantKeys": [
+   "5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w400.webp",
+   "5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w800.webp"
+  ],
+  "featured": 1,
+  "imgOrder": 0,
+  "propertyId": "6adc9897a27068f565fe8ce3",
+  "createdAt": "2026-10-24T11:39:42.349Z",
+  "__v": 0
+ },
+ "imageList": [
+  {
+   "id": "6adc98fe91c0a2bd3a8936f6",
+   "filepath": "https://satel-resources.nyc3.digitaloceanspaces.com/5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w1200.webp",
+   "srcset": "https://satel-resources.nyc3.digitaloceanspaces.com/5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w400.webp 400w, https://satel-resources.nyc3.digitaloceanspaces.com/5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w800.webp 800w, https://satel-resources.nyc3.digitaloceanspaces.com/5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w1200.webp 1200w",
+   "filename": "5d0af7ad-5a6e-4a86-9d12-cc4681eb864b_w1200.webp",
+   "featured": 1
+  }
+ ],
+ "_displayOrderSort": 235,
+ "_featuredSort": 0
+}

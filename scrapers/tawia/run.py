@@ -50,6 +50,7 @@ from scrapers.common import db, normalize, page_pin  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://tawia.sa"
 SOURCE = "مكتب طوية للعقار"
@@ -206,6 +207,9 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
         # the REGA AD licence only (7xxxxxxxxx); the office's FAL numbers are never an ad licence
         "license_number": lic if lic and lic.startswith("7") else None,
         "photo_urls": photos,
+        # THE SITE'S OWN POSTING DATE (owner 2026-10-26): JSON-LD datePosted. It was filed under
+        # additional_info only, so the welcome facts could not count by it.
+        "date_added": site_posting_date(ld.get("datePosted")),
         **row_price,
     }
     for k, v in (d.get("details") or {}).items():
