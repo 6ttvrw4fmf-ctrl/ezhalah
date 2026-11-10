@@ -14,7 +14,7 @@
 //
 // MUTATION PROOF (in-file): the pre-fix list (with bare «timed out», without «runner lost») is run
 // through the same cases and must FAIL them — a guard that passes the old list guards nothing.
-import { readFileSync, readdirSync } from 'node:fs';
+import { replayFunction } from './lib/rpcReplay.ts';
 import { join } from 'node:path';
 
 const dir = join(import.meta.dirname, '..', 'supabase', 'migrations');
@@ -41,34 +41,25 @@ export function problems(pattern: string): string[] {
   return out;
 }
 
-// The latest migration that (re)defines each function wins — the same rule production follows.
-const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
-const latest = (needle: RegExp): { file: string; sql: string } | null => {
-  for (let i = files.length - 1; i >= 0; i--) {
-    const sql = readFileSync(join(dir, files[i]), 'utf8');
-    if (needle.test(sql)) return { file: files[i], sql };
-  }
-  return null;
-};
-
-const FN = /create or replace function public\.mon_note_is_run_kill\s*\(/i;
-const DET = /create or replace function public\.mon_detect_run_killed_by_timeout\s*\(/i;
+// The effective body after replaying every committed definition — the same rule production follows,
+// read through the shared tag-generic reader (never a hardcoded dollar tag).
 const fail: string[] = [];
-const fn = latest(FN);
-if (!fn) fail.push('no committed migration defines public.mon_note_is_run_kill()');
+const fn = replayFunction(dir, 'mon_note_is_run_kill');
+const fnFile = fn.touchedBy[fn.touchedBy.length - 1] ?? '(none)';
+if (!fn.body || fn.unresolved.length) fail.push(`mon_note_is_run_kill() is not readable from committed migrations (unresolved: ${fn.unresolved.join(', ') || 'never defined'})`);
 else {
-  const m = fn.sql.slice(fn.sql.search(FN)).match(/p_notes\s*~\*\s*'([^']+)'/);
-  if (!m) fail.push(`${fn.file}: could not read the phrase list out of mon_note_is_run_kill()`);
-  else fail.push(...problems(m[1]).map((p) => `${fn.file}: ${p}`));
+  const m = fn.body.match(/p_notes\s*~\*\s*'([^']+)'/);
+  if (!m) fail.push(`${fnFile}: could not read the phrase list out of mon_note_is_run_kill()`);
+  else fail.push(...problems(m[1]).map((p) => `${fnFile}: ${p}`));
 }
-const det = latest(DET);
-if (!det) fail.push('no committed migration defines mon_detect_run_killed_by_timeout()');
+const det = replayFunction(dir, 'mon_detect_run_killed_by_timeout');
+const detFile = det.touchedBy[det.touchedBy.length - 1] ?? '(none)';
+if (!det.body || det.unresolved.length) fail.push(`mon_detect_run_killed_by_timeout() is not readable from committed migrations (unresolved: ${det.unresolved.join(', ') || 'never defined'})`);
 else {
-  const body = det.sql.slice(det.sql.search(DET)).split('$function$;')[0];
-  if (!/and public\.mon_note_is_run_kill\(notes\)/.test(body))
-    fail.push(`${det.file}: the detector no longer decides through mon_note_is_run_kill(notes)`);
-  if (/notes\s*~\*/.test(body))
-    fail.push(`${det.file}: the detector carries its own second phrase list (notes ~* …)`);
+  if (!/and public\.mon_note_is_run_kill\(notes\)/.test(det.body))
+    fail.push(`${detFile}: the detector no longer decides through mon_note_is_run_kill(notes)`);
+  if (/notes\s*~\*/.test(det.body))
+    fail.push(`${detFile}: the detector carries its own second phrase list (notes ~* …)`);
 }
 
 // Mutation proof: the list as it was before the fix must be caught, in both directions.
@@ -83,4 +74,4 @@ if (fail.length) {
   console.error('✗ run-kill phrase guard:\n  ' + fail.join('\n  '));
   process.exit(1);
 }
-console.log(`✓ run-kill phrases: ${KILLS.length} real kill notes seen, ${NOT_KILLS.length} non-kills ignored; old list and bare «killed» both caught (${fn!.file})`);
+console.log(`✓ run-kill phrases: ${KILLS.length} real kill notes seen, ${NOT_KILLS.length} non-kills ignored; old list and bare «killed» both caught (${fnFile})`);
