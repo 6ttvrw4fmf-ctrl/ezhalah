@@ -21,11 +21,16 @@ const ask = (f: Record<string, unknown>, withScope = true) => {
   return { pf: pf as Record<string, any>, args: m.rpcArgs({ s: 16, w: 34, n: 33, e: 56 }, 0.5, { deals: ['sale'], ...pf }) as Record<string, any> };
 };
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+// The barrier's predicate: the map's request carries exactly the Filter's scope for the same choice.
+const asksLikeFilter = (args: Record<string, any>, F: Record<string, any>) =>
+  same(args.p_types, F.types) && same(args.p_tables, F.tables) && same(args.p_tables2, F.tables2) && same(args.p_types2, F.types2) && args.p_macro === F.macro;
+// mustCatch: the predicate, applied to a deliberately broken request, must say NO.
+const mustCatch = (what: string, brokenPasses: boolean) => check(`MUTATION caught: ${what}`, !brokenPasses);
 
 // 1. The owner's photo: «تجاري» → «الأراضي» → «أرض خام».
 const raw = ask({ category: 'Commercial', groups: ['Commercial & Industrial Plots'], types: ['Raw Land'] });
 const rawF = m.mapTypeScope('Commercial', ['Raw Land']);
-check('raw land under «تجاري»: the map sends the Filter\'s own types, tables and category gate', same(raw.args.p_types, rawF.types) && same(raw.args.p_tables, rawF.tables) && same(raw.args.p_tables2, rawF.tables2) && same(raw.args.p_types2, rawF.types2) && raw.args.p_macro === rawF.macro);
+check('raw land under «تجاري»: the map sends the Filter\'s own types, tables and category gate', asksLikeFilter(raw.args, rawF));
 check('raw land is asked for by its tag «أرض خام», over residential AND commercial tables', (raw.args.p_types ?? []).includes('أرض خام') && raw.args.p_tables.some((t: string) => /_residential_listings$/.test(t)) && raw.args.p_tables.some((t: string) => /_commercial_listings$/.test(t)));
 check('with the Filter\'s scope sent, the old table-name category test is not', raw.args.p_category === null);
 
@@ -56,7 +61,9 @@ check('the card hides the bedrooms row by the same rule and builds its request w
 
 // 6. MUTATION: without the Filter's scope the request is the defect — a stored-type list and a table-name category.
 const old = ask({ category: 'Commercial', groups: ['Commercial & Industrial Plots'], types: ['Raw Land'] }, false);
-check('MUTATION caught: the request without the Filter\'s scope is the old one (no tables, lowercase category)', !('p_tables' in old.args) && old.args.p_category === 'commercial');
+mustCatch('the old request (no Filter scope, table-name category) is not the Filter\'s', asksLikeFilter(old.args, rawF));
+mustCatch('a request with the category gate dropped is not the Filter\'s', asksLikeFilter({ ...raw.args, p_macro: null }, rawF));
+mustCatch('a request with the raw-land tag replaced by stored land types is not the Filter\'s', asksLikeFilter({ ...raw.args, p_types: ['أرض'] }, rawF));
 
 // 7. The server applies the Filter's rule: the newest migration defining each function carries it.
 const dir = join(ROOT, 'supabase/migrations');
