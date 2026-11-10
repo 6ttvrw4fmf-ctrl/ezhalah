@@ -51,7 +51,10 @@ for (const r of rows) {
   const found = res.kind === 'city' ? res.city.toLowerCase() === r.city.toLowerCase() : res.districts.includes(r.district);
   if (found) continue;
   if (res.kind === 'city') townSwaps++;
-  lost.push({ d: r.district, city: r.city, n: r.n, got: `${res.kind} «${res.label}» ${res.city} (${res.districts.length} districts)` });
+  // Say WHAT the resolver answered, not only how many districts: a twin name across cities (11-10: «حي البحيرات» typed in
+  // Mecca, 327 ads, answered «Al-Buhayrat» Jeddah) is a different bug from a fuzzy miss, and the lost line must show it.
+  const extra = (res as { ambiguous?: boolean; cities?: string[] });
+  lost.push({ d: r.district, city: r.city, n: r.n, got: `${res.kind} «${res.label}» ${res.city} (${res.districts.length} districts: ${res.districts.slice(0, 3).join(' | ')}${extra.ambiguous ? '; AMBIGUOUS' : ''}${extra.cities?.length ? '; cities ' + extra.cities.slice(0, 4).join(' | ') : ''})` });
 }
 lost.sort((a, b) => b.n - a.n);
 const lostListings = lost.reduce((s, l) => s + l.n, 0);
