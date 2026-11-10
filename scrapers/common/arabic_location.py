@@ -671,6 +671,18 @@ def title_hayy_district(title: Optional[str], known: frozenset[str]) -> Optional
     return None
 
 
+# A PROPERTY-TYPE NOUN WITHOUT «ال» IS THE PROPERTY, NEVER A DISTRICT (⚡ 2026-11-10). norm_district_tok() drops the
+# article, so the bare «شقة» of «شقة للإيجار في بريدة في العليا» equalled Buraydah's district «الشقة»: albdah stored
+# 6 of its 10 «حي الشقة» cards from the word «apartment» (19983353, 19983374 …), and «مزرعة للبيع» would land in a
+# district «المزرعة» the same way. Only the free-text window scan skips them; a district the text names with its
+# article («في الشقة», «حي الشقة») still matches.
+_BARE_TYPE_NOUNS = frozenset({
+    "شقة", "شقه", "شقق", "فيلا", "فلة", "فله", "فلل", "دور", "ادوار", "أدوار", "عمارة", "عماره", "ارض", "أرض",
+    "اراضي", "أراضي", "محل", "محلات", "مكتب", "مكاتب", "استراحة", "استراحه", "مزرعة", "مزرعه", "بيت", "منزل",
+    "غرفة", "غرفه", "شاليه", "مستودع", "معرض", "دوبلكس", "روف", "قصر", "مخيم",
+})
+
+
 def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Optional[str]:
     """Recognizes a REAL district of `city_id` mentioned in free text (a title, a description) — for
     sources that publish no separate district field/taxonomy at all (remal: class_list gives only an
@@ -742,6 +754,8 @@ def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Option
             if _PLAN_WORD in window:
                 continue
             for first in _forms(window[0]):
+                if first in _BARE_TYPE_NOUNS:
+                    continue      # «شقة للبيع» is the property, never the district «الشقة» (see _BARE_TYPE_NOUNS)
                 candidate = " ".join([first, *window[1:]])
                 # norm_district_tok(), NOT norm_ar(): `known` holds catalog district_norm values, and
                 # district_norm = norm_district_tok(district_ar). norm_ar() mirrors only that
