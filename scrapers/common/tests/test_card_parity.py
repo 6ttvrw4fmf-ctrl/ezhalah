@@ -197,3 +197,47 @@ def test_a_total_rooms_site_card_never_matches_a_bedroom_count():
     tuba = dict(STORED, platform="tuba")
     v = cp.judge(tuba, CARD, PAGE, platform="tuba", link_kind="ok", page_photo=True)
     assert v["bedrooms"] == MISMATCH, v
+
+
+def _page(lines, meta=None):
+    return {**PAGE, "title": "عقار", "meta": meta or {}, "evidence_lines": lines, "text_head": " | ".join(lines),
+            "_text": "\n".join(lines)}
+
+
+_LAND = {**STORED, "type_ar": "أرض", "price_total": None, "area_m2": 370, "bedrooms": None, "bathrooms": None}
+
+
+def test_a_printed_zero_is_not_a_price_but_a_real_figure_is():      # macsaib 13604785 (alert 13960, 2026-11-09)
+    meta = {"description": "للبيع قطعة ارض - حي حويلان - 370 م² - 0 ريال"}
+    silent = _page(["السعر للمتر: 0", "المساحة 370 م²"], meta)
+    assert _judge(stored=_LAND, card=None, page=silent)["price"] == PAGE_SILENT
+    priced = _page(["السعر للمتر: 0", "المساحة 370 م²"], {"description": "للبيع قطعة ارض - 370 م² - 450,000 ريال"})
+    assert _judge(stored=_LAND, card=None, page=priced)["price"] == "we_miss"          # the page states one: we miss it
+    both = _page(["السعر 450,000 ريال", "المساحة 370 م²"], meta)
+    assert _judge(stored=_LAND, card=None, page=both)["price"] == "we_miss"            # a zero beside a real price
+    apart = _page(["السعر 450000 بالريال", "المساحة 370 م²"], meta)
+    assert _judge(stored=_LAND, card=None, page=apart)["price"] == "we_miss"           # figure not beside the word
+
+
+def test_the_pages_own_per_metre_label_is_our_rate_only_when_equal():   # macsaib 13604800 and 13604790
+    meta = {"description": "ارض تجارية سكنية للبيع حي الصفاء - 0 ريال"}
+    land = {**_LAND, "area_m2": None, "price_per_meter": 750}
+    same = _page(["السوم : 600 للمتر والحد 750", "السعر للمتر: 750"], meta)
+    assert _judge(stored=land, card=None, page=same)["price"] == MATCH
+    other = _page(["السعر للمتر: 800"], meta)
+    assert _judge(stored=land, card=None, page=other)["price"] == MISMATCH
+    # 13604790: the office removed its rate («السعر للمتر: 0») and we still store 550 — that one is REAL
+    gone = _page(["السعر للمتر: 0", "المساحة 506 م²"], meta)
+    assert _judge(stored={**land, "price_per_meter": 550, "area_m2": 506}, card=None, page=gone)["price"] == MISMATCH
+
+
+def test_a_detail_page_printing_our_rate_matches_only_when_rate_times_area_is_our_total():   # villassa 13108884 / 13108862
+    plot = {**_LAND, "price_total": 700000, "price_per_meter": 1400, "area_m2": 500}
+    page = _page(["1,400 ريال", "ريال", "المساحة 500 م²"])
+    assert _judge(stored=plot, card=None, page=page)["price"] == MATCH
+    odd = {**_LAND, "price_total": 1037933, "price_per_meter": 1300, "area_m2": 798}     # ad 21: 798.41 m² printed
+    assert _judge(stored=odd, card=None, page=_page(["1,300 ريال", "المساحة 798 م²"]))["price"] == MATCH
+    assert _judge(stored=plot, card=None, page=_page(["1,500 ريال", "المساحة 500 م²"]))["price"] == MISMATCH
+    assert _judge(stored={**plot, "price_total": 900000}, card=None, page=page)["price"] == MISMATCH   # not rate × area
+    two = _page(["1,400 ريال", "650,000 ريال", "المساحة 500 م²"])
+    assert _judge(stored=plot, card=None, page=two)["price"] == MISMATCH                 # the page prints another total
