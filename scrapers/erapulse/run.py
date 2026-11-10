@@ -92,6 +92,8 @@ SUBTYPE_MAP = {
 }
 # subTypes that name no property: the form's catch-all. They never decide the type while the title names one.
 CATCH_ALL_SUBTYPES = {"RESIDENTIAL", "OTHER_RESIDENTIAL", "COMMERCIAL", "OTHER_COMMERCIAL", "OTHER", ""}
+# The catch-alls that are the site's «تجاري»: never a home, whatever the top-level type says.
+COMMERCIAL_CATCH_ALL = {"COMMERCIAL", "OTHER_COMMERCIAL"}
 COMMERCIAL_TYPES = {
     "Office", "Shop", "Showroom", "Warehouse", "Workshop", "Factory", "Hotel",
     "Gas Station", "Commercial Building", "Commercial Land", "Hall",
@@ -346,10 +348,17 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
         property_type = canonical_type_from_title(p.get("title"))
         type_source = "title" if property_type else None
     if not property_type:
-        # The site states no specific type and neither does the title: the coarse top-level type only
-        # (its own words), recorded as such so an auditor can find every row that took this road.
-        property_type = {"LAND": "Residential Land", "COMMERCIAL": "Office",
-                         "RESIDENTIAL": "Apartment"}.get(top)
+        # The site states no specific type and neither does the title: the coarse type only, IN THE SITE'S OWN
+        # WORD, recorded as such so an auditor can find every row that took this road.
+        # 2026-11-10, read on the site's own ad pages: a catch-all residential ad is printed «فلة للبيع …»
+        # (648057, 648056, 646397, 21673925 — path /العقارات/للبيع/فلة/…) and we showed «شقة»; a catch-all
+        # COMMERCIAL subType under a RESIDENTIAL top-level type is printed «عقار تجاري للإيجار» (26359507,
+        # «صالات تجارية للإيجار») and we showed a residential flat. «Apartment» was our word, never the site's.
+        if subtype in COMMERCIAL_CATCH_ALL:
+            property_type = "Office"
+        else:
+            property_type = {"LAND": "Residential Land", "COMMERCIAL": "Office",
+                             "RESIDENTIAL": "Villa"}.get(top)
         type_source = "top_level_type" if property_type else None
     if not property_type:
         return None, "residential"
