@@ -55,3 +55,11 @@ def test_unlicensed_daily_chalet_is_not_a_yearly_rent(catalog):
 def test_a_stated_monthly_rent_still_pools(catalog):
     row, _, skip, _ = _post("شقة للإيجار", "الايجار 2500 شهري")
     assert skip == "" and (row["rent_period"], row["price_annual"]) == ("monthly", 30000)
+
+
+def test_short_stay_with_several_prices_still_clears_an_old_monthly(catalog):
+    # 20945296: three prices (day / month / year) → no single price is read, and the old «monthly 9,600» stayed.
+    row, _, skip, _ = _post("بيت تراثي للإيجار اليومي و الشهري سنوي",
+                            "الأسعار: اليوم الواحد: 800 ريال الشهر: 5,000 ريال العرض السنوي: 45,000 ريال")
+    assert skip == ""
+    assert row["rent_period"] is db.AUTHORITATIVE_NULL and row["price_annual"] is db.AUTHORITATIVE_NULL

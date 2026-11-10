@@ -435,6 +435,10 @@ def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: d
                 price, {"monthly": "شهري", "annual": "سنوي"}[prose_price["period"]])
         else:
             rent_period, price_annual = N.rent_period_from_ad(price, prose_price["phrase"], None, title)
+    if deal == "Rent" and X.short_stay_rent(title, description):
+        # Also when NO single price was read («اليوم 800 · الشهر 5,000 · السنوي 45,000», 20945296): the seller
+        # states a short stay, so an older «monthly ×12» must not survive the re-read either (backlog 1674).
+        rent_period = price_annual = db.AUTHORITATIVE_NULL
     area = X.area_of(title, description)
     more = X.facts(title, description, ptype)
     if category == "commercial":
