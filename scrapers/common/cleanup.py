@@ -461,6 +461,35 @@ def _held_by_direct_ledger(client, platform: str, cands: list, now: datetime) ->
 
 GONE_LEDGER = "ops_stale_inactivation_probe"
 
+# ── A revival leaves its reading behind (2026-11-10) ─────────────────────────────────────────────
+# aqar_residential 10509703 and 14993148 were hidden on 2026-10-12 by three direct «مغلق» readings.
+# Thirty days later this cleanup re-read their pages before deleting them (run 630, 2026-11-10
+# 02:59 UTC, reactivated=2), read both as open ads and switched them back on — and a browser read
+# of 10509703 the same day agrees: aqar's own payload says closed:false, published:true, price
+# 3000, updated 2026-11-09. The revival was right. What it left behind was not: the write was
+# `active=true, missing_count=0` and nothing else — no row saying which ad was revived, on what
+# reading, and no trace on the listing that anyone had looked since the kill. So the two ads read
+# as «killed in the ledger, active now, never looked at since», indistinguishable from a kill that
+# something undid by accident, and finding out took a walk through four jobs.
+#
+# Now every revival writes one LIVE row to the shared reading ledger BEFORE the listing changes
+# (evidence before the act, as the aqar sweep does for a hide), and marks the listing as looked-at.
+# `last_liveness_probe_at` means «we LOOKED», never «proven alive»: this cleanup's 'live' is «HTTP
+# 200 without the site's dead marker», which for the 404-only sites is weaker than the affirmative
+# reading liveness_contract asks for, so `last_verified_alive_at` is NOT stamped here — the site's
+# own liveness job stamps it when it next reads the ad.
+REVIVAL_ORACLE = "cleanup.recheck"
+
+
+def revival_evidence(table: str, row: dict, url: str, status, body: str, why: str) -> dict:
+    return {"source_table": table, "listing_id": row.get("id"), "ad_number": row.get("ad_number"),
+            "listing_url": url, "http_status": status, "body_bytes": len(body or ""),
+            "verdict": "LIVE", "oracle": REVIVAL_ORACLE, "note": (why or "")[:500]}
+
+
+def revival_patch(now_iso: str) -> dict:
+    return {"active": True, "missing_count": 0, "last_liveness_probe_at": now_iso}
+
 
 def fresh_gone_in_shared_ledger(history: list[dict], cands: list[dict], now: datetime,
                                 hours: int = FRESH_DEAD_HOURS) -> set:
@@ -931,6 +960,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 stats["work_set"] = len(cands)
                 to_delete: dict[str, list] = {}
                 to_reactivate: dict[str, list] = {}
+                revive_rows: list[dict] = []
                 log_rows: list[dict] = []
                 # Counted separately from stats["skipped"], which is ALSO incremented for rows
                 # with no listing_url — those never reach _probe(), so folding them in would
@@ -952,7 +982,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         if v == "unknown":
                             inconclusive += 1
                     else:
-                        status, v = None, "dead"     # explicit opt-out (not used by default policy)
+                        status, v, body = None, "dead", ""     # explicit opt-out (not used by default policy)
                         why = "require_source_recheck=false — deleted with NO fresh source probe"
                     if v == "dead":
                         to_delete.setdefault(t, []).append(r["id"])
@@ -974,6 +1004,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         stats["skipped"] += 1
                     elif v == "live":
                         to_reactivate.setdefault(t, []).append(r["id"])
+                        revive_rows.append(revival_evidence(t, r, url, status, body, why))
                         stats["reactivated"] += 1
                     else:
                         stats["skipped"] += 1
@@ -1032,9 +1063,23 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                                f"{stats['reactivated']} reactivation(s) kept.")
 
                 if not dry_run:
+                    # EVIDENCE BEFORE THE REVIVAL: one LIVE row per ad lands in the shared reading
+                    # ledger first; a ledger that refuses the write revives nothing this run.
+                    try:
+                        for i in range(0, len(revive_rows), _WRITE_CHUNK):
+                            client.table(GONE_LEDGER).insert(revive_rows[i:i + _WRITE_CHUNK]).execute()
+                    except Exception as exc:  # noqa: BLE001 — no evidence, no revival
+                        msg = (f"revival_evidence_unwritten={len(revive_rows)} ({str(exc)[:120]}): "
+                               f"nothing revived this run")
+                        stats["note"] = f"{stats['note']}; {msg}" if stats["note"] else msg
+                        print(f"⚠ cleanup {platform}: {msg}", flush=True)
+                        stats["skipped"] += stats["reactivated"]
+                        stats["reactivated"] = 0
+                        to_reactivate = {}
+                    patch = revival_patch(datetime.now(timezone.utc).isoformat())
                     for t, ids in to_reactivate.items():   # self-heal a wrongly-inactive live listing
                         for i in range(0, len(ids), _WRITE_CHUNK):
-                            client.table(t).update({"active": True, "missing_count": 0}).in_("id", ids[i:i + _WRITE_CHUNK]).execute()
+                            client.table(t).update(patch).in_("id", ids[i:i + _WRITE_CHUNK]).execute()
                     if log_rows:
                         for i in range(0, len(log_rows), _WRITE_CHUNK):
                             client.table("cleanup_deletion_log").insert(log_rows[i:i + _WRITE_CHUNK]).execute()

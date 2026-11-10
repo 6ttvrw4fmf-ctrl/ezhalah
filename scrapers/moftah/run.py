@@ -130,6 +130,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     city_ar_for, find_district_in_text, to_catalog)
 
@@ -466,6 +467,19 @@ def read_area(title: str, sp: dict[str, str]) -> Optional[int]:
     return a if a and a > 0 else None
 
 
+_SPEC_ADDED = "تاريخ الإضافة"
+_AR_MONTHS = {"يناير": 1, "فبراير": 2, "مارس": 3, "ابريل": 4, "مايو": 5, "يونيو": 6, "يوليو": 7,
+              "اغسطس": 8, "سبتمبر": 9, "اكتوبر": 10, "نوفمبر": 11, "ديسمبر": 12}
+_ADDED_RE = re.compile(r"(\d{1,2}) (\S+) (\d{4})", re.ASCII)
+
+
+def _added_date(raw: Optional[str]) -> Optional[str]:
+    """«12 فبراير 2026» → «2026-02-12»; an unknown month word or any other shape → None."""
+    m = _ADDED_RE.fullmatch(re.sub(r"\s+", " ", raw or "").strip().translate(normalize._TRANS))
+    month = _AR_MONTHS.get(re.sub("[أإآ]", "ا", m.group(2))) if m else None
+    return site_posting_date(f"{m.group(3)}-{month:02d}-{int(m.group(1)):02d}") if month else None
+
+
 def map_listing(p: dict, page: Optional[str] = None) -> tuple[Optional[dict], str, str]:
     """One Store-API product (+ its page HTML, for the counts block) → (row, category, skip_reason).
     Returns (None, cat, why) for anything this source has not actually said, never a guess."""
@@ -530,6 +544,11 @@ def map_listing(p: dict, page: Optional[str] = None) -> tuple[Optional[dict], st
         # Written as a total expression, not the bare `deal`: a transaction_type that is not provably
         # Buy/Rent reaches the index as NULL and a null deal is quarantined out of search entirely.
         "transaction_type": "Rent" if deal == "Rent" else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the spec «تاريخ الإضافة» («12 فبراير
+        # 2026» — day, Arabic month NAME, year: unambiguous). Present on 4 of the 13 products (the ones
+        # carrying «رقم بيوت المرجعي»); the rest publish no date and stay NULL. Stored on every row
+        # as additional_info.specs; the site's domain had expired when this was checked (2026-11-09).
+        "date_added": _added_date(sp.get(_SPEC_ADDED)),
         "city": normalize.map_city(city_ar) if city_ar else None,
         "city_ar": city_ar,
         "city_id": city_id,

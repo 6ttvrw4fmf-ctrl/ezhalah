@@ -1,0 +1,59 @@
+{
+ "id": 22760,
+ "date": "2026-10-06T15:31:50",
+ "date_gmt": "2026-10-06T15:31:50",
+ "modified": "2026-10-06T15:31:50",
+ "modified_gmt": "2026-10-06T15:31:50",
+ "slug": "%d8%b4%d9%82%d9%82-%d8%aa%d9%85%d9%84%d9%8a%d9%83-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84%d8%b1%d8%b5%d9%8a%d9%81%d8%a9-%d9%85%d8%af%d9%8a%d9%86%d8%a9-%d9%85%d9%83%d8%a9-%d9%85%d8%b4%d8%b1%d9%88%d8%b9",
+ "status": "publish",
+ "type": "property",
+ "link": "https://suwar.sa/property/%d8%b4%d9%82%d9%82-%d8%aa%d9%85%d9%84%d9%8a%d9%83-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84%d8%b1%d8%b5%d9%8a%d9%81%d8%a9-%d9%85%d8%af%d9%8a%d9%86%d8%a9-%d9%85%d9%83%d8%a9-%d9%85%d8%b4%d8%b1%d9%88%d8%b9/",
+ "title": {
+  "rendered": "شقق تمليك في حي الرصيفة مدينة مكة مشروع رقم 1028"
+ },
+ "content": {
+  "rendered": "<p style=\"text-align: right;\">شقق للتمليك بمدينة مكة حي الرصيفة تتكون من :</p>\n<p style=\"text-align: right;\">4 غرف + صالة + مطبخ أمريكي + غرفة غسيل +3 دورات مياه</p>\n<p style=\"text-align: right;\">المساحة / 161 م<br />\nالسعر / 560,000<br />\n• امامية</p>\n<p style=\"text-align: right;\">✏️.داخل حد الحرم 🕋<br />\n✏️ تأمين التعاونية 10 سنوات<br />\n✏️ كرت إشراف هندسي<br />\n✏️ ضمانات على السباكة والكهربا<br />\n✏️ قريبة من محطة القطار<br />\n✏️ قريبة من مشروع مسار<br />\n✏️ قريبة من الدائري والخدمات<br />\n✏️ ش 15 م _ مدخلين 🚪<br />\n✏️ غرف سائقين _ موقف خاص</p>\n<p style=\"text-align: right;\">مشروع 1028</p>\n<p style=\"text-align: right;\">ترخيص اعلان :<br />\n[number removed]</p>\n"
+ },
+ "featured_media": 22775,
+ "_embedded": {
+  "wp:term": [
+   [
+    {
+     "id": 114,
+     "name": "تأمين",
+     "taxonomy": "property_feature"
+    },
+    {
+     "id": 94,
+     "name": "داخل حد الحرم",
+     "taxonomy": "property_feature"
+    },
+    {
+     "id": 98,
+     "name": "ضمان علي السباكه والكهرباء",
+     "taxonomy": "property_feature"
+    },
+    {
+     "id": 107,
+     "name": "غرفة سائق",
+     "taxonomy": "property_feature"
+    },
+    {
+     "id": 105,
+     "name": "كرت إشراف هندسى",
+     "taxonomy": "property_feature"
+    },
+    {
+     "id": 104,
+     "name": "موقف خاص",
+     "taxonomy": "property_feature"
+    }
+   ]
+  ],
+  "wp:featuredmedia": [
+   {
+    "source_url": "https://suwar.sa/wp-content/uploads/2026/10/WhatsApp-Image-2026-10-06-at-6.18.07-PM.jpeg"
+   }
+  ]
+ }
+}

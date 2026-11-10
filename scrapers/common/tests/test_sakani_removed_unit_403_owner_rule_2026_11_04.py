@@ -82,8 +82,9 @@ def test_anything_short_of_the_full_proof_stays_unknown(monkeypatch, ad_answers,
 
 
 def test_two_reads_are_required(monkeypatch):
-    # the oracle's own attempts see blank 403s, then the owner rule's second read draws a challenge
-    first = [BLANK] * R.ORACLE_ATTEMPTS + [BLANK, CHALLENGE]
+    # cheapest-proof read blank, the owner rule's own first look blank, its first read blank, then
+    # its SECOND read draws a challenge: no removal, and the remaining attempts never see the blank again
+    first = [BLANK, BLANK, BLANK, CHALLENGE]
     (verdict, _), _s = _run(monkeypatch, {AD_URL: first, CTRL_URL: [LIVE]})
     assert verdict == "unknown"
 

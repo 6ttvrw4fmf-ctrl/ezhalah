@@ -33,7 +33,11 @@ def _p(**kw):
 
 def test_a_zero_price_is_unpublished_not_free():
     (row, _), why = R.map_listing(_p(), {}, "أرض")
-    assert why == "" and row["price_total"] is None
+    # The site PRINTED the zero, so the NULL is the source's own word: it must also clear a figure an
+    # older crawl stored (a plain None is dropped by the no-clobber guard and the old figure stays).
+    from scrapers.common import db
+    assert why == "" and row["price_total"] is db.AUTHORITATIVE_NULL
+    assert row["price_total"] != 0
 
 
 def test_the_printed_price_is_stored_as_published():
