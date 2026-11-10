@@ -40,7 +40,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  normUrl, isMainSearch, afTargetsFor, carriedOnRequest, typeUi, TYPE_UI,
+  normUrl, isMainSearch, afTargetsFor, carriedOnRequest, typeUi, typeTapPlan, TYPE_UI,
   priceOf, rangeAround, clampToPriceBox, pickSpread, seededShuffle, idKey,
 } from './journey-lib.mjs';
 // The AF's own card lists (backlog 1268): targets are chips the product really shows for the listing's type × deal.
@@ -283,10 +283,9 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     }
 
     step(`type ${ui.cat} → ${ui.group ?? '(no type: an unboxed type is found by category alone)'} → ${ui.tap ?? '—'}`);
-    await tap(ui.cat).catch(() => {});                    // category may already be the default tab
-    if (ui.group) {
-      await tap(ui.group);
-      await tap(ui.tap).catch(() => log(`    ! no «${ui.tap}» box (group-level search)`));
+    for (const t of typeTapPlan(ui)) {                    // src: journey-lib.mjs typeTapPlan (self-checked)
+      if (!t.optional) { await tap(t.text); continue; }   // a mandatory tap that fails throws → the journey is not judged
+      await tap(t.text).catch(() => { if (t.missingNote) log(`    ! no «${t.text}» box (group-level search)`); });
     }
 
     // ranges around the listing's own values (customer behaviour; never written over the source)
