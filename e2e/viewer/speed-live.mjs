@@ -179,7 +179,9 @@ try {
         // answered 200 with NO frame header to another vantage. Same class as the challenge page and the 4xx/5xx above:
         // print what was read (server, size, title), exclude it as inconclusive, never ✗ — a real refusal is a full ad
         // page (thousands of characters, no wall words) that still carries the header, and that still fails here.
-        const body = await res.text().catch(() => '');
+        const body = await res.text().catch(() => null);
+        // An unreadable body is neither the ad page nor a wall: say so and leave it to step 2 (CodeRabbit, #11680).
+        if (body === null) { console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa} but the body could not be read: header check inconclusive`); continue; }
         const wall = isBotWall(body);
         // No <title> in the log: a listing's title can carry a phone number or a person's name (PDPL). Server + size say enough.
         console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa}; server ${res.headers.get('server') ?? '?'}, ${body.length} chars${wall ? ' → a bot wall to this egress, not the ad page: header check skipped' : ''}`);
@@ -200,8 +202,11 @@ try {
         // and body, so a blank frame is judged on what the FRAME received, not on what the robot's fetch received.
         if (r.request().resourceType() === 'document' && r.frame() !== p.mainFrame()) {
           const h = r.headers();
-          frameDoc = { status: r.status(), xfo: h['x-frame-options'] ?? '', csp: h['content-security-policy'] ?? '', text: '' };
-          r.text().then((t) => { frameDoc.text = t; }).catch(() => {});
+          const d = { status: r.status(), xfo: h['x-frame-options'] ?? '', csp: h['content-security-policy'] ?? '', text: '', ready: null };
+          // The body read is kept and AWAITED before any decision (CodeRabbit, #11680): an unresolved read would leave
+          // text '' and read as a wall, hiding a real refusal. An unreadable body stays '' (→ inconclusive, never ✗).
+          d.ready = r.text().then((t) => { d.text = t; }).catch(() => {});
+          frameDoc = d;
         }
       });
       const cdp = await ctx.newCDPSession(p);
@@ -226,6 +231,7 @@ try {
       if (seen === null && topWall.has(u)) {
         // The top-level fetch hit a wall, but the FRAME is its own request: if the frame received a real ad page (not a
         // wall, not an error) that still carried a refusing header, that is a real refusal and fails here.
+        if (frameDoc?.ready) await frameDoc.ready;
         const refusal = frameRefusal(frameDoc);
         if (refusal) { fail(`${site.host}: ${u} — the frame received the ad page (${frameDoc.text.length} chars) with ${refusal}: REFUSES framing — take it off IN_APP_VIEWER_HOSTS`); continue; }
         console.log(`· ${site.host}: ${u} — top-level load was a bot wall to this egress (frame: ${frameDoc ? `HTTP ${frameDoc.status}, ${frameDoc.text.length} chars` : 'no document answer'}), excluded as inconclusive`); continue;
