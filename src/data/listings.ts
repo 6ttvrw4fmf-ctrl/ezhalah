@@ -88,6 +88,10 @@ export type Listing = {
   // row of search_listings_ar, which is how the in-app ad page reads the source's own pin and finds
   // the same ad on other sites (src/data/adPageData.ts). Set on every fetched listing; undefined on mocks.
   sourceTable?: string;
+  // What the map's pin sheet needs to tell «the same property» from «a look-alike» (src/lib/mapPins.ts foldSameProperty):
+  // the index's own licence, deal, type, size, price and floor. Absent when the index read failed — and then the card
+  // is never folded with another (unknown is not «the same»).
+  fold?: { lic: string | null; dealAr: string | null; typeAr: string | null; area: number | null; price: number | null; floor: number | null };
   // Rich extras for the new residential card design — all optional. Mock listings don't carry them;
   // real Aqar listings populate them from the rich `aqar_residential_listings` table. (user request.)
   ad_number?: string;

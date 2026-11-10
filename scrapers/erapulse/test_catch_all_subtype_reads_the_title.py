@@ -37,6 +37,8 @@ CASES = [
     ("دور ارضي بحي البصر 3", "Floor", "residential"),                      # 7855826
     ("للبيع شقة دور أرضي – شارع عثمان بن عفان | بريدة", "Floor", "residential"),  # 648058: longest token «دور أرضي»
     ("شقة فاخرة حي الروضة", "Apartment", "residential"),                   # 3961981 stays a flat
+    ("للبيع شالية بحي السلمان", "Chalet", "residential"),                  # 21673925: «شالية» is «شاليه»
+    ("صالات تجارية للإيجار - مجمع روفان التجاري بريدة", "Shop", "commercial"),  # 26359507
 ]
 bad = []
 for title, want, cat in CASES:
@@ -45,9 +47,23 @@ for title, want, cat in CASES:
         bad.append((title, want, cat, got))
 
 # a title that names nothing keeps the site's own coarse type, labelled as such (never dropped)
-got = typed("حي ضراس")
-if got != ("Apartment", "residential", "top_level_type"):
-    bad.append(("حي ضراس", "Apartment/top_level_type", "", got))
+got = typed("حي ضراس")                                                  # 646397: the site prints «فلة للبيع في حي ضراس»
+if got != ("Villa", "residential", "top_level_type"):
+    bad.append(("حي ضراس", "Villa/top_level_type", "", got))
+got = typed("شمال بريدة - حي الرحاب", subtype="RESIDENTIAL")            # 648057: «فلة للبيع في حي الرحاب»
+if got != ("Villa", "residential", "top_level_type"):
+    bad.append(("شمال بريدة - حي الرحاب", "Villa/top_level_type", "", got))
+# a COMMERCIAL catch-all is never a home, even under a RESIDENTIAL top-level type (26359507 was a rented «شقة»)
+got = typed("مجمع روفان التجاري بريدة", subtype="COMMERCIAL", top="RESIDENTIAL")
+if got != ("Office", "commercial", "top_level_type"):
+    bad.append(("COMMERCIAL catch-all", "Office/commercial/top_level_type", "", got))
+# MUTATION 2: without the commercial road the same ad is a home again
+orig_c = m.COMMERCIAL_CATCH_ALL
+m.COMMERCIAL_CATCH_ALL = set()
+mutant_c = typed("مجمع روفان التجاري بريدة", subtype="COMMERCIAL", top="RESIDENTIAL")
+m.COMMERCIAL_CATCH_ALL = orig_c
+if mutant_c[1] != "residential":
+    bad.append(("MUTATION 2", "without the commercial road the ad must read residential", "", mutant_c))
 # a SPECIFIC subType still wins over the title (the site's structured word for this property)
 got = typed("فيلا للبيع", subtype="APARTMENT")
 if got[:2] != ("Apartment", "residential") or got[2] != "subtype":
@@ -65,4 +81,4 @@ if bad:
     for b in bad:
         print("FAIL", b)
     sys.exit(1)
-print(f"PASS {len(CASES) + 2} cases + 1 mutation: a catch-all subType reads the office's title")
+print(f"PASS {len(CASES) + 4} cases + 2 mutations: a catch-all subType reads the office's title")

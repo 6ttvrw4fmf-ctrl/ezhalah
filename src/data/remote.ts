@@ -2035,19 +2035,23 @@ export async function fetchListingCards(table: string, ids: number[]): Promise<L
   const rows = finalize(data, table.includes('_commercial') ? 'com' : 'res');
   // The same Arabic place the search results print (applyArabicLocation). A failed read keeps the CITY_AR mapping
   // below it — never worse than before, and never a blank-for-error.
-  const loc = await bounded(supabase.from('search_listings_ar').select('listing_id,region_ar,city_ar,district_ar,bathrooms')
+  const loc = await bounded(supabase.from('search_listings_ar').select('listing_id,region_ar,city_ar,district_ar,bathrooms,license_number,deal_ar,type_ar,area_m2,price_total,price_annual,floor_number')
     .eq('source_table', table).in('listing_id', ids).limit(ids.length));
   // A FAILED FETCH IS NOT AN EMPTY ANSWER: the fallback below keeps every card, but the failure is reported, never
   // swallowed (CodeRabbit Major on #11678) — a silent index read would silently drop the Arabic place AND the bath count.
   if (loc.error) reportMessage('fetchListingCards: search_listings_ar read failed', { table, ids: ids.length, error: String((loc.error as { message?: string }).message ?? loc.error) });
   const arById = new Map<number, { region: string; city: string; district: string }>();
   const bathsById = new Map<number, unknown>();
-  for (const x of ((loc.error ? null : loc.data) ?? []) as { listing_id: number; region_ar: string | null; city_ar: string | null; district_ar: string | null; bathrooms?: unknown }[]) {
+  const foldById = new Map<number, NonNullable<Listing['fold']>>();
+  const num = (v: unknown): number | null => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  for (const x of ((loc.error ? null : loc.data) ?? []) as { listing_id: number; region_ar: string | null; city_ar: string | null; district_ar: string | null; bathrooms?: unknown; license_number?: string | null; deal_ar?: string | null; type_ar?: string | null; area_m2?: unknown; price_total?: unknown; price_annual?: unknown; floor_number?: unknown }[]) {
     arById.set(Number(x.listing_id), { region: x.region_ar || '', city: x.city_ar || '', district: x.district_ar || '' });
     bathsById.set(Number(x.listing_id), x.bathrooms);
+    foldById.set(Number(x.listing_id), { lic: x.license_number ?? null, dealAr: x.deal_ar ?? null, typeAr: x.type_ar ?? null, area: num(x.area_m2), price: num(x.deal_ar === 'بيع' ? x.price_total : x.price_annual), floor: num(x.floor_number) });
   }
   for (const r of rows) {
     r.sourceTable = table;
+    r.fold = foldById.get(Number(r.id));
     applyArabicLocation(r, arById.get(Number(r.id)));
     // Same rule as the search path: the index's bath count fills a box the site left empty (src/lib/indexBathrooms.ts).
     r.bathrooms = bathroomsForCard(r.bathrooms, bathsById.get(Number(r.id))) ?? 0;
