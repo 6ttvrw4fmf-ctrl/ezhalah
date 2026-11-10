@@ -137,6 +137,14 @@ void resolveVoice();
 // Speech API on web (see WEB PAUSE/RESUME BUG note), which needs an actual voice object, not a
 // string id. Voice SELECTION itself is untouched: this only re-looks-up the exact voice
 // pickBestArabic already chose.
+// Is this confirmed voice in the browser's LIVE voice list right now? Native (expo-speech) has no such list
+// to drift from, so it is always true there.
+function liveVoicePresent(v: Voice): boolean {
+  if (!isWeb()) return true;
+  if (typeof window === 'undefined' || !window.speechSynthesis) return false;
+  return window.speechSynthesis.getVoices().some((x) => x.voiceURI === v.identifier);
+}
+
 function resolveWebVoiceObject(): SpeechSynthesisVoice | null {
   if (!sessionVoice || typeof window === 'undefined' || !window.speechSynthesis) return null;
   const voices = window.speechSynthesis.getVoices();
@@ -435,6 +443,12 @@ export function speakReadAloud(id: string, segments: ReadAloudSegment[], locale:
   sessionVoice = locale === 'en' ? bestEnglishVoice : bestArabicVoice;
   sessionLanguage = locale === 'en' ? 'en-US' : AR_LANG;
   if (!sessionVoice) return false; // never fall back to a different language's default voice
+  // A voice confirmed EARLIER is not a voice the browser holds NOW (ops_incident #856, journey sweep 2026-11-09:
+  // engine reported 0 voices before and after the tap, never in the speaking state, no message). speakUnitText()
+  // would find no live voice object, error synchronously and end the session, while this returned true — so the
+  // caller showed no refusal and the tap did nothing a user could see. Refuse here instead; readAloudRefusal()
+  // then says «still preparing the voice».
+  if (!liveVoicePresent(sessionVoice)) return false;
   const units = buildUnits(segments);
   if (!units.length) return false;
   sessionId = id;
@@ -625,6 +639,10 @@ export function isReadAloudDefinitelyUnavailable(): boolean {
 // the ~45s RETRY_WINDOW_MS after load those are different facts. Keeping the boolean return means
 // every existing caller still works unchanged; this only tells an already-refused caller why.
 export function readAloudRefusal(locale: 'ar' | 'en' = 'ar'): ReadAloudRefusal {
+  const best = locale === 'en' ? bestEnglishVoice : bestArabicVoice;
+  // Confirmed once, absent from the live list right now (#856): the voice list is reloading — say so,
+  // never «not available on this device» (it was available) and never nothing (a dead control).
+  if (best && !liveVoicePresent(best)) return 'still-resolving';
   return readAloudRefusalVerdict({
     voiceConfirmed: !!(locale === 'en' ? bestEnglishVoice : bestArabicVoice),
     checkExhausted: voiceCheckExhausted,
