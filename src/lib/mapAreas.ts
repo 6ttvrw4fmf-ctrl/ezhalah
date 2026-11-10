@@ -170,7 +170,10 @@ export function areasFromFeed(feed: AreaFeedRow[], level: AreaLevel, deals: stri
     const regions: AreaRow[] = [];
     for (const [name, g] of by) {
       const lat = g.la / g.n, lng = g.lo / g.n;
-      if (lat >= box.s && lat <= box.n && lng >= box.w && lng <= box.e) regions.push({ city: name, district: '', lat, lng, n: g.n, ...(REGION_LABEL_AT[name] ? { at: REGION_LABEL_AT[name] } : {}) });
+      // On screen by where the label is DRAWN (review of #11608): a label whose point is in view shows even when its
+      // weighted centre is not, and one drawn off screen is not counted. A tap still zooms to the weighted centre.
+      const at = REGION_LABEL_AT[name]; const p = at ?? { lat, lng };
+      if (p.lat >= box.s && p.lat <= box.n && p.lng >= box.w && p.lng <= box.e) regions.push({ city: name, district: '', lat, lng, n: g.n, ...(at ? { at } : {}) });
     }
     return regions.sort((x, y) => y.n - x.n).slice(0, limit);
   }

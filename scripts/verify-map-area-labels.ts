@@ -41,6 +41,16 @@ mustCatch('the Saudi bubble coming back on the opening view', areaLevelShown(17)
   const feed = [{ city: 'الدمام', district: '', lat: 26.4, lng: 50.1, buy: 9, rent: 0, short: 0, isCity: true, region: 'المنطقة الشرقية' }] as unknown as Parameters<typeof areasFromFeed>[0];
   const [east] = areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], COUNTRY_BOX);
   check('the label sits at its point; a tap still zooms to where the listings are', east.at === REGION_LABEL_AT['المنطقة الشرقية'] && east.lat === 26.4 && east.lng === 50.1);
+  // Review of #11608: the point must reach the screen — both label layers (Apple's annotations and the bridge) draw at it.
+  const web2 = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
+  check('Apple\'s labels are drawn at the region\'s point', /new mk\.Annotation\(new mk\.Coordinate\(\(a\.at \?\? a\)\.lat, \(a\.at \?\? a\)\.lng\), \(\) => areaElement\(a, level\)/.test(web2));
+  check('the bridge labels are drawn at the region\'s point', /pt = toPage\(new mk\.Coordinate\(\(a\.at \?\? a\)\.lat, \(a\.at \?\? a\)\.lng\)\)/.test(web2));
+  mustCatch('a label layer back on the weighted centre', !/new mk\.Annotation\(new mk\.Coordinate\(a\.lat, a\.lng\), \(\) => areaElement/.test(web2) && !/pt = toPage\(new mk\.Coordinate\(a\.lat, a\.lng\)\)/.test(web2));
+  // A view holding the label's point but not its weighted centre still shows the label (and the reverse hides it).
+  const pointOnly = { s: 20, w: 49, n: 23, e: 52 };        // around الشرقية's point (21.6, 50.6), not Dammam (26.4, 50.1)
+  const centreOnly = { s: 25.5, w: 49, n: 27, e: 51 };     // around Dammam, not the point
+  check('a region shows when its label point is in view', areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], pointOnly).length === 1);
+  check('a region drawn off screen is neither shown nor counted', areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], centreOnly).length === 0);
   mustCatch('labels piled at the weighted centres (الشرقية behind الرياض, as measured live)', clash({ lat: 26.0, lng: 49.6 }, { lat: 24.7, lng: 46.7 }));
 }
 check('city zoom shows one label per DISTRICT', areaLevelFor(2.5) === 'district' && areaLevelFor(0.5) === 'district' && areaLevelFor(0.07) === 'district');
