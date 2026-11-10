@@ -645,6 +645,22 @@ def _placed(cid: int, rid, district_ar) -> dict:
             "district_ar": district_ar, "confidence": "address"}
 
 
+def _slug_named_region(uri: str) -> int | None:
+    """The region the slug itself NAMES («…-منطقة-الرياض-…») and the region catalogue validates, else None — the same
+    «منطقة X» read resolve_slug() makes, so a dropped street town never lends its region through an unrecognised
+    «منطقة» phrase (CodeRabbit on #11715)."""
+    AL._load()
+    mr = re.search(r"منطقه\s+([؀-ۿ]+(?:\s+[؀-ۿ]+)?)", AL.norm_ar(uri.replace("-", " ")))
+    if not mr:
+        return None
+    cand = mr.group(1)
+    for k in (cand, cand.split()[0]):
+        rid = AL._REGION_NORM.get("منطقه " + k) or AL._REGION_NORM.get(k)
+        if rid:
+            return rid
+    return None
+
+
 def _served_region(loc: dict):
     """The region to WRITE. A region we proved came from a street-named town is cleared, not kept: a plain None
     means «unknown this fetch» and would leave the stored wrong region in place (aqarmonthly 1097380 kept بدر's
@@ -672,9 +688,8 @@ def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) 
         # glued «المجمعة», and the row took بدر's region 3. Re-clean the district by NAME exactly as the
         # unresolved branch of resolve_slug() does, and keep a region only when the slug itself said «منطقة».
         d = loc.get("district_ar")
-        said_region = re.search(r"منطقه", AL.norm_ar(uri.replace("-", " ")))
         loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved", "street_city_dropped": True,
-               "region_id": loc.get("region_id") if said_region else None,
+               "region_id": _slug_named_region(uri),
                "district_ar": AL.strip_city_suffix(d, AL.trailing_catalog_city_norm(d)) if d else d}
     try:
         hint = AQAR_CITY_REGION.get(int(aqar_city_id or 0))

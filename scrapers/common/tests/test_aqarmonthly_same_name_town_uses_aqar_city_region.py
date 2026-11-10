@@ -177,6 +177,11 @@ def test_a_dropped_street_city_takes_its_district_cleaning_and_region_with_it(ad
     r = _resolve_location("شارع-العيينة-منطقة-الرياض-1", None, "شارع العيينة ، الوغل")
     assert r.get("street_city_dropped") is True and r["city_id"] is None
     assert r["region_id"] == 1
+    # an UNRECOGNISED «منطقة» phrase is no region: the street town's region is not kept through it
+    al._CITY["بدر"] = [(1053, 3)]
+    al._CID_AR[1053] = "بدر"
+    r = _resolve_location("شارع-بدر-الوغل-منطقة-الغيمة-1", None, "شارع بدر ، الوغل")
+    assert r.get("street_city_dropped") is True and r["region_id"] is None
 
 
 def test_a_dropped_street_city_clears_the_stored_region_not_just_the_fetched_one(address_catalog):
