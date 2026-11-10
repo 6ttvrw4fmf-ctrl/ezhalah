@@ -37,10 +37,13 @@ if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/drift-held-in-open-pr
   if (!Array.isArray(missing) || !missing.length) die('no missing_in_git list in the response');
   const slug = process.env.GITHUB_REPOSITORY || '6ttvrw4fmf-ctrl/ezhalah';
   const gh = (...a: string[]) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  const prs = JSON.parse(gh('pr', 'list', '-R', slug, '--state', 'open', '--limit', '300', '--json', 'number,headRefOid,files')) as
+  // CodeRabbit #11469: list EVERY open PR (a 1000 cap that is reached refuses), and page a PR's files past gh's 100-per-PR cap.
+  const prs = JSON.parse(gh('pr', 'list', '-R', slug, '--state', 'open', '--limit', '1000', '--json', 'number,headRefOid,files')) as
     Array<{ number: number; headRefOid: string; files: Array<{ path: string }> }>;
+  if (prs.length >= 1000) die('1000+ open PRs: the list may be cut short');
   const files: OpenPrFile[] = [];
-  for (const p of prs) for (const { path } of p.files) {
+  for (const p of prs) for (const path of p.files.length < 100 ? p.files.map((f) => f.path)
+    : gh('api', '--paginate', `repos/${slug}/pulls/${p.number}/files?per_page=100`, '-q', '.[].filename').split('\n').filter(Boolean)) {
     if (!missing.some((v) => path.startsWith(`supabase/migrations/${v}_`))) continue;
     let text: string | null = null;
     try { text = gh('api', '-H', 'Accept: application/vnd.github.raw', `repos/${slug}/contents/${path}?ref=${p.headRefOid}`); } catch { /* unreadable = not held */ }
