@@ -16,8 +16,16 @@ export const MAX_HYDRATION_DROPS = 25;
 // Every observation is kept: an older search's hydration can ARRIVE after the newer one's, and the URL cannot say
 // which search asked. When the observations made after a search DISAGREE about a row, the drop count is ambiguous
 // and is reported as unmeasured, so the strict «headline == rpc» rule applies (CodeRabbit, PR 11725).
-export type HydrationLedger = { obs: Map<string, { seq: number; got: boolean }[]> };
-export const newHydrationLedger = (): HydrationLedger => ({ obs: new Map() });
+// `pending` counts hydration responses that have ARRIVED but whose body is still being read: while any is pending, a
+// newer observation may be about to land, so no drop count is a verdict yet (CodeRabbit, PR 11725).
+export type HydrationLedger = { obs: Map<string, { seq: number; got: boolean }[]>; pending: number };
+export const newHydrationLedger = (): HydrationLedger => ({ obs: new Map(), pending: 0 });
+/** Call synchronously when a hydration response arrives (before any await); call `done()` once it is recorded or failed. */
+export function beginHydration(led: HydrationLedger): () => void {
+  led.pending++;
+  let closed = false;
+  return () => { if (!closed) { closed = true; led.pending--; } };
+}
 
 /** Record one raw-table hydration response: its URL names the table and the ids asked for; its body holds the rows returned. */
 export function recordHydration(led: HydrationLedger, url: string, ok: boolean, body: unknown, seq: number): boolean {
@@ -37,6 +45,7 @@ export function recordHydration(led: HydrationLedger, url: string, ok: boolean, 
 
 /** Rows of a search page («table:id» keys) asked for after `sinceSeq` and not returned; null if any row was not observed. */
 export function dropsOf(led: HydrationLedger, rows: string[], sinceSeq = -Infinity): { n: number | null; keys: string[] } {
+  if (led.pending > 0) return { n: null, keys: [] };              // a hydration body is still being read
   const keys: string[] = [];
   for (const k of rows) {
     const after = (led.obs.get(k) ?? []).filter((o) => o.seq >= sinceSeq);

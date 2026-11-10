@@ -1,6 +1,6 @@
 // Hermetic proof of scripts/lib/hydrationDrops.ts — the one rule the live count robots use to judge an honest headline.
 // Executes the functions on synthetic hydration traffic; every mutation must be caught.
-import { newHydrationLedger, recordHydration, dropsOf, honestHeadline, isResultsPage, newestBySeq, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, isResultsPage, newestBySeq, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); if (!ok) failed++; };
@@ -60,6 +60,16 @@ mustCatch('selecting the newest response WITHOUT the results-page filter would p
 const late = [{ seq: 30, id: 'newer' }, { seq: 25, id: 'older-read-late' }];
 check('the newest ARRIVAL wins, not the last body read', newestBySeq(late)?.id === 'newer');
 mustCatch('taking the last array entry instead would pick the older response', late[late.length - 1].id === 'older-read-late');
+
+// PENDING (CodeRabbit, PR 11725): an older hydration omitted id 6 after the search started while the newer hydration's
+// body is still being read — no verdict until it lands.
+const pz = newHydrationLedger();
+recordHydration(pz, url('haraj_residential_listings', [6]), true, [], 12);          // older search's omission, recorded
+const doneNewer = beginHydration(pz);                                                 // newer response arrived, body pending
+check('while a hydration body is still pending the count is unmeasured', dropsOf(pz, ['haraj_residential_listings:6'], 10).n === null);
+mustCatch('a pending body cannot let the older omission excuse a reduced headline', !honestHeadline(99, 100, dropsOf(pz, ['haraj_residential_listings:6'], 10).n));
+recordHydration(pz, url('haraj_residential_listings', [6]), true, [{ id: 6 }], 13); doneNewer();
+check('once the newer body lands the disagreement makes it unmeasured, never a drop', dropsOf(pz, ['haraj_residential_listings:6'], 10).n === null);
 
 console.log(failed ? `\n❌ ${failed} check(s) failed` : '\n✅ the honest-headline allowance is exact and measured');
 process.exit(failed ? 1 : 0);

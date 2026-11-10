@@ -26,7 +26,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
-import { newHydrationLedger, recordHydration, dropsOf, honestHeadline, isResultsPage } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, isResultsPage } from './lib/hydrationDrops.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { pickScreenCityCall } from './lib/trendingScreenCall.ts';
@@ -201,7 +201,8 @@ async function runJourney(j: Journey) {
     // the one that says «this hydration belongs to that search».
     const arrived = hydSeq++;
     if (resp.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u)) {
-      try { recordHydration(hyd, u, resp.ok(), await resp.json(), arrived); } catch {}
+      const done = beginHydration(hyd);
+      try { recordHydration(hyd, u, resp.ok(), await resp.json(), arrived); } catch {} finally { done(); }
       return;
     }
     if (resp.request().method() !== 'POST') return;

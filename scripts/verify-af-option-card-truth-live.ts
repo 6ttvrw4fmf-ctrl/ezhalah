@@ -58,7 +58,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
-import { newHydrationLedger, recordHydration, dropsOf as libDropsOf, newestBySeq } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, beginHydration, dropsOf as libDropsOf, newestBySeq } from './lib/hydrationDrops.ts';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
@@ -643,13 +643,14 @@ page.on('response', async (r) => {
   // Arrival order stamped before any await (CodeRabbit, PR 11725): body reads finish in any order.
   const arrived = seq++;
   if (r.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u) && /[?&]id=in\./.test(decodeURIComponent(u))) {
+    const done = beginHydration(hyd);
     try {
       const tbl = (u.match(/\/rest\/v1\/([a-z0-9_]+_listings)\?/) || [])[1];
       if (!tbl || !r.ok()) return;                     // a failed chunk is not a drop: the app shows the retry UI instead
       const j = await r.json();
       if (!Array.isArray(j)) return;
       recordHydration(hyd, u, r.ok(), j, arrived);
-    } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ }
+    } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ } finally { done(); }
     return;
   }
   if (r.request().method() !== 'POST') return;
