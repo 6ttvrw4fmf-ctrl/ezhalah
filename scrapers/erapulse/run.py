@@ -198,7 +198,7 @@ _REGION_RE = re.compile(r"منطقة\s+([^,،]+)")
 # (governorate), an admin-locality marker like "مدينة"/"منطقة" that's already stripped elsewhere
 # (e.g. "غرناطة محافظة النبهانبة" -> "غرناطة").
 _CITY_SUFFIX_RE = re.compile(
-    r"\s*[-–]?\s*(?:محافظة\s+)?(" + "|".join(map(re.escape, QASSIM_CITY_WORDS)) + r")\s*$"
+    r"\s*[-–]?\s*(?:(?:محافظة|مدينة)\s+)?(" + "|".join(map(re.escape, QASSIM_CITY_WORDS)) + r")\s*$"
 )
 
 
