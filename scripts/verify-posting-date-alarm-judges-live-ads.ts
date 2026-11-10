@@ -88,7 +88,34 @@ mutation('the kind hidden in a variable again', detectorProblems(det.replace(/mo
 mutation('the old «baseline − 20» rule', verdictProblems(ver.replace(/greatest\(\s*p_baseline\s*-\s*drop_pts\s*,\s*p_baseline\s*\/\s*2(?:\.0)?\s*\)/, 'p_baseline - drop_pts')));
 mutation('no unknown verdict', verdictProblems(ver.replace(/verdict\s*:=\s*'unknown'/g, "verdict := 'ok'")));
 
-// ── 4. this file runs in `npm test` ─────────────────────────────────────────────────────────────
+// ── 4. the behavioural self-test exists, exercises switched-off rows, and runs from the roster ──────
+// public.ops_posting_date_alarm_selftest() runs the REAL detector over controlled live and switched-off rows (always
+// rolled back); mon_detect_posting_date_alarm_selftest() runs it daily and raises when a state comes out wrong.
+const SELFTEST = 'create or replace function public.ops_posting_date_alarm_selftest()';
+export function selftestProblems(body: string, migrationText: string): string[] {
+  const p: string[] = [];
+  if (!/select\s+false\s*,\s*now\(\)/.test(body)) p.push('no switched-off rows are planted, so counting them again would pass');
+  if (!/select\s+true\s*,\s*now\(\)/.test(body)) p.push('no live rows are planted');
+  if (!/perform\s+public\.mon_detect_source_posting_date_fill_regressed\(\)/.test(body)) p.push('the real detector is not run');
+  for (const s of ['A', 'B', 'C', 'D']) if (!body.includes(`SELFTEST ${s}:`)) p.push(`state ${s} is not asserted`);
+  if (!/'__pd_alarm_selftest_rollback__'/.test(body)) p.push('the test does not roll itself back');
+  if (!/''mon_detect_posting_date_alarm_selftest'',/.test(migrationText)) p.push('the daily wrapper is not put on the detector roster');
+  return p;
+}
+const selFile = lastDefining(SELFTEST);
+check('a committed migration defines the behavioural self-test', !!selFile);
+if (selFile) {
+  const selText = text(selFile);
+  const sel = windowBetween(selText, SELFTEST, 'end $function$;', selFile);
+  const sp = selftestProblems(sel, selText);
+  check('the self-test plants live and switched-off rows, runs the real detector, asserts A–D, rolls back, runs daily',
+    sp.length === 0, sp.join('; '));
+  mutation('a self-test without switched-off rows', selftestProblems(sel.replace(/select\s+false\s*,\s*now\(\)/, 'select true, now()'), selText));
+  mutation('a self-test that skips state B', selftestProblems(sel.replace(/SELFTEST B:/g, 'SELFTEST b:'), selText));
+  mutation('a self-test off the roster', selftestProblems(sel, selText.replace(/''mon_detect_posting_date_alarm_selftest'',/g, '')));
+}
+
+// ── 5. this file runs in `npm test` ─────────────────────────────────────────────────────────────
 check('npm test runs this check', npmTestRuns(ROOT, 'verify-posting-date-alarm-judges-live-ads'));
 
 console.log(failed === 0
