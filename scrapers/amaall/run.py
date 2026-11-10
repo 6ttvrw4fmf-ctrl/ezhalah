@@ -51,6 +51,7 @@ import html as ihtml
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -187,6 +188,61 @@ def _meta1(meta: dict, key: str) -> Any:
     if isinstance(v, list):
         return v[0] if v else None
     return v
+
+
+# The page's own «تفاصيل إضافية» list prints the REGA ad licence as
+# `<li …><strong>الترخيص الاعلاني:</strong> <span>7200807823</span></li>` (source-reread run 42907507350, 2026-11-10:
+# on 10729186 and 10729193, both crawled 21:17 UTC with the REST meta reader of #11625 and both still without a
+# licence — the REST post does not carry it in a shape that reader sees). Read from that row ONLY, the 71/72 REGA
+# ad-licence shape, stated once; the WhatsApp row printed just above it is never read.
+_PAGE_LICENCE_RE = re.compile(
+    r"<strong>\s*الترخيص\s*الاعلاني\s*:?\s*</strong>\s*<span>\s*([0-9٠-٩]{10})\s*</span>")
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def licence_from_page(page_html: Optional[str]) -> Optional[str]:
+    """The one REGA ad licence the page's «الترخيص الاعلاني» row states (filtered to the 71/72 shape BEFORE the
+    count, as normalize.ad_licence_from_prose does), else None."""
+    found = {v for v in (m.group(1).translate(_AR_DIGITS) for m in _PAGE_LICENCE_RE.finditer(page_html or ""))
+             if re.fullmatch(r"7[12]\d{8}", v)}
+    return found.pop() if len(found) == 1 else None
+
+
+PAGE_PAUSE_S = 1.0          # ≤ 1 request/second to the site (house scraping rule)
+_LAST_PAGE_READ = [0.0]
+PAGE_READ_FAILURES: dict[str, int] = {}
+
+
+def _page_html(s, link: Optional[str]) -> Optional[str]:
+    """The post's own page, for the licence row only, at most one read a second. A failed read is None (the licence
+    stays unknown, never «no») and is counted in PAGE_READ_FAILURES, which the run prints, so a blocked or throttled
+    page never fails silently."""
+    if not link:
+        return None
+    wait = PAGE_PAUSE_S - (time.monotonic() - _LAST_PAGE_READ[0])
+    if wait > 0:
+        time.sleep(wait)
+    try:
+        r = s.get(link, timeout=30)
+        why = None if r.status_code == 200 else f"http_{r.status_code}"
+        text = r.text if why is None else None
+    except Exception as e:  # noqa: BLE001
+        why, text = type(e).__name__, None
+    finally:
+        _LAST_PAGE_READ[0] = time.monotonic()
+    if why:
+        PAGE_READ_FAILURES[why] = PAGE_READ_FAILURES.get(why, 0) + 1
+    return text
+
+
+def _licence_from_own_page(s, p: dict, row: dict) -> None:
+    """Fill the card's licence from the post's own page when the REST post gave none (live rows only)."""
+    if not row.get("active") or (row.get("additional_info") or {}).get("rega_ad_license_number"):
+        return
+    lic = licence_from_page(_page_html(s, p.get("link")))
+    if lic:
+        row["license_number"] = lic
+        row.setdefault("additional_info", {})["rega_ad_license_number"] = lic
 
 
 def is_arabic_post(p: dict) -> bool:
@@ -511,6 +567,7 @@ def main() -> int:
                     if nm and nm not in TYPE_CATEGORY_TERMS:
                         unmapped[nm] = unmapped.get(nm, 0) + 1
                 continue
+            _licence_from_own_page(s, p, row)
             if not row["active"]:
                 gone_ct += 1
             if args.type != "all" and cat != args.type:
@@ -519,6 +576,8 @@ def main() -> int:
             if not row["active"]:
                 (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
 
+        if PAGE_READ_FAILURES:
+            print(f"  licence page reads failed (licence left unknown): {PAGE_READ_FAILURES}", flush=True)
         if res:
             db.upsert_amaall_residential_batch(res)
         if com:
