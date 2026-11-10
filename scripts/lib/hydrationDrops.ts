@@ -75,3 +75,10 @@ export function newestBySeq<T extends { seq: number }>(items: T[]): T | null {
   for (const it of items) if (!best || it.seq > best.seq) best = it;
   return best;
 }
+
+/** The ONE rule a live robot uses to keep the search its headline is judged against: a results page replaces the kept
+ *  one only if it ARRIVED later; anything that is not a results page (a count probe, a later page) never does. */
+export function pickResultsSearch<T extends { body: any; seq: number }>(kept: T | null, arrived: T): T | null {
+  if (!isResultsPage(arrived.body)) return kept;
+  return !kept || arrived.seq > kept.seq ? arrived : kept;
+}

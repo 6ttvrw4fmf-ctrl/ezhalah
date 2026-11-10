@@ -26,7 +26,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
-import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, isResultsPage } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, pickResultsSearch } from './lib/hydrationDrops.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { pickScreenCityCall } from './lib/trendingScreenCall.ts';
@@ -214,8 +214,8 @@ async function runJourney(j: Journey) {
       else if (u.includes('/rpc/district_options_ar')) districtCalls.push({ body, rows: j2 });
       // Only a RESULTS page (page 0 of a real page size) is the search the headline describes; a late count probe
       // (p_limit 1) must never replace it, or the drops would be counted over one probe row (CodeRabbit, PR 11725).
-      else if (u.includes('/rpc/location_search_candidates_ar') && isResultsPage(body)) {
-        if (!lastSearch || arrived > lastSearch.seq) lastSearch = { body, rows: j2, seq: arrived };   // newest ARRIVAL wins
+      else if (u.includes('/rpc/location_search_candidates_ar')) {
+        lastSearch = pickResultsSearch(lastSearch, { body, rows: j2, seq: arrived });   // lib rule, wiring-checked
       }
     } catch {}
   });

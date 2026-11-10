@@ -1,6 +1,6 @@
 // Hermetic proof of scripts/lib/hydrationDrops.ts — the one rule the live count robots use to judge an honest headline.
 // Executes the functions on synthetic hydration traffic; every mutation must be caught.
-import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, isResultsPage, newestBySeq, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, isResultsPage, newestBySeq, pickResultsSearch, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); if (!ok) failed++; };
@@ -70,6 +70,31 @@ check('while a hydration body is still pending the count is unmeasured', dropsOf
 mustCatch('a pending body cannot let the older omission excuse a reduced headline', !honestHeadline(99, 100, dropsOf(pz, ['haraj_residential_listings:6'], 10).n));
 recordHydration(pz, url('haraj_residential_listings', [6]), true, [{ id: 6 }], 13); doneNewer();
 check('once the newer body lands the disagreement makes it unmeasured, never a drop', dropsOf(pz, ['haraj_residential_listings:6'], 10).n === null);
+
+// THE HANDLER'S RULE (CodeRabbit, PR 11725): a results page with TWO measured drops, then a later count probe whose single
+// row is one of the dropped ones. The kept search must stay the results page, so the drop count stays 2.
+const hl = newHydrationLedger();
+const page = { body: { p_offset: 0, p_limit: 1500 }, rows: ['t_listings:1', 't_listings:2', 't_listings:3'], seq: 40 };
+recordHydration(hl, url('t_listings', [1, 2, 3]), true, [{ id: 1 }], 41);
+const probeLate = { body: { p_offset: 0, p_limit: 1 }, rows: ['t_listings:2'], seq: 42 };
+let kept: typeof page | null = null;
+for (const r of [page, probeLate]) kept = pickResultsSearch(kept, r);
+const keptDrops = kept ? dropsOf(hl, kept.rows, kept.seq).n : null;
+check('the handler rule keeps the results page after a later probe, two drops measured', kept === page && keptDrops === 2);
+check('an honest headline (rpc − 2) passes on the kept page', honestHeadline(98, 100, keptDrops));
+// mutation: the same handler without the results-page filter keeps the probe and measures the wrong count
+const noFilter = (k: any, a: any) => (!k || a.seq > k.seq ? a : k);
+let keptBroken: any = null; for (const r of [page, probeLate]) keptBroken = noFilter(keptBroken, r);
+mustCatch('a handler without the filter keeps the probe and rejects the honest rpc − 2 headline',
+  keptBroken === probeLate && !honestHeadline(98, 100, dropsOf(hl, keptBroken.rows, keptBroken.seq).n));
+// WIRING: the Trending robot's search branch must route through pickResultsSearch, so removing it there turns this red
+import { readFileSync } from 'node:fs';
+const trending = readFileSync(new URL('./verify-trending-live-four-way-truth.ts', import.meta.url), 'utf8');
+const at = trending.indexOf("u.includes('/rpc/location_search_candidates_ar'))");
+const branch = at < 0 ? '' : trending.slice(at, at + 240);   // the search branch of the response listener
+check('the Trending robot keeps its search through pickResultsSearch (wiring)', /lastSearch\s*=\s*pickResultsSearch\(/.test(branch));
+mustCatch('a branch that assigns lastSearch directly fails the wiring check',
+  !/lastSearch\s*=\s*pickResultsSearch\(/.test(branch.replace('pickResultsSearch(lastSearch, ', '(')));
 
 console.log(failed ? `\n❌ ${failed} check(s) failed` : '\n✅ the honest-headline allowance is exact and measured');
 process.exit(failed ? 1 : 0);
