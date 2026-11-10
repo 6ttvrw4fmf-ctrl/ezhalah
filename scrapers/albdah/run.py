@@ -124,6 +124,9 @@ def parse_detail(page: str) -> dict[str, Any]:
         loc = re.sub(r'<span class="ref">.*?</span>|<span class="num">.*?</span>\s*مشاهدة', "", m.group(1), flags=re.S)
         parts = [p for p in (_text(x) for x in loc.split('<span class="s"></span>')) if p]
     d["loc_parts"] = parts
+    # The location line was read to its end: it closes with the ad's own «إعلان رقم» ref. Only then is a line
+    # naming the city alone the source saying «no district» (a cut or partial read keeps the stored one).
+    d["loc_complete"] = bool(m and re.search(r'class="ref">\s*إعلان رقم', m.group(1)))
     m = re.search(r'<div class="price-big">(.*?)</div>', page, re.S)
     d["price_raw"] = _text(m.group(1)) if m else None
     n = re.search(r'<span class="num">([^<]*)</span>', m.group(1)) if m else None
@@ -246,7 +249,7 @@ def map_listing(slug: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         # a stored one. A plain None would keep a wrong old value — 6 live cards kept «حي الشقة» read from the title's
         # «شقة» (85UOh, 88bts, 58zYD name no district; 48Ckn «العليا», 19Ehz «البشر», 62ZVk «خلف سوق التميمي»
         # name places Buraydah's catalogue does not hold), 🔧 2026-11-10. The source's own words stay in neighborhood.
-        "district_ar": district_ar or db.AUTHORITATIVE_NULL,
+        "district_ar": district_ar or (db.AUTHORITATIVE_NULL if d.get("loc_complete") else None),
         "neighborhood": district_raw,
         "area_m2": normalize.to_int(facts.get("متر مربع")),
         "bedrooms": normalize.to_int(facts.get("غرف نوم")) if property_type in _DWELLINGS else None,

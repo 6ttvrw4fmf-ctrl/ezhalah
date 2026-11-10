@@ -29,6 +29,14 @@ def test_the_type_word_in_a_title_is_not_the_district():
     assert al.find_district_in_text("شقه مفروشة للايجار", BURAYDAH) is None
 
 
+def test_a_type_word_with_a_number_is_still_the_type():
+    """«شقة ٣ غرف»: the digits are dropped by norm_district_tok(), so the window must be refused before it."""
+    assert al.find_district_in_text("شقة ٣ غرف للإيجار في بريدة", BURAYDAH) is None
+    assert al.find_district_in_text("شقة٣ غرف للإيجار", BURAYDAH) is None
+    assert al.find_district_in_text("شقة 3 غرف للإيجار", BURAYDAH) is None
+    assert al.find_district_in_text("شقة ٣ غرف في حي الشقة", BURAYDAH) == "حي الشقة"
+
+
 def test_the_district_itself_still_matches_when_the_ad_names_it():
     assert al.find_district_in_text("شقة للإيجار في حي الشقة", BURAYDAH) == "حي الشقة"
     assert al.find_district_in_text("شقة للإيجار بالشقة", BURAYDAH) == "حي الشقة"
@@ -39,7 +47,7 @@ def test_the_district_itself_still_matches_when_the_ad_names_it():
 def test_albdah_clears_a_district_its_page_does_not_state(monkeypatch):
     from scrapers.albdah import run as ab
     monkeypatch.setattr(ab, "to_catalog", lambda c, region_hint=None: (BURAYDAH, 4) if c == "بريدة" else (None, None))
-    d = {"deal": "للإيجار", "loc_parts": ["بريدة"], "title": "شقة للإيجار في بريدة", "facts": {}, "rows": [],
+    d = {"deal": "للإيجار", "loc_parts": ["بريدة"], "loc_complete": True, "title": "شقة للإيجار في بريدة", "facts": {}, "rows": [],
          "price": None, "period_text": None, "photo_urls": None, "description": None, "chips": []}
     row, _, why = ab.map_listing("apartment", {**d, "id": "85UOh"})
     assert row, why
@@ -48,6 +56,9 @@ def test_albdah_clears_a_district_its_page_does_not_state(monkeypatch):
     row, _, _ = ab.map_listing("apartment", {**d, "id": "48Ckn", "loc_parts": ["بريدة", "العليا"],
                                              "title": "شقة للإيجار في بريدة في العليا"})
     assert row["district_ar"] is db.AUTHORITATIVE_NULL and row["neighborhood"] == "العليا"
+    # a location line that was NOT read to its «إعلان رقم» ref is not a statement: the stored district is kept
+    row, _, _ = ab.map_listing("apartment", {**d, "id": "85UOh", "loc_complete": False})
+    assert row["district_ar"] is None
     # a page that DOES name a district keeps it
     row, _, _ = ab.map_listing("apartment", {**d, "id": "36wFU", "loc_parts": ["بريدة", "الصفراء"]})
     assert row["district_ar"] == "حي الصفراء"

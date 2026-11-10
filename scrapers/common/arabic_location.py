@@ -612,6 +612,16 @@ def resolve(
 _BARE_TYPE_WORDS = frozenset(norm_ar(w) for w in (
     "شقة", "شقه", "فيلا", "فيلة", "فلة", "فله", "ارض", "أرض", "دور", "عمارة", "عماره", "محل", "مكتب", "مستودع",
     "استراحة", "استراحه", "مزرعة", "مزرعه", "غرفة", "غرفه", "بيت", "منزل", "شاليه", "قصر", "معرض", "ورشة"))
+_DIGITS_RE = re.compile(r"[0-9٠-٩۰-۹]+")
+
+
+def _is_bare_type_window(window: list[str]) -> bool:
+    """A bare type word, alone or followed only by numbers («شقة», «شقة ٣», «شقة٣»): norm_district_tok() drops
+    the digits too, so «شقة ٣ غرف» would otherwise still read as «حي الشقة» (CodeRabbit on #11716)."""
+    head = _DIGITS_RE.sub("", norm_ar(window[0]))
+    return head in _BARE_TYPE_WORDS and all(_DIGITS_RE.fullmatch(w) for w in window[1:])
+
+
 _PLAN_WORD = "مخطط"  # a subdivision-PLAN reference ("مخطط الربوة", "مخطط تلال مكة") is never a district,
 # even when the plan's own name matches a real district elsewhere — see district_ar_looks_bogus()
 # (20260911201847) for the same rule enforced DB-side on already-stored text.
@@ -767,7 +777,7 @@ def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Option
             if _PLAN_WORD in window:
                 continue
             for first in _forms(window[0]):
-                if size == 1 and norm_ar(first) in _BARE_TYPE_WORDS:
+                if _is_bare_type_window([first, *window[1:]]):
                     continue   # the ad's TYPE word, never its district (see _BARE_TYPE_WORDS)
                 candidate = " ".join([first, *window[1:]])
                 # norm_district_tok(), NOT norm_ar(): `known` holds catalog district_norm values, and
