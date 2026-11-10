@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import sys
 import threading
 import time
@@ -313,6 +314,41 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
     return (row, category), ""
 
 
+# ── removal oracle: «is this 200 page THIS ad, still published?» ─────────────────────────────────
+# Measured 2026-11-10 with a browser on the five ads that sat at 4 strikes with their pages up (P1
+# served_after_source_gone:manzo — MNZ2006, MNZ2010, MNZ2375, MNZ1892, MNZ1893): each answers 200 and
+# prints a schema.org block `"@type":"RealEstateListing"` whose "url" is the page's own address, with
+# a "datePosted". A removed ad (MNZ1403, MNZ3148) and a made-up slug answer HTTP 404 «عقار | مانزو»
+# with NO such block — while still printing a canonical link to the asked address, so the canonical
+# alone proves nothing. LIVE = that block, naming this row's own stored address. Anything else: no
+# opinion.
+_LD_RE = re.compile(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+
+
+def _own_path(url: Any) -> str:
+    from urllib.parse import unquote, urlparse
+    return unquote(urlparse(str(url or "")).path).rstrip("/")
+
+
+def page_is_this_live_ad(_ad_number: str, row: Optional[dict], body: str) -> bool:
+    want = _own_path((row or {}).get("listing_url"))
+    if not want.startswith("/ar/property/"):
+        return False
+    for raw in _LD_RE.findall(body or ""):
+        try:
+            d = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("@type") == "RealEstateListing" and d.get("datePosted") \
+                and _own_path(d.get("url")) == want:
+            return True
+    return False
+
+
+def _oracle(tbl: str, seen):
+    return db.own_page_status_oracle(db.sb(), tbl, seen, live_page=page_is_this_live_ad)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -372,10 +408,11 @@ def main() -> int:
         seen_all = {r["ad_number"] for r in res + com} | listed
         for tbl, rr in (("manzo_residential_listings", res), ("manzo_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                seen = {r["ad_number"] for r in rr}
+                n = db.prune_unseen(tbl, seen, source=SOURCE, verify_gone=_oracle(tbl, seen))
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — reading the unseen ads' own pages", flush=True)
-                    n = db.strike_read_gone(tbl, seen_all, SOURCE)
+                    n = db.strike_read_gone(tbl, seen_all, SOURCE, verify_gone=_oracle(tbl, seen_all))
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
             elif seen_all:
@@ -383,7 +420,7 @@ def main() -> int:
                 # prune every night, so MNZ1403 (its own page 404, dead-visible 10-11 and 10-12)
                 # froze at 2 strikes, on screen. Absence still decides nothing: only an unseen ad
                 # whose OWN page reads gone (a seen ad answering live first) takes a strike.
-                n = db.strike_read_gone(tbl, seen_all, SOURCE)
+                n = db.strike_read_gone(tbl, seen_all, SOURCE, verify_gone=_oracle(tbl, seen_all))
                 if n > 0:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
