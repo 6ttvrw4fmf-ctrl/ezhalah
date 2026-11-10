@@ -7,6 +7,8 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
+import { bathroomsForCard } from '@/lib/indexBathrooms';
+import { reportMessage } from '@/lib/observability';
 import { honestTotal } from '@/lib/honestTotal';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { normalizeType, queryForSelection, queryForTypes, storedRawTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
@@ -1883,6 +1885,11 @@ export async function fetchListingsForQuery(
     // this row really satisfies each active predicate — read from the SAME row the filter ran on,
     // never from l.features/l.bathrooms (finalize() collapses their NULLs to 0/false).
     l.canon = c.af_canon;
+    // The bath count the card prints is the one the index SERVES when the site's own box is empty (Rule B: the
+    // seller's words fill it) — otherwise a customer who filtered «3 حمامات» reaches a card showing none
+    // (card_parity_card_missing fkralemar/aqargate, 🔧 2026-11-10; src/lib/indexBathrooms.ts).
+    const servedBaths = c.af_canon?.bathrooms;   // read only; the canonical row itself is attached verbatim above
+    l.bathrooms = bathroomsForCard(l.bathrooms, servedBaths) ?? 0;
     // A land «total» the index read as a PER-METRE price (owner 2026-11-04) prints the index's «≈ figure × area», so the
     // client budget net below keeps the card the server matched (src/lib/landPerMeterTotal.ts).
     followIndexPerMeterVerdict(l, c.effective_price);
@@ -2028,13 +2035,23 @@ export async function fetchListingCards(table: string, ids: number[]): Promise<L
   const rows = finalize(data, table.includes('_commercial') ? 'com' : 'res');
   // The same Arabic place the search results print (applyArabicLocation). A failed read keeps the CITY_AR mapping
   // below it — never worse than before, and never a blank-for-error.
-  const loc = await bounded(supabase.from('search_listings_ar').select('listing_id,region_ar,city_ar,district_ar')
+  const loc = await bounded(supabase.from('search_listings_ar').select('listing_id,region_ar,city_ar,district_ar,bathrooms')
     .eq('source_table', table).in('listing_id', ids).limit(ids.length));
+  // A FAILED FETCH IS NOT AN EMPTY ANSWER: the fallback below keeps every card, but the failure is reported, never
+  // swallowed (CodeRabbit Major on #11678) — a silent index read would silently drop the Arabic place AND the bath count.
+  if (loc.error) reportMessage('fetchListingCards: search_listings_ar read failed', { table, ids: ids.length, error: String((loc.error as { message?: string }).message ?? loc.error) });
   const arById = new Map<number, { region: string; city: string; district: string }>();
-  for (const x of ((loc.error ? null : loc.data) ?? []) as { listing_id: number; region_ar: string | null; city_ar: string | null; district_ar: string | null }[]) {
+  const bathsById = new Map<number, unknown>();
+  for (const x of ((loc.error ? null : loc.data) ?? []) as { listing_id: number; region_ar: string | null; city_ar: string | null; district_ar: string | null; bathrooms?: unknown }[]) {
     arById.set(Number(x.listing_id), { region: x.region_ar || '', city: x.city_ar || '', district: x.district_ar || '' });
+    bathsById.set(Number(x.listing_id), x.bathrooms);
   }
-  for (const r of rows) { r.sourceTable = table; applyArabicLocation(r, arById.get(Number(r.id))); }
+  for (const r of rows) {
+    r.sourceTable = table;
+    applyArabicLocation(r, arById.get(Number(r.id)));
+    // Same rule as the search path: the index's bath count fills a box the site left empty (src/lib/indexBathrooms.ts).
+    r.bathrooms = bathroomsForCard(r.bathrooms, bathsById.get(Number(r.id))) ?? 0;
+  }
   return rows;
 }
 
