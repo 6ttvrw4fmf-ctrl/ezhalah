@@ -68,7 +68,7 @@ check('a single ad and an unknown type get no building title', sameKindSummary(1
 // 5. The sheet renders the groups and every folded ad as a link; the cards carry the index's own facts.
 const sheet = readFileSync(join(root, 'src/components/MapPinSheet.tsx'), 'utf8');
 const remote = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
-check('the sheet renders one card per group and a link for every other ad of it', /foldSameProperty\(cards, factsOf\)\.map\(/.test(sheet) && /testID="map-pin-sheet-also-chip"/.test(sheet) && /onPress=\{\(\) => \{ void openListing\(o\); \}\}/.test(sheet));
+check('the sheet renders one card per group and a link for every other ad of it', /const groups = cards ? foldSameProperty\(cards, factsOf\) : \[\]/.test(sheet) && /\{groups\.map\(/.test(sheet) && /groups\.length > 1 \? `\$\{groups\.length\} `/.test(sheet) && /testID="map-pin-sheet-also-chip"/.test(sheet) && /onPress=\{\(\) => \{ void openListing\(o\); \}\}/.test(sheet));
 check('a folded ad\'s price goes through listingPrice() (stay-length sites print none)', /\[siteOf\(o\), listingPrice\(o, locale\)\]/.test(sheet));
 check('a card without index facts has no site to match on', /site: l\.fold \? l\.source : ''/.test(sheet));
 check('the cards read the licence, deal, type, size, price and floor from the index', /license_number,deal_ar,type_ar,area_m2,price_total,price_annual,floor_number/.test(remote) && /r\.fold = foldById\.get\(Number\(r\.id\)\);/.test(remote));
