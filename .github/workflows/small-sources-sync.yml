@@ -322,7 +322,7 @@ jobs:
             #   profiles DIRECT before the proxy, so the proxy is only used when DIRECT is refused.
             - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10, proxy: true }
             - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10, proxy: true }
-            - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10, proxy: true }
+            - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 15, proxy: true, browser: true }   # browser: the project-button goo.gl hop answers a script page, not a redirect (⚡ 11-10, run 42762924130)
             - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 15, proxy: true, browser: true }   # browser: the goo.gl pin hop (⚡ 11-03)
             # SuperOffice (2026-09-27): owner-approved — available private offices only.
             - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10, proxy: true }
