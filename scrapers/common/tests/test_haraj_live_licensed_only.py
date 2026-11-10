@@ -455,3 +455,42 @@ def test_licensed_daily_rent_is_never_annualised_2026_11_10():
         "سعر الوحدة: 2800", "سعر الوحدة: 350")
     row, *_ = mapped("شقه فاخره للاجار اليومي", desc, city="الرياض")
     assert row["rent_period"] is db.AUTHORITATIVE_NULL and row["price_annual"] is db.AUTHORITATIVE_NULL
+
+
+@pytest.mark.parametrize("phrase,period", [
+    ("للإيجار اليومي", "daily"),
+    ("للتأجير الأسبوعي", "weekly"),
+])
+@pytest.mark.parametrize("in_title", [True, False], ids=["title", "free-text"])
+@pytest.mark.parametrize("price", [350, 40000], ids=["monthly-heuristic", "above-monthly-threshold"])
+def test_licensed_short_stay_overrides_price_heuristics(phrase, period, in_title, price):
+    from scrapers.common import db
+
+    title = f"شقة {phrase}" if in_title else "شقة للإيجار"
+    free_text = "شقة مفروشة" if in_title else f"شقة {phrase}"
+    desc = FLAT_EN_MONTHLY.replace("للايجار شقق عزاب مؤثثة في حي البيان", free_text).replace(
+        "سعر الوحدة: 2800", f"سعر الوحدة: {price}")
+    row, _, skip, facts = mapped(title, desc, city="الرياض")
+    assert skip == ""
+    assert row["property_type"] == "Apartment"
+    assert facts["short_stay"] == period
+    assert row["transaction_type"] == "Rent"
+    assert row["rent_period"] is db.AUTHORITATIVE_NULL
+    assert row["price_annual"] is db.AUTHORITATIVE_NULL
+    payload = row.copy()
+    db._unknown_must_not_overwrite_known(payload)
+    assert "rent_period" in payload and payload["rent_period"] is None
+    assert "price_annual" in payload and payload["price_annual"] is None
+
+
+@pytest.mark.parametrize("price,period,annual", [(2800, "monthly", 33600), (40000, None, 40000)])
+def test_licensed_daily_services_do_not_change_rent_period(price, period, annual):
+    desc = FLAT_EN_MONTHLY.replace("للايجار شقق عزاب مؤثثة في حي البيان",
+                                   "شقة للإيجار مع تنظيف يومي وصيانة أسبوعية").replace(
+        "سعر الوحدة: 2800", f"سعر الوحدة: {price}")
+    # Bypass the independent service-word classifier to unit-test the licensed mapper.
+    row, _, skip, facts = R.map_post("11190690713", ld("شقة للإيجار", desc, city="الرياض"),
+                                    PAGE, "offer", "mapping unit test", today=TODAY)
+    assert skip == ""
+    assert "short_stay" not in facts
+    assert (row["rent_period"], row["price_annual"]) == (period, annual)
