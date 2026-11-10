@@ -54,8 +54,11 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
   // A BUILDING SAYS WHAT IT HOLDS (owner 2026-11-10: «12 شقة للإيجار من 40,000»): once every ad of the pin is loaded
   // and they are all one type and one deal. Until then, and for a mixed pin, the plain count stays.
   const kind = !row.noPin && cards ? sameKindSummary(row.n, cards.map((l) => ({ ...factsOf(l), showsPrice: listingPrice(l, locale) !== '' }))) : null;
+  // THE TITLE COUNTS PROPERTIES, NOT ADS (measured live 2026-11-10: «4 دور للبيع» over two cards — two floors, each
+  // advertised on two sites). One property left → no number at all.
+  const groups = cards ? foldSameProperty(cards, factsOf) : [];
   const kindTitle = kind
-    ? `${row.n} ${locale === 'en' ? englishCatalogText(kind.typeAr) : kind.typeAr} ${t(kind.dealAr === 'بيع' ? 'for sale' : 'for rent')}${kind.from !== null ? ` ${t('from {price}', { price: kind.from.toLocaleString('en-US') })}` : ''}`
+    ? `${groups.length > 1 ? `${groups.length} ` : ''}${locale === 'en' ? englishCatalogText(kind.typeAr) : kind.typeAr} ${t(kind.dealAr === 'بيع' ? 'for sale' : 'for rent')}${kind.from !== null ? ` ${t('from {price}', { price: kind.from.toLocaleString('en-US') })}` : ''}`
     : '';
   const title = row.noPin
     ? t('{n} listings in {district}', { n: row.n, district: isRTL ? place : translitPlace(place) })
@@ -88,12 +91,12 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
       ) : (
         <ScrollView style={s.list} contentContainerStyle={s.listInner} showsVerticalScrollIndicator>
           {/* One card per PROPERTY; every other ad of the same property is a named link under it — nothing is hidden. */}
-          {foldSameProperty(cards, factsOf).map(({ main, others }) => (
+          {groups.map(({ main, others }) => (
             <View key={`${main.sourceTable}#${main.id}`} style={s.card}>
               <ResultCard listing={main} onOpen={() => { void openListing(main); }} row="tight" />
               {others.length ? (
                 <View style={[s.also, { flexDirection: isRTL ? 'row-reverse' : 'row' }]} testID="map-pin-sheet-also-on">
-                  <Text style={s.alsoLabel}>{t('Same property, {n} more ads:', { n: others.length })}</Text>
+                  <Text style={s.alsoLabel}>{others.length === 1 ? t('Same property, one more ad:') : t('Same property, {n} more ads:', { n: others.length })}</Text>
                   {others.map((o) => (
                     <Pressable key={`${o.sourceTable}#${o.id}`} onPress={() => { void openListing(o); }} accessibilityRole="link" style={s.alsoChip} testID="map-pin-sheet-also-chip">
                       <Text style={s.alsoChipText}>{[siteOf(o), listingPrice(o, locale)].filter(Boolean).join(' · ')}</Text>
