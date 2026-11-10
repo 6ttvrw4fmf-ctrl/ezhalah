@@ -1,0 +1,13 @@
+{
+ "_note": "ksaaqar /wp-json/wp/v2/ad_post/29304 as the crawl reads it (fetched 2026-11-09): date_gmt «2026-10-30T15:41:53» equals the page's JSON-LD datePublished «2026-10-30T15:41:53+00:00»; modified is an edit. title = the page's own heading.",
+ "id": 29304,
+ "date": "2026-10-30T18:41:53",
+ "date_gmt": "2026-10-30T15:41:53",
+ "modified": "2026-11-06T10:47:38",
+ "slug": "%d8%ac%d8%a7%d8%b2%d8%a7%d9%86-5",
+ "link": "https://ksaaqar.com/ad/%d8%ac%d8%a7%d8%b2%d8%a7%d9%86-5/",
+ "title": {
+  "rendered": "جازان"
+ },
+ "class_list": []
+}

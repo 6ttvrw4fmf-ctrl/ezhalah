@@ -1,0 +1,69 @@
+{
+ "id": 18702,
+ "date": "2024-10-04T20:55:16",
+ "date_gmt": "2024-10-04T17:55:16",
+ "modified": "2026-08-30T12:20:17",
+ "modified_gmt": "2026-08-30T09:20:17",
+ "slug": "%d8%b4%d9%82%d8%a9-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-5-%d8%ba%d8%b1%d9%81-%d8%a8%d8%ad%d9%8a-%d8%a7%d9%84%d8%b1%d9%8a%d8%a7%d9%86",
+ "link": "https://shmoua-alshmal.com/property/%d8%b4%d9%82%d8%a9-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-5-%d8%ba%d8%b1%d9%81-%d8%a8%d8%ad%d9%8a-%d8%a7%d9%84%d8%b1%d9%8a%d8%a7%d9%86/",
+ "title": {
+  "rendered": "شقة فاخرة 5 غرف بحي الريان"
+ },
+ "content": {
+  "rendered": "<ul>\n<li>5 غرف</li>\n<li>4 دورة مياة</li>\n<li>1 صالة</li>\n<li>سطح</li>\n<li>مدخل رجال &amp; ونساء</li>\n<li>مطبخ</li>\n</ul>\n<p>&nbsp;</p>\n<p style=\"text-align: right;\">رقم الاعــلان : 52</p>\n<p style=\"text-align: right;\">رقم الرخصة : 1200027062</p>\n<p style=\"text-align: right;\">س . ج : 3550033136</p>\n<p>&nbsp;</p>\n<p>للتواصل :<a href=\"http://966920031699\">920031699</a></p>\n",
+  "protected": false
+ },
+ "property_type": [
+  76
+ ],
+ "property_status": [
+  34
+ ],
+ "property_feature": [
+  133,
+  131,
+  132,
+  115
+ ],
+ "property_city": [
+  54
+ ],
+ "property_area": [
+  125
+ ],
+ "property_meta": {
+  "fave_property_size": [
+   "190"
+  ],
+  "fave_property_size_prefix": [
+   "م²"
+  ],
+  "fave_property_bedrooms": [
+   "5"
+  ],
+  "fave_property_bathrooms": [
+   "4"
+  ],
+  "fave_property_id": [
+   "52"
+  ],
+  "fave_property_map": [
+   "1"
+  ],
+  "fave_property_map_address": [
+   "تبوك حي الريان، تبوك السعودية"
+  ],
+  "fave_property_location": [
+   "28.4647896,36.5532532,15"
+  ],
+  "houzez_geolocation_lat": [
+   "28.4647896"
+  ],
+  "houzez_geolocation_long": [
+   "36.5532532"
+  ],
+  "fave_property_map_street_view": [
+   "hide"
+  ]
+ }
+}

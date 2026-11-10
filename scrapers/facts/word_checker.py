@@ -476,8 +476,12 @@ _LIST_WORDS = frozenset(_n(w) for w in (
 # PREPARED / POSSIBLE: the thing is not there yet — no row (the scrapers' _PREPARED_ONLY + «possible» words).
 # «موسس / موسسة» is «مؤسس» typed without the hamza (🔬 2026-11-04 elevator precision sample: aqar 17753855
 # «موسسة مصعد», 14874158 «موسس مصعد» served lift = yes; 2 of 25 sampled yeses).
+# «تسليك» is the conduit laid FOR a fixture, not the fixture: «الشقه يوجد بها تسليك مكيف اسبلت للصاله» (aqar 15702793),
+# «تسليك التكييف جاهز» (manafe project 297's spec list). 🔬 2026-11-09: 6 of 12 served aqar AC yeses whose text says
+# «تسليك … مكيف/تكييف» had no other AC statement; the af-score asked AC of manafe 13707996 / 13708034 for the same words.
 _PREPARED = tuple(_n(w) for w in N._PREPARED_ONLY + ("تمديد", "تمديدات", "امكانيه", "بالامكان", "قابل",
-                                                        "قابليه", "يمكن", "ممكن", "يصلح", "موسس", "موسسه"))
+                                                        "قابليه", "يمكن", "ممكن", "يصلح", "موسس", "موسسه",
+                                                        "تسليك", "وتسليك", "تسليكات"))
 _PREPARED_PLACE = tuple(_n(w) for w in ("مكان", "مساحه", "موقع"))   # «مكان مسبح», «مكان للمصعد»
 _PLACE_FACTS = frozenset({"pool", "elevator"})
 # NEARBY: about the street, not the unit — no row. The scrapers' _PROXIMITY plus the words a view/distance uses.
@@ -863,7 +867,10 @@ _PREP_MAKE = tuple(_n(w) for w in ("عمل", "انشاء", "اضافه", "ترك
 # «تأسيس / مؤسس …» govern the next word only when it is itself a fixture («تأسيس مصعد»), not «تأسيس أمريكي».
 _PREP_VERBAL = tuple(_n(w) for w in ("يمكن", "ممكن", "امكانيه", "بالامكان", "يصلح", "قابل", "قابليه"))
 _PREPARABLE = tuple(_n(w) for w in ("مصعد", "مصاعد", "اصنصير", "مسبح", "تكييف", "تكيف", "مكيف", "مكيفات", "فايبر", "الياف",
-                                     "كهرباء", "سخان", "مطبخ", "كاميرات", "انتركم", "غاز", "شاحن"))
+                                     "كهرباء", "سخان", "مطبخ", "كاميرات", "انتركم", "غاز", "شاحن",
+                                     # «تسليك إنترنت / دش / مجاري» governs its OWN object, never a fitted AC before it
+                                     # (CodeRabbit on #11470: «مكيفات راكبة وتسليك إنترنت» lost its AC)
+                                     "انترنت", "الانترنت", "نت", "دش", "ستلايت", "مجاري", "صرف", "تلفون", "هاتف"))
 
 
 def _bare_l(w: str) -> str:
@@ -872,6 +879,11 @@ def _bare_l(w: str) -> str:
         if w.startswith(p_) and len(w) > len(p_) + 2:
             return w[len(p_):]
     return w
+
+
+# A two-word object of a prepared word: «تسليك واي فاي» lays cabling for Wi-Fi, never for a fitted AC before it
+# (CodeRabbit on #11470; «واي» alone looks like «و + اي» to the single-word check above).
+_PREPARABLE_PHRASES = ((_n("واي"), _n("فاي")),)
 
 
 def _prepared_applies(before: list[str], after: list[str], hit: str = "") -> bool:
@@ -889,6 +901,7 @@ def _prepared_applies(before: list[str], after: list[str], hit: str = "") -> boo
             continue
         nxt = after[k + 1] if k + 1 < len(after) else ""
         if nxt and ((_starts(_bare_l(nxt), _PREPARABLE) and not (nxt.startswith("و") and _strip_wa(nxt) != nxt))
+                    or tuple(after[k + 1:k + 3]) in _PREPARABLE_PHRASES or _strip_wa(nxt) in ("وايفاي", "wifi")
                     or (_starts(_strip_wa(w), _PREP_VERBAL) and not _starts(_bare_l(nxt), _PREP_MAKE))):
             continue                                # it governs the next word, not this hit
         return True
@@ -1045,7 +1058,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # «تأسيس» governs the elevator after it, not the pool before (🔬 2026-11-06 two-way sample, aqar 17595 / 83389)
     public = public and fact != "pool"
     if (any(_starts(w, _PREPARED) for w in gp[-2:] + gn[:2]) if public
-            else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:3]), t[ws:we])) or "prepared for" in " ".join(n2):
+            else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:4]), t[ws:we])) or "prepared for" in " ".join(n2):
         return None, s, e
     if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) for w in p2):
         return None, s, e
@@ -2250,6 +2263,16 @@ def selftest() -> None:
         ("لا يوجد سماعات", {"sound_system": False}, ()),
         ("جلسة نار وحطب", {"fire_pit": True}, ()),
         ("موقد خارجي", {"fire_pit": True}, ()),
+        # 🔬 2026-11-09: «تسليك» (conduits laid) is a preparation, not fitted AC — real sentences
+        ("مكونه من 3غرف +3حمامات + مطبخ امريكي مع صاله الشقه يوجد بها تسليك مكيف اسبلت للصاله", {}, ("air_conditioner",)),
+        ("منتهي من الكهرباء واللياسه والسباكه وتسليك تكيف سبيلت اللياسه داخلي وخارجي", {}, ("air_conditioner",)),
+        ("ملاحظه :تسليك المكيفات جميعها اسبلت كذلك الفله بناء شخصي", {}, ("air_conditioner",)),
+        ("المواصفات أرضيات سيراميك أسقف جبس دش مركزي مصعد خدمة انترنت حمامات تسليك التكييف جاهز كاميرات مراقبة", {}, ("air_conditioner",)),
+        # … while fitted AC beside the conduits still reads yes
+        ("جميع المكيفات المركبة من ماركة جري نوع كونسيل وجميع تسليك مكيفات الغرفة مجهزة لنظام السبلت", {"air_conditioner": True}, ()),
+        ("مكيفات راكبة وتسليك إنترنت", {"air_conditioner": True}, ()),   # CodeRabbit on #11470
+        ("مكيفات راكبة وتسليك واي فاي", {"air_conditioner": True}, ()),
+        ("مطبخ راكب ومكيفات راكبة وتسليك دش", {"air_conditioner": True, "kitchen": True}, ()),
         # 🔬 2026-11-09 (P2 13085): «لاستقبالك» is a welcome, «للحمامات» work for the home's bathrooms — real aqar sentences
         ("لا تشيل هم التجهيز… بيتك شبه مكتمل وجاهز لاستقبالك 🌟", {}, ("reception",)),
         ("شقة متكاملة تجمع بين الراحة والخصوصية وسهولة المعيشة، وجاهزة لاستقبالك!", {}, ("reception",)),

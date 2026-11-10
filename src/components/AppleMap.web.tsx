@@ -31,10 +31,11 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
-import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, placeApart, pinAnchorOffset, pinStem, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 import { onSurface } from '@/lib/mapSurface';
@@ -624,7 +625,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     void fetchAreasFeed(); void fetchMapDots();
     const keyed = new Map<string, unknown>();   // the annotations on the map, by what they show — a pan keeps what stays
     const loc = localeRef.current === 'ar' ? 'ar' : 'en';
-    // PINS NEVER SIT ON EACH OTHER (owner 2026-11-05, src/lib/mapPins.ts mergeOverlapping): heads are measured with the
+    // ONE PIN = ONE PLACE, NEIGHBOURS SIDE BY SIDE (owner 2026-11-10, src/lib/mapPins.ts placeApart): heads are measured with the
     // font they are drawn in and placed through MapKit's own projection, so «touching» means touching on this screen.
     const measure = document.createElement('canvas').getContext('2d');
     if (measure) measure.font = '600 11px -apple-system,system-ui,sans-serif';
@@ -671,7 +672,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           : 'border-radius:10px;padding:4px 7px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);position:relative');
       el.textContent = cell > 0 ? '' : pinHead(row, loc);
       if (counted && cell > 0 && row.n > 1) el.textContent = areaCount(row.n, loc);
-      if (cell === 0) {
+      const stem = cell === 0 ? pinStem(row.shift, headWidth(row) / 2) : null;
+      if (stem) {
+        // Drawn beside its neighbour: a thin line back to the ad's own spot and a dot on it, so the head never claims
+        // the place it was moved to (owner 2026-11-10). Behind the pill, and never a tap target.
+        const line = document.createElement('div');
+        line.setAttribute('data-testid', 'map-pin-stem');
+        line.style.cssText = `position:absolute;left:50%;bottom:${stem.fromBottom}px;width:${stem.length}px;height:2px;margin-top:-1px;background:${color};transform-origin:0 50%;transform:rotate(${stem.angle}rad);z-index:-1;pointer-events:none`;
+        const dot = document.createElement('div');
+        dot.style.cssText = `position:absolute;left:calc(50% + ${stem.dotX}px);bottom:${stem.dotBottom}px;width:6px;height:6px;margin:0 0 -3px -3px;border-radius:50%;background:${color};box-shadow:0 0 0 1.5px #fff;z-index:-1;pointer-events:none`;
+        el.appendChild(line); el.appendChild(dot);
+      } else if (cell === 0 && !row.shift) {
         const tip = document.createElement('div');
         tip.style.cssText = `position:absolute;left:50%;bottom:-5px;width:0;height:0;margin-left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid ${color}`;
         el.appendChild(tip);
@@ -682,6 +693,30 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       el.addEventListener('pointerup', (e) => {
         const d = down; down = null;
         if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 10) { e.stopPropagation(); pick(row, cell); }
+      });
+      return el;
+    };
+    // THE DISTRICT MARKER (owner 2026-11-09, src/lib/mapNoPin.ts): the listings of one district that have no exact
+    // location, as ONE pin-sized pill at the district's centre — the app's dark purple with a white edge, a crossed-out
+    // pin, the count, and the tag «موقع غير محدد» under it, so it never reads as a house's spot. A tap opens the same
+    // card sheet a pin opens (pick with cell 0).
+    const noPinElement = (row: PinRow) => {
+      const el = document.createElement('div');
+      el.setAttribute('data-testid', 'map-no-pin');
+      el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;touch-action:none;font-family:-apple-system,system-ui,sans-serif';
+      const pill = document.createElement('div');
+      pill.style.cssText = `display:flex;align-items:center;gap:5px;direction:ltr;background:${NO_PIN_COLOR};border:2px solid #fff;border-radius:14px;padding:0 9px 0 7px;height:22px;color:#fff;font-weight:700;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,.35)`;
+      pill.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><path d="M4 4l16 16"/></svg>';
+      pill.appendChild(document.createTextNode(noPinHead(row.n)));
+      const tag = document.createElement('div');
+      tag.style.cssText = `margin-top:-2px;background:#fff;color:${NO_PIN_COLOR};font-size:9.5px;font-weight:600;border-radius:7px;padding:1px 6px;box-shadow:0 1px 2px rgba(0,0,0,.25);white-space:nowrap`;
+      tag.textContent = noPinTag(loc);
+      el.append(pill, tag);
+      let down: { x: number; y: number } | null = null;
+      el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      el.addEventListener('pointerup', (e) => {
+        const d = down; down = null;
+        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 10) { e.stopPropagation(); pick(row, 0); }
       });
       return el;
     };
@@ -758,10 +793,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       });
       return el;
     };
-    const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
+    const drawAreas = (areas: AreaRow[], level: AreaLevel, whole: AreaRow[] | null = null) => {
       // The pill names where the view is at every zoom (owner 2026-11-05): the country, then the region, the city, the
       // district most of the view's listings are in — «في هذه المنطقة» only when no one place holds most of them.
-      const place = areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
+      // The whole-Kingdom view shows regions (owner 2026-11-09): the pill keeps the country and its WHOLE total, read
+      // over COUNTRY_BOX, so a pan that leaves a region off screen never shrinks «… في السعودية».
+      const place = whole ? areaPlace(whole, 'country', loc, translitPlace, m.region.center, m.region.span) : areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
       setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
@@ -771,7 +808,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const maxN = Math.max(1, ...areas.map((a) => a.n));
       for (const [k, a] of next) {
         if (keyed.has(k)) continue;
-        const ann = new mk.Annotation(new mk.Coordinate(a.lat, a.lng), () => areaElement(a, level), {
+        const ann = new mk.Annotation(new mk.Coordinate((a.at ?? a).lat, (a.at ?? a).lng), () => areaElement(a, level), {
           calloutEnabled: false, collisionMode: mk.Annotation.CollisionMode?.Rectangle, displayPriority: 250 + Math.round(499 * a.n / maxN),
         });
         keyed.set(k, ann); m.addAnnotation(ann);
@@ -804,7 +841,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const placed: DOMRect[] = [];
       for (const a of [...areas].sort((x, y) => y.n - x.n)) {
         let pt: { x: number; y: number };
-        try { pt = toPage(new mk.Coordinate(a.lat, a.lng)); } catch { continue; }
+        try { pt = toPage(new mk.Coordinate((a.at ?? a).lat, (a.at ?? a).lng)); } catch { continue; }
         const el = areaElement(a, level);
         el.style.position = 'absolute';
         el.style.left = `${pt.x - ox}px`;
@@ -835,14 +872,19 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const { center, span } = m.region;
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
-      const level = narrowed ? null : areaLevelFor(span.latitudeDelta);
+      const level = narrowed ? null : areaLevelShown(span.latitudeDelta);
       if (level) {
         const areas = await fetchMapAreas(paddedBox(center, span), level, pins.deals);
         if (my !== seq || mapRef.current !== m) return;
         if (areas !== 'unknown') {
           hideCanvas(); shown = [];
-          drawAreas(visibleAreas(areas, level), level);
-          setPinCount(areasTotal(areas));
+          // The opening zoom: the country's own total for the pill (the feed is already on the phone; a failed read
+          // leaves the pill to the labels in view, never a partial count named «السعودية»).
+          const wholeRead = areaLevelFor(span.latitudeDelta) === 'country' ? await fetchMapAreas(COUNTRY_BOX, 'country', pins.deals) : 'unknown';
+          if (my !== seq || mapRef.current !== m) return;
+          const whole = Array.isArray(wholeRead) && wholeRead.length ? wholeRead : null;
+          drawAreas(visibleAreas(areas, level), level, whole);
+          setPinCount(whole ? areasTotal(whole) : areasTotal(areas));
           return;
         }
         // The labels failed to load: the dots below, never an empty map.
@@ -861,6 +903,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // SMOOTH (owner 2026-11-03: «I want it to feel smooth»): a close view the dots feed (already on the phone) says holds
       // more than CROWD_ESTIMATE listings is crowded without asking the network; only a view that may fit as pins reads.
       // The place for the count pill, read alongside the pins (a few ms on the pin index) for the visible view only.
+      // The district markers for listings with no exact location, read alongside the pins (src/lib/mapNoPin.ts).
+      const noPinRead: Promise<NoPinRow[] | 'unknown'> = showNoPin(cell, pins) ? fetchMapNoPin(paddedBox(center, span), pins) : Promise.resolve([]);
       const placeRead = cell === 0 ? fetchViewPlace({ s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 }) : Promise.resolve(null);
       const dots = cell === 0 && !narrowed ? await fetchMapDots() : 'unknown';
       if (my !== seq || mapRef.current !== m) return;
@@ -876,7 +920,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       let drawCell = cell;
       // DEEPEST ZOOM (🔧 2026-11-06, owner 2026-11-05 «user cannot select what he wants»): where a bubble would be bigger
       // than the view, a tap on it cannot zoom closer, so the listings would stay hidden behind a number. Read every
-      // exact point of the view instead and let mergeOverlapping fold the touching heads into counted gold heads.
+      // exact point of the view instead; placeApart sets them side by side (a pile with no room left joins as a counted head).
       let dense = cell === 0 && (crowdedByDots || rows.length > PIN_SHOW_MAX);
       if (dense && !bubblesCanZoomIn(span.latitudeDelta)) {
         const every = await fetchMapPins(paddedBox(center, span), 0, pins, PIN_LIMIT);
@@ -905,8 +949,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
         }
       }
-      // Heads that would touch on this screen become one gold head with their count (src/lib/mapPins.ts).
-      if (drawCell === 0) rows = mergeOverlapping(rows, onScreen, headWidth);
+      // A head whose spot is taken is drawn beside its neighbour, never on it and never joined to it (src/lib/mapPins.ts).
+      if (drawCell === 0) rows = placeApart(rows, onScreen, headWidth);
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
@@ -915,14 +959,24 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
       // head would change (count, deal, price, cell size) is replaced.
-      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}`;
+      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}|${r.shift ? r.shift.join(',') : ''}`;
       const next = new Map<string, PinRow>(); for (const row of rows) next.set(keyOf(row), row);
+      // The district markers join the same diff. A FAILED marker read keeps the markers already on the map (A FAILED
+      // FETCH IS NOT AN EMPTY ANSWER: a marker that vanished after an error would read as «no such listings here»).
+      const noPin = await noPinRead;
+      if (my !== seq || mapRef.current !== m) return;
+      if (noPin !== 'unknown') for (const r of noPin) next.set(noPinKey(r), noPinPinRow(r));
+      else for (const [k, a] of keyed) if (isNoPinKey(k)) next.set(k, (a as { data: { pin: PinRow } }).data.pin);
       for (const [k, a] of keyed) if (!next.has(k)) { m.removeAnnotation(a); keyed.delete(k); }
       for (const [k, row] of next) {
         if (keyed.has(k)) continue;
-        const a = new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell, cell === 0 && drawCell > 0), {
-          data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -6),
-        });
+        // A district marker is its own annotation: centred on the district's centre, cell 0 (a tap opens the sheet),
+        // drawn above its neighbours.
+        const a = row.noPin
+          ? new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => noPinElement(row), { data: { pin: row, cell: 0 }, calloutEnabled: false, displayPriority: 1000 })
+          : new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell, cell === 0 && drawCell > 0), {
+            data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(...pinAnchorOffset(row.shift)),
+          });
         keyed.set(k, a); m.addAnnotation(a);
       }
       mine = [...keyed.values()];
@@ -1082,7 +1136,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {onExpand && !failed && !drawing ? (
-        <Pressable style={s.closeBtn} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+        <Pressable style={[s.closeBtn, s.closeBtnLeft]} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
@@ -1099,11 +1153,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {drawing && !sketch ? <View style={s.hint} pointerEvents="none"><Text style={s.hintT}>{t('Drag on the map to draw an area')}</Text></View> : null}
       {onClose && !drawing ? (
-        <Pressable style={s.closeBtn} onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-close-full">
+        // The X is top RIGHT, always, in both languages (owner 2026-11-10: «x for everything must always be on the top right
+        // no matter what, even if it's in English»); «رسم» / «مسار» move to the top left while it shows. `left`/`right`
+        // are physical here (measured live 2026-11-10: left: 12 sat at the physical left under Arabic RTL).
+        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-close-full">
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       ) : null}
-      {roomy ? <View style={s.topRight} pointerEvents="box-none">
+      {roomy ? <View style={[s.topRight, onClose && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
       {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
           becomes «إزالة المسار ✕». */}
       {onRoute && !failed && !drawing ? (
@@ -1182,7 +1239,13 @@ const s = StyleSheet.create({
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
-  topRight: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
+  // Each side is its OWN style (review of #11614): React Native Web drops a style value set to undefined, so clearing `left` that way
+  // would have left the base `left: 12` in place next to `right: 12`.
+  topRight: { position: 'absolute', top: 12, flexDirection: 'row', gap: 8 },
+  topRightAt: { right: 12 },
+  topRightAsLeft: { left: 12 },
+  closeBtnLeft: { left: 12 },
+  closeBtnRight: { right: 12 },
   drawBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
     paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
@@ -1208,7 +1271,7 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   closeBtn: {
-    position: 'absolute', top: 12, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
+    position: 'absolute', top: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   boundaryBtn: { borderColor: colors.primary, borderWidth: 1.5, backgroundColor: colors.tintFill },

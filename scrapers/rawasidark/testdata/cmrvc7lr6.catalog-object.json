@@ -1,0 +1,20 @@
+{
+ "id": "cmrvc7lr60000jr04v4psqtxb",
+ "title": "ارض",
+ "location": "الدمام، منسوب المعلمين",
+ "price": 515000,
+ "area": 483,
+ "streetWidth": "$undefined",
+ "type": "أرض سكنية",
+ "imageUrl": "https://xdukspxiailfjfkaygvj.supabase.co/storage/v1/object/public/property-images/1784679691307-fzofi.png",
+ "statusText": "للبيع",
+ "createdAt": "$D2026-07-22T00:21:34.815Z",
+ "updatedAt": "$D2026-11-09T05:50:32.626Z",
+ "userId": "",
+ "city": "الدمام",
+ "description": "للبيع: أرض سكنية 🏠 مباشر من المالك 📍 الموقع: الأحساء – الهفوف حي منسوب التعليم الثاني ✏️ المساحة: 483 م² 💹 السعر: 515,000 ريال قابل للتفاوض تفاصيل العقار: * ركنية. * نافذ 6 م شمال. * شارع 12",
+ "images": [
+  "https://xdukspxiailfjfkaygvj.supabase.co/storage/v1/object/public/property-images/1784679691307-fzofi.png"
+ ],
+ "_note": "catalog RSC object as the page emits it ($D date sentinels); values from our 2026-11-09 capture of the live catalog (contact banner removed)"
+}

@@ -21,6 +21,14 @@ import { join } from 'node:path';
 
 export const GRACE_MINUTES = 20;
 export const MAX_PER_RUN = 10;
+// A person's open PR on mirror/<version> holds the version only this long after the apply (2026-11-10, repeat_bug:
+// migration_drift ×16 in 7 days). Measured over 61 migrations 11-07…11-09: the robot's own PRs merged in 15–60 min,
+// but 27 mirrors took > 3 h — every one sat behind a person's mirror/<version> PR that was not moving (#11367 carried
+// 9 migrations + 2 scripts and 32 commits of review on a branch named mirror/…; #11444/#11445/#11471 waited 11–14 h
+// on a reviewer). An open PR read as «someone is on it» forever, so the robot never stepped in. After CLAIM_MINUTES
+// the robot mirrors the version itself on mirror/<version>-auto; engineer-automerge closes the person's PR if it then
+// carries nothing new. The robot's own -auto PR never expires as a claim (it would only duplicate itself).
+export const CLAIM_MINUTES = 90;
 
 /** «20261027201642» → Date (UTC); null when the version is not a 14-digit timestamp. */
 export function versionTime(version) {
@@ -35,7 +43,8 @@ export function safeName(name) {
 }
 
 /** Which missing migrations to mirror now: old enough, not already being mirrored, at most MAX_PER_RUN.
- *  «Being mirrored» = an OPEN PR whose head is mirror/<version> (`takenHeads`). A bare branch with no open PR is
+ *  «Being mirrored» = an OPEN PR whose head is mirror/<version> (`takenHeads`), for CLAIM_MINUTES after the apply.
+ *  A bare branch with no open PR is
  *  NOT a claim: on 2026-11-03 four of 🔬's five applied migrations (20261103091902 … 093636) had stale
  *  mirror/<version> branches and no PR — the files travelled in #10130 beside sql/mirrors/ — so every run read
  *  «someone is on it», mirrored nothing, and the drift gate refused six deploys over 2 h 37 min. Such a version is
@@ -46,14 +55,16 @@ export function planMirrors(missing, now, takenHeads, existingBranches = takenHe
   return (missing ?? [])
     .filter((m) => {
       const t = versionTime(m?.version);
-      return t && now.getTime() - t.getTime() >= GRACE_MINUTES * 60_000
-        && !taken.has(`mirror/${m.version}`) && !taken.has(`mirror/${m.version}-auto`);
+      if (!t) return false;
+      const ageMs = now.getTime() - t.getTime();
+      const heldByPerson = taken.has(`mirror/${m.version}`) && ageMs < CLAIM_MINUTES * 60_000;
+      return ageMs >= GRACE_MINUTES * 60_000 && !heldByPerson && !taken.has(`mirror/${m.version}-auto`);
     })
     .slice(0, MAX_PER_RUN)
     .map((m) => ({
       version: m.version,
       file: `supabase/migrations/${m.version}_${safeName(m.name)}.sql`,
-      branch: exists.has(`mirror/${m.version}`) ? `mirror/${m.version}-auto` : `mirror/${m.version}`,
+      branch: exists.has(`mirror/${m.version}`) || taken.has(`mirror/${m.version}`) ? `mirror/${m.version}-auto` : `mirror/${m.version}`,
     }));
 }
 
