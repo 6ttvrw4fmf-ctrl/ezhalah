@@ -2051,8 +2051,8 @@ export async function fetchListingCards(table: string, ids: number[]): Promise<L
   }
   for (const r of rows) {
     r.sourceTable = table;
-    applyArabicLocation(r, arById.get(Number(r.id)));
     r.fold = foldById.get(Number(r.id));
+    applyArabicLocation(r, arById.get(Number(r.id)));
     // Same rule as the search path: the index's bath count fills a box the site left empty (src/lib/indexBathrooms.ts).
     r.bathrooms = bathroomsForCard(r.bathrooms, bathsById.get(Number(r.id))) ?? 0;
   }
