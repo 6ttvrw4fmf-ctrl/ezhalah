@@ -638,6 +638,8 @@ const hydrationAsked = new Map<string, number>();   // `${table}:${id}` → seq 
 const hydrationGot = new Set<string>();
 page.on('response', async (r) => {
   const u = r.url();
+  // Arrival order stamped before any await (CodeRabbit, PR 11725): body reads finish in any order.
+  const arrived = seq++;
   if (r.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u) && /[?&]id=in\./.test(decodeURIComponent(u))) {
     try {
       const tbl = (u.match(/\/rest\/v1\/([a-z0-9_]+_listings)\?/) || [])[1];
@@ -645,8 +647,7 @@ page.on('response', async (r) => {
       if (!tbl || !r.ok()) return;                     // a failed chunk is not a drop: the app shows the retry UI instead
       const j = await r.json();
       if (!Array.isArray(j)) return;
-      const s = seq++;
-      for (const id of inList.split(',').map((x) => x.trim()).filter(Boolean)) hydrationAsked.set(`${tbl}:${id}`, s);
+      for (const id of inList.split(',').map((x) => x.trim()).filter(Boolean)) hydrationAsked.set(`${tbl}:${id}`, arrived);
       for (const row of j) if (row?.id != null) hydrationGot.add(`${tbl}:${row.id}`);
     } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ }
     return;
@@ -661,9 +662,9 @@ page.on('response', async (r) => {
     if (!Array.isArray(j)) return;
     const body = JSON.parse(r.request().postData() || '{}');
     if (isSearch) {
-      searches.push({ body, total: j.length ? Number(j[0]?.total_count ?? NaN) : 0, rows: j.map((x: any) => `${x.source_table}:${x.listing_id}`), seq: seq++ });
+      searches.push({ body, total: j.length ? Number(j[0]?.total_count ?? NaN) : 0, rows: j.map((x: any) => `${x.source_table}:${x.listing_id}`), seq: arrived });
     } else if (j.length) {
-      counts.push({ rpc: isGuided ? 'guided' : 'age', body, row: j[0], seq: seq++ });
+      counts.push({ rpc: isGuided ? 'guided' : 'age', body, row: j[0], seq: arrived });
     }
   } catch { /* a body we could not read is not a request we can assert on */ }
 });

@@ -196,8 +196,12 @@ async function runJourney(j: Journey) {
   let hydSeq = 0;
   page.on('response', async (resp) => {
     const u = resp.url();
+    // ARRIVAL ORDER is stamped synchronously, before any await (CodeRabbit, PR 11725): a body read can finish in
+    // any order, but the app sends a page's hydration only after its search response ARRIVED, so arrival order is
+    // the one that says «this hydration belongs to that search».
+    const arrived = hydSeq++;
     if (resp.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u)) {
-      try { recordHydration(hyd, u, resp.ok(), await resp.json(), hydSeq++); } catch {}
+      try { recordHydration(hyd, u, resp.ok(), await resp.json(), arrived); } catch {}
       return;
     }
     if (resp.request().method() !== 'POST') return;
@@ -207,7 +211,11 @@ async function runJourney(j: Journey) {
       const body = JSON.parse(resp.request().postData() || '{}');
       if (u.includes('/rpc/top_cities_by_deal_ar')) cityCalls.push({ body, rows: j2 });
       else if (u.includes('/rpc/district_options_ar')) districtCalls.push({ body, rows: j2 });
-      else if (u.includes('/rpc/location_search_candidates_ar')) lastSearch = { body, rows: j2, seq: hydSeq };
+      // Only a RESULTS page (page 0 of a real page size) is the search the headline describes; a late count probe
+      // (p_limit 1) must never replace it, or the drops would be counted over one probe row (CodeRabbit, PR 11725).
+      else if (u.includes('/rpc/location_search_candidates_ar') && (body?.p_offset ?? 0) === 0 && Number(body?.p_limit ?? 0) > 1) {
+        lastSearch = { body, rows: j2, seq: arrived };
+      }
     } catch {}
   });
 
@@ -443,8 +451,12 @@ async function runJourney(j: Journey) {
       // fixed in the live sweep; it recurred here because the barrier guarding the class was a
       // three-file list. The comparison is now unconditional: a screen showing results whose total
       // cannot be read fails, and says which of the two it is.
-      // The page-0 rows this search returned, and how many of them the raw hydration did not return.
-      const drops = dropsOf(hyd, rows.map((r: any) => `${r.source_table}:${r.listing_id}`), (lastSearch as any).seq);
+      // The page-0 rows this search returned, and how many of them the raw hydration did not return. The listener may
+      // still be reading a hydration body when the headline settles, so wait (bounded) for the count to be MEASURED;
+      // if it never is, the strict rule applies — an unmeasured difference is never excused (CodeRabbit, PR 11725).
+      const pageKeys = rows.map((r: any) => `${r.source_table}:${r.listing_id}`);
+      let drops = dropsOf(hyd, pageKeys, (lastSearch as any).seq);
+      for (let w = 0; w < 20 && drops.n == null; w++) { await page.waitForTimeout(500); drops = dropsOf(hyd, pageKeys, (lastSearch as any).seq); }
       check(`${name}: the displayed result count == the search RPC's total_count (minus the measured hydration drops)`,
         honestHeadline(uiCount, rpcTotal, drops.n),
         uiCount == null
