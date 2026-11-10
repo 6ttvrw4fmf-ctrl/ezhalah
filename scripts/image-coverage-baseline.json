@@ -47,10 +47,16 @@
       "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 11 of 11 active rows carry photo_urls (100%). TINY: one listing is ~9 points; floor set one listing below the observation, as villassa is at the same size."
     },
     "albdah": {
-      "floor_pct": 85,
-      "today_pct": 100.0,
-      "active_rows": 9,
-      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 9 of 9 rows carried photo_urls (the whole catalogue). TINY: one listing is ~11 points; floor set one listing below the observation."
+      "floor_pct": 58,
+      "today_pct": 60.6,
+      "active_rows": 94,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 9 of 9 rows carried photo_urls (the whole catalogue). TINY: one listing is ~11 points; floor set one listing below the observation.",
+      "rebased": {
+        "from": 85,
+        "to": 58,
+        "why": "Quality & Repair Engineer 2026-11-10: the 85 floor was set on the 9-ad catalogue of 09-24. On 10-23/24 the walk grew to 86-94 ads and coverage has been flat at 59.3-60.6% on every daily snapshot since (57/94 on 11-10). The site publishes ads with NO photo: the page of each sampled photo-less ad (85UOh, 36wFU, 95lBA) carries no /media/property/images/ reference at all, while the control 05WmN (with photos) carries its <div class=\"gal\"> image and GALLERY array. Not a capture regression. Floor one listing (~1.1 points) under the observed low, minus ~1 point of churn.",
+        "evidence": "source-reread.yml run 42903635386 (2026-11-10 21:22 UTC, around=media/property/images): marker found only on albdah_residential_listings:13107369; none on :19983319 / :19983337 / :19983338. mon_image_coverage daily snapshots 2026-10-24 … 11-10 (queried 2026-11-10 21:10 UTC)."
+      }
     },
     "albukaeri": {
       "floor_pct": 95,
