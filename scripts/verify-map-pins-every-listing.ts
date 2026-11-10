@@ -105,7 +105,7 @@ check('the map filter card shows the picked groups\' types after the groups', /<
 // full-screen map's X at left: 12. Physical order: row-reverse under RTL; absolute `right:` is physical on web.
 check('the map filter header keeps its X on the right under Arabic RTL', /<View style=\{\[s\.head, \{ flexDirection: isRTL \? 'row-reverse' : 'row' \}/.test(card));
 const webSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
-check('the full-screen map\'s X is at the physical right; «رسم» moves left while it shows', /style=\{\[s\.closeBtn, s\.closeBtnRight\]\}[^\n]*testID="map-close-full"/.test(webSrc) && /closeBtnRight: \{ left: undefined, right: 12 \}/.test(webSrc) && /topRightAsLeft: \{ right: undefined, left: 12 \}/.test(webSrc));
+check('the full-screen map\'s X is at the physical right; «رسم» moves left while it shows', /style=\{\[s\.closeBtn, s\.closeBtnRight\]\}[^\n]*testID="map-close-full"/.test(webSrc) && /closeBtnRight: \{ right: 12 \}/.test(webSrc) && /topRightAsLeft: \{ left: 12 \}/.test(webSrc) && !/closeBtn: \{\s*position: 'absolute', top: 12, (?:left|right):/.test(webSrc));
 mustCatch('the full-screen X back on the left', !/<Pressable style=\{s\.closeBtn\} onPress=\{onClose\}/.test(webSrc));
 
 // Wiring.

@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
+import { useDocumentRtl } from '@/lib/useDocumentRtl';
 import {
   subscribeReadAloudPlayback, pauseReadAloud, resumeReadAloud, seekReadAloud,
   cycleReadAloudRate, stopReadAloud, type ReadAloudSnapshot,
@@ -34,6 +35,8 @@ function formatElapsed(ms: number): string {
 
 export default function ReadAloudPlayer() {
   const { t, isRTL } = useI18n();
+  // The row follows the DOCUMENT's direction, not the locale (review of #11614): the × must land right either way.
+  const docRtl = useDocumentRtl(isRTL);
   const insets = useSafeAreaInsets();
   const reducedMotion = useReducedMotion();
 
@@ -97,7 +100,7 @@ export default function ReadAloudPlayer() {
           // mirror rather than a copy of the LTR reference screenshot's left-to-right order.
           // Verified live on production: 'row-reverse' here double-reversed it back to an
           // LTR-looking layout (play on the left) — confirmed empirically, not assumed.
-          { flexDirection: isRTL ? 'row' : 'row-reverse' },
+          { flexDirection: docRtl ? 'row' : 'row-reverse' },
           { opacity: anim, transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }, { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }] },
         ]}
       >
