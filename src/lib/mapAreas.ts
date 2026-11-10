@@ -28,24 +28,18 @@ export function areaLevelFor(latitudeDelta: number): AreaLevel | null {
   return null;
 }
 
-/** A TAP ON THE COUNTRY SHOWS EVERY REGION WHERE THE USER ALREADY IS (owner 2026-11-09: «it shows Saudi Arabia, when
- *  user clicks on the map — just clicks — it shows regions with total count, later zoom in cities then districts»).
- *  Zooming in to the region band fits only 4 of the 13 regions on a phone (measured live 2026-11-09, 390×844: الرياض،
- *  القصيم، حائل، الباحة), so a tap keeps the whole-Kingdom view and switches its labels to the regions. `regionsAt` is
- *  the latitude span the tap happened at (0 = no tap): that view, or any closer one still in the country band, shows
- *  regions; zooming out past it goes back to the one «السعودية» label. */
-export const REGIONS_TAP_SLACK = 1.05;
-export function areaLevelShown(latitudeDelta: number, regionsAt: number): AreaLevel | null {
+/** THE MAP OPENS ON THE REGIONS — NO «السعودية» BUBBLE (owner 2026-11-09: «no need Saudi Arabia, we just show the
+ *  regions, then from the region to cities, district»; it replaced 2026-11-05's one-country-label opening). The
+ *  whole-Kingdom zoom shows the 13 region labels; the pill below still names the country and its total. */
+export function areaLevelShown(latitudeDelta: number): AreaLevel | null {
   const level = areaLevelFor(latitudeDelta);
-  return level === 'country' && regionsAt > 0 && latitudeDelta <= regionsAt * REGIONS_TAP_SLACK ? 'region' : level;
+  return level === 'country' ? 'region' : level;
 }
 
-/** A count in few characters: 245, 3.4 ألف / 3.4K, 1.2 مليون / 1.2M. */
-export function areaCount(n: number, loc: 'ar' | 'en'): string {
-  const one = (v: number) => (v < 10 ? (Math.round(v * 10) / 10).toString() : Math.round(v).toString());
-  if (n >= 1_000_000) return loc === 'ar' ? `${one(n / 1_000_000)} مليون` : `${one(n / 1_000_000)}M`;
-  if (n >= 1_000) return loc === 'ar' ? `${one(n / 1_000)} ألف` : `${one(n / 1_000)}K`;
-  return String(n);
+/** A count, exact (owner 2026-11-09: the bubble said «300 ألف» over a pill saying 299,996 — «how come map says 300,000
+ *  and the number below isn't accurate»): 245, 3,412, 299,996 — the same digits the pill prints. */
+export function areaCount(n: number, _loc: 'ar' | 'en'): string {
+  return Math.round(n).toLocaleString('en-US');
 }
 
 /** The country label's place and name. */
