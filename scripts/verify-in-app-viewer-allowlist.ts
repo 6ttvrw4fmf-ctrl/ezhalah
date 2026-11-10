@@ -327,6 +327,49 @@ check('speed-live.mjs skips the framing-header check on a 4xx/5xx (or absent) to
 mustCatch('a guard that reads X-Frame-Options off an error page', !guardSkipsHeadersOnErrorPage(guardSrc.replace('if (!res || res.status >= 400)', 'if (false)')));
 mustCatch('a guard that checks the headers before it looks at the status', !guardSkipsHeadersOnErrorPage(
   guardSrc.replace("const xfo = res?.headers.get('x-frame-options') ?? '';", '').replace("const topStatus = new Map();", "const xfo0 = res?.headers.get('x-frame-options') ?? ''; const topStatus = new Map();")));
+// A BOT WALL IS NOT THE AD PAGE, AND THE FRAME IS ITS OWN REQUEST (🔧 2026-11-10, #11680, alert 14155). Six hosts read
+// «SAMEORIGIN» ×3 + NO CONTENT ×3 in run 42817005291 because the robot's top-level fetch received a WAF page whose header
+// is the wall's, not the ad's. The guard's two new decisions are EXECUTED here, lifted from the live script's own source
+// so the proof is about the predicate production runs, not a copy of it:
+//   isBotWall(body)  — a page too small to be a listing, or challenge words on a page still far smaller than any ad page;
+//                      a full ad page with «captcha» in a widget is NOT a wall (CodeRabbit: an incidental marker).
+//   frameRefusal(doc) — the FRAME's own document answer proves a refusal (2xx/3xx, not a wall, refusing header) even
+//                      when the top-level fetch hit a wall; otherwise the blank frame is inconclusive.
+const liftArrow = (src: string, name: string) => {
+  const m = new RegExp(`export const ${name} = (\\([^)]*\\) => [\\s\\S]*?);\\n(?=\\/\\*\\*|export |const |\\n)`).exec(src);
+  if (!m) throw new Error(`could not lift ${name} from speed-live.mjs`);
+  return m[1];
+};
+const liftGuard = (src: string) => {
+  const consts = /export const WALL_MAX_CHARS = ([0-9_]+);/.exec(src)?.[1] ?? '20_000';
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  return new Function(`const WALL_MAX_CHARS = ${consts}; const isBotWall = ${liftArrow(src, 'isBotWall')}; const frameRefusal = ${liftArrow(src, 'frameRefusal')}; return { isBotWall, frameRefusal };`)() as
+    { isBotWall: (b: string) => boolean; frameRefusal: (d: { status: number; xfo: string; csp: string; text: string } | null) => string | null };
+};
+const guard = liftGuard(guardSrc);
+const challenge = '<html><head><title>Just a moment...</title></head><body><div id="challenge-platform">Checking your browser before accessing the site.</div></body></html>'.padEnd(6_000, ' ');
+const adPage = ('<html><head><title>شقة للإيجار</title></head><body>' + '<p>غرف 3 · حمامات 2 · 1,200 م²</p>'.repeat(900) + '<div class="contact captcha-widget">captcha</div></body></html>');
+check('a 6 KB Cloudflare interstitial is a wall', guard.isBotWall(challenge));
+check('a few hundred bytes with no words is a wall (a WAF stub)', guard.isBotWall('<html><body>Forbidden</body></html>'));
+check(`a full ad page (${adPage.length} chars) that merely contains «captcha» in a widget is NOT a wall`, !guard.isBotWall(adPage));
+check('a blank frame over a wall is inconclusive when the frame received a wall too', guard.frameRefusal({ status: 200, xfo: 'SAMEORIGIN', csp: '', text: challenge }) === null);
+check('…and when the frame received an error page', guard.frameRefusal({ status: 503, xfo: 'SAMEORIGIN', csp: '', text: adPage }) === null);
+check('…and when the frame received the ad with no refusing header', guard.frameRefusal({ status: 200, xfo: '', csp: "frame-ancestors *", text: adPage }) === null);
+check('but the FRAME receiving the real ad page with X-Frame-Options is a refusal, whatever the top-level fetch saw', guard.frameRefusal({ status: 200, xfo: 'SAMEORIGIN', csp: '', text: adPage }) === 'SAMEORIGIN');
+check('…and so is a CSP frame-ancestors that is not *', /frame-ancestors 'self'/.test(guard.frameRefusal({ status: 200, xfo: '', csp: "default-src 'self'; frame-ancestors 'self'", text: adPage }) ?? ''));
+check('no frame document answer at all is inconclusive (never invented)', guard.frameRefusal(null) === null);
+check('the exclusion branch consults the frame\'s evidence before excluding', /topWall\.has\(u\)\) \{\n\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc));
+check('the top-level log line carries no <title> (PDPL: a listing title can name a person or a phone)', !/title «\$\{title\}»/.test(guardSrc) && !/const title = \/<title/.test(guardSrc));
+check('an ONLY_HOSTS entry that is not in SITES fails the run (a typo must not read as a green run over nothing)', /const unknown = only\.filter\(\(h\) => !SITES\.some\(\(s\) => s\.host === h\)\);\n\s*if \(unknown\.length\) fail\(/.test(guardSrc));
+mustCatch('a wall test that trusts the words alone (an ad page with «captcha» read as a wall)',
+  liftGuard(guardSrc.replace('body.length < 1500 || (body.length < WALL_MAX_CHARS && /', 'body.length < 1500 || (true && /')).isBotWall(adPage));
+mustCatch('a wall test that stops looking at the words (the 6 KB interstitial read as the ad page)',
+  !liftGuard(guardSrc.replace('body.length < 1500 || (body.length < WALL_MAX_CHARS && /', 'body.length < 1500 || (false && /')).isBotWall(challenge));
+mustCatch('a frame refusal that ignores what the frame received (every wall-covered blank frame excluded)',
+  liftGuard(guardSrc.replace("if (!doc || doc.status >= 400 || isBotWall(doc.text)) return null;", "return null;")).frameRefusal({ status: 200, xfo: 'SAMEORIGIN', csp: '', text: adPage }) === null);
+mustCatch('an exclusion that no longer asks the frame', !/const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc.replace('const refusal = frameRefusal(frameDoc);\n        if (refusal) { fail(', 'const refusal = null;\n        if (refusal) { fail(')));
+mustCatch('the <title> back in the log', /title «\$\{title\}»/.test(guardSrc.replace('${body.length} chars${wall', '${body.length} chars, title «${title}»${wall')));
+
 // A suffix match without the dot boundary (the lookalike mutant).
 const sloppySuffix = (url: string) => IN_APP_VIEWER_HOSTS.find((h) => new URL(url).hostname.endsWith(h)) ?? null;
 mustCatch('a host match without the dot boundary', sloppySuffix('https://notdealapp.sa/x') !== null);

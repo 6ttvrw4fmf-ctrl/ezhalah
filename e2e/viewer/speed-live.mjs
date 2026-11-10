@@ -105,9 +105,20 @@ const SITES = [
 ];
 let failed = 0;
 const fail = (m) => { failed++; console.log(`✗ ${m}`); };
-// A bot wall / WAF page served to a datacenter robot instead of the ad: known challenge words, or a page too small to be
-// a listing (the ad pages this robot frames run 20–400 KB; a wall is a few hundred bytes to ~1.5 KB).
-export const isBotWall = (body) => /just a moment|checking your browser|verify you are human|cf-chl|challenge-platform|__cf_chl|sucuri|imunify|wordfence|access denied|attention required|captcha|ddos-guard|bot verification|enable javascript and cookies|التحقق من المتصفح|يرجى الانتظار/i.test(body) || body.length < 1500;
+// A bot wall / WAF page served to a datacenter robot instead of the ad: a page too small to be a listing (the ad pages
+// this robot frames run 20–400 KB; a wall is a few hundred bytes to ~1.5 KB), or known challenge words on a page still
+// far smaller than any ad page (a Cloudflare interstitial is 5–12 KB). The words alone are NOT a wall: a full ad page
+// may carry «captcha» in a contact widget, and such a page with a refusing header is a real refusal (CodeRabbit, #11680).
+export const WALL_MAX_CHARS = 20_000;
+export const isBotWall = (body) => body.length < 1500 || (body.length < WALL_MAX_CHARS && /just a moment|checking your browser|verify you are human|cf-chl|challenge-platform|__cf_chl|sucuri|imunify|wordfence|access denied|attention required|captcha|ddos-guard|bot verification|enable javascript and cookies|التحقق من المتصفح|يرجى الانتظار/i.test(body));
+/** The frame's own document answer, when it is a refusal of a real ad page (not a wall, not an error): the header it
+ *  carried, else null. A blank frame whose top-level fetch hit a wall is excluded as inconclusive ONLY when the frame's
+ *  own answer does not prove a refusal — the two are separate requests (CodeRabbit, #11680). */
+export const frameRefusal = (doc) => {
+  if (!doc || doc.status >= 400 || isBotWall(doc.text)) return null;
+  const fa = /frame-ancestors[^;]*/i.exec(doc.csp ?? '')?.[0] ?? '';
+  return doc.xfo || (fa && !/frame-ancestors\s+\*/.test(fa)) ? (doc.xfo || fa) : null;
+};
 const ok = (m) => console.log(`✓ ${m}`);
 
 // Cross-check the list against the app's own allowlist, so a new in-app site cannot skip this guard.
@@ -132,6 +143,8 @@ try {
   // ONLY_HOSTS=a.com,b.sa: a diagnostic / proof run over a few sites (the workflow then skips the alert bridge).
   const only = String(process.env.ONLY_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean);
   const runSites = only.length ? SITES.filter((s) => only.includes(s.host)) : SITES;
+  const unknown = only.filter((h) => !SITES.some((s) => s.host === h));
+  if (unknown.length) fail(`ONLY_HOSTS names ${unknown.join(', ')} — not in SITES; a filter that selects nothing must not read as a green run`);
   if (only.length) console.log(`! partial run: ${runSites.map((s) => s.host).join(', ')} (ONLY_HOSTS)`);
   for (const site of runSites) {
     let urls;
@@ -167,9 +180,9 @@ try {
         // print what was read (server, size, title), exclude it as inconclusive, never ✗ — a real refusal is a full ad
         // page (thousands of characters, no wall words) that still carries the header, and that still fails here.
         const body = await res.text().catch(() => '');
-        const title = /<title[^>]*>([^<]{0,120})/i.exec(body)?.[1]?.trim() ?? '';
         const wall = isBotWall(body);
-        console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa}; server ${res.headers.get('server') ?? '?'}, ${body.length} chars, title «${title}»${wall ? ' → a bot wall to this egress, not the ad page: header check skipped' : ''}`);
+        // No <title> in the log: a listing's title can carry a phone number or a person's name (PDPL). Server + size say enough.
+        console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa}; server ${res.headers.get('server') ?? '?'}, ${body.length} chars${wall ? ' → a bot wall to this egress, not the ad page: header check skipped' : ''}`);
         if (wall) { topWall.add(u); continue; }
         fail(`${site.host}: ${u} now REFUSES framing (${xfo || fa}) — take it off IN_APP_VIEWER_HOSTS`);
       }
@@ -179,8 +192,18 @@ try {
     for (const u of urls) {
       const ctx = await browser.newContext({ ...devices['iPhone 13'], locale: 'ar' });
       const p = await ctx.newPage();
-      let rateLimited = false, challenged = false;
-      p.on('response', (r) => { if (r.status() === 429) rateLimited = true; if (r.headers()['cf-mitigated'] === 'challenge') challenged = true; });
+      let rateLimited = false, challenged = false, frameDoc = null;
+      p.on('response', (r) => {
+        if (r.status() === 429) rateLimited = true;
+        if (r.headers()['cf-mitigated'] === 'challenge') challenged = true;
+        // The frame's OWN document answer (a separate request from the top-level fetch above): status, framing headers
+        // and body, so a blank frame is judged on what the FRAME received, not on what the robot's fetch received.
+        if (r.request().resourceType() === 'document' && r.frame() !== p.mainFrame()) {
+          const h = r.headers();
+          frameDoc = { status: r.status(), xfo: h['x-frame-options'] ?? '', csp: h['content-security-policy'] ?? '', text: '' };
+          r.text().then((t) => { frameDoc.text = t; }).catch(() => {});
+        }
+      });
       const cdp = await ctx.newCDPSession(p);
       await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 800_000, uploadThroughput: 93_750 });
       const t0 = Date.now(); let seen = null;
@@ -200,7 +223,13 @@ try {
       // challenge page — excluded and reported, never ✗. A 200 page that stays blank is still measured (99,999).
       const top = topStatus.get(u) ?? 0;
       if (seen === null && (top === 0 || top >= 400)) { console.log(`· ${site.host}: ${u} — top-level load answered HTTP ${top || 'nothing'} to this egress (WAF / block / outage), excluded as inconclusive`); continue; }
-      if (seen === null && topWall.has(u)) { console.log(`· ${site.host}: ${u} — top-level load was a bot wall to this egress, excluded as inconclusive`); continue; }
+      if (seen === null && topWall.has(u)) {
+        // The top-level fetch hit a wall, but the FRAME is its own request: if the frame received a real ad page (not a
+        // wall, not an error) that still carried a refusing header, that is a real refusal and fails here.
+        const refusal = frameRefusal(frameDoc);
+        if (refusal) { fail(`${site.host}: ${u} — the frame received the ad page (${frameDoc.text.length} chars) with ${refusal}: REFUSES framing — take it off IN_APP_VIEWER_HOSTS`); continue; }
+        console.log(`· ${site.host}: ${u} — top-level load was a bot wall to this egress (frame: ${frameDoc ? `HTTP ${frameDoc.status}, ${frameDoc.text.length} chars` : 'no document answer'}), excluded as inconclusive`); continue;
+      }
       times.push(seen ?? 99_999);
       console.log(`· ${site.host}: ${u} → ${seen === null ? 'NO CONTENT in 12s' : seen + ' ms'}`);
     }
