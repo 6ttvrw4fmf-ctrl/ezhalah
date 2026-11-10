@@ -53,6 +53,16 @@ const real = await bundleResolver(root, rows as any);
   check('control: an ordinary twin («حي الروضة») is unchanged (ambiguous Jeddah/Riyadh)', r1.ambiguous === true && r1.cities.length === 2, JSON.stringify(r1));
   const m = ask(real, 'حي الملقا');
   check('control: a single-city district («حي الملقا») is unchanged', m.kind === 'district' && m.city === 'Riyadh' && !m.ambiguous, JSON.stringify(m));
+  // WITH AN EXPLICIT CITY (CodeRabbit on #11683): the exact name is compared AFTER the city is cut out of the probe.
+  // KNOWN GAP, dated 2026-11-10 (backlog 1729, 🔬 lane): the ARABIC city form «حي الفحياء، المجمعة» still resolves to
+  // nothing — «المجمعة» alone is an AMBIGUOUS catalog city (three same-name rows in three regions) and the phrase dies
+  // before this lookup; the English form below and «اليحيى، الهفوف» are fixed by the city-cut exact name.
+  const fm = ask(real, 'حي الفحياء، Al Majmaah');
+  check('«حي الفحياء، Al Majmaah» (explicit city, «حي» inside the word) is Al Majmaah\'s district, spelled as the index has it', fm.kind === 'district' && fm.city === 'Al Majmaah' && fm.districts.includes('حي الفحياء'), JSON.stringify(fm));
+  const yh = ask(real, 'اليحيى، الهفوف');
+  check('«اليحيى، الهفوف» (explicit city) is Hofuf\'s district', yh.kind === 'district' && yh.city === 'Hofuf' && yh.districts.includes('اليحيى'), JSON.stringify(yh));
+  const rj = ask(real, 'حي الروضة، جدة');
+  check('control: «حي الروضة، جدة» stays Jeddah only (the named city scopes the twin)', rj.kind === 'district' && rj.city === 'Jeddah' && !rj.ambiguous, JSON.stringify(rj));
 }
 
 // Mutation: the pre-11-10 lookup (no exact-name union) executed on the same shelf sends the twin to Jeddah alone.
@@ -64,6 +74,17 @@ const real = await bundleResolver(root, rows as any);
     const src = readFileSync(f, 'utf8');
     const cut = src.replace(/\n  for \(const d of namedExactly\(\)\) \{\n[\s\S]*?\n  \}\n  out\.sort\(\(a, b\) => b\.n - a\.n\);/, '\n  out.sort((a, b) => b.n - a.n);');
     check('(mutation setup) the exact-name union is present in src and the mutant removes it', cut !== src);
+    // Second mutant: the exact name compared on the WHOLE phrase only (the pre-fix namedExactly) — an explicit city
+    // plus a «حي»-inside name must then be lost again.
+    const rawOnly = src.replace("const cut = cityKey && probe !== normDist(raw) ? liveNamedExactlyKey(probe) : [];", 'const cut: LiveDistrict[] = [];');
+    check('(mutation setup) the city-cut exact name is present in src and the mutant removes it', rawOnly !== src);
+    const dir2 = mkdtempSync(join(tmpdir(), 'resolver-mutant2-'));
+    cpSync(join(root, 'src'), join(dir2, 'src'), { recursive: true });
+    writeFileSync(join(dir2, 'src/data/locations.ts'), rawOnly);
+    const mutant2 = await bundleResolver(dir2, rows as any);
+    const f2 = ask(mutant2, 'حي الفحياء، Al Majmaah');
+    mustCatch('an exact name compared on the whole phrase only: «حي الفحياء، Al Majmaah» is lost again', !(f2.kind === 'district' && f2.city === 'Al Majmaah'), JSON.stringify(f2));
+    rmSync(dir2, { recursive: true, force: true });
     writeFileSync(f, cut);
     const mutant = await bundleResolver(dir, rows as any);
     const b = ask(mutant, 'حي البحيرات');
