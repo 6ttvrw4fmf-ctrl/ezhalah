@@ -118,6 +118,27 @@ if (selFile) {
   mutation('a self-test off the roster', selftestProblems(sel, selText.replace(/''mon_detect_posting_date_alarm_selftest'',/g, '')));
 }
 
+// The daily wrapper proves the self-test restored the policy table EXACTLY (a fingerprint before and after), never by
+// a fixed count such as «at least 100 'yes' sites».
+const WRAPPER = 'create or replace function public.mon_detect_posting_date_alarm_selftest()';
+export function wrapperProblems(body: string): string[] {
+  const p: string[] = [];
+  const fp = (body.match(/into\s+v_(before|after)\s+from\s+public\.ops_source_posting_date_policy/g) ?? []).length;
+  if (fp < 2) p.push('the policy table is not fingerprinted both before and after the self-test');
+  if (!/if\s+v_after\s+is\s+distinct\s+from\s+v_before\s+then/.test(body)) p.push('the before/after fingerprints are not compared');
+  if (!/mon_resolve_key\(\s*'posting_date_alarm_selftest'/.test(body)) p.push('a passing run does not clear the alert by its literal kind');
+  return p;
+}
+const wrapFile = lastDefining(WRAPPER);
+check('a committed migration defines the daily self-test wrapper', !!wrapFile);
+if (wrapFile) {
+  const wrap = windowBetween(text(wrapFile), WRAPPER, 'end $function$;', wrapFile);
+  const wp = wrapperProblems(wrap);
+  check('the wrapper compares the policy table before and after, and clears by its literal kind', wp.length === 0, wp.join('; '));
+  mutation('a wrapper that does not compare before and after', wrapperProblems(wrap.replace(/if\s+v_after\s+is\s+distinct\s+from\s+v_before\s+then/, 'if false then')));
+  mutation('a wrapper with no fingerprint after the run', wrapperProblems(wrap.replace(/into\s+v_after\s+from/, 'into v_ignored from')));
+}
+
 // ── 5. this file runs in `npm test` ─────────────────────────────────────────────────────────────
 check('npm test runs this check', npmTestRuns(ROOT, 'verify-posting-date-alarm-judges-live-ads'));
 
