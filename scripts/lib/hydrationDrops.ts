@@ -53,3 +53,16 @@ export function honestHeadline(headline: number | null, rpc: number | null, drop
   if (drops == null) return headline === rpc;
   return drops <= MAX_HYDRATION_DROPS && headline === rpc - drops;
 }
+
+/** The search the headline describes is a RESULTS page: page 0 of a real page size. A count probe (p_limit 1) or a later
+ *  page never is — letting one replace the results page would count drops over the wrong rows (CodeRabbit, PR 11725). */
+export function isResultsPage(body: { p_offset?: unknown; p_limit?: unknown } | null | undefined): boolean {
+  return Number(body?.p_offset ?? 0) === 0 && Number(body?.p_limit ?? 0) > 1;
+}
+
+/** The captured entry that ARRIVED last (greatest seq), never merely the one whose body finished reading last. */
+export function newestBySeq<T extends { seq: number }>(items: T[]): T | null {
+  let best: T | null = null;
+  for (const it of items) if (!best || it.seq > best.seq) best = it;
+  return best;
+}

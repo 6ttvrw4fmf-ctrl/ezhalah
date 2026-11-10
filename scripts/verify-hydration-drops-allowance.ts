@@ -1,9 +1,11 @@
 // Hermetic proof of scripts/lib/hydrationDrops.ts — the one rule the live count robots use to judge an honest headline.
 // Executes the functions on synthetic hydration traffic; every mutation must be caught.
-import { newHydrationLedger, recordHydration, dropsOf, honestHeadline, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, dropsOf, honestHeadline, isResultsPage, newestBySeq, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); if (!ok) failed++; };
+// A mutation proof: `caught` must be TRUE when the rule rejects the deliberately broken input.
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION ${label}`, caught);
 
 const led = newHydrationLedger();
 const url = (tbl: string, ids: number[]) => `https://ezhalah.com/sb/rest/v1/${tbl}?select=id,price&id=in.%28${ids.join('%2C')}%29&active=eq.true`;
@@ -14,6 +16,10 @@ const d = dropsOf(led, rows, 4);
 check('one row asked and not returned is one measured drop', d.n === 1 && d.keys[0] === 'aqar_residential_listings:2');
 check('a row whose request was never observed makes the allowance null', dropsOf(led, [...rows, 'wasalt_residential_listings:9'], 4).n === null);
 check('a request older than the search does not count', dropsOf(led, rows, 6).n === null);
+// two successful responses for two tables: the drops of both are measured together
+check('a second hydration response is recorded', recordHydration(led, url('wasalt_residential_listings', [9, 10]), true, [{ id: 9 }], 7));
+const combined = dropsOf(led, [...rows, 'wasalt_residential_listings:9', 'wasalt_residential_listings:10'], 4);
+check('drops accumulate across responses', combined.n === 2 && combined.keys.includes('aqar_residential_listings:2') && combined.keys.includes('wasalt_residential_listings:10'));
 // CROSSING (CodeRabbit, PR 11725): a newer search (seq 10) hydrates id 7 and loses it; an OLDER search's response that
 // had returned id 7 arrives later with an earlier stamp (seq 8) — it must not mask the newer drop or overwrite it.
 const x = newHydrationLedger();
@@ -30,18 +36,30 @@ const z = newHydrationLedger();
 recordHydration(z, url('haraj_residential_listings', [4]), true, [], 11);                      // newer search: 4 dropped
 recordHydration(z, url('haraj_residential_listings', [4]), true, [{ id: 4 }], 13);             // older search's, arriving later
 check('an older hydration arriving later and disagreeing makes the count unmeasured', dropsOf(z, ['haraj_residential_listings:4'], 10).n === null);
-check('MUTATION that ambiguous overlap cannot excuse an unsubtracted or a subtracted headline', !honestHeadline(99, 100, dropsOf(z, ['haraj_residential_listings:4'], 10).n));
+mustCatch('that ambiguous overlap cannot excuse an unsubtracted or a subtracted headline', !honestHeadline(99, 100, dropsOf(z, ['haraj_residential_listings:4'], 10).n));
 check('headline == rpc − 1 with one measured drop is honest', honestHeadline(99, 100, 1));
 check('headline == rpc with zero drops is honest', honestHeadline(100, 100, 0));
 check('headline == rpc with unobserved drops is honest', honestHeadline(100, 100, null));
 // mutations — each must be REJECTED
-check('MUTATION an unsubtracted headline with one measured drop is caught', !honestHeadline(100, 100, 1));
-check('MUTATION a headline one below with zero drops is caught', !honestHeadline(99, 100, 0));
-check('MUTATION a headline one below with unobserved drops is caught', !honestHeadline(99, 100, null));
-check('MUTATION a headline above the total is caught', !honestHeadline(101, 100, 1));
-check('MUTATION a miscount by two with one drop is caught', !honestHeadline(98, 100, 1));
-check('MUTATION drift above the cap is caught', !honestHeadline(100 - (MAX_HYDRATION_DROPS + 1), 100, MAX_HYDRATION_DROPS + 1));
-check('MUTATION an unreadable headline is caught', !honestHeadline(null, 100, 0));
+mustCatch('an unsubtracted headline with one measured drop is caught', !honestHeadline(100, 100, 1));
+mustCatch('a headline one below with zero drops is caught', !honestHeadline(99, 100, 0));
+mustCatch('a headline one below with unobserved drops is caught', !honestHeadline(99, 100, null));
+mustCatch('a headline above the total is caught', !honestHeadline(101, 100, 1));
+mustCatch('a miscount by two with one drop is caught', !honestHeadline(98, 100, 1));
+mustCatch('drift above the cap is caught', !honestHeadline(100 - (MAX_HYDRATION_DROPS + 1), 100, MAX_HYDRATION_DROPS + 1));
+mustCatch('an unreadable headline is caught', !honestHeadline(null, 100, 0));
+
+// RESULTS-PAGE SELECTION (CodeRabbit, PR 11725): a results page with two drops followed by a count probe — the probe
+// must never become the search the headline is judged against.
+const results = { body: { p_offset: 0, p_limit: 1500 }, rows: ['t_listings:1', 't_listings:2', 't_listings:3'], seq: 20 };
+const probe = { body: { p_offset: 0, p_limit: 1 }, rows: ['t_listings:2'], seq: 21 };
+const picked = newestBySeq([results, probe].filter((s) => isResultsPage(s.body)));
+check('a count probe arriving after the results page never replaces it', picked === results);
+check('a later page is not a results page', !isResultsPage({ p_offset: 1500, p_limit: 1500 }));
+mustCatch('selecting the newest response WITHOUT the results-page filter would pick the probe', newestBySeq([results, probe]) === probe);
+const late = [{ seq: 30, id: 'newer' }, { seq: 25, id: 'older-read-late' }];
+check('the newest ARRIVAL wins, not the last body read', newestBySeq(late)?.id === 'newer');
+mustCatch('taking the last array entry instead would pick the older response', late[late.length - 1].id === 'older-read-late');
 
 console.log(failed ? `\n❌ ${failed} check(s) failed` : '\n✅ the honest-headline allowance is exact and measured');
 process.exit(failed ? 1 : 0);

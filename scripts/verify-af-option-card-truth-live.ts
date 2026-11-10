@@ -58,7 +58,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
-import { newHydrationLedger, recordHydration, dropsOf as libDropsOf } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, dropsOf as libDropsOf, newestBySeq } from './lib/hydrationDrops.ts';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
@@ -707,7 +707,7 @@ const waitForSearch = async (armed: number, timeoutMs = 40_000, want?: (s: Searc
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     const cands = searches.slice(armed).filter((s) => isResultsSearch(s) && (!want || want(s)));
-    if (cands.length) return cands[cands.length - 1];
+    if (cands.length) return newestBySeq(cands);   // newest ARRIVAL, not last body read (CodeRabbit, PR 11725)
     await page.waitForTimeout(400);
   }
   return null;
@@ -781,7 +781,7 @@ const pairCount = (rpc: Rpc, ctxBody: any): Count | null => {
   const keysOf = (b: any) => Object.keys(b ?? {}).filter((k) => !NON_PREDICATE_KEYS.has(k) && !(rpc === 'age' && AGE_KEYS.includes(k)));
   const match = counts.filter((c) => c.rpc === rpc &&
     [...new Set([...keysOf(c.body), ...keysOf(ctxBody)])].every((k) => JN(c.body?.[k]) === JN(ctxBody?.[k])));
-  return match.length ? match[match.length - 1] : null;
+  return newestBySeq(match);   // newest ARRIVAL, not last body read (CodeRabbit, PR 11725)
 };
 
 type OptionRead = { key: string; count: number | null; label: string; col?: string; rpcVal?: number; oracle?: number | null; unhandled?: string[] };
