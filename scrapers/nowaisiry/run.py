@@ -427,7 +427,32 @@ def fetch_lands(s: cc.Session) -> list[dict]:
     return out
 
 
-def map_listing(p: dict) -> tuple[Optional[dict], str]:
+# The page's own offer table prints «رقم الترخيص» → the REGA ad licence (🔧 2026-11-09: post for 7100312611 printed
+# it; the REST post carries it nowhere, so every card showed no licence — card_parity_card_missing:nowaisiry:licence).
+# Only the 71/72 REGA ad-licence shape, from the heading pair itself — never a number elsewhere on the page.
+_PAGE_LICENCE_RE = re.compile(
+    r"offer-table-item-title\"[^>]*>\s*رقم\s*الترخيص\s*</h3>\s*<h3[^>]*offer-table-item-description\"[^>]*>\s*"
+    r"([0-9٠-٩]{10})\s*</h3>")
+
+
+def licence_from_page(html: Optional[str]) -> Optional[str]:
+    found = {m.group(1).translate(_TRANS) for m in _PAGE_LICENCE_RE.finditer(html or "")}
+    lic = found.pop() if len(found) == 1 else None
+    return lic if lic and re.fullmatch(r"7[12]\d{8}", lic) else None
+
+
+def _page_html(s, link: Optional[str]) -> Optional[str]:
+    """The post's own page, for the licence row only. A failed read is None (the licence stays unknown, never «no»)."""
+    if not link:
+        return None
+    try:
+        r = s.get(link, timeout=30)
+        return r.text if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+def map_listing(p: dict, page_html: Optional[str] = None) -> tuple[Optional[dict], str]:
     """Combine the REST `lands` post into a canonical row. Returns (row, category)."""
     # FAIL CLOSED (audit 2026-10-02): a post with NO status used to be read as "publish". The
     # publish state is the only availability this source states (measured: 17 of 17 posts carry
@@ -502,6 +527,7 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "plot_number": plot_no,
         "offer_land_id": offer_id,
         "plan_name": neighborhood,
+        "rega_ad_license_number": licence_from_page(page_html),
     }
     info = {k: v for k, v in info.items() if v not in (None, "", [], "—", "–")}
 
@@ -563,7 +589,7 @@ def main() -> int:
     seen = 0
     try:
         for p in posts:
-            row, cat = map_listing(p)
+            row, cat = map_listing(p, _page_html(s, p.get("link")) if p.get("status") == "publish" else None)
             if not row:
                 continue
             if args.type != "all" and cat != args.type:

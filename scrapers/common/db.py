@@ -681,7 +681,15 @@ def _stated_rega_ad_licence(r: dict[str, Any], info) -> Optional[str]:
         # A licence is the text the source printed: a bare number (int) is not one (test_licence_reaches_the_card).
         if isinstance(v, str) and _REGA_AD_LICENCE.match(v.strip()):
             return v.strip()
+    # aqar publishes its licence as a structured payload field (aqar/enrich_residential.ad_licence), and where both
+    # exist the prose disagrees on 181 of 7,064 live rows (advertisers paste an older licence): the structured field
+    # is the source's statement there, so aqar never falls back to its prose (🔧 2026-11-09, test_aqar_never_reads_its_prose_licence).
+    if _PROSE_LICENCE_DISTRUSTED.search(str(r.get("listing_url") or "")):
+        return None
     return normalize.ad_licence_from_prose(" ".join(str(r.get(k) or "") for k in ("description", "title")))
+
+
+_PROSE_LICENCE_DISTRUSTED = re.compile(r"^https?://(?:[a-z]+\.)?aqar\.fm/", re.I)
 
 
 def _fold_price_evidence(r: dict[str, Any]) -> None:
