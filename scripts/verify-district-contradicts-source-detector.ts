@@ -46,7 +46,7 @@ const defining = readdirSync(MIG_DIR)
 
 check('a migration defines the district-contradicts-source detector', defining.length > 0);
 const sql = defining.length ? readFileSync(join(MIG_DIR, defining[defining.length - 1]), 'utf8') : '';
-// The detector's BODY is judged on the LATEST migration that redefines it (#1, #3, #4). The one-time acts of the
+// The detector's BODY is judged on the LATEST migration that redefines it (#1, #3, #4, #9). The one-time acts of the
 // migration that introduced it — wiring it into the roster, the owner's RED-list scope note, the data repair (#2, #5,
 // #6) — were performed ONCE, by the FIRST definer, and are judged there. Reading them from the latest definer made every
 // later body fix (🆕 2026-11-10, 20261110072248) fail contracts it never had to repeat.
@@ -105,6 +105,20 @@ check('#6 the repair requires the source to publish BOTH district fields',
     !/normalisation-aware/i.test(preFix) &&
     !/RED list/.test(preFix);
   check('#7 a raw-string-drift oracle (the ~6,781-row trap) fails contracts #1 and #5', mutantFails);
+}
+
+// ── 9. A STALE ORACLE NEVER PAGES (🆕 2026-11-10, repeat_bug 14121) ──────────────────────────────────
+// listing_source_district_ar_fleet is a 3-hourly snapshot; a crawl that re-files a listing between snapshots made the
+// detector raise against the OLD source value (3 gathern reopens in 7 days, each 05:59 → 06:59). The latest body must
+// re-read each candidate's own ACTIVE source row before raising, and raise from what survives that re-read.
+check('#9 the detector re-reads the candidates\' own source rows before raising',
+  /_dcs_candidates/.test(sql) && /x\.active/.test(sql) && /update public\.listing_source_district_ar_fleet/i.test(sql));
+check('#9 it raises from the re-read candidates, not from the raw view',
+  /from _dcs_candidates\s+group by/i.test(sql));
+{
+  const preFix = readFileSync(join(MIG_DIR, '20260925175435_district_contradicts_source_goes_fleet_wide.sql'), 'utf8');
+  check('#9 (mutation) a body without the re-read fails #9',
+    !(/_dcs_candidates/.test(preFix) && /update public\.listing_source_district_ar_fleet/i.test(preFix)));
 }
 
 // ── 8. Wired into the suite ──────────────────────────────────────────────────────────────────────
