@@ -32,7 +32,7 @@ const remote = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
 check('the search path hands the index row\'s bathrooms to the rule right where af_canon travels with the card',
   /l\.canon = c\.af_canon;[\s\S]{0,700}?const servedBaths = c\.af_canon\?\.bathrooms;[^\n]*\n\s*l\.bathrooms = bathroomsForCard\(l\.bathrooms, servedBaths\) \?\? 0;/.test(remote));
 check('the in-app ad page\'s sibling cards read the index\'s bathrooms with the Arabic place and hand it to the rule',
-  /select\('listing_id,region_ar,city_ar,district_ar,bathrooms'\)/.test(remote) && /r\.bathrooms = bathroomsForCard\(r\.bathrooms, bathsById\.get\(Number\(r\.id\)\)\) \?\? 0;/.test(remote));
+  /select\('listing_id,region_ar,city_ar,district_ar,bathrooms[,']/.test(remote) && /r\.bathrooms = bathroomsForCard\(r\.bathrooms, bathsById\.get\(Number\(r\.id\)\)\) \?\? 0;/.test(remote));
 check('the rule is imported from one module', /import \{ bathroomsForCard \} from '@\/lib\/indexBathrooms';/.test(remote));
 
 if (failed) { console.error(`\n❌ verify-card-prints-the-bathrooms-the-index-serves: ${failed} check(s) failed.`); process.exit(1); }

@@ -184,6 +184,67 @@ export function foldDuplicates<T>(cards: T[], keyOf: (c: T) => string): { card: 
   return out;
 }
 
+/** THE SAME PROPERTY IS ONE CARD THAT NAMES EVERY SITE (owner 2026-11-10, the final pin rule). Cards under one pin are
+ *  the same property only with PROOF — never because they look alike:
+ *    1. the same government advertising licence and the same deal; or
+ *    2. the same site with the deal, price, size, type, rooms AND a known floor all matching (a site's own repost) —
+ *       two flats whose floor nobody published are two flats (measured 2026-11-10, wasalt حي بدر: plots 475 and 476,
+ *       every other field equal); or
+ *    3. a WHOLE property (villa, land, building … — it stands on its own ground) of the same type and the same size at
+ *       this pin, on any site. A unit (flat, room, office, shop …) shares its building with look-alikes, so two flats
+ *       are never the same by rule 3 — only by rule 1 or 2.
+ *  TWO DIFFERENT LICENCES ARE NEVER FOLDED BY RULE 2 OR 3: the licences say the ads may be two properties (twin villas,
+ *  two units), and unknown is not «the same». Rule 1 runs first, so each group knows its licence before 2 and 3 look.
+ *  Nothing is dropped: the group keeps every ad — the cheapest leads, the rest are named under it with their prices.
+ *  A card with no facts (the index read failed) is never grouped. */
+export type FoldFacts = { site: string; lic?: string | null; dealAr?: string | null; typeAr?: string | null; area?: number | null; price?: number | null; beds?: number | null; floor?: number | null };
+export const UNIT_TYPES_AR = ['شقة', 'استوديو', 'دور', 'غرفة', 'مكتب', 'محل', 'ملحق علوي', 'مكاتب مشتركة', 'كشك', 'غير معروف', 'مركز أعمال', 'مواقف', 'تخزين ذاتي', 'مخازن سحابية'];
+export function foldSameProperty<T>(cards: T[], factsOf: (c: T) => FoldFacts): { main: T; others: T[] }[] {
+  const parent = cards.map((_, i) => i);
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const facts = cards.map(factsOf);
+  const licOf = facts.map((f) => (f.lic && /^[0-9]{6,}$/.test(f.lic) ? f.lic : ''));
+  const lics = licOf.map((l) => new Set(l ? [l] : []));                 // per group root: the licences it holds
+  const join = (i: number, j: number, proven: boolean): boolean => {
+    const a = find(i), b = find(j);
+    if (a === b) return true;
+    if (!proven && lics[a].size && lics[b].size && [...lics[a]].some((l) => !lics[b].has(l))) return false;   // two licences → not proven the same
+    parent[a] = b; for (const l of lics[a]) lics[b].add(l);
+    return true;
+  };
+  const pass = (keyOf: (f: FoldFacts, i: number) => string | null, proven: boolean) => {
+    const seen = new Map<string, number[]>();
+    facts.forEach((f, i) => {
+      const k = keyOf(f, i); if (k === null) return;
+      const before = seen.get(k) ?? [];
+      if (!before.some((j) => join(i, j, proven))) seen.set(k, [...before, i]);   // joins the first group it may join, else stands as a new one
+    });
+  };
+  const base = (f: FoldFacts) => (f.dealAr && f.typeAr && typeof f.area === 'number' && f.area > 0 ? `${f.dealAr}|${f.typeAr}|${f.area}` : null);
+  pass((f, i) => (f.dealAr && licOf[i] ? `${licOf[i]}|${f.dealAr}` : null), true);
+  pass((f) => (base(f) && f.site && typeof f.price === 'number' && f.price > 0 && typeof f.floor === 'number' ? `${f.site}|${base(f)}|${f.price}|${f.beds ?? ''}|${f.floor}` : null), false);
+  pass((f) => (base(f) && !UNIT_TYPES_AR.includes(f.typeAr as string) ? base(f) : null), false);
+  const groups = new Map<number, number[]>();
+  cards.forEach((_, i) => { const r = find(i); const g = groups.get(r); if (g) g.push(i); else groups.set(r, [i]); });
+  const priced = (i: number) => (typeof facts[i].price === 'number' && (facts[i].price as number) > 0 ? (facts[i].price as number) : Infinity);
+  // Groups stay in the order their first card arrived; inside a group the cheapest leads (ties keep the arrival order).
+  return [...groups.values()].sort((a, b) => a[0] - b[0]).map((g) => {
+    const byPrice = [...g].sort((a, b) => priced(a) - priced(b) || a - b);
+    return { main: cards[byPrice[0]], others: byPrice.slice(1).map((i) => cards[i]) };
+  });
+}
+
+/** THE SHEET SAYS WHAT A BUILDING HOLDS (owner 2026-11-10: «12 شقة للإيجار من 40,000»): only when EVERY ad of the pin
+ *  is loaded and they all share one type and one deal — otherwise null and the plain count stays. `from` is the lowest
+ *  price, or null when any ad has none to show (then the line carries no price rather than a partial one). */
+export function sameKindSummary(n: number, facts: (FoldFacts & { showsPrice: boolean })[]): { typeAr: string; dealAr: string; from: number | null } | null {
+  if (n < 2 || facts.length !== n) return null;
+  const typeAr = facts[0].typeAr || '', dealAr = facts[0].dealAr || '';
+  if (!typeAr || !dealAr || typeAr === 'غير معروف' || facts.some((f) => f.typeAr !== typeAr || f.dealAr !== dealAr)) return null;
+  const all = facts.every((f) => f.showsPrice && typeof f.price === 'number' && f.price > 0);
+  return { typeAr, dealAr, from: all ? Math.min(...facts.map((f) => f.price as number)) : null };
+}
+
 /** A drawn overlay's points → a closed GeoJSON polygon ([lng, lat] rings), or null when too small to be an area. */
 export function polygonOf(points: unknown[]): PinFilter['poly'] {
   // MapKit's PolygonOverlay.points is RINGS — [[Coordinate, …]] — even when the overlay was built from a flat list
