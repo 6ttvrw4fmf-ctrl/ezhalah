@@ -36,6 +36,7 @@ from urllib.parse import urlsplit
 
 from scrapers.common import http
 from scrapers.common.db import begin_run, end_run, sb
+from scrapers.common.liveness_policies import complete_list_absence_hides
 from scrapers.common.liveness_trust import MIN_CANARIES, canary_environment_ok
 from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS, looks_closed as _aqar_looks_closed
 
@@ -822,7 +823,13 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
 
     try:
         health_ok, health_reason = (True, None)
-        if not force and not pol["enabled"]:
+        if complete_list_absence_hides(platform):
+            # NOT bypassed by --force or by an enabled policy. Owner decision 2026-11-10
+            # (LISTING_LIVENESS.md §7.3 + §2.1): this site's ads are hidden on complete-list absence,
+            # which is not a DIRECT verdict — they are hidden and KEPT, never deleted.
+            _abort("hidden on complete-list absence, never deleted (owner decision 2026-11-10, "
+                   "LISTING_LIVENESS.md §7.3): no direct verdict exists for this site's rows")
+        elif not force and not pol["enabled"]:
             _abort("policy disabled (enabled=false)")
         elif not tables:
             _abort("no tables registered for platform (default-deny)")

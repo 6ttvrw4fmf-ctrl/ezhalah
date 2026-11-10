@@ -121,7 +121,7 @@ const TO = '#c84646';
  *  Once both are picked, Apple's driving route draws with a soft band around it and the map fits it; `onRouted`
  *  opens the full-screen map. */
 export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onRouted?: () => void }) {
-  const { t } = useI18n();
+  const { t, isRTL } = useI18n();
   const [from, setFrom] = useState<PlaceSuggestion | null>(null);
   const [to, setTo] = useState<PlaceSuggestion | null>(null);
   const [failed, setFailed] = useState(false);
@@ -134,7 +134,8 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
   const swap = () => { const a = from, b = to; setFrom(b); setTo(a); go(b, a); };
   return (
     <View style={s.routeWrap} testID="map-route-fields">
-      <View style={s.routeHead}>
+      {/* X top right in both languages (owner 2026-11-10: «x for everything must always be on the top right no matter what»). */}
+      <View style={[s.routeHead, isRTL && { flexDirection: 'row-reverse', justifyContent: 'flex-end', gap: 8 }]}>
         <Text style={s.routeTitle}>{t('Route')}</Text>
         <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-route-close">
           <Ionicons name="close" size={20} color={colors.muted} />
