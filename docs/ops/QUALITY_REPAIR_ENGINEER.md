@@ -560,6 +560,19 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   the per-call cost of each suspect. Same body as plpgsql (plans cached) = 0.23 ms, proven identical over every distinct
   (city, district) pair inside the migration. Measure functions one at a time before touching the query that calls them.
 
+- **2026-11-08:** the measuring tool is the first suspect, again, on my own robot: the new signed-in speed step waited
+  90 s for the Filter page's golden card («اضغط هنا 👆») on the AGENT screen, where it never renders (run 42484976341),
+  and read the night's first measurement as a failure; the owner's two budgets (☰ ≤ 1 s, saved chat ≤ 3 s) were green
+  all along (311 / 1,178 ms on 4G, 546 / 1,197 ms on a VPN line, run 42485498376). Rule: a new robot step ends at the
+  marker the OWNER named, never at a marker borrowed from another screen; run it once from the branch before the PR
+  opens. Second: the owner's «sooooo slow» on a VPN was not our client — the edge logs for the iPhone (country IT)
+  showed 845 ms in `/auth/v1/token`, every REST read crossing to Tokyo (Vercel `hnd1`, DB `ap-northeast-1`) and a direct
+  `user_chats` upsert refused 403 after 1.7 s by the back-door network guard; read the visitor's own request log
+  (`edge_logs` by user agent and minute) before theorising about render cost. Third: a migration proof over hand-made
+  rows must `coalesce(…, false)` a predicate that can be NULL (a never-stamped dispatcher), or the whole apply rolls back
+  on its own proof (first apply of 20261108133643). Fourth: the clock — `select now()` said 13:36 when the work felt
+  like 13:55 (10-20 / 11-01 / 11-04 / 11-07 lesson, kept because it still holds).
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -724,3 +737,36 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   DELETE inside a function body), 🆕 11-01 (#9761 met the prompt at minute 70). Rule: prove the other direction with a
   plain SELECT over a hand-made row of the real shape, or an INSERT inside a rolled-back sub-block; read the row state
   after any timeout before retrying ("a timeout is not a rollback").
+
+## 📚 FLEET LESSONS 2026-11-08 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① CodeRabbit's hourly review limit turns its check NEUTRAL / SKIPPED, and the merge robot refuses ANY non-SUCCESS
+  check — so a finished PR waits for nothing.** 🔬 11-08: #11296 / #11299 / #11308 sat green and clean for 1–3 h on a
+  NEUTRAL check (five reviews an hour, spent by four PRs plus generated-test runs); 🆕 11-08: #11276 / #11279 / #11280
+  waited on the same limit; ⚡ 11-08: nine pushes to #11247 = nine reviews. 🔧 11-06 saw the SKIPPED shape on mirror
+  #10898 (backlog 1420). Rule: one PR per bug class, ONE push per cycle, and comment «@coderabbitai review» the moment a
+  check reads rate-limited — never at the end of the slot. Second night of this family → 🆕's and 🔬's rulebooks carry it.
+- **② A PASS counts only from a proof row with `push_ok = true` AND notes JSON carrying `"result":"PASS"`.** 🆕 11-08
+  wrote 7 real PASS rows (journeys 42459920398 / 42459318433) with `push_ok` NULL and no notes, and
+  `ops_engineer_fix_rate` read the night as 0 % / over_claimed; ♻️ 10-30 lost a night the same way (the view was then
+  taught to read the notes too). Rule: use the insert template in your rulebook, every time; a proof the view cannot
+  read is a proof nobody counted. Second night → 🆕's rulebook carries it.
+- **③ A site that moves to a new address scheme leaves its old-scheme rows behind a reader that can only answer
+  UNKNOWN.** ♻️ 11-08: 27 aqargate WordPress-era ads served with dead `/property/` links while their WP oracle answered
+  500 for every id (it could never strike); ♻️ 11-07: 47 old property.maqamco.sa rows behind maqam's move; ⚡ 11-06:
+  aqargate's price rules keyed on a field the move dropped. Rule: the day a crawler changes scheme, read every row still
+  on the old scheme against the new site's complete catalogue and adjudicate it the same day — a correct UNKNOWN keeps a
+  dead card on screen forever.
+- **④ An un-mirrored migration blocks EVERYONE's deploy, yours included — and the owner's fix with it.** 🔧 11-08:
+  `deploy-frontend.yml` was refused three times by the drift gate (11:43 and 12:43 on ♻️'s five lifecycle migrations before
+  their mirrors merged; 13:53 on 🔧's own three), then `auto-deploy-merged-fixes.yml` stood down for 3 h after «3 failures
+  in a row». The owner's one-tap fix (#11313, merged ~11:40) reached ezhalah.com at 15:30 — four hours later — only because
+  🔧 dispatched the deploy by hand once the last mirror (#11345) was on main. Rule: open the mirror PR the moment
+  `apply_migration` returns; when CodeRabbit is limited, spend each freed slot on the deploy-blocking mirror first; the
+  drift guard's `mirror (auto)` lane (#11347) is a backstop, not the plan; and after the mirrors land, dispatch
+  `deploy-frontend.yml` yourself rather than wait for the 3 h re-arm.
+- **⑤ CodeRabbit's included allowance SHRINKS with every attempt, rate-limited ones and pushes included.** 🔧 11-08: 39
+  attempts in 7 days → 4 reviews/hour at 13:36; 43 attempts → 3/hour at 15:24. Blind re-requests and «one more push» are
+  the attempts that cost the fleet its slots. Rule: read «Next included review available in N minutes» on the latest
+  rate-limited comment and re-request at that minute, one PR per freed slot, deploy-blocking mirrors before guards and
+  docs; a small nit is carried into the next real push, never pushed alone.

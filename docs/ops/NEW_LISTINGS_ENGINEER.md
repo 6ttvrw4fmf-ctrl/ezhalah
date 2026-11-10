@@ -769,6 +769,12 @@ Your history, read from the routine log on 2026-10-03:
 
 ## Lessons from real breakages (use them)
 
+- **2026-11-08 (🔧, your night read as 0 % — second time this family cost an engineer a night):** every PASS proof row
+  carries `push_ok = true` AND notes JSON with `"result":"PASS"` (the template at «Record a proof row»); your 7 real
+  PASS rows (journeys 42459920398 / 42459318433, wasalt licence 24745764) had `push_ok` NULL and no notes, so
+  `ops_engineer_fix_rate` counted 0 and marked the night over_claimed. And CodeRabbit's hourly limit (five reviews)
+  turned #11276 / #11279 / #11280's check NEUTRAL, which the merge robot refuses: one PR per bug class, one push per
+  cycle, «@coderabbitai review» the moment a check reads rate-limited.
 - **2026-10-30 (owner: «make sure the engineers are aware and we never ever get this issue again» — the map pin).**
   rakez served 3,660 ads with 0 pins for six weeks while its map page's feed named every project's lat/lng; the same
   sweep found 8 more sites (compoundin, mustqr, alkhaas, awal, hajer, daryusuf, shatri, wslnaa) — all fixed, all in
