@@ -1734,6 +1734,19 @@ new detector needing a longer history must raise the retention in the same chang
   Buildings and other types are untouched. Guard: `scrapers/common/tests/test_nuzul_usage_is_the_pages_own_2026_11_10.py`
   (runs every Nuzul scraper; a new Nuzul scraper not behind the rule is red).
 
+- **A SCREEN'S SMALL FLOW IS ONE NAMED DECISION, NOT LOOSE BOOLEANS (owner 2026-11-10, «find all of the implicit
+  state machines … fix everything»).** A sign-in, a framed page, a chat turn, a retry: when a screen has a flow with a
+  «failed» ending, the decision lives as a pure function in `src/lib/flowState.ts` and the screen CALLS it. Two
+  booleans that can both be true, or an `await` with no catch, is how a failed step came to read as a finished one:
+  a failed Google sign-in signed the visitor in as a made-up «User», a late timer covered a loaded ad page, a chat
+  turn that threw left «searching…» on screen forever. A catch added in a screen must still call `reportError`
+  (catching takes the error away from the global reporter). New flow → add its function there and its rule plus a
+  mutant to `scripts/verify-hidden-flows.ts`, which RUNS the functions and the lifted handlers.
+  Three endings every such flow owes the visitor: a read that FAILED says so and offers «try again» (the map's pill,
+  a shared-chat link — never a blank map or a plain home page); a step that never LANDED takes back what it set up
+  for its result (an Advanced Filter round's receipt comes off when its search threw or was stopped, so the buttons
+  return); and a failure line in the chat is written in THAT TURN's language, not the interface's.
+
 ---
 
 ## 21. Open questions / decisions still pending
