@@ -21,6 +21,8 @@ export type PinFilter = {
   beds?: number[] | null;
   areaMin?: number | null; areaMax?: number | null;
   priceMin?: number | null; priceMax?: number | null;
+  /** «الأثاث» (owner 2026-11-10): true = furnished, false = unfurnished, null = all. Ads that do not say show only under all. */
+  furnished?: boolean | null;
   /** GeoJSON polygon drawn by the user («رسم» → «تطبيق»): only pins strictly inside it. */
   poly?: { type: 'Polygon'; coordinates: number[][][] } | null;
 };
@@ -141,6 +143,7 @@ export function rpcArgs(box: { s: number; w: number; n: number; e: number }, cel
     p_beds: f.beds && f.beds.length ? f.beds : null,
     p_area_min: f.areaMin ?? null, p_area_max: f.areaMax ?? null,
     p_price_min: f.priceMin ?? null, p_price_max: f.priceMax ?? null,
+    ...(f.furnished != null ? { p_furnished: f.furnished } : {}),
   };
 }
 

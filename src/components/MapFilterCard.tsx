@@ -17,16 +17,18 @@ import { OptionBox, FieldLabel } from '@/components/ui';
 import { CATEGORIES } from '@/data/taxonomy';
 import { groupsFor, groupMembers, typeArForTypes, type Macro } from '@/data/propertyTypes';
 import { EMPTY_MAP_FILTER, digits, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
-import { pinFilterOf as pinFilterOfWith } from '@/lib/mapFilter';
+import { pinFilterOf as pinFilterOfWith, furnitureOffered } from '@/lib/mapFilter';
 export { EMPTY_MAP_FILTER, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
 /** The popup's state → the pin query, with the site's own group → type labels mapping. */
-export const pinFilterOf = (f: MapFilterState) => pinFilterOfWith(f, typeArForTypes, groupMembers);
-import { categoryImg, groupImg, typeImg, BED_IMG, RANGE_ICON } from '@/theme/propertyIcons';
+export const pinFilterOf = (f: MapFilterState, deals: readonly string[] = []) => pinFilterOfWith(f, typeArForTypes, groupMembers, deals);
+import { categoryImg, groupImg, typeImg, BED_IMG, RANGE_ICON, FURN_IMG } from '@/theme/propertyIcons';
 import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 
-export default function MapFilterCard({ value, onApply, onClose, countPins }: {
+export default function MapFilterCard({ value, onApply, onClose, countPins, deals = [] }: {
   value: MapFilterState; onApply: (f: MapFilterState) => void; onClose: () => void;
+  /** The map's deal choice: «الأثاث» shows only on «إيجار» alone (yearly rent), as on the Filter home. */
+  deals?: readonly string[];
   /** Pins the choice leaves in the current view; null = could not count (the button then says «عرض الإعلانات»). */
   countPins: (f: MapFilterState) => Promise<number | null>;
 }) {
@@ -56,6 +58,8 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
   // PROPERTY TYPE AFTER THE GROUP (owner 2026-11-10: «the filter button on the map is incomplete, no property type, just
   // group»): the picked groups' types, as on the Filter home.
   const typeChoices = useMemo(() => [...new Set(f.groups.flatMap((g) => groupMembers(g)))], [f.groups]);
+  // What «تطبيق» hands the map: a furniture choice the row no longer offers is dropped (no hidden filter left behind).
+  const applied: MapFilterState = f.furnished != null && !furnitureOffered(deals, f.category) ? { ...f, furnished: null } : f;
   const toggleBed = (b: '1' | '2' | '3' | '4' | '5+') => setF((x) => ({ ...x, beds: x.beds.includes(b) ? x.beds.filter((y) => y !== b) : [...x.beds, b] }));
 
   return (
@@ -107,6 +111,18 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
                   onPress={() => (opt === 'any' ? setF((x) => ({ ...x, beds: [] })) : toggleBed(opt))} style={s.cell} />
               ))}
             </View>
+            {/* «الأثاث» — copied from the Filter home (owner 2026-11-10: «yeah you copy the filter»): yearly rent homes only. */}
+            {furnitureOffered(deals, f.category) ? (
+              <>
+                <FieldLabel>{t('Furniture')}</FieldLabel>
+                <View style={s.wrap} testID="map-filter-furniture">
+                  {([['any', null, 'Furniture: all'], ['yes', true, 'Furniture: furnished'], ['no', false, 'Furniture: unfurnished']] as const).map(([key, pref, label]) => (
+                    <OptionBox key={key} label={t(label)} img={FURN_IMG[key]} selected={(f.furnished ?? null) === pref}
+                      onPress={() => setF((x) => ({ ...x, furnished: pref }))} style={s.cell} />
+                  ))}
+                </View>
+              </>
+            ) : null}
             <View style={[s.rangeHead, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}><Image source={RANGE_ICON.areaHead} style={s.icon} /><Text style={s.rangeLabel}>{t('Area (m²)')}</Text></View>
             <View style={[s.row, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
               <Range icon={RANGE_ICON.areaFrom} label={t('From')} unit={t('m²')} value={f.areaMin} onChange={(v) => setF((x) => ({ ...x, areaMin: digits(v) }))} testID="map-filter-area-min" />
@@ -127,13 +143,13 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
               <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} disabled={!isNarrowed(f)} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
                 <Text style={[s.resetT, !isNarrowed(f) && { color: colors.muted }]}>{t('Clear all')}</Text>
               </Pressable>
-              <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(f)} accessibilityRole="button" testID="map-filter-apply">
+              <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
                 <Text style={s.applyT}>{t('Show listings')}</Text>
               </Pressable>
             </View>
           ) : (
             <View style={s.foot}>
-              <Pressable style={s.apply} onPress={() => onApply(f)} accessibilityRole="button" testID="map-filter-apply">
+              <Pressable style={s.apply} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
                 <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
               </Pressable>
             </View>

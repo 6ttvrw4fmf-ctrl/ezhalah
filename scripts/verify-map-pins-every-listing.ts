@@ -6,7 +6,7 @@
 // the deal button feeds it, and a committed migration creates the function.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { pinFilterOf, isNarrowed, EMPTY_MAP_FILTER, typeSelection } from '../src/lib/mapFilter.ts';
+import { pinFilterOf, isNarrowed, EMPTY_MAP_FILTER, typeSelection, furnitureOffered } from '../src/lib/mapFilter.ts';
 import { pinColor, dotColor, MIXED_DOT, pinHead, shortMoney, cellForSpan, fineCellForSpan, CELL_LADDER, PIN_LIMIT, PIN_SHOW_MAX, foldDuplicates, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
@@ -98,7 +98,7 @@ check('the pins ask for the picked type only', JSON.stringify(villaOnly.types) =
 mustCatch('a picked type ignored (the whole group still sent)', !(villaOnly.types ?? []).includes('دوبلكس'));
 check('a picked type alone counts as a narrowed filter', isNarrowed({ ...EMPTY_MAP_FILTER, types: ['Villa'] }));
 const card = readFileSync(join(root, 'src/components/MapFilterCard.tsx'), 'utf8');
-check('the map filter card shows the picked groups\' types after the groups', /<FieldLabel>\{t\('Property type'\)\}<\/FieldLabel>/.test(card) && /testID="map-filter-types"/.test(card) && /pinFilterOfWith\(f, typeArForTypes, groupMembers\)/.test(card));
+check('the map filter card shows the picked groups\' types after the groups', /<FieldLabel>\{t\('Property type'\)\}<\/FieldLabel>/.test(card) && /testID="map-filter-types"/.test(card) && /pinFilterOfWith\(f, typeArForTypes, groupMembers(?:, deals)?\)/.test(card));
 
 // X TOP RIGHT IN BOTH LANGUAGES (owner 2026-11-10: «x for everything must always be on the top right no matter what»).
 // Measured live 2026-11-10, Arabic, 390 px: the filter card's X sat 16 px from the LEFT (a plain row under RTL), and the
@@ -107,6 +107,18 @@ check('the map filter header keeps its X on the right under Arabic RTL', /<View 
 const webSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 check('the full-screen map\'s X is at the physical right; «رسم» moves left while it shows', /style=\{\[s\.closeBtn, s\.closeBtnRight\]\}[^\n]*testID="map-close-full"/.test(webSrc) && /closeBtnRight: \{ right: 12 \}/.test(webSrc) && /topRightAsLeft: \{ left: 12 \}/.test(webSrc) && !/closeBtn: \{\s*position: 'absolute', top: 12, (?:left|right):/.test(webSrc));
 mustCatch('the full-screen X back on the left', !/<Pressable style=\{s\.closeBtn\} onPress=\{onClose\}/.test(webSrc));
+
+// «الأثاث» COPIED FROM THE FILTER HOME (owner 2026-11-10: «yeah you copy the filter»): yearly rent homes only, the same
+// rule as apartment_guided_counts_ar (`furnished = p_furnished`; ads that do not say show only under «الكل»).
+const furn = (deals: string[], f: Partial<typeof EMPTY_MAP_FILTER>) => pinFilterOf({ ...EMPTY_MAP_FILTER, category: 'Residential', ...f }, typeAr, () => [], deals).furnished;
+check('furnished / unfurnished narrow the pins on «إيجار» + «سكني»', furn(['rent'], { furnished: true }) === true && furn(['rent'], { furnished: false }) === false && furn(['rent'], {}) === null);
+check('the choice is dropped on buy, short stays, mixed deals or commercial (no hidden filter)', furn(['buy'], { furnished: true }) === null && furn(['short'], { furnished: true }) === null && furn(['buy', 'rent'], { furnished: true }) === null && furn(['rent'], { furnished: true, category: 'Commercial' }) === null);
+mustCatch('furniture narrowing buy pins (a row the user cannot see)', furn(['buy'], { furnished: true }) === null);
+check('the row is offered exactly where it applies', furnitureOffered(['rent'], 'Residential') && !furnitureOffered(['rent'], null) && !furnitureOffered(['rent', 'short'], 'Residential'));
+check('a furniture choice counts as a narrowed filter', isNarrowed({ ...EMPTY_MAP_FILTER, furnished: false }));
+const pinsLib = readFileSync(join(root, 'src/lib/mapPins.ts'), 'utf8'), noPinLib = readFileSync(join(root, 'src/lib/mapNoPin.ts'), 'utf8');
+check('both map reads send p_furnished only when a choice is made', /\.\.\.\(f\.furnished != null \? \{ p_furnished: f\.furnished \} : \{\}\)/.test(pinsLib) && /\.\.\.\(f\.furnished != null \? \{ p_furnished: f\.furnished \} : \{\}\)/.test(noPinLib));
+check('the card shows «الأثاث» with the home\'s three choices and icons, and Apply drops a hidden choice', /testID="map-filter-furniture"/.test(card) && /FURN_IMG\[key\]/.test(card) && /onApply\(applied\)/.test(card));
 
 // Wiring.
 const data = readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8');
@@ -180,8 +192,8 @@ check('dotColor is the deal colour, neutral for a mixed cell, never gold', dotCo
 mustCatch('a numbered bubble when zoomed out (the Zillow rule)', !/bubbleText\(row\.n, loc\)/.test(web));
 check('the count pill shows for every view («N إعلانات في حي …» / «في هذه المنطقة», viewCountText) and for a drawn boundary', /!drawing && pinCount !== null \?/.test(web) && /hasShape \? t\('\{n\} listings inside the boundary', \{ n: pinCount\.toLocaleString\('en-US'\) \}\) : viewCountText\(placeCount \?\? pinCount, viewPlace, locale === 'ar' \? 'ar' : 'en', pins\?\.deals, otherDeals\)/.test(web) && /'\{n\} listings here': '\{n\} إعلان في هذه المنطقة'/.test(readFileSync(join(root, 'src/i18n.tsx'), 'utf8')));
 // (M.MapDealRow / M.countPinsInView since 2026-11-02: the deal row and the MapKit glue load as their own chunk — ALWAYS FAST)
-check('the map screen feeds the deal button into the pins and clears the sheet on a deal change', /<M\.MapDealRow deals=\{deals\} onDeals=\{\(d\) => \{ setDeals\(d\); setPinRow\(null\); \}\} onFilter=/.test(screen) && /pins=\{\{ deals, \.\.\.pinFilterOf\(mapFilter\) \}\}/.test(screen));
-check('the Filter button opens the centered filter card; Apply feeds the pins and counts in view', /onFilter=\{\(\) => setFilterOpen\(true\)\} filterOn=\{isNarrowed\(mapFilter\)\}/.test(screen) && /<MapFilterCard value=\{mapFilter\}/.test(screen) && /countPins=\{\(f\) => M\.countPinsInView\(\{ deals, \.\.\.pinFilterOf\(f\) \}\)\}/.test(screen));
+check('the map screen feeds the deal button into the pins and clears the sheet on a deal change', /<M\.MapDealRow deals=\{deals\} onDeals=\{\(d\) => \{ setDeals\(d\); setPinRow\(null\); setMapFilter\(/.test(screen) && /pins=\{\{ deals, \.\.\.pinFilterOf\(mapFilter, deals\) \}\}/.test(screen));
+check('the Filter button opens the centered filter card; Apply feeds the pins and counts in view', /onFilter=\{\(\) => setFilterOpen\(true\)\} filterOn=\{isNarrowed\(mapFilter\)\}/.test(screen) && /<MapFilterCard value=\{mapFilter\} deals=\{deals\}/.test(screen) && /countPins=\{\(f\) => M\.countPinsInView\(\{ deals, \.\.\.pinFilterOf\(f, deals\) \}\)\}/.test(screen));
 const cardSrc = readFileSync(join(root, 'src/components/MapFilterCard.tsx'), 'utf8');
 check('the filter card is the site\'s own tiles (OptionBox + the same icons), X top right, no transaction section', /<OptionBox compact key=\{cat\} label=\{t\(cat\)\} img=\{categoryImg\(cat\)\}/.test(cardSrc) && /img=\{groupImg\(g\.group\)\}/.test(cardSrc) && /img=\{BED_IMG\[opt\]\}/.test(cardSrc) && /testID="map-filter-close"/.test(cardSrc) && !/DEALS|MapDeal\b/.test(cardSrc));
 // Owner 2026-11-08: «سكني» / «تجاري» first; the groups appear only once a category is picked (like the Filter home).
