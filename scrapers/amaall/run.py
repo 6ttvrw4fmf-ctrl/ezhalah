@@ -51,6 +51,7 @@ import html as ihtml
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -200,20 +201,38 @@ _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
 def licence_from_page(page_html: Optional[str]) -> Optional[str]:
-    found = {m.group(1).translate(_AR_DIGITS) for m in _PAGE_LICENCE_RE.finditer(page_html or "")}
-    lic = found.pop() if len(found) == 1 else None
-    return lic if lic and re.fullmatch(r"7[12]\d{8}", lic) else None
+    """The one REGA ad licence the page's «الترخيص الاعلاني» row states (filtered to the 71/72 shape BEFORE the
+    count, as normalize.ad_licence_from_prose does), else None."""
+    found = {v for v in (m.group(1).translate(_AR_DIGITS) for m in _PAGE_LICENCE_RE.finditer(page_html or ""))
+             if re.fullmatch(r"7[12]\d{8}", v)}
+    return found.pop() if len(found) == 1 else None
+
+
+PAGE_PAUSE_S = 1.0          # ≤ 1 request/second to the site (house scraping rule)
+_LAST_PAGE_READ = [0.0]
+PAGE_READ_FAILURES: dict[str, int] = {}
 
 
 def _page_html(s, link: Optional[str]) -> Optional[str]:
-    """The post's own page, for the licence row only. A failed read is None (the licence stays unknown, never «no»)."""
+    """The post's own page, for the licence row only, at most one read a second. A failed read is None (the licence
+    stays unknown, never «no») and is counted in PAGE_READ_FAILURES, which the run prints, so a blocked or throttled
+    page never fails silently."""
     if not link:
         return None
+    wait = PAGE_PAUSE_S - (time.monotonic() - _LAST_PAGE_READ[0])
+    if wait > 0:
+        time.sleep(wait)
     try:
         r = s.get(link, timeout=30)
-        return r.text if r.status_code == 200 else None
-    except Exception:  # noqa: BLE001
-        return None
+        why = None if r.status_code == 200 else f"http_{r.status_code}"
+        text = r.text if why is None else None
+    except Exception as e:  # noqa: BLE001
+        why, text = type(e).__name__, None
+    finally:
+        _LAST_PAGE_READ[0] = time.monotonic()
+    if why:
+        PAGE_READ_FAILURES[why] = PAGE_READ_FAILURES.get(why, 0) + 1
+    return text
 
 
 def _licence_from_own_page(s, p: dict, row: dict) -> None:
@@ -557,6 +576,8 @@ def main() -> int:
             if not row["active"]:
                 (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
 
+        if PAGE_READ_FAILURES:
+            print(f"  licence page reads failed (licence left unknown): {PAGE_READ_FAILURES}", flush=True)
         if res:
             db.upsert_amaall_residential_batch(res)
         if com:

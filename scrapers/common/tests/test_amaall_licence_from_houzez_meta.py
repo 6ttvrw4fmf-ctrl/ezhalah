@@ -53,6 +53,43 @@ def test_never_the_whatsapp_row_a_fal_number_or_two_licences():
     assert _am.licence_from_page(None) is None
 
 
+def test_a_fal_number_beside_the_licence_does_not_hide_it():
+    """Filtered to the REGA shape before counting, like the shared reader: a labelled FAL number is not a second licence."""
+    page = _PAGE + '<strong>الترخيص الاعلاني:</strong> <span>1100027006</span>'
+    assert _am.licence_from_page(page) == "7200807823"
+
+
+class _Resp:
+    def __init__(self, code, text="x"):
+        self.status_code, self.text = code, text
+
+
+class _Sess:
+    def __init__(self, outcomes):
+        self.outcomes, self.calls = list(outcomes), []
+
+    def get(self, link, timeout=30):
+        self.calls.append(link)
+        o = self.outcomes.pop(0)
+        if isinstance(o, Exception):
+            raise o
+        return o
+
+
+def test_page_reads_are_paced_and_failures_are_counted(monkeypatch):
+    """At most one page read a second, and a 403 / an exception is counted (never silent) and stays unknown."""
+    sleeps = []
+    monkeypatch.setattr(_am.time, "sleep", lambda t: sleeps.append(t))
+    monkeypatch.setattr(_am, "_LAST_PAGE_READ", [0.0])
+    monkeypatch.setattr(_am, "PAGE_READ_FAILURES", {})
+    s = _Sess([_Resp(200, _PAGE), _Resp(403), RuntimeError("boom")])
+    assert _am._page_html(s, "a") == _PAGE
+    assert _am._page_html(s, "b") is None
+    assert _am._page_html(s, "c") is None
+    assert len(sleeps) == 2 and all(0 < t <= _am.PAGE_PAUSE_S for t in sleeps)
+    assert _am.PAGE_READ_FAILURES == {"http_403": 1, "RuntimeError": 1}
+
+
 def test_the_page_is_read_only_for_a_live_row_without_a_licence(monkeypatch):
     calls = []
     monkeypatch.setattr(_am, "_page_html", lambda s, link: calls.append(link) or _PAGE)
