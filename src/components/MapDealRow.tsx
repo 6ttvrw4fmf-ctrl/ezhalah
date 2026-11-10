@@ -11,6 +11,7 @@ import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'r
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
+import { hitsToShow } from '@/lib/placeSearch';
 import { suggestPlaces, flyToPlace, clearPlaceMark, routeBetween, type PlaceSuggestion } from '@/components/AppleMap';
 import { KIND_LABEL, type PlaceKind } from '@/lib/placeKind';
 
@@ -34,15 +35,20 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
 }) {
   const { t, isRTL, locale } = useI18n();
   const [q, setQ] = useState(value);
-  const [hits, setHits] = useState<PlaceSuggestion[]>([]);
+  // The rows AND the words they were found for (src/lib/placeSearch.ts): a list never shows under other words.
+  const [found, setFound] = useState<{ q: string; rows: PlaceSuggestion[] } | null>(null);
+  const hits = hitsToShow(q, found);
+  const setHits = (rows: PlaceSuggestion[], forQ = q) => setFound(rows.length ? { q: forQ, rows } : null);
   const [focused, setFocused] = useState(false);
+  // A finger is down on a suggestion: the field's blur must not close the list under it (a 0.35 s tap lost it, live).
+  const pressing = useRef(false);
   const seq = useRef(0);
   const inputRef = useRef<TextInput>(null);
   useEffect(() => { setQ(value); }, [value]);
   useEffect(() => {
     const id = ++seq.current;
     if (q.trim().length < 2 || q === value) { setHits([]); return; }
-    const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r); }); }, 220);
+    const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r, q); }); }, 180);
     return () => clearTimeout(h);
   }, [q, locale, value]);
   // THE KEYBOARD CLOSES ON A PICK (owner 2026-11-02, phone: «doesn't look nice on a phone» — the keyboard stayed up
@@ -59,7 +65,7 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
           value={q}
           onChangeText={setQ}
           onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 150)}
+          onBlur={() => setTimeout(() => { if (!pressing.current) setFocused(false); }, 150)}
           placeholder={placeholder}
           placeholderTextColor={colors.muted}
           accessibilityLabel={placeholder}
@@ -76,7 +82,8 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
       {open ? (
         <View style={s.hits} testID={`${testID}-hits`}>
           {hits.slice(0, 6).map((p, i) => (
-            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
+            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPressIn={() => { pressing.current = true; }}
+              onPressOut={() => { setTimeout(() => { pressing.current = false; if (!inputRef.current?.isFocused?.()) setFocused(false); }, 0); }} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
               <Ionicons name={KIND_ICON[p.kind ?? 'place']} size={16} color={colors.primary} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={s.hitTop}>
@@ -106,7 +113,8 @@ export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
     <PlaceField
       value={value}
       placeholder={t('Region, city, landmark, district or street')}
-      onPick={(p) => { setValue(p.displayLines[0]); onPick?.(); flyToPlace(p); }}
+      // The same words the field shows after a pick (p.name), so the text does not jump to Apple's raw first line.
+      onPick={(p) => { setValue(p.name ?? p.displayLines[0]); onPick?.(); flyToPlace(p); }}
       onClear={() => { setValue(''); clearPlaceMark(); }}
       testID="map-search"
     />
@@ -142,13 +150,13 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
       </View>
       {/* The fields SAY what can be typed (owner 2026-11-01: «it doesn't show clearly that the user can type a street,
           landmark, district…»). */}
-      <PlaceField value={from?.displayLines[0] ?? ''} placeholder={`${t('From')}: ${t('Region, city, landmark, district or street')}`} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
+      <PlaceField value={from ? (from.name ?? from.displayLines[0]) : ''} placeholder={`${t('From')}: ${t('Region, city, landmark, district or street')}`} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
       <View style={s.swapRow}>
         <Pressable style={s.swapBtn} onPress={swap} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Swap')} testID="map-route-swap">
           <Ionicons name="swap-vertical" size={18} color={colors.primary} />
         </Pressable>
       </View>
-      <PlaceField value={to?.displayLines[0] ?? ''} placeholder={`${t('To')}: ${t('Region, city, landmark, district or street')}`} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
+      <PlaceField value={to ? (to.name ?? to.displayLines[0]) : ''} placeholder={`${t('To')}: ${t('Region, city, landmark, district or street')}`} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
       {failed ? <Text style={s.routeFail}>{t('No route found between these two places')}</Text> : null}
     </View>
   );

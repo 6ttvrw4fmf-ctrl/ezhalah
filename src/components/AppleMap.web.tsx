@@ -39,6 +39,7 @@ import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, 
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 import { onSurface } from '@/lib/mapSurface';
+import { RESOLVE_BUDGET_MS, makeSuggestCache, suggestKey } from '@/lib/placeSearch';
 
 // The soil mascot (assets/images/soil-mascot.svg) wore this button for a day; owner 2026-11-03: «hide the mascot,
 // will add it later, not the priority» — the ground-layers icon is back until the soil layer itself is built.
@@ -292,6 +293,8 @@ export function clearPlaceMark() {
 /** Apple Maps' own place suggestions (owner 2026-10-31: «this search connected to Apple Maps, like how a user
  *  searches in Apple Maps»), limited to Saudi Arabia, in the UI language. Resolves [] when MapKit is unavailable:
  *  the field then simply shows nothing (never a fake "no places"). */
+// Recent answers (src/lib/placeSearch.ts): backspace or the same words again shows the list at once.
+const suggestCache = makeSuggestCache<PlaceSuggestion[]>();
 export async function suggestPlaces(q: string, uiLanguage: string): Promise<PlaceSuggestion[]> {
   const query = q.trim();
   if (query.length < 2) return [];
@@ -313,6 +316,9 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   // fifteen Riyadh branches). Apple ranks around `region`, so the search follows the map: a chain or a common name
   // lists the nearby ones first, and a city or region name is still found wherever it is.
   if (live.map) search.region = live.map.region;
+  const key = suggestKey(query, language, live.map?.region.center);
+  const cached = suggestCache.get(key);
+  if (cached) return cached;
   const rows = await new Promise<PlaceSuggestion[]>((resolve) => {
     // Only real PLACES: Apple also returns query completions («adidas · Search Nearby») that carry no coordinate and
     // land nowhere (owner 2026-11-01 saw one in the route fields).
@@ -326,7 +332,7 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   // its two lines and no tag — never dropped, never a fake kind.
   const country = language === 'ar' ? 'المملكة العربية السعودية' : 'Saudi Arabia';
   const resolve1 = (r: PlaceSuggestion) => new Promise<PlaceSuggestion>((resolve) => {
-    const timer = setTimeout(() => resolve(r), 1500);
+    const timer = setTimeout(() => resolve(r), RESOLVE_BUDGET_MS);   // was 1,500 ms: the list waited for the slowest row
     search.search(r, (err, data) => {
       clearTimeout(timer);
       const p = !err && data?.places?.[0];
@@ -343,7 +349,9 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   const named = resolved.map((r) => ({ ...r, apple: r.apple ?? r, name: r.name ?? r.displayLines[0] }));
   // A user-written description («طريق الملك فهد اللي دايم زحمه») is not a place; what was typed sorts first.
   const places = named.filter((r) => !isNoiseName(r.name));
-  return sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
+  const out = sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
+  if (rows.length) suggestCache.set(key, out);   // an empty answer may be a failed call: never remembered
+  return out;
 }
 
 /** HOW MANY PINS A FILTER LEAVES IN THE CURRENT VIEW (the popup's button): one coarse count-cell read over the
