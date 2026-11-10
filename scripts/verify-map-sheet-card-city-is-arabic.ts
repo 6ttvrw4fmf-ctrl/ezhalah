@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { liftSymbols } from './lib/liftSymbols.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
@@ -17,7 +18,9 @@ const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches 
 
 // Shims for what the lifted code closes over but that carries no location logic: the client, the timeout wrapper,
 // the table allow-list, the column list and finalize() (which only copies the raw row's city/neighbourhood across).
+// fetchListingCards() also hands the index's bath count to the card rule (🔧 2026-11-10); the lifted copy imports the REAL rule.
 const PRELUDE = `
+import { bathroomsForCard } from '${pathToFileURL(join(root, 'src/lib/indexBathrooms.ts')).href}';
 type Listing = any;
 const bounded = (p: any) => p;
 const SEARCHABLE_TABLES = ['aqar_residential_listings'];
