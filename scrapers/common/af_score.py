@@ -563,6 +563,12 @@ def sanadak_page(url: str, fetch=None) -> dict | None:
         v = o.get(key)
         if isinstance(v, (int, float, str)) and not isinstance(v, bool) and str(v).strip():
             lines.insert(0, f"{label} {v}")
+    # …and its structured PRICE: without it only the description was read, and 25845975's prose «4300 ريال شهرياً»
+    # scored our structured price 4,200 (the object's own `price`, PRICE = SOURCE) a MISMATCH (🆕 2026-11-09, score
+    # run 42568334721). The figure is the object's own; the description stays readable beside it.
+    v = o.get("price")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        lines.insert(0, f"السعر {int(v) if v == int(v) else v} ريال")
     return {"title": o.get("title"), "meta": {}, "jsonld": [{"additionalProperty": props}],
             "evidence_lines": lines[:200], "text_head": " | ".join(lines)[:1500]}
 

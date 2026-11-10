@@ -208,6 +208,14 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 if stored_v == int(stored_v):
                     stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
+            # The card prints the monthly line as Math.round(annual / 12) (src/lib/listingDisplay.ts monthlyLineText),
+            # so a ÷12 with a fraction is never what a customer reads. superoffice 25881144 (11-10 score, job
+            # 129653650048): page «1225.12 ريال شهري» shown as «1,225», price_annual 14701 (bigint, law conflict #60),
+            # served 1225.083 → scored MISMATCH on a card that reads «1,225». Compare the figure the card prints too;
+            # a different figure still scores wrong.
+            if out[name] != MATCH and isinstance(stored_v, float) and stored_v != int(stored_v):
+                if _cmp_number(int(stored_v + 0.5), lines, whole, kw) == MATCH:
+                    out[name] = MATCH
             # Rule 5: a per-m² rate × size is the total the card SHOWS. A page that prints only that total
             # states our price, not another one. muktamel 17584328 (2026-10-14, re-read run 38530789154):
             # land rate 420 (the API's offer.price) × 690 m² = «289,800», the only figure on the page.
@@ -612,8 +620,19 @@ def _age_floor(line: str, own: bool) -> Optional[float]:
     return float(WORD_NUMBERS[v]) if v in WORD_NUMBERS else float(v.translate(_DIGITS))
 
 
+# A per-metre PRICE line is not an area statement: alshawaf's own node table prints «سعر المتر» / «1,800» (and its index
+# «المتر 1,800»), and the area keyword «متر» read it as a stated area, so our 587 (the node's «المساحة» / «587م») scored
+# MISMATCH and capped the 2026-11-09 night at 85 % (re-read run 42578333590: 25868220 / 25868063 / 25868148). An area
+# says «587 متر» — the figure BEFORE the word; «(سعر) المتر N» — the definite word before the figure — is a price.
+PER_METRE_PRICE = re.compile(r"سعر\s+(?:ال)?متر|(?<![ء-ي])المتر\s*[:：]?\s*[\d٠-٩]")
+# The bare area label of a th/td table («<th>المساحة</th><td>587م</td>» → lines «المساحه» / «587م»).
+AREA_LABEL_LINE = re.compile(r"^\s*(?:ال)?مساحه(?:\s+(?:ال)?(?:ارض|الارض|العقار))?\s*[:：]?\s*$")
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
+    if "مساحه" in kw:
+        kw_hits = [i for i in kw_hits if not (PER_METRE_PRICE.search(lines[i]) and not re.search(r"مساحه|م²|م2", lines[i]))]
     # A LABEL («keyword:») that ENDS its line, its value cut off, states nothing ON that line: haraj's meta
     # description is cut off at «…نوع العقار: Apartment سعر الوحدة: 27000 عمر العقار:» (21839193, re-read run
     # 41288305920, 2026-11-01), and the other field's 27000 before it read as a stated age, scoring our 9 a
@@ -622,6 +641,10 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     if not AREA_UNIT.search(kw):
         lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
     page_states = any(re.search(r"\d", lines[i]) for i in kw_hits)
+    if "مساحه" in kw and not page_states:
+        # a th/td area («المساحه» / «587م») states the figure on the line under its label
+        page_states = any(AREA_LABEL_LINE.match(lines[i]) and i + 1 < len(lines)
+                          and re.match(r"^\s*[\d٠-٩][\d٠-٩.,]*\s*م\s*$", lines[i + 1]) for i in kw_hits)
     if stored is None:
         return WE_MISS if page_states else PAGE_SILENT
     pat = _num_pattern(stored)
@@ -651,6 +674,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
             if pat.search(lines[i]):
                 return MATCH
             if any(0 <= j < len(lines) and bare.match(lines[j]) for j in (i - 1, i + 1)):
+                return MATCH
+            # The value line right under a BARE area label may glue its «م» (alshawaf «المساحة» / «587م», 2026-11-09).
+            # Only under the label itself — a glued «422.22م» elsewhere (the related table) keeps meaning nothing.
+            if ("مساحه" in kw and AREA_LABEL_LINE.match(lines[i]) and i + 1 < len(lines)
+                    and re.match(r"^\s*" + pat.pattern + r"\s*م\s*$", lines[i + 1])):
                 return MATCH
         # area_m2 is an integer column (backlog #123), so a page «232.8 م²» is stored as its nearest whole
         # number, 233. tuba 18258569 (2026-10-17): «المساحة:» / «232.8 م²» read as a contradiction of any
@@ -1466,6 +1494,65 @@ def muhaysini_page(url: str, fetch=None) -> dict | None:
             "text_head": " | ".join(lines)[:1500]}
 
 
+_MOBASHER_RECORDS: "dict | None" = None
+
+
+def mobasher_page(url: str, fetch=None) -> dict | None:
+    """A mobasher ad read from the platform's OWN discovery record (🆕 2026-11-10). mobasher.sa/direct/realestate/<slug>
+    is a JS shell to the independent reader (re-read run 42773173060: title only), so the score compared our structured
+    values with the seller's one-line prose: 26222806 stores propertySpace 300 / bathrooms 5 (the record's own fields)
+    and the prose says «مساحة الأرض: 250 م²»; 25881325 stores askingPrice 3,100,000 and the prose names no price —
+    both scored MISMATCH and capped the 11-10 night at 5 (mobasher 83.3 %). The scraper writes the box (Rule B), so
+    the comparison reads the box. Keyed by the record's slugAr (listing_url = SITE + quote(slugAr)); the list is
+    walked once per run; None when it cannot be read or lacks the ad (unknown, never wrong)."""
+    global _MOBASHER_RECORDS
+    m = re.search(r"mobasher\.sa/direct/realestate/([^?#]+)", url or "")
+    if not m:
+        return None
+    from urllib.parse import unquote
+    try:
+        if _MOBASHER_RECORDS is None:
+            if fetch is not None:
+                items = fetch()
+            else:
+                from scrapers.mobasher import run as mb
+                s, _ = mb.retry_smarter_session(mb.API, timeout=40)
+                items = mb.walk(s)[0]
+            _MOBASHER_RECORDS = {unquote(str((x.get("searchableAttributes") or {}).get("slugAr") or x.get("slugAr") or "")): x
+                                 for x in items if isinstance(x, dict)}
+        x = _MOBASHER_RECORDS.get(unquote(m.group(1)).rstrip("/"))
+    except Exception:  # noqa: BLE001 — a failed read is unknown, never wrong
+        return None
+    if not isinstance(x, dict):
+        return None
+    a = x.get("searchableAttributes") if isinstance(x.get("searchableAttributes"), dict) else {}
+
+    def g(k):
+        return x.get(k) if x.get(k) not in (None, "") else a.get(k)
+    lines: list[str] = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0, "0"):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", "للبيع" if x.get("listingType") == "DIRECT_SALE" else None)
+    put("المنطقة", g("regionNameAr"))
+    put("المدينة", g("cityNameAr"))
+    put("الحي", g("neighborhoodNameAr"))
+    put("نوع العقار", g("propertyTypeAr"))
+    put("المساحة", g("propertySpace"), " م²")
+    put("عدد الغرف", g("rooms"))
+    put("دورات المياه", g("bathrooms"))
+    put("السعر", g("askingPrice"), " ريال")
+    put("عرض الشارع", g("streetWidth"))
+    title = str(g("titleAr") or "")
+    summary = re.sub(r"<[^>]+>", " ", str(g("summaryAr") or ""))
+    lines += [title] if title else []
+    lines += [y.strip() for y in summary.splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _TUBA_RECORDS: "dict | None" = None
 
 
@@ -1544,6 +1631,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
         if "aqaralmuhaysini.com/propertydetails/" in url:
             own = muhaysini_page
+        if "mobasher.sa/direct/realestate/" in url:
+            own = mobasher_page
         if "dallali.com/advertisements/" in url:
             own = dallali or dallali_page
         if "safainv.sa" in url:

@@ -155,9 +155,8 @@ def _own_pin(page: str) -> dict:
     return pin_dict(la.group(1), lo.group(1)) if la and lo else {}
 
 
-def map_listing(ad_id: int, page: str, today: date) -> tuple[Optional[tuple[dict, str]], str]:
-    """((row, category) | None, skip_reason) for one detail page."""
-    kv = labels(page)
+def standing(kv: dict[str, str], today: date) -> tuple[Optional[date], str]:
+    """(licence end, '') for a page that is a PUBLISHED ad we may show, else (None, why not)."""
     title = kv.get("عنوان الإعلان") or ""
     if not kv.get("رقم ترخيص الإعلان") or not title:
         return None, "not_a_listing"                      # a 200 without the licence block is no listing
@@ -169,6 +168,39 @@ def map_listing(ad_id: int, page: str, today: date) -> tuple[Optional[tuple[dict
     for why, rx in _EXCLUDE:
         if rx.search(_alif(title)):
             return None, why
+    return exp, ""
+
+
+# ── removal oracle: «is this 200 page THIS ad, still published?» ─────────────────────────────────
+# The detail URL keeps one path for every ad (the id is in the query), so the page must name its own
+# id: its script prints `const adId = '179';`. Measured 2026-11-10 with a browser: 155, 179 and 182
+# answer 200 with that line, the licence block and a licence end in 2027 / 12-2026; 178 and a made-up
+# id answer 404 «Oops! The page you're looking for doesn't exist»; 168 answers 200 with a licence that
+# ended 07/10/2026. A browser's FIRST visit is then sent by the page's own script to
+# /DAuth/ClearAllCookies → /DAuth/SendLoginCode (a build-version reset): that login page carries no
+# adId line and no licence block, so it is never LIVE and never GONE — UNKNOWN, and nobody logs in.
+# NWF155 and NWF179 sat at 4-5 strikes on live pages (P1 served_after_source_gone:nawafeth): 179's
+# advertiser retitled it «أرض 300م حي القصر -بقعاء», which no longer states a deal, so the crawl skips
+# it (deal_not_stated) while the ad is still up. Liveness asks only the standing() question — is it a
+# published, licensed ad of ours to show — never whether today's title still maps.
+_PAGE_AD_RE = re.compile(r"const\s+adId\s*=\s*'(\d+)'")
+
+
+def page_is_this_live_ad(ad_number: str, _row: Optional[dict], body: str,
+                         today: Optional[date] = None) -> bool:
+    m = _PAGE_AD_RE.search(body or "")
+    if not m or f"{PREFIX}{m.group(1)}" != str(ad_number):
+        return False
+    return standing(labels(body), today or date.today())[1] == ""
+
+
+def map_listing(ad_id: int, page: str, today: date) -> tuple[Optional[tuple[dict, str]], str]:
+    """((row, category) | None, skip_reason) for one detail page."""
+    kv = labels(page)
+    title = kv.get("عنوان الإعلان") or ""
+    exp, why = standing(kv, today)
+    if why:
+        return None, why
 
     type_ar = (kv.get("نوع العقار") or "").translate(_MARKS).strip()
     ptype = normalize.map_type_exact(type_ar, _TYPE_OVERRIDES)
@@ -341,7 +373,9 @@ def main() -> int:
         complete = unreadable == 0 and not a.limit and walked_to_end
         for tbl, rr in (("nawafeth_residential_listings", res), ("nawafeth_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                seen = {r["ad_number"] for r in rr}
+                n = db.prune_unseen(tbl, seen, source=SOURCE, verify_gone=db.own_page_status_oracle(
+                    db.sb(), tbl, seen, live_page=page_is_this_live_ad))
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
