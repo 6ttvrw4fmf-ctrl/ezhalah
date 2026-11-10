@@ -218,10 +218,21 @@ def _own_signal(status, body, moved):
     return "gone" if _GENERIC_TITLE.search(body) else None
 
 
+_AR_SITE = "https://mobasher.sa/ar/direct/realestate/"
+
+
 def _ar_url(url: Optional[str]) -> Optional[str]:
-    if not url or not url.startswith(SITE):
+    # A stored URL is in one of two shapes: the crawl's /direct/… or the site's own /ar/direct/… (4 active
+    # rows on 2026-11-10 held the /ar/ shape). Reading only the first made the oracle answer «no stored
+    # URL» for the second, so an ad the feed dropped was held UNKNOWN for good (alert_event 13910: one row,
+    # 5 strikes, never asked). Both shapes name the same page; anything else is still not ours to fetch.
+    if not url:
         return None
-    return "https://mobasher.sa/ar/direct/realestate/" + url[len(SITE):]
+    if url.startswith(_AR_SITE):
+        return url if len(url) > len(_AR_SITE) else None
+    if not url.startswith(SITE) or len(url) == len(SITE):
+        return None
+    return _AR_SITE + url[len(SITE):]
 
 
 _stored_url = stored_listing_url(("mobasher_residential_listings", "mobasher_commercial_listings"))

@@ -36,6 +36,8 @@ GROUP_MODULES = [
     "scripts.lib.posting_date_fixture_g4",
     "scripts.lib.posting_date_fixture_g5",
     "scripts.lib.posting_date_fixture_g6",
+    "scripts.lib.posting_date_fixture_g8",
+    "scripts.lib.posting_date_fixture_g10",
 ]
 
 
@@ -104,6 +106,53 @@ def mapped(platform, builder_args, mutated_source=None):
     with contextlib.redirect_stdout(sys.stderr):
         row, why = call(mod, build(*builder_args))
     return {"mapped": bool(row), "date_added": (row or {}).get("date_added"), "why": why}
+
+
+def no_date_report():
+    """Sites whose printed «date» is NOT a posting date (group modules' NO_DATE): [{site, module, raw, got,
+    raw_kept, mutations: [[label, file, applied, real, mutant]]}]. The barrier judges; nothing here does."""
+    out = []
+    for m in _groups():
+        for site, (module, build, call, raw_path) in getattr(m, "NO_DATE", {}).items():
+            def run(mutated=None, args=None):
+                real = importlib.import_module(module)
+                mod = real
+                if mutated:
+                    mod = types.ModuleType("mutant")
+                    mod.__dict__.update({k: v for k, v in real.__dict__.items() if not k.startswith("__")})
+                    mod.__dict__["__file__"] = real.__file__
+                    mod.__dict__["__name__"] = "mutant"
+                    exec(compile(mutated, "mutant.py", "exec"), mod.__dict__)
+                with contextlib.redirect_stdout(sys.stderr):
+                    row, why = call(mod, build(*(args or [])))
+                return row, why
+            rep = {"site": site, "module": module, "mutations": []}
+            try:
+                row, why = run()
+                kept = row
+                for k in raw_path:
+                    kept = kept.get(k) if isinstance(kept, dict) else None
+                printed = build()[0]
+                want = printed
+                for k in raw_path[1:]:
+                    want = want.get(k) if isinstance(want, dict) else None
+                rep.update(mapped=bool(row), date_added=(row or {}).get("date_added"), why=why,
+                           raw_kept=(kept is not None and kept == want))
+            except Exception as e:  # noqa: BLE001
+                rep.update(error=f"{type(e).__name__}: {e}"[-400:])
+            for label, rel, find, replace, args in getattr(m, "MUTATIONS", {}).get(site, []):
+                with open(os.path.join(_ROOT, rel), encoding="utf-8") as fh:
+                    src = fh.read()
+                mutated = src.replace(find, replace)
+                if mutated == src:
+                    rep["mutations"].append([label, rel, False, None]); continue
+                try:
+                    row, _ = run(mutated, args)
+                    rep["mutations"].append([label, rel, True, {"mapped": bool(row), "date_added": (row or {}).get("date_added")}])
+                except Exception as e:  # noqa: BLE001
+                    rep["mutations"].append([label, rel, True, {"error": f"{type(e).__name__}: {e}"[-300:]}])
+            out.append(rep)
+    return out
 
 
 def _safe(fn, *a):
