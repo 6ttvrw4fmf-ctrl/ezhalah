@@ -14,15 +14,19 @@
 //                controls (sidebar CTA, top-bar pills, One Tap fallbacks) via openAuth(). It
 //                never raises itself anymore — deliberate intent gets the full modal.
 //
+//   signInCardRestPos            WHERE the card rests: beside the form, above the cookie card — from
+//                                what is measured on the screen, and `fits: false` when there is no room.
 //   canDragAuthPopup             WHERE dragging exists: desktop web only (both surfaces).
 //   clampAuthPopupOffset         HOW FAR either surface drags: fully on-screen, EDGE margin.
 //   dismissalOutlivesTransition  the auth-epoch rule (#1214), retargeted to the card's flag.
 
 export type SignInCardGate = {
   isWeb: boolean;
-  /** Desktop web only — at/above DOCK_BREAKPOINT. Mobile keeps the top-bar sign-in pill and the
-   *  sidebar CTA, both opening the centered modal on demand (the retired dock's own precedent). */
-  docked: boolean;
+  /** There is a free column BESIDE the search form — at/above SIGNIN_CARD_BREAKPOINT (lib/responsive.ts).
+   *  This was `docked` (DOCK_BREAKPOINT) until 2026-11-10: the sidebar docks at 900, but the form only leaves
+   *  room for a 208 px card from ~1306, so from 900 to ~1305 the card sat ON the search boxes. Narrower
+   *  screens keep the top-bar sign-in pill and the sidebar CTA, both opening the centered modal on demand. */
+  sideRoom: boolean;
   /** The initial Supabase session restore has settled. NOT optional: during restore `user` is
    *  null, so `!user` alone flashes the card at a LOGGED-IN visitor for a frame — the same trap
    *  GoogleOneTap and the retired dock both document at their gates. */
@@ -43,7 +47,7 @@ export type SignInCardGate = {
 
 export function shouldShowSignInCard(g: SignInCardGate): boolean {
   if (!g.isWeb) return false;        // native has its own auth entry points
-  if (!g.docked) return false;       // mobile / narrow desktop: never (pill + on-demand modal)
+  if (!g.sideRoom) return false;     // no free column beside the form: never (pill + on-demand modal)
   if (!g.authChecked) return false;  // session still restoring — say nothing yet
   if (g.user) return false;          // signed in: never
   if (g.modalOpen) return false;     // the full modal is up — suppressed, never stacked
@@ -64,34 +68,33 @@ export const AUTH_POPUP_EDGE = 16;
 // production at 1280×720: nav rail 14→285, filter card 529→1051, free right column 229px wide).
 export const SIGNIN_CARD_W = 208;
 
-// COLLISION GUARD vs CookieConsent (owner-reported 2026-09-19: on ordinary laptop-height viewports
-// the fixed 0.46 fraction below landed the card's bottom edge INSIDE the cookie card's corner slot
-// — both sit right-anchored in the same column, so a fixed fraction that ignores either card's own
-// height overlaps them together the moment the viewport is shorter than roughly 1180px. Measured
-// live at 1280×720 (production): the card is ~275px tall, the cookie corner card ~294px tall sitting
-// at its own bottom:20 offset — a combined ~630px footprint neither constant alone accounted for.
-// SIGNIN_CARD_H / COOKIE_RESERVED are that same footprint rounded UP for headroom (AR/EN copy-length
-// and font-metric variance), so the guard stays safe without having to read the DOM.
-// Exported (not just used below) so the barrier asserts the SAME numbers this file computes with —
-// never a second copy of the footprint a reviewer would have to keep in sync by hand.
-export const SIGNIN_CARD_H = 300;
-export const COOKIE_RESERVED = 320; // cookie card's own ~294px height + its 20px bottom offset, rounded up
 export const CARD_GAP = AUTH_POPUP_EDGE; // breathing room between the two cards' facing edges
 
-export const signInCardDefaultPos = (vw: number, vh: number) => {
-  // The historical "feels centered" position — unchanged on any viewport tall enough to hold it.
-  const idealY = Math.round(vh * 0.46);
-  // The lowest the card's TOP may sit and still leave CARD_GAP above the cookie card's reserved
-  // band. NEVER overridden by a competing floor — avoiding the cookie card is the one thing this
-  // guard exists for, so on a viewport too short to fit both with room to spare, this wins over
-  // "feels centered" every time, right down to AUTH_POPUP_EDGE (the same off-screen floor every
-  // other clamp in this file already uses — no second, larger floor to fight it here).
-  const maxY = vh - COOKIE_RESERVED - SIGNIN_CARD_H - CARD_GAP;
+// WHERE THE CARD RESTS — MEASURED, NEVER GUESSED (owner 2026-11-10: «make sure never ever get this mistake ever.
+// Ever again»). The card and the cookie card share the right-hand column. Until that day this file placed the card
+// from two written-down heights (card 300, cookie band 320 — the 2026-09-19 collision guard). They were Arabic
+// numbers: measured on the built app, the card is ~297 px tall in Arabic and ~350 in ENGLISH, the cookie corner card
+// ~293 and ~348. So in English the two cards sat on each other on every laptop, and on a short window the card was
+// pushed up over the top bar. A constant cannot know the language, the font or tomorrow's copy; the caller now hands
+// in what is REALLY on the screen:
+//   cardH      the card's own height right now
+//   cookieTop  where the cookie card's top edge rests (null when no cookie card is up)
+// and gets back the resting place plus `fits`: false when the window is too short to hold the card above the cookie
+// card with the margins. The caller then keeps the card OFF the screen rather than on top of something — the visitor
+// answers the cookie card first and the sign-in card takes its place (SignInCard.tsx). The "feels centred" 0.46 of
+// the window height is kept wherever there is room for it.
+export function signInCardRestPos(g: {
+  vw: number; vh: number; cardH: number; cookieTop: number | null;
+}): { x: number; y: number; fits: boolean } {
+  const floor = g.cookieTop == null ? g.vh - AUTH_POPUP_EDGE : g.cookieTop - CARD_GAP;
+  const lowestTop = floor - g.cardH;            // the lowest the card's top may sit and still clear the floor
+  const ideal = Math.round(g.vh * 0.46);
   return {
-    x: vw - SIGNIN_CARD_W - AUTH_POPUP_EDGE,
-    y: Math.max(AUTH_POPUP_EDGE, Math.min(idealY, maxY)),
+    x: g.vw - SIGNIN_CARD_W - AUTH_POPUP_EDGE,
+    y: Math.max(AUTH_POPUP_EDGE, Math.min(ideal, lowestTop)),
+    fits: lowestTop >= AUTH_POPUP_EDGE,
   };
-};
+}
 
 // ── THE AUTH EPOCH (owner 2026-08-29) ───────────────────────────────────────────────────────────
 // «NOT AUTHENTICATED = the invitation must be ELIGIBLE to appear. Do not key it off whether the

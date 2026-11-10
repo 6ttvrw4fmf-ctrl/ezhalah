@@ -24,9 +24,10 @@ import { monthlyLineText } from '@/lib/listingDisplay';
 function monthlyLine(listing: Listing, locale: 'ar' | 'en') {
   const text = monthlyLineText(listing, locale);
   if (text == null) return null;
-  return <Text style={card.pricePerMeter} numberOfLines={1} testID="card-monthly-line">{text}</Text>;
+  return <Text style={card.pricePerMeter} {...MONEY_LINE} testID="card-monthly-line">{text}</Text>;
 }
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
+import { MONEY_LINE } from '@/lib/moneyLine';
 import { typeImg } from '@/theme/propertyIcons';
 import { GoldShineButton, GoldSurface } from './CardReveal';
 import { BuzzLayer } from './CardBuzzer';
@@ -294,11 +295,11 @@ export function ResultCard({
           <View style={card.lpPriceRow}>
             <View style={card.lpPriceCol}>
               {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
-              {stay ? null : <Text style={[card.price, card.lpPrice]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+              {stay ? null : <Text style={[card.price, card.lpPrice]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
               {monthlyLine(listing, locale)}
               {listing.discount ? (
                 <View style={card.discountRow} testID="card-discount">
-                  <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+                  <Text style={card.discountOld} {...MONEY_LINE}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
                   <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
                 </View>
               ) : null}
@@ -313,14 +314,14 @@ export function ResultCard({
             ) : null}
           </View>
           {(listing.price === 'Price on request' || listing.priceIsDerived) && listing.pricePerMeter != null && listing.pricePerMeter > 1 ? (
-            <Text style={card.pricePerMeter} numberOfLines={1}>
+            <Text style={card.pricePerMeter} {...MONEY_LINE}>
               {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{Number(listing.pricePerMeter).toLocaleString('en-US')} {t('SAR/m²')}</Text>
             </Text>
           ) : null}
           {listing.priceIsDerived ? (() => {
             const eq = derivedTotalEquation(listing.pricePerMeter, listing.area);
             return eq ? (
-              <Text style={card.derivedTotalEquation} numberOfLines={1}>
+              <Text style={card.derivedTotalEquation} {...MONEY_LINE}>
                 {`${eq.perMeter.toLocaleString('en-US')} ${t('SAR/m²')} × ${eq.area.toLocaleString('en-US')} ${t('m²')} = ${eq.total.toLocaleString('en-US')} ${t('SAR')}`}
               </Text>
             ) : null;
@@ -329,12 +330,12 @@ export function ResultCard({
             <Text style={card.derivedTotalNote} numberOfLines={1}>{t('Calculated from price per m² × area — not published by the source')}</Text>
           ) : null}
           {listing.typedTotalAsPerMeter != null ? (
-            <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-total-as-ppm">
+            <Text style={card.derivedTotalNote} {...MONEY_LINE} testID="card-typed-total-as-ppm">
               {t('The ad put {n} SAR in the price box — read as the price per m²', { n: Number(listing.typedTotalAsPerMeter).toLocaleString('en-US') })}
             </Text>
           ) : null}
           {listing.typedInThousands != null ? (
-            <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-in-thousands">
+            <Text style={card.derivedTotalNote} {...MONEY_LINE} testID="card-typed-in-thousands">
               {t('The site wrote {n} — we read it in thousands', { n: Number(listing.typedInThousands).toLocaleString('en-US') })}
             </Text>
           ) : null}
@@ -469,14 +470,14 @@ export function ResultCard({
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
         {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
-        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
         {monthlyLine(listing, locale)}
         </View>
         {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
             under the final price. Rendered only when the source showed one — see listingDiscountFrom(). */}
         {listing.discount ? (
           <View style={card.discountRow} testID="card-discount">
-            <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+            <Text style={card.discountOld} {...MONEY_LINE}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
             <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
           </View>
         ) : null}
@@ -518,7 +519,7 @@ export function ResultCard({
         {(listing.price === 'Price on request' || listing.priceIsDerived)
           && listing.pricePerMeter != null
           && listing.pricePerMeter > 1 ? (
-          <Text style={card.pricePerMeter} numberOfLines={1}>
+          <Text style={card.pricePerMeter} {...MONEY_LINE}>
             {/* UNIT-SUFFIXED, never prefix-only (owner 2026-08-09: "display it clearly as ريال/م²").
                 Renders «سعر المتر 750 ريال/م²». The old form put the currency BEFORE the number
                 («سعر المتر ر.س 750»), which reads like a total price with a label in front of it —
@@ -537,7 +538,7 @@ export function ResultCard({
         {listing.priceIsDerived ? (() => {
           const eq = derivedTotalEquation(listing.pricePerMeter, listing.area);
           return eq ? (
-            <Text style={card.derivedTotalEquation} numberOfLines={1}>
+            <Text style={card.derivedTotalEquation} {...MONEY_LINE}>
               {`${eq.perMeter.toLocaleString('en-US')} ${t('SAR/m²')} × ${eq.area.toLocaleString('en-US')} ${t('m²')} = ${eq.total.toLocaleString('en-US')} ${t('SAR')}`}
             </Text>
           ) : null;
@@ -550,14 +551,14 @@ export function ResultCard({
         {/* THE SELLER'S OWN FIGURE STAYS VISIBLE (owner 2026-11-04): the index read the ad's «total» as a per-metre price
             (src/lib/landPerMeterTotal.ts), so say what the ad actually wrote, next to the «≈» total we computed. */}
         {listing.typedTotalAsPerMeter != null ? (
-          <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-total-as-ppm">
+          <Text style={card.derivedTotalNote} {...MONEY_LINE} testID="card-typed-total-as-ppm">
             {t('The ad put {n} SAR in the price box — read as the price per m²', { n: Number(listing.typedTotalAsPerMeter).toLocaleString('en-US') })}
           </Text>
         ) : null}
         {/* A PRICE TYPED IN THOUSANDS (owner 2026-11-06): the index serves «≈ figure × 1000» (src/lib/priceInThousands.ts);
             the site's own figure stays visible next to it. */}
         {listing.typedInThousands != null ? (
-          <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-in-thousands">
+          <Text style={card.derivedTotalNote} {...MONEY_LINE} testID="card-typed-in-thousands">
             {t('The site wrote {n} — we read it in thousands', { n: Number(listing.typedInThousands).toLocaleString('en-US') })}
           </Text>
         ) : null}
@@ -1560,7 +1561,10 @@ const card = StyleSheet.create({
   wrapRow: { flexDirection: 'row' },
   bodyRow: { flex: 1, minWidth: 0 },
   photoColRow: { width: 168, minHeight: 118, margin: 8, borderRadius: 8, alignSelf: 'stretch' },
-  photoColTight: { width: 124, minHeight: 100, margin: 6 },
+  // The photo gives way before the price does (owner 2026-11-10): at a 1024-wide laptop with the ad beside, this row
+  // is ~262 px, and a fixed 124 px photo left the price 108 px — «ر.س 3,450,000» needs 112. It is 124 px from a
+  // 310 px card up and 40% of the card below that, so a seven-digit price keeps its one line there too.
+  photoColTight: { width: '40%', maxWidth: 124, minHeight: 100, margin: 6 },
   rankBadgeRow: { top: 5, left: 5, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
   rankTextRow: { fontSize: 10 },
   sourceStripRow: { paddingVertical: 4, paddingHorizontal: 7, columnGap: 6, rowGap: 0 },

@@ -17,6 +17,7 @@ import { SourceBadge, FEATURE_META, arAttrValue, isBlankAttrValue } from '@/comp
 import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts, districtEmbedUrl, districtPlace, type DistrictPlace, fetchSimilarListings, type SimilarCard } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import { safeHttpUrl } from '@/lib/safeUrl';
+import { MONEY_LINE } from '@/lib/moneyLine';
 import type { Listing } from '@/data/listings';
 
 // THE IN-APP AD PAGE for the sites that cannot be framed (lib/inAppViewer.ts IN_APP_PREVIEW_HOSTS):
@@ -582,7 +583,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
           <View style={s.headMain}>
             {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
             {listingPrice(l, locale) ? (
-              <Text testID="listing-preview-price" numberOfLines={1} style={[s.price, tx]}>
+              <Text testID="listing-preview-price" {...MONEY_LINE} style={[s.price, tx]}>
                 {priceRuns(listingPrice(l, locale)).map((r, i) => <Text key={i} style={r.num ? s.priceNum : s.priceUnit}>{r.text}</Text>)}
               </Text>
             ) : null}
@@ -591,14 +592,14 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             {(() => {
               const text = monthlyLineText(l, locale);
               return text == null ? null : (
-                <Text testID="listing-preview-monthly-line" numberOfLines={1} style={[s.priceUnit, tx]}>{text}</Text>
+                <Text testID="listing-preview-monthly-line" {...MONEY_LINE} style={[s.priceUnit, tx]}>{text}</Text>
               );
             })()}
             {/* Source-published discount (owner 2026-10-19): the old price struck + «خصم X٪» under the
                 final price — the same line the result card shows, only when the source showed one. */}
             {l.discount ? (
               <View style={s.discountRow} testID="listing-preview-discount">
-                <Text numberOfLines={1} style={s.discountOld}>{listingDiscountOldPrice(l.discount, locale)}</Text>
+                <Text {...MONEY_LINE} style={s.discountOld}>{listingDiscountOldPrice(l.discount, locale)}</Text>
                 <View style={s.discountBadge}><Text style={s.discountBadgeTx}>{t('Discount {pct}%', { pct: l.discount.pct })}</Text></View>
               </View>
             ) : null}
@@ -709,7 +710,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                 const cell = (label: string, value: string | null, key: string) => (
                   <View key={key} style={s.cell2}>
                     <Text numberOfLines={1} style={[s.cellK2, tx]}>{label}</Text>
-                    <Text numberOfLines={1} style={[s.cellV2, tx]}>{value ?? '—'}</Text>
+                    <Text {...MONEY_LINE} style={[s.cellV2, tx]}>{value ?? '—'}</Text>
                   </View>
                 );
                 const ours = st ? {
@@ -850,7 +851,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                       >
                         <View style={s.siteLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.5 }] }}><SourceBadge source={card.source} /></View></View>
                         <Text numberOfLines={1} style={s.siteName}>{t(sourceName(card.source))}</Text>
-                        <Text numberOfLines={1} style={s.sitePrice}>{listingPrice(card, locale)}</Text>
+                        <Text {...MONEY_LINE} style={s.sitePrice}>{listingPrice(card, locale)}</Text>
                         <Text numberOfLines={1} style={[s.siteHint, me && s.siteHintMe]}>{me ? t('this ad') : t('Tap to view it')}</Text>
                       </Pressable>
                     ))}
@@ -1004,8 +1005,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                 >
                   <View style={s.simLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.5 }] }}><SourceBadge source={card.source} /></View></View>
                   <View style={s.simMain}>
-                    <Text numberOfLines={1} style={[s.simPrice, tx]}>{listingPrice(card, locale)}</Text>
-                    <Text numberOfLines={1} style={[s.simMeta, tx]}>{`${fmtArea(area)} م² · ${fmtInt(ppm)} ${t('SAR/m²')}${beds != null ? ` · ${t('{n} bedrooms', { n: fmtInt(beds) })}` : ''}`}</Text>
+                    <Text {...MONEY_LINE} style={[s.simPrice, tx]}>{listingPrice(card, locale)}</Text>
+                    <Text {...MONEY_LINE} style={[s.simMeta, tx]}>{`${fmtArea(area)} م² · ${fmtInt(ppm)} ${t('SAR/m²')}${beds != null ? ` · ${t('{n} bedrooms', { n: fmtInt(beds) })}` : ''}`}</Text>
                     <Text numberOfLines={1} style={[s.simSite, tx]}>{t(sourceName(card.source))} · {t('Tap to view it')}</Text>
                   </View>
                   <Ionicons name="open-outline" size={16} color={colors.primary} />
@@ -1056,8 +1057,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
               <View key={d.ref} style={s.dealRow}>
                 <Text numberOfLines={1} style={s.dealCell}>{d.date}</Text>
                 <Text numberOfLines={1} style={s.dealCell}>{fmtArea(d.area)}</Text>
-                <Text numberOfLines={1} style={s.dealCell}>{fmtInt(d.price)}</Text>
-                <Text numberOfLines={1} style={s.dealCell}>{fmtInt(d.ppm)}</Text>
+                <Text {...MONEY_LINE} style={s.dealCell}>{fmtInt(d.price)}</Text>
+                <Text {...MONEY_LINE} style={s.dealCell}>{fmtInt(d.ppm)}</Text>
                 <Text numberOfLines={1} style={[s.dealCell, s.dealRef]}>{d.ref}</Text>
               </View>
             ))}
