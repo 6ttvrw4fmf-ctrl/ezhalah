@@ -641,6 +641,12 @@
         "evidence": "mon_image_coverage / ops_image_coverage_latest() daily snapshots 2026-09-30 … 10-07 (queried 2026-10-07 05:40 UTC)."
       }
     },
+    "propertyfinder": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 4677,
+      "note": "Declared 2026-11-10 by the Quality & Repair Engineer: live since 2026-11-04 without a baseline row, so loader-active-platforms-check.yml was red on «NOT in the baseline». MEASURED ON THE PRODUCTION ROWS: mon_image_coverage has 6 daily snapshots, 4,541–4,677 active rows, 100.0% with photo_urls on every one (4,677 of 4,677 on 2026-11-10 03:37 UTC). Floor ≈ the observed low minus ~3 points, so the gate fires on a capture regression, not on churn."
+    },
     "qmra": {
       "floor_pct": 60,
       "today_pct": 100.0,
