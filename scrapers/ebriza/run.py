@@ -101,6 +101,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import decide, read_is_unbelievable  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://ebriza.com.sa"
 API = f"{BASE}/RestApi/MainApi.php"
@@ -346,6 +347,12 @@ def map_listing(it: dict) -> tuple[Optional[dict], str, str]:
         "street_width_m": normalize.one_street_width(sw_raw) if sw_raw not in ("", "0") else None,
         "direction": normalize.one_direction(facade_raw) if facade_raw else None,
         "license_number": licence if re.fullmatch(r"\d{6,}", licence) else None,
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): `created_at`, which the ad page prints as «تاريخ النشر
+        # … على منصة ابريزة» / «منذ تاريخ : <created_at[:10]>» (assets/js/property_details.js). It carries no zone and
+        # IS SAUDI TIME, kept as published: each ad's photo file name holds its upload epoch, 0-53 s before created_at
+        # read as +03:00 on all six newest ads (787: m1793533806 = 11:50:06Z, created_at 14:50:59). Never creationDate /
+        # endDate (the REGA licence, DD/MM/YYYY) nor date_created (the building-age word «جديد»).
+        "date_added": site_posting_date(it.get("created_at")),
         "photo_urls": photo_urls(it)[:20] or None,
     }
 

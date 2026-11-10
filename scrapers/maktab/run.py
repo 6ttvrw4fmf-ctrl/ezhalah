@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 SITE = "https://maktab.sa"
 API = "https://backend.maktab.sa/apiBack/v1/user/offices"
@@ -153,6 +154,11 @@ def map_office(o: dict, today: Any = None) -> tuple[Optional[dict], str, str]:
         "price_annual": price_annual,
         "rent_period": rent_period,
         "photo_urls": photos[:20],
+        # The office record's `created_at` (Laravel, UTC «Z») — what /details/<id> prints as «تاريخ الإعلان»
+        # (Details chunk: adDate = format(r.created_at)). NOT license_create_date («تاريخ إصدار الرخصة»).
+        # Live office 127 (2026-11-09): created_at «2026-11-05T12:53:13.000000Z», licence issued
+        # 2026-11-04; we first saw it 2026-11-06 05:18 UTC.
+        "date_added": site_posting_date(o.get("created_at")),
         "additional_info": redact_capture({k: v for k, v in {
             "office_kind_ar": kind, "price_period_label": label, "price_raw": price,
             "ad_licence_url": o.get("ad_license_url"), "licence_created": o.get("license_create_date"),

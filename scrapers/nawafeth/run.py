@@ -33,8 +33,13 @@ TYPE is «نوع العقار». A plot is Commercial Land only when the source'
 «تجاري» (the fleet reading, as macsaib). «شقَّة صغيرة (استوديو)» → Studio (abaad's fold).
 
 NOT STORED: coordinates — the page's map pin is unreliable (#156, a plot in دخنه/القصيم, is pinned
-at 27.02, 49.57 in the Eastern Province). The header date carries no label saying whether it is a
-posting or an update date, so it is kept in additional_info only, never as date_added.
+at 27.02, 49.57 in the Eastern Province).
+POSTING DATE (2026-11-09). The header's unlabelled date (clock icon, «26‏/10‏/2026», DD/MM/YYYY) is the
+AD's own date, measured on four live ads: it is per ad (180 and 182, one advertiser fetched seconds apart,
+print 23/10 and 26/10 — so not the advertiser's last-seen); it rises with the ad id (151 24/02 · 176
+04/10 · 180 23/10 · 182 26/10); it is the day before we first saw each new ad (176/180/182) and never
+later; and 180 and 182 carry REGA licences 7201172112 / 7201172117, issued minutes apart, yet print dates
+three days apart — so it is not the licence's date either. → date_added. The licence END date never is.
 
 PDPL: «اسم/رقم الموظف المسؤول عن الاعلان» and the header «الإسم» are never read into the row.
 """
@@ -55,6 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.page_pin import pin_from_html  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
@@ -125,6 +131,17 @@ def _num(raw: Optional[str]):
     except ValueError:
         return None
     return None if f <= 0 else int(f) if f.is_integer() else f
+
+
+# The header's clock-icon date, «26&#x200F;/10&#x200F;/2026» (RLM marks around the slashes).
+_POSTED_RE = re.compile(r'<img src="/imgs/icons/time\.png"[^>]*>\s*<p>\s*(\d{1,2})(?:&#x200F;|\u200f)?/'
+                        r'(?:&#x200F;|\u200f)?(\d{1,2})(?:&#x200F;|\u200f)?/(?:&#x200F;|\u200f)?(\d{4})\s*</p>', re.I)
+
+
+def posted_on(page: str) -> Optional[str]:
+    """The ad's own date as DD/MM/YYYY (the order is proven by 26/10, 23/10, 24/02) — None when absent."""
+    m = _POSTED_RE.search(page or "")
+    return f"{m[1]}/{m[2]}/{m[3]}" if m else None
 
 
 _PLAT = re.compile(r"propertyLat\s*=\s*parseFloat\('(-?\d+\.\d+)'\)")
@@ -204,6 +221,9 @@ def map_listing(ad_id: int, page: str, today: date) -> tuple[Optional[tuple[dict
         "license_number": kv.get("رقم ترخيص الإعلان"),
         "license_expiry": exp.isoformat(),
         "photo_urls": photos(page) or None,
+        # The header's date (see POSTING DATE above). Live 182 (2026-11-09): «26‏/10‏/2026»; we first saw
+        # it 2026-10-27 05:29 UTC. Not «تاريخ انتهاء رخصة الاعلان» (30/12/2026), the licence's end.
+        "date_added": site_posting_date(posted_on(page)),
         "price_per_meter": price if is_land else None,
     }
     if is_land:

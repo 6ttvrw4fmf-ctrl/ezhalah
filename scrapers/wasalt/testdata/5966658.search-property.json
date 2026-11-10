@@ -1,0 +1,120 @@
+{
+ "id": 5966658,
+ "createdAt": "2026-10-31T10:09:14.122Z",
+ "publishedAt": "2026-10-31T10:19:21.069Z",
+ "updatedAt": "2026-11-03T13:04:22.535Z",
+ "isUpdated": true,
+ "propertyInfo": {
+  "currencyType": "SAR",
+  "country": "Saudi Arabia",
+  "propertyMainType": "Residential",
+  "address": "Al Salamah, North Jeddah, Jeddah",
+  "city": "Jeddah",
+  "propertySubType": "Apartment",
+  "furnishingType": "Un-Furnished",
+  "title": "Apartment",
+  "unitType": "SQM",
+  "possessionType": "Residential",
+  "zone": "Al Salamah",
+  "managedBy": "Your Team",
+  "slug": "apartment-5966658",
+  "territory": "North Jeddah",
+  "salePrice": 850000,
+  "expectedRent": "",
+  "tags": [
+   "Un-Furnished"
+  ],
+  "propertyFor": "sale",
+  "conversionPrice": 850000,
+  "conversionUnit": "SAR",
+  "statusTypeId": 505,
+  "statusTypeSlug": "approved",
+  "cityId": 274,
+  "territoryId": 5,
+  "zoneId": 2213,
+  "districtId": 2213,
+  "district": "Al Salamah",
+  "propertySubTypeSlug": "apartment",
+  "rentFreq": "",
+  "currencyTypeMarker": "SR"
+ },
+ "attributes": [
+  {
+   "key": "noOfBathrooms",
+   "name": "Bathrooms",
+   "value": 3,
+   "image": "https://assets.wasalt.com/others/icons/noofbathroomsbnw.png",
+   "iconClass": "bathroom"
+  },
+  {
+   "key": "builtUpArea",
+   "name": "Built-Up Area",
+   "value": "183",
+   "image": "https://assets.wasalt.com/others/icons/builtupareabnw.png",
+   "unit": "SQM",
+   "iconClass": "builtup-area"
+  },
+  {
+   "key": "completionYear",
+   "name": "Age",
+   "value": "New",
+   "image": "https://assets.wasalt.com/others/icons/completionyearbnw.png",
+   "unit": "",
+   "iconClass": "age-of-building"
+  }
+ ],
+ "featureAmenities": [
+  {
+   "name": "Park"
+  },
+  {
+   "name": "School"
+  },
+  {
+   "name": "Mosque"
+  },
+  {
+   "name": "Garden"
+  },
+  {
+   "name": "Health Centre"
+  },
+  {
+   "name": "Retail Outlet"
+  },
+  {
+   "name": "Indoor Staircase"
+  }
+ ],
+ "location": {
+  "lon": "39.157682757695845",
+  "lat": "21.592757874329358"
+ },
+ "propertyFiles": {
+  "images": [
+   "eb531fd3-3a25-4a65-a8d4-861c4da49aaa.jpeg",
+   "0f665ac6-0eb6-4384-8af0-7f7dfcabf6dd.jpeg",
+   "47f7ce81-6fdf-4c89-8b1b-a50dfb962245.jpeg",
+   "bde1e27d-921e-43f4-8ab5-5ac13aa63610.jpeg",
+   "7360c4f0-c842-4665-8b88-274487b4c6b0.jpeg",
+   "8c6be314-4e12-45b0-a3da-2def70a6dde0.jpeg",
+   "6d657836-2e31-4ac7-b422-9d5284321ece.jpeg",
+   "2da4f780-cbbf-4568-80b7-51d98768613b.jpeg",
+   "4bf3f889-db7b-4a03-8a97-5ff8cd1ce4d6.jpeg",
+   "eb97bf2c-29d3-45fa-bf28-83d0c595b3c5.jpeg",
+   "76b89919-41e6-40d1-9b7f-e27e725dbd13.jpeg",
+   "e0d6304e-dcd6-40b6-80a2-7803d7d8141e.jpeg"
+  ],
+  "brochure": [],
+  "floorPlans": [],
+  "videoUrls": [
+   {
+    "thumbnail": "https://assets.wasalt.com/properties/5966658/images/ffa92811-0b50-4a41-b5db-ac62956ee207_thumbnail.jpg",
+    "type": "video",
+    "content": "https://cdn.wasalt.com/production/properties/5966658/videos/ffa92811-0b50-4a41-b5db-ac62956ee207.mp4",
+    "videoType": "manual-video",
+    "iconClass": "play"
+   }
+  ]
+ }
+}

@@ -67,6 +67,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 # PDPL: never store advertiser contact/identity. The rest of the row is kept.
 _PII = {"owner_phone", "owner_name", "advertiser_id"}
@@ -277,6 +278,10 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "photo_urls": (L.get("images") or [])[:30],
         "video_url": L.get("video_url"),
         "license_number": L.get("ad_license"),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the row's `created_at` (UTC), which the ad page prints
+        # as «تاريخ النشر: ٢/١١/٢٠٢٦» — measured 2026-11-09 on AD202611020001: created_at 2026-11-02T18:38:11Z (21:38 Saudi);
+        # the site's own ad number carries the same day. Never updated_at (an edit: 2026-11-03 on the same ad).
+        "date_added": site_posting_date(L.get("created_at")),
         "rega_location_verified": bool(L.get("ad_license")),
         "additional_info": _extra_info_rows(L.get("extras")),
         "source_capture": {k: v for k, v in L.items() if k not in _PII},
