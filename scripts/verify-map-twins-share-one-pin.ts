@@ -56,7 +56,11 @@ const refreshFn = fnBody(refresh.body);
 const sameSiteOnly = (sql: string) => /partition by s\.source_table, s\.deal_ar, s\.price, s\.area_m2, s\.type_ar, s\.bedrooms, s\.ppm\)/.test(sql)
   && /group by 1, 2, 3, 4, 5, 6, 7 having count\(distinct \(la, lo\)\) > 1/.test(sql) && /select source_table, deal_ar, price, area_m2, type_ar, bedrooms, ppm\s/.test(sql);
 const nearOnly = (sql: string) => { const m = /ST_ClusterDBSCAN\([^,]+\([^)]*\), ([0-9.]+), 2\)/.exec(sql); return !!m && Number(m[1]) > 0 && Number(m[1]) <= 0.001; };
-const noPlaceholders = (sql: string) => /not exists \(select 1 from public\.ops_default_pin_register r/.test(sql);
+// EVERY read of the listings (the same-site pass and the licence pass) leaves the placeholder pins out — counted, so a
+// second pass cannot slip in without the exclusion.
+const count = (sql: string, re: RegExp) => (sql.match(re) ?? []).length;
+const noPlaceholders = (sql: string) => count(sql, /from public\.search_listings_ar x\b/g) > 0
+  && count(sql, /not exists \(select 1 from public\.ops_default_pin_register r/g) === count(sql, /from public\.search_listings_ar x\b/g);
 check('twins are grouped only inside ONE site with the same deal, price, area, type and bedrooms', sameSiteOnly(refreshFn));
 check('twins must be within ~100 m of each other (DBSCAN eps ≤ 0.001°)', nearOnly(refreshFn));
 check('placeholder/default pins never take part', noPlaceholders(refreshFn));
