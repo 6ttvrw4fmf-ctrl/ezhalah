@@ -10,8 +10,11 @@
 // drops is index↔raw drift and stays red.
 export const MAX_HYDRATION_DROPS = 25;
 
-export type HydrationLedger = { asked: Map<string, number>; got: Set<string> };
-export const newHydrationLedger = (): HydrationLedger => ({ asked: new Map(), got: new Set() });
+// Per listing key, the NEWEST hydration that asked for it (by arrival order) and whether THAT response returned it.
+// A slower, older response never overwrites a newer observation, and «returned» belongs to one response, never to
+// the key forever — so a row an older search got back cannot mask the newer search's drop (CodeRabbit, PR 11725).
+export type HydrationLedger = { obs: Map<string, { seq: number; got: boolean }> };
+export const newHydrationLedger = (): HydrationLedger => ({ obs: new Map() });
 
 /** Record one raw-table hydration response: its URL names the table and the ids asked for; its body holds the rows returned. */
 export function recordHydration(led: HydrationLedger, url: string, ok: boolean, body: unknown, seq: number): boolean {
@@ -19,8 +22,13 @@ export function recordHydration(led: HydrationLedger, url: string, ok: boolean, 
   const tbl = (url.match(/\/rest\/v1\/([a-z0-9_]+_listings)\?/) || [])[1];
   const inList = (dec.match(/[?&]id=in\.\(([^)]*)\)/) || [])[1];
   if (!tbl || inList == null || !ok || !Array.isArray(body)) return false;   // a failed chunk is not a drop
-  for (const id of inList.split(',').map((x) => x.trim()).filter(Boolean)) led.asked.set(`${tbl}:${id}`, seq);
-  for (const row of body as any[]) if (row?.id != null) led.got.add(`${tbl}:${row.id}`);
+  const returned = new Set((body as any[]).filter((r) => r?.id != null).map((r) => String(r.id)));
+  for (const id of inList.split(',').map((x) => x.trim()).filter(Boolean)) {
+    const k = `${tbl}:${id}`;
+    const prev = led.obs.get(k);
+    if (prev && prev.seq > seq) continue;               // a newer observation already stands
+    led.obs.set(k, { seq, got: returned.has(id) });
+  }
   return true;
 }
 
@@ -28,9 +36,9 @@ export function recordHydration(led: HydrationLedger, url: string, ok: boolean, 
 export function dropsOf(led: HydrationLedger, rows: string[], sinceSeq = -Infinity): { n: number | null; keys: string[] } {
   const keys: string[] = [];
   for (const k of rows) {
-    const s = led.asked.get(k);
-    if (s == null || s < sinceSeq) return { n: null, keys: [] };
-    if (!led.got.has(k)) keys.push(k);
+    const o = led.obs.get(k);
+    if (o == null || o.seq < sinceSeq) return { n: null, keys: [] };
+    if (!o.got) keys.push(k);
   }
   return { n: keys.length, keys };
 }

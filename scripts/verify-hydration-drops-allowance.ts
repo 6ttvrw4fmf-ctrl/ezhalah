@@ -14,6 +14,17 @@ const d = dropsOf(led, rows, 4);
 check('one row asked and not returned is one measured drop', d.n === 1 && d.keys[0] === 'aqar_residential_listings:2');
 check('a row whose request was never observed makes the allowance null', dropsOf(led, [...rows, 'wasalt_residential_listings:9'], 4).n === null);
 check('a request older than the search does not count', dropsOf(led, rows, 6).n === null);
+// CROSSING (CodeRabbit, PR 11725): a newer search (seq 10) hydrates id 7 and loses it; an OLDER search's response that
+// had returned id 7 arrives later with an earlier stamp (seq 8) — it must not mask the newer drop or overwrite it.
+const x = newHydrationLedger();
+recordHydration(x, url('haraj_residential_listings', [7, 8]), true, [{ id: 8 }], 11);          // newer search's hydration: 7 dropped
+recordHydration(x, url('haraj_residential_listings', [7]), true, [{ id: 7 }], 9);              // older response, read later
+const xd = dropsOf(x, ['haraj_residential_listings:7', 'haraj_residential_listings:8'], 10);
+check('an older response read late neither masks nor overwrites the newer drop', xd.n === 1 && xd.keys[0] === 'haraj_residential_listings:7');
+const y = newHydrationLedger();
+recordHydration(y, url('haraj_residential_listings', [5]), true, [{ id: 5 }], 3);              // an older search got id 5 back
+recordHydration(y, url('haraj_residential_listings', [5]), true, [], 12);                      // the newer search lost it
+check('a row an older search got back cannot mask the newer search drop', dropsOf(y, ['haraj_residential_listings:5'], 10).n === 1);
 check('headline == rpc − 1 with one measured drop is honest', honestHeadline(99, 100, 1));
 check('headline == rpc with zero drops is honest', honestHeadline(100, 100, 0));
 check('headline == rpc with unobserved drops is honest', honestHeadline(100, 100, null));

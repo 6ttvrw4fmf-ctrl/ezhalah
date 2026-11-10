@@ -58,6 +58,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
+import { newHydrationLedger, recordHydration, dropsOf as libDropsOf } from './lib/hydrationDrops.ts';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
@@ -634,8 +635,9 @@ const counts: Count[] = [];
 let seq = 0;
 // Every raw-table hydration the app sent (fetchRawByIds: GET /rest/v1/<table>?…&id=in.(…)): which ids it ASKED for
 // and which came back. A row asked for and not returned is a hydration drop (src/lib/honestTotal.ts).
-const hydrationAsked = new Map<string, number>();   // `${table}:${id}` → seq of the request
-const hydrationGot = new Set<string>();
+// One ledger rule for every live count robot (scripts/lib/hydrationDrops.ts): per listing key the NEWEST hydration
+// by arrival order and whether THAT response returned it (CodeRabbit, PR 11725).
+const hyd = newHydrationLedger();
 page.on('response', async (r) => {
   const u = r.url();
   // Arrival order stamped before any await (CodeRabbit, PR 11725): body reads finish in any order.
@@ -643,12 +645,10 @@ page.on('response', async (r) => {
   if (r.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u) && /[?&]id=in\./.test(decodeURIComponent(u))) {
     try {
       const tbl = (u.match(/\/rest\/v1\/([a-z0-9_]+_listings)\?/) || [])[1];
-      const inList = (decodeURIComponent(u).match(/[?&]id=in\.\(([^)]*)\)/) || [])[1] || '';
       if (!tbl || !r.ok()) return;                     // a failed chunk is not a drop: the app shows the retry UI instead
       const j = await r.json();
       if (!Array.isArray(j)) return;
-      for (const id of inList.split(',').map((x) => x.trim()).filter(Boolean)) hydrationAsked.set(`${tbl}:${id}`, arrived);
-      for (const row of j) if (row?.id != null) hydrationGot.add(`${tbl}:${row.id}`);
+      recordHydration(hyd, u, r.ok(), j, arrived);
     } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ }
     return;
   }
@@ -716,13 +716,7 @@ const waitForSearch = async (armed: number, timeoutMs = 40_000, want?: (s: Searc
  *  request was not observed after the search (then nothing is excused). */
 const dropsOf = (s: Search | null): { n: number | null; keys: string[] } => {
   if (!s) return { n: null, keys: [] };
-  const keys: string[] = [];
-  for (const k of s.rows) {
-    const asked = hydrationAsked.get(k);
-    if (asked == null || asked < s.seq) return { n: null, keys: [] };
-    if (!hydrationGot.has(k)) keys.push(k);
-  }
-  return { n: keys.length, keys };
+  return libDropsOf(hyd, s.rows, s.seq);
 };
 const waitForHeadline = async (total: number | null, timeoutMs = 25_000, honest?: () => number | null): Promise<number | null> => {
   const until = Date.now() + timeoutMs;
