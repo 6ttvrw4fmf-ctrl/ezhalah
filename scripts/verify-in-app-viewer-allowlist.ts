@@ -327,6 +327,68 @@ check('speed-live.mjs skips the framing-header check on a 4xx/5xx (or absent) to
 mustCatch('a guard that reads X-Frame-Options off an error page', !guardSkipsHeadersOnErrorPage(guardSrc.replace('if (!res || res.status >= 400)', 'if (false)')));
 mustCatch('a guard that checks the headers before it looks at the status', !guardSkipsHeadersOnErrorPage(
   guardSrc.replace("const xfo = res?.headers.get('x-frame-options') ?? '';", '').replace("const topStatus = new Map();", "const xfo0 = res?.headers.get('x-frame-options') ?? ''; const topStatus = new Map();")));
+// A BOT WALL IS NOT THE AD PAGE, AND THE FRAME IS ITS OWN REQUEST (🔧 2026-11-10, #11680, alert 14155). Six hosts read
+// «SAMEORIGIN» ×3 + NO CONTENT ×3 in run 42817005291 because the robot's top-level fetch received a WAF page whose header
+// is the wall's, not the ad's. The guard's two new decisions are EXECUTED here, lifted from the live script's own source
+// so the proof is about the predicate production runs, not a copy of it:
+//   isBotWall(body)  — a page too small to be a listing, or challenge words on a page still far smaller than any ad page;
+//                      a full ad page with «captcha» in a widget is NOT a wall (CodeRabbit: an incidental marker).
+//   frameRefusal(doc) — the FRAME's own document answer proves a refusal (2xx/3xx, not a wall, refusing header) even
+//                      when the top-level fetch hit a wall; otherwise the blank frame is inconclusive.
+const liftArrow = (src: string, name: string) => {
+  const m = new RegExp(`export const ${name} = (\\([^)]*\\) => [\\s\\S]*?);\\n(?=\\/\\*\\*|export |const |\\n)`).exec(src);
+  if (!m) throw new Error(`could not lift ${name} from speed-live.mjs`);
+  return m[1];
+};
+const liftGuard = (src: string) => {
+  const consts = /export const WALL_MAX_CHARS = ([0-9_]+);/.exec(src)?.[1];
+  if (!consts) throw new Error('could not lift WALL_MAX_CHARS from speed-live.mjs — the proof must run production\'s own threshold');
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  return new Function(`const WALL_MAX_CHARS = ${consts}; const isBotWall = ${liftArrow(src, 'isBotWall')}; const frameRefusal = ${liftArrow(src, 'frameRefusal')}; return { isBotWall, frameRefusal };`)() as
+    { isBotWall: (b: string) => boolean; frameRefusal: (d: { status: number; xfo: string; csp: string; text: string } | null) => string | null };
+};
+const guard = liftGuard(guardSrc);
+const challenge = '<html><head><title>Just a moment...</title></head><body><div id="challenge-platform">Checking your browser before accessing the site.</div></body></html>'.padEnd(6_000, ' ');
+const adPage = ('<html><head><title>شقة للإيجار</title></head><body>' + '<p>غرف 3 · حمامات 2 · 1,200 م²</p>'.repeat(900) + '<div class="contact captcha-widget">captcha</div></body></html>');
+check('a 6 KB Cloudflare interstitial is a wall', guard.isBotWall(challenge));
+check('a few hundred bytes with no words is a wall (a WAF stub)', guard.isBotWall('<html><body>Forbidden</body></html>'));
+check(`a full ad page (${adPage.length} chars) that merely contains «captcha» in a widget is NOT a wall`, !guard.isBotWall(adPage));
+check('a blank frame over a wall is inconclusive when the frame received a wall too', guard.frameRefusal({ status: 200, xfo: 'SAMEORIGIN', csp: '', text: challenge }) === null);
+check('…and when the frame received an error page', guard.frameRefusal({ status: 503, xfo: 'SAMEORIGIN', csp: '', text: adPage }) === null);
+check('…and when the frame received the ad with no refusing header', guard.frameRefusal({ status: 200, xfo: '', csp: "frame-ancestors *", text: adPage }) === null);
+check('but the FRAME receiving the real ad page with X-Frame-Options is a refusal, whatever the top-level fetch saw', guard.frameRefusal({ status: 200, xfo: 'SAMEORIGIN', csp: '', text: adPage }) === 'SAMEORIGIN');
+check('…and so is a CSP frame-ancestors that is not *', /frame-ancestors 'self'/.test(guard.frameRefusal({ status: 200, xfo: '', csp: "default-src 'self'; frame-ancestors 'self'", text: adPage }) ?? ''));
+check('no frame document answer at all is inconclusive (never invented)', guard.frameRefusal(null) === null);
+check('the top-level wall branch skips ONLY a wall: a full ad page with the header still fails as REFUSES framing', /if \(wall\) \{ topWall\.add\(u\); continue; \}\n\s*fail\(`\$\{site\.host\}: \$\{u\} now REFUSES framing/.test(guardSrc));
+check('an unreadable top-level body is inconclusive, never classified as a wall', /const body = await res\.text\(\)\.catch\(\(\) => null\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(body === null\) \{ topUnreadable\.add\(u\); console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc));
+check('an unreadable top-level body never becomes a 99,999 ms sample: a blank frame over it is inconclusive unless the frame proves a refusal', /topUnreadable\.add\(u\);/.test(guardSrc) && /if \(seen === null && \(topWall\.has\(u\) \|\| topUnreadable\.has\(u\)\)\) \{/.test(guardSrc) && /excluded as inconclusive`\); continue;\n\s*\}\n\s*times\.push\(seen \?\? 99_999\);/.test(guardSrc));
+check('a given-but-empty ONLY_HOSTS is refused (the bridge already reads it as partial)', /if \(\(process\.env\.ONLY_HOSTS \?\? ''\) !== '' && !only\.length\) fail\(/.test(guardSrc));
+check('the frame body read is awaited (bounded) BEFORE the browser context is closed', (() => { const a = guardSrc.indexOf('await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);'); const c = guardSrc.indexOf('await ctx.close();'); return a > 0 && c > 0 && a < c; })());
+check('the frame body read is awaited before the refusal decision', /d\.ready = r\.text\(\)\.then/.test(guardSrc) && guardSrc.indexOf('await Promise.race([frameDoc.ready') < guardSrc.indexOf('const refusal = frameRefusal(frameDoc);'));
+check('the exclusion branch consults the frame\'s evidence before excluding, and a proven refusal FAILS (never a 99,999 sample)', /\(topWall\.has\(u\) \|\| topUnreadable\.has\(u\)\)\) \{\n(?:\s*\/\/[^\n]*\n)+\s*const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc));
+check('the top-level log line carries no <title> (PDPL: a listing title can name a person or a phone)', !/title «\$\{title\}»/.test(guardSrc) && !/const title = \/<title/.test(guardSrc));
+check('an ONLY_HOSTS entry that is not in SITES fails the run (a typo must not read as a green run over nothing)', /const unknown = only\.filter\(\(h\) => !SITES\.some\(\(s\) => s\.host === h\)\);\n\s*if \(unknown\.length\) fail\(/.test(guardSrc));
+mustCatch('a wall test that trusts the words alone (an ad page with «captcha» read as a wall)',
+  liftGuard(guardSrc.replace('body.length < 1500 || (body.length < WALL_MAX_CHARS && /', 'body.length < 1500 || (true && /')).isBotWall(adPage));
+mustCatch('a wall test that stops looking at the words (the 6 KB interstitial read as the ad page)',
+  !liftGuard(guardSrc.replace('body.length < 1500 || (body.length < WALL_MAX_CHARS && /', 'body.length < 1500 || (false && /')).isBotWall(challenge));
+mustCatch('a frame refusal that ignores what the frame received (every wall-covered blank frame excluded)',
+  liftGuard(guardSrc.replace("if (!doc || doc.status >= 400 || isBotWall(doc.text)) return null;", "return null;")).frameRefusal({ status: 200, xfo: 'SAMEORIGIN', csp: '', text: adPage }) === null);
+mustCatch('an exclusion that no longer asks the frame', !/const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc.replace('const refusal = frameRefusal(frameDoc);\n        if (refusal) { fail(', 'const refusal = null;\n        if (refusal) { fail(')));
+mustCatch('a proven refusal demoted to a 99,999 sample (two fast siblings would outvote it)',
+  !/const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc.replace('if (refusal) { fail(', 'if (refusal) { console.log(')));
+mustCatch('a top-level branch that skips every page as a wall (`if (true)`)',
+  !/if \(wall\) \{ topWall\.add\(u\); continue; \}\n\s*fail\(`\$\{site\.host\}: \$\{u\} now REFUSES framing/.test(guardSrc.replace('if (wall) { topWall.add(u); continue; }', 'if (true) { topWall.add(u); continue; }')));
+mustCatch('an unreadable body read as an empty page (a wall)',
+  !/const body = await res\.text\(\)\.catch\(\(\) => null\);/.test(guardSrc.replace("const body = await res.text().catch(() => null);", "const body = await res.text().catch(() => '');")));
+mustCatch('a refusal decided before the frame body arrived',
+  (() => { const m = guardSrc.replace("      if (seen === null && frameDoc?.ready) await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);\n", ''); return !(m.indexOf('await Promise.race([frameDoc.ready') > 0 && m.indexOf('await Promise.race([frameDoc.ready') < m.indexOf('const refusal = frameRefusal(frameDoc);')); })());
+mustCatch('an unreadable body that still measures the blank frame (the 99,999 trap)',
+  !/if \(seen === null && \(topWall\.has\(u\) \|\| topUnreadable\.has\(u\)\)\) \{/.test(guardSrc.replace('if (seen === null && (topWall.has(u) || topUnreadable.has(u))) {', 'if (seen === null && topWall.has(u)) {')));
+mustCatch('a context closed before the frame body was read',
+  (() => { const m = guardSrc.replace("      if (seen === null && frameDoc?.ready) await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);\n", ''); const a = m.indexOf('await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);'); const c = m.indexOf('await ctx.close();'); return !(a > 0 && c > 0 && a < c); })());
+mustCatch('the <title> back in the log', /title «\$\{title\}»/.test(guardSrc.replace('${body.length} chars${wall', '${body.length} chars, title «${title}»${wall')));
+
 // A suffix match without the dot boundary (the lookalike mutant).
 const sloppySuffix = (url: string) => IN_APP_VIEWER_HOSTS.find((h) => new URL(url).hostname.endsWith(h)) ?? null;
 mustCatch('a host match without the dot boundary', sloppySuffix('https://notdealapp.sa/x') !== null);
