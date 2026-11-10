@@ -941,9 +941,12 @@ def street_from_prose(text) -> tuple[Optional[int], Optional[str]]:
 # on «ترخيص» and one whole 10-digit number: a bare digit grab is the price trap the masar tests guard.
 # «رخصة الإعلان: 7200661580» (amaall, 🔧 2026-11-07) says the same thing; «رخصة» counts only WITH «الإعلان», because
 # a bare «رخصة» is as often the broker's FAL licence, which is not the ad's.
+# «ترخيص الإعلان العقاري: 7201204886» (jurash, 32 of 43 live ads, card parity 2026-11-09): the word «العقاري» may
+# sit between «الإعلان» and the number, and the number is the AD licence only in its REGA shape 71/72xxxxxxxx — a
+# ten-digit FAL licence (1xxxxxxxxx) printed after «ترخيص» is the broker's, never the ad's.
 _AD_LICENCE_RE = re.compile(
     r"(?:ترخيص\s*(?:(?:ال)?[إا]علان(?:ي|ى)?\s*)?|رخص[ةه]\s*(?:ال)?[إا]علان(?:ي|ى)?\s*)"
-    r"(?:رقم\s*)?[:：/]?\s*([\d٠-٩]{10})(?![\d٠-٩])")
+    r"(?:(?:ال)?عقاري[ةه]?\s*)?(?:رقم\s*)?[:：/]?\s*(7[12][\d٠-٩]{8}|[٧][١٢][\d٠-٩]{8})(?![\d٠-٩])")
 
 
 def ad_licence_from_prose(text) -> Optional[str]:

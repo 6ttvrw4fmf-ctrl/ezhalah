@@ -1,0 +1,104 @@
+{
+ "id": 9067,
+ "date": "2026-04-14T15:56:47",
+ "date_gmt": "2026-04-14T15:56:47",
+ "modified": "2026-04-14T15:56:47",
+ "modified_gmt": "2026-04-14T15:56:47",
+ "slug": "%d8%b4%d9%82%d8%a9-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%a8%d8%ad%d9%8a-%d9%84%d8%a8%d9%86-%d8%b1%d9%82%d9%85-12",
+ "status": "publish",
+ "type": "property",
+ "link": "https://aqaralsaudia.com/property/%d8%b4%d9%82%d8%a9-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%a8%d8%ad%d9%8a-%d9%84%d8%a8%d9%86-%d8%b1%d9%82%d9%85-12/",
+ "title": {
+  "rendered": "شقة فاخرة للبيع بحي لبن رقم (12)"
+ },
+ "content": {
+  "rendered": "<p>شقة مكونة من مجلس وصالة ومطبخ و 3 غرف نوم</p>\n",
+  "protected": false
+ },
+ "featured_media": 9062,
+ "مميزات العقار": [
+  35,
+  62,
+  73,
+  74,
+  63,
+  76
+ ],
+ "تحديد انواع العقارات": [],
+ "مدن العقارات": [],
+ "حالات العقار": [],
+ "property_meta": {
+  "REAL_HOMES_property_price": "700000",
+  "REAL_HOMES_property_old_price": "",
+  "REAL_HOMES_property_price_prefix": "",
+  "REAL_HOMES_property_price_postfix": "",
+  "REAL_HOMES_property_size": "150",
+  "REAL_HOMES_property_size_postfix": "متر مربع",
+  "REAL_HOMES_property_lot_size": "",
+  "REAL_HOMES_property_lot_size_postfix": "",
+  "REAL_HOMES_property_bedrooms": "4",
+  "REAL_HOMES_property_bathrooms": "3",
+  "REAL_HOMES_property_garage": "1",
+  "REAL_HOMES_property_id": "AP-9067-property",
+  "REAL_HOMES_property_year_built": "",
+  "REAL_HOMES_property_location": {
+   "latitude": "24.636784",
+   "longitude": "46.5966777",
+   "zoom": ""
+  },
+  "REAL_HOMES_property_address": "لبن, ظهرة لبن, بلدية العريجاء, محافظة الرياض, منطقة الرياض, 13874, السعودية"
+ },
+ "_embedded": {
+  "wp:featuredmedia": [
+   {
+    "id": 9062,
+    "source_url": "https://aqaralsaudia.com/wp-content/uploads/2026/04/IMG_8410-7.jpeg",
+    "media_type": "image",
+    "mime_type": "image/jpeg"
+   }
+  ],
+  "wp:term": [
+   [
+    {
+     "id": 35,
+     "name": "أرضيات رخامية",
+     "slug": "marble-floors",
+     "taxonomy": "property-feature"
+    },
+    {
+     "id": 62,
+     "name": "تشطيب فاخر",
+     "slug": "fs",
+     "taxonomy": "property-feature"
+    },
+    {
+     "id": 73,
+     "name": "تكييف",
+     "slug": "wrte",
+     "taxonomy": "property-feature"
+    },
+    {
+     "id": 74,
+     "name": "دخول ذكي",
+     "slug": "dfsf",
+     "taxonomy": "property-feature"
+    },
+    {
+     "id": 63,
+     "name": "كافة الضمانات",
+     "slug": "dhamanat",
+     "taxonomy": "property-feature"
+    },
+    {
+     "id": 76,
+     "name": "مصعد",
+     "slug": "fwe",
+     "taxonomy": "property-feature"
+    }
+   ],
+   [],
+   [],
+   []
+  ]
+ }
+}

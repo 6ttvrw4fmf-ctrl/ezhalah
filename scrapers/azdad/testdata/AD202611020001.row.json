@@ -1,0 +1,35 @@
+{
+ "id": "e8fec943-5c62-4a80-baab-11b00e7d7cb2",
+ "title": "شقه 4 غرف",
+ "description": "شقه 4 غرف بدون صاله \r\nومطبخ وثلاث دورات مياة \r\nمداخل مستقله \r\nدور ارضي \r\n\r\nقريب من كل الخدمات",
+ "location": "مدينة سلطان",
+ "map_url": null,
+ "category": "شقة",
+ "type": "للإيجار",
+ "status": "متاح",
+ "area": 150,
+ "rooms": 4,
+ "bathrooms": 3,
+ "floor": "0",
+ "video_url": null,
+ "price": null,
+ "monthly_rent": 2084,
+ "yearly_rent": 25000,
+ "extras": [
+  "مطبخ راكب",
+  "كهرباء مستقل",
+  "حوش خاص",
+  "تحلية واصله",
+  "قريبة من المدارس",
+  "ماء مستقل"
+ ],
+ "images": [
+  "https://evtfmgakvnlnmtcffasw.supabase.co/storage/v1/object/public/property-images/e35d88db-493d-429e-952d-27fe03bc0b27/1793644686194-0-1000525206.jpg",
+  "https://evtfmgakvnlnmtcffasw.supabase.co/storage/v1/object/public/property-images/e35d88db-493d-429e-952d-27fe03bc0b27/1793644686834-1-1000525208.jpg"
+ ],
+ "ad_license": null,
+ "ad_number": "AD202611020001",
+ "created_at": "2026-11-02T18:38:11.045325+00:00",
+ "updated_at": "2026-11-03T13:39:34.551+00:00",
+ "views_count": 20
+}

@@ -654,6 +654,9 @@ def earned_verify_gone(ad_number: str):
                        f"{PRUNE_GRACE - 1} plus this one")
 
 
+HELD_MIN_INTERVAL_S = 1.0
+
+
 def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
     """Feed rows whose OWN PAGE is under strike and still does not answer live: {ad: (strikes, active)}.
 
@@ -666,8 +669,15 @@ def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
     held: dict[str, tuple[int, bool]] = {}
     for i in range(0, len(rows), 200):
         ads = [r["ad_number"] for r in rows[i:i + 200]]
+        # A HIDDEN unit is held too, whatever its strike count (2026-11-09). 620 hidden rows carry
+        # missing_count = 0 (hidden by the 09-28 owner-ordered 404 sweep, or by a path that reset the
+        # count), and `.gt("missing_count", 0)` alone let the next feed sighting revive them with no
+        # page read: alert repeat_bug:false_resurrection (13734) fired 9 times in 7 days — e.g.
+        # GTH151726, GTH224930, GTH240969 active at 03:59 on a 09-28 GONE verdict, first proven alive
+        # only at 04:38. Now a hidden feed unit is re-read here like a struck one: live → stamped and
+        # revived in the same upsert; anything else → stays hidden.
         res = (db.sb().table("gathern_residential_listings").select("ad_number, missing_count, active")
-               .in_("ad_number", ads).gt("missing_count", 0).execute())
+               .in_("ad_number", ads).or_("missing_count.gt.0,active.is.false").execute())
         for x in (res.data if res else None) or []:
             held[x["ad_number"]] = (int(x["missing_count"]), bool(x["active"]))
     url = {r["ad_number"]: r.get("listing_url") or "" for r in rows}
@@ -681,7 +691,15 @@ def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
     # read live at 05:08 stayed «served, no check > 26 h» until the sweep came back to them, and a
     # fresh CI spot-check read all 6 live (41626783236).
     by_ad = {r["ad_number"]: r for r in rows}
+    # Paced: hidden rows now join this loop (hundreds per crawl), so request STARTS keep at least
+    # one second apart whatever SCRAPE_MIN_INTERVAL says (a slower configured interval still wins).
+    gap = max(HELD_MIN_INTERVAL_S, MIN_INTERVAL)
+    last = 0.0
     for ad in list(held):
+        wait = gap - (time.monotonic() - last)
+        if last and wait > 0:
+            time.sleep(wait)
+        last = time.monotonic()
         status, body, home = _probe.fetch(url[ad])
         if home:
             if _L._opens_at_ar_view(_oracle_session(), url[ad]):

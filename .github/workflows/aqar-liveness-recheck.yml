@@ -65,9 +65,13 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
-      - name: Re-read struck rows (aqarmonthly_residential_listings)
+      # aqarmonthly gets a FULL second pass here, not only its struck rows (♻️ 2026-11-09): its SLA is
+      # 24 h and the 01:30 sweep was its only full pass, so any late start (03:12 on 11-09) aged every
+      # row past 24 h at once (repeat_bug:liveness_sla:aqarmonthly, 3x in 7 days). ~3.7k rows, ~20 min,
+      # +2 % of aqar's daily reads; the 6 h rest between readings and the 3-strike grace are unchanged.
+      - name: Second daily pass (aqarmonthly_residential_listings)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           AQAR_SOFT_CLOSE_ARMED: "1"
-        run: exec python -m scrapers.aqar.liveness --table aqarmonthly_residential_listings --shards 1 --shard 0 --min-strikes 1
+        run: exec python -m scrapers.aqar.liveness --table aqarmonthly_residential_listings --shards 1 --shard 0 --recheck-all

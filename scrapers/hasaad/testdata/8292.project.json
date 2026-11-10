@@ -1,0 +1,54 @@
+{
+ "_note": "parse_project() of https://hasaadestate.com/projects/شقق-مسكني-8/ (post 8292), read live 2026-11-09; photos trimmed to 3",
+ "post_id": "8292",
+ "title": "شقق مسكني 8",
+ "city": "جدة",
+ "district": "درب الحرمين",
+ "status_chip": "متاح",
+ "units": [
+  {
+   "id": "8519",
+   "css": "green",
+   "status": "متاح",
+   "name": "نموذج A – مسكني 8",
+   "price_raw": "1,100,000 - 1,150,000",
+   "specs": [
+    "3 غرف نوم",
+    "صالون",
+    "غرفة طعام",
+    "صالة معيشة",
+    "مطبخ",
+    "4 دورات مياه",
+    "غرفة خادمة",
+    "غرفة غسيل"
+   ],
+   "area_raw": "211 م2"
+  },
+  {
+   "id": "8556",
+   "css": "green",
+   "status": "متاح",
+   "name": "نموذج B – مسكني 8",
+   "price_raw": "990,000 -980,000",
+   "specs": [
+    "3 غرف نوم",
+    "صالون",
+    "غرفة طعام",
+    "صالة معيشة",
+    "مطبخ",
+    "4 دورات مياه",
+    "غرفة خادمة",
+    "مخزن"
+   ],
+   "area_raw": "201 م2"
+  }
+ ],
+ "photos": [
+  "https://i0.wp.com/hasaadestate.com/wp-content/uploads/2025/10/WhatsApp-Image-2026-05-18-at-6.31.50-PM8.jpeg",
+  "https://i0.wp.com/hasaadestate.com/wp-content/uploads/2025/10/WhatsApp-Image-2026-05-18-at-6.31.50-PM7.jpeg",
+  "https://i0.wp.com/hasaadestate.com/wp-content/uploads/2025/10/WhatsApp-Image-2026-05-18-at-6.31.50-PM6.jpeg"
+ ],
+ "lift": true,
+ "licence": "7200345489",
+ "units_total": 29
+}
