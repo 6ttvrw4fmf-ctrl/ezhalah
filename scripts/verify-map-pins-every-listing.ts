@@ -98,7 +98,7 @@ check('the pins ask for the picked type only', JSON.stringify(villaOnly.types) =
 mustCatch('a picked type ignored (the whole group still sent)', !(villaOnly.types ?? []).includes('دوبلكس'));
 check('a picked type alone counts as a narrowed filter', isNarrowed({ ...EMPTY_MAP_FILTER, types: ['Villa'] }));
 const card = readFileSync(join(root, 'src/components/MapFilterCard.tsx'), 'utf8');
-check('the map filter card shows the picked groups\' types after the groups', /<FieldLabel>\{t\('Property type'\)\}<\/FieldLabel>/.test(card) && /testID="map-filter-types"/.test(card) && /pinFilterOfWith\(f, typeArForTypes, groupMembers(?:, deals)?\)/.test(card));
+check('the map filter card shows the picked groups\' types after the groups', /<FieldLabel>\{t\('Property type'\)\}<\/FieldLabel>/.test(card) && /testID="map-filter-types"/.test(card) && /pinFilterOfWith\(f, typeArForTypes, groupMembers(?:, deals)?(?:, mapTypeScope)?\)/.test(card));
 
 // X TOP RIGHT IN BOTH LANGUAGES (owner 2026-11-10: «x for everything must always be on the top right no matter what»).
 // Measured live 2026-11-10, Arabic, 390 px: the filter card's X sat 16 px from the LEFT (a plain row under RTL), and the

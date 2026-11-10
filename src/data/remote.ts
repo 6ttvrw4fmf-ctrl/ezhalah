@@ -608,6 +608,18 @@ export function searchTableScope(q: SearchQuery): SearchTableScope | null {
   return { p_tables: mainTables, ...scopeB, isBroadCommercial };
 }
 
+// THE MAP FILTER ASKS LIKE THE FILTER (owner 2026-11-10: «this filter is like the one we have but it shows the result
+// in the map»). The type half of the request the Filter home sends for a category + exact types — table sets, type
+// lists, category gate — from the SAME functions (searchTableScope, cohortTypesAr, impliedCategory), so the map can
+// never read a choice differently: «أرض خام» (a tag, not a stored type), land under «تجاري», misfiled rows. Every
+// deal's tables are in scope (the map narrows by deal on its own). Pure and synchronous.
+export function mapTypeScope(category: Macro, types: string[]): { types: string[] | null; tables: string[] | null; tables2: string[] | null; types2: string[] | null; macro: Macro | null } {
+  const q = { deal: 'Rent', dealCombined: true, category, types: types.length ? types : null, geographicScope: 'NATIONWIDE' } as unknown as SearchQuery;
+  const ts = searchTableScope(q);
+  if (!ts) return { types: null, tables: [], tables2: null, types2: null, macro: category };
+  return { types: ts.isBroadCommercial ? COMMERCIAL_TYPE_AR_RES : cohortTypesAr(q), tables: ts.p_tables, tables2: ts.p_tables2, types2: ts.p_types2, macro: impliedCategory(q) };
+}
+
 // UNKNOWN IS NOT AN HONEST ZERO (P2, found 2026-09-04). `null` from here means the location genuinely
 // resolves to nothing, and every caller renders that as an empty result set — the "no listings here,
 // try broadening your search" screen. The resolve_district_cities failure branch below used to return
