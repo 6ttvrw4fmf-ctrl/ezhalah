@@ -208,6 +208,14 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 if stored_v == int(stored_v):
                     stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
+            # The card prints the monthly line as Math.round(annual / 12) (src/lib/listingDisplay.ts monthlyLineText),
+            # so a ÷12 with a fraction is never what a customer reads. superoffice 25881144 (11-10 score, job
+            # 129653650048): page «1225.12 ريال شهري» shown as «1,225», price_annual 14701 (bigint, law conflict #60),
+            # served 1225.083 → scored MISMATCH on a card that reads «1,225». Compare the figure the card prints too;
+            # a different figure still scores wrong.
+            if out[name] != MATCH and isinstance(stored_v, float) and stored_v != int(stored_v):
+                if _cmp_number(int(stored_v + 0.5), lines, whole, kw) == MATCH:
+                    out[name] = MATCH
             # Rule 5: a per-m² rate × size is the total the card SHOWS. A page that prints only that total
             # states our price, not another one. muktamel 17584328 (2026-10-14, re-read run 38530789154):
             # land rate 420 (the API's offer.price) × 690 m² = «289,800», the only figure on the page.
