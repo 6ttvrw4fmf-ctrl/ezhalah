@@ -147,6 +147,15 @@ for (const [label, value, expected] of [
   ['Price as published', '32,000 ر.س \n / yearly', '32,000 SAR / yearly'],
   ['Amenities', 'إضاءة إضافية, بروجكتر, ماستر', 'Extra lighting, Projector, Master bedroom'],
 ]) check(`English value ${label}: ${value}`, format(label, value, 'en') === expected);
+// Nuzul sites print every use of the property on one «الاستخدام» row (owner 2026-11-10, aldarim 50820): each word
+// must read as English on the English card, and stay the site's own words on the Arabic card.
+for (const [value, expected] of [
+  ['تجاري', 'commercial'], ['سكني، تجاري', 'residential, commercial'], ['تجاري، صحي، صناعي', 'commercial, health, industrial'],
+  ['سكني / تجاري / تعليمي', 'residential, commercial, educational'], ['زراعي', 'agricultural'],
+]) {
+  check(`English Property usage: ${value}`, format('Property usage', value, 'en') === expected, `got «${format('Property usage', value, 'en')}»`);
+  check(`Arabic Property usage keeps the site's words: ${value}`, format('Property usage', value, 'ar') === value);
+}
 check('Arabic source authority retained', format('Ad source', 'الهيئة العامة للعقار', 'ar') === 'الهيئة العامة للعقار');
 check('Arabic explicit absence retained', format('Other obligations on the property', 'لايوجد', 'ar') === 'لايوجد');
 check('Arabic enum rendering retained', format('Facade', 'east', 'ar') === 'شرقية');

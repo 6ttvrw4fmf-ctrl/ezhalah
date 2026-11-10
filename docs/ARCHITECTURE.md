@@ -1724,6 +1724,15 @@ new detector needing a longer history must raise the retention in the same chang
   than min(8, totalCount) as truncated (no prune) and re-reads robots.txt each run, only REPORTING if `/api` stops being
   disallowed — reading it would be a new owner decision. Guards: `scripts/verify-catalogue-rebase-is-scoped-and-still-alarms.ts`,
   `scrapers/common/tests/test_superoffice_new_site_2026_10_29.py`.
+- **Nuzul sites: the usage row and a LAND ad's kind follow the ad page's own «الاستخدام» (owner 2026-11-10, «Fix all bro
+  these issues can't happen»).** Every Nuzul tenant (aldarim, abwbna, alobid, bahadhabab, goldendeal, yameen, jawher,
+  m3tmd, october, senan) sends a hidden office filing `category` and the `is_for_*` use flags; the ad page prints only the
+  flags. aldarim 50820 said «الاستخدام: تجاري» and we showed «أرض سكنية» with usage «residential» (about 55 active land
+  ads on six sites). One rule, `scrapers/common/nuzul_usage.py`: the usage row is the page's own words for the flags
+  that are on (none on → no row, never the filing); a land ad is commercial when only the commercial flag is on,
+  residential when only the residential flag is on, and the filing decides only when the page does not settle it.
+  Buildings and other types are untouched. Guard: `scrapers/common/tests/test_nuzul_usage_is_the_pages_own_2026_11_10.py`
+  (runs every Nuzul scraper; a new Nuzul scraper not behind the rule is red).
 
 ---
 
