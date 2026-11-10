@@ -484,6 +484,13 @@ _PREPARED = tuple(_n(w) for w in N._PREPARED_ONLY + ("تمديد", "تمديدا
                                                         "تسليك", "وتسليك", "تسليكات"))
 _PREPARED_PLACE = tuple(_n(w) for w in ("مكان", "مساحه", "موقع"))   # «مكان مسبح», «مكان للمصعد»
 _PLACE_FACTS = frozenset({"pool", "elevator"})
+# a washing machine's SPOT, never the machine (🔬 2026-11-10) — only for the washer word «غسالة»: «ركن غسيل», «مكان غسيل
+# ملابس» are a laundry space and stay yeses (haraj 18743786, dealapp 21427433 in the real-ad lock)
+_WASHER_SPOT = frozenset(_n(w) for w in ("ركن", "مخرج", "مخارج", "موقع", "لموقع", "مكان", "لمكان", "توصيله", "توصيلة",
+                                          "وصله", "وصلة", "تمديد", "تمديدات"))
+# a forecast of income, never income the property earns (🔬 2026-11-10)
+_FORECAST = frozenset(_n(w) for w in ("متوقع", "المتوقع", "متوقعه", "المتوقعه", "تحقيق",
+                                       "لتحقيق", "يحقق", "تحقق", "تقديري", "تقديريه", "تقديرية", "المحتمل", "محتمل"))
 # NEARBY: about the street, not the unit — no row. The scrapers' _PROXIMITY plus the words a view/distance uses.
 _NEAR = tuple(_n(w) for w in N._PROXIMITY + ("قريب", "قريبه", "قرب", "بالقرب", "بجوار", "جوار", "مجاور", "مجاوره",
                                                "بقرب", "قربها", "قربه", "مقابله", "جنب", "بجنب", "دقيقتين", "دقيقتان",
@@ -1142,6 +1149,19 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                                                      # project's corner unit, not this ad's plot (P2 13085, 2026-11-06)
     if fact == "laundry_room" and p2 and p2[-1] in ("حي", "بحي", "العدل"):
         return None, s, e                            # «حي العدل الغسالة»: a Makkah district, not a washing machine
+    if fact in ("kitchen", "laundry_room") and p2 and _starts(_strip_wa(p2[-1]), (_n("مجهز"), _n("مهيا"), _n("مهيأ"))) \
+            and _n(t[ws:we]).lstrip("و").startswith("ل"):
+        return None, s, e                            # «ممر مجهز لمطبخ»: a space prepared FOR a kitchen, not a kitchen
+                                                     # (P2 13085 «لمطبخ», aqar 5830, 🔬 2026-11-10). «مطبخ مجهز» stays a yes.
+    if fact == "laundry_room" and p2 and _strip_wa(p2[-1]) in _WASHER_SPOT and "غسال" in _n(t[ws:we]):
+        return None, s, e                            # «مجهز لموقع الغسالة», «ركن الغسالة», «مخرج الغسالة»: the washer's
+                                                     # spot or hook-up, not a washing machine (P2 13085 «الغساله», aqar
+                                                     # 71281 / 6477635, 🔬 2026-11-10)
+    if fact == "earning_income" and (any(_strip_wa(w) in _FORECAST for w in gp[-3:])
+                                     or any(_strip_wa(w.strip(":：")) in _FORECAST for w in gn[:3])):
+        return None, s, e                            # «دخل شهري: متوقع للشقه بعد التاثيث», «فرص تحقيق دخل شهري»: a
+                                                     # forecast, not income the property earns (P2 13085 «دخل شهري», aqar
+                                                     # 113914 / 38786, 🔬 2026-11-10)
     if fact == "reception" and re.match(r"^(?:ل|لل)استقبال(?:ك|كم|كن|كي)$", _n(t[ws:we]).lstrip("و")):
         return None, s, e                            # «جاهزة لاستقبالك», «بيتك جاهز لاستقبالك»: «ready to welcome YOU»,
                                                      # marketing, never a reception desk (P2 13085, 5 of 5 aqar, 🔬 2026-11-09)
@@ -2756,6 +2776,15 @@ def selftest() -> None:
         ("العائد 8%", {"earning_income": True}, ()),
         ("عقد بين المؤجر والمستأجر", {}, ("earning_income",)),
         ("غير مؤجره", {"earning_income": False}, ()),
+        # 🔬 2026-11-10, P2 13085 phrase review: a forecast, a washer's spot, a space prepared FOR a kitchen (real aqar lines)
+        ("المكيفات راكبه دخل شهري: متوقع للشقه بعد التاثيث من ٢٠٠٠ إلى ٣٠٠٠ للشهر الواحد", {"air_conditioner": True}, ("earning_income",)),
+        ("مرونة عالية في التأجير ويعزز فرص تحقيق دخل شهري مستقر", {}, ("earning_income",)),
+        ("💰 العائد الاستثماري: • دخل شهري ثابت: 2,300 ريال", {"earning_income": True}, ()),
+        ("▪️ ارتداد خلفي مجهز لموقع الغسالة ومخرج غاز ▪️ 3 غرف نوم", {}, ("laundry_room",)),
+        ("تفاصيل العقار : غرفتين نوم يوجد ركن الغسالة مجلس", {}, ("laundry_room",)),
+        ("مؤثث بالكامل مع توفر الغسالة والثلاجة", {"laundry_room": True}, ()),
+        ("الملحق الخارجي: - غرفة نوم - حمام - ممر مجهز لمطبخ الطابق الأرضي", {}, ("kitchen",)),
+        ("وغرفة خادمه بحمام بلاضافه لمطبخ كبير", {"kitchen": True}, ()),
         ("فندق خمس نجوم", {"stars_mentioned": True}, ()),
         ("تصنيف 4 نجوم", {"stars_mentioned": True}, ()),
         ("قريب من فندق 5 نجوم", {}, ("stars_mentioned",)),
