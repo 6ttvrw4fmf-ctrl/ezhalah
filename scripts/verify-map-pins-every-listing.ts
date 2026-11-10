@@ -6,7 +6,7 @@
 // the deal button feeds it, and a committed migration creates the function.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { pinFilterOf, isNarrowed, EMPTY_MAP_FILTER } from '../src/lib/mapFilter.ts';
+import { pinFilterOf, isNarrowed, EMPTY_MAP_FILTER, typeSelection } from '../src/lib/mapFilter.ts';
 import { pinColor, dotColor, MIXED_DOT, pinHead, shortMoney, cellForSpan, fineCellForSpan, CELL_LADDER, PIN_LIMIT, PIN_SHOW_MAX, foldDuplicates, paddedBox, bubbleText, rpcArgs, pinsFrom, idsByTable, orderLike, polygonOf, PIN_COLOR, GOLD } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
@@ -87,6 +87,27 @@ check('pinFilterOf maps category, group → type_ar labels, beds (5+ = 5…12), 
 check('an empty filter narrows nothing and is not «on»', Object.values(pinFilterOf(EMPTY_MAP_FILTER, typeAr)).every((v) => v === null) && !isNarrowed(EMPTY_MAP_FILTER) && isNarrowed({ ...EMPTY_MAP_FILTER, beds: ['1'] }));
 mustCatch('a group sent as its English name instead of the index\'s Arabic labels', !(pf.types ?? []).includes('Villas & Houses'));
 
+// PROPERTY TYPE AFTER THE GROUP (owner 2026-11-10: «no property type, just group — looks wrong»): a group with types
+// picked narrows to them; a group with none stays whole; un-picked types never leak in.
+const members = (g: string) => (g === 'Villas & Houses' ? ['Villa', 'Duplex'] : g === 'Apartments' ? ['Apartment', 'Studio'] : []);
+check('a picked type narrows its own group; a group with no type stays whole', JSON.stringify(typeSelection({ groups: ['Villas & Houses', 'Apartments'], types: ['Villa'] }, members)) === JSON.stringify(['Villa', 'Apartments']));
+check('no types picked: the groups as before', JSON.stringify(typeSelection({ groups: ['Villas & Houses'], types: [] }, members)) === JSON.stringify(['Villas & Houses']));
+const typeArT = (sel: string[]) => sel.flatMap((x) => (x === 'Villa' ? ['فيلا'] : x === 'Villas & Houses' ? ['فيلا', 'دوبلكس'] : []));
+const villaOnly = pinFilterOf({ ...EMPTY_MAP_FILTER, category: 'Residential', groups: ['Villas & Houses'], types: ['Villa'] }, typeArT, members);
+check('the pins ask for the picked type only', JSON.stringify(villaOnly.types) === JSON.stringify(['فيلا']));
+mustCatch('a picked type ignored (the whole group still sent)', !(villaOnly.types ?? []).includes('دوبلكس'));
+check('a picked type alone counts as a narrowed filter', isNarrowed({ ...EMPTY_MAP_FILTER, types: ['Villa'] }));
+const card = readFileSync(join(root, 'src/components/MapFilterCard.tsx'), 'utf8');
+check('the map filter card shows the picked groups\' types after the groups', /<FieldLabel>\{t\('Property type'\)\}<\/FieldLabel>/.test(card) && /testID="map-filter-types"/.test(card) && /pinFilterOfWith\(f, typeArForTypes, groupMembers\)/.test(card));
+
+// X TOP RIGHT IN BOTH LANGUAGES (owner 2026-11-10: «x for everything must always be on the top right no matter what»).
+// Measured live 2026-11-10, Arabic, 390 px: the filter card's X sat 16 px from the LEFT (a plain row under RTL), and the
+// full-screen map's X at left: 12. Physical order: row-reverse under RTL; absolute `right:` is physical on web.
+check('the map filter header keeps its X on the right under Arabic RTL', /<View style=\{\[s\.head, \{ flexDirection: isRTL \? 'row-reverse' : 'row' \}/.test(card));
+const webSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
+check('the full-screen map\'s X is at the physical right; «رسم» moves left while it shows', /style=\{\[s\.closeBtn, s\.closeBtnRight\]\}[^\n]*testID="map-close-full"/.test(webSrc) && /closeBtnRight: \{ right: 12 \}/.test(webSrc) && /topRightAsLeft: \{ left: 12 \}/.test(webSrc) && !/closeBtn: \{\s*position: 'absolute', top: 12, (?:left|right):/.test(webSrc));
+mustCatch('the full-screen X back on the left', !/<Pressable style=\{s\.closeBtn\} onPress=\{onClose\}/.test(webSrc));
+
 // Wiring.
 const data = readFileSync(join(root, 'src/data/mapPins.ts'), 'utf8');
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
@@ -95,7 +116,7 @@ check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure argumen
 check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins, cell === 0 \? PIN_SHOW_MAX \+ 1 : PIN_LIMIT\)/.test(web) && /keyed\.set\(k, a\); m\.addAnnotation\(a\);/.test(web) && /mine = \[\.\.\.keyed\.values\(\)\];/.test(web));
 // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan removes only the pins that left the view and adds only
 // the new ones, keyed by what the head shows; never the old clear-all-then-add-all flicker.
-check('AppleMap.web.tsx diffs the pins by key on every load (remove the gone, add the new, keep the rest)', /for \(const \[k, a\] of keyed\) if \(!next\.has\(k\)\) \{ m\.removeAnnotation\(a\); keyed\.delete\(k\); \}/.test(web) && /if \(keyed\.has\(k\)\) continue;/.test(web) && /const keyOf = \(r: PinRow\) => `\$\{drawCell\}\|\$\{r\.lat\}\|\$\{r\.lng\}\|\$\{r\.n\}\|\$\{r\.deal\}\|\$\{r\.price \?\? ''\}`/.test(web));
+check('AppleMap.web.tsx diffs the pins by key on every load (remove the gone, add the new, keep the rest)', /for \(const \[k, a\] of keyed\) if \(!next\.has\(k\)\) \{ m\.removeAnnotation\(a\); keyed\.delete\(k\); \}/.test(web) && /if \(keyed\.has\(k\)\) continue;/.test(web) && /const keyOf = \(r: PinRow\) => `\$\{drawCell\}\|\$\{r\.lat\}\|\$\{r\.lng\}\|\$\{r\.n\}\|\$\{r\.deal\}\|\$\{r\.price \?\? ''\}\|\$\{r\.shift \? r\.shift\.join\(','\) : ''\}`/.test(web));
 mustCatch('the clear-all-then-add-all redraw (the flicker on every pan)', !/clear\(\);\n\s*mine = rows\.map/.test(web));
 // The layer mounts BEFORE MapKit has loaded and returns early; the map's arrival must re-run it (measured live
 // 2026-11-02: a fresh /map load drew nothing until the deal changed).

@@ -94,7 +94,8 @@ function Shell({ children, onClose, countChip, pills }: {
             <View style={s.brandMark}><Ionicons name="sparkles" size={18} color={colors.primary} /></View>
             <Text style={s.barTitle} numberOfLines={1}>{t('🎯 Refine with AI')}</Text>
           </View>
-          <View style={s.barSide}>
+          {/* X top right in both languages (owner 2026-11-10: «x for everything must always be on the top right no matter what»): barSide is a plain row, so under RTL the chip took the corner. */}
+          <View style={[s.barSide, isRTL && { flexDirection: 'row-reverse' }]}>
             {countChip != null ? <View testID="af-count-chip"><AnimatedCount value={countChip} /></View> : null}
             <Pressable onPress={onClose} style={s.xBtn} hitSlop={6}>
               <Ionicons name="close" size={18} color={colors.muted} />
