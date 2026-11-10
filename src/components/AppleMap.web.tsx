@@ -316,7 +316,7 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   // fifteen Riyadh branches). Apple ranks around `region`, so the search follows the map: a chain or a common name
   // lists the nearby ones first, and a city or region name is still found wherever it is.
   if (live.map) search.region = live.map.region;
-  const key = suggestKey(query, language, live.map?.region.center);
+  const key = suggestKey(query, language, live.map?.region);
   const cached = suggestCache.get(key);
   if (cached) return cached;
   const rows = await new Promise<PlaceSuggestion[]>((resolve) => {

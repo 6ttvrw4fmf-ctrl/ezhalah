@@ -42,6 +42,9 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
   const [focused, setFocused] = useState(false);
   // A finger is down on a suggestion: the field's blur must not close the list under it (a 0.35 s tap lost it, live).
   const pressing = useRef(false);
+  // The pressed row can vanish mid-press (a newer answer replaced the list); RN Web then never calls its onPressOut, so
+  // the flag is cleared whenever the list itself changes (review of #11635).
+  useEffect(() => { pressing.current = false; }, [found]);
   const seq = useRef(0);
   const inputRef = useRef<TextInput>(null);
   useEffect(() => { setQ(value); }, [value]);

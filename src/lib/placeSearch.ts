@@ -28,6 +28,13 @@ export function makeSuggestCache<T>(max = 60) {
     size: () => m.size,
   };
 }
-/** The cache key: the words, the language, and roughly where the map is (Apple ranks around the view). */
-export const suggestKey = (q: string, language: string, center?: { latitude: number; longitude: number }) =>
-  `${language}|${norm(q)}|${center ? `${Math.round(center.latitude * 2) / 2},${Math.round(center.longitude * 2) / 2}` : ''}`;
+/** The cache key: the words, the language, and the VIEW Apple ranks around — its zoom (span, in doublings) and its
+ *  centre to half a view (review of #11635: a key on the centre alone reused a Kingdom-wide answer after a zoom into
+ *  one district, and an answer for one end of a city after a pan to the other). */
+export const suggestKey = (q: string, language: string, region?: { center: { latitude: number; longitude: number }; span: { latitudeDelta: number; longitudeDelta: number } }) => {
+  if (!region) return `${language}|${norm(q)}|`;
+  const span = Math.max(1e-4, region.span.latitudeDelta);
+  const zoom = Math.round(Math.log2(span));
+  const cell = Math.pow(2, zoom) / 2;   // half the view
+  return `${language}|${norm(q)}|${zoom}|${Math.round(region.center.latitude / cell)},${Math.round(region.center.longitude / cell)}`;
+};

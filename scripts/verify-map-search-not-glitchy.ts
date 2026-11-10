@@ -27,7 +27,11 @@ check('a row waits at most 600 ms for its kind tag (was 1,500)', RESOLVE_BUDGET_
 const c = makeSuggestCache<string[]>(2);
 c.set('a', ['1']); c.set('b', ['2']); c.get('a'); c.set('c', ['3']);
 check('the cache keeps recent answers and drops the oldest', c.get('b') === undefined && c.get('c')?.[0] === '3' && c.size() === 2);
-check('the cache key ignores spacing but not the language or a far-away view', suggestKey('الخبر ', 'ar', { latitude: 26.2, longitude: 50.2 }) === suggestKey('الخبر', 'ar', { latitude: 26.1, longitude: 50.1 }) && suggestKey('الخبر', 'ar') !== suggestKey('الخبر', 'en') && suggestKey('x', 'en', { latitude: 24.7, longitude: 46.7 }) !== suggestKey('x', 'en', { latitude: 21.5, longitude: 39.2 }));
+const view = (lat: number, lng: number, d: number) => ({ center: { latitude: lat, longitude: lng }, span: { latitudeDelta: d, longitudeDelta: d } });
+check('the cache key ignores spacing and a tiny pan, not the language', suggestKey('الخبر ', 'ar', view(26.21, 50.2, 0.3)) === suggestKey('الخبر', 'ar', view(26.22, 50.21, 0.3)) && suggestKey('الخبر', 'ar') !== suggestKey('الخبر', 'en'));
+check('a zoom changes the key (Apple ranks around the view; review of #11635)', suggestKey('مول', 'ar', view(24.7, 46.7, 16)) !== suggestKey('مول', 'ar', view(24.7, 46.7, 0.05)));
+check('a pan of more than half a view changes the key', suggestKey('مول', 'ar', view(24.70, 46.70, 0.1)) !== suggestKey('مول', 'ar', view(24.70, 46.90, 0.1)) && suggestKey('x', 'en', view(24.7, 46.7, 2)) !== suggestKey('x', 'en', view(21.5, 39.2, 2)));
+mustCatch('a key on the centre alone (a Kingdom-wide answer reused inside one district)', suggestKey('مول', 'ar', view(24.7, 46.7, 16)) !== suggestKey('مول', 'ar', view(24.7, 46.7, 0.05)));
 
 // Wiring: the web search uses the budget and the cache, and never remembers an empty (maybe failed) answer.
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
@@ -37,6 +41,8 @@ check('suggestPlaces answers from the cache and stores only non-empty answers', 
 // 3. The field: rows remember their words, and a finger on a suggestion keeps the list open through the blur.
 const f = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
 check('the field shows hitsToShow(q, found), never a list kept from other words', /const hits = hitsToShow\(q, found\);/.test(f) && /setHits\(r, q\)/.test(f));
+check('the press flag clears whenever the list changes (a row that vanished mid-press never calls onPressOut)', /useEffect\(\(\) => \{ pressing\.current = false; \}, \[found\]\);/.test(f));
+check('suggestPlaces keys its cache on the whole view (centre AND span)', /suggestKey\(query, language, live\.map\?\.region\)/.test(web));
 check('a press on a suggestion holds the list open through the field\'s blur', /onPressIn=\{\(\) => \{ pressing\.current = true; \}\}/.test(f) && /onBlur=\{\(\) => setTimeout\(\(\) => \{ if \(!pressing\.current\) setFocused\(false\); \}, 150\)\}/.test(f));
 mustCatch('a blur that closes the list under a finger (the lost 0.35 s tap)', !/onBlur=\{\(\) => setTimeout\(\(\) => setFocused\(false\), 150\)\}/.test(f));
 check('a picked place keeps the words the list showed (no jump to Apple\'s raw line)', /setValue\(p\.name \?\? p\.displayLines\[0\]\)/.test(f) && /value=\{from \? \(from\.name \?\? from\.displayLines\[0\]\) : ''\}/.test(f));
