@@ -554,6 +554,11 @@ export function observeColumnPromptInset(
   );
 }
 
+/** When a prompt is measured again after a change that touched it (ms): through a slide-in or fade-in to its rest. */
+export const PROMPT_SETTLE_MS = [300, 800, 1600, 3000] as const;
+/** The browser's «this element stopped moving» events; listened for on the document, acted on for watched nodes only. */
+export const PROMPT_MOTION_END_EVENTS = ['transitionend', 'transitioncancel', 'animationend', 'animationcancel'] as const;
+
 function observeDockedPrompts(
   selector: string,
   measure: (rects: PromptRect[], viewportHeight: number, viewportWidth: number) => PromptInsets,
@@ -587,7 +592,22 @@ function observeDockedPrompts(
     }
   };
 
-  const tick = () => { retarget(); emit(); };
+  // A PROMPT THAT SLIDES INTO PLACE IS MEASURED AGAIN WHEN IT COMES TO REST (2026-11-10, journey-sweep 42789448147,
+  // WebKit desktop: Google's card at 20,20 → 391,368 over «إنشاء حساب / تسجيل الدخول» while the sidebar reserved 0).
+  // A CSS transform or opacity transition moves the box with NO attribute change and NO resize, so neither observer
+  // fires after the first measurement — taken while the box was still off screen. Reproduced on ezhalah.com: a fixed
+  // box sliding in from translateY(-420px) left the CTA at y 85, under it, 2.5 s after it stopped. Two cheap answers:
+  // the browser's own «motion ended» events on a watched node (or an ancestor), and a few re-measurements after any
+  // change that touched a prompt. Neither runs for a card mounting or an animation frame elsewhere (owner 2026-10-05).
+  let settle: ReturnType<typeof setTimeout>[] = [];
+  const settleLater = () => { for (const t of settle) clearTimeout(t); settle = PROMPT_SETTLE_MS.map((ms) => setTimeout(emit, ms)); };
+  const onMotionEnd = (e: Event) => {
+    const t = e.target as Node | null;
+    if (t && watched.some((w) => w === t || t.contains(w))) emit();
+  };
+  for (const type of PROMPT_MOTION_END_EVENTS) document.addEventListener(type, onMotionEnd, true);
+
+  const tick = () => { retarget(); emit(); settleLater(); };
 
   // Only mutations that CAN change a prompt re-measure (owner 2026-10-05: «عرض المزيد takes time»).
   // Measured on a production export at 4× CPU, 100 → 500 cards: 12.6 s of 15.6 s main-thread time
@@ -608,6 +628,8 @@ function observeDockedPrompts(
     sizeObserver?.disconnect();
     window.removeEventListener('resize', emit);
     window.removeEventListener('orientationchange', emit);
+    for (const type of PROMPT_MOTION_END_EVENTS) document.removeEventListener(type, onMotionEnd, true);
+    for (const t of settle) clearTimeout(t);
   };
 }
 
