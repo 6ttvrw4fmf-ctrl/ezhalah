@@ -348,10 +348,12 @@ const R = {
    *  bug»): the app prints total_count MINUS the rows of this page it asked the raw tables for and did not get back
    *  (hidden at source since the last :22 index sync). So headline == rpc − drops, where `drops` is MEASURED from the
    *  hydration requests this page really sent (`null` = not every row's request was observed → no allowance at all),
-   *  and rpc == oracle still holds exactly. A drop count above MAX_HYDRATION_DROPS is index↔raw drift, never allowed. */
+   *  and rpc == oracle still holds exactly. A drop count above MAX_HYDRATION_DROPS is index↔raw drift, never allowed.
+   *  Measured drops make the expectation EXACT: with one drop the headline must be rpc − 1, and an unsubtracted
+   *  rpc is a regression of honestTotal itself (CodeRabbit, PR 11697). Unobserved drops keep headline == rpc. */
   honestCount: (headline: number | null, rpc: number | null, oracle: number | null, drops: number | null) =>
     headline != null && rpc != null && oracle != null && rpc === oracle &&
-    (headline === rpc || (drops != null && drops > 0 && drops <= MAX_HYDRATION_DROPS && headline === rpc - drops)),
+    (drops == null ? headline === rpc : drops <= MAX_HYDRATION_DROPS && headline === rpc - drops),
   /** R10.1.1 — no card repeats across pages. */
   noDuplicates: (ids: string[]) => new Set(ids).size === ids.length,
   /** R10.1.1 — a later page carries byte-identical scope + AF predicate; only paging may differ. */
@@ -727,9 +729,10 @@ const waitForHeadline = async (total: number | null, timeoutMs = 25_000, honest?
   while (Date.now() < until) {
     const hs: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
     last = headlineNum(hs[hs.length - 1]);
-    if (last != null && last === total) return last;
-    const h = honest?.();
-    if (last != null && h != null && last === h) return last;
+    // The number the page must print: total minus the measured hydration drops when they are known, else total.
+    // Never stop on the raw total when drops were measured — that would hide an unsubtracted headline.
+    const expected = honest?.() ?? total;
+    if (last != null && expected != null && last === expected) return last;
     await page.waitForTimeout(500);
   }
   return last;
@@ -1515,6 +1518,8 @@ try {
     mut('a headline ABOVE the total is caught by honestCount even with drops measured', !R.honestCount(T + 1, T, T, 1));
     mut('a headline one below with NO observed hydration is caught by honestCount', !R.honestCount(T - 1, T, T, null));
     mut('a headline one below with ZERO measured drops is caught by honestCount', !R.honestCount(T - 1, T, T, 0));
+    mut('an UNSUBTRACTED headline (== rpc) with one measured drop is caught by honestCount', !R.honestCount(T, T, T, 1));
+    mut('headline == rpc with zero measured drops is accepted by honestCount', R.honestCount(T, T, T, 0));
     mut('a headline two below with ONE measured drop is caught by honestCount', !R.honestCount(T - 2, T, T, 1));
     mut('drops above MAX_HYDRATION_DROPS are drift, caught by honestCount', !R.honestCount(T - (MAX_HYDRATION_DROPS + 1), T, T, MAX_HYDRATION_DROPS + 1));
     mut('rpc ≠ oracle is caught by honestCount whatever the drops', !R.honestCount(T - 1, T, T + 1, 1));
