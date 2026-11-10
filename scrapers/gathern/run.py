@@ -654,6 +654,9 @@ def earned_verify_gone(ad_number: str):
                        f"{PRUNE_GRACE - 1} plus this one")
 
 
+HELD_MIN_INTERVAL_S = 1.0
+
+
 def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
     """Feed rows whose OWN PAGE is under strike and still does not answer live: {ad: (strikes, active)}.
 
@@ -688,7 +691,15 @@ def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
     # read live at 05:08 stayed «served, no check > 26 h» until the sweep came back to them, and a
     # fresh CI spot-check read all 6 live (41626783236).
     by_ad = {r["ad_number"]: r for r in rows}
+    # Paced: hidden rows now join this loop (hundreds per crawl), so request STARTS keep at least
+    # one second apart whatever SCRAPE_MIN_INTERVAL says (a slower configured interval still wins).
+    gap = max(HELD_MIN_INTERVAL_S, MIN_INTERVAL)
+    last = 0.0
     for ad in list(held):
+        wait = gap - (time.monotonic() - last)
+        if last and wait > 0:
+            time.sleep(wait)
+        last = time.monotonic()
         status, body, home = _probe.fetch(url[ad])
         if home:
             if _L._opens_at_ar_view(_oracle_session(), url[ad]):

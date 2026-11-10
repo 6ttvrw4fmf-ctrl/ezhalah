@@ -92,3 +92,17 @@ def test_an_active_unstruck_row_is_not_read_at_all(monkeypatch):
     monkeypatch.setattr(R.db, "sb", lambda: types.SimpleNamespace(table=lambda _n: _Filtering(stored)))
     monkeypatch.setattr(R._probe, "fetch", _no_fetch)
     assert R.held_strikes(_rows("GTH5")) == {}
+
+
+def test_held_reads_start_at_least_one_second_apart(monkeypatch):
+    """Hidden rows join this loop (hundreds a crawl): page reads stay ≤ 1 request/second even when
+    SCRAPE_MIN_INTERVAL is lower (CodeRabbit, PR #11478)."""
+    stored = [{"ad_number": f"GTH{i}", "missing_count": 0, "active": False} for i in (1, 2, 3)]
+    _wire(monkeypatch, stored, {str(i): (404, "x") for i in (1, 2, 3)})
+    clock = [100.0]
+    slept = []
+    monkeypatch.setattr(R, "MIN_INTERVAL", 0.6)
+    monkeypatch.setattr(R.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(R.time, "sleep", lambda s: (slept.append(round(s, 3)), clock.__setitem__(0, clock[0] + s)))
+    R.held_strikes(_rows("GTH1", "GTH2", "GTH3"))
+    assert slept == [1.0, 1.0], slept
