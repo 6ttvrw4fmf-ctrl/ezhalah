@@ -47,3 +47,46 @@ MUTATIONS = {
          [None]],
     ],
 }
+
+
+# ── SITES WHOSE PRINTED «DATE» IS NOT A POSTING DATE ─────────────────────────────────────────────
+# NO_DATE = {site: (scraper module, builder, call, where the raw text must survive)}. The builder takes
+# the raw value the page prints; the mapper must store date_added = None and keep the raw text in the
+# row's own capture (a path into the row dict). MUTATIONS above may re-create the old reading.
+#
+# nofodh: «تاريخ النشر» is the platform's import timestamp — 2,542 of 2,556 active ads print the same
+# one. The record is /listings/149628 verbatim (scrapers/common/tests/test_nofodh_price_period_and_pdpl.py),
+# with the catalog stubbed to the real ids that test documents (جدة = city 18, region 2).
+def nofodh_args(printed="2026-05-15"):
+    return [{
+        "id": "149628",
+        "details": {"رقم العقار": "149628", "السعر": "882,446",
+                    "مساحة العقار": "1689.45 متر مربع", "سنة البناء": printed,
+                    "نوع العقار": "أرض", "حالة العقار": "للبيع", "رقم البلوك": "BLK54"},
+        "overview": {"تاريخ النشر": printed, "متر مربع": "1689.45",
+                     "نوع العقار": "أرض", "الفئة": "سكني"},
+        "address": {"المدينة": "جدة", "الحي": "حي المنارات"},
+        "price_exact": 882446, "min_price": 882446, "max_price": 0,
+        "code": "WAP-BLK54-6",
+        "photos": ["https://www.nofodh.sa/listings/149628_6a43785435dc0/6.jpg"],
+        "has_auction_word": False,
+    }]
+
+
+def _nofodh(mod, args):
+    mod.to_catalog = lambda c, *a, **k: {"جدة": (18, 2)}.get(c, (None, None))
+    mod.find_district_in_text = lambda t, cid: {(18, "حي المنارات"): "حي المنارات"}.get((cid, t))
+    row, _cat, why = mod.map_listing(*args)
+    return row, why
+
+
+NO_DATE = {
+    "nofodh": ("scrapers.nofodh.run", nofodh_args, _nofodh, ["source_capture", "overview", "تاريخ النشر"]),
+}
+
+MUTATIONS["nofodh"] = [
+    ["nofodh storing its import stamp as the posting date (the defect as it shipped)", "scrapers/nofodh/run.py",
+     '        "date_added": None,\n        "photo_urls": photos,',
+     '        "date_added": redact_pii(rec["overview"].get("تاريخ النشر")),\n        "photo_urls": photos,',
+     ["2026-05-15"]],
+]
