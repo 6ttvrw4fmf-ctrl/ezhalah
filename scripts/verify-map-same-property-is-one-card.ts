@@ -32,6 +32,11 @@ check('the same site\'s exact repost (deal, price, size, type, rooms, floor) is 
 check('the same licence on two sites is one card, the cheapest leading', same(fold([c(1, 'wasalt', { lic: '7100238257', price: 1000000 }), c(2, 'aqar', { lic: '7100238257', price: 950000 })]), [[2, 1]]));
 check('the same licence for sale and for rent stays two cards', same(fold([c(1, 'aqar', { lic: '7100238257' }), c(2, 'aqar', { lic: '7100238257', dealAr: 'إيجار', price: 40000 })]), [[1], [2]]));
 check('a licence that is not a real number (too short, letters) proves nothing', same(fold([c(1, 'aqar', { lic: '123' }), c(2, 'wasalt', { lic: '123' }), c(3, 'aqar', { lic: 'N/A', floor: 5 }), c(4, 'wasalt', { lic: 'N/A', floor: 6 })]), [[1], [2], [3], [4]]));
+check('two flats of one site alike in everything, floor unknown, are two flats (wasalt حي بدر, plots 475 and 476)', same(fold([c(1, 'wasalt', { floor: null }), c(2, 'wasalt', { floor: null })]), [[1], [2]]));
+check('two units, each on two sites, each with its own licence → two cards of two ads (حي بدر, 7100238257 and 7100237453)', same(fold([c(1, 'wasalt', { lic: '7100238257', floor: null }), c(2, 'wasalt', { lic: '7100237453', floor: null }), c(3, 'dealapp', { lic: '7100238257', floor: null, beds: null }), c(4, 'dealapp', { lic: '7100237453', floor: null, beds: null })]), [[1, 3], [2, 4]]));
+check('a site\'s exact repost with two different licences is two properties', same(fold([c(1, 'aqar', { lic: '7100000011' }), c(2, 'aqar', { lic: '7100000012' })]), [[1], [2]]));
+check('twin villas of the same size with two different licences are two cards', same(fold([c(1, 'aqar', { typeAr: 'فيلا', area: 300, lic: '7100000021' }), c(2, 'wasalt', { typeAr: 'فيلا', area: 300, lic: '7100000022' })]), [[1], [2]]));
+check('…and a third ad with no licence joins one of them, never bridges the two', (() => { const g = fold([c(1, 'aqar', { typeAr: 'فيلا', area: 300, lic: '7100000021' }), c(2, 'wasalt', { typeAr: 'فيلا', area: 300, lic: '7100000022' }), c(3, 'bayut', { typeAr: 'فيلا', area: 300 })]); return g.length === 2 && g.flat().length === 3; })());
 // 2. Whole properties: same type + same size at the pin.
 check('a villa of the same size on two sites is one card', same(fold([c(1, 'aqar', { typeAr: 'فيلا', area: 300, price: 2000000 }), c(2, 'wasalt', { typeAr: 'فيلا', area: 300, price: 1900000 })]), [[2, 1]]));
 check('a villa of another size is another property', same(fold([c(1, 'aqar', { typeAr: 'فيلا', area: 300 }), c(2, 'wasalt', { typeAr: 'فيلا', area: 312 })]), [[1], [2]]));
@@ -48,6 +53,7 @@ check('groups stay in the order the pin listed them', same(fold([c(1, 'aqar', { 
 // Mutations: each wrong fold, written out, must give a different answer from the real one on the cases above.
 const loose = (cards: Card[], keyOf: (x: Card) => string) => { const m = new Map<string, number[]>(); for (const x of cards) { const k = keyOf(x); m.set(k, [...(m.get(k) ?? []), x.id]); } return [...m.values()]; };
 mustCatch('a fold by looks alone (type + size + price, any site)', !same(loose([c(1, 'aqar'), c(2, 'wasalt')], (x) => `${x.typeAr}|${x.area}|${x.price}`), fold([c(1, 'aqar'), c(2, 'wasalt')])));
+mustCatch('a fold that reads an unknown floor as the same floor', !same(loose([c(1, 'wasalt', { floor: null }), c(2, 'wasalt', { floor: null })], (x) => `${x.site}|${x.typeAr}|${x.area}|${x.price}|${x.beds}|${x.floor}`), fold([c(1, 'wasalt', { floor: null }), c(2, 'wasalt', { floor: null })])));
 mustCatch('a fold that forgets the floor', !same(loose([c(1, 'aqar'), c(2, 'aqar', { floor: 3 })], (x) => `${x.site}|${x.typeAr}|${x.area}|${x.price}|${x.beds}`), fold([c(1, 'aqar'), c(2, 'aqar', { floor: 3 })])));
 mustCatch('a fold that drops the copies (one id per group)', !everyAdKept(mixed) || fold(mixed).map((g) => [g[0]]).flat().length !== mixed.length);
 

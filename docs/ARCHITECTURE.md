@@ -492,8 +492,10 @@ is normal) — but see the next rule: their heads never overlap on screen. Guard
 3. Whole properties (villa, house, building, land, warehouse, showroom, rest house, farm …): same pin + same type + same
    size = the same property → one card; another size is another card.
 4. «Same property» needs PROOF: the same government licence number (6+ digits) and deal, or the same site with deal,
-   price, size, type, rooms and floor all matching, or rule 3. Looking alike is never enough (`foldSameProperty` in
-   `src/lib/mapPins.ts`; a card whose index facts failed to load is never grouped).
+   price, size, type, rooms and a KNOWN floor all matching, or rule 3. Looking alike is never enough, an unknown floor is
+   not «the same floor», and two ads carrying two DIFFERENT licences are never folded by looks (measured on حي بدر:
+   two wasalt flats equal in every field were plots 475 and 476). `foldSameProperty` in `src/lib/mapPins.ts`; a card
+   whose index facts failed to load is never grouped.
 5. Proven the same (same licence, city and deal; 2–40 ads; within ~150 m; same size) but pinned a few metres apart by
    different agents → drawn on one pin (`map_pin_snap_refresh_ar()` pass 2).
 6. The one card shows every site: the cheapest ad leads and each other ad is a link under it with its site and price
