@@ -35,7 +35,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, http_liveness, normalize
-from scrapers.common.arabic_location import to_catalog
+from scrapers.common.arabic_location import to_catalog, twin_city_by_district
 from scrapers.common.pii import redact_pii
 from scrapers.common.posting_date import site_posting_date
 from scrapers.common.source_pin import pin_dict
@@ -439,12 +439,15 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
 
     # Native Arabic R/C/D (ADDITIVE — live city/neighborhood above untouched). The API already carries
     # city.name_ar / district.name_ar; we just stopped discarding them. No region signal from Aldarim,
-    # so same-name twins (rare here — mostly Riyadh) stay region_id-null rather than guessing.
+    # so a same-name twin is settled only by the ad's OWN district when exactly one twin has that
+    # district (twin_city_by_district); otherwise it stays null rather than guessing.
     cityd = L.get("city") if isinstance(L.get("city"), dict) else {}
     distd = L.get("district") if isinstance(L.get("district"), dict) else {}
     city_ar = (cityd.get("name_ar") or "").strip() or None
     district_ar = (distd.get("name_ar") or "").strip() or None
     cid, rid = to_catalog(city_ar)
+    if cid is None:
+        cid, rid = twin_city_by_district(city_ar, district_ar) or (cid, rid)
     row = {
         "ad_number": f"ALD{pid}",
         "listing_url": f"https://www.aldarim.sa/en/properties/{pid}",

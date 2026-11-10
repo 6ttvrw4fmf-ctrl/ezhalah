@@ -510,6 +510,24 @@ def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None
     return None, (rid or hint)
 
 
+def twin_city_by_district(city_ar: Optional[str], district_ar: Optional[str]) -> Optional[tuple[int, Optional[int]]]:
+    """A same-name TWIN city («المجمعة» ×4 across regions) that to_catalog() refused, settled by the
+    district the SAME source states — only when that district belongs to EXACTLY ONE of the twins
+    (_pick_candidate's rule: one match or nothing, never a guess). For callers that keep
+    `cid, rid = to_catalog(city_ar)` and have no region signal (aldarim, 2026-11-10: «المجمعة / حي
+    المطار» sat hidden from search with city_id NULL while the API stated both).
+
+    Reads the catalogue to_catalog() just loaded and never loads it itself: not loaded = cannot
+    answer = None (a unit test that stubs to_catalog reaches no network through here)."""
+    if not _CITY:
+        return None
+    n = norm_ar(city_ar)
+    d = None if is_placeholder(district_ar) else norm_district_tok(district_ar)
+    if not n or not d or len(_CITY.get(n) or ()) < 2:
+        return None
+    return _pick_candidate(n, None, district_norm=d)
+
+
 def region_id_for(city_ar: Optional[str], region_hint: Union[int, str, None] = None) -> Optional[int]:
     return to_catalog(city_ar, region_hint)[1]
 
