@@ -1,0 +1,232 @@
+{
+ "name": "Ishbilia Village Compound",
+ "title": "Ishbilia Village Compound",
+ "slug": "ishbilia-village-compound",
+ "address": "7454 Al Hanafi, Ishbiliyah، 4047, Riyadh 13225, Saudi Arabia",
+ "description": "Welcome to Ishbilia Village Compound, a premium gated residential community designed to provide a five-star living experience for all residents. Nestled in a secure and well-connected location in Riyadh, Ishbilia Village seamlessly blends modern luxury, community living, and top-tier amenities, making it an ideal home for families and professionals seeking the pinnacle of comfort and convenience. Experience the epitome of luxury compound living in Riyadh at Ishbilia Village. Whether you’re seeking a family-friendly environment or a sophisticated setting for professional life, Ishbilia Village offers the perfect blend of comfort, security, and community. ",
+ "latitude": 24.7891914151021,
+ "longitude": 46.787139041597,
+ "residences": [
+  {
+   "id": 39,
+   "bedrooms": "one",
+   "fullBathrooms": "one",
+   "halfBathrooms": null,
+   "area": null,
+   "areaUnit": null,
+   "name": "Studio Apartment",
+   "title": "Studio Apartment",
+   "description": null,
+   "pricing": [
+    {
+     "id": 28,
+     "low": 115000,
+     "high": 135000,
+     "currency": "SAR",
+     "name": "Year - SAR",
+     "duration": "Year"
+    }
+   ]
+  },
+  {
+   "id": 40,
+   "bedrooms": "one",
+   "fullBathrooms": "one",
+   "halfBathrooms": null,
+   "area": null,
+   "areaUnit": null,
+   "name": "1 Bedroom Apartment",
+   "title": "1 Bedroom Apartment",
+   "description": null,
+   "pricing": [
+    {
+     "id": 26,
+     "low": 140000,
+     "high": 140000,
+     "currency": "SAR",
+     "name": "Year- SAR",
+     "duration": "Year"
+    }
+   ]
+  },
+  {
+   "id": 41,
+   "bedrooms": "four",
+   "fullBathrooms": "four",
+   "halfBathrooms": null,
+   "area": null,
+   "areaUnit": null,
+   "name": "4 Bedroom Villa",
+   "title": "4 Bedroom Villa",
+   "description": null,
+   "pricing": [
+    {
+     "id": 27,
+     "low": 250000,
+     "high": 280000,
+     "currency": "SAR",
+     "name": "Year - SAR",
+     "duration": "Year"
+    }
+   ]
+  }
+ ],
+ "createdAt": "2025-01-27T16:35:27.208Z",
+ "updatedAt": "2025-02-14T01:07:54.627Z",
+ "publishedAt": "2025-01-27T16:49:46.972Z",
+ "locale": "en",
+ "features": {
+  "data": [
+   {
+    "attributes": {
+     "name": "Fitness Center",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Swimming Pool",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Reserved Parking",
+     "featureType": "home"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Restaurant",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Billiard Tables",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Squash Court",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Basketball Court",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Recreational Room",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "High Speed Internet",
+     "featureType": "home"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Tennis",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Satellite Cable",
+     "featureType": "home"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Security 24/7",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Children Playground",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Outdoor Children Playground",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Laundry Service",
+     "featureType": "home"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Garbage Chute",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Shaded Parking Area",
+     "featureType": "building"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Terrace",
+     "featureType": "home"
+    }
+   },
+   {
+    "attributes": {
+     "name": "Sauna",
+     "featureType": "building"
+    }
+   }
+  ]
+ },
+ "primaryCardPhoto": {
+  "data": {
+   "attributes": {
+    "url": "https://assetservices.imgix.net/cms/poster_357363b125.jpg"
+   }
+  }
+ },
+ "images": [
+  {
+   "image": {
+    "data": {
+     "attributes": {
+      "url": "https://assetservices.imgix.net/cms/ext1_d91dfab94c.jpg"
+     }
+    }
+   }
+  },
+  {
+   "image": {
+    "data": {
+     "attributes": {
+      "url": "https://assetservices.imgix.net/cms/ext2_747a9c543b.jpg"
+     }
+    }
+   }
+  },
+  {
+   "image": {
+    "data": {
+     "attributes": {
+      "url": "https://assetservices.imgix.net/cms/ext3_96e344b4b7.jpg"
+     }
+    }
+   }
+  }
+ ]
+}

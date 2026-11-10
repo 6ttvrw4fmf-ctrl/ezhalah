@@ -66,6 +66,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://flow.life"
@@ -203,6 +204,12 @@ def map_listing(fp: dict, prop_slug: str, url_by_fid: dict[str, str]) -> tuple[O
         "listing_url": url_by_fid.get(fid) or
                        f"{BASE}/en/properties/{prop_slug}/available-homes/{_slugify(title) or 'home'}/fid/{fid}",
         "source": SOURCE,
+        # Posting date = the home type's own CMS publishedAt (UTC «Z»), the instant it went public: three
+        # Granada types were created as drafts 2025-08-06 and published 08-12/08-13, so createdAt would
+        # be early. updatedAt moves on every sync; units[].availabilityStatus.date is a move-in date.
+        # Live 2026-11-09: Granada «2 Bedroom» C1ThyDRn… publishedAt 2025-05-30T19:50:38.135Z
+        # (first seen 2026-09-24).
+        "date_added": site_posting_date(fp.get("publishedAt")),
         "active": True,
         "title": " – ".join(x for x in (pattrs.get("name"), title) if x) or None,
         "description": redact_pii(fp.get("description") or pattrs.get("description")),

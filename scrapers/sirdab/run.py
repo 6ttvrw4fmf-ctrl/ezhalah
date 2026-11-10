@@ -41,6 +41,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 LIST = "https://marketplace.sirdab.co/ar/ads"
 SITE = "https://marketplace.sirdab.co/ar/ads/"
@@ -187,6 +188,11 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "direction": normalize.one_direction(_FACADE_AR.get(p.get("facade") or ""), diagonal=True),
         "street_width_m": p.get("street_width") if isinstance(p.get("street_width"), (int, float)) and p["street_width"] > 0 else None,
         "license_number": lic if lic and lic.startswith("7") else None,   # a REGA AD licence only
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the AD's `created_at` (UTC), which the ad page prints
+        # as JSON-LD datePosted — measured 2026-11-09 on 302869aa: 2026-11-01T15:45:52.306996+00:00 both. Never
+        # available_from / available_to (the rental window), updated_at, or property.created_at (the zone-less
+        # property record, entered minutes before the ad).
+        "date_added": site_posting_date(a.get("created_at")),
         "photo_urls": photos,
         **row_price,
     }

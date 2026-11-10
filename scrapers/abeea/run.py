@@ -69,6 +69,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://abeea.com.sa"
 # Primary discovery (since 2026-07-16): the default WP REST property endpoint. The Yoast property
@@ -298,6 +299,11 @@ def feature_terms(s: cc.Session) -> dict[int, str]:
     return out
 
 
+# {url: WordPress `date_gmt`} from the same REST list rest_urls() already reads — the post's publish time
+# in UTC (the detail page prints only «Updated on» / og:updated_time, an edit). Filled by rest_urls().
+REST_POSTED_GMT: dict[str, str] = {}
+
+
 def rest_urls(s: cc.Session) -> tuple[list[str], dict[str, set[str]]]:
     """Primary discovery: the live WP REST property list (paginated, per_page=100).
 
@@ -311,10 +317,11 @@ def rest_urls(s: cc.Session) -> tuple[list[str], dict[str, set[str]]]:
     feats: dict[str, set[str]] = {}
     seen: set[str] = set()
     terms = feature_terms(s)
+    REST_POSTED_GMT.clear()
     page = 1
     while True:
         try:
-            r = s.get(f"{LIST_API}?per_page=100&page={page}&_fields=link,property_feature",
+            r = s.get(f"{LIST_API}?per_page=100&page={page}&_fields=link,property_feature,date_gmt",
                       timeout=30, headers={"Accept": "application/json"})
         except Exception:
             break
@@ -331,6 +338,8 @@ def rest_urls(s: cc.Session) -> tuple[list[str], dict[str, set[str]]]:
             if _is_property_url(u) and u not in seen:
                 seen.add(u)
                 out.append(u)
+                if isinstance(p.get("date_gmt"), str):
+                    REST_POSTED_GMT[u] = p["date_gmt"]
                 # An id missing from `terms` is a term we could not resolve to a slug — skipped,
                 # never guessed. Only resolved slugs reach the mapper.
                 if terms:
@@ -598,7 +607,8 @@ def _area_district(body: Optional[str], arabic: bool) -> Optional[str]:
 
 def map_listing(body: str, url: str,
                 rest_slugs: Optional[set[str]] = None,
-                ar_body: Optional[str] = None) -> tuple[Optional[dict], str, Optional[bool]]:
+                ar_body: Optional[str] = None,
+                posted_gmt: Optional[str] = None) -> tuple[Optional[dict], str, Optional[bool]]:
     """Return (row, category, gone). gone=True → sold/rented (skip / mark inactive).
 
     gone=None → the page carried no «Property Status» cell, so its availability was NOT READ. Abeea
@@ -775,6 +785,10 @@ def map_listing(body: str, url: str,
         "title": title,
         "description": description,
         "photo_urls": _images(body, ld),
+        # The post's WordPress `date_gmt` from the REST list (UTC by definition; `date` is 3 h later, so
+        # the site runs on Saudi time): post 24493 «2026-11-03T14:27:35» = date «2026-11-03T17:27:35».
+        # Never the page's «Updated on» / modified. Checked live 2026-11-09.
+        "date_added": site_posting_date(f"{posted_gmt}Z") if isinstance(posted_gmt, str) else None,
         "additional_info": info,
         **feature_fields,
     }
@@ -928,6 +942,8 @@ def main() -> int:
             twin = arabic_twin_url(body)
             got_ar = fetch_one(twin) if twin else None
             twin_kw = {"ar_body": got_ar[0]} if got_ar else {}
+            if u in REST_POSTED_GMT:
+                twin_kw["posted_gmt"] = REST_POSTED_GMT[u]
             row, cat, gone = map_listing(body, u, url_feats.get(u), **twin_kw)
             if not row:
                 continue

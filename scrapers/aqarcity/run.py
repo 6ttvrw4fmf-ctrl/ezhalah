@@ -60,6 +60,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.page_pin import pin_from_html  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://www.aqarcity.net"
 # /sitemaps/sitemap-index.xml answers 404 since the 2026-09 redesign; robots.txt now names
@@ -1057,7 +1058,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "longitude": geo.get("longitude") or page_pin.get("longitude"),
         "street_address": _redact(addr.get("streetAddress")),
         "postal_code": addr.get("postalCode"),
-        "date_published": ld.get("datePublished"),
+        "date_published": ld.get("datePublished") or ld.get("datePosted"),
         "date_modified": ld.get("dateModified"),
         "availability": offers.get("availability"),
         "availability_ends": offers.get("availabilityEnds"),
@@ -1107,7 +1108,17 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "title": title,
         "description": description,
         "photo_urls": _images(ld, body),
-        "date_added": ld.get("datePublished") or None,
+        # THE POSTING DATE MOVED KEYS: the page's block is now a RealEstateListing whose posting moment is
+        # `datePosted` («2026-09-24T18:19:05.000Z»); `datePublished` is no longer printed. Reading only the old
+        # key left date_added NULL on every ad first seen since — 948 rows, 676 of them live, on 2026-11-09.
+        # Checked on the live pages of 30938 and 30312: datePosted is the same instant the old datePublished
+        # carried, and it does not move when the ad is edited (30312: posted 21/07, modified 05/11). The
+        # page's own «تاريخ النشر» cell (DD/MM/YYYY) is the fallback when the block is silent; the older
+        # layout's month-name form («٣٠ نوفمبر ٢٠٢٥») is not a readable date and stays NULL. `dateModified`
+        # is a change date and is never read here.
+        "date_added": (site_posting_date(ld.get("datePublished"))
+                       or site_posting_date(ld.get("datePosted"))
+                       or site_posting_date(pi.get("تاريخ النشر"))),
         "last_update": ld.get("dateModified") or None,
         "additional_info": info,
     }
