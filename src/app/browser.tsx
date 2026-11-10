@@ -37,6 +37,8 @@ export default function Browser() {
   const [frame, setFrame] = useState<FrameState>('loading');
   // The ad could not be LOOKED UP (a failed read) — not the same as «no such ad».
   const [lookupFailed, setLookupFailed] = useState(false);
+  // «Retry» after a failed lookup: bumping this runs the lookup again, so one bad read is not a dead end.
+  const [lookupTry, setLookupTry] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   // If the proxied page doesn't load within ~12s, treat it as a failure and show a graceful in-app
   // fallback (Reload / Open on AQAR) instead of Chrome's bare "couldn't load" page. Proxying a live
@@ -70,7 +72,7 @@ export default function Browser() {
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, lookupTry]);
 
   // Localize the partner URL to the app language (Aqar has an /en variant).
   const localize = (url?: string | null): string | undefined => {
@@ -95,6 +97,7 @@ export default function Browser() {
     return (
       <View style={[s.center, { paddingTop: insets.top }]}>
         <Text>{lookupFailed ? t("Couldn't load the preview here.") : t('Listing not found.')}</Text>
+        {lookupFailed && <Pressable onPress={() => setLookupTry((n) => n + 1)}><Text style={{ color: colors.primary, marginTop: 8 }}>{t('Retry')}</Text></Pressable>}
         <Pressable onPress={() => router.back()}><Text style={{ color: colors.primary, marginTop: 8 }}>{t('Done')}</Text></Pressable>
       </View>
     );

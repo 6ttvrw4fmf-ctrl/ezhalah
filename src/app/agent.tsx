@@ -1097,6 +1097,8 @@ export default function Agent() {
       // startVoiceInput reports its failures through onFailure; one that THROWS instead left the composer stuck in
       // recording mode with the mic latched. Same clean restore, same honest line (2026-11-10).
       reportError(e, { source: 'agent.startVoice' });
+      // The microphone may already be open (access granted, then the recognizer threw): let go of it.
+      cancelVoiceInput();
       voiceActiveRef.current = false;
       setVoiceState('idle');
       showVoiceNotice(t('Voice input is not available right now.'));
@@ -1932,7 +1934,9 @@ export default function Agent() {
 
   // Shared "found" choreography: the typed reply ("answer respond") → a held "Ezhalah is searching…"
   // beat → the results header + cards. `statusId` is the thinking bubble we morph into the reply.
-  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string, afCompleted = false) => {
+  // Resolves TRUE once the results bubble is on screen, FALSE when the run was stopped during the loader beat
+  // (nothing new was shown). runRefine reads it: a round only «landed» if its results appeared (2026-11-10).
+  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string, afCompleted = false): Promise<boolean> => {
     // 1) SEARCHING phase: status bubble shows the slogan + summary. Slogan language follows the
     // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
     // who chat in one language and have their UI in the other still get the matching slogan.
@@ -1971,12 +1975,12 @@ export default function Agent() {
     }
     delete loaderPresentedRef.current[statusId];
     delete searchingAtRef.current[statusId];
-    if (run.cancelled) return;
+    if (run.cancelled) return false;
     // Soft completion (owner v4): the loader fades out gently instead of vanishing in a single
     // frame — flag it `exiting`, give the fade its beat, then morph into the results state.
     setMsgs((m) => m.map((x) => (x.id === statusId && x.role === 'status' ? { ...x, exiting: true } : x)));
     await waitRun(run, LOADER_EXIT_MS);
-    if (run.cancelled) return;
+    if (run.cancelled) return false;
     // 2) RESULTS: ONE consolidated bubble in the exact order the user wants:
     //    [slogan] → [Search Summary] → [Result intro] → [Sort line] → [Property cards].
     //    The slogan + summary CARRY OVER from the searching status into this same bubble — they don't
@@ -2013,6 +2017,7 @@ export default function Agent() {
     // to show. R11.1's own setCompleted(true) call in the AF-round onFetched path is left in place —
     // this is a superset, not a replacement, so no existing AF-round behavior changes.
     if (searchIsFinishedAtThreshold(quotableTotal(result), INTERVIEW_STOP_AT)) setCompleted(true);
+    return true;
   };
 
   // «عرض المزيد» (Load more) — 100, THEN THE CHOICE, THEN EVERYTHING (owner product rule
@@ -2685,14 +2690,14 @@ export default function Agent() {
     // on screen; the later passes settle it ~80 px under the top with the loader below it. All land
     // within the first 1.5 s, long before the user has had reason to scroll.
     for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);
-    // `landed`: the search answered and this turn is going to show something. A refine that threw or was stopped
-    // before that tells its caller (onNotLanded), so nothing it set up for «the new results» is left behind.
+    // `landed`: this turn's results are ON SCREEN (playListings says so). A refine that threw, or was stopped before
+    // that — in the search OR in the loader beat after it — tells its caller (onNotLanded), so nothing it set up
+    // for «the new results» is left behind.
     let landed = false;
     try {
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
     prefetchNarrowing(result.query ?? refined, opts?.guided?.asked ?? []);  // AFTER the search — see prefetchNarrowing
-    landed = true;
     // quotableTotal, never `result.total` — that is this page's buffer length (≤ the 1500-row
     // QUERY_LIMIT), so the mining overlay quoted «لقينا 1,500 عقار» on every set larger than a page
     // while the results headline behind it stated the real match total. ONE total for both.
@@ -2718,7 +2723,7 @@ export default function Agent() {
     }
     // A round of the Advanced Filter reads the ORIGINAL summary plus every committed answer (owner
     // 2026-10-03); any other refine keeps summarising the query it ran.
-    await playListings(run, statusId,
+    landed = await playListings(run, statusId,
       opts?.guided ? guidedSearchSummary(opts.guided.baseQ, opts.guided.facets) : buildScrapeIntro(result.query ?? refined),
       result, label, !!opts?.guided);
     if (run.cancelled) return;

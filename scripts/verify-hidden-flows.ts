@@ -305,13 +305,14 @@ mustCatch('the «searching» row staying on screen after a turn throws',
   !turnIsReleased(await failTurnOn(mutantFile(agentSrc, 'setMsgs((m) => failedTurnMsgs(m, statusId, ', 'setMsgs((m) => m.concat(', 'agent.tsx'), {})));
 
 // ═══ C2. A REFINE THAT NEVER LANDED, LIFTED OUT OF agent.tsx AND RUN ════════════════════════════════════════════
-// runRefine itself, with the search stubbed: it throws, it is stopped before any result, or it answers. The caller
+// runRefine AND playListings themselves, with the search stubbed: it throws, it is stopped before any result (in the
+// search, or in the loader beat after it), or it answers and the results reach the screen. The caller
 // (an Advanced Filter round) put a «round done» receipt on the turn it started from; onNotLanded is how it hears
 // that the round never produced anything, so the receipt comes off and that turn's buttons come back.
-type RefineBus = { search: 'throws' | 'stopped' | 'answers'; notLanded: number; failed: string[] };
+type RefineBus = { search: 'throws' | 'stopped' | 'stopped-in-loader' | 'answers'; notLanded: number; failed: string[]; shown: number };
 const gr = globalThis as unknown as { __refine: RefineBus };
 const REFINE_PRELUDE = [
-  'type SearchQuery = any; type GuidedFacet = any;',
+  'type SearchQuery = any; type GuidedFacet = any; type Run = any; type SearchResult = any; type Locale = any;',
   'const bus: any = (globalThis as any).__refine;',
   'const pendingRefineRef: any = { current: null }; const refineMsgIdRef: any = { current: null }; const searchingAtRef: any = { current: {} };',
   'const runRef: any = { current: null };',
@@ -320,16 +321,23 @@ const REFINE_PRELUDE = [
   'const applyRefinement = (q: any) => q;',
   'let n = 0; const uid = () => `id${n++}`;',
   'const makeRun = () => ({ cancelled: false, ac: { signal: null } });',
-  'const runQuery = async () => { if (bus.search === "throws") throw new Error("network"); if (bus.search === "stopped") runRef.current.cancelled = true; return { query: null }; };',
-  // Everything after the search has landed is the reply itself (covered elsewhere): the harness stops there.
-  'const prefetchNarrowing = () => {}; const quotableTotal = () => { throw new Error("reached-the-reply"); };',
+  'const runQuery = async () => { if (bus.search === "throws") throw new Error("network"); if (bus.search === "stopped") runRef.current.cancelled = true; return { query: null, listings: [] }; };',
+  'const prefetchNarrowing = () => {}; const quotableTotal = () => 0;',
+  // playListings is lifted too (the REAL one decides «did the results reach the screen»). Its timings are zeroed and
+  // its one wait is where a Stop during the loader beat arrives; beginCardDrip is the moment the cards appear.
+  'const msgRTL = (_: string) => true; const hypePhrase = () => ""; const resultDone = () => ""; const buildScrapeIntro = () => "";',
+  'const SEARCH_MIN_MS = 0; const SEARCH_MAX_HOLD_MS = 0; const AF_LOADER_MS = 0; const LOADER_EXIT_MS = 0; const INTERVIEW_STOP_AT = 50;',
+  'const loaderPresentedRef: any = { current: {} }; const liveTurnsRef: any = { current: new Set() };',
+  'const waitRun = async (run: any, _ms: number) => { if (bus.search === "stopped-in-loader") run.cancelled = true; };',
+  'const beginCardDrip = () => { bus.shown++; }; const initialReveal = () => 0;',
+  'const searchIsFinishedAtThreshold = () => false; const setCompleted = (_: boolean) => {}; const promptSignupSoon = async () => {};',
   'const failTurn = (_r: any, _id: string, e: any, where: string, l: string) => { bus.failed.push(`${where}:${l}:${e.message}`); };',
   'const detectLocale = (t: string) => (/[a-z]/i.test(t) ? "en" : /[\u0600-\u06FF]/.test(t) ? "ar" : null);',
   'const locale: string = "ar";',
 ].join('\n');
 const refine = async (file: string, search: RefineBus['search'], label = 'شقة'): Promise<RefineBus> => {
-  gr.__refine = { search, notLanded: 0, failed: [] };
-  const m = await liftSymbols(file, [{ header: '  const runRefine = async (', endsWith: /^  \};$/ }], ['runRefine'], REFINE_PRELUDE) as
+  gr.__refine = { search, notLanded: 0, failed: [], shown: 0 };
+  const m = await liftSymbols(file, [{ header: '  const playListings = async (', endsWith: /^  \};$/ }, { header: '  const runRefine = async (', endsWith: /^  \};$/ }], ['runRefine'], REFINE_PRELUDE) as
     { runRefine: (q: unknown, d: string, v: string, l: string, o: { onNotLanded: () => void }) => Promise<void> };
   await m.runRefine({}, 'd', 'v', label, { onNotLanded: () => { gr.__refine.notLanded++; } });
   return gr.__refine;
@@ -340,14 +348,26 @@ const refine = async (file: string, search: RefineBus['search'], label = 'شقة
 }
 check('refine: a round stopped before any result tells its caller once', (await refine(AGENT, 'stopped')).notLanded === 1);
 {
+  // Stop pressed AFTER the search answered but while the loader beat was still up: no new results were shown, so
+  // the round did not land and its receipt must come off (CodeRabbit on #11706).
+  const b = await refine(AGENT, 'stopped-in-loader');
+  check('refine: a round stopped during the loader beat (search answered, nothing shown) tells its caller once', b.notLanded === 1 && b.shown === 0 && b.failed.length === 0, JSON.stringify(b));
+}
+{
   const b = await refine(AGENT, 'answers');
-  check('refine: a search that ANSWERED is never «not landed» (a real round keeps its receipt)', b.notLanded === 0 && b.failed[0]?.endsWith('reached-the-reply') === true, JSON.stringify(b));
+  check('refine: a round whose results reached the screen is never «not landed» (a real round keeps its receipt)', b.notLanded === 0 && b.shown === 1 && b.failed.length === 0, JSON.stringify(b));
 }
 check('refine: a failed refine typed in English fails in English', (await refine(AGENT, 'throws', 'apartment')).failed[0] === 'agent.runRefine:en:network');
 mustCatch('a refine that threw leaving its «round done» receipt behind (the bug verbatim)',
   (await refine(mutantFile(agentSrc, '    finally { if (!landed) opts?.onNotLanded?.(); }\n', '', 'agent.tsx'), 'throws')).notLanded !== 1);
 mustCatch('a stopped refine counted as landed',
   (await refine(mutantFile(agentSrc, '    if (run.cancelled) return;\n    prefetchNarrowing(result.query ?? refined', '    landed = true;\n    if (run.cancelled) return;\n    prefetchNarrowing(result.query ?? refined', 'agent.tsx'), 'stopped')).notLanded !== 1);
+mustCatch('a round stopped during the loader beat counted as landed (landed set when the search answered)',
+  (await refine(mutantFile(agentSrc, '    landed = await playListings(run, statusId,', '    landed = true; await playListings(run, statusId,', 'agent.tsx'), 'stopped-in-loader')).notLanded !== 1);
+mustCatch('playListings calling a stopped loader beat «shown»',
+  (await refine(mutantFile(agentSrc, '    await waitRun(run, LOADER_EXIT_MS);\n    if (run.cancelled) return false;', '    await waitRun(run, LOADER_EXIT_MS);\n    if (run.cancelled) return true;', 'agent.tsx'), 'stopped-in-loader')).notLanded !== 1);
+mustCatch('playListings never saying the results were shown (every real round would lose its receipt)',
+  (await refine(mutantFile(agentSrc, 'setCompleted(true);\n    return true;\n  };', 'setCompleted(true);\n    return false;\n  };', 'agent.tsx'), 'answers')).notLanded !== 0);
 mustCatch('a refine that answered taking a real round’s receipt off',
   (await refine(mutantFile(agentSrc, '    finally { if (!landed) opts?.onNotLanded?.(); }\n', '    finally { opts?.onNotLanded?.(); }\n', 'agent.tsx'), 'answers')).notLanded !== 0);
 
@@ -395,6 +415,10 @@ const wired = (src: { browser: string; map: string; agent: string; home: string 
   'the ad page has ONE frame state (no second boolean to disagree with it)': !/\bframeError\b|\bframeLoaded\b/.test(src.browser),
   'the ad page catches a failed lookup': /findListing\([^;]*?\)\s*\.then\([\s\S]*?\.catch\(/.test(src.browser),
   'the ad page REPORTS a failed lookup': /\.catch\(\(e: unknown\) => \{\s*reportError\(e, /.test(src.browser),
+  'the ad page offers «Retry» after a failed lookup, and it runs the lookup again':
+    /\{lookupFailed && <Pressable onPress=\{\(\) => setLookupTry\(\(n\) => n \+ 1\)\}>/.test(src.browser) && /\}, \[id, lookupTry\]\);/.test(src.browser),
+  'a voice start that throws lets go of the microphone before the composer goes idle':
+    /catch \(e\) \{\s*reportError\(e, [^)]*\);\s*cancelVoiceInput\(\);\s*voiceActiveRef\.current = false;\s*setVoiceState\(/.test(src.agent),
   'the ad page starts its 12 s clock through frameTimerRuns': /if \(!frameTimerRuns\(frame, frameOnScreen\)\) return;/.test(src.browser) && /const frameOnScreen = IS_WEB && !resolving && !!listing;/.test(src.browser),
   'an Advanced Filter round takes its receipt back when the refine never landed': /onNotLanded: \(\) => \{[^}]*setAfReceipt\(\(r\) => withoutReceipt\(r, carry\.msgId\)\)/.test(src.agent),
   'the map offers «try again» when its read failed, and shows a count only for a number':
@@ -421,6 +445,9 @@ const wiringMutant = (what: string, rule: string, part: 'browser' | 'map' | 'age
   mustCatch(what, wired({ ...realWiring, [part]: realWiring[part].replace(from, to) })[rule] === false);
 };
 wiringMutant('the failed ad lookup going unreported again', 'the ad page REPORTS a failed lookup', 'browser', 'reportError(e, ', 'void (e, ');
+wiringMutant('the «Retry» button on a failed ad lookup doing nothing', 'the ad page offers «Retry» after a failed lookup, and it runs the lookup again', 'browser', '}, [id, lookupTry]);', '}, [id]);');
+wiringMutant('a failed ad lookup with no way to try again', 'the ad page offers «Retry» after a failed lookup, and it runs the lookup again', 'browser', 'setLookupTry((n) => n + 1)', 'router.back()');
+wiringMutant('a voice start that throws keeping the microphone open', 'a voice start that throws lets go of the microphone before the composer goes idle', 'agent', 'cancelVoiceInput();\n      voiceActiveRef.current = false;\n      setVoiceState(', 'voiceActiveRef.current = false;\n      setVoiceState(');
 wiringMutant('the 12 s clock starting with the lookup again', 'the ad page starts its 12 s clock through frameTimerRuns', 'browser', 'if (!frameTimerRuns(frame, frameOnScreen)) return;', '');
 wiringMutant('the round keeping its receipt after a refine that never landed', 'an Advanced Filter round takes its receipt back when the refine never landed', 'agent', 'withoutReceipt(r, carry.msgId)', 'r');
 wiringMutant('the map’s «try again» doing nothing', 'the map offers «try again» when its read failed, and shows a count only for a number', 'map', 'retryPinsRef.current = () => { void load(); };', '');
