@@ -1753,6 +1753,20 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // — search nothing extra rather than a different place (project_exact-location-only-rule).
   if (!out.length && new Set(typoHits.map((h) => h.word)).size === 1) out.push(...typoHits.map((h) => h.d));
   if (!out.length && cityKey) return namedExactly(); // the «city» we scoped to was part of the district's own name
+  // THE NAME AS TYPED WINS, also when «حي» sits INSIDE the word (🔧 2026-11-10, district-name-sweep red since 11-07):
+  // normDist strips every «حي», so «حي البحيرات» probes as «البرات», «حي الفحياء» as «الفاء», «اليحيى» as «الى» — the
+  // whole-word match above finds none of their Arabic rows, only the English twin rows the catalog bridge adds
+  // («Al-Buhayrat», Jeddah). The multi-city branch then saw ONE city and sent 327 Mecca ads' name to Jeddah, and
+  // the Majmaah / Hofuf names were lost outright (647 listings on the 11-10 sweep, 335 of them البحيرات). The rows
+  // whose normalised name EQUALS the typed one (both sides normalised alike) always belong to the answer; a city
+  // the user named still scopes them.
+  for (const d of namedExactly()) {
+    if (cityKey) {
+      const dc = flatLoc(d.city);
+      if (dc !== cityKey && dc !== cityKeyAr && flatLoc(CITY_AR_DISPLAY[dc] || '') !== cityKeyAr) continue;
+    }
+    if (!out.includes(d)) out.push(d);
+  }
   out.sort((a, b) => b.n - a.n); // strongest (most listings) first
   return out;
 }
