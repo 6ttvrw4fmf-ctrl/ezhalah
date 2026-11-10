@@ -77,7 +77,8 @@ check('every card still carries its table', [...ok.values()].every((r) => r.sour
 const down = await cards(real, { index: 'error' });
 check('a FAILED index read still names the city (CITY_AR) and still returns every card — never a blank-for-error', down.get(17656083)?.city === 'الطائف' && down.size === 3);
 
-const noCall = real.replace('for (const r of rows) { r.sourceTable = table; applyArabicLocation(r, arById.get(Number(r.id))); }', 'for (const r of rows) { r.sourceTable = table; }');
+// The loop also hands the index's bath count to the card rule (🔧 2026-11-10); the mutant drops ONLY the Arabic step.
+const noCall = real.replace('    applyArabicLocation(r, arById.get(Number(r.id)));\n    // Same rule as the search path', '    // Same rule as the search path');
 mustCatch('fetchListingCards skipping the Arabic step (the «الموقع غير محدد» card of 2026-11-05)', noCall !== real && (await cards(noCall, { index: 'ok' })).get(17656083)?.city !== 'الطائف');
 const rawWins = real.replace("l.city = /[ء-ي]/.test(rawCity || '') ? rawCity : ((ar?.city) || arCity(safeRawCity) || safeRawCity || '');", 'l.city = rawCity;');
 mustCatch('the English raw city printed on the card', rawWins !== real && (await cards(rawWins, { index: 'ok' })).get(17656083)?.city === 'Taif');
