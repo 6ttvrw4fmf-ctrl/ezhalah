@@ -108,6 +108,28 @@ for (const s of sites) {
   }
 }
 
+// ── 4c. A PRINTED «DATE» THAT IS NOT A POSTING DATE STAYS OUT OF date_added ───────────────────────
+// nofodh prints «تاريخ النشر» on every page, but it is the platform's import timestamp: 2,542 of 2,556
+// active ads share one value (measured 2026-11-10). A shared stamp is not a posting date, and a wrong date
+// is worse than none — so the mapper stores NULL, keeps the printed text in the row's capture, and the
+// site is 'no' in the policy table. mon_detect_shared_posting_stamp() watches every table for the shape.
+type NoDate = { site: string; module: string; mapped?: boolean; date_added?: string | null; why?: string;
+  raw_kept?: boolean; error?: string; mutations: [string, string, boolean, Mapped | null][] };
+const noDate = (pyCall(ROOT, FIX, 'no_date_report', [[]]) as NoDate[][])[0];
+check('nofodh is registered as a site whose printed date is not a posting date', noDate.some((n) => n.site === 'nofodh'));
+for (const n of noDate) {
+  if (n.error) { check(`${n.site}: mapper ran`, false, n.error); continue; }
+  check(`${n.site}: the ad still maps`, n.mapped === true, `skipped: ${n.why}`);
+  check(`${n.site}: date_added stays NULL (the printed stamp is not a posting date)`, n.date_added === null, `got ${show(n.date_added)}`);
+  check(`${n.site}: the printed text is kept verbatim in the row's capture`, n.raw_kept === true);
+  for (const [label, , applied, mutant] of n.mutations) {
+    if (!applied) { check(`MUTATION ${label}: ANCHOR DRIFTED — mutant never applied`, false); continue; }
+    if (err(mutant)) { check(`MUTATION ${label}: python threw`, false, err(mutant)!); continue; }
+    const mm = mutant as Exclude<Mapped, { error: string }>;
+    mutation(`${label}`, mm.mapped === true && mm.date_added !== null, `mutant answered ${show(mm.date_added)}`);
+  }
+}
+
 // ── 5. EVERY SITE HERE IS WATCHED IN PRODUCTION ─────────────────────────────────────────────────
 // A site that writes its date but is not 'yes' in ops_source_posting_date_policy is invisible to
 // mon_detect_source_posting_date_fill_regressed(): the day the site renames its field, nothing fires.
@@ -121,6 +143,9 @@ for (const f of readdirSync(MIGRATIONS).filter((x) => x.endsWith('.sql')).sort()
 }
 for (const s of sites) {
   check(`${s.site}: declared publishes = 'yes' in ops_source_posting_date_policy by a committed migration`, yes.has(s.site));
+}
+for (const n of noDate) {
+  check(`${n.site}: NOT declared 'yes' (its printed date is not a posting date)`, !yes.has(n.site));
 }
 
 // ── 6. THIS FILE RUNS IN `npm test` — asked of the registry, never by string-matching package.json ──
