@@ -153,3 +153,25 @@ def test_the_street_pattern_really_matches_a_street_segment():
     assert not am._STREET_SEG.match("الوغل") and not am._STREET_SEG.match("شارعين")
     assert am._city_only_in_street("الاحساء", "شارع الاحساء, العيينة")
     assert not am._city_only_in_street("تمنية", "شارع 44 تمنية ، تمنية ، منطقة عسير")
+
+
+def test_a_dropped_street_city_takes_its_district_cleaning_and_region_with_it(address_catalog):
+    # real ad 5708581 (aqarmonthly 1097380), 2026-11-10: «شارع-بدر-حي-الملك-فهد-المجمعة-المجمعة». بدر is a catalog
+    # town (Madinah region) and المجمعة a 4-way twin, so the slug picked بدر; the street guard dropped it but the
+    # row kept «حي الملك فهد المجمعة» (cleaned against بدر) and بدر's region 3 — alert aqarmonthly_district_city_suffix.
+    al._CITY["بدر"] = [(1053, 3)]
+    al._CITY["المجمعه"] = [(24, 1), (1343, 2), (1494, 6), (1761, 6)]
+    al._CID_AR.update({1053: "بدر", 24: "المجمعة", 1343: "المجمعة", 1494: "المجمعة", 1761: "المجمعة"})
+    am._city_region.cache_clear()
+    uri, addr = "شارع-بدر-حي-الملك-فهد-المجمعة-المجمعة-5708581", "شارع بدر ، حي الملك فهد ، المجمعة ، المجمعة"
+    r = _resolve_location(uri, None, addr)
+    assert r["city_id"] is None and r.get("street_city_dropped") is True
+    assert r["district_ar"] == "حي الملك فهد"
+    assert r["region_id"] is None                      # never the street town's region
+    # Aqar's own city id still supplies the region (Riyadh-region id 21 → المجمعة 24)
+    r = _resolve_location(uri, 21, addr)
+    assert (r["city_id"], r["district_ar"]) == (24, "حي الملك فهد")
+    # a slug that SAYS «منطقة» keeps that region when the street town is dropped
+    al._REGION_NORM["منطقه الرياض"] = 1
+    r = _resolve_location("شارع-بدر-حي-الملك-فهد-الوغل-منطقة-الرياض-1", None, "شارع بدر ، حي الملك فهد ، الوغل ، منطقة الرياض")
+    assert r["region_id"] == 1
