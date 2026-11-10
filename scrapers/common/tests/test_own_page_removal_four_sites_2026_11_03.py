@@ -98,6 +98,30 @@ def test_mobasher_empty_shell_is_gone_but_an_unreadable_record_is_not():
     assert mobasher._ar_url("https://example.com/x") is None
 
 
+def test_mobasher_stored_url_already_in_ar_shape_is_asked_not_skipped(monkeypatch):
+    # alert_event 13910 (2026-11-10): a row stored as /ar/direct/… was answered «no stored URL» and
+    # held UNKNOWN at 5 strikes. Both stored shapes must reach the same page.
+    ar = "https://mobasher.sa/ar/direct/realestate/%D8%B7%D8%A7%D8%A8%D9%82-1787486370520"
+    assert mobasher._ar_url(ar) == ar
+    assert mobasher._ar_url("https://mobasher.sa/ar/direct/realestate/") is None
+    assert mobasher._ar_url("https://mobasher.sa/direct/realestate/") is None
+    assert mobasher._ar_url("https://mobasher.sa/ar/other/abc") is None
+    asked = []
+
+    class P:
+        def __init__(self, **kw):
+            self.kw = kw
+
+        def verify_gone(self, ad):
+            asked.append(self.kw["url_for"](ad))
+            return "gone", "x"
+
+    monkeypatch.setattr(mobasher, "LivenessProbe", P)
+    monkeypatch.setattr(mobasher, "_stored_url", lambda ad: ar)
+    assert mobasher._make_verify_gone(object(), ar)("MBSx")[0] == "gone"
+    assert asked == [ar]
+
+
 # ── the positive control gates every removal ────────────────────────────────────────────────────
 @pytest.mark.parametrize("mod,ad,ctrl", [
     (jurash, "JR68", "JR84"), (vmksa, "VMK668", "VMK886"), (amlak, "AMH19625", "AMH19774")])
