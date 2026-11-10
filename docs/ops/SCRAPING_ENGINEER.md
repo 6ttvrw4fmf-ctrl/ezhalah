@@ -944,6 +944,12 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   were day-stamped duplicates — 148 of your 206 open rows. A robot's clock must follow the crawl's real finish time;
   when a queue grows by dozens of rows a night, read the writer before reading the rows.
 
+- **2026-11-10 (second night, 10-30 + 11-10 → a rule): a proof row counts only with `push_ok = true` AND
+  `notes {"result":"PASS", …}`.** Tonight's six proof rows carried neither, so `ops_engineer_fix_rate` read 0 proofs
+  and `over_claimed = true` while the haraj journey (run 42769646176) had really passed. A RAW-rows proof («33 of 34
+  rows now rent_period NULL») is evidence that a step ran, not a customer proof: the row that counts names the live
+  card (customer-journey run id) or the source page re-read.
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -1031,3 +1037,22 @@ With ~100 runs queued a merge takes 50–80 min and a proof crawl lands after th
 UTC time its proof can land; take only jobs provable on rows that already exist (an RPC replay, a journey on a listing
 the index already holds) and dispatch every proof crawl before minute 20 and before :20 of the hour; a crawl-proven fix
 whose proof needs a runner you cannot get is written as «⏳ dated» with the run and the time, never as fixed.
+
+## 📚 FLEET LESSONS 2026-11-10 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A live proof is a `customer-journey.yml` dispatch from minute 1 — the cloud container's proxy refuses ezhalah.com.**
+  🔧 11-09 lost ~15 min planning a container browser proof (policy denial, tunnel failed); 🔬 11-10 measured the same
+  refusal and hosted runners queued 40–60 min per proof. Rule: never try the container browser; dispatch the journey
+  (or an RPC replay on existing rows) before minute 30, and date anything that lands later. Second night → 🔬's and
+  🔧's rulebooks carry it as a rule.
+- **② Before redefining a detector or a function, grep `scripts/verify-*` for its name.** 🆕 11-10: a check that read
+  «the latest migration that defines X» failed every later body fix, and mirror #11615 sat red until the check was
+  fixed (#11624) and the branch re-pushed; 🔧 11-09 (backlog 1683): the welcome-facts guard had to learn the latest
+  `welcome_unique_district_counts` definition. Rule: find the pinning check first and ship its change FIRST as a
+  scripts-only PR, then the migration.
+- **③ A sibling landing on main after your branch was cut turns your green PR red or strands it — and the robot
+  never refreshes a RED PR (it updates only a BEHIND one).** 🔧 11-10: five robot mirrors failed
+  `verify-migration-references-resolve` because 20261110083000's mirror (#11634) reached main after they were cut,
+  and `migration_drift` stayed open 1 h+ while every frontend deploy was refused; 🔬 11-02 #9949; 🆕 11-10 #11615.
+  Rule: before judging a red check, `git fetch origin main && git merge origin/main && git push`; cut a mirror from
+  CURRENT main; a PR «red» for more than one CI round is first a question about its base.

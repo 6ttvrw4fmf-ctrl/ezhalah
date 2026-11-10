@@ -29,6 +29,13 @@ export const MAX_PER_RUN = 10;
 // the robot mirrors the version itself on mirror/<version>-auto; engineer-automerge closes the person's PR if it then
 // carries nothing new. The robot's own -auto PR never expires as a claim (it would only duplicate itself).
 export const CLAIM_MINUTES = 90;
+/** Every PR body this robot writes carries this; an open mirror PR with it is the robot's own and holds its version for good. */
+export const ROBOT_MARK = '.github/workflows/migration-auto-mirror.yml';
+/** The title this robot gives every PR it opens (see `gh pr create` below). */
+export const ROBOT_TITLE = 'mirror (auto): ';
+/** The robot's own PR: ITS title shape AND its body mark. A person's PR that merely mentions the workflow path
+ *  (a lesson, a cross-reference) is still a person's claim and still expires (CodeRabbit on #11673). */
+export const isRobotPr = (pr) => String(pr?.title ?? '').startsWith(ROBOT_TITLE) && String(pr?.body ?? '').includes(ROBOT_MARK);
 
 /** «20261027201642» → Date (UTC); null when the version is not a 14-digit timestamp. */
 export function versionTime(version) {
@@ -49,15 +56,19 @@ export function safeName(name) {
  *  mirror/<version> branches and no PR — the files travelled in #10130 beside sql/mirrors/ — so every run read
  *  «someone is on it», mirrored nothing, and the drift gate refused six deploys over 2 h 37 min. Such a version is
  *  mirrored on mirror/<version>-auto so the stale branch is never touched. */
-export function planMirrors(missing, now, takenHeads, existingBranches = takenHeads) {
+export function planMirrors(missing, now, takenHeads, existingBranches = takenHeads, robotHeads = []) {
   const taken = new Set(takenHeads);
   const exists = new Set(existingBranches);
+  // The robot's OWN open PRs (any name) never expire as a claim: on 2026-11-10 its plain mirror/<version> PRs
+  // (#11639 #11649 #11651 #11655 #11658) were read as a person's claim, expired at CLAIM_MINUTES and were mirrored a
+  // second time on -auto (#11652 #11654 #11660 #11663 #11665) — five duplicate PRs, ten CI rounds, one drift.
+  const robot = new Set(robotHeads);
   return (missing ?? [])
     .filter((m) => {
       const t = versionTime(m?.version);
       if (!t) return false;
       const ageMs = now.getTime() - t.getTime();
-      const heldByPerson = taken.has(`mirror/${m.version}`) && ageMs < CLAIM_MINUTES * 60_000;
+      const heldByPerson = taken.has(`mirror/${m.version}`) && (ageMs < CLAIM_MINUTES * 60_000 || robot.has(`mirror/${m.version}`));
       return ageMs >= GRACE_MINUTES * 60_000 && !heldByPerson && !taken.has(`mirror/${m.version}-auto`);
     })
     .slice(0, MAX_PER_RUN)
@@ -90,9 +101,12 @@ if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/auto-mirror-migration
   if (!Array.isArray(missing)) die('preflight returned no missing_in_git_details (never read as "nothing missing")');
   const branches = git('ls-remote', '--heads', 'origin', 'mirror/*').split('\n').filter(Boolean).map((l) => l.split('refs/heads/')[1]);
   // Only an OPEN PR claims a version; a leftover branch does not (2026-11-03: 178 mirror/* branches on origin).
-  const openHeads = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '300', '--json', 'headRefName'], { encoding: 'utf8' }))
-    .map((p) => p.headRefName).filter((h) => /^mirror\//.test(h));
-  const plan = planMirrors(missing, new Date(), openHeads, branches);
+  const openPrs = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '300', '--json', 'headRefName,title,body'], { encoding: 'utf8' }))
+    .filter((p) => /^mirror\//.test(p.headRefName));
+  const openHeads = openPrs.map((p) => p.headRefName);
+  // The robot's own PRs (title shape + body mark, isRobotPr) are its own claims and never expire.
+  const robotHeads = openPrs.filter(isRobotPr).map((p) => p.headRefName);
+  const plan = planMirrors(missing, new Date(), openHeads, branches, robotHeads);
   console.log(`missing in git: ${missing.length}; mirroring now: ${plan.length}`);
   let failed = 0;
   for (const p of plan) {
@@ -110,10 +124,10 @@ if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/auto-mirror-migration
       // was refused «non-fast-forward», and the run went red. A person's mirror/<version> branch is never forced.
       git('push', '-q', ...(p.branch.endsWith('-auto') ? ['--force'] : []), 'origin', `${p.branch}:${p.branch}`);
       execFileSync('gh', ['pr', 'create', '--head', p.branch, '--base', 'main',
-        '--title', `mirror (auto): ${p.version} ${p.file.split('/').pop()}`,
+        '--title', `${ROBOT_TITLE}${p.version} ${p.file.split('/').pop()}`,
         '--body', `Applied to production but missing from git, ${GRACE_MINUTES}+ minutes after it was applied. ` +
           'File = `ops_migration_sql(version)`, exactly what production executed. Merged by engineer-automerge.yml once every ' +
-          'required check (incl. byte-parity) is green. Opened by `.github/workflows/migration-auto-mirror.yml`.'], { stdio: 'inherit' });
+          'required check (incl. byte-parity) is green. Opened by `' + ROBOT_MARK + '`.'], { stdio: 'inherit' });
       console.log(`✓ ${p.version}: PR opened on ${p.branch}`);
     } catch (e) { console.error(`✗ ${p.version}: ${e.message}`); failed++; }
   }

@@ -537,6 +537,11 @@ row; a night is better on findability only when a score row says so.**
   ♻️'s three real PASS rows of 10-30 as 0 proven because `push_ok` was left NULL. The view now also reads the notes'
   `"result":"PASS"`, but the column is the contract.
 
+- **2026-11-10 (second night, 🔧 11-09 + 🔬 11-10 → a rule):** the cloud container's proxy refuses ezhalah.com, so a
+  live proof is ALWAYS a `customer-journey.yml` dispatch (or an RPC replay on rows that already exist), dispatched
+  before minute 30 because hosted runners queue 40–60 min; `safe-pr-merge.ts` is refused here too, so a merge is the
+  robot's. Never spend a minute on a container browser.
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -685,3 +690,22 @@ the owner:** (1) «3 دورات مياه» + «مجلس بدورة مياه» (~
   more — every Major or Critical is fixed or rebutted, owner order); never stack a second PR on a branch another PR is about to
   squash — after the sibling lands, `git fetch origin main && git merge origin/main` the same minute — a conflict is resolved keeping the review
   fixes, the relevant tests re-run, and only then `git push`.
+
+## 📚 FLEET LESSONS 2026-11-10 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A live proof is a `customer-journey.yml` dispatch from minute 1 — the cloud container's proxy refuses ezhalah.com.**
+  🔧 11-09 lost ~15 min planning a container browser proof (policy denial, tunnel failed); 🔬 11-10 measured the same
+  refusal and hosted runners queued 40–60 min per proof. Rule: never try the container browser; dispatch the journey
+  (or an RPC replay on existing rows) before minute 30, and date anything that lands later. Second night → 🔬's and
+  🔧's rulebooks carry it as a rule.
+- **② Before redefining a detector or a function, grep `scripts/verify-*` for its name.** 🆕 11-10: a check that read
+  «the latest migration that defines X» failed every later body fix, and mirror #11615 sat red until the check was
+  fixed (#11624) and the branch re-pushed; 🔧 11-09 (backlog 1683): the welcome-facts guard had to learn the latest
+  `welcome_unique_district_counts` definition. Rule: find the pinning check first and ship its change FIRST as a
+  scripts-only PR, then the migration.
+- **③ A sibling landing on main after your branch was cut turns your green PR red or strands it — and the robot
+  never refreshes a RED PR (it updates only a BEHIND one).** 🔧 11-10: five robot mirrors failed
+  `verify-migration-references-resolve` because 20261110083000's mirror (#11634) reached main after they were cut,
+  and `migration_drift` stayed open 1 h+ while every frontend deploy was refused; 🔬 11-02 #9949; 🆕 11-10 #11615.
+  Rule: before judging a red check, `git fetch origin main && git merge origin/main && git push`; cut a mirror from
+  CURRENT main; a PR «red» for more than one CI round is first a question about its base.
