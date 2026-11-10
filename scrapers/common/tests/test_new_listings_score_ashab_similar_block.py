@@ -60,7 +60,10 @@ def test_alshawaf_related_table_is_not_the_ads_area():
 
 
 def test_alshawaf_without_the_cut_misreads_the_area():
-    assert _area(ALSHAWAF) == S.MISMATCH
+    # 2026-11-09: the node's th/td «المساحة» / «250م» is read now, so the cut is proven with the RELATED table's 600:
+    # uncut, another plot's area reads as ours; cut, it is a mismatch against the node's 250.
+    related = lambda body: S.compare_listing({"area_m2": 600}, S.page_evidence(body))["area"]
+    assert related(ALSHAWAF) == S.MATCH and related(S.scope_to_its_ad(ALSHAWAF_URL, ALSHAWAF)) == S.MISMATCH
 
 
 # alshawaf 22426 (2026-11-08, backlog 1357): the related table under the node carried no «frontpage-block» id, so
@@ -83,7 +86,8 @@ def test_alshawaf_related_listing_rows_are_cut_without_a_block_id():
     scoped = S.scope_to_its_ad(URL_22426, page)
     assert "500" not in scoped and "375م" in scoped and 'headers="' not in scoped
     assert _area_375(scoped) != S.MISMATCH
-    assert _area_375(page) == S.MISMATCH          # the uncut page really does misread it
+    # the uncut page really does misread it: the related row's 500 reads as ours until the cut removes it
+    assert S.compare_listing({"area_m2": 500}, S.page_evidence(page))["area"] == S.MATCH
 
 
 def test_alshawaf_a_listing_row_before_the_node_never_cuts_the_ad():
