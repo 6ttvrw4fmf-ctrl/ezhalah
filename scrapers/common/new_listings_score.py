@@ -258,6 +258,10 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 out[name] = _cmp_bedrooms_beside_total_rooms(stored.get(col), lines, whole, kw)
                 continue
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
+            if name == "property_age":
+                built = _structured_age(stored.get(col), lines, jsonld if page.get("jsonld") else "")
+                if built is not None:
+                    out[name] = built
             # An OPEN bucket «+7 غرف نوم» / «7+ حمامات» is a floor, not a count: Property Finder 24671162 (score run
             # 42343488034, 2026-11-07) prints «+7» while its own payload's bedrooms_value is 20 (bathrooms 9), and the
             # score read our 20 as a MISMATCH. A stored count AT OR ABOVE the bucket's floor, on the keyword's own line.
@@ -627,6 +631,36 @@ def _age_floor(line: str, own: bool) -> Optional[float]:
 PER_METRE_PRICE = re.compile(r"سعر\s+(?:ال)?متر|(?<![ء-ي])المتر\s*[:：]?\s*[\d٠-٩]")
 # The bare area label of a th/td table («<th>المساحة</th><td>587م</td>» → lines «المساحه» / «587م»).
 AREA_LABEL_LINE = re.compile(r"^\s*(?:ال)?مساحه(?:\s+(?:ال)?(?:ارض|الارض|العقار))?\s*[:：]?\s*$")
+
+
+# A BUILD YEAR the page publishes as a structured field is the age's statement, and it wins over prose (law: prose is
+# never consulted for a field the site publishes structurally). 🔬 2026-11-10, backlog 1615, pages re-read via
+# net.http_get: squares 13602726 prints the spec row «سنة البناء» / «2022» (stored 4) while its 2024 prose still says
+# «عمر العقار : سنتين»; erapulse 648075's JSON-LD says «"yearBuilt":1993» (stored 33) while the page's OTHER ad's
+# prose «عمر العقار: 3 سنوات» read as its age. Both scored MISMATCH on correct values. One year either way is the
+# same building (the age turns on the month we cannot see).
+BUILD_YEAR_LABEL = re.compile(r"^\s*(?:سنه|عام)\s+(?:ال)?(?:بناء|انشاء|إنشاء)\s*[:：]?\s*((?:19|20)\d\d)?\s*$")
+JSONLD_YEAR_BUILT = re.compile(r'"yearBuilt"\s*:\s*"?((?:19|20)\d\d)"?')
+
+
+def _structured_age(stored, lines: list[str], jsonld: str, now_year: Optional[int] = None) -> Optional[str]:
+    """MATCH / MISMATCH / WE_MISS from the page's own build year, or None when the page publishes none."""
+    now_year = now_year or datetime.now(timezone.utc).year
+    years: list[int] = [int(m.group(1)) for m in JSONLD_YEAR_BUILT.finditer(jsonld or "")]
+    for i, x in enumerate(lines):
+        m = BUILD_YEAR_LABEL.match(x or "")
+        if not m:
+            continue
+        if m.group(1):
+            years.append(int(m.group(1)))
+        elif i + 1 < len(lines) and re.match(r"^\s*(?:19|20)\d\d\s*$", lines[i + 1] or ""):
+            years.append(int(lines[i + 1].strip()))
+    years = [y for y in years if 1900 <= y <= now_year]
+    if not years:
+        return None
+    if stored is None:
+        return WE_MISS
+    return MATCH if any(abs(float(stored) - (now_year - y)) <= 1 for y in years) else MISMATCH
 
 
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
