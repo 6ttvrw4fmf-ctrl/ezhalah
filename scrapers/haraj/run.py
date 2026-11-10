@@ -281,7 +281,13 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
     elif price and p["deal"] == "Rent" and (ptype not in LAND_TYPES or basis == "total"):
         # PERIOD = the ad's own words tied to THIS price, else the repo's «≤ 10,000 looks monthly» rule,
         # else unstated (price stored unconverted, period NULL: it stays out of yearly/monthly searches).
-        rent_period, price_annual = N.rent_period_from_ad(price, f"{title}\n{free_text}", None, title)
+        if X.short_stay_rent(title, free_text):
+            # The seller states a daily/weekly rent (backlog 1674): no bucket, never annualised. The page was
+            # read and settled it, so a «monthly ×12» an older read stored is CLEARED, not kept as None would.
+            facts["short_stay"] = X.short_stay_rent(title, free_text)
+            rent_period = price_annual = db.AUTHORITATIVE_NULL
+        else:
+            rent_period, price_annual = N.rent_period_from_ad(price, f"{title}\n{free_text}", None, title)
     services = P.services_of(p["services_raw"])
     dwelling = ptype in DWELLING_TYPES
     rooms = N.rooms_from_phrase(f"{title}\n{free_text}") if dwelling else {}
@@ -420,8 +426,10 @@ def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: d
     elif price and deal == "Buy":
         price_total = price
     elif price and deal == "Rent":
-        if prose_price["period"] == "daily":
-            price_annual = None                                           # no daily bucket: not a figure we store
+        if prose_price["period"] == "daily" or X.short_stay_rent(title, description):
+            # no daily bucket: not a figure we store. The words were read and settle it, so an older
+            # «monthly ×12» is cleared (backlog 1674: 25790932 «للإيجار اليومي» served as 3,600 a year).
+            rent_period = price_annual = db.AUTHORITATIVE_NULL
         elif prose_price["period"]:
             rent_period, price_annual = N.rent_period_and_annual(
                 price, {"monthly": "شهري", "annual": "سنوي"}[prose_price["period"]])

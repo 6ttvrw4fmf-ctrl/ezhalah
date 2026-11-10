@@ -446,3 +446,12 @@ def test_catchup_cursor_ignores_the_finished_licensed_only_walk():
     old = '{"catchup_before": "2026-07-20-00", "catchup_files_left": 0}'
     assert R._CURSOR.search(old) is None
     assert R._CURSOR.search('{"catchup_all_before": "2026-09-01-03"}').group(1) == "2026-09-01-03"
+
+
+def test_licensed_daily_rent_is_never_annualised_2026_11_10():
+    # Backlog 1674: 18749721 «شقه فاخره للاجار اليومي», «سعر الوحدة» 350, was served 4,200 a year (350 × 12).
+    from scrapers.common import db
+    desc = FLAT_EN_MONTHLY.replace("للايجار شقق عزاب مؤثثة في حي البيان", "شقه مفروشه فاخره للاجار اليومي").replace(
+        "سعر الوحدة: 2800", "سعر الوحدة: 350")
+    row, *_ = mapped("شقه فاخره للاجار اليومي", desc, city="الرياض")
+    assert row["rent_period"] is db.AUTHORITATIVE_NULL and row["price_annual"] is db.AUTHORITATIVE_NULL
