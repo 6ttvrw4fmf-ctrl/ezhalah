@@ -224,6 +224,9 @@ try {
         const n = fr ? await fr.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0) : 0;
         if (n > 200) seen = Date.now() - t0;
       }
+      // The frame body read must finish WHILE the context is open (closing it would interrupt a pending read and leave
+      // text '' → «wall» → a hidden refusal; CodeRabbit, #11680). Bounded: 3 s, then the decision reads what arrived.
+      if (seen === null && frameDoc?.ready) await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);
       await ctx.close();
       if (seen === null && rateLimited) { console.log(`· ${site.host}: ${u} — rate-limited by the site (429), excluded`); continue; }
       if (seen === null && challenged) { console.log(`· ${site.host}: ${u} — Cloudflare challenged the robot (cf-mitigated: challenge), excluded`); continue; }

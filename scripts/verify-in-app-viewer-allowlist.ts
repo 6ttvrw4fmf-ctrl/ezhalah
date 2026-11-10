@@ -363,6 +363,7 @@ check('the top-level wall branch skips ONLY a wall: a full ad page with the head
 check('an unreadable top-level body is inconclusive, never classified as a wall', /const body = await res\.text\(\)\.catch\(\(\) => null\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(body === null\) \{ topUnreadable\.add\(u\); console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc));
 check('an unreadable top-level body never becomes a 99,999 ms sample: a blank frame over it is inconclusive unless the frame proves a refusal', /topUnreadable\.add\(u\);/.test(guardSrc) && /if \(seen === null && topUnreadable\.has\(u\) && !frameRefusal\(frameDoc\)\) \{ console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc));
 check('a given-but-empty ONLY_HOSTS is refused (the bridge already reads it as partial)', /if \(\(process\.env\.ONLY_HOSTS \?\? ''\) !== '' && !only\.length\) fail\(/.test(guardSrc));
+check('the frame body read is awaited (bounded) BEFORE the browser context is closed', (() => { const a = guardSrc.indexOf('await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);'); const c = guardSrc.indexOf('await ctx.close();'); return a > 0 && c > 0 && a < c; })());
 check('the frame body read is awaited before the refusal decision', /if \(frameDoc\?\.ready\) await frameDoc\.ready;\n\s*const refusal = frameRefusal\(frameDoc\);/.test(guardSrc) && /d\.ready = r\.text\(\)\.then/.test(guardSrc));
 check('the exclusion branch consults the frame\'s evidence before excluding', /topWall\.has\(u\)\) \{\n\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(frameDoc\?\.ready\) await frameDoc\.ready;\n\s*const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc));
 check('the top-level log line carries no <title> (PDPL: a listing title can name a person or a phone)', !/title «\$\{title\}»/.test(guardSrc) && !/const title = \/<title/.test(guardSrc));
@@ -382,6 +383,8 @@ mustCatch('a refusal decided before the frame body arrived',
   !/if \(frameDoc\?\.ready\) await frameDoc\.ready;\n\s*const refusal = frameRefusal\(frameDoc\);/.test(guardSrc.replace('if (frameDoc?.ready) await frameDoc.ready;\n', '')));
 mustCatch('an unreadable body that still measures the blank frame (the 99,999 trap)',
   !/if \(seen === null && topUnreadable\.has\(u\) && !frameRefusal\(frameDoc\)\) \{ console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc.replace('if (seen === null && topUnreadable.has(u) && !frameRefusal(frameDoc)) {', 'if (false) {')));
+mustCatch('a context closed before the frame body was read',
+  (() => { const m = guardSrc.replace("      if (seen === null && frameDoc?.ready) await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);\n", ''); const a = m.indexOf('await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);'); const c = m.indexOf('await ctx.close();'); return !(a > 0 && c > 0 && a < c); })());
 mustCatch('the <title> back in the log', /title «\$\{title\}»/.test(guardSrc.replace('${body.length} chars${wall', '${body.length} chars, title «${title}»${wall')));
 
 // A suffix match without the dot boundary (the lookalike mutant).
