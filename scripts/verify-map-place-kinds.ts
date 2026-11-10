@@ -159,7 +159,7 @@ const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const field = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
 const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 check('AppleMap.web.tsx: suggestPlaces classifies, dedupes and sorts', /classifyPlace\(facts\)/.test(web) && /sortByKind\(dropAreaShadows\(dedupePlaces\(/.test(web) && /placeSubtitle\(facts, kind, country\)/.test(web));
-check('AppleMap.web.tsx: an unresolved row is kept with its two lines (timeout → resolve(r))', /setTimeout\(\(\) => resolve\(r\), \d+\)/.test(web));
+check('AppleMap.web.tsx: an unresolved row is kept with its two lines (timeout → resolve(r))', /setTimeout\(\(\) => resolve\(r\), (?:\d+|RESOLVE_BUDGET_MS)\)/.test(web));
 check('AppleMap.web.tsx: autocomplete ranks around the map\'s region (a chain lists nearby branches, walked live 2026-11-01)', /if \(live\.map\) search\.region = live\.map\.region;/.test(web));
 const row = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
 check('MapDealRow.tsx: a pick BLURS the field so the phone keyboard closes (owner 2026-11-02)', /inputRef\.current\?\.blur\(\); onPick\(p\);/.test(row) && /ref=\{inputRef\}/.test(row));
