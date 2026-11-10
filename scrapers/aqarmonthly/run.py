@@ -645,6 +645,15 @@ def _placed(cid: int, rid, district_ar) -> dict:
             "district_ar": district_ar, "confidence": "address"}
 
 
+def _served_region(loc: dict):
+    """The region to WRITE. A region we proved came from a street-named town is cleared, not kept: a plain None
+    means «unknown this fetch» and would leave the stored wrong region in place (aqarmonthly 1097380 kept بدر's
+    region 3, 🔧 2026-11-10) — the same rule the city columns follow below."""
+    if loc.get("region_id") or not loc.get("street_city_dropped"):
+        return loc.get("region_id")
+    return db.AUTHORITATIVE_NULL
+
+
 def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) -> dict:
     """The ad's city, from the strongest evidence the source gives, in this order:
       1. the slug (resolve_slug) — unless that city appears only as a street name in the address;
@@ -820,7 +829,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "city_ar":          loc["city_ar"] if loc["city_ar"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
         "district_ar":      district_ar_val,
         "city_id":          loc["city_id"] if loc["city_id"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
-        "region_id":        loc["region_id"],
+        "region_id":        _served_region(loc),
         "source_capture":   capture,
         # Aqar's own pin for this unit (Listing.location), through the one KSA gate; {} → the district
         # border, never a guess. listing_rich_attrs reads additional_info.latitude/longitude.

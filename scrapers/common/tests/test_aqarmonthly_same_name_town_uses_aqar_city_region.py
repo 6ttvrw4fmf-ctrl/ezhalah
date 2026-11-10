@@ -171,7 +171,22 @@ def test_a_dropped_street_city_takes_its_district_cleaning_and_region_with_it(ad
     # Aqar's own city id still supplies the region (Riyadh-region id 21 → المجمعة 24)
     r = _resolve_location(uri, 21, addr)
     assert (r["city_id"], r["district_ar"]) == (24, "حي الملك فهد")
-    # a slug that SAYS «منطقة» keeps that region when the street town is dropped
+    # a slug that SAYS «منطقة» keeps that region when the street town is dropped (the street town is a
+    # region-1 town here, so the drop branch really runs; the address names no region to mask a failure)
     al._REGION_NORM["منطقه الرياض"] = 1
-    r = _resolve_location("شارع-بدر-حي-الملك-فهد-الوغل-منطقة-الرياض-1", None, "شارع بدر ، حي الملك فهد ، الوغل ، منطقة الرياض")
+    r = _resolve_location("شارع-العيينة-منطقة-الرياض-1", None, "شارع العيينة ، الوغل")
+    assert r.get("street_city_dropped") is True and r["city_id"] is None
     assert r["region_id"] == 1
+
+
+def test_a_dropped_street_city_clears_the_stored_region_not_just_the_fetched_one(address_catalog):
+    """The row CLEARS a region the street town gave it (a plain None would keep the stored wrong one)."""
+    al._CITY["بدر"] = [(1053, 3)]
+    al._CID_AR[1053] = "بدر"
+    am._city_region.cache_clear()
+    g = {"id": 5708581, "uri": "شارع-بدر-حي-الملك-فهد-المجمعة-المجمعة-5708581",
+         "address": "شارع بدر ، حي الملك فهد ، المجمعة ، المجمعة"}
+    loc = _resolve_location(g["uri"], None, g["address"])
+    assert am._served_region(loc) is am.db.AUTHORITATIVE_NULL
+    assert am._served_region({"region_id": 1, "street_city_dropped": True}) == 1
+    assert am._served_region({"region_id": None}) is None
