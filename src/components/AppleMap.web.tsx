@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
@@ -755,7 +755,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     // and place marks only when the user zooms in further»; «at this zoom level show the names of the districts only
     // and the number of listings»): far out, one label per city; at city zoom, one per district; pins only closer in.
     // A tap on a label zooms into it. Keyed like the pins, so a pan keeps the labels that stay.
+    // A tap on «السعودية», or anywhere on the map while it shows, lists every region in this same view (owner
+    // 2026-11-09; src/lib/mapAreas.ts areaLevelShown).
+    let regionsAt = 0; let levelNow: AreaLevel | null = null;
+    const showRegionsHere = () => { regionsAt = m.region.span.latitudeDelta; void load(); };
     const pickArea = (a: AreaRow, level: AreaLevel) => {
+      if (level === 'country') { showRegionsHere(); return; }
       live.history.push(m.region);
       const sp = areaZoomSpan(level);
       // SHAPED LIKE THE SCREEN (measured live 2026-11-05, 390×844): a square span on a tall map is widened by MapKit to
@@ -786,7 +791,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
       // The pill names where the view is at every zoom (owner 2026-11-05): the country, then the region, the city, the
       // district most of the view's listings are in — «في هذه المنطقة» only when no one place holds most of them.
-      const place = areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
+      // Regions shown in the whole-Kingdom view: the pill keeps the country and its total.
+      const place = areaPlace(areas, level === 'region' && areaLevelFor(m.region.span.latitudeDelta) === 'country' ? 'country' : level, loc, translitPlace, m.region.center, m.region.span);
       setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
@@ -860,7 +866,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const { center, span } = m.region;
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
-      const level = narrowed ? null : areaLevelFor(span.latitudeDelta);
+      const level = narrowed ? null : areaLevelShown(span.latitudeDelta, regionsAt);
+      if (regionsAt && (span.latitudeDelta > regionsAt * 1.05 || (level !== 'region' && level !== 'country'))) regionsAt = 0;
+      levelNow = level;
       if (level) {
         const areas = await fetchMapAreas(paddedBox(center, span), level, pins.deals);
         if (my !== seq || mapRef.current !== m) return;
@@ -977,6 +985,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     // BEFORE this cleanup runs (src/lib/mapSurface.ts; measured 11-03, an uncaught TypeError on a fast tab switch).
     const offCanvasTap = onSurface(m, 'click', onCanvasTap);
     const offPanelsClose = onSurface(m, 'pointerdown', closePanels);
+    let tapDown: { x: number; y: number } | null = null;
+    const offTapDown = onSurface<PointerEvent>(m, 'pointerdown', (e) => { tapDown = { x: e.clientX, y: e.clientY }; });
+    const offTapUp = onSurface<PointerEvent>(m, 'pointerup', (e) => {
+      const d = tapDown; tapDown = null;
+      if (d && levelNow === 'country' && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 10) showRegionsHere();
+    });
     m.addEventListener('region-change-start', closePanels);
     m.addEventListener('region-change-start', clearBridge);
     void load();
@@ -986,7 +1000,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       m.removeEventListener('region-change-start', hideCanvas as unknown as (e: unknown) => void);
       m.removeEventListener('select', onSelect as unknown as (e: unknown) => void);
       offCanvasTap();
-      offPanelsClose();
+      offPanelsClose(); offTapDown(); offTapUp();
       clearBridge();
       m.removeEventListener('region-change-start', clearBridge as unknown as (e: unknown) => void);
       m.removeEventListener('region-change-start', closePanels as unknown as (e: unknown) => void);

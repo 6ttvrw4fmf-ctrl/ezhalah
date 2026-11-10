@@ -28,6 +28,18 @@ export function areaLevelFor(latitudeDelta: number): AreaLevel | null {
   return null;
 }
 
+/** A TAP ON THE COUNTRY SHOWS EVERY REGION WHERE THE USER ALREADY IS (owner 2026-11-09: «it shows Saudi Arabia, when
+ *  user clicks on the map — just clicks — it shows regions with total count, later zoom in cities then districts»).
+ *  Zooming in to the region band fits only 4 of the 13 regions on a phone (measured live 2026-11-09, 390×844: الرياض،
+ *  القصيم، حائل، الباحة), so a tap keeps the whole-Kingdom view and switches its labels to the regions. `regionsAt` is
+ *  the latitude span the tap happened at (0 = no tap): that view, or any closer one still in the country band, shows
+ *  regions; zooming out past it goes back to the one «السعودية» label. */
+export const REGIONS_TAP_SLACK = 1.05;
+export function areaLevelShown(latitudeDelta: number, regionsAt: number): AreaLevel | null {
+  const level = areaLevelFor(latitudeDelta);
+  return level === 'country' && regionsAt > 0 && latitudeDelta <= regionsAt * REGIONS_TAP_SLACK ? 'region' : level;
+}
+
 /** A count in few characters: 245, 3.4 ألف / 3.4K, 1.2 مليون / 1.2M. */
 export function areaCount(n: number, loc: 'ar' | 'en'): string {
   const one = (v: number) => (v < 10 ? (Math.round(v * 10) / 10).toString() : Math.round(v).toString());

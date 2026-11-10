@@ -5,7 +5,7 @@
 // shape: un-narrowed views read the labels first, a failed read falls back to the dots, labels are keyed and tappable.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, visibleAreas, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
+import { areaLevelFor, areaLevelShown, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, visibleAreas, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -14,6 +14,12 @@ const mustCatch = (name: string, caught: boolean) => check(`(mutation) catches $
 
 // Owner 2026-11-05: «first thing Saudi, the total number, then region, then city, then district» (the map opens at ~17°).
 check('the opening view (17°) shows ONE country label; a zoom in shows regions, then cities', areaLevelFor(17) === 'country' && areaLevelFor(9) === 'region' && areaLevelFor(3) === 'city');
+// Owner 2026-11-09: «when user clicks on the map — just clicks — it shows regions with total count». On a phone the
+// region zoom fits 4 of 13 regions, so a tap keeps the whole-Kingdom view and switches it to region labels.
+check('a tap on the country view shows the regions in that same view', areaLevelShown(17, 17) === 'region' && areaLevelShown(14, 17) === 'region' && areaLevelShown(9, 17) === 'region' && areaLevelShown(3, 17) === 'city');
+check('no tap: the country view still shows one «السعودية» label', areaLevelShown(17, 0) === 'country');
+check('zooming out past the tapped view goes back to «السعودية»', areaLevelShown(25, 17) === 'country');
+mustCatch('a tap that leaves the one country label (the owner taps and nothing happens)', areaLevelShown(17, 17) === 'region');
 check('city zoom shows one label per DISTRICT', areaLevelFor(2.5) === 'district' && areaLevelFor(0.5) === 'district' && areaLevelFor(0.07) === 'district');
 check('close in shows price pins (no label level)', areaLevelFor(0.06) === null && areaLevelFor(0.02) === null);
 mustCatch('pins at city zoom (the clutter the owner\'s father saw)', areaLevelFor(0.3) !== null);
@@ -53,13 +59,15 @@ mustCatch('the LABEL_MIN floor hiding every label of a small town (the empty Uml
 check('the drawn labels are the visible ones; the pill still counts every listing in view', (src => /drawAreas\(visibleAreas\(areas, level\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src) && /drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src))(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const data = readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8');
-check('an un-narrowed view reads the labels for its level first', /const level = narrowed \? null : areaLevelFor\(span\.latitudeDelta\);/.test(web) && /const areas = await fetchMapAreas\(paddedBox\(center, span\), level, pins\.deals\);/.test(web));
+check('an un-narrowed view reads the labels for its level first', /const level = narrowed \? null : areaLevelShown\(span\.latitudeDelta, regionsAt\);/.test(web) && /const areas = await fetchMapAreas\(paddedBox\(center, span\), level, pins\.deals\);/.test(web));
 check('labels are drawn keyed, counted in the pill, and a failed read falls back to the dots', /drawAreas\(visibleAreas\(areas, level\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web) && /if \(areas !== 'unknown'\) \{/.test(web) && /next\.set\(`A\|\$\{level\}\|\$\{a\.city\}\|\$\{a\.district\}\|\$\{a\.n\}`, a\)/.test(web));
 check('labels never pile up: MapKit collision hides the smaller neighbour, priority follows the count', /collisionMode: mk\.Annotation\.CollisionMode\?\.Rectangle, displayPriority: 250 \+ Math\.round\(499 \* a\.n \/ maxN\)/.test(web));
 check('the crowded exact-point read shows district names before falling back to the fine grid', /if \(areas !== 'unknown' && denseShowsDistricts\(areas\.filter\(\(a\) => inView\(a, center, span\)\)\.length, span\.latitudeDelta\)\) \{\n\s*drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web));
 check('a close-in crowded bubble shows its count; zoomed-out dots stay plain (owner 2026-11-02)', /if \(counted && cell > 0 && row\.n > 1\) el\.textContent = areaCount\(row\.n, loc\);/.test(web) && /\(\) => element\(row, drawCell, cell === 0 && drawCell > 0\), \{/.test(web));
 mustCatch('a bubble of 5,399 listings drawn as a blank dot at street zoom', /counted && cell > 0 && row\.n > 1/.test(web));
 check('a bubble tap uses bubbleTapSpan (always in)', /const sp = bubbleTapSpan\(cell, m\.region\.span\.latitudeDelta\);/.test(web));
+check('a tap on «السعودية» lists the regions where the user is (no zoom)', /if \(level === 'country'\) \{ showRegionsHere\(\); return; \}/.test(web));
+check('a plain tap anywhere on the country view lists the regions', /if \(d && levelNow === 'country' && Math\.hypot\(e\.clientX - d\.x, e\.clientY - d\.y\) < 10\) showRegionsHere\(\);/.test(web));
 check('a tap on a label zooms into it', /if \(d && Math\.hypot\(e\.clientX - d\.x, e\.clientY - d\.y\) < 10\) \{ e\.stopPropagation\(\); pickArea\(a, level\); \}/.test(web));
 check('the labels come through the bounded RPC and a failed read is unknown', /boundedRpc<AreaRow\[\]>\(supabase\.rpc\('map_areas_ar'/.test(data) && /if \(error \|\| !Array\.isArray\(data\)\) return 'unknown';/.test(data));
 check('src/lib/mapAreas.ts is import-free (the barrier executes it in Node)', !/^import /m.test(readFileSync(join(root, 'src/lib/mapAreas.ts'), 'utf8')));
