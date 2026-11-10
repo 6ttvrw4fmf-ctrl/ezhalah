@@ -1,0 +1,97 @@
+// THE POSTING-DATE ALARM JUDGES LIVE ADS, KEEPS AN UNJUDGEABLE SITE'S ALERT, AND CAN FIRE ON A LOW BASELINE.
+//
+// public.mon_detect_source_posting_date_fill_regressed() raises when a site that publishes a posting date stops
+// getting it stored on its NEW ads (docs/ARCHITECTURE.md §20). Three ways it went wrong on 2026-11-10, each caught
+// in review (PR #11606) and fixed in migration 20261110090000:
+//   1. it counted switched-off rows, which are never crawled again and can never gain a date — dwelleo (61 of 61
+//      live ads dated) would have alarmed for weeks;
+//   2. a site with too few live ads to judge was skipped AND its open alert closed — «unknown» read as «recovered»;
+//   3. «fill below baseline − 20» can never fire on a low baseline (aljassim measured 9 % → threshold −11 %).
+// The decision now lives in public.source_posting_date_fill_verdict(), executed against a truth table when its
+// migration is applied. This check runs on every PR: it reads the LATEST committed definition of both functions
+// and fails if a later change counts switched-off rows again, lets an unknown site's alert close, drops the
+// low-baseline floor, or hides the kind from the stale-alert watcher. Every predicate is proven by a mutation.
+//
+// Hermetic: committed migration text only. Run: node --experimental-strip-types scripts/verify-posting-date-alarm-judges-live-ads.ts
+
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { windowBetween } from './lib/sourceWindow.ts';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+const ROOT = join(import.meta.dirname, '..');
+const MIG = join(ROOT, 'supabase/migrations');
+const DETECTOR = 'create or replace function public.mon_detect_source_posting_date_fill_regressed()';
+const VERDICT = 'create or replace function public.source_posting_date_fill_verdict(';
+const PATCH = "pg_get_functiondef('public.mon_detect_source_posting_date_fill_regressed()";
+
+let failed = 0;
+const check = (label: string, ok: boolean, detail = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : ` — ${detail}`}`);
+  if (!ok) failed++;
+};
+// A mutation proof: the predicate, applied to a deliberately broken definition, must report a problem.
+const mutation = (label: string, problems: string[]) =>
+  check(`MUTATION: catches ${label}`, problems.length > 0, 'the broken definition passed');
+
+const files = readdirSync(MIG).filter((f) => f.endsWith('.sql')).sort();
+const text = (f: string) => readFileSync(join(MIG, f), 'utf8');
+const lastDefining = (marker: string) => [...files].reverse().find((f) => text(f).includes(marker));
+
+// ── the predicates ─────────────────────────────────────────────────────────────────────────────
+export function detectorProblems(body: string): string[] {
+  const p: string[] = [];
+  if (!/where\s+active\s+and\s+scraped_at\s*>=/.test(body)) p.push('the count query does not filter to live ads (`where active and scraped_at`)');
+  if (!/from\s+public\.source_posting_date_fill_verdict\s*\(/.test(body)) p.push('the decision is not taken by source_posting_date_fill_verdict()');
+  if (!/if\s+v\.verdict\s*=\s*'unknown'\s+then\s+(?:--[^\n]*\n\s*)*live\s*:=\s*live\s*\|\|\s*\(k\s*\|\|\s*':'\s*\|\|\s*r\.platform\)\s*;\s*continue\s*;/.test(body))
+    p.push('an unknown (too small to judge) site does not keep its key live, so its open alert would close');
+  if (!/mon_resolve_stale_keys\s*\(\s*'source_posting_date_fill_regressed'/.test(body))
+    p.push('the resolver does not name the kind as a literal, so mon_detect_unresolvable_alert_kinds() cannot see it');
+  return p;
+}
+
+export function verdictProblems(body: string): string[] {
+  const p: string[] = [];
+  if (!/threshold_pct\s*:=\s*greatest\(\s*p_baseline\s*-\s*drop_pts\s*,\s*p_baseline\s*\/\s*2(?:\.0)?\s*\)/.test(body))
+    p.push('the threshold is not greatest(baseline − 20, baseline ÷ 2): a low baseline could never fire');
+  if (!/verdict\s*:=\s*'unknown'/.test(body)) p.push('no «unknown» verdict: a small sample would be judged');
+  return p;
+}
+
+// ── 1. the latest committed definitions, and nothing patching them afterwards ─────────────────────
+const detFile = lastDefining(DETECTOR);
+const verFile = lastDefining(VERDICT);
+check('a committed migration defines the alarm whole', !!detFile);
+check('a committed migration defines source_posting_date_fill_verdict()', !!verFile);
+if (!detFile || !verFile) process.exit(1);
+
+const laterPatch = files.filter((f) => f > detFile && text(f).includes(PATCH));
+check(`no migration after ${detFile} text-patches the alarm (this check reads whole definitions only)`,
+  laterPatch.length === 0, `re-create it whole instead: ${laterPatch.join(', ')}`);
+
+const det = windowBetween(text(detFile), DETECTOR, 'end $function$;', detFile);
+const ver = windowBetween(text(verFile), VERDICT, 'end $function$;', verFile);
+
+// ── 2. the properties ──────────────────────────────────────────────────────────────────────────
+const dp = detectorProblems(det);
+check('the alarm counts live ads, keeps an unknown site\'s alert, uses the verdict, names its kind', dp.length === 0, dp.join('; '));
+const vp = verdictProblems(ver);
+check('the verdict has a low-baseline floor and an unknown answer', vp.length === 0, vp.join('; '));
+check(`the verdict's migration executes a truth table at apply (${verFile})`, /PROOF: verdict\(/.test(text(verFile)));
+
+// ── 3. mutation proofs: each predicate catches the break it exists for ──────────────────────────
+mutation('switched-off rows counted again', detectorProblems(det.replace(/where\s+active\s+and\s+scraped_at/, 'where scraped_at')));
+mutation('an unknown site\'s alert closing',
+  detectorProblems(det.replace(/(if\s+v\.verdict\s*=\s*'unknown'\s+then\s+(?:--[^\n]*\n\s*)*)live\s*:=\s*live\s*\|\|[^;]*;/, '$1')));
+mutation('the decision taken outside the verdict function', detectorProblems(det.replace(/source_posting_date_fill_verdict/g, 'some_other_rule')));
+mutation('the kind hidden in a variable again', detectorProblems(det.replace(/mon_resolve_stale_keys\(\s*'source_posting_date_fill_regressed'/, 'mon_resolve_stale_keys(k')));
+mutation('the old «baseline − 20» rule', verdictProblems(ver.replace(/greatest\(\s*p_baseline\s*-\s*drop_pts\s*,\s*p_baseline\s*\/\s*2(?:\.0)?\s*\)/, 'p_baseline - drop_pts')));
+mutation('no unknown verdict', verdictProblems(ver.replace(/verdict\s*:=\s*'unknown'/g, "verdict := 'ok'")));
+
+// ── 4. this file runs in `npm test` ─────────────────────────────────────────────────────────────
+check('npm test runs this check', npmTestRuns(ROOT, 'verify-posting-date-alarm-judges-live-ads'));
+
+console.log(failed === 0
+  ? '\n✅ posting-date alarm: judges live ads, keeps an unjudgeable site\'s alert, and can fire on a low baseline.\n'
+  : `\n❌ posting-date alarm: ${failed} check(s) failed.\n`);
+process.exit(failed === 0 ? 0 : 1);
