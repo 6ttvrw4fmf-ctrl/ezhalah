@@ -186,6 +186,9 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     chip_cols, labels = _amenities(p.get("amenities") or [])
     amen_text = "، ".join(labels) + "\n" + (desc or "")
     photos = [BASE + quote(u, safe="/") for u in (p.get("gallery") or []) if isinstance(u, str) and u.startswith("/")] or None
+    if not photos:  # PROBE 2026-11-10 (not for main): what does a photo-less record carry?
+        print(f"PROBE {pid}: gallery={str(p.get('gallery'))[:300]!r} keys={sorted(p.keys())} "
+              f"img_like={ {k: str(v)[:160] for k, v in p.items() if any(w in k.lower() for w in ('img','image','photo','gallery','cover','media','thumb'))} }")
     price = _pos(p.get("price"))
     for_sale = bool(p.get("forSale"))
     row: dict[str, Any] = {
