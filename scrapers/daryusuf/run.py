@@ -94,6 +94,7 @@ from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # n
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.page_pin import pin_from_html  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://daryusuf.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -550,6 +551,10 @@ def map_listing(post: dict, terms: dict[int, str]) -> tuple[Optional[dict], str,
         "price_per_meter": normalize.to_int(facts["ppm"]) if facts.get("ppm") and re.search(r"\d", facts["ppm"]) else None,
         "license_number": normalize.ad_licence_from_prose(description),
         "photo_urls": photos[:20] or None,
+        # The post's WordPress `date_gmt` (always UTC; the site's `date` equals it, so its zone is UTC):
+        # 10070 «2026-11-08T14:15:37» = page JSON-LD datePublished «2026-11-08T14:15:37+00:00». Never
+        # `modified_gmt` (an edit). Checked live 2026-11-09.
+        "date_added": site_posting_date(f"{post['date_gmt']}Z") if isinstance(post.get("date_gmt"), str) else None,
     }
     if ac:
         # A stated negation ("بدون تكييف") must land False, not NULL — an if-only True assignment

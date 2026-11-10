@@ -54,6 +54,7 @@ wrappers are added centrally later, with the tables).
 from __future__ import annotations
 
 import argparse
+import email.utils
 import html as ihtml
 import re
 import sys
@@ -70,6 +71,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://hasaadestate.com"
 SOURCE = "حصاد الاقتصادية للعقارات"
@@ -96,6 +98,8 @@ _AREA_RE = re.compile(r"<h2>المساحة الداخلية</h2>\s*<p>([^<]*)</p
 _BEDS_RE = re.compile(r"([\d٠-٩]{1,2})\s*غرف(?:ة|ه)?\s*نوم")
 _BATHS_RE = re.compile(r"([\d٠-٩]{1,2})\s*دور(?:ات|ة|ه)\s*مياه")
 _UNITS_RE = re.compile(r"([\d٠-٩]{1,4})\s*وحد(?:ة|ات)\s*سكنية")
+# «رخصة المعلن : 7200345489» — the project page's REGA AD licence (71/72xxxxxxxx; a FAL licence is 1xxxxxxxxx).
+_LICENCE_RE = re.compile(r"رخص[ةه]\s*(?:المعلن|الإعلان|الاعلان)\s*:?\s*(7[12]\d{8})(?!\d)")
 _PHOTO_RE = re.compile(r'(?:src|href)="(https?://(?:i\d\.wp\.com/)?hasaadestate\.com/wp-content/uploads/[^"]+?\.(?:jpe?g|webp))(?:\?[^"]*)?"', re.I)
 
 
@@ -283,13 +287,69 @@ def parse_project(page_html: str) -> dict[str, Any]:
         e = _encode(u)
         if e not in photos:
             photos.append(e)
+    # The REGA ad licence the project page prints once for all its units («رخصة المعلن : 7200345489», مسكني 8 —
+    # card parity 2026-11-09: on the page, on 0 cards). Only the REGA ad-licence shape 71/72xxxxxxxx counts.
+    lm = _LICENCE_RE.search(plain(page_html))
     return {"post_id": m.group(1) if m else None, "title": title, "city": city, "district": district,
             "status_chip": plain(cm.group(1)) if cm else "", "units": units, "photos": photos,
             "lift": project_has_lift(page_html),
+            "licence": lm.group(1) if lm else None,
             "units_total": normalize.to_int(um.group(1)) if um else None}
 
 
-def map_units(url: str, project: dict[str, Any]) -> tuple[list[dict], dict[str, int]]:
+# POSTING DATE (2026-11-09). The project page prints only og:updated_time (an edit) and «units» has no REST
+# route, but WordPress serves any public post as a one-item RSS feed: /?feed=rss2&post_type=units&p=<unit id>
+# &withoutcomments=1 (it 301s to /units/<slug>/feed/?withoutcomments=1). Its <pubDate> is post_date_gmt — the
+# unit model's PUBLISH date. Read live 2026-11-09: unit 8519 «نموذج A – مسكني 8» → «Mon, 03 Nov 2025 14:09:16
+# +0000» (first seen by us 2026-09-24). The type-wide feed (/feed/?post_type=units) holds the same dates but
+# only 3 items a page, so ONE small read per AVAILABLE unit model (12 today) is cheaper than walking it.
+UNIT_FEED = BASE + "/?feed=rss2&post_type=units&p={}&withoutcomments=1"
+_FEED_ITEM = re.compile(r"<item>(.*?)</item>", re.S)
+_FEED_GUID_ID = re.compile(r"[?&](?:#038;|amp;)?p=(\d+)\s*</guid>")
+_FEED_PUB = re.compile(r"<pubDate>([^<]+)</pubDate>")
+
+
+def unit_feed_pub(xml: str, unit_id: str) -> Optional[str]:
+    """The <pubDate> of a single-post feed, exactly as printed — None unless the feed holds exactly ONE item and
+    that item's <guid> (when it carries a post id; imported posts keep a foreign guid) names this unit."""
+    items = _FEED_ITEM.findall(xml or "")
+    if len(items) != 1:
+        return None
+    gid = _FEED_GUID_ID.search(items[0])
+    if gid and gid.group(1) != str(unit_id):
+        return None
+    pub = _FEED_PUB.search(items[0])
+    return pub.group(1).strip() if pub else None
+
+
+def fetch_unit_dates(s: cc.Session, unit_ids: list[str]) -> dict[str, str]:
+    """{unit id: <pubDate>} for these unit models. A failed read leaves that unit out (its date stays NULL)."""
+    out: dict[str, str] = {}
+    for uid in dict.fromkeys(unit_ids):
+        try:
+            r = s.get(UNIT_FEED.format(uid), timeout=30)
+        except Exception:   # noqa: BLE001
+            continue
+        time.sleep(PAUSE)
+        pub = unit_feed_pub(r.text, uid) if r.status_code == 200 else None
+        if pub:
+            out[uid] = pub
+    return out
+
+
+def _rss_instant(pub: Optional[str]) -> Optional[str]:
+    """«Mon, 03 Nov 2025 14:09:16 +0000» → «2025-11-03T14:09:16+00:00». A stamp without a stated zone → None."""
+    if not isinstance(pub, str):
+        return None
+    try:
+        at = email.utils.parsedate_to_datetime(pub)
+    except (TypeError, ValueError, IndexError):
+        return None
+    return at.isoformat() if at is not None and at.tzinfo is not None else None
+
+
+def map_units(url: str, project: dict[str, Any],
+              posted: Optional[dict[str, str]] = None) -> tuple[list[dict], dict[str, int]]:
     """Every UNIT MODEL of one project page as its own row, plus the skip tally for the page."""
     skips: dict[str, int] = {}
 
@@ -351,6 +411,8 @@ def map_units(url: str, project: dict[str, Any]) -> tuple[list[dict], dict[str, 
             "reception_rooms_majlis": 1 if "مجلس" in u["specs"] else None,
             "halls": 1 if any(x in ("غرفة معيشة", "صالة معيشة", "صالة") for x in u["specs"]) else None,
             "price_total": price,
+            # the unit model's own WordPress publish date (fetch_unit_dates / unit_feed_pub above)
+            "date_added": site_posting_date(_rss_instant((posted or {}).get(u["id"]))),
             "photo_urls": (project.get("photos") or [])[:20] or None,
             "price_evidence": normalize.price_evidence(
                 field="unit card <p> after <h3>", raw=u["price_raw"] or None, stored=price,
@@ -362,10 +424,12 @@ def map_units(url: str, project: dict[str, Any]) -> tuple[list[dict], dict[str, 
         row["additional_info"] = {k: v for k, v in {
             "project_post_id": pid, "unit_post_id": u["id"], "project_title": title,
             "model_name": u["name"], "price_raw": u["price_raw"] or None,
+            "unit_feed_pub_date": (posted or {}).get(u["id"]),
             "price_range": u["price_raw"] if is_range else None,
             "area_raw": u.get("area_raw"), "specs": u["specs"],
             "project_units_total": project.get("units_total"),
             "project_status": project.get("status_chip") or None,
+            "rega_ad_license_number": project.get("licence"),      # the card's «رقم رخصة الإعلان» row
         }.items() if v not in (None, "", {}, [])}
         rows.append(row)
     return rows, skips
@@ -441,6 +505,10 @@ def main() -> int:
             project = parse_project(r.text)
             seen += len(project["units"])
             rows, skips = map_units(u, project)
+            if rows:   # one feed read per unit model that is actually listed, then the same pure mapping again
+                posted = fetch_unit_dates(s, [r0["additional_info"]["unit_post_id"] for r0 in rows])
+                if posted:
+                    rows, skips = map_units(u, project, posted)
             for k, v in skips.items():
                 skipped[k] = skipped.get(k, 0) + v
             for row in rows:

@@ -139,9 +139,11 @@ def test_h19_maps_with_the_card_price_monthly_and_the_address_district():
 
 
 def test_13a2_takes_its_own_photo_and_the_branch_district_when_it_is_the_only_one():
-    # card «1,099.15» → 1,099 (halalas truncated); page «مبنى 6143، طريق الملك عبدالعزيز الأول، العارض، الرياض»
+    # card «1,099.15» a month → the year is the exact ×12 rounded once (13,190), never the floored 1,099 × 12
+    # (card parity 2026-11-08: BB94 «621.68» stored 7,452, the card said 621 against the page's «622 SAR»);
+    # page «مبنى 6143، طريق الملك عبدالعزيز الأول، العارض، الرياض»
     (row, _), why = _map("list_al-aarid.html", "13A2", "unit_13A2.html")
-    assert why == "" and row["price_annual"] == 1099 * 12 and row["rent_period"] == "monthly"
+    assert why == "" and row["price_annual"] == round(1099.15 * 12) == 13190 and row["rent_period"] == "monthly"
     assert row["district_ar"] == "حي العارض", "the road is never read; العارض is the only district part"
     assert row["photo_urls"] == ["https://superoffice.sa/media/media/13a2-2-1793206545390-486a4b49.webp"]
 

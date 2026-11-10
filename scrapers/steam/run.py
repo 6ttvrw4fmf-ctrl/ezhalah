@@ -44,6 +44,7 @@ from scrapers.common import db, honest_fetch as H, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E402
 from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance", "furnished", "balcony_terrace", "laundry_room")
 SOURCE = "STeam Residence"
@@ -63,6 +64,11 @@ _DESC_FALLBACK_RE = re.compile(r'<div class="description-content">(.*?)</div>\s*
 _FEATURE_RE = re.compile(r'<a href="https://steam-realestate\.com/feature/[^"]*">\s*([^<]+?)\s*</a>')
 _POSTID_RE = re.compile(r"\bpostid-(\d+)\b")     # the WordPress post id on <body class>: the ad's stable id
 _UPDATED_RE = re.compile(r"تحديث في\s*([^<]+?)\s*<")
+# THE SITE'S OWN POSTING DATE: the Yoast graph's WebPage `datePublished` (the WordPress post date, UTC). Measured
+# 2026-11-09: 17546 «2026-07-16T21:02:59+00:00», 17878 «2026-08-01T13:45:42+00:00» — one per page, per post. The
+# page's visible «تحديث في …» is `dateModified` (an edit: 17878 «أغسطس 19, 2026 في 10:35 ص» == 10:35:32+00:00).
+_YOAST_RE = re.compile(r'<script[^>]*class="yoast-schema-graph"[^>]*>(.*?)</script>', re.S)
+_PUBLISHED_RE = re.compile(r'"@type":"WebPage".*?"datePublished":"([^"]+)"', re.S)
 _DEAL = {"للايجار": "Rent", "للإيجار": "Rent", "للبيع": "Buy"}
 _FEATURE_COL = {"تكييف": "air_conditioner", "مصعد": "elevator", "موقف": "parking", "مطبخ": "kitchen"}
 
@@ -90,7 +96,9 @@ def parse_property(page: str) -> Optional[dict]:
     images = list(dict.fromkeys(re.findall(r'data-src="(https://steam-realestate\.com/wp-content/uploads/[^"]+)"', top)))
     sl = _POSTID_RE.search(page)
     upd = _UPDATED_RE.search(page)
-    return {"title": _text(h1.group(1)), "status": _text((_STATUS_RE.search(page) or [None, ""])[1])
+    graph = _YOAST_RE.search(page)
+    pub = _PUBLISHED_RE.search(graph.group(1)) if graph else None
+    return {"published": pub.group(1) if pub else None, "title": _text(h1.group(1)), "status": _text((_STATUS_RE.search(page) or [None, ""])[1])
             if _STATUS_RE.search(page) else "", "price_raw": _text(_PRICE_RE.search(page).group(1)) if _PRICE_RE.search(page) else "",
             "details": pairs("property-detail-wrap"), "address": pairs("property-address-wrap"),
             "features": _FEATURE_RE.findall(_section(page, "property-features-wrap")),
@@ -131,6 +139,7 @@ def map_property(slug: str, url: str, p: dict) -> tuple[Optional[tuple[dict, str
         "bedrooms": N.to_int(d.get("غرف النوم") or d.get("غرفة نوم")), "bathrooms": baths,
         "property_age": N.to_int(d.get("عمر المبنى")),
         "photo_urls": p["images"] or None, "last_update": p["updated"], **prose, **feats,
+        "date_added": site_posting_date(p.get("published")),   # Yoast WebPage datePublished — never «تحديث في»
     }
     if deal == "Buy":
         row["price_total"] = price if price else db.AUTHORITATIVE_NULL

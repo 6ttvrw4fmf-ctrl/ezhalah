@@ -55,6 +55,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
 from scrapers.common.http_liveness import LivenessProbe
+from scrapers.common.posting_date import site_posting_date
 
 REST = "https://amlakalahsa.com/wp-json/wp/v2"
 SITE = "https://amlakalahsa.com"
@@ -199,6 +200,15 @@ def _first_street_width(v: Any) -> Optional[int]:
         return None
     m = re.search(r"\d+", str(v))
     return int(m.group()) if m else None
+
+
+def posted_at(post: dict) -> Optional[str]:
+    """The post's WordPress publish instant → date_added. THIS SITE'S WORDPRESS CLOCK IS UTC: `date` equals
+    `date_gmt` (land 20186: both «2026-11-07T15:15:07»), so the zone-less `date` is NOT Saudi time — date_gmt
+    is read as UTC and lands as 18:15 +03:00. The ad page agrees: «إعلان 483 - منذ يومين» on 2026-11-09.
+    `modified` is an edit and is never read. First seen by us 2026-11-08."""
+    g = post.get("date_gmt")
+    return site_posting_date(g.strip() + "Z") if isinstance(g, str) and g.strip() else None
 
 
 def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict], str]:
@@ -375,6 +385,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
 
     row = {
         "ad_number": f"AMH{pid}",
+        "date_added": posted_at(post),          # WordPress date_gmt (UTC) — see posted_at()
         "listing_url": post.get("link") or f"{SITE}/?p={pid}",
         "source": "AmlakAlAhsa",
         "active": True,
