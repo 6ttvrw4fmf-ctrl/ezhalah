@@ -13,7 +13,10 @@ export const MAX_HYDRATION_DROPS = 25;
 // Per listing key, the NEWEST hydration that asked for it (by arrival order) and whether THAT response returned it.
 // A slower, older response never overwrites a newer observation, and «returned» belongs to one response, never to
 // the key forever — so a row an older search got back cannot mask the newer search's drop (CodeRabbit, PR 11725).
-export type HydrationLedger = { obs: Map<string, { seq: number; got: boolean }> };
+// Every observation is kept: an older search's hydration can ARRIVE after the newer one's, and the URL cannot say
+// which search asked. When the observations made after a search DISAGREE about a row, the drop count is ambiguous
+// and is reported as unmeasured, so the strict «headline == rpc» rule applies (CodeRabbit, PR 11725).
+export type HydrationLedger = { obs: Map<string, { seq: number; got: boolean }[]> };
 export const newHydrationLedger = (): HydrationLedger => ({ obs: new Map() });
 
 /** Record one raw-table hydration response: its URL names the table and the ids asked for; its body holds the rows returned. */
@@ -25,9 +28,9 @@ export function recordHydration(led: HydrationLedger, url: string, ok: boolean, 
   const returned = new Set((body as any[]).filter((r) => r?.id != null).map((r) => String(r.id)));
   for (const id of inList.split(',').map((x) => x.trim()).filter(Boolean)) {
     const k = `${tbl}:${id}`;
-    const prev = led.obs.get(k);
-    if (prev && prev.seq > seq) continue;               // a newer observation already stands
-    led.obs.set(k, { seq, got: returned.has(id) });
+    const list = led.obs.get(k) ?? [];
+    list.push({ seq, got: returned.has(id) });
+    led.obs.set(k, list);
   }
   return true;
 }
@@ -36,9 +39,10 @@ export function recordHydration(led: HydrationLedger, url: string, ok: boolean, 
 export function dropsOf(led: HydrationLedger, rows: string[], sinceSeq = -Infinity): { n: number | null; keys: string[] } {
   const keys: string[] = [];
   for (const k of rows) {
-    const o = led.obs.get(k);
-    if (o == null || o.seq < sinceSeq) return { n: null, keys: [] };
-    if (!o.got) keys.push(k);
+    const after = (led.obs.get(k) ?? []).filter((o) => o.seq >= sinceSeq);
+    if (!after.length) return { n: null, keys: [] };                         // not observed for this search
+    if (after.some((o) => o.got) && after.some((o) => !o.got)) return { n: null, keys: [] };  // ambiguous overlap
+    if (!after[0].got) keys.push(k);
   }
   return { n: keys.length, keys };
 }

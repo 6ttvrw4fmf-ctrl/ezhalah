@@ -25,6 +25,12 @@ const y = newHydrationLedger();
 recordHydration(y, url('haraj_residential_listings', [5]), true, [{ id: 5 }], 3);              // an older search got id 5 back
 recordHydration(y, url('haraj_residential_listings', [5]), true, [], 12);                      // the newer search lost it
 check('a row an older search got back cannot mask the newer search drop', dropsOf(y, ['haraj_residential_listings:5'], 10).n === 1);
+// An older search's hydration ARRIVING after the newer one's (seq 13 > 11) and disagreeing: ambiguous → unmeasured.
+const z = newHydrationLedger();
+recordHydration(z, url('haraj_residential_listings', [4]), true, [], 11);                      // newer search: 4 dropped
+recordHydration(z, url('haraj_residential_listings', [4]), true, [{ id: 4 }], 13);             // older search's, arriving later
+check('an older hydration arriving later and disagreeing makes the count unmeasured', dropsOf(z, ['haraj_residential_listings:4'], 10).n === null);
+check('MUTATION that ambiguous overlap cannot excuse an unsubtracted or a subtracted headline', !honestHeadline(99, 100, dropsOf(z, ['haraj_residential_listings:4'], 10).n));
 check('headline == rpc − 1 with one measured drop is honest', honestHeadline(99, 100, 1));
 check('headline == rpc with zero drops is honest', honestHeadline(100, 100, 0));
 check('headline == rpc with unobserved drops is honest', honestHeadline(100, 100, null));
