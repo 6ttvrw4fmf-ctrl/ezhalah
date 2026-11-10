@@ -5,7 +5,7 @@
 // shape: un-narrowed views read the labels first, a failed read falls back to the dots, labels are keyed and tappable.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { areaLevelFor, areaLevelShown, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, visibleAreas, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
+import { areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, visibleAreas, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -17,6 +17,18 @@ check('the opening view (17°) shows ONE country label; a zoom in shows regions,
 // Owner 2026-11-09: «no need Saudi Arabia, we just show the regions, then from the region to cities, district».
 check('the map opens (17°) on the REGIONS, never one «السعودية» bubble', areaLevelShown(17) === 'region' && areaLevelShown(30) === 'region' && areaLevelShown(9) === 'region' && areaLevelShown(3) === 'city' && areaLevelShown(1) === 'district' && areaLevelShown(0.02) === null);
 mustCatch('the Saudi bubble coming back on the opening view', areaLevelShown(17) !== 'country');
+{
+  // Review of #11592: a pan at the opening zoom leaves regions off screen; the country total is read over COUNTRY_BOX.
+  const feed = [
+    { city: 'الرياض', district: '', lat: 24.7, lng: 46.7, buy: 100, rent: 0, short: 0, isCity: true, region: 'منطقة الرياض' },
+    { city: 'جدة', district: '', lat: 21.5, lng: 39.2, buy: 50, rent: 0, short: 0, isCity: true, region: 'منطقة مكة المكرمة' },
+  ] as unknown as Parameters<typeof areasFromFeed>[0];
+  const panned = { s: 18, w: 43, n: 30, e: 56 };   // Jeddah off screen to the west
+  const whole = areasFromFeed(feed, 'country', ['buy', 'rent', 'short'], COUNTRY_BOX);
+  check('the country total counts every region, even ones a pan left off screen', whole.length === 1 && whole[0].n === 150);
+  mustCatch('a panned view\'s partial sum named «السعودية»', areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], panned).reduce((t, a) => t + a.n, 0) !== whole[0].n);
+  check('the opening zoom reads the country total over COUNTRY_BOX for the pill', /await fetchMapAreas\(COUNTRY_BOX, 'country', pins\.deals\)/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+}
 check('city zoom shows one label per DISTRICT', areaLevelFor(2.5) === 'district' && areaLevelFor(0.5) === 'district' && areaLevelFor(0.07) === 'district');
 check('close in shows price pins (no label level)', areaLevelFor(0.06) === null && areaLevelFor(0.02) === null);
 mustCatch('pins at city zoom (the clutter the owner\'s father saw)', areaLevelFor(0.3) !== null);
@@ -54,11 +66,11 @@ mustCatch('a label of 1 listing drawn next to 98 thousand', !visibleAreas(countr
 const umluj = [{ city: 'املج', district: 'حي الدقم', lat: 25.07, lng: 37.25, n: 2 }, { city: 'املج', district: 'حي الضويحي', lat: 25.12, lng: 37.26, n: 2 }, { city: 'املج', district: 'حي البلد', lat: 25.02, lng: 37.26, n: 1 }];
 check('a small town with no big place in view shows all its places (Umluj: 3 districts of 1-2 listings)', visibleAreas(umluj).length === 3);
 mustCatch('the LABEL_MIN floor hiding every label of a small town (the empty Umluj map)', visibleAreas(umluj).length > 0);
-check('the drawn labels are the visible ones; the pill still counts every listing in view', (src => /drawAreas\(visibleAreas\(areas, level\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src) && /drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src))(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+check('the drawn labels are the visible ones; the pill still counts every listing in view', (src => /drawAreas\(visibleAreas\(areas, level\), level, whole\);\n\s*setPinCount\(whole \? areasTotal\(whole\) : areasTotal\(areas\)\);/.test(src) && /drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);/.test(src))(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const data = readFileSync(join(root, 'src/data/mapAreas.ts'), 'utf8');
 check('an un-narrowed view reads the labels for its level first', /const level = narrowed \? null : areaLevelShown\(span\.latitudeDelta\);/.test(web) && /const areas = await fetchMapAreas\(paddedBox\(center, span\), level, pins\.deals\);/.test(web));
-check('labels are drawn keyed, counted in the pill, and a failed read falls back to the dots', /drawAreas\(visibleAreas\(areas, level\), level\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web) && /if \(areas !== 'unknown'\) \{/.test(web) && /next\.set\(`A\|\$\{level\}\|\$\{a\.city\}\|\$\{a\.district\}\|\$\{a\.n\}`, a\)/.test(web));
+check('labels are drawn keyed, counted in the pill, and a failed read falls back to the dots', /drawAreas\(visibleAreas\(areas, level\), level, whole\);\n\s*setPinCount\(whole \? areasTotal\(whole\) : areasTotal\(areas\)\);\n\s*return;/.test(web) && /if \(areas !== 'unknown'\) \{/.test(web) && /next\.set\(`A\|\$\{level\}\|\$\{a\.city\}\|\$\{a\.district\}\|\$\{a\.n\}`, a\)/.test(web));
 check('labels never pile up: MapKit collision hides the smaller neighbour, priority follows the count', /collisionMode: mk\.Annotation\.CollisionMode\?\.Rectangle, displayPriority: 250 \+ Math\.round\(499 \* a\.n \/ maxN\)/.test(web));
 check('the crowded exact-point read shows district names before falling back to the fine grid', /if \(areas !== 'unknown' && denseShowsDistricts\(areas\.filter\(\(a\) => inView\(a, center, span\)\)\.length, span\.latitudeDelta\)\) \{\n\s*drawAreas\(visibleAreas\(areas\), 'district'\);\n\s*setPinCount\(areasTotal\(areas\)\);\n\s*return;/.test(web));
 check('a close-in crowded bubble shows its count; zoomed-out dots stay plain (owner 2026-11-02)', /if \(counted && cell > 0 && row\.n > 1\) el\.textContent = areaCount\(row\.n, loc\);/.test(web) && /\(\) => element\(row, drawCell, cell === 0 && drawCell > 0\), \{/.test(web));

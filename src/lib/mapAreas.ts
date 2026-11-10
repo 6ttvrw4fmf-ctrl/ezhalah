@@ -42,6 +42,9 @@ export function areaCount(n: number, _loc: 'ar' | 'en'): string {
   return Math.round(n).toLocaleString('en-US');
 }
 
+/** A box holding the whole Kingdom: the country total is read over it, never over the view — a pan at the opening zoom
+ *  leaves some regions off screen, and the pill must not call their remainder «السعودية» (review of #11592). */
+export const COUNTRY_BOX = { s: 16, w: 34, n: 33, e: 56 };
 /** The country label's place and name. */
 export const COUNTRY_CENTER = { lat: 23.9, lng: 45.1 };
 export const COUNTRY_NAME = { ar: 'السعودية', en: 'Saudi Arabia' } as const;

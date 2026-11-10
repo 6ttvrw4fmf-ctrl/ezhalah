@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
@@ -783,12 +783,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       });
       return el;
     };
-    const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
+    const drawAreas = (areas: AreaRow[], level: AreaLevel, whole: AreaRow[] | null = null) => {
       // The pill names where the view is at every zoom (owner 2026-11-05): the country, then the region, the city, the
       // district most of the view's listings are in — «في هذه المنطقة» only when no one place holds most of them.
-      // The whole-Kingdom view shows regions (owner 2026-11-09): the pill keeps the country and its total.
-      const pillLevel: AreaLevel = areaLevelFor(m.region.span.latitudeDelta) === 'country' ? 'country' : level;
-      const place = areaPlace(areas, pillLevel, loc, translitPlace, m.region.center, m.region.span);
+      // The whole-Kingdom view shows regions (owner 2026-11-09): the pill keeps the country and its WHOLE total, read
+      // over COUNTRY_BOX, so a pan that leaves a region off screen never shrinks «… في السعودية».
+      const place = whole ? areaPlace(whole, 'country', loc, translitPlace, m.region.center, m.region.span) : areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
       setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
@@ -868,8 +868,13 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (my !== seq || mapRef.current !== m) return;
         if (areas !== 'unknown') {
           hideCanvas(); shown = [];
-          drawAreas(visibleAreas(areas, level), level);
-          setPinCount(areasTotal(areas));
+          // The opening zoom: the country's own total for the pill (the feed is already on the phone; a failed read
+          // leaves the pill to the labels in view, never a partial count named «السعودية»).
+          const wholeRead = areaLevelFor(span.latitudeDelta) === 'country' ? await fetchMapAreas(COUNTRY_BOX, 'country', pins.deals) : 'unknown';
+          if (my !== seq || mapRef.current !== m) return;
+          const whole = Array.isArray(wholeRead) && wholeRead.length ? wholeRead : null;
+          drawAreas(visibleAreas(areas, level), level, whole);
+          setPinCount(whole ? areasTotal(whole) : areasTotal(areas));
           return;
         }
         // The labels failed to load: the dots below, never an empty map.
