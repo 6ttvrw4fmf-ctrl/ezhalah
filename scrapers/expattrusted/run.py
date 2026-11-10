@@ -68,6 +68,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://expattrustedhousingriyadh.com"
 SOURCE = "Expat Trusted Housing"
@@ -264,6 +265,13 @@ def map_listing(prop: dict, res: dict, url: str, loc: dict) -> tuple[Optional[di
         "price_annual": price,
         "rent_period": period,
         "photo_urls": photos(prop),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the compound page's Strapi `publishedAt` in
+        # pageProps.property (the /p/en/ entry we read) — when that page went live. Edits move `updatedAt`,
+        # never this; the page prints no date. Measured 2026-11-09: ishbilia-village-compound publishedAt
+        # 2025-01-27T16:49:46.972Z (createdAt 16:35, updatedAt 2025-02-14), first seen by us 2026-09-24.
+        # A unit type (residence) is a component with no date of its own, so it carries its page's date.
+        # Never createdAt (the draft) / updatedAt, nor the localizations' or images' own stamps.
+        "date_added": site_posting_date(prop.get("publishedAt")),
         "additional_info": {k: v for k, v in {
             "compound": compound_name, "compound_slug": prop.get("slug"), "residence_id": rid,
             "unit_type_en": res.get("name"), "unit_description": redact_pii(res.get("description")),

@@ -125,6 +125,33 @@ for (const bad of ['FAILURE', 'CANCELLED', 'NEUTRAL', null] as const) {
   check(`CodeRabbit ${bad ?? 'PENDING'} still blocks`,
     !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, rabbit(bad)], ...CLEAN }).allow);
 }
+// 0b″ (owner 2026-11-09): rate-limited CodeRabbit passes only after a real review with every Major resolved.
+const limited: CheckRun = { context: 'CodeRabbit', conclusion: 'NEUTRAL', title: 'Review rate limited' };
+const RL = { requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, limited], ...CLEAN };
+check('CodeRabbit rate-limited after a review, no open Major → ALLOWED (#11367 sat 5 h on this)',
+  decideMerge({ ...RL, codeRabbitReviewed: true, openReviewMajors: [] }).allow);
+check('CodeRabbit rate-limited, never reviewed this PR → BLOCKED',
+  !decideMerge({ ...RL, codeRabbitReviewed: false, openReviewMajors: [] }).allow);
+check('CodeRabbit rate-limited, threads unreadable → BLOCKED',
+  !decideMerge({ ...RL, codeRabbitReviewed: true, openReviewMajors: null }).allow);
+check('CodeRabbit rate-limited with an open Major → BLOCKED',
+  !decideMerge({ ...RL, codeRabbitReviewed: true, openReviewMajors: ['Make the area division safe.'] }).allow);
+check('CodeRabbit NEUTRAL for any other reason → BLOCKED',
+  !decideMerge({ ...RL, checks: [...allGreen, { ...limited, title: 'Review failed' }], codeRabbitReviewed: true, openReviewMajors: [] }).allow);
+// 0b‴ (owner 2026-11-09): a PROVEN mirror of production passes a rate-limited CodeRabbit that never read it.
+check('rate-limited, never reviewed, PROVEN mirror of production, no open Major → ALLOWED (#11493 and 10 more sat on this)',
+  decideMerge({ ...RL, codeRabbitReviewed: false, mirrorOfProduction: true, openReviewMajors: [] }).allow);
+check('rate-limited, never reviewed, parity NOT measured → BLOCKED',
+  !decideMerge({ ...RL, codeRabbitReviewed: false, openReviewMajors: [] }).allow
+    && !decideMerge({ ...RL, codeRabbitReviewed: false, mirrorOfProduction: false, openReviewMajors: [] }).allow);
+check('proven mirror with an open Major, or unreadable threads → BLOCKED',
+  !decideMerge({ ...RL, mirrorOfProduction: true, openReviewMajors: ['x'] }).allow
+    && !decideMerge({ ...RL, mirrorOfProduction: true, openReviewMajors: null }).allow);
+check('proven mirror, CodeRabbit NEUTRAL for another reason / FAILURE / pending → BLOCKED',
+  [{ ...limited, title: 'Review failed' }, rabbit('FAILURE'), rabbit(null)].every((c) =>
+    !decideMerge({ ...RL, checks: [...allGreen, c], mirrorOfProduction: true, openReviewMajors: [] }).allow));
+check('proven mirror does NOT excuse a failing required check',
+  !decideMerge({ ...RL, checks: [...allGreen.slice(1), { ...allGreen[0], conclusion: 'FAILURE' }, limited], mirrorOfProduction: true, openReviewMajors: [] }).allow);
 check('CodeRabbit SKIPPED when it IS required → BLOCKED (rule 1 governs)',
   !decideMerge({ requiredContexts: [...REQ, 'CodeRabbit'], requiredContextsKnown: true, checks: [...allGreen, rabbit('SKIPPED')], ...CLEAN }).allow);
 
@@ -171,6 +198,14 @@ mustCatch('a skip exemption widened to ANY optional check would wrongly allow a 
 mustCatch('a skip exemption that ignores the REQUIRED list would wrongly allow a required CodeRabbit that skipped',
   !decideMerge({ requiredContexts: ['CodeRabbit'], requiredContextsKnown: true, checks: [{ context: 'CodeRabbit', conclusion: 'SKIPPED' }], ...CLEAN }).allow);
 
+mustCatch('a rate-limit pass that skips the «reviewed before» test would merge a PR CodeRabbit never read',
+  !decideMerge({ ...RL, openReviewMajors: [] }).allow);
+mustCatch('a mirror pass widened to a REQUIRED CodeRabbit would bypass branch protection',
+  !decideMerge({ ...RL, requiredContexts: [...REQ, 'CodeRabbit'], mirrorOfProduction: true, openReviewMajors: [] }).allow);
+mustCatch('a mirror pass that accepts a truthy non-boolean («unknown», 1) would pass an unmeasured PR',
+  !decideMerge({ ...RL, mirrorOfProduction: 'unknown' as unknown as boolean, openReviewMajors: [] }).allow);
+mustCatch('a rate-limit pass widened to a REQUIRED CodeRabbit would bypass branch protection',
+  !decideMerge({ ...RL, requiredContexts: [...REQ, 'CodeRabbit'], codeRabbitReviewed: true, openReviewMajors: [] }).allow);
 mustCatch('a gate that ignores unresolved CodeRabbit Majors would merge #11247 (9 unanswered, PRICE = SOURCE)',
   !decideMerge({ requiredContexts: REQ, requiredContextsKnown: true, checks: allGreen, ...CLEAN, openReviewMajors: ['Preserve a separately published rate.'] }).allow);
 mustCatch('a gate that treats UNREADABLE review threads as "none open" would wrongly allow',

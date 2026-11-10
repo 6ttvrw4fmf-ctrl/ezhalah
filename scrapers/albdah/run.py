@@ -63,6 +63,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://albdah.sa"
 SOURCE = "البداح للعقارات"
@@ -135,7 +136,12 @@ def parse_detail(page: str) -> dict[str, Any]:
     # sidebar's identically-classed `<div class="rows">` box (and the footer), so a colliding key
     # («رخصة فال» differs on 97AxA: 1100027006 for the listing vs 1200017006 for the office) had
     # dict(rows) silently keep whichever occurred LAST in page order — the office's, not the ad's.
-    box = re.search(r'<div class="box rows">(.*?)</div>\s*<div class="sec-h"', page, re.S)
+    # The box is its consecutive row divs up to its own closing tag. It used to end at the NEXT
+    # «sec-h» heading, which exists only when a location section follows: on ads where the box is
+    # the last section (05rLV, 57mWX, live 2026-11-09) the regex missed and every row — «تاريخ
+    # الإضافة», «الغرض», the utilities — was silently dropped (50 of 94 active rows had no `posted`).
+    box = re.search(r'<div class="box rows">((?:\s*<div class="row"><span class="k">.*?</span>'
+                    r'<span class="v">.*?</span></div>)*)\s*</div>', page, re.S)
     rows: list[tuple[str, str]] = [(_text(k), _text(v)) for k, v in re.findall(
         r'<div class="row"><span class="k">(.*?)</span><span class="v">(.*?)</span></div>',
         box.group(1) if box else "", re.S)]
@@ -167,6 +173,15 @@ def _flag(v: str) -> Optional[bool]:
     if v.startswith("غير") or v.startswith("لا"):
         return False
     return True if v.startswith("متوفر") or v == "متاح" else None
+
+
+_POSTED_RE = re.compile(r"(\d{4})/(\d{1,2})/(\d{1,2})", re.ASCII)
+
+
+def _posted_date(raw: Optional[str]) -> Optional[str]:
+    """«2026/11/07» (year/month/day, as albdah prints «تاريخ الإضافة») → «2026-11-07»; anything else → None."""
+    m = _POSTED_RE.fullmatch((raw or "").strip())
+    return site_posting_date(f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}") if m else None
 
 
 def map_listing(slug: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]:
@@ -218,6 +233,10 @@ def map_listing(slug: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         **normalize.amenities_from_text(amen_text),
         "property_type": property_type,
         "transaction_type": tx,
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the details box's «تاريخ الإضافة»,
+        # printed YYYY/MM/DD (05rLV «2026/11/07», first seen 2026-11-08; 59ZCP «2026/10/27»). The
+        # order is proven: 42 of 44 stored values end in a number > 12 and none has one in the middle.
+        "date_added": _posted_date(dict(rows).get("تاريخ الإضافة")),
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,

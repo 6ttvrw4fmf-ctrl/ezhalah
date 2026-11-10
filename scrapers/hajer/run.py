@@ -52,6 +52,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, http_liveness, normalize, sold_pin
 from scrapers.common.arabic_location import to_catalog
 from scrapers.common.pii import redact_pii
+from scrapers.common.posting_date import site_posting_date
 from scrapers.common.source_pin import pin_dict
 
 BASE = "https://hajerhouses.com"
@@ -492,6 +493,10 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "neighborhood": f.get("أسم الحي") or None,
         "title": _clean((p.get("title") or {}).get("rendered", "")),
         "photo_urls": _image(p, html_text),
+        # The post's WordPress `date_gmt` from the REST list fetch_list() already reads (UTC by definition;
+        # the site's `date` equals it, so its zone is UTC): post 1555 «2026-10-19T13:53:44», first seen by us
+        # 2026-10-20 04:23 UTC. Never `modified_gmt` (an edit). The page prints no date. Checked live 2026-11-09.
+        "date_added": site_posting_date(f"{p['date_gmt']}Z") if isinstance(p.get("date_gmt"), str) else None,
         "rega_location_verified": False,
         "additional_info": extra,
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────

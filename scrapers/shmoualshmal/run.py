@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://shmoua-alshmal.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -424,6 +425,11 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` (UTC). This site's
+        # clock is Saudi time — `date` reads 3 h ahead of `date_gmt` on all 6 posts — so date_gmt + «Z» is the
+        # instant. Checked live 2026-11-09 on wp/v2/properties: 18702 date 2024-10-04T20:55:16 / date_gmt
+        # 2024-10-04T17:55:16; first seen by us 2026-09-05. Never `modified` (18702: 2026-08-30, an edit).
+        "date_added": site_posting_date(f"{p['date_gmt']}Z") if p.get("date_gmt") else None,
         "area_m2": area,
         "bedrooms": beds,
         "bathrooms": baths,

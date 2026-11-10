@@ -28,14 +28,23 @@ export function areaLevelFor(latitudeDelta: number): AreaLevel | null {
   return null;
 }
 
-/** A count in few characters: 245, 3.4 ألف / 3.4K, 1.2 مليون / 1.2M. */
-export function areaCount(n: number, loc: 'ar' | 'en'): string {
-  const one = (v: number) => (v < 10 ? (Math.round(v * 10) / 10).toString() : Math.round(v).toString());
-  if (n >= 1_000_000) return loc === 'ar' ? `${one(n / 1_000_000)} مليون` : `${one(n / 1_000_000)}M`;
-  if (n >= 1_000) return loc === 'ar' ? `${one(n / 1_000)} ألف` : `${one(n / 1_000)}K`;
-  return String(n);
+/** THE MAP OPENS ON THE REGIONS — NO «السعودية» BUBBLE (owner 2026-11-09: «no need Saudi Arabia, we just show the
+ *  regions, then from the region to cities, district»; it replaced 2026-11-05's one-country-label opening). The
+ *  whole-Kingdom zoom shows the 13 region labels; the pill below still names the country and its total. */
+export function areaLevelShown(latitudeDelta: number): AreaLevel | null {
+  const level = areaLevelFor(latitudeDelta);
+  return level === 'country' ? 'region' : level;
 }
 
+/** A count, exact (owner 2026-11-09: the bubble said «300 ألف» over a pill saying 299,996 — «how come map says 300,000
+ *  and the number below isn't accurate»): 245, 3,412, 299,996 — the same digits the pill prints. */
+export function areaCount(n: number, _loc: 'ar' | 'en'): string {
+  return Math.round(n).toLocaleString('en-US');
+}
+
+/** A box holding the whole Kingdom: the country total is read over it, never over the view — a pan at the opening zoom
+ *  leaves some regions off screen, and the pill must not call their remainder «السعودية» (review of #11592). */
+export const COUNTRY_BOX = { s: 16, w: 34, n: 33, e: 56 };
 /** The country label's place and name. */
 export const COUNTRY_CENTER = { lat: 23.9, lng: 45.1 };
 export const COUNTRY_NAME = { ar: 'السعودية', en: 'Saudi Arabia' } as const;

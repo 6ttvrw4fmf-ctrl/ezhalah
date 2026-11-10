@@ -113,7 +113,7 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("type", "word", "type_ar", ""),
     ("rent_period", "word", "rent_period_ar", ""),
     ("price", "price", "", r"ريال|ر\.س|SAR"),
-    ("area", "number", "area_m2", r"م²|م2|متر|مساحه"),
+    ("area", "number", "area_m2", r"م²|م2|متر|مساحه|Property Area"),
     ("bedrooms", "number", "bedrooms", r"غرف|غرفه نوم"),
     # Advanced Filter fields the app serves (the rulebook scorecard's af_n columns + bathrooms).
     ("bathrooms", "number", "bathrooms", r"حمام|دوره مياه|دورات مياه|دوره المياه|دورات المياه"),
@@ -217,6 +217,18 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 total = float(ppm) * float(area)
                 if total == int(total) and _cmp_number(int(total), lines, whole, kw) == MATCH:
                     out[name] = MATCH
+            # The same identity when the total IS stored: the page prints the rate and the EXACT size, and our total is
+            # their product to the riyal. fursaghyr 1199451 (card parity 2026-11-08): the page's price is «684 SAR»,
+            # «سعر المتر للأرض: 684», «مساحة العقار: 2194.62»; the site's total is 684 × 2194.62 = 1,501,120 (stored
+            # verbatim, area stored as the integer 2194) and the page never prints it. The rate must be on the page
+            # as a price, the size must be the stored one with its decimals; any other total still scores wrong.
+            pt = stored.get("price_total")
+            if (out[name] != MATCH and pt and ppm and area and float(pt) != float(ppm)
+                    and _cmp_number(ppm, lines, whole, kw) == MATCH
+                    and any(int(float(area)) in (int(float(a)), int(float(a) + 0.5))
+                            and abs(float(ppm) * float(a) - float(pt)) < 1
+                            for a in re.findall(r"(?<![\d.,])(\d+\.\d+)(?![\d.,])", whole))):
+                out[name] = MATCH
             # A price written in words of thousands is the same figure: akariyoun 18605450 (2026-10-19, re-read
             # run 39215534393) prints «السعر : 150 الف ريال» and we store 150000; the score read «150» as a
             # different price. Thousands («الف/ألف») and millions («مليون») only, the figure exact.
@@ -891,7 +903,18 @@ def closed_ad_page(platform: str, status, body: str) -> bool:
 _AD_CODE_IN_URL = re.compile(r"[?&]ads-([A-Za-z]*\d+)=")
 
 
+# almajdiah's «/rentals/<building>» page draws its unit rows («ترخيص الاعلان: 6201065960» / «العارض») with JavaScript
+# after the first paint. Read before they are drawn, the visible text is only the project blurb and the company
+# footer («حي القيروان», the head office), which scored the district of 161 / 183 / 160 MISMATCH on the card-parity
+# nights 2026-11-07..09 while every drawn page said what we store. A page whose unit rows are not drawn has said
+# nothing about a unit; a drawn row with another district still scores wrong.
+_UNIT_ROWS_BY_SCRIPT = re.compile(r"^https?://(?:www\.)?almajdiah\.com/rentals/\d")
+_UNIT_ROW_LABEL = re.compile(r">\s*ترخيص ال[اإ]علان\s*:?\s*<")
+
+
 def page_lacks_its_ad(url: str | None, body: str) -> bool:
+    if _UNIT_ROWS_BY_SCRIPT.match(url or ""):
+        return not _UNIT_ROW_LABEL.search(body or "")
     m = _AD_CODE_IN_URL.search(url or "")
     if not m:
         return False

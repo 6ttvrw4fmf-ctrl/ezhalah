@@ -1,0 +1,200 @@
+{
+ "propertyAmenities": "Pool, Hot Tub, Sauna, Steam Room, Expansive Gym, Restaurant, Coffee Shop, Children's Playroom, Business Lounge, Private Offices, Yoga Room, Billiards Lounge, Gaming Center, Table Game Lounge, Tournament Ping Pong, Event Space, Package Services",
+ "floorplan": {
+  "fid": "C1ThyDRn8cT7nzvDUHcF",
+  "name": "Samhan 2 Bedroom",
+  "media": [
+   {
+    "fid": "ddf3317a1067a0e95fb4af75371dca58",
+    "external": {
+     "sourceUrl": "%5Bobject%20Object%5D"
+    },
+    "mimeType": "image/png"
+   }
+  ],
+  "external": {
+   "itemId": "item_FbwMTMrI6zsy2tHbfZ",
+   "furnished": true
+  },
+  "maxPrice": {
+   "id": 110713,
+   "currency": "SAR",
+   "basePrice": null,
+   "pricePeriod": "P12M",
+   "leaseDuration": "P12M",
+   "furnishedPrice": 195000,
+   "netEffectivePrice": null
+  },
+  "minPrice": {
+   "id": 110710,
+   "currency": "SAR",
+   "pricePeriod": "P12M",
+   "leaseDuration": "P12M",
+   "furnishedPrice": 159600,
+   "netEffectivePrice": null
+  },
+  "unitCount": 58,
+  "unitTypes": [
+   {
+    "fid": "V1e3EgLjsUAuIbYwwYdH",
+    "name": "B22",
+    "units": [],
+    "external": {
+     "itemId": "item_8cMI0mkatr7e6Ftnjg"
+    },
+    "description": "",
+    "marketingName": "B22"
+   },
+   {
+    "fid": "ltQ7jVKx1KWcIvmOmL7f",
+    "name": "B21",
+    "units": [],
+    "external": {
+     "itemId": "item_b2KY4WJTUvH8MqKsiC"
+    },
+    "description": "",
+    "marketingName": "B21"
+   },
+   {
+    "fid": "u97tKXjFKPFE8XkGkn0J",
+    "name": "B20",
+    "units": [],
+    "external": {
+     "itemId": "item_ETTvRU8Rk1JkaUgpzo"
+    },
+    "description": "",
+    "marketingName": "B20"
+   },
+   {
+    "fid": "r2kWR7iEIrRPcMXSZf6X",
+    "name": "B31",
+    "units": [],
+    "external": {
+     "itemId": "item_CqEnjiHivZ0ZT3JLYl"
+    },
+    "description": "",
+    "marketingName": "B31"
+   }
+  ],
+  "attributes": [
+   {
+    "marketingFloorplan.amenities": "Terrace, Furnished Units Available, Refrigerator, Microwave, Oven, Electric Cooktop, Built-In Oven, Air Conditioner, Dishwasher, Combination Washer/Dryer, Built-In Closets"
+   }
+  ],
+  "description": "Located in Flow Granada, Riyadh. A 114 m², 2-bedroom and 3-bath intended to cultivate wellness and creativity of a life in Flow. With exclusive access to all elevated offerings such as the indoor pool, gym, sauna, and restaurant, along with in-house services such as laundry and housekeeping. An option to furnish with Flow Furniture takes the design of the space to a new level with an aesthetic inspired by nature and created sustainably.",
+  "internalName": null,
+  "maxFloorArea": {
+   "units": "sqm",
+   "value": 141
+  },
+  "minFloorArea": {
+   "units": "sqm",
+   "value": 107
+  },
+  "numberOfBedrooms": 2,
+  "numberOfBathrooms": 3,
+  "minFurnishedPrice": {
+   "id": 110710,
+   "currency": "SAR",
+   "pricePeriod": "P12M",
+   "leaseDuration": "P12M",
+   "furnishedPrice": 159600,
+   "netEffectivePrice": null
+  }
+ },
+ "status": "available",
+ "title": "2 Bedroom",
+ "description": "Located in Flow Granada, Riyadh. A 114 m², 2-bedroom and 3-bath intended to cultivate wellness and creativity of a life in Flow. With exclusive access to all elevated offerings such as the indoor pool, gym, sauna, and restaurant, along with in-house services such as laundry and housekeeping. An option to furnish with Flow Furniture takes the design of the space to a new level with an aesthetic inspired by nature and created sustainably.",
+ "startingAtPriceInterval": "year",
+ "startingAtCurrency": "SAR",
+ "bedrooms": 2,
+ "bathrooms": 3,
+ "furnishedAvailable": true,
+ "area": 107,
+ "areaUnit": "sqm",
+ "specialAvailable": false,
+ "syncStatus": "omit",
+ "externalRefId": "C1ThyDRn8cT7nzvDUHcF",
+ "externalRefType": "fid",
+ "createdAt": "2025-05-30T19:50:36.747Z",
+ "updatedAt": "2026-11-09T22:35:05.982Z",
+ "publishedAt": "2025-05-30T19:50:38.135Z",
+ "name": "Samhan 2 Bedroom - C1ThyDRn8cT7nzvDUHcF",
+ "locale": "en",
+ "startingAtFurnishedPrice": 159600,
+ "omitProperties": [
+  "title",
+  "poster"
+ ],
+ "homeAmenities": "Terrace, Furnished Units Available, Refrigerator, Microwave, Oven, Electric Cooktop, Built-In Oven, Air Conditioner, Dishwasher, Combination Washer/Dryer, Built-In Closets",
+ "newConstruction": false,
+ "isRentByBedroom": false,
+ "rbbTotalBedrooms": null,
+ "internalName": null,
+ "publicStartingAtPrice": null,
+ "publicStartingAtFurnishedPrice": 159600,
+ "property": {
+  "data": {
+   "id": 13,
+   "attributes": {
+    "name": "Flow Granada",
+    "slug": "riyadh-granada",
+    "createdAt": "2025-05-24T14:22:47.511Z",
+    "updatedAt": "2026-10-06T21:38:23.610Z",
+    "publishedAt": "2025-05-24T14:22:48.878Z",
+    "description": "Just a 10-minute walk from Granada Metro Station, Flow Granada is where life, learning, and leisure come together. Flow Granada offers luxury 2- to 3-bedroom apartments in one of Riyadh’s most well-connected neighborhoods. Designed for families, professionals, and expats, this community blends high-end living with unmatched convenience — including an on-site school and full-service restaurant.\n\nApartments are fully furnished with modern interiors, smart home features, and generous layouts. Beyond your front door, Flow Granada provides access to green spaces, co-working areas, fitness facilities, and weekly community events.\n\nWhether you're relocating to Riyadh or upgrading your lifestyle, Flow Granada is a destination for those who want to live fully — without compromise.",
+    "region": "Riyadh"
+   }
+  }
+ },
+ "poster": {
+  "data": {
+   "id": 3012,
+   "attributes": {
+    "name": "DRSHssq0JbixUik7O6zJ.png",
+    "alternativeText": null,
+    "caption": null,
+    "width": 1920,
+    "height": 1080,
+    "formats": {
+     "thumbnail": {
+      "ext": ".png",
+      "url": "https://flowhouse.imgix.net/cms/thumbnail_DRS_Hssq0_Jbix_Uik7_O6z_J_c2d9451ef5.png",
+      "hash": "thumbnail_DRS_Hssq0_Jbix_Uik7_O6z_J_c2d9451ef5",
+      "mime": "image/png",
+      "name": "thumbnail_DRSHssq0JbixUik7O6zJ.png",
+      "path": null,
+      "size": 72.41,
+      "width": 245,
+      "height": 138,
+      "sizeInBytes": 72410
+     }
+    },
+    "hash": "DRS_Hssq0_Jbix_Uik7_O6z_J_c2d9451ef5",
+    "ext": ".png",
+    "mime": "image/png",
+    "size": 817.23,
+    "url": "https://flowhouse.imgix.net/cms/DRS_Hssq0_Jbix_Uik7_O6z_J_c2d9451ef5.png",
+    "previewUrl": null,
+    "provider": "strapi-provider-upload-azure-storage",
+    "provider_metadata": null,
+    "createdAt": "2025-05-30T21:25:28.974Z",
+    "updatedAt": "2025-05-30T21:25:28.974Z"
+   }
+  }
+ },
+ "video": {
+  "data": null
+ },
+ "virtualTours": [],
+ "extraCarouselImages": {
+  "data": null
+ },
+ "heroVideo": {
+  "data": null
+ },
+ "heroImage": {
+  "data": null
+ },
+ "id": 1
+}

@@ -75,6 +75,7 @@ if str(ROOT) not in sys.path:
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 SOURCE = "عقاريون"
 BASE = "https://akariyoun.sa"
@@ -491,6 +492,23 @@ def parse_ad_licence(page_html: str) -> Optional[str]:
     return m.group(1).translate(_AR_DIGITS) if m else None
 
 
+# The ad's posting date: the pill beside the title in the page header («… <div class="col-3"> <h3> <span
+# class="property-views"> 2026-11-08 </span>»). It is NOT the REGA block's «تاريخ انشاء الاعلان» (the licence's
+# creation, a separate labelled table), which this never reads. Measured 2026-11-09 on three live ads — pill /
+# licence created / our first sight: 1108 «2026-11-08» / 2026-11-07 / 11-09; 1075 «2026-10-20» / 10-18 / 10-21;
+# 985 «2026-09-18» / 09-05 / 09-18 — the pill always sits after the licence and on or before our first sight,
+# and the 7-week-old 985 still prints its first day, so it is no bump date. Read only inside the title block.
+_POSTED_PILL = re.compile(r'<div class="col-3">\s*(?:<h3[^>]*>\s*)?<span class="property-views"[^>]*>\s*'
+                          r'(\d{4}-\d{2}-\d{2})\s*</span>')
+
+
+def parse_posted(page_html: str) -> Optional[str]:
+    """The header pill's date → date_added, or None when the title block prints none."""
+    i = (page_html or "").find("prt-detail-title-desc")
+    m = _POSTED_PILL.search(page_html[i:i + 6000]) if i >= 0 else None
+    return site_posting_date(m.group(1)) if m else None
+
+
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:
     """(row, category, raw_price_text). row is None when the page is not a real listing."""
     t = _txt(page_html)
@@ -568,6 +586,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
 
     row: dict[str, Any] = {
         "ad_number": f"AK{ad.group(1).translate(_AR_DIGITS)}",
+        "date_added": parse_posted(page_html),     # the title block's date pill — see _POSTED_PILL
         "city_ar": city,
         "district_ar": district_ar,
         "city_id": city_id,
