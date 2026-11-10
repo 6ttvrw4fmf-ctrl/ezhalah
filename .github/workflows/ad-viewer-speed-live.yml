@@ -16,6 +16,11 @@ on:
     workflows: ['Selector E2E (production)']
     types: [completed]
   workflow_dispatch:
+    inputs:
+      hosts:
+        description: 'comma-separated hosts to check (diagnostic / proof run); empty = every in-app site'
+        required: false
+        default: ''
 
 concurrency:
   group: ad-viewer-speed-live
@@ -46,10 +51,12 @@ jobs:
           BASE_URL: https://ezhalah-app.vercel.app
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ONLY_HOSTS: ${{ inputs.hosts }}
         run: node e2e/viewer/speed-live.mjs
 
+      # A partial (hosts-filtered) run proves nothing about the sites it skipped: it never resolves or raises the robot's alert.
       - name: Bridge this run's result to alert_event
-        if: always()
+        if: always() && (inputs.hosts == '' || inputs.hosts == null)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

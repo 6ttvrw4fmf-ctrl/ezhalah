@@ -105,6 +105,9 @@ const SITES = [
 ];
 let failed = 0;
 const fail = (m) => { failed++; console.log(`✗ ${m}`); };
+// A bot wall / WAF page served to a datacenter robot instead of the ad: known challenge words, or a page too small to be
+// a listing (the ad pages this robot frames run 20–400 KB; a wall is a few hundred bytes to ~1.5 KB).
+export const isBotWall = (body) => /just a moment|checking your browser|verify you are human|cf-chl|challenge-platform|__cf_chl|sucuri|imunify|wordfence|access denied|attention required|captcha|ddos-guard|bot verification|enable javascript and cookies|التحقق من المتصفح|يرجى الانتظار/i.test(body) || body.length < 1500;
 const ok = (m) => console.log(`✓ ${m}`);
 
 // Cross-check the list against the app's own allowlist, so a new in-app site cannot skip this guard.
@@ -126,7 +129,11 @@ async function sampleUrls(table) {
 
 const browser = await chromium.launch();
 try {
-  for (const site of SITES) {
+  // ONLY_HOSTS=a.com,b.sa: a diagnostic / proof run over a few sites (the workflow then skips the alert bridge).
+  const only = String(process.env.ONLY_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean);
+  const runSites = only.length ? SITES.filter((s) => only.includes(s.host)) : SITES;
+  if (only.length) console.log(`! partial run: ${runSites.map((s) => s.host).join(', ')} (ONLY_HOSTS)`);
+  for (const site of runSites) {
     let urls;
     try { urls = await sampleUrls(site.table); } catch (e) { fail(`${site.host}: cannot pick live ads (${e.message})`); continue; }
     if (!urls.length) { fail(`${site.host}: no active ads to test`); continue; }
@@ -136,6 +143,7 @@ try {
     // HTTP 403 text/plain with no cf-* header from a cloud session, NO CONTENT ×3 from the runner, 200 to a
     // phone — a WAF on datacenter egress, not a framing refusal, yet it read ✗ on every run for two days.
     const topStatus = new Map();
+    const topWall = new Set();
     for (const u of urls) {
       const res = await fetch(u, { headers: { 'User-Agent': devices['iPhone 13'].userAgent }, redirect: 'follow' }).catch(() => null);
       topStatus.set(u, res ? res.status : 0);
@@ -151,7 +159,20 @@ try {
       if (res?.headers.get('cf-mitigated') === 'challenge') { console.log(`· ${site.host}: ${u} — Cloudflare challenged the robot (${res.status} cf-mitigated: challenge), header check skipped`); continue; }
       const xfo = res?.headers.get('x-frame-options') ?? '';
       const fa = /frame-ancestors[^;]*/i.exec(res?.headers.get('content-security-policy') ?? '')?.[0] ?? '';
-      if (xfo || (fa && !/frame-ancestors\s+\*/.test(fa))) fail(`${site.host}: ${u} now REFUSES framing (${xfo || fa}) — take it off IN_APP_VIEWER_HOSTS`);
+      if (xfo || (fa && !/frame-ancestors\s+\*/.test(fa))) {
+        // A 200 whose BODY is a bot wall (a WAF / JS-challenge page served to this datacenter egress) carries the wall's
+        // X-Frame-Options, not the ad page's. 2026-11-10 run 42817005291: six hosts (awaalun.com, villas-sa.com, 24.com.sa,
+        // qmra.sa, ryadah.com.sa, sqcc.sa) read «SAMEORIGIN» ×3 and NO CONTENT ×3 in the same run, while 24.com.sa/1306/x
+        // answered 200 with NO frame header to another vantage. Same class as the challenge page and the 4xx/5xx above:
+        // print what was read (server, size, title), exclude it as inconclusive, never ✗ — a real refusal is a full ad
+        // page (thousands of characters, no wall words) that still carries the header, and that still fails here.
+        const body = await res.text().catch(() => '');
+        const title = /<title[^>]*>([^<]{0,120})/i.exec(body)?.[1]?.trim() ?? '';
+        const wall = isBotWall(body);
+        console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa}; server ${res.headers.get('server') ?? '?'}, ${body.length} chars, title «${title}»${wall ? ' → a bot wall to this egress, not the ad page: header check skipped' : ''}`);
+        if (wall) { topWall.add(u); continue; }
+        fail(`${site.host}: ${u} now REFUSES framing (${xfo || fa}) — take it off IN_APP_VIEWER_HOSTS`);
+      }
     }
     // 2. time to content inside a frame, phone + 4G
     const times = [];
@@ -179,6 +200,7 @@ try {
       // challenge page — excluded and reported, never ✗. A 200 page that stays blank is still measured (99,999).
       const top = topStatus.get(u) ?? 0;
       if (seen === null && (top === 0 || top >= 400)) { console.log(`· ${site.host}: ${u} — top-level load answered HTTP ${top || 'nothing'} to this egress (WAF / block / outage), excluded as inconclusive`); continue; }
+      if (seen === null && topWall.has(u)) { console.log(`· ${site.host}: ${u} — top-level load was a bot wall to this egress, excluded as inconclusive`); continue; }
       times.push(seen ?? 99_999);
       console.log(`· ${site.host}: ${u} → ${seen === null ? 'NO CONTENT in 12s' : seen + ' ms'}`);
     }
