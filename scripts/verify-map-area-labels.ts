@@ -5,7 +5,7 @@
 // shape: un-narrowed views read the labels first, a failed read falls back to the dots, labels are keyed and tappable.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { areaLevelFor, areaLevelShown, COUNTRY_BOX, REGION_LABEL_AT, REGION_EN, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, visibleAreas, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
+import { areaLevelFor, areaLevelShown, COUNTRY_BOX, REGION_LABEL_AT, REGION_EN, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, parseAreasFeed, areasFromFeed, visibleAreas, areaPlace, CITY_LABELS_ABOVE, DISTRICT_LABELS_ABOVE } from '../src/lib/mapAreas.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -50,7 +50,18 @@ mustCatch('the Saudi bubble coming back on the opening view', areaLevelShown(17)
   const pointOnly = { s: 20, w: 49, n: 23, e: 52 };        // around الشرقية's point (21.6, 50.6), not Dammam (26.4, 50.1)
   const centreOnly = { s: 25.5, w: 49, n: 27, e: 51 };     // around Dammam, not the point
   check('a region shows when its label point is in view', areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], pointOnly).length === 1);
-  check('a region drawn off screen is neither shown nor counted', areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], centreOnly).length === 0);
+  check('a region whose label is off screen is not drawn', visibleAreas(areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], centreOnly), 'region').length === 0);
+  // …but its listings still count (review of #11608: a 6° view over Dammam read 0).
+  check('a view over the listings counts them even with the label point off screen', areasTotal(areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], centreOnly)) === 9);
+  mustCatch('the count following the labels (0 over Dammam)', areasTotal(areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], centreOnly)) !== 0);
+  // The pill names the region by the labels the user SEES (review of #11608): two labels in view, the bigger one's
+  // weighted centre off screen — it is still the place named.
+  const big = { city: 'منطقة الرياض', district: '', lat: 30, lng: 30, n: 100, at: { lat: 24, lng: 46 } };
+  const small = { city: 'منطقة القصيم', district: '', lat: 26, lng: 44, n: 10, at: { lat: 26, lng: 44 } };
+  const named = areaPlace([big, small], 'region', 'ar', (x) => x, { latitude: 25, longitude: 45 }, { latitudeDelta: 4, longitudeDelta: 4 });
+  check('the pill names the region whose label is on screen, by its drawn point', named?.name === 'منطقة الرياض');
+  mustCatch('a visible region dropped from the pill because its weighted centre is off screen', named?.name !== 'منطقة القصيم');
+  check('a label on screen over no listings is drawn but not counted', visibleAreas(areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], pointOnly), 'region').length === 1 && areasTotal(areasFromFeed(feed, 'region', ['buy', 'rent', 'short'], pointOnly)) === 0);
   mustCatch('labels piled at the weighted centres (الشرقية behind الرياض, as measured live)', clash({ lat: 26.0, lng: 49.6 }, { lat: 24.7, lng: 46.7 }));
 }
 check('city zoom shows one label per DISTRICT', areaLevelFor(2.5) === 'district' && areaLevelFor(0.5) === 'district' && areaLevelFor(0.07) === 'district');

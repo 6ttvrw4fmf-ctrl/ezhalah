@@ -5,7 +5,10 @@
 
 export type AreaLevel = 'country' | 'region' | 'city' | 'district';
 /** One label. At region level `city` holds the region's name; at country level, the country's. */
-export type AreaRow = { city: string; district: string; lat: number; lng: number; n: number; at?: { lat: number; lng: number } };
+/** `at`: where a region's label is drawn (REGION_LABEL_AT); `lat`/`lng` stay the count-weighted centre a tap zooms to.
+ *  `offLabel`: the label point is outside the view (not drawn, still counted); `offCount`: the weighted centre is outside
+ *  the view (drawn, not counted) — the count and the labels are decided separately (review of #11608). */
+export type AreaRow = { city: string; district: string; lat: number; lng: number; n: number; at?: { lat: number; lng: number }; offLabel?: true; offCount?: true };
 
 // ZOOM GOES COUNTRY → REGION → CITY → DISTRICT → PINS (owner 2026-11-05: «when the user zooms in, first thing Saudi, the
 // total number, then region, then city, and then district»). The map opens on the whole Kingdom (latitude span 17-18°),
@@ -106,7 +109,7 @@ export function bubbleTapSpan(cell: number, latitudeDelta: number): number {
 }
 
 /** The labels' total — the count pill's number. */
-export const areasTotal = (rows: AreaRow[]): number => rows.reduce((a, r) => a + r.n, 0);
+export const areasTotal = (rows: AreaRow[]): number => rows.reduce((a, r) => a + (r.offCount ? 0 : r.n), 0);
 
 /** ONLY THE PLACES THAT MATTER AT THIS ZOOM (owner 2026-11-03, a country-view screenshot: «the numbers 1 … look a bit
  *  weird»). «الحزم 1», «يدمة 2», «طبرجل 8» sat beside «الرياض 98 ألف» and, by taking the space, hid Makkah, Buraidah
@@ -118,7 +121,7 @@ export const LABEL_MIN = 10;
 export function visibleAreas(rows: AreaRow[], level: AreaLevel = 'district'): AreaRow[] {
   // The country label and the 13 regions always show: a region is an administrative area, not a crowd of small towns
   // (Al Jouf's ~400 listings are 0.2% of Riyadh Region's — the share rule would hide it).
-  if (level === 'country' || level === 'region') return rows;
+  if (level === 'country' || level === 'region') return rows.filter((r) => !r.offLabel);
   const max = rows.reduce((m, r) => Math.max(m, r.n), 0);
   // A SMALL TOWN SHOWS ITS PLACES (owner 2026-11-05, Umluj: «0 listings» — its districts hold 1-2 listings each, so the
   // LABEL_MIN floor hid every one of them and the map over Umluj was empty while the pill counted 6). The floor exists
@@ -170,10 +173,13 @@ export function areasFromFeed(feed: AreaFeedRow[], level: AreaLevel, deals: stri
     const regions: AreaRow[] = [];
     for (const [name, g] of by) {
       const lat = g.la / g.n, lng = g.lo / g.n;
-      // On screen by where the label is DRAWN (review of #11608): a label whose point is in view shows even when its
-      // weighted centre is not, and one drawn off screen is not counted. A tap still zooms to the weighted centre.
+      // Drawn by where the LABEL is, counted by where the LISTINGS are (review of #11608): a view over Dammam counts the
+      // Eastern Province even when its label point is off screen, and a label on screen shows even when its weighted
+      // centre is not. A tap still zooms to the weighted centre.
       const at = REGION_LABEL_AT[name]; const p = at ?? { lat, lng };
-      if (p.lat >= box.s && p.lat <= box.n && p.lng >= box.w && p.lng <= box.e) regions.push({ city: name, district: '', lat, lng, n: g.n, ...(at ? { at } : {}) });
+      const inside = (q: { lat: number; lng: number }) => q.lat >= box.s && q.lat <= box.n && q.lng >= box.w && q.lng <= box.e;
+      const drawn = inside(p), counted = inside({ lat, lng });
+      if (drawn || counted) regions.push({ city: name, district: '', lat, lng, n: g.n, ...(at ? { at } : {}), ...(drawn ? {} : { offLabel: true as const }), ...(counted ? {} : { offCount: true as const }) });
     }
     return regions.sort((x, y) => y.n - x.n).slice(0, limit);
   }
@@ -207,7 +213,9 @@ export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en
 export function areaPlace(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
   center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): { name: string; n: number } | null {
   if (level === 'country') { const n = rows.reduce((t, a) => t + a.n, 0); return n > 0 ? { name: COUNTRY_NAME[loc], n } : null; }
-  const onScreen = rows.filter((a) => inView(a, center, span));
+  // A region is on screen where its label is drawn OR where its listings are (review of #11608); anything else by its
+  // own point.
+  const onScreen = rows.filter((a) => (!a.offLabel && a.at && inView(a.at, center, span)) || inView(a, center, span));
   const seen = onScreen.length ? onScreen : rows;
   const total = seen.reduce((t, a) => t + a.n, 0);
   if (!total) return null;

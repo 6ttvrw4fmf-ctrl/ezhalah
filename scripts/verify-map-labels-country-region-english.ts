@@ -103,7 +103,7 @@ check('the map hands every label view to areaPlaceName (not a fixed «في هذ�
 
 const noCountry = real.replace("  if (latitudeDelta > COUNTRY_LABELS_ABOVE) return 'country';\n", '');
 mustCatch('the opening view drawing regions or cities instead of the one Saudi total', noCountry !== real && (await load(noCountry)).areaLevelFor(17) !== 'country');
-const shareRegions = real.replace("  if (level === 'country' || level === 'region') return rows;\n", '');
+const shareRegions = real.replace("  if (level === 'country' || level === 'region') return rows.filter((r) => !r.offLabel);\n", '');
 mustCatch('small regions hidden by the city share rule', shareRegions !== real && (await load(shareRegions)).visibleAreas(lib.areasFromFeed(feed, 'region', ALL, KSA), 'region').length < 13);
 const arabicEn = real.replace("  return loc === 'en' ? latin(name) : name;", '  return name;');
 mustCatch('an English UI showing Arabic city/district names (the 2026-11-05 screenshot)', arabicEn !== real && AR.test((await load(arabicEn)).areaName({ city: 'جدة', district: 'حي الشراع' }, 'district', 'en', latin)));
