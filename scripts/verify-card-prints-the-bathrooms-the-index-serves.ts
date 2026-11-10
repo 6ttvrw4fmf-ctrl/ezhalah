@@ -13,6 +13,7 @@ import { bathroomsForCard } from '../src/lib/indexBathrooms.ts';
 const root = join(import.meta.dirname, '..');
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`); if (!ok) failed++; };
+const mustCatch = (label: string, caught: boolean, detail = '') => check(`(mutation) catches ${label}`, caught, detail);
 
 // The rule, executed.
 check('an empty box takes the index\'s figure (fkralemar 13106990: NULL + 4 → 4)', bathroomsForCard(null, 4) === 4);
@@ -24,7 +25,7 @@ check('a numeric string from the index counts (PostgREST may hand smallint as a 
 
 // Mutation: the pre-11-10 card (raw only) executed on the fkralemar row prints nothing.
 const rawOnly = (raw: unknown, _served: unknown) => (typeof raw === 'number' && raw > 0 ? raw : null);
-check('(mutation) the raw-only card is caught: it prints no bath count for an empty box the index fills', rawOnly(null, 4) === null && bathroomsForCard(null, 4) === 4);
+mustCatch('the raw-only card: it prints no bath count for an empty box the index fills', rawOnly(null, 4) === null && bathroomsForCard(null, 4) === 4);
 
 // Both card paths call the rule.
 const remote = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
