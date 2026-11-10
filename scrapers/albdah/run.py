@@ -241,7 +241,12 @@ def map_listing(slug: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         "city_ar": city_ar,
         "city_id": city_id,
         "region_id": region_id,
-        "district_ar": district_ar,
+        # The page WAS read (this row exists only when its location line gave a catalogued city), so the district
+        # computed from it is the answer, not a guess about a failed read: when it is no catalogued district it CLEARS
+        # a stored one. A plain None would keep a wrong old value — 6 live cards kept «حي الشقة» read from the title's
+        # «شقة» (85UOh, 88bts, 58zYD name no district; 48Ckn «العليا», 19Ehz «البشر», 62ZVk «خلف سوق التميمي»
+        # name places Buraydah's catalogue does not hold), 🔧 2026-11-10. The source's own words stay in neighborhood.
+        "district_ar": district_ar or db.AUTHORITATIVE_NULL,
         "neighborhood": district_raw,
         "area_m2": normalize.to_int(facts.get("متر مربع")),
         "bedrooms": normalize.to_int(facts.get("غرف نوم")) if property_type in _DWELLINGS else None,

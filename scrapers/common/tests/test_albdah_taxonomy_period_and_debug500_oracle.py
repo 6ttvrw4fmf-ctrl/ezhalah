@@ -160,7 +160,8 @@ def test_sale_has_no_period_and_type_comes_from_the_taxonomy_slug():
     assert row["furnished"] is True and row["kitchen"] is True
     assert "elevator" not in row                         # silent → NULL, never False
     assert row["additional_info"]["amenity_chips"] == ["مسبح", "مفروش", "مطبخ", "ألعاب"]
-    assert row["district_ar"] is None and row["neighborhood"] == "ضراس"
+    # no catalogued district → the explicit clear (a plain None would keep a stale stored one, 🔧 2026-11-10)
+    assert row["district_ar"] is R.db.AUTHORITATIVE_NULL and row["neighborhood"] == "ضراس"
 
 
 def test_fal_licence_is_never_the_ad_licence_and_utilities_are_tri_state():
