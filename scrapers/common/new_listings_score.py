@@ -1548,7 +1548,11 @@ def mobasher_page(url: str, fetch=None) -> dict | None:
     title = str(g("titleAr") or "")
     summary = re.sub(r"<[^>]+>", " ", str(g("summaryAr") or ""))
     lines += [title] if title else []
-    lines += [y.strip() for y in summary.splitlines() if y.strip()]
+    # mobasher's summaryAr is ONE line («… * مساحة الأرض: 250 م². * مسطح البناء: أكثر من 500 م². * الواجهة: جنوبية.
+    # …»), so every keyword matched it and read every number in it (11-10 branch score, 26222810: «واجهه 330 15 2009 4
+    # 3 6.» scored direction MISMATCH). A keyword sees only its own sentence: split on the seller's bullets / full
+    # stops / bars, never inside a number («6,228.25»).
+    lines += [y.strip() for y in re.split(r"\n|\s\*\s|\|| [-–] |(?<!\d)\.(?!\d)|،", summary) if y and y.strip()]
     return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
             "text_head": " | ".join(lines)[:1500]}
 

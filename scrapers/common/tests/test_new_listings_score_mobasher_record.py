@@ -56,3 +56,27 @@ def test_a_failed_list_read_is_unreadable_not_wrong():
     def boom():
         raise RuntimeError("403")
     assert S.mobasher_page(URL + "x-1", fetch=boom) is None
+
+
+# 🆕 2026-11-10 follow-up: the one-line summary is split into its own sentences, so the facade keyword reads only its
+# own sentence (26222810's «واجهه 330 15 2009 4 3 6.» was scored against our «جنوب»).
+FACADE_SLUG = "فيلا-للبيع-1"
+FACADE = {"listingType": "DIRECT_SALE", "slugAr": FACADE_SLUG, "askingPrice": 1200000, "cityNameAr": "الرياض",
+          "searchableAttributes": {"propertyTypeAr": "فيلا", "propertySpace": 330, "titleAr": "فيلا للبيع",
+                                   "summaryAr": "فيلا مساحة 330 م² على شارع 15 م بناء 2009. * الواجهة: جنوبية. "
+                                                "* 4 غرف و 3 دورات مياه و 6 مجالس."}}
+
+
+def test_the_facade_keyword_reads_its_own_sentence():
+    S._MOBASHER_RECORDS = None
+    from urllib.parse import quote
+    page = S.mobasher_page(URL + quote(FACADE_SLUG), fetch=lambda: [FACADE])
+    assert any(x.startswith("الواجهة") and "جنوبية" in x and "330" not in x for x in page["evidence_lines"]), page
+    assert compare_listing({"direction_ar": "جنوب"}, page, skip_price=True)["direction_ar"] == MATCH
+
+
+def test_a_decimal_number_is_not_split():
+    S._MOBASHER_RECORDS = None
+    from urllib.parse import quote
+    page = S.mobasher_page(URL + quote(REST_SLUG), fetch=lambda: [VILLA, REST])
+    assert any("6,228.25" in x for x in page["evidence_lines"]), page
