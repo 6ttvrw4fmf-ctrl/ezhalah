@@ -684,7 +684,7 @@ const FURNISH_VALUES_AR: Record<string, string> = {
 const AR_ENUM: Record<string, Record<string, string>> = {
   // (owner report, 2026-07-16 Arabic-only sweep) 'agricultural'/'mixed' added — eaqartabuk/erapulse
   // raw values that fell through the enum lookup and rendered raw English.
-  'property usage': { residential: 'سكني', commercial: 'تجاري', agricultural: 'زراعي', mixed: 'مختلط' },
+  'property usage': { residential: 'سكني', commercial: 'تجاري', agricultural: 'زراعي', mixed: 'مختلط', industrial: 'صناعي', educational: 'تعليمي', health: 'صحي' },
   // BOTH label spellings are real and must BOTH be kept — see FURNISH_VALUES_AR below.
   // (fix, 2026-07-16) satel's ADDL_FIELDS label is 'Furnishing' ('Fully furnished'/'Unfurnished'/
   //   'Partially furnished', 203 rows).
@@ -756,6 +756,11 @@ export function arAttrValue(label: string, value: string, locale: string): strin
     // Translate finite source enums in either direction without changing the stored fact.
     const known = Object.entries(AR_ENUM[ll] ?? {}).find(([, ar]) => ar === v);
     if (known) return known[0].replace(/-/g, ' ');
+    if (ll === 'property usage' && /[،,/]/.test(v)) {
+      // Nuzul sites print every use of the property on one row («سكني، تجاري»): translate it word by word.
+      const uses = Object.entries(AR_ENUM[ll]);
+      return v.split(/\s*[،,/]\s*/).filter(Boolean).map(p => uses.find(([, ar]) => ar === p)?.[0] ?? freeTextEn(englishCatalogText(p))).join(', ');
+    }
     if (v === 'نعم') return 'Yes';
     if (v === 'لا') return 'No';
     if (ll === 'facade') {
