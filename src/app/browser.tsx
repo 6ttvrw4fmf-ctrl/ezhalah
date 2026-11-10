@@ -9,7 +9,8 @@ import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
 import { openListing } from '@/lib/openListing';
 import { safeHttpUrl } from '@/lib/safeUrl';
-import { frameNext, type FrameState } from '@/lib/flowState';
+import { frameNext, frameTimerRuns, type FrameState } from '@/lib/flowState';
+import { reportError } from '@/lib/observability';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -40,11 +41,13 @@ export default function Browser() {
   // If the proxied page doesn't load within ~12s, treat it as a failure and show a graceful in-app
   // fallback (Reload / Open on AQAR) instead of Chrome's bare "couldn't load" page. Proxying a live
   // site is intermittently flaky, so we never leave the user stuck. (user-reported.)
+  // The clock starts when the frame is on screen (the ad was found), never while the ad is still being looked up.
+  const frameOnScreen = IS_WEB && !resolving && !!listing;
   useEffect(() => {
-    if (frame !== 'loading') return;
+    if (!frameTimerRuns(frame, frameOnScreen)) return;
     const tmr = setTimeout(() => setFrame((f) => frameNext(f, 'timeout')), 12000);
     return () => clearTimeout(tmr);
-  }, [frame, reloadKey]);
+  }, [frame, reloadKey, frameOnScreen]);
 
   useEffect(() => {
     let alive = true;
@@ -57,8 +60,10 @@ export default function Browser() {
       if (l) trackOpen(l);
       // NATIVE: hand off to the in-app browser overlay and close this route.
       if (l && !IS_WEB) { void openListing(l); router.back(); }
-    }).catch(() => {
-      // A lookup that FAILED ends the spinner with an honest «couldn't load», never an endless wait.
+    }).catch((e: unknown) => {
+      // A lookup that FAILED ends the spinner with an honest «couldn't load», never an endless wait — and it is
+      // reported, because catching it here takes it away from the global unhandled-rejection reporter.
+      reportError(e, { source: 'browser.findListing' });
       if (!alive) return;
       setLookupFailed(true);
       setResolving(false);

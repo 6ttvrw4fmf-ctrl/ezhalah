@@ -116,7 +116,7 @@ import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryPr
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
-import { failedTurnMsgs, mayFailTurn } from '@/lib/flowState';
+import { failedTurnMsgs, mayFailTurn, withoutReceipt } from '@/lib/flowState';
 import { reportError } from '@/lib/observability';
 import { PLATFORM_META, type LoaderPlatform } from '@/data/loaderPlatforms';
 
@@ -2646,16 +2646,18 @@ export default function Agent() {
   // composer until a reload. sendFilter already ended its turn this way; this is the same ending for the other two.
   // The decisions live in src/lib/flowState.ts (mayFailTurn / failedTurnMsgs) so a guard can RUN them; the error is
   // still reported, because catching it here takes it away from the global unhandled-rejection reporter.
-  const failTurn = (run: Run, statusId: string, err: unknown, where: string) => {
+  // `replyLocale` is the language of the turn that failed (an English message gets the English line even when the
+  // interface is Arabic — CHAT LANGUAGE AND UI LANGUAGE ARE SEPARATE), never the interface language.
+  const failTurn = (run: Run, statusId: string, err: unknown, where: string, replyLocale: Locale) => {
     reportError(err, { source: where });
     if (!mayFailTurn(run, runRef.current)) return;
-    setMsgs((m) => failedTurnMsgs(m, statusId, { id: uid(), role: 'agent', text: locale === 'en' ? nextVariant(SEARCH_FAILED_EN) : nextVariant(SEARCH_FAILED_AR) } as ChatMsg));
+    setMsgs((m) => failedTurnMsgs(m, statusId, { id: uid(), role: 'agent', text: replyLocale === 'en' ? nextVariant(SEARCH_FAILED_EN) : nextVariant(SEARCH_FAILED_AR) } as ChatMsg));
     setBusy(false);
     runRef.current = null;
   };
   const runRefine = async (
     baseQ: SearchQuery, dim: string, value: string, label: string,
-    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[]; pools?: Array<number | null> } },
+    opts?: { onFetched?: (total: number | null) => void; onNotLanded?: () => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[]; pools?: Array<number | null> } },
   ) => {
     pendingRefineRef.current = null;
     finalizeReveal();
@@ -2683,9 +2685,13 @@ export default function Agent() {
     // on screen; the later passes settle it ~80 px under the top with the loader below it. All land
     // within the first 1.5 s, long before the user has had reason to scroll.
     for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);
+    // `landed`: the search answered and this turn is going to show something. A refine that threw or was stopped
+    // before that tells its caller (onNotLanded), so nothing it set up for «the new results» is left behind.
+    let landed = false;
     try {
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
+    landed = true;
     prefetchNarrowing(result.query ?? refined, opts?.guided?.asked ?? []);  // AFTER the search — see prefetchNarrowing
     // quotableTotal, never `result.total` — that is this page's buffer length (≤ the 1500-row
     // QUERY_LIMIT), so the mining overlay quoted «لقينا 1,500 عقار» on every set larger than a page
@@ -2723,7 +2729,8 @@ export default function Agent() {
     // beginCardDrip already eases the new turn's TOP to ~80px under the viewport top (the 2026-07-09
     // "don't drag the whole screen down" rule), which is exactly where the owner wants a completed
     // round to land: the selection receipt, then the new count, then the new cards.
-    } catch (e) { failTurn(run, statusId, e, 'agent.runRefine'); return; }
+    } catch (e) { failTurn(run, statusId, e, 'agent.runRefine', (label ? detectLocale(label) : null) ?? locale); return; }
+    finally { if (!landed) opts?.onNotLanded?.(); }
     setBusy(false); runRef.current = null;
   };
 
@@ -3026,6 +3033,9 @@ export default function Agent() {
     const roundLabel = ageFlowLabelsRef.current.join(locale === 'ar' ? '، ' : ', ');
     void runRefine(q, '__guided__', '', roundLabel ? pickAfCourtesyOpening(Math.random, locale) + roundLabel : roundLabel, {
       guided,
+      // The round never produced results (it threw, or was stopped first): the turn it started from gets its
+      // buttons back — a «round done» receipt over a round that never ran was a dead end (no way back in).
+      onNotLanded: () => { if (carry && roundCommitted) setAfReceipt((r) => withoutReceipt(r, carry.msgId)); },
       // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
       // One beat per answered question, in the chips' own words without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات»),
       // each with the size of the set it was checked against — the beat reads «نفحص 1,425 عقار…» → «نفحص 830 عقار…».
@@ -3612,7 +3622,7 @@ export default function Agent() {
         m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: reply, typing: true } : x)),
       );
     }
-    } catch (e) { failTurn(run, statusId, e, 'agent.send'); return; }
+    } catch (e) { failTurn(run, statusId, e, 'agent.send', replyLocale); return; }
     // The network turn is done; the cards then reveal on their own timers (busy is free, so the user can
     // type a new message — which finalizes the reveal via finalizeReveal). interview returns earlier.
     setBusy(false);

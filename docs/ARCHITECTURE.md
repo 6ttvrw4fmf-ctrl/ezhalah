@@ -1706,6 +1706,10 @@ new detector needing a longer history must raise the retention in the same chang
   turn that threw left «searching…» on screen forever. A catch added in a screen must still call `reportError`
   (catching takes the error away from the global reporter). New flow → add its function there and its rule plus a
   mutant to `scripts/verify-hidden-flows.ts`, which RUNS the functions and the lifted handlers.
+  Three endings every such flow owes the visitor: a read that FAILED says so and offers «try again» (the map's pill,
+  a shared-chat link — never a blank map or a plain home page); a step that never LANDED takes back what it set up
+  for its result (an Advanced Filter round's receipt comes off when its search threw or was stopped, so the buttons
+  return); and a failure line in the chat is written in THAT TURN's language, not the interface's.
 
 ---
 

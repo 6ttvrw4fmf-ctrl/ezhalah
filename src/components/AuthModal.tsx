@@ -9,6 +9,7 @@ import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { oauthOutcome, oneAtATime } from '@/lib/flowState';
+import { reportError } from '@/lib/observability';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SkyEagleLightUp } from '@/components/SidebarSky';
 import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
@@ -253,12 +254,20 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
   // done(fallback) and sign the visitor in as a made-up «User / user@gmail.com» (found 2026-11-10).
   const googleBusyRef = useRef(false);
   const onGoogle = (fallback: AuthUser) => oneAtATime(googleBusyRef, async () => {
-    const r: Awaited<ReturnType<typeof signInWithProvider>> = await signInWithProvider('google').catch(() => ({ error: 'threw' }));
+    // A failure is REPORTED exactly once (a thrown call here, a returned error below) — the user's message alone
+    // told nobody on our side that Google sign-in was down.
+    let thrown = false;
+    const r: Awaited<ReturnType<typeof signInWithProvider>> = await signInWithProvider('google').catch((e: unknown) => {
+      thrown = true;
+      reportError(e, { source: 'AuthModal.google' });
+      return { error: 'threw' };
+    });
     const outcome = oauthOutcome(r, isBackendLive);
     if (outcome === 'redirected') return; // store adopts the session via onAuthStateChange; the OAuth redirect
     // lands on the tiny /auth stub, which bounces back to '/' or '/agent' already signed in.
     if (outcome === 'signed-in') return done(r.user!);
     if (outcome === 'preview') return done(fallback); // no backend at all: the design preview's pretend account
+    if (!thrown) reportError(new Error(r?.error ?? 'google sign-in failed'), { source: 'AuthModal.google' });
     setStep('main');
     setOauthErr(t('Google sign-in isn’t available right now. Please try another method.'));
   });

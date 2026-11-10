@@ -8,6 +8,10 @@
 //   3. The map's read failed for a new view    → the pill kept the previous view's count.
 //   4. An AI chat turn threw                   → the «searching…» row and the busy composer stayed forever.
 //   5. A shared-search card failed to load     → it gave up after one try; a double tap imported the chat twice.
+// And the second pass (the reviewer robot's eight findings on that work, same day):
+//   6. A failed turn answered in the INTERFACE language, not the turn's; a refine that never landed left its
+//      «round done» receipt, so the buttons were gone; the ad page's 12 s clock ran during the LOOKUP; a failed
+//      lookup / Google sign-in was not reported; a shared link or a map view that could not be read said nothing.
 //
 // This file RUNS the real code (the pure functions directly, the screen handlers lifted out of their components
 // with scripts/lib/liftSymbols.ts) and re-breaks each one to prove the check goes RED. No source-text matching
@@ -80,7 +84,10 @@ const rules = async (f: Flow): Promise<Record<string, boolean>> => {
     'frame: a late timer or error never covers a page that loaded': f.frameNext('loaded', 'timeout') === 'loaded' && f.frameNext('loaded', 'error') === 'loaded',
     'frame: a page that never arrives becomes an error (no endless spinner)': f.frameNext('loading', 'timeout') === 'error' && f.frameNext('loading', 'error') === 'error',
     'frame: reload starts over from any state': (['loading', 'loaded', 'error'] as const).every((s) => f.frameNext(s, 'reload') === 'loading'),
-    'map pill: a failed read has no count': f.pillCount('unknown') === null,
+    'frame clock: it does not run while the ad is still being looked up': f.frameTimerRuns('loading', false) === false,
+    'frame clock: it runs for a frame on screen that is still loading, and only then':
+      f.frameTimerRuns('loading', true) === true && !f.frameTimerRuns('loaded', true) && !f.frameTimerRuns('error', true),
+    'map pill: a failed read is «failed» (try again), never a number and never nothing': f.pillCount('unknown') === 'failed',
     'map pill: a real read is summed, and a real zero stays zero': f.pillCount([{ n: 2 }, { n: 5 }]) === 7 && f.pillCount([]) === 0,
     'chat: a failed turn swaps its «searching» row for the failure bubble':
       JSON.stringify(f.failedTurnMsgs([other, status], 's1', bubble)) === JSON.stringify([other, bubble]),
@@ -89,6 +96,13 @@ const rules = async (f: Flow): Promise<Record<string, boolean>> => {
     'chat: only the turn that is still current may be failed':
       f.mayFailTurn(run, run) && !f.mayFailTurn(run, { cancelled: false }) && !f.mayFailTurn(run, null) && !f.mayFailTurn({ cancelled: true }, null),
     'chat: a cancelled turn is never failed': (() => { const c = { cancelled: true }; return f.mayFailTurn(c, c) === false; })(),
+    'refine: one that never landed takes its receipt off that turn only':
+      JSON.stringify(f.withoutReceipt({ a: 1, b: 2 }, 'a')) === JSON.stringify({ b: 2 }) && (() => { const r = { b: 2 }; return f.withoutReceipt(r, 'a') === r; })(),
+    'shared card: it has given up only after the last retry': [0, 1, 2, 3].every((a) => !f.sharedCardGaveUp(a)) && f.sharedCardGaveUp(4),
+    'shared chat: a read that FAILED with no search to open asks to try again (never a silent home page)': f.afterSharedChatRead('failed', false) === 'retry-card',
+    'shared chat: a chat that was read opens; a search still opens without it; a chat that is gone stays put':
+      f.afterSharedChatRead('ok', false) === 'open-chat' && f.afterSharedChatRead('ok', true) === 'open-chat'
+      && f.afterSharedChatRead('failed', true) === 'open-search' && f.afterSharedChatRead('absent', true) === 'open-search' && f.afterSharedChatRead('absent', false) === 'stay',
     'shared card: retries a few times, then stops': [0, 1, 2, 3].every((a) => { const ms = f.sharedCardRetryMs(a); return typeof ms === 'number' && ms >= 1000; })
       && f.sharedCardRetryMs(4) === null && f.sharedCardRetryMs(-1) === null && f.sharedCardRetryMs(1.5) === null,
     'one at a time: a second call while the first runs does nothing': ran === 1 && second === undefined && firstValue === 'one',
@@ -117,8 +131,23 @@ await flowMutant('a late timer covering a loaded page',
   'frame: a late timer or error never covers a page that loaded',
   "if (s === 'loaded') return 'loaded';", '');
 await flowMutant('a failed map read keeping a number',
-  'map pill: a failed read has no count',
-  "if (rows === 'unknown') return null;", "if (rows === 'unknown') return 0;");
+  'map pill: a failed read is «failed» (try again), never a number and never nothing',
+  "if (rows === 'unknown') return 'failed';", "if (rows === 'unknown') return 0;");
+await flowMutant('the 12 s clock running during the ad lookup (the bug verbatim)',
+  'frame clock: it does not run while the ad is still being looked up',
+  "return s === 'loading' && frameOnScreen;", "return s === 'loading';");
+await flowMutant('the 12 s clock never running at all',
+  'frame clock: it runs for a frame on screen that is still loading, and only then',
+  "return s === 'loading' && frameOnScreen;", 'return false;');
+await flowMutant('a refine that never landed keeping its receipt',
+  'refine: one that never landed takes its receipt off that turn only',
+  'delete next[msgId];', '');
+await flowMutant('the shared card never admitting it gave up',
+  'shared card: it has given up only after the last retry',
+  'return sharedCardRetryMs(attempt) === null;', 'return false;');
+await flowMutant('a shared chat that could not be read leaving a silent home page (the bug verbatim)',
+  'shared chat: a read that FAILED with no search to open asks to try again (never a silent home page)',
+  "return read === 'failed' ? 'retry-card' : 'stay';", "return 'stay';");
 await flowMutant('the failure bubble deleting a reply that already landed',
   'chat: a reply that already landed under that id is kept',
   "!(x.id === statusId && x.role === 'status')", '!(x.id === statusId)');
@@ -139,7 +168,7 @@ await flowMutant('the gate staying shut after a throw',
   'try { return await fn(); } finally { latch.current = false; }', 'const v = await fn(); latch.current = false; return v;');
 
 // ═══ B. THE GOOGLE BUTTON, LIFTED OUT OF AuthModal AND PRESSED ═══════════════════════════════════════════════════
-type GoogleBus = { result: unknown; throws: boolean; live: boolean; calls: number; done: unknown[]; steps: string[]; errs: string[] };
+type GoogleBus = { result: unknown; throws: boolean; live: boolean; calls: number; done: unknown[]; steps: string[]; errs: string[]; reported: string[] };
 const gg = globalThis as unknown as { __google: GoogleBus };
 const GOOGLE_PRELUDE = [
   `import { oauthOutcome, oneAtATime } from ${JSON.stringify(pathToFileURL(FLOW).href)};`,
@@ -152,10 +181,11 @@ const GOOGLE_PRELUDE = [
   'const setStep = (s: string) => { bus.steps.push(s); };',
   'const setOauthErr = (e: string) => { bus.errs.push(e); };',
   'const t = (k: string) => k;',
+  'const reportError = (e: unknown, ctx: any) => { bus.reported.push(`${ctx.source}: ${(e as Error).message}`); };',
 ].join('\n');
 const FALLBACK = { method: 'google', initials: 'U', name: 'User', sub: 'user@gmail.com' };
 const pressGoogle = async (file: string, o: { result?: unknown; throws?: boolean; live: boolean; twice?: boolean }): Promise<GoogleBus> => {
-  gg.__google = { result: o.result, throws: !!o.throws, live: o.live, calls: 0, done: [], steps: [], errs: [] };
+  gg.__google = { result: o.result, throws: !!o.throws, live: o.live, calls: 0, done: [], steps: [], errs: [], reported: [] };
   const m = await liftSymbols(file,
     [{ header: '  const onGoogle = (fallback: AuthUser) => oneAtATime(googleBusyRef, async () => {', endsWith: /^  \}\);$/ }],
     ['onGoogle'], GOOGLE_PRELUDE) as { onGoogle: (f: unknown) => Promise<unknown> };
@@ -167,22 +197,33 @@ const pressGoogle = async (file: string, o: { result?: unknown; throws?: boolean
 /** The rule the user feels: on the live site a failed Google sign-in signs NOBODY in and says so. */
 const failedGoogleIsHonest = (b: GoogleBus) => b.done.length === 0 && b.errs.length === 1 && b.steps.includes('main');
 
-check('google button: live site + Google returns an error → nobody is signed in, the error is shown',
-  failedGoogleIsHonest(await pressGoogle(AUTH, { result: { error: 'provider disabled' }, live: true })));
-check('google button: live site + the call throws → nobody is signed in, the error is shown',
-  failedGoogleIsHonest(await pressGoogle(AUTH, { throws: true, live: true })));
+/** A failure we never hear about cannot be fixed: each failed sign-in is reported ONCE, with what went wrong. */
+const reportedOnce = (b: GoogleBus, what: string) => b.reported.length === 1 && b.reported[0] === `AuthModal.google: ${what}`;
+const RETURNED_ERR = { result: { error: 'provider disabled' }, live: true };
+const THROWN_ERR = { throws: true, live: true };
+{
+  const b = await pressGoogle(AUTH, RETURNED_ERR);
+  check('google button: live site + Google returns an error → nobody is signed in, the error is shown', failedGoogleIsHonest(b));
+  check('google button: that returned error is reported once', reportedOnce(b, 'provider disabled'), JSON.stringify(b.reported));
+}
+{
+  const b = await pressGoogle(AUTH, THROWN_ERR);
+  check('google button: live site + the call throws → nobody is signed in, the error is shown', failedGoogleIsHonest(b));
+  check('google button: that throw is reported once (not twice)', reportedOnce(b, 'popup blocked'), JSON.stringify(b.reported));
+}
 {
   const b = await pressGoogle(AUTH, { result: { user: { name: 'Real Person' } }, live: true });
   check('google button: a real Google user IS signed in (the fix is not a broken button)',
-    b.done.length === 1 && (b.done[0] as { name: string }).name === 'Real Person' && b.errs.length === 0);
+    b.done.length === 1 && (b.done[0] as { name: string }).name === 'Real Person' && b.errs.length === 0 && b.reported.length === 0);
 }
 {
   const b = await pressGoogle(AUTH, { result: { redirected: true }, live: true });
-  check('google button: a redirect signs nobody in here and shows no error', b.done.length === 0 && b.errs.length === 0);
+  check('google button: a redirect signs nobody in here, shows no error and reports nothing', b.done.length === 0 && b.errs.length === 0 && b.reported.length === 0);
 }
 {
   const b = await pressGoogle(AUTH, { result: { error: 'no backend' }, live: false });
-  check('google button: the no-backend design preview still gets its pretend account', b.done.length === 1 && b.done[0] === FALLBACK);
+  check('google button: the no-backend design preview still gets its pretend account (and is not reported as a failure)',
+    b.done.length === 1 && b.done[0] === FALLBACK && b.reported.length === 0);
 }
 {
   const b = await pressGoogle(AUTH, { result: { user: { name: 'Real Person' } }, live: true, twice: true });
@@ -197,12 +238,25 @@ mustCatch('the Google button swallowing a failure without telling the user',
     mutantFile(authSrc, "    setOauthErr(t('Google sign-in isn’t available right now. Please try another method.'));\n  });", '  });', 'AuthModal.tsx'),
     { result: { error: 'provider disabled' }, live: true })));
 
+mustCatch('a Google sign-in that returned an error going unreported',
+  !reportedOnce(await pressGoogle(
+    mutantFile(authSrc, "    if (!thrown) reportError(new Error(r?.error ?? 'google sign-in failed'), { source: 'AuthModal.google' });\n", '', 'AuthModal.tsx'),
+    RETURNED_ERR), 'provider disabled'));
+mustCatch('a Google sign-in that threw going unreported',
+  !reportedOnce(await pressGoogle(
+    mutantFile(authSrc, "      reportError(e, { source: 'AuthModal.google' });\n", '', 'AuthModal.tsx'),
+    THROWN_ERR), 'popup blocked'));
+mustCatch('a Google sign-in that threw being reported twice',
+  !reportedOnce(await pressGoogle(
+    mutantFile(authSrc, "    if (!thrown) reportError(new Error(", '    reportError(new Error(', 'AuthModal.tsx'),
+    THROWN_ERR), 'popup blocked'));
+
 // ═══ C. A CHAT TURN THAT THROWS, LIFTED OUT OF agent.tsx ═════════════════════════════════════════════════════════
 type TurnBus = { msgs: { id: string; role: string; text?: string }[]; busy: boolean; current: unknown; reported: string[] };
 const gt = globalThis as unknown as { __turn: TurnBus };
 const TURN_PRELUDE = [
   `import { failedTurnMsgs, mayFailTurn } from ${JSON.stringify(pathToFileURL(FLOW).href)};`,
-  'type Run = any; type ChatMsg = any;',
+  'type Run = any; type ChatMsg = any; type Locale = any;',
   'const bus: any = (globalThis as any).__turn;',
   'const runRef = { get current() { return bus.current; }, set current(v: any) { bus.current = v; } };',
   'const reportError = (_e: unknown, ctx: any) => { bus.reported.push(ctx.source); };',
@@ -213,13 +267,13 @@ const TURN_PRELUDE = [
   'const nextVariant = (a: string[]) => a[0];',
   'const SEARCH_FAILED_EN = ["failed-en"]; const SEARCH_FAILED_AR = ["failed-ar"];',
 ].join('\n');
-const failTurnOn = async (file: string, o: { cancelled?: boolean; replaced?: boolean }): Promise<TurnBus> => {
+const failTurnOn = async (file: string, o: { cancelled?: boolean; replaced?: boolean; reply?: 'ar' | 'en' }): Promise<TurnBus> => {
   const run = { cancelled: !!o.cancelled };
   gt.__turn = { msgs: [{ id: 'u', role: 'user' }, { id: 'st', role: 'status' }], busy: true, current: o.replaced ? { cancelled: false } : run, reported: [] };
   const m = await liftSymbols(file,
-    [{ header: '  const failTurn = (run: Run, statusId: string, err: unknown, where: string) => {', endsWith: /^  \};$/ }],
-    ['failTurn'], TURN_PRELUDE) as { failTurn: (r: unknown, id: string, e: unknown, w: string) => void };
-  m.failTurn(run, 'st', new Error('network'), 'agent.send');
+    [{ header: '  const failTurn = (run: Run, statusId: string, err: unknown, where: string, replyLocale: Locale) => {', endsWith: /^  \};$/ }],
+    ['failTurn'], TURN_PRELUDE) as { failTurn: (r: unknown, id: string, e: unknown, w: string, l: string) => void };
+  m.failTurn(run, 'st', new Error('network'), 'agent.send', o.reply ?? 'ar');
   return gt.__turn;
 };
 /** The rule the user feels: after a turn throws, the spinner row is gone, a failure bubble is there, typing works. */
@@ -239,10 +293,63 @@ const turnIsReleased = (b: TurnBus) =>
   const b = await failTurnOn(AGENT, { replaced: true });
   check('chat: an old turn that throws late does not end the NEW turn', b.busy === true && b.current !== null && !b.msgs.some((m) => m.role === 'agent'));
 }
+/** CHAT LANGUAGE AND UI LANGUAGE ARE SEPARATE: the interface in this harness is Arabic (`locale = "ar"`). */
+const failedIn = (b: TurnBus) => b.msgs.find((m) => m.role === 'agent')?.text;
+check('chat: an ENGLISH turn that fails says so in English, even with the interface in Arabic', failedIn(await failTurnOn(AGENT, { reply: 'en' })) === 'failed-en');
+check('chat: an Arabic turn that fails says so in Arabic', failedIn(await failTurnOn(AGENT, { reply: 'ar' })) === 'failed-ar');
+mustCatch('a failed English turn answered in the interface language (the bug verbatim)',
+  failedIn(await failTurnOn(mutantFile(agentSrc, "text: replyLocale === 'en' ? nextVariant(SEARCH_FAILED_EN)", "text: locale === 'en' ? nextVariant(SEARCH_FAILED_EN)", 'agent.tsx'), { reply: 'en' })) !== 'failed-en');
 mustCatch('the composer staying busy forever after a turn throws (the bug verbatim)',
   !turnIsReleased(await failTurnOn(mutantFile(agentSrc, "    setBusy(false);\n    runRef.current = null;\n  };\n  const runRefine = async (", "    runRef.current = null;\n  };\n  const runRefine = async (", 'agent.tsx'), {})));
 mustCatch('the «searching» row staying on screen after a turn throws',
   !turnIsReleased(await failTurnOn(mutantFile(agentSrc, 'setMsgs((m) => failedTurnMsgs(m, statusId, ', 'setMsgs((m) => m.concat(', 'agent.tsx'), {})));
+
+// ═══ C2. A REFINE THAT NEVER LANDED, LIFTED OUT OF agent.tsx AND RUN ════════════════════════════════════════════
+// runRefine itself, with the search stubbed: it throws, it is stopped before any result, or it answers. The caller
+// (an Advanced Filter round) put a «round done» receipt on the turn it started from; onNotLanded is how it hears
+// that the round never produced anything, so the receipt comes off and that turn's buttons come back.
+type RefineBus = { search: 'throws' | 'stopped' | 'answers'; notLanded: number; failed: string[] };
+const gr = globalThis as unknown as { __refine: RefineBus };
+const REFINE_PRELUDE = [
+  'type SearchQuery = any; type GuidedFacet = any;',
+  'const bus: any = (globalThis as any).__refine;',
+  'const pendingRefineRef: any = { current: null }; const refineMsgIdRef: any = { current: null }; const searchingAtRef: any = { current: {} };',
+  'const runRef: any = { current: null };',
+  'const finalizeReveal = () => {}; const setStopped = (_: boolean) => {}; const setBusy = (_: boolean) => {}; const setMsgs = (_: any) => {};',
+  'const toBottom = () => {}; const easeToMsgTop = (_a: string, _b: number) => {}; const ensureChatId = () => "chat";',
+  'const applyRefinement = (q: any) => q;',
+  'let n = 0; const uid = () => `id${n++}`;',
+  'const makeRun = () => ({ cancelled: false, ac: { signal: null } });',
+  'const runQuery = async () => { if (bus.search === "throws") throw new Error("network"); if (bus.search === "stopped") runRef.current.cancelled = true; return { query: null }; };',
+  // Everything after the search has landed is the reply itself (covered elsewhere): the harness stops there.
+  'const prefetchNarrowing = () => { throw new Error("reached-the-reply"); };',
+  'const failTurn = (_r: any, _id: string, e: any, where: string, l: string) => { bus.failed.push(`${where}:${l}:${e.message}`); };',
+  'const detectLocale = (t: string) => (/[a-z]/i.test(t) ? "en" : /[\u0600-\u06FF]/.test(t) ? "ar" : null);',
+  'const locale: string = "ar";',
+].join('\n');
+const refine = async (file: string, search: RefineBus['search'], label = 'شقة'): Promise<RefineBus> => {
+  gr.__refine = { search, notLanded: 0, failed: [] };
+  const m = await liftSymbols(file, [{ header: '  const runRefine = async (', endsWith: /^  \};$/ }], ['runRefine'], REFINE_PRELUDE) as
+    { runRefine: (q: unknown, d: string, v: string, l: string, o: { onNotLanded: () => void }) => Promise<void> };
+  await m.runRefine({}, 'd', 'v', label, { onNotLanded: () => { gr.__refine.notLanded++; } });
+  return gr.__refine;
+};
+{
+  const b = await refine(AGENT, 'throws');
+  check('refine: a search that throws tells its caller once (the receipt comes off) and the turn is failed', b.notLanded === 1 && b.failed.length === 1 && b.failed[0] === 'agent.runRefine:ar:network', JSON.stringify(b));
+}
+check('refine: a round stopped before any result tells its caller once', (await refine(AGENT, 'stopped')).notLanded === 1);
+{
+  const b = await refine(AGENT, 'answers');
+  check('refine: a search that ANSWERED is never «not landed» (a real round keeps its receipt)', b.notLanded === 0 && b.failed[0]?.endsWith('reached-the-reply') === true, JSON.stringify(b));
+}
+check('refine: a failed refine typed in English fails in English', (await refine(AGENT, 'throws', 'apartment')).failed[0] === 'agent.runRefine:en:network');
+mustCatch('a refine that threw leaving its «round done» receipt behind (the bug verbatim)',
+  (await refine(mutantFile(agentSrc, '    finally { if (!landed) opts?.onNotLanded?.(); }\n', '', 'agent.tsx'), 'throws')).notLanded !== 1);
+mustCatch('a stopped refine counted as landed',
+  (await refine(mutantFile(agentSrc, '    if (run.cancelled) return;\n    landed = true;\n', '    landed = true;\n    if (run.cancelled) return;\n', 'agent.tsx'), 'stopped')).notLanded !== 1);
+mustCatch('a refine that answered taking a real round’s receipt off',
+  (await refine(mutantFile(agentSrc, '    finally { if (!landed) opts?.onNotLanded?.(); }\n', '    finally { opts?.onNotLanded?.(); }\n', 'agent.tsx'), 'answers')).notLanded !== 0);
 
 // ═══ D. AN AD LOOKUP WHOSE READ FAILED IS NOT «NO SUCH AD» (remote.ts fetchListingById) ══════════════════════════
 const LOOKUP_PRELUDE = `
@@ -287,6 +394,17 @@ const wired = (src: { browser: string; map: string; agent: string; home: string 
   'the ad page drives its frame through frameNext (load, error, timeout, reload)': count(src.browser, /\bframeNext\(/g) >= 4,
   'the ad page has ONE frame state (no second boolean to disagree with it)': !/\bframeError\b|\bframeLoaded\b/.test(src.browser),
   'the ad page catches a failed lookup': /findListing\([^;]*?\)\s*\.then\([\s\S]*?\.catch\(/.test(src.browser),
+  'the ad page REPORTS a failed lookup': /\.catch\(\(e: unknown\) => \{\s*reportError\(e, /.test(src.browser),
+  'the ad page starts its 12 s clock through frameTimerRuns': /if \(!frameTimerRuns\(frame, frameOnScreen\)\) return;/.test(src.browser) && /const frameOnScreen = IS_WEB && !resolving && !!listing;/.test(src.browser),
+  'an Advanced Filter round takes its receipt back when the refine never landed': /onNotLanded: \(\) => \{[^}]*setAfReceipt\(\(r\) => withoutReceipt\(r, carry\.msgId\)\)/.test(src.agent),
+  'the map offers «try again» when its read failed, and shows a count only for a number':
+    /retryPinsRef\.current = \(\) => \{ void load\(\); \};/.test(src.map) && /onPress=\{\(\) => retryPinsRef\.current\?\.\(\)\}/.test(src.map)
+    && /typeof pinCount === /.test(src.map) && !/pinCount !== null/.test(src.map),
+  'a filter change re-reads the map through the same load (so its failure gets the same «try again»)': /\}, \[pinsKey, failed, mapReady, locale\]\);/.test(src.map),
+  'the home page says so when the shared card gave up': /if \(sharedCardGaveUp\(attempt\)\) setSharedFail\(/.test(src.home),
+  'opening a shared chat asks afterSharedChatRead, and a failed read shows the retry card':
+    /const next = afterSharedChatRead\(/.test(src.home) && /setSharedFail\(\{ code: s\.code, /.test(src.home),
+  'the home page draws the «couldn’t open — try again» card with a working button': /\{sharedFail && \(/.test(src.home) && /onPress=\{retryShared\}/.test(src.home),
   'the map pill reads a fetched view through pillCount (both failed-read lines and the paint)': count(src.map, /setPinCount\(pillCount\(rows\)\)/g) >= 3 && !/setPinCount\(rows\./.test(src.map),
   'both chat entry points hand a throw to failTurn': count(src.agent, /catch \(e\) \{ failTurn\(run, statusId, e, /g) >= 2,
   'the shared card asks sharedCardRetryMs when to retry': /\bsharedCardRetryMs\(/.test(src.home),
@@ -298,6 +416,16 @@ mustCatch('a chat entry point losing its catch',
   wired({ ...realWiring, agent: realWiring.agent.replace(/catch \(e\) \{ failTurn\(run, statusId, e, /, 'catch (e) { void (run, statusId, e, ') })['both chat entry points hand a throw to failTurn'] === false);
 mustCatch('the map pill being set from a raw sum again',
   wired({ ...realWiring, map: realWiring.map.replace('setPinCount(pillCount(', 'setPinCount(sum(') })['the map pill reads a fetched view through pillCount (both failed-read lines and the paint)'] === false);
+const wiringMutant = (what: string, rule: string, part: 'browser' | 'map' | 'agent' | 'home', from: string, to: string) => {
+  if (!realWiring[part].includes(from)) throw new Error(`wiring mutation anchor missing in ${part}:\n${from}`);
+  mustCatch(what, wired({ ...realWiring, [part]: realWiring[part].replace(from, to) })[rule] === false);
+};
+wiringMutant('the failed ad lookup going unreported again', 'the ad page REPORTS a failed lookup', 'browser', 'reportError(e, ', 'void (e, ');
+wiringMutant('the 12 s clock starting with the lookup again', 'the ad page starts its 12 s clock through frameTimerRuns', 'browser', 'if (!frameTimerRuns(frame, frameOnScreen)) return;', '');
+wiringMutant('the round keeping its receipt after a refine that never landed', 'an Advanced Filter round takes its receipt back when the refine never landed', 'agent', 'withoutReceipt(r, carry.msgId)', 'r');
+wiringMutant('the map’s «try again» doing nothing', 'the map offers «try again» when its read failed, and shows a count only for a number', 'map', 'retryPinsRef.current = () => { void load(); };', '');
+wiringMutant('the shared card giving up without a word again', 'the home page says so when the shared card gave up', 'home', 'if (sharedCardGaveUp(attempt)) setSharedFail(', 'if (false) setSharedFail(');
+wiringMutant('the retry card losing its button', 'the home page draws the «couldn’t open — try again» card with a working button', 'home', 'onPress={retryShared}', 'onPress={undefined}');
 mustCatch('the ad page growing a second frame boolean',
   wired({ ...realWiring, browser: `${realWiring.browser}\nconst [frameError, setFrameError] = useState(false);` })['the ad page has ONE frame state (no second boolean to disagree with it)'] === false);
 

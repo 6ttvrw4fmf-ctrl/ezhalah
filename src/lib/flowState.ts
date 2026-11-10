@@ -30,12 +30,19 @@ export function frameNext(s: FrameState, e: FrameEvent): FrameState {
   if (s === 'loaded') return 'loaded';    // a late timer or error never covers a page that is showing
   return 'error';
 }
+// The 12 s clock counts only while a page is really on its way: the ad has been found AND its frame is on screen.
+// Before this the clock started with the ad LOOKUP, so a slow lookup spent the page's time and the «couldn't load»
+// cover came up over a page that had only just started.
+export function frameTimerRuns(s: FrameState, frameOnScreen: boolean): boolean {
+  return s === 'loading' && frameOnScreen;
+}
 
 // ── 3. The map's «N listings» pill ────────────────────────────────────────────────────────────────────────────────
-// A view whose read FAILED has no known count: null hides the pill. Before this the pill kept the previous view's
-// number over the new view.
-export function pillCount(rows: ReadonlyArray<{ n: number }> | 'unknown'): number | null {
-  if (rows === 'unknown') return null;
+// A view whose read FAILED has no known count: 'failed' swaps the pill for «couldn't load — try again». Before this
+// the pill kept the previous view's number over the new view (and, for a while, just vanished with no way to retry).
+export type PillCount = number | 'failed';
+export function pillCount(rows: ReadonlyArray<{ n: number }> | 'unknown'): PillCount {
+  if (rows === 'unknown') return 'failed';
   let total = 0;
   for (const r of rows) total += r.n;
   return total;
@@ -53,12 +60,34 @@ export function mayFailTurn(run: { cancelled: boolean }, current: unknown): bool
   return !run.cancelled && current === run;
 }
 
+// A refinement that never LANDED (it threw, or the user stopped it before any result) leaves no mark on the turn it
+// started from: that turn's «round done» receipt goes, so its buttons come back and the round can be opened again.
+export function withoutReceipt<R>(receipts: Readonly<Record<string, R>>, msgId: string): Record<string, R> {
+  if (!(msgId in receipts)) return receipts as Record<string, R>;
+  const next: Record<string, R> = { ...receipts };
+  delete next[msgId];
+  return next;
+}
+
 // ── 5. A shared-chat link whose card could not be read ────────────────────────────────────────────────────────────
 // Wait before try number `attempt + 1`, or null = stop asking. Four more tries over ~22 s instead of two over 3 s: a
 // link opened on a slow connection used to give up silently and leave the visitor on a plain home page.
 const SHARED_CARD_WAITS_MS = [1500, 3000, 6000, 12000] as const;
 export function sharedCardRetryMs(attempt: number): number | null {
   return Number.isInteger(attempt) && attempt >= 0 && attempt < SHARED_CARD_WAITS_MS.length ? SHARED_CARD_WAITS_MS[attempt] : null;
+}
+// After the last try the visitor is TOLD and offered «try again» — never a plain home page with no word.
+export function sharedCardGaveUp(attempt: number): boolean {
+  return sharedCardRetryMs(attempt) === null;
+}
+// What opening a shared chat does once its conversation has been asked for. A conversation that could not be READ is
+// not a missing conversation: with a search in the link the search still opens (the owner's «never a dead tap»);
+// with none there is nothing to open, so the visitor gets «couldn't open — try again» instead of a silent home page.
+export type SharedChatNext = 'open-chat' | 'open-search' | 'retry-card' | 'stay';
+export function afterSharedChatRead(read: 'ok' | 'absent' | 'failed', hasSearch: boolean): SharedChatNext {
+  if (read === 'ok') return 'open-chat';
+  if (hasSearch) return 'open-search';
+  return read === 'failed' ? 'retry-card' : 'stay';
 }
 
 // ── 6. One at a time ──────────────────────────────────────────────────────────────────────────────────────────────

@@ -43,7 +43,7 @@ import { InsightHowItWorks } from '@/components/InsightHowItWorks';
 import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
-import { oneAtATime, sharedCardRetryMs } from '@/lib/flowState';
+import { afterSharedChatRead, oneAtATime, sharedCardGaveUp, sharedCardRetryMs } from '@/lib/flowState';
 import { sentenceName } from '@/lib/nameSync';
 import { typedDir } from '@/lib/typedDir';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
@@ -172,6 +172,10 @@ export default function Home() {
   // A /s/<code> link is a whole SHARED CHAT (src/lib/sharedChat.ts): the card's facts are read from the
   // database, and the tap copies the conversation into the recipient's own history and opens it there.
   const [sharedSearch, setSharedSearch] = useState<{ q: SearchQuery | null; name: string; code?: string } | null>(null);
+  // A shared chat that could not be READ (its card, or its conversation): the visitor is told and offered «try
+  // again» — the link's code is kept here because the address bar no longer carries it.
+  const [sharedFail, setSharedFail] = useState<{ code: string; stage: 'card' | 'chat' } | null>(null);
+  const retrySharedCardRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const raw = new URLSearchParams(window.location.search).get(SHARE_PARAM);
@@ -187,12 +191,14 @@ export default function Home() {
         if (isProbeFailure(card)) {
           const wait = sharedCardRetryMs(attempt);
           if (wait !== null) setTimeout(() => { if (alive) void load(attempt + 1); }, wait);
+          if (sharedCardGaveUp(attempt)) setSharedFail({ code: raw!, stage: 'card' });
           return;
         }
         if (card) setSharedSearch({ q: card.q, name: card.name, code: raw! });
       };
+      retrySharedCardRef.current = () => { if (alive) void load(0); };
       void load(0);
-      return () => { alive = false; };
+      return () => { alive = false; retrySharedCardRef.current = null; };
     }
     const s = decodeSharePayload(raw);
     if (s) { setSharedSearch(s); return; }
@@ -230,14 +236,17 @@ export default function Home() {
         await new Promise((r) => setTimeout(r, 1200));
         chat = await fetchSharedChat(s.code);
       }
-      if (chat && !isProbeFailure(chat)) {
+      const next = afterSharedChatRead(isProbeFailure(chat) ? 'failed' : chat ? 'ok' : 'absent', !!s.q);
+      if (next === 'open-chat' && chat && !isProbeFailure(chat)) {
         const hid = importSharedChat(chat.q, chat.transcript);
         try { localStorage.setItem(SHARED_IMPORTED_KEY, JSON.stringify({ ...done, [s.code]: hid })); } catch { /* per-device only */ }
         setTimeout(() => router.push({ pathname: '/agent', params: { filter: JSON.stringify(chat.q ?? emptyQuery()), replay: '0', hid } }), 0);
         return;
       }
-      // The copy could not be read: the shared SEARCH still opens (never a dead tap). A chat with no
-      // search has nothing to run — Home stays.
+      // The copy could not be read: the shared SEARCH still opens (never a dead tap). A chat with no search has
+      // nothing to run — a FAILED read says so and offers «try again» (it used to leave a silent home page); a
+      // conversation that is genuinely gone leaves Home as it is.
+      if (next === 'retry-card') { setSharedFail({ code: s.code, stage: 'chat' }); return; }
     }
     if (s.q) router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
   }), [router, history, importSharedChat]);
@@ -260,6 +269,13 @@ export default function Home() {
     }
     if (sharedSearch.code) void openSharedSearch(sharedSearch);
   }, [sharedSearch, authChecked, user, openAuth, openSharedSearch, locale]);
+  const retryShared = () => {
+    const f = sharedFail;
+    if (!f) return;
+    setSharedFail(null);
+    if (f.stage === 'card') retrySharedCardRef.current?.();
+    else void openSharedSearch({ q: null, code: f.code });
+  };
   const onSharedTap = () => {
     if (!sharedSearch) return;
     if (user) { void openSharedSearch(sharedSearch); return; }
@@ -2489,6 +2505,22 @@ export default function Home() {
             </Text>
             <Pressable onPress={onSharedTap} style={({ pressed }) => [s.sharedButton, pressed && { opacity: 0.9 }]} accessibilityRole="button">
               <Text style={s.sharedButtonText}>{SHARE_COPY[locale === 'en' ? 'en' : 'ar'].button}</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+      {sharedFail && (
+        <View style={s.sharedBackdrop} accessibilityViewIsModal testID="shared-link-failed">
+          <View style={s.sharedCard}>
+            <Pressable onPress={() => setSharedFail(null)} hitSlop={10} style={[s.sharedClose, { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+            <XImage source={require('../../assets/images/logo-cloud-green-static.svg')} style={s.sharedEagle} contentFit="contain" />
+            <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
+              {t('Couldn’t open the shared chat. Check your connection and try again.')}
+            </Text>
+            <Pressable onPress={retryShared} style={({ pressed }) => [s.sharedButton, pressed && { opacity: 0.9 }]} accessibilityRole="button" testID="shared-link-retry">
+              <Text style={s.sharedButtonText}>{t('Try again')}</Text>
             </Pressable>
           </View>
         </View>
