@@ -6,7 +6,9 @@
 //   1. every exact-point read in map_pins_ar draws at the snapped spot (all three street-zoom paths, not one of them);
 //   2. a snap is ignored when the listing has since moved (~1 km), so a stale snap never misplaces a pin;
 //   3. the box filter stays on the listing's OWN coordinates (the index keeps serving it — the 2026-11-03 slow-zoom fix);
-//   4. twins are only ever grouped INSIDE one site and one deal/price/area/type/bedrooms (two sites are two ads);
+//   4. twins are only ever grouped INSIDE one site and one deal/price/area/type/bedrooms (two sites are two ads —
+//      unless they carry the same government licence: the final pin rule's second pass, owner 2026-11-10, held in
+//      verify-map-same-property-is-one-card.ts);
 //   5. placeholder pins never take part, the refresh is scheduled, and nothing is removed — the pin keeps every id.
 // Each rule has a mutation that must be caught. The live half of the claim (the aqar pair 6797149/6834756 returns one
 // spot with n = 2) is production state, measured when the change shipped, not something an offline suite can see.

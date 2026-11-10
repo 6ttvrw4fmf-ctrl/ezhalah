@@ -483,6 +483,31 @@ most-shared spot (`map_pin_snap`, refreshed hourly by `map_pin_snap_refresh_ar()
 tapping it lists every ad. Two DIFFERENT sites keep their own spot (owner 2026-11-03: same-site copies stay, cross-site
 is normal) — but see the next rule: their heads never overlap on screen. Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`, `20261105071552`).
 
+**Map tab: THE FINAL PIN RULE — one pin is one place, the same property is one card that names every site (owner
+2026-11-10, permanent; it replaces «two different sites are always two ads» above).**
+1. One pin = one place; different places sit side by side, never on top of each other.
+2. Units in a building (apartment, studio, floor, room, office, shop): the building has one pin and each unit its own
+   card — the same look on another floor is another unit. A pin whose ads are all one type and one deal titles its
+   sheet «12 شقة للإيجار من 40,000» (`sameKindSummary`).
+3. Whole properties (villa, house, building, land, warehouse, showroom, rest house, farm …): same pin + same type + same
+   size = the same property → one card; another size is another card.
+4. «Same property» needs PROOF: the same government licence number (6+ digits) and deal, or the same site with deal,
+   price, size, type, rooms and floor all matching, or rule 3. Looking alike is never enough (`foldSameProperty` in
+   `src/lib/mapPins.ts`; a card whose index facts failed to load is never grouped).
+5. Proven the same (same licence, city and deal; 2–40 ads; within ~150 m; same size) but pinned a few metres apart by
+   different agents → drawn on one pin (`map_pin_snap_refresh_ar()` pass 2).
+6. The one card shows every site: the cheapest ad leads and each other ad is a link under it with its site and price
+   (price through `listingPrice()`, so stay-length sites print none).
+7. Nothing is ever hidden or deleted — a folded ad is always one tap away.
+8. **A site's stand-in point is not a place.** One site, one exact point, ten or more DIFFERENT whole properties (type +
+   size) of several kinds (three kinds, or two kinds both for sale and for rent) → those ads leave the pin and show under
+   their district's «موقع غير محدد» marker (`map_stray_pin`, rebuilt hourly by `map_stray_pin_refresh_ar()` inside
+   `map_grid_refresh_ar()`, so new listings follow it; ceiling 5,000 keeps the previous set). A real one-kind project
+   (hundreds of land plots a developer pins at its gate) is NOT a stray point and keeps its pin. Measured at ship: 375
+   ads at 9 points (aqar النرجس, bossbih and arkaan in الأحساء).
+A photo check («same photos = same property») is a later step, not built. Migration `20261110202049`; guard
+`scripts/verify-map-same-property-is-one-card.ts` (executes the fold, with mutations).
+
 **Map tab: a listing with NO exact location shows as its district's marker, never as a house's spot (owner 2026-11-09,
 permanent: «include the ones with no pins … make it professional … «موقع غير محدد» / «No exact location» … when the
 user clicks he sees them»; «make sure it's live for all the ones with no pins»).** ~15,300 listings name their district

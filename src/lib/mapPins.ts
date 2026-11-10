@@ -184,6 +184,51 @@ export function foldDuplicates<T>(cards: T[], keyOf: (c: T) => string): { card: 
   return out;
 }
 
+/** THE SAME PROPERTY IS ONE CARD THAT NAMES EVERY SITE (owner 2026-11-10, the final pin rule). Cards under one pin are
+ *  the same property only with PROOF — never because they look alike:
+ *    1. the same government advertising licence and the same deal; or
+ *    2. the same site with the deal, price, size, type, rooms and floor all matching (a site's own repost); or
+ *    3. a WHOLE property (villa, land, building … — it stands on its own ground) of the same type and the same size at
+ *       this pin, on any site. A unit (flat, room, office, shop …) shares its building with look-alikes, so two flats
+ *       are never the same by rule 3 — only by rule 1 or 2.
+ *  Nothing is dropped: the group keeps every ad — the cheapest leads, the rest are named under it with their prices.
+ *  A card with no facts (the index read failed) is never grouped: unknown is not «the same». */
+export type FoldFacts = { site: string; lic?: string | null; dealAr?: string | null; typeAr?: string | null; area?: number | null; price?: number | null; beds?: number | null; floor?: number | null };
+export const UNIT_TYPES_AR = ['شقة', 'استوديو', 'دور', 'غرفة', 'مكتب', 'محل', 'ملحق علوي', 'مكاتب مشتركة', 'كشك', 'غير معروف', 'مركز أعمال', 'مواقف', 'تخزين ذاتي', 'مخازن سحابية'];
+export function foldSameProperty<T>(cards: T[], factsOf: (c: T) => FoldFacts): { main: T; others: T[] }[] {
+  const parent = cards.map((_, i) => i);
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const seen = new Map<string, number>();
+  const facts = cards.map(factsOf);
+  facts.forEach((f, i) => {
+    const keys: string[] = [];
+    const deal = f.dealAr || '', type = f.typeAr || '', area = typeof f.area === 'number' && f.area > 0 ? f.area : null;
+    if (deal && f.lic && /^[0-9]{6,}$/.test(f.lic)) keys.push(`L|${f.lic}|${deal}`);
+    if (deal && type && area !== null && typeof f.price === 'number' && f.price > 0 && f.site) keys.push(`S|${f.site}|${deal}|${f.price}|${area}|${type}|${f.beds ?? ''}|${f.floor ?? ''}`);
+    if (deal && type && area !== null && !UNIT_TYPES_AR.includes(type)) keys.push(`W|${deal}|${type}|${area}`);
+    for (const k of keys) { const j = seen.get(k); if (j === undefined) seen.set(k, i); else parent[find(i)] = find(j); }
+  });
+  const groups = new Map<number, number[]>();
+  cards.forEach((_, i) => { const r = find(i); const g = groups.get(r); if (g) g.push(i); else groups.set(r, [i]); });
+  const priced = (i: number) => (typeof facts[i].price === 'number' && (facts[i].price as number) > 0 ? (facts[i].price as number) : Infinity);
+  // Groups stay in the order their first card arrived; inside a group the cheapest leads (ties keep the arrival order).
+  return [...groups.values()].sort((a, b) => a[0] - b[0]).map((g) => {
+    const byPrice = [...g].sort((a, b) => priced(a) - priced(b) || a - b);
+    return { main: cards[byPrice[0]], others: byPrice.slice(1).map((i) => cards[i]) };
+  });
+}
+
+/** THE SHEET SAYS WHAT A BUILDING HOLDS (owner 2026-11-10: «12 شقة للإيجار من 40,000»): only when EVERY ad of the pin
+ *  is loaded and they all share one type and one deal — otherwise null and the plain count stays. `from` is the lowest
+ *  price, or null when any ad has none to show (then the line carries no price rather than a partial one). */
+export function sameKindSummary(n: number, facts: (FoldFacts & { showsPrice: boolean })[]): { typeAr: string; dealAr: string; from: number | null } | null {
+  if (n < 2 || facts.length !== n) return null;
+  const typeAr = facts[0].typeAr || '', dealAr = facts[0].dealAr || '';
+  if (!typeAr || !dealAr || typeAr === 'غير معروف' || facts.some((f) => f.typeAr !== typeAr || f.dealAr !== dealAr)) return null;
+  const all = facts.every((f) => f.showsPrice && typeof f.price === 'number' && f.price > 0);
+  return { typeAr, dealAr, from: all ? Math.min(...facts.map((f) => f.price as number)) : null };
+}
+
 /** A drawn overlay's points → a closed GeoJSON polygon ([lng, lat] rings), or null when too small to be an area. */
 export function polygonOf(points: unknown[]): PinFilter['poly'] {
   // MapKit's PolygonOverlay.points is RINGS — [[Coordinate, …]] — even when the overlay was built from a flat list
