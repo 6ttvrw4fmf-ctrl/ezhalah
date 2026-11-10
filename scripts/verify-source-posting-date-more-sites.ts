@@ -43,6 +43,8 @@ const check = (label: string, ok: boolean, detail = '') => {
   if (!ok) failed++;
 };
 const show = (v: unknown) => JSON.stringify(v);
+// A mutation proof: the barrier's own predicate, applied to a deliberately broken mapper, must say «caught».
+const mutation = (label: string, caught: boolean, detail = '') => check(`MUTATION: catches ${label}`, caught, detail);
 
 // ── 1. THE READER'S FOUR SHAPES, lifted from the migration that defines public.source_posted_at ──
 const sql = readFileSync(SQL_SRC, 'utf8');
@@ -87,7 +89,7 @@ for (const s of sites) {
   if (err(s.helper_off)) { check(`MUTATION ${s.site}/helper-off: python threw`, false, err(s.helper_off)!); continue; }
   const off = s.helper_off as Exclude<Mapped, { error: string }>;
   // The ad must still map: a skipped ad answers NULL too, and would prove nothing about a side door.
-  check(`MUTATION: catches ${s.site} writing its date without site_posting_date()`, off.mapped === true && off.date_added === null,
+  mutation(`${s.site} writing its date without site_posting_date()`, off.mapped === true && off.date_added === null,
     `mapped=${off.mapped}; with the reader switched off the mapper wrote ${show(off.date_added)}`);
 }
 
@@ -101,7 +103,7 @@ for (const s of sites) {
     if (err(real) || err(mutant)) { check(`MUTATION ${label}: python threw`, false, (err(real) ?? err(mutant))!); continue; }
     // The mutant must still produce a row: «no row» is not the wrong date it was built to produce.
     const mm = mutant as Exclude<Mapped, { error: string }>;
-    check(`MUTATION: catches ${label}`, mm.mapped === true && dateOf(mutant) !== dateOf(real),
+    mutation(`${label}`, mm.mapped === true && dateOf(mutant) !== dateOf(real),
       `mutant mapped=${mm.mapped}, answered ${show(dateOf(mutant))}`);
   }
 }
