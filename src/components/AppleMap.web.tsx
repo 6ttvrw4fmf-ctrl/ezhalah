@@ -34,7 +34,7 @@ import { lightColors } from '@/theme/palette';
 import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
-import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, placeApart, pinAnchorOffset, pinStem, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
@@ -672,17 +672,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           : 'border-radius:10px;padding:4px 7px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);position:relative');
       el.textContent = cell > 0 ? '' : pinHead(row, loc);
       if (counted && cell > 0 && row.n > 1) el.textContent = areaCount(row.n, loc);
-      const stem = cell === 0 ? pinStem(row.shift, headWidth(row) / 2) : null;
-      if (stem) {
-        // Drawn beside its neighbour: a thin line back to the ad's own spot and a dot on it, so the head never claims
-        // the place it was moved to (owner 2026-11-10). Behind the pill, and never a tap target.
-        const line = document.createElement('div');
-        line.setAttribute('data-testid', 'map-pin-stem');
-        line.style.cssText = `position:absolute;left:50%;bottom:${stem.fromBottom}px;width:${stem.length}px;height:2px;margin-top:-1px;background:${color};transform-origin:0 50%;transform:rotate(${stem.angle}rad);z-index:-1;pointer-events:none`;
-        const dot = document.createElement('div');
-        dot.style.cssText = `position:absolute;left:calc(50% + ${stem.dotX}px);bottom:${stem.dotBottom}px;width:6px;height:6px;margin:0 0 -3px -3px;border-radius:50%;background:${color};box-shadow:0 0 0 1.5px #fff;z-index:-1;pointer-events:none`;
-        el.appendChild(line); el.appendChild(dot);
-      } else if (cell === 0 && !row.shift) {
+      // A head on its own spot points at it with a tip; a head drawn beside its neighbour gets a line back to its spot
+      // instead, drawn under every head by drawStems() below.
+      if (cell === 0 && !row.shift) {
         const tip = document.createElement('div');
         tip.style.cssText = `position:absolute;left:50%;bottom:-5px;width:0;height:0;margin-left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid ${color}`;
         el.appendChild(tip);
@@ -720,7 +712,29 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       });
       return el;
     };
-    const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; keyed.clear(); };
+    const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; keyed.clear(); clearStems(); };
+    // THE LINE BACK TO THE AD'S OWN SPOT (owner 2026-11-10, src/lib/mapPins.ts pinStemTo): a head drawn beside its
+    // neighbour never claims the place it was moved to. MapKit overlays are drawn on the map itself, under every
+    // annotation, so a line or its dot never crosses another head's text. Never a tap target (enabled: false).
+    let stems: unknown[] = [];
+    const clearStems = () => { for (const o of stems) m.removeOverlay(o); stems = []; };
+    const drawStems = (rows: PinRow[]) => {
+      clearStems();
+      const box = (hostRef.current as unknown as HTMLElement | null)?.getBoundingClientRect();
+      const metresPerPx = m.region.span.latitudeDelta * 111_320 / Math.max(1, box?.height ?? 600);
+      for (const row of rows) {
+        const to = row.noPin ? null : pinStemTo(row.shift, headWidth(row) / 2);
+        if (!to) continue;
+        const [x, y] = onScreen(row.lat, row.lng);
+        const spot = new mk.Coordinate(row.lat, row.lng);
+        const head = m.convertPointOnPageToCoordinate(new DOMPoint(x + to[0], y + to[1]));
+        const color = pinColor(row);
+        const halo = new mk.PolylineOverlay([spot, head], { style: new mk.Style({ strokeColor: '#ffffff', strokeOpacity: 0.9, lineWidth: 4 }), enabled: false });
+        const line = new mk.PolylineOverlay([spot, head], { style: new mk.Style({ strokeColor: color, strokeOpacity: 1, lineWidth: 2 }), enabled: false });
+        const dot = new mk.CircleOverlay(spot, 3 * metresPerPx, { style: new mk.Style({ strokeColor: '#ffffff', strokeOpacity: 1, lineWidth: 1.5, fillColor: color, fillOpacity: 1 }), enabled: false });
+        for (const o of [halo, line, dot]) { m.addOverlay(o); stems.push(o); }
+      }
+    };
     // EVERY SPOT, AT ANY ZOOM (owner 2026-11-02: «even when I am zoomed out they all show»): zoomed out with no
     // narrowing (deal only), the dots feed — every pinned listing's 1 km cell, downloaded once — is painted on a canvas
     // over the map: all 23k spots in a few ms, where 23k annotations would freeze a phone. The canvas is hidden while
@@ -800,6 +814,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // over COUNTRY_BOX, so a pan that leaves a region off screen never shrinks «… في السعودية».
       const place = whole ? areaPlace(whole, 'country', loc, translitPlace, m.region.center, m.region.span) : areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
       setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
+      clearStems();   // area labels replace the pins: no line may outlive the head it belonged to
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
       for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
@@ -980,6 +995,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         keyed.set(k, a); m.addAnnotation(a);
       }
       mine = [...keyed.values()];
+      drawStems(drawCell === 0 ? rows : []);
     };
     const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 120); };
     const onSelect = (e: { annotation?: { data?: { pin?: PinRow; cell?: number } } }) => {

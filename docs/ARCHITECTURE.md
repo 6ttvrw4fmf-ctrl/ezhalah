@@ -518,7 +518,8 @@ rule, which read two different places a few metres apart as one «N إعلانا
 count. Before the map draws its street-level heads, `placeApart()` (src/lib/mapPins.ts) places every head (measured in
 the font it is drawn in, through MapKit's projection, 4 px of air): a head whose own spot is taken is DRAWN in the
 nearest free place beside its neighbours, at most `PIN_MAX_SHIFT_PX` (84 px: one head across, two rows down) away,
-keeps its own price and ad list, and carries a thin line and dot back to its own spot; only a pile with no room that
+keeps its own price and ad list, and gets a thin line and dot back to its own spot (`pinStemTo()`, drawn as MapKit
+overlays — on the map, under every head, never inside the head's own element where it covered its neighbours' text); only a pile with no room that
 close joins its nearest head as a counted head (zooming in gives room again). MapKit draws an element at (point −
 anchorOffset) — measured live, so the shift is applied through `pinAnchorOffset()`. It runs on every settled view and a
 listing ingested a minute ago is covered with no batch job; every id is on exactly one head (MATCH FIRST). The count pill

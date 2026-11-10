@@ -292,15 +292,16 @@ export const PIN_ANCHOR_Y = -6;
 export function pinAnchorOffset(shift?: [number, number]): [number, number] {
   return shift ? [-shift[0], PIN_ANCHOR_Y - shift[1]] : [0, PIN_ANCHOR_Y];
 }
-/** The line from a shifted head back to its ad's own spot, in the head's own box (x from its centre, `bottom` up from
- *  its bottom edge). Null when the head is not shifted or still covers its own spot — then there is nothing to point at. */
-export function pinStem(shift: [number, number] | undefined, halfWidth: number): { length: number; angle: number; fromBottom: number; dotX: number; dotBottom: number } | null {
+/** Where a shifted head's CENTRE is drawn relative to its ad's own spot (screen px, y down), or null when the head is
+ *  not shifted or still covers its own spot — then there is nothing to point at. The map draws a line from the spot to
+ *  here as a MapKit OVERLAY: on the map itself, under every head. (A line inside the head's own element was painted over
+ *  its neighbours' text — the spot of a moved head lies under another head by definition; measured live 2026-11-10.) */
+export function pinStemTo(shift: [number, number] | undefined, halfWidth: number): [number, number] | null {
   if (!shift) return null;
-  // The ad's spot relative to the head's bottom centre (screen px, y down): the head sits `shift` away and −PIN_ANCHOR_Y lower.
+  // The ad's spot relative to the head's bottom centre: the head sits `shift` away and −PIN_ANCHOR_Y lower.
   const tx = -shift[0], ty = PIN_ANCHOR_Y - shift[1];
   if (ty <= 0 && ty >= -PIN_H_PX && Math.abs(tx) <= halfWidth) return null;   // the head still covers its own spot
-  const cy = -PIN_H_PX / 2;                       // the head's centre
-  return { length: Math.round(Math.hypot(tx, ty - cy)), angle: Math.atan2(ty - cy, tx), fromBottom: PIN_H_PX / 2 - 1, dotX: tx, dotBottom: -ty };
+  return [shift[0], shift[1] - PIN_ANCHOR_Y - PIN_H_PX / 2];
 }
 
 /** WHERE THE VIEW IS (owner 2026-11-05: «you see how it says هذه المنطقة — include the name of the district»). The
