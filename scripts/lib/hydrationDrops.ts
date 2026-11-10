@@ -18,8 +18,11 @@ export const MAX_HYDRATION_DROPS = 25;
 // and is reported as unmeasured, so the strict «headline == rpc» rule applies (CodeRabbit, PR 11725).
 // `pending` counts hydration responses that have ARRIVED but whose body is still being read: while any is pending, a
 // newer observation may be about to land, so no drop count is a verdict yet (CodeRabbit, PR 11725).
-export type HydrationLedger = { obs: Map<string, { seq: number; got: boolean }[]>; pending: number };
-export const newHydrationLedger = (): HydrationLedger => ({ obs: new Map(), pending: 0 });
+// `failed`: arrival stamps of hydrations that settled WITHOUT an observation (request failed, non-2xx, unreadable
+// body). A failed newer hydration may have been the one that returned a row, so any failure at or after a search
+// keeps that search's drop count unmeasured (CodeRabbit, PR 11725).
+export type HydrationLedger = { obs: Map<string, { seq: number; got: boolean }[]>; pending: number; failed: number[] };
+export const newHydrationLedger = (): HydrationLedger => ({ obs: new Map(), pending: 0, failed: [] });
 /** Call synchronously when a hydration response arrives (before any await); call `done()` once it is recorded or failed. */
 export function beginHydration(led: HydrationLedger): () => void {
   led.pending++;
@@ -41,7 +44,14 @@ export function hydrationRequestTracker<K>(led: HydrationLedger) {
   const open = new Map<K, () => void>();
   return {
     sent(k: K) { if (!open.has(k)) open.set(k, beginHydration(led)); },
-    settled(k: K) { const close = open.get(k); if (close) { open.delete(k); close(); } },
+    /** `recorded` false (failed / unreadable) stamps a failure at `seq`, so the overlap stays unmeasured. */
+    settled(k: K, recorded: boolean, seq: number) {
+      const close = open.get(k);
+      if (!close) return;
+      open.delete(k);
+      if (!recorded) led.failed.push(seq);
+      close();
+    },
     get inFlight() { return open.size; },
   };
 }
@@ -65,6 +75,7 @@ export function recordHydration(led: HydrationLedger, url: string, ok: boolean, 
 /** Rows of a search page («table:id» keys) asked for after `sinceSeq` and not returned; null if any row was not observed. */
 export function dropsOf(led: HydrationLedger, rows: string[], sinceSeq = -Infinity): { n: number | null; keys: string[] } {
   if (led.pending > 0) return { n: null, keys: [] };              // a hydration body is still being read
+  if (led.failed.some((f) => f >= sinceSeq)) return { n: null, keys: [] };   // a hydration for this search failed
   const keys: string[] = [];
   for (const k of rows) {
     const after = (led.obs.get(k) ?? []).filter((o) => o.seq >= sinceSeq);

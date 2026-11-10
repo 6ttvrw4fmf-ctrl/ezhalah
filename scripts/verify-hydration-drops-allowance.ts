@@ -101,11 +101,11 @@ mustCatch('a branch that assigns lastSearch directly fails the wiring check',
 const fl = newHydrationLedger();
 const tr = hydrationRequestTracker<string>(fl);
 const flRows = ['t_listings:1', 't_listings:2'];
-tr.sent('older'); recordHydration(fl, url('t_listings', [1, 2]), true, [{ id: 1 }], 51); tr.settled('older');
+tr.sent('older'); recordHydration(fl, url('t_listings', [1, 2]), true, [{ id: 1 }], 51); tr.settled('older', true, 51);
 tr.sent('newer');                                         // newer request out, no response yet
 check('a newer hydration still waiting for headers keeps the count unmeasured', dropsOf(fl, flRows, 50).n === null);
 check('so 99 against an RPC total of 100 is not accepted while it is in flight', !honestHeadline(99, 100, dropsOf(fl, flRows, 50).n));
-recordHydration(fl, url('t_listings', [1, 2]), true, [{ id: 1 }, { id: 2 }], 53); tr.settled('newer');
+recordHydration(fl, url('t_listings', [1, 2]), true, [{ id: 1 }, { id: 2 }], 53); tr.settled('newer', true, 53);
 check('once it lands and returns the row, the older omission is never counted as a drop', dropsOf(fl, flRows, 50).n !== 1 && fl.pending === 0);
 const fm = newHydrationLedger();                          // mutation: pending counted only from the response
 recordHydration(fm, url('t_listings', [1, 2]), true, [{ id: 1 }], 51);
@@ -128,6 +128,24 @@ check('waitForSearch selects by arrival (wiring)', picksNewest(ws));
 check('pairCount selects by arrival (wiring)', picksNewest(pc));
 mustCatch('waitForSearch reverted to the last entry fails', !picksNewest(ws.replace('return newestBySeq(cands)', 'return cands[cands.length - 1]')));
 mustCatch('pairCount reverted to the last entry fails', !picksNewest(pc.replace('return newestBySeq(match)', 'return match[match.length - 1]')));
+
+// FAILED NEWER: the newer hydration fails (requestfailed / non-2xx / unreadable) after an older one omitted id 2.
+// Its pending count clears, but it may have been the response that returned the row, so nothing is measured.
+const ff = newHydrationLedger();
+const tf = hydrationRequestTracker<string>(ff);
+tf.sent('older'); recordHydration(ff, url('t_listings', [1, 2]), true, [{ id: 1 }], 51); tf.settled('older', true, 51);
+tf.sent('newer'); tf.settled('newer', false, 52);
+check('a failed newer hydration keeps the count unmeasured', ff.pending === 0 && dropsOf(ff, flRows, 50).n === null);
+check('so 99 against 100 is not accepted after the newer hydration failed', !honestHeadline(99, 100, dropsOf(ff, flRows, 50).n));
+check('a failure BEFORE the search does not taint it', (() => { const o = newHydrationLedger(); o.failed.push(40);
+  recordHydration(o, url('t_listings', [1, 2]), true, [{ id: 1 }], 51); return dropsOf(o, flRows, 50).n === 1; })());
+const fx = newHydrationLedger(); const tx = hydrationRequestTracker<string>(fx);   // mutation: settle a failure as if recorded
+tx.sent('older'); recordHydration(fx, url('t_listings', [1, 2]), true, [{ id: 1 }], 51); tx.settled('older', true, 51);
+tx.sent('newer'); tx.settled('newer', true, 52);
+mustCatch('settling a failed hydration without stamping it would accept 99 vs 100', honestHeadline(99, 100, dropsOf(fx, flRows, 50).n));
+const failWired = (src: string) => /page\.on\('requestfailed',[^\n]*\.settled\(req, false, /.test(src) && /hydReq\.settled\([a-z]+\.request\(\), recorded, arrived\)/.test(src);
+check('both robots stamp failed hydrations (wiring)', failWired(trending) && failWired(afSrc));
+mustCatch('a robot settling failures as recorded fails the wiring check', !failWired(afSrc.replace('settled(req, false, ', 'settled(req, true, ')));
 
 console.log(failed ? `\n❌ ${failed} check(s) failed` : '\n✅ the honest-headline allowance is exact and measured');
 process.exit(failed ? 1 : 0);

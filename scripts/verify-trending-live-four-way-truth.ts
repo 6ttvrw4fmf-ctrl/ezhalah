@@ -198,7 +198,7 @@ async function runJourney(j: Journey) {
   // keeps dropsOf() at «not yet measured».
   const hydReq = hydrationRequestTracker<object>(hyd);
   page.on('request', (req) => { if (isHydrationRequest(req.method(), req.url())) hydReq.sent(req); });
-  page.on('requestfailed', (req) => hydReq.settled(req));
+  page.on('requestfailed', (req) => hydReq.settled(req, false, hydSeq++));
   page.on('response', async (resp) => {
     const u = resp.url();
     // ARRIVAL ORDER is stamped synchronously, before any await (CodeRabbit, PR 11725): a body read can finish in
@@ -206,7 +206,8 @@ async function runJourney(j: Journey) {
     // the one that says «this hydration belongs to that search».
     const arrived = hydSeq++;
     if (resp.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u)) {
-      try { recordHydration(hyd, u, resp.ok(), await resp.json(), arrived); } catch {} finally { hydReq.settled(resp.request()); }
+      let recorded = false;
+      try { recorded = recordHydration(hyd, u, resp.ok(), await resp.json(), arrived); } catch {} finally { hydReq.settled(resp.request(), recorded, arrived); }
       return;
     }
     if (resp.request().method() !== 'POST') return;

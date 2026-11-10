@@ -642,19 +642,20 @@ const hyd = newHydrationLedger();
 // keeps dropsOf() at «not yet measured».
 const hydReq = hydrationRequestTracker<object>(hyd);
 page.on('request', (req) => { if (isHydrationRequest(req.method(), req.url())) hydReq.sent(req); });
-page.on('requestfailed', (req) => hydReq.settled(req));
+page.on('requestfailed', (req) => hydReq.settled(req, false, seq++));
 page.on('response', async (r) => {
   const u = r.url();
   // Arrival order stamped before any await (CodeRabbit, PR 11725): body reads finish in any order.
   const arrived = seq++;
   if (r.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u) && /[?&]id=in\./.test(decodeURIComponent(u))) {
+    let recorded = false;   // a failed / unreadable chunk stamps a failure: the overlap stays unmeasured
     try {
       const tbl = (u.match(/\/rest\/v1\/([a-z0-9_]+_listings)\?/) || [])[1];
       if (!tbl || !r.ok()) return;                     // a failed chunk is not a drop: the app shows the retry UI instead
       const j = await r.json();
       if (!Array.isArray(j)) return;
-      recordHydration(hyd, u, r.ok(), j, arrived);
-    } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ } finally { hydReq.settled(r.request()); }
+      recorded = recordHydration(hyd, u, r.ok(), j, arrived);
+    } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ } finally { hydReq.settled(r.request(), recorded, arrived); }
     return;
   }
   if (r.request().method() !== 'POST') return;
