@@ -154,6 +154,8 @@ const AR: Record<string, string> = {
   // Top-nav ModeSwitch pill's third tab (owner 2026-10-30): the Map way to search.
   'Map': 'خريطة',
   'The map could not load': 'تعذّر تحميل الخريطة',
+  'Couldn’t load the listings here. Try again': 'تعذّر تحميل الإعلانات هنا. حاول مرة أخرى',
+  'Couldn’t open the shared chat. Check your connection and try again.': 'تعذّر فتح المحادثة المشتركة. تأكد من اتصالك وحاول مرة أخرى.',
   'Whole Kingdom': 'كل المملكة',
 
   // Home
@@ -2004,6 +2006,7 @@ const AR: Record<string, string> = {
   'Signing out…': 'جارٍ تسجيل الخروج…',
   'Deleting account…': 'جارٍ حذف الحساب…',
   'Apple sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر Apple غير متاح حالياً. جرّب طريقة أخرى.',
+  'Google sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر Google غير متاح حالياً. جرّب طريقة أخرى.',
   'Send code': 'إرسال الرمز',
   'Cancel': 'إلغاء',
   'Back': 'رجوع',
