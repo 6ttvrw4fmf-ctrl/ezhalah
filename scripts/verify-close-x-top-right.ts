@@ -22,9 +22,25 @@ const pick = (expr: string, cond: boolean) => { const m = expr.match(/\?\s*'([\w
 // 1. Read-aloud pill: the × is the row's FIRST child, and the row follows the document's direction.
 const ra = src('src/components/ReadAloudPlayer.tsx');
 const raDir = ra.match(/\{ flexDirection: (docRtl \? '[\w-]+' : '[\w-]+') \}/)?.[1] ?? '';
-const firstPill = ra.slice(ra.indexOf('<Animated.View')).match(/<PillButton[^>]*>/)?.[0] ?? '';
+/** The pill's FIRST control: the first JSX element inside <Animated.View …>, whatever its tag (comments skipped). */
+const firstControl = (code: string): string => {
+  const open = code.indexOf('<Animated.View');
+  if (open < 0) return '';
+  let i = code.indexOf('>', code.indexOf(']}', open)) + 1;   // end of the opening tag (its style array ends with ]})
+  const body = code.slice(i).replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+  return body.match(/<[A-Z][\w.]*[^>]*>/)?.[0] ?? '';
+};
+const firstPill = firstControl(ra);
 check('read-aloud: the row direction follows the document (useDocumentRtl), not the locale', /const docRtl = useDocumentRtl\(isRTL\);/.test(ra) && raDir !== '');
-check('read-aloud: the × is the first control in the pill', /icon="close"/.test(firstPill));
+check('read-aloud: the × is the first control in the pill (any control kind)', /^<PillButton icon="close"/.test(firstPill));
+check('read-aloud: the direction comes from the document only — a locale/document mismatch cannot flip it', /docRtl \?/.test(raDir) && !/isRTL/.test(raDir));
+// Mutations executed on the real source: a SeekButton moved before Close, and the old order (Close last).
+const seekLine = ra.match(/ *<SeekButton mirrored[^\n]*\n/)?.[0] ?? '';
+const closeLine = ra.match(/ *<PillButton icon="close"[^\n]*\n/)?.[0] ?? '';
+const seekFirst = ra.replace(seekLine, '').replace(closeLine, seekLine + closeLine);
+mustCatch('a SeekButton moved before Close', seekLine !== '' && seekFirst !== ra && !/^<PillButton icon="close"/.test(firstControl(seekFirst)));
+const closeLast = ra.replace(closeLine, '').replace(/( *)<\/Animated\.View>/, closeLine + '$1</Animated.View>');
+mustCatch('Close moved back to the end', closeLast !== ra && !/^<PillButton icon="close"/.test(firstControl(closeLast)));
 check('read-aloud: the × lands physically right in Arabic AND English', [true, false].every((rtl) => firstChildSide(pick(raDir, rtl), rtl) === 'right'));
 // The old order put the × LAST: in this row the last child lands opposite the first, i.e. left in both languages.
 mustCatch('the × as the last control (left in both languages, as shipped before)', [true, false].every((rtl) => firstChildSide(pick(raDir, rtl), rtl) !== 'left') && !/icon=\{playing/.test(firstPill));
