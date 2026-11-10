@@ -166,6 +166,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://www.dwelleo.sa"
 API = "https://api.dwelleo.sa/api/v1/properties"
@@ -405,6 +406,16 @@ def _clean_info(d: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _date_posted(rec: dict) -> Optional[str]:
+    """The site's own posting date: the DETAIL record's seo.structured_data_blocks RealEstateListing
+    `datePosted` (the same JSON-LD the ad page prints). The list item carries no date at all."""
+    seo = rec.get("seo") if isinstance(rec.get("seo"), dict) else {}
+    for block in seo.get("structured_data_blocks") or []:
+        if isinstance(block, dict) and isinstance(block.get("datePosted"), str):
+            return block["datePosted"]
+    return None
+
+
 def map_listing(rec: dict, *, this_year: Optional[int] = None,
                 public_urls: Optional[dict[str, str]] = None) -> tuple[Optional[dict], str, str]:
     """One API record (list item, or list item merged with its detail) → (row|None, category, why).
@@ -468,6 +479,9 @@ def map_listing(rec: dict, *, this_year: Optional[int] = None,
 
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{dwl_id}",
+        # Posting date = the detail's JSON-LD datePosted (live 2026-11-09: 22869 → 2026-11-03T17:12:30+03:00,
+        # first seen 2026-11-05 01:38 UTC; 22896 → 2026-11-04T23:54:35+03:00). No detail → None.
+        "date_added": site_posting_date(_date_posted(rec)),
         "listing_url": public_urls[slug] if public_urls is not None else f"{BASE}/ar/properties/{slug}",
         "source": SOURCE,
         "active": True,

@@ -168,9 +168,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import http, db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
-from scrapers.common.http_liveness import (LivenessProbe, live_control_url,  # noqa: E402
+from scrapers.common.http_liveness import (LivenessProbe, decide, live_control_url,  # noqa: E402
                                            removal_by_owner_approved_status)
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://sakani.sa"
 SOURCE = "سكني"
@@ -191,6 +192,28 @@ PAUSE = 1.5            # seconds between requests — the pace that drew no chal
 # minutes instead of burning the job — nothing is guessed, nothing is pruned, stored rows are kept.
 DETAIL_WALL_AFTER = 3
 MAX_RENEGOTIATIONS = 2
+# THE RUN ENDS ITSELF BEFORE CI KILLS IT (2026-11-09, small-sources job 128978543773). The walk finished
+# at 06:02 and every row was WRITTEN, then the prune's oracle spent 49 silent minutes on at-grace units
+# (~70 s each: four backed-off attempts before the blank-403 owner rule was even consulted) until
+# timeout-minutes 150 cancelled the job at 07:04 — before end_run(), so the row read «killed … rows_seen 0»
+# and crawl_went_silent fired on a crawl that had just upserted 1,629 rows. The budget is a fact about
+# OUR job (small-sources-sync `tmo: 150`), so main() arms it and nothing else does: fleet_liveness imports
+# `_verify_gone` and runs under its own 350-min cap. Past the deadline the detail walk stops (the rows it
+# read are written, the run is partial → no prune) and the oracle answers UNKNOWN without a read (a held
+# strike, never a hide); end_run() then lands with the real counts and says what was cut.
+RUN_BUDGET_MIN = float(os.environ.get("SAKANI_TIME_BUDGET_MIN", "125"))
+_DEADLINE: Optional[float] = None        # armed by main(); None = no budget (fleet_liveness, tests)
+_budget_skipped = 0                      # oracle reads refused because the budget was spent
+
+
+def _arm_budget(minutes: float = RUN_BUDGET_MIN) -> None:
+    global _DEADLINE, _budget_skipped
+    _DEADLINE = time.monotonic() + 60 * minutes
+    _budget_skipped = 0
+
+
+def _over_budget() -> bool:
+    return _DEADLINE is not None and time.monotonic() > _DEADLINE
 
 _COMMERCIAL_WORD = re.compile(r"تجار[يةه]")
 _CHALLENGE = re.compile(r"Just a moment|cf-chl|challenge-platform|cf_chl", re.I)
@@ -588,6 +611,10 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
         "direction": _FACE.get(face),
         "property_age": _age(d, lic),
         "license_number": str(lic.get("ad_license_number") or "").strip() or None,   # the AD licence
+        # The unit's own `publish_date` («2026-11-08») from its market_units record — NOT the REGA licence,
+        # which carries only end_date. Read live 2026-11-09: /marketUnitsApi/v6/market_units/25492 →
+        # publish_date 2026-11-08, licence end_date 2027-03-04; first seen by us 2026-11-09.
+        "date_added": site_posting_date(d.get("publish_date") or rich.get("publish_date")),
         "photo_urls": _photos(rich, d) or None,
         **_amenities(d),
     }
@@ -713,12 +740,12 @@ _ACCESS_WHY = re.compile(r"about our access|no answer from the source|HTTP 5\d\d
 _oracle_renewed = 0
 
 
-def _probe_once(ad_number: str, uid: str, purpose: str, attempts: int = ORACLE_ATTEMPTS) -> tuple[str, str]:
+def _probe_once(ad_number: str, uid: str, purpose: str) -> tuple[str, str]:
     return LivenessProbe(platform="sakani",
                          signal=lambda st, b, mv: _signal(st, b, mv, purpose),
                          session=_oracle_session,
                          url_for=lambda _a: f"{DETAIL}{uid}",
-                         attempts=attempts, backoff=PAUSE * 4).verify_gone(ad_number)
+                         attempts=ORACLE_ATTEMPTS, backoff=PAUSE * 4).verify_gone(ad_number)
 
 
 # OWNER RULE 2026-11-04 («Yes, use your picks», decision 1): a REMOVED sakani unit answers HTTP 403 with
@@ -760,20 +787,29 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
     if not m:
         return "unknown", f"{ad_number!r} is not a {PREFIX}/{SALE_PREFIX}<id> ad number"
     purpose = _PURPOSE_OF[m.group(1)]
-    # ONE QUICK READ FIRST (⚡ 2026-11-09, repeat_bug:run_duration_explosion:fleet_liveness:sakani, 6 raises in
-    # 7 days). A removed unit answers the blank 403 on EVERY read, and the oracle used to spend all
-    # ORACLE_ATTEMPTS on it — sleeping 6 + 12 + 18 + 24 s — before the owner rule was even asked: ~65 s per
-    # removed unit. 11-08 08:33: 177 of 355 probes were removals and the run took 203 min (1.7 rows/min against
-    # a 14 rows/min norm). A live (200) or a 404 still decides on the first read; a blank 403 goes straight to
-    # the owner rule (its own two reads + the live control — unchanged, so this can never add a death); only a
-    # challenge or no answer earns the slow retries below, exactly as before.
-    verdict, why = _probe_once(ad_number, m.group(2), purpose, attempts=1)
-    if verdict == "unknown" and "HTTP 403" in (why or ""):
+    if _over_budget():
+        # No read, no verdict: prune_unseen keeps the strike and hides nothing (UNKNOWN never kills).
+        global _budget_skipped
+        _budget_skipped += 1
+        return "unknown", f"run time budget ({RUN_BUDGET_MIN:g} min) spent before this read — not read this run"
+    # CHEAPEST PROOF FIRST (2026-11-09). One read decides a live unit (200 published) or a deleted one
+    # (404 «not found») exactly as the first of the oracle's attempts would. A BLANK 403 is the removed
+    # shape and can never become a verdict by retrying, so it goes straight to the owner rule (two reads
+    # + a live control) instead of first spending four backed-off attempts (~60 s of sleep) on it — the
+    # cost that stalled the 11-09 prune. A challenge page or a transport failure keeps the full
+    # resilience below: attempts, then fresh sessions. Nothing here reads a 403 as death on its own.
+    sig = lambda st, b, mv: _signal(st, b, mv, purpose)  # noqa: E731 — the oracle's own signal
+    probe = LivenessProbe(platform="sakani", signal=sig, session=_oracle_session, url_for=lambda _a: None)
+    st, body, moved = probe.fetch(f"{DETAIL}{m.group(2)}")
+    if st == 403 and not moved and _REMOVED_403_BODY.search(body or ""):
         by_status = _removed_by_owner_rule(ad_number, m.group(2))
         if by_status:
             return by_status
-    if verdict == "unknown":
-        verdict, why = _probe_once(ad_number, m.group(2), purpose)
+    else:
+        decided = decide(st, body, moved, sig)
+        if decided is not None:
+            return decided
+    verdict, why = _probe_once(ad_number, m.group(2), purpose)
     while True:
         if verdict == "unknown" and "HTTP 403" in (why or ""):
             by_status = _removed_by_owner_rule(ad_number, m.group(2))
@@ -835,6 +871,7 @@ def main() -> int:
     _oracle_sess = s = session()     # the walk warms it; the oracle reuses it (never a cold probe)
     _walk_renew = session
     dry = args.dry_run or bool(args.limit)
+    _arm_budget()
     run_id = None if dry else db.begin_run("sakani")
     res: list[dict] = []
     com: list[dict] = []
@@ -875,7 +912,16 @@ def main() -> int:
         districts: dict = {}
         walled_run = 0          # consecutive details that drew no answer at all
         renegotiated = 0
-        for purpose, idx, rich in units:
+        for n_unit, (purpose, idx, rich) in enumerate(units):
+            if _over_budget():
+                # The rows read so far are real and get written; the rest were never visited, so this
+                # run is PARTIAL and testifies to nobody's absence (no prune). Said in the run row.
+                cut = len(units) - n_unit
+                skipped["deadline_cut"] = cut
+                partial = True
+                print(f"  ⏱ run budget {RUN_BUDGET_MIN:g} min spent at unit {n_unit} of {len(units)}: "
+                      f"{cut} left unread this run, no prune", flush=True)
+                break
             seen += 1
             uid = str(rich.get("resource_id") or idx.get("resource_id") or "")
             detail: Optional[dict] = None
@@ -949,7 +995,10 @@ def main() -> int:
         pruned = 0
         detail_misses = skipped.get("detail_miss", 0)
         if partial:
-            print("  partial run (--deal/--max-units/--ids): no prune", flush=True)
+            print("  partial run (--deal/--max-units/--ids/budget): no prune", flush=True)
+        # Progress is on the row BEFORE the oracle phase: a kill from here on leaves the real counts,
+        # not begin_run()'s zeros (the 11-09 kill row read rows_seen=0 over 1,629 written rows).
+        db.record_run_progress(run_id, rows_seen=seen, rows_upserted=len(res) + len(com))
         if args.type == "all" and not partial and _controls_live([r["ad_number"] for r in res + com]):
             for tbl, rows in (("sakani_residential_listings", res),
                               ("sakani_commercial_listings", com)):
@@ -960,6 +1009,8 @@ def main() -> int:
                 else:
                     pruned += n
         withheld = f" | {_control_why}" if _control_why else ""
+        if _budget_skipped:
+            withheld += f" | budget: {_budget_skipped} oracle read(s) not made, strikes held"
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
                              notes=f"pruned={pruned}{withheld} {notes}"[:300],
                              degraded=detail_misses * 5 > seen,      # >20 % index-only rows

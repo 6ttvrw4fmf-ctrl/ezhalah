@@ -82,6 +82,7 @@ from curl_cffi import requests as cc
 from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common.pii import redact_capture, redact_pii
+from scrapers.common.posting_date import site_posting_date
 
 API = "https://crm.aoujestates.com/api/public/properties"
 SITE = "https://aoujestates.com"
@@ -316,6 +317,12 @@ def map_item(o: dict) -> tuple[Optional[dict], str]:
         "property_type": property_type,
         "transaction_type": transaction_type,
         # area is m², present on 76/76, sometimes fractional ("10776.24") → truncate, never round up.
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the API object's `date` (UTC, +00:00) — the one date it
+        # publishes (additional_info.first_published is the same value). It is the record's creation, not an edit: on
+        # 2026-11-09 it rises with the CRM's own reference number (KH26211 07-24 … KH26227 08-02 … DH26346 10-31, newest
+        # 1456 = 2026-10-31T07:47:05Z, first seen by us 11-01 10:49Z). The 25 oldest refs share two import instants
+        # (2026-05-14 / 05-18) — the site's own value, kept. The ad page prints no date.
+        "date_added": site_posting_date(o.get("date")),
         "area_m2": N.to_int_numeric(o.get("area")),
         # to_int_numeric treats "0" as no-value, which is what this source's "0" means: it appears
         # only on a land row and a tower row (bedrooms AND bathrooms AND rooms all "0"), i.e. the

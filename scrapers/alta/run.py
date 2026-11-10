@@ -47,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 BASE = "https://alta.com.sa"
 REST = f"{BASE}/wp-json/wp/v2"
 SOURCE = "Alta"
@@ -314,6 +315,11 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "active": not gone,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` (UTC; `date` equals
+        # it on all 17 posts). Checked live 2026-11-09 on wp/v2/estate_property: 24870 date_gmt
+        # 2025-07-15T09:29:53, 25759 2025-10-28T12:29:29; first seen by us 2026-09-05. Never `modified`
+        # (24870: 2025-09-08, an edit).
+        "date_added": site_posting_date(f"{p['date_gmt']}Z") if p.get("date_gmt") else None,
         "area_m2": area,
         "bedrooms": beds,
         "bathrooms": baths,

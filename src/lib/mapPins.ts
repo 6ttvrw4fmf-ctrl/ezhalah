@@ -8,6 +8,9 @@ export type PinDeal = 'buy' | 'rent' | 'short' | 'mixed';
 export type PinRow = {
   lat: number; lng: number; n: number; deal: PinDeal; type_ar: string | null; platforms: number;
   ids: { t: string; i: number }[] | null; price: number | string | null; platform: string | null;
+  /** Set on a DISTRICT MARKER (src/lib/mapNoPin.ts): these listings have no exact location and sit at the district's
+   *  centre — the sheet titles them by district and prints no head price. */
+  noPin?: { city: string; district: string };
 };
 export type PinFilter = {
   deals: ('buy' | 'rent' | 'short')[];

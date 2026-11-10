@@ -1,0 +1,23 @@
+{
+ "id": 738,
+ "ad_number": "J1562",
+ "city": "الرياض",
+ "neighborhood": "غرناطة",
+ "status": "متاح",
+ "price": 3000000,
+ "unit_type": "تاون هاوس",
+ "property_role": "بيع",
+ "land_area": "237",
+ "bedrooms": "5",
+ "facade": "شماليه",
+ "street_width": "20",
+ "image1": "/das/includes/uploads/images/offer_20261012_202928_d057d2.webp",
+ "created_at": "2026-10-12 20:29:22",
+ "updated_at": "2026-11-04 11:00:50",
+ "license_number": "7201088010",
+ "visits_total": 0,
+ "my_visits": 0,
+ "view_count": 72,
+ "avg_rating": 0,
+ "rating_count": 0
+}

@@ -82,8 +82,8 @@ def test_anything_short_of_the_full_proof_stays_unknown(monkeypatch, ad_answers,
 
 
 def test_two_reads_are_required(monkeypatch):
-    # the oracle's one quick read and the rule's shape check see blank 403s, the rule's first read too, then
-    # its second read draws a challenge (since 2026-11-09 the rule is asked after ONE oracle read)
+    # cheapest-proof read blank, the owner rule's own first look blank, its first read blank, then
+    # its SECOND read draws a challenge: no removal, and the remaining attempts never see the blank again
     first = [BLANK, BLANK, BLANK, CHALLENGE]
     (verdict, _), _s = _run(monkeypatch, {AD_URL: first, CTRL_URL: [LIVE]})
     assert verdict == "unknown"
@@ -107,22 +107,3 @@ def test_a_live_unit_and_a_404_are_untouched(monkeypatch):
 def test_the_universal_law_still_never_reads_403_as_death():
     assert L.decide(403, " ", False, lambda *a: "gone") is None
     assert L.OWNER_APPROVED_REMOVAL_STATUS["sakani"] == 403
-
-
-def test_a_removed_unit_costs_the_owner_rule_reads_not_every_retry(monkeypatch):
-    """⚡ 2026-11-09 (run_duration_explosion:fleet_liveness:sakani): a blank 403 goes to the owner rule after
-    ONE oracle read. Before, the oracle spent all ORACLE_ATTEMPTS (≈ 60 s of back-off) on every removed unit
-    first — 177 removals made the 11-08 run take 203 min."""
-    sleeps: list[float] = []
-    monkeypatch.setattr(L.time, "sleep", lambda d: sleeps.append(d))
-    (verdict, why), s = _run(monkeypatch, {AD_URL: [BLANK], CTRL_URL: [LIVE]})
-    assert verdict == "gone" and "owner rule" in why
-    # 1 oracle read + the rule's shape check + its 2 reads + the control
-    assert s.calls == [AD_URL, AD_URL, AD_URL, AD_URL, CTRL_URL]
-    assert sum(d for d in sleeps if d >= R.PAUSE * 4) <= R.PAUSE * 4   # no retry ladder before the rule
-
-
-def test_a_challenge_still_earns_every_retry(monkeypatch):
-    (verdict, _), s = _run(monkeypatch, {AD_URL: [CHALLENGE], CTRL_URL: [LIVE]})
-    assert verdict == "unknown"
-    assert s.calls.count(AD_URL) >= 1 + R.ORACLE_ATTEMPTS

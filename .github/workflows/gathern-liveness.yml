@@ -111,6 +111,12 @@ jobs:
   liveness:
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 300
+    # actions: read — the sweep asks GitHub whether the run holding the apply lock has FINISHED
+    # (scrapers/gathern/liveness.py _reclaim_stale_ci_lock, 2026-11-09): a lost runner left run
+    # 42602133546 holding the lock for its 2 h TTL, the next sweep skipped, and a 0-row no-op row paged.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -124,6 +130,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # read-only, for _reclaim_stale_ci_lock: is the run holding the apply lock still running?
+          GITHUB_TOKEN: ${{ github.token }}
           SCRAPE_MIN_INTERVAL: "1.0"
           # Present but INERT unless --proxy is passed: scrapers/gathern/liveness.py reads this
           # ONLY behind the flag. The standing rule for this secret (scrapers/jazwtn/run.py) is
