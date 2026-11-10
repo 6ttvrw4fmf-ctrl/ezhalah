@@ -167,7 +167,6 @@ PLATFORMS = {
     "sakani": ("scrapers.sakani.run", sakani_args, _sakani),
     "ksaaqar": ("scrapers.ksaaqar.run", ksaaqar_args, _ksaaqar),
     "akariyoun": ("scrapers.akariyoun.run", akariyoun_args, _akariyoun),
-    "amlakalahsa": ("scrapers.amlakalahsa.run", amlakalahsa_args, lambda m, a: m.map_listing(*a)),
 }
 
 CASES = {
@@ -204,13 +203,26 @@ CASES = {
          "no pill → NULL; the REGA block's «تاريخ انشاء الاعلان 2026-11-07» (a licence date) is never read"],
         [["relative"], None, "a pill that is relative text («منذ يومين») → NULL, never converted"],
     ],
+}
+
+
+# ── NOT A POSTING DATE (2026-11-10): amlakalahsa's WordPress date_gmt moves forward when an ad is re-published
+# (land 19748: «2026-11-03» though first stored 2026-09-12; 45 of 302 live ads dated after our first sight). The
+# mapper stores NULL and keeps the verbatim value as additional_info["date_gmt"]; the mutation restores the old
+# reading and must put a date back.
+def _amlakalahsa_nd(*_):
+    return amlakalahsa_args("2026-11-07T15:15:07")
+
+
+NO_DATE = {
+    "amlakalahsa": ("scrapers.amlakalahsa.run", _amlakalahsa_nd, lambda m, a: m.map_listing(*a),
+                    ["additional_info", "date_gmt"]),
+}
+
+MUTATIONS = {
     "amlakalahsa": [
-        [["2026-11-07T15:15:07"], "2026-11-07T18:15:07+03:00",
-         "land 20186 date_gmt read live; this WordPress clock is UTC (date == date_gmt) → Saudi time"],
-        [["2026-11-08T22:30:00"], "2026-11-09T01:30:00+03:00", "a late-evening UTC publish lands on the Saudi day"],
-        [[None, None], None, "no date / date_gmt → NULL, the ad still maps"],
-        [[None, "2026-11-07T15:15:07"], None,
-         "only the zone-less `date` (UTC here, not Saudi) → NULL, never read as Saudi time"],
-        [[None, None, "2026-11-07T15:15:09"], None, "only modified_gmt (an edit) → NULL"],
+        ("amlakalahsa: the re-publish date_gmt stored as the posting date again", "scrapers/amlakalahsa/run.py",
+         '"date_added": None,                     # WordPress date_gmt is a re-publish date here — see the note above',
+         '"date_added": site_posting_date(post["date_gmt"] + "Z"),', []),
     ],
 }

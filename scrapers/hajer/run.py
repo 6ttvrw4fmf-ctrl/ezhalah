@@ -448,6 +448,8 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     # additional_info->>'latitude', which a JSON array can never answer. The fact rows the ad page renders
     # keep their shape under "rows" (src/data/remote.ts reads an object's `rows` exactly like the bare list).
     extra: dict = {"rows": []}
+    if isinstance(p.get("date_gmt"), str):
+        extra["date_gmt"] = p["date_gmt"]    # verbatim; a re-publish date on this site, never date_added
     for label, key in (("واجهة العقار", "Facade"), ("عمر العقار", "Age"),
                        ("عرض الشارع", "Street width"), ("خدمات الحي", "Property services")):
         v = f.get(label)
@@ -493,10 +495,12 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "neighborhood": f.get("أسم الحي") or None,
         "title": _clean((p.get("title") or {}).get("rendered", "")),
         "photo_urls": _image(p, html_text),
-        # The post's WordPress `date_gmt` from the REST list fetch_list() already reads (UTC by definition;
-        # the site's `date` equals it, so its zone is UTC): post 1555 «2026-10-19T13:53:44», first seen by us
-        # 2026-10-20 04:23 UTC. Never `modified_gmt` (an edit). The page prints no date. Checked live 2026-11-09.
-        "date_added": site_posting_date(f"{p['date_gmt']}Z") if isinstance(p.get("date_gmt"), str) else None,
+        # NO POSTING DATE (2026-11-10). WordPress `date_gmt` here moves FORWARD when an ad is re-published: post
+        # 1022 (HJ4010) reads «2026-10-10T10:45:58» with modified_gmt the same second, though we stored that very
+        # link on 2026-06-21; 6 of 123 dated live ads were dated after our first sight. A date that moves on
+        # re-publish is a bump (docs/ARCHITECTURE.md §20 rule 1); the page prints no other date. NULL, and the
+        # verbatim value is kept as additional_info["date_gmt"].
+        "date_added": None,
         "rega_location_verified": False,
         "additional_info": extra,
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────

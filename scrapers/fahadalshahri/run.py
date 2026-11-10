@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import argparse
 import html as ihtml
+import json
 import re
 import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import unquote, urlsplit
 
 from curl_cffi import requests as cc
 
@@ -35,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://fahadalshahri.com"
 SOURCE = "Fahad Alshahri"
@@ -123,7 +126,58 @@ def _num(m: Optional[re.Match]) -> Optional[int]:
         return None
 
 
-def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
+# ── POSTING DATE (read 2026-11-10). The Store API carries no date. Each product page carries a Yoast JSON-LD
+# ItemPage (a WebPage) block whose datePublished is the post's publish time WITH its zone («2026-08-23T09:40:17+02:00»
+# on /product/فيلا-دورين-وملحق/), next to a separate dateModified («2026-09-13T11:35:47+02:00») — an edit does not
+# move it, and every one of the 5 active ads was published before we first saw it (2026-09-20). Only the page block
+# whose url IS this product's page counts; dateModified is never read, and an unreadable page leaves NULL (never our
+# crawl time). If an ad ever shows a datePublished after our first sight, this is a re-publish date like amlakalahsa
+# and hajer (docs/ARCHITECTURE.md §20 rule 1) and must stop being stored.
+_LD_RE = re.compile(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.S | re.I)
+
+
+def _page_key(url: Optional[str]) -> str:
+    if not url:
+        return ""
+    u = urlsplit(unquote(url).strip())
+    return f"{u.netloc.lower().removeprefix('www.')}{u.path.rstrip('/')}"
+
+
+def page_posted(page_html: Optional[str], url: Optional[str]) -> Optional[str]:
+    """datePublished of the JSON-LD WebPage node for THIS product's page, verbatim; None when absent."""
+    want = _page_key(url)
+    if not page_html or not want:
+        return None
+    for block in _LD_RE.findall(page_html):
+        try:
+            data = json.loads(block)
+        except ValueError:
+            continue
+        nodes = data.get("@graph", [data]) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        for n in nodes:
+            if not isinstance(n, dict):
+                continue
+            t = n.get("@type")
+            if not {"WebPage", "ItemPage"} & set(t if isinstance(t, list) else [t]):   # the live page says ItemPage
+                continue
+            if _page_key(n.get("url") or n.get("@id")) == want and isinstance(n.get("datePublished"), str):
+                return n["datePublished"]
+    return None
+
+
+def fetch_page(s: cc.Session, url: Optional[str]) -> Optional[str]:
+    """The product's own page through the same bare session the removal check uses; None unless it answered
+    200 as a product page (a 403 / wall / error is UNKNOWN, so the date stays NULL)."""
+    if not url:
+        return None
+    try:
+        r = s.get(url, timeout=30)
+    except Exception:  # noqa: BLE001 — unknown, never a guess
+        return None
+    return r.text if r.status_code == 200 and _PRODUCT_PAGE_RE.search(r.text) else None
+
+
+def map_listing(p: dict, page_html: Optional[str] = None) -> tuple[Optional[dict], str, str]:
     name = plain(p.get("name"))
     desc = plain(p.get("description"))
     blob = f"{name} {desc}"
@@ -180,6 +234,7 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "area_m2": _num(_AREA_RE.search(blob)),
         "street_width_m": _num(_STREET_W_RE.search(blob)),
         "photo_urls": imgs[:20] or None,
+        "date_added": site_posting_date(page_posted(page_html, p.get("permalink"))),
         # This template has no labelled spec rows at all — every fact lives in the marketing prose
         # («مواقف سيارات، بلكونة ومطبخ أمريكي، مع غرفتي ماستر»), which is why all 5 listings carried
         # NULL for every Advanced-Filter column. Only amenities the text NAMES are written, negations
@@ -338,6 +393,8 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            # Only a product that maps costs a page read (5 of 25 on 2026-11-10); the page adds its posting date.
+            row = map_listing(p, fetch_page(s, p.get("permalink")))[0] or row
             if p.get("is_in_stock") is not True:    # unmeasured here: kept as before, and counted
                 k = f"kept_active_is_in_stock={p.get('is_in_stock')}"
                 unmeasured[k] = unmeasured.get(k, 0) + 1
