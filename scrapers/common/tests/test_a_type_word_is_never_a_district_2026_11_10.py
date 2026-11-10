@@ -27,6 +27,7 @@ def fake_catalog(monkeypatch):
 def test_the_type_word_in_a_title_is_not_the_district():
     assert al.find_district_in_text("شقة للإيجار في بريدة", BURAYDAH) is None
     assert al.find_district_in_text("شقه مفروشة للايجار", BURAYDAH) is None
+    assert al.find_district_in_text("شقّة للإيجار في بريدة", BURAYDAH) is None          # tashkeel
 
 
 def test_a_type_word_with_a_number_is_still_the_type():
@@ -41,6 +42,9 @@ def test_the_district_itself_still_matches_when_the_ad_names_it():
     assert al.find_district_in_text("شقة للإيجار في حي الشقة", BURAYDAH) == "حي الشقة"
     assert al.find_district_in_text("شقة للإيجار بالشقة", BURAYDAH) == "حي الشقة"
     assert al.find_district_in_text("الشقة", BURAYDAH) == "حي الشقة"
+    assert al.find_district_in_text("الشّقة", BURAYDAH) == "حي الشقة"
+    # the site's OWN district field naming it bare is the district (the guard is for free text only)
+    assert al.find_district_in_text("شقة", BURAYDAH, district_field=True) == "حي الشقة"
     assert al.find_district_in_text("شقة للإيجار في الصفراء", BURAYDAH) == "حي الصفراء"
 
 
@@ -59,6 +63,9 @@ def test_albdah_clears_a_district_its_page_does_not_state(monkeypatch):
     # a location line that was NOT read to its «إعلان رقم» ref is not a statement: the stored district is kept
     row, _, _ = ab.map_listing("apartment", {**d, "id": "85UOh", "loc_complete": False})
     assert row["district_ar"] is None
+    # the location line's own district part «شقة» is Buraydah's «حي الشقة», not the type word
+    row, _, _ = ab.map_listing("apartment", {**d, "id": "x", "loc_parts": ["بريدة", "شقة"]})
+    assert row["district_ar"] == "حي الشقة"
     # a page that DOES name a district keeps it
     row, _, _ = ab.map_listing("apartment", {**d, "id": "36wFU", "loc_parts": ["بريدة", "الصفراء"]})
     assert row["district_ar"] == "حي الصفراء"

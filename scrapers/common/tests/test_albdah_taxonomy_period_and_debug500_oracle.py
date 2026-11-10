@@ -116,7 +116,7 @@ GONE_500 = "<title>DoesNotExist at /property/ZZZZZ/details/</title><h1>DoesNotEx
 def _no_catalog_network(monkeypatch):
     monkeypatch.setattr(R, "to_catalog", lambda c, region_hint=None: (11, 4) if c == "بريدة" else (None, None))
     monkeypatch.setattr(R, "find_district_in_text",
-                        lambda t, cid: next((d for k, d in (("الصفراء", "حي الصفراء"), ("الريان", "حي الريان"), ("المنتزة", "حي منتزه"))
+                        lambda t, cid, **_kw: next((d for k, d in (("الصفراء", "حي الصفراء"), ("الريان", "حي الريان"), ("المنتزة", "حي منتزه"))
                                              if t and k in t), None))
 
 

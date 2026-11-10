@@ -216,7 +216,8 @@ def map_listing(slug: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         return None, category, "city_not_in_catalog"
     district_raw = parts[1] if len(parts) >= 2 else None
     tenants = parts[2] if len(parts) >= 3 else None
-    district_ar = find_district_in_text(district_raw, city_id) or find_district_in_text(title, city_id)
+    district_ar = (find_district_in_text(district_raw, city_id, district_field=True)
+                   or find_district_in_text(title, city_id))
 
     facts = d.get("facts") or {}
     rows = d.get("rows") or []

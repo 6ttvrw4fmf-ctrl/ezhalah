@@ -613,12 +613,13 @@ _BARE_TYPE_WORDS = frozenset(norm_ar(w) for w in (
     "شقة", "شقه", "فيلا", "فيلة", "فلة", "فله", "ارض", "أرض", "دور", "عمارة", "عماره", "محل", "مكتب", "مستودع",
     "استراحة", "استراحه", "مزرعة", "مزرعه", "غرفة", "غرفه", "بيت", "منزل", "شاليه", "قصر", "معرض", "ورشة"))
 _DIGITS_RE = re.compile(r"[0-9٠-٩۰-۹]+")
+_TASHKEEL_RE = re.compile(r"[\u064B-\u0652\u0670\u0640]")
 
 
 def _is_bare_type_window(window: list[str]) -> bool:
     """A bare type word, alone or followed only by numbers («شقة», «شقة ٣», «شقة٣»): norm_district_tok() drops
     the digits too, so «شقة ٣ غرف» would otherwise still read as «حي الشقة» (CodeRabbit on #11716)."""
-    head = _DIGITS_RE.sub("", norm_ar(window[0]))
+    head = _TASHKEEL_RE.sub("", _DIGITS_RE.sub("", norm_ar(window[0])))   # «شقّة»: norm_district_tok() drops it too
     return head in _BARE_TYPE_WORDS and all(_DIGITS_RE.fullmatch(w) for w in window[1:])
 
 
@@ -706,7 +707,7 @@ def title_hayy_district(title: Optional[str], known: frozenset[str]) -> Optional
     return None
 
 
-def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Optional[str]:
+def find_district_in_text(text: Optional[str], city_id: Optional[int], *, district_field: bool = False) -> Optional[str]:
     """Recognizes a REAL district of `city_id` mentioned in free text (a title, a description) — for
     sources that publish no separate district field/taxonomy at all (remal: class_list gives only an
     unresolvable numeric term id; azdad: the district field is sometimes blank but the source's own
@@ -725,6 +726,9 @@ def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Option
     2026-09-11: "مخطط الربوة" / "مخطط تلال مكة" / "مخطط الصفوة" are NOT in loc_catalog_district for
     Mecca at all, while "الرصيفة" / "الخالدية" / "الشوقية" / "العوالي" / "الكعكية" — each stated
     plainly in a title with no مخطط anywhere near it — are real, catalog-confirmed Mecca districts).
+    
+    `district_field=True` is for text that IS the site's own district field (albdah's location-line district part):
+    there a bare «شقة» is the district's name, so the free-text type-word guard does not apply (CodeRabbit #11716).
     """
     _load()
     if not text or not city_id:
@@ -777,7 +781,7 @@ def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Option
             if _PLAN_WORD in window:
                 continue
             for first in _forms(window[0]):
-                if _is_bare_type_window([first, *window[1:]]):
+                if not district_field and _is_bare_type_window([first, *window[1:]]):
                     continue   # the ad's TYPE word, never its district (see _BARE_TYPE_WORDS)
                 candidate = " ".join([first, *window[1:]])
                 # norm_district_tok(), NOT norm_ar(): `known` holds catalog district_norm values, and
