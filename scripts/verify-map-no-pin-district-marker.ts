@@ -73,7 +73,13 @@ const RULES: Array<[string, RegExp]> = [
 ];
 check('a committed migration defines map_nopin_refresh_ar()', refresh.length > 0);
 for (const [l, re] of RULES) check(l, re.test(refresh));
-const problems = (sql: string) => RULES.filter(([, re]) => !re.test(sql)).map(([l]) => l);
+// Every placing read (pin-less listings, and since the final pin rule the stray pins) needs a real centre — counted, so
+// a second read cannot place a listing nowhere.
+const n = (sql: string, re: RegExp) => (sql.match(re) ?? []).length;
+const everyReadHasACentre = (sql: string) => n(sql, /from public\.search_listings_ar s\b/g) > 0
+  && n(sql, /coalesce\(c\.lat, cc\.lat::double precision\) is not null/g) === n(sql, /from public\.search_listings_ar s\b/g);
+check('every read that places a listing requires a centre', everyReadHasACentre(refresh));
+const problems = (sql: string) => [...RULES.filter(([, re]) => !re.test(sql)).map(([l]) => l), ...(everyReadHasACentre(sql) ? [] : ['a read with no centre check'])];
 for (const [label, from, to] of [
   ['pinned listings placed under a district marker too', 'where (s.latitude is null or s.longitude is null)', 'where true'],
   ['a borrowed listing drawn twice', "and not exists (select 1 from public.map_pin_borrow b where b.source_table = s.source_table and b.listing_id = s.listing_id)\n", ''],
