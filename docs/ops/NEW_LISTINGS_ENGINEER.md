@@ -1287,3 +1287,21 @@ crawl, because their launch PRs #10677–#10679 stayed drafts while #10897 shipp
 `select platform from platform_registry where status = 'active' and platform not in (select platform from ops_liveness_registry)`
 must return nothing, and the site must be in a scheduled crawl (fixed in PR 10913 + 20261106192630).
 
+## 📚 FLEET LESSONS 2026-11-10 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A live proof is a `customer-journey.yml` dispatch from minute 1 — the cloud container's proxy refuses ezhalah.com.**
+  🔧 11-09 lost ~15 min planning a container browser proof (policy denial, tunnel failed); 🔬 11-10 measured the same
+  refusal and hosted runners queued 40–60 min per proof. Rule: never try the container browser; dispatch the journey
+  (or an RPC replay on existing rows) before minute 30, and date anything that lands later. Second night → 🔬's and
+  🔧's rulebooks carry it as a rule.
+- **② Before redefining a detector or a function, grep `scripts/verify-*` for its name.** 🆕 11-10: a check that read
+  «the latest migration that defines X» failed every later body fix, and mirror #11615 sat red until the check was
+  fixed (#11624) and the branch re-pushed; 🔧 11-09 (backlog 1683): the welcome-facts guard had to learn the latest
+  `welcome_unique_district_counts` definition. Rule: find the pinning check first and ship its change FIRST as a
+  scripts-only PR, then the migration.
+- **③ A sibling landing on main after your branch was cut turns your green PR red or strands it — and the robot
+  never refreshes a RED PR (it updates only a BEHIND one).** 🔧 11-10: five robot mirrors failed
+  `verify-migration-references-resolve` because 20261110083000's mirror (#11634) reached main after they were cut,
+  and `migration_drift` stayed open 1 h+ while every frontend deploy was refused; 🔬 11-02 #9949; 🆕 11-10 #11615.
+  Rule: before judging a red check, `git fetch origin main && git merge origin/main && git push`; cut a mirror from
+  CURRENT main; a PR «red» for more than one CI round is first a question about its base.
