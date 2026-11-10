@@ -47,6 +47,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
 from scrapers.common.pii import redact_pii
+from scrapers.common.posting_date import site_posting_date
 
 # PDPL: seller identity + contact — never stored. (sellerLicenseNumber is a REGA licence, kept.)
 _PII_SANADAK = {"sellerId", "sellerName", "sellerUsername", "sellerPhonenumber",
@@ -709,6 +710,11 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
         # it was never mapped). Verbatim, phones/emails redacted (PDPL); silence stays NULL, never ''.
         "description": ad_description(o.get("description")),
         "photo_urls": _images(body),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the listing object's `creationDateTime` (UTC).
+        # Measured 2026-11-09 on 7100296212: 2026-11-08T13:36:21.489+00:00 while the page printed «منذ يوم». Read
+        # from THIS url's own object (the RSC body also carries similar ads' dates). Never lastUpdateDateTime (an
+        # edit; «0001-01-01» when never edited) nor «تاريخ ترخيص الاعلان» (the licence, Hijri).
+        "date_added": site_posting_date(o.get("creationDateTime")),
         "rega_location_verified": bool(o.get("sellerLicenseNumber")),
         "additional_info": extra,
         # ── Arabic-native structured (additive, shadow) + complete-source capture ──

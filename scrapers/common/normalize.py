@@ -944,13 +944,17 @@ def street_from_prose(text) -> tuple[Optional[int], Optional[str]]:
 # Between the label and the number the prose carries decoration — «:*», «( », «: - », «| », «: [», «((», «\\»,
 # a direction mark (aqar prose, 🔧 2026-11-09: 225 of 337 live cards missed on it). Punctuation only, at most 8
 # characters: a word between label and number (a phone label, «فال») still breaks the match.
+# «ترخيص الإعلان العقاري: 7201204886» (jurash, 32 of 43 live ads, card parity 2026-11-09): the word «العقاري» may
+# sit between «الإعلان» and the number, and the number is the AD licence only in its REGA shape 71/72xxxxxxxx — a
+# ten-digit FAL licence (1xxxxxxxxx) printed after «ترخيص» is the broker's, never the ad's.
 _LIC_SEP = r"[\s:：/#*()\[\]{}|\\\-–ـ«»\"'\u200e\u200f]{0,8}"
+_REGA_AD_NUM = r"(7[12][\d٠-٩]{8}|[٧][١٢][\d٠-٩]{8})(?![\d٠-٩])"
 _AD_LICENCE_RE = re.compile(
-    r"(?:(?:ترخيص\s*(?:(?:ال)?[إا]علان(?:ي|ى|ها)?(?:\s*(?:ال)?عقاري)?)?|رخص[ةه]\s*(?:ال)?[إا]علان(?:ي|ى)?(?:\s*(?:ال)?عقاري)?)"
-    r"(?:\s*\(?\s*(?:الهيئة العامة للعقار|معتمد)\s*\)?)?" + _LIC_SEP + r"(?:رقم" + _LIC_SEP + r")?([\d٠-٩]{10})(?![\d٠-٩])"
+    r"(?:(?:ترخيص\s*(?:(?:ال)?[إا]علان(?:ي|ى|ها)?(?:\s*(?:ال)?عقاري[ةه]?)?)?|رخص[ةه]\s*(?:ال)?[إا]علان(?:ي|ى)?(?:\s*(?:ال)?عقاري[ةه]?)?)"
+    r"(?:\s*\(?\s*(?:الهيئة العامة للعقار|معتمد)\s*\)?)?" + _LIC_SEP + r"(?:رقم" + _LIC_SEP + r")?" + _REGA_AD_NUM +
     # «Advertisement License: 7200421226» (abeea, 🔧 2026-11-09: 114 live cards). Only the AD licence label in
     # English: a bare "License" is as often the broker's FAL licence.
-    r"|(?i:\b(?:advertis(?:e|ing|ement)|ad)\s+licen[cs]e)" + _LIC_SEP + r"(?:(?i:no\.?|number)" + _LIC_SEP + r")?([\d٠-٩]{10})(?![\d٠-٩]))")
+    r"|(?i:\b(?:advertis(?:e|ing|ement)|ad)\s+licen[cs]e)" + _LIC_SEP + r"(?:(?i:no\.?|number)" + _LIC_SEP + r")?" + _REGA_AD_NUM + r")")
 
 
 def ad_licence_from_prose(text) -> Optional[str]:

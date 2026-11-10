@@ -57,6 +57,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://mizlaj.com.sa"
 MAP_DATA = f"{BASE}/api/guest/listings/map-data"
@@ -378,6 +379,20 @@ def _approved_rega(listing: dict) -> dict:
     return single if isinstance(single, dict) else {}
 
 
+def posted_at(listing: dict) -> Optional[str]:
+    """When mizlaj PUBLISHED the ad: the earliest `published_at` of the listing's approved
+    rega_advertisements (the platform's own publication record — status «approved»). Not the REGA
+    licence: on listing 90 (live 2026-11-09) published_at is 2026-09-24T00:25:52.000000Z while the licence
+    says creationDate 05/08/2026 / ad_license_end_date 2027-08-05; we first saw it 2026-09-24 04:22:36Z.
+    Not `created_at` either: that is the draft (listing 44: created 06-09, published 06-14).
+    The stamp is read as UTC: it is Laravel's toJSON() form (…000000Z), which always writes UTC."""
+    ads = listing.get("rega_advertisements")
+    stamps = [site_posting_date(a.get("published_at")) for a in (ads if isinstance(ads, list) else [])
+              if isinstance(a, dict) and a.get("status") == "approved"]
+    stamps = [x for x in stamps if x]
+    return min(stamps) if stamps else None   # one notation (+03:00), so the text order is the time order
+
+
 # City suffix sometimes encoded only in the listing name ("… - الطائف"). Resolve via map_city.
 def _city_from_name(name: Optional[str]) -> Optional[str]:
     if not name or " - " not in name:
@@ -587,6 +602,7 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
         "listing_url": f"{BASE}/guest/listings/{slug}",
         "source": "Mizlaj",
         "active": True,
+        "date_added": posted_at(listing),
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": round(area) if area else None,

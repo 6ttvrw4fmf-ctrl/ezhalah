@@ -97,6 +97,28 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # Each LEAVES this set at its own launch (kellerwilliams + almajdiah: 2026-11-05) (owner switch, docs/ops/FIVE_SOURCES_LAUNCH.md) with SOURCE_LIST_PRESENCE below.
 NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "moj", "facts"})
 
+# ── THE ONE SITE WHOSE COMPLETE-LIST ABSENCE HIDES (owner decision 2026-11-10, LISTING_LIVENESS.md §7.3) ──────
+# Everywhere else absence is a CANDIDATE and never hides (§2). The owner was told: «for propertyfinder only, when
+# an ad is missing from their complete list 3 times in a row, we hide it. If it ever shows up on their list again,
+# it comes back by itself … This changes a safety rule for one site.» and answered «Ok do whatever u find good ok».
+# Its single-ad pages are robots-disallowed and never fetched, so no own-page reading can ever exist for it.
+#   • db.prune_unseen() honours a verify_gone answer of «absent» ONLY for a platform named here; from any other
+#     platform «absent» is held as UNKNOWN. «gone» without a read stays forbidden for everyone
+#     (test_verify_gone_never_kills_on_absence.py).
+#   • such a row is HIDDEN, never deleted: cleanup.run() refuses a platform named here.
+#   • a list sighting un-hides it (db._wasalt_batch): there is no own-page «gone» to outrank the list.
+# A second name joins ONLY with an owner decision recorded in LISTING_LIVENESS.md §7.3;
+# test_complete_list_absence_is_propertyfinder_only.py pins the set.
+COMPLETE_LIST_ABSENCE_HIDES: frozenset[str] = frozenset({"propertyfinder"})
+COMPLETE_LIST_ABSENCE_VERDICT = "absent"
+COMPLETE_LIST_ABSENCE_ORACLE = "complete_list_absence.owner_2026-11-10"
+
+
+def complete_list_absence_hides(table_or_platform: str) -> bool:
+    """True only for a listing table (or platform key) of a site named in COMPLETE_LIST_ABSENCE_HIDES.
+    No platform key contains "_"."""
+    return str(table_or_platform or "").split("_", 1)[0] in COMPLETE_LIST_ABSENCE_HIDES
+
 
 class _P(dict):
     """One registry row: the policy plus the human-readable strategy and death signals."""
@@ -1171,8 +1193,11 @@ POLICIES: dict[str, _P] = {
         "the crawl's OWN seen-set over the site's four COMPLETE category lists (/ar/<side>/عقارات-….html?page=N, "
         "__NEXT_DATA__ searchResult, walked to meta.page_count and checked against meta.total_count; a side short "
         "of it is walked twice). run.py prunes a table only when every side feeding it walked completely.",
-        "No oracle is possible within the owner's access rule: single-ad /plp/ pages answer 403 to robots and are "
-        "never fetched, so the complete list is the only reading there is."),
+        "No own-page oracle is possible within the owner's access rule: single-ad /plp/ pages answer 403 to robots "
+        "and are never fetched. OWNER DECISION 2026-11-10 («Ok do whatever u find good ok», this site ONLY): an ad "
+        "missing from 3 COMPLETE list walks in a row is HIDDEN (COMPLETE_LIST_ABSENCE_HIDES below; "
+        "run.py::_absent_from_complete_list answers «absent»). Hidden, never deleted; the next walk that lists it "
+        "again brings it back by the normal upsert. LISTING_LIVENESS.md §7.3."),
     "opensooq": _P(
         _pol("opensooq", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the real-estate SERP's inline JSON (/ar/عقارات?page=N, "

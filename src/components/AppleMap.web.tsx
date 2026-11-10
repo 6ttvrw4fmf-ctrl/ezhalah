@@ -31,14 +31,15 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
-import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, mergeOverlapping, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 import { onSurface } from '@/lib/mapSurface';
+import { RESOLVE_BUDGET_MS, makeSuggestCache, suggestKey } from '@/lib/placeSearch';
 
 // The soil mascot (assets/images/soil-mascot.svg) wore this button for a day; owner 2026-11-03: «hide the mascot,
 // will add it later, not the priority» — the ground-layers icon is back until the soil layer itself is built.
@@ -292,6 +293,8 @@ export function clearPlaceMark() {
 /** Apple Maps' own place suggestions (owner 2026-10-31: «this search connected to Apple Maps, like how a user
  *  searches in Apple Maps»), limited to Saudi Arabia, in the UI language. Resolves [] when MapKit is unavailable:
  *  the field then simply shows nothing (never a fake "no places"). */
+// Recent answers (src/lib/placeSearch.ts): backspace or the same words again shows the list at once.
+const suggestCache = makeSuggestCache<PlaceSuggestion[]>();
 export async function suggestPlaces(q: string, uiLanguage: string): Promise<PlaceSuggestion[]> {
   const query = q.trim();
   if (query.length < 2) return [];
@@ -313,6 +316,9 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   // fifteen Riyadh branches). Apple ranks around `region`, so the search follows the map: a chain or a common name
   // lists the nearby ones first, and a city or region name is still found wherever it is.
   if (live.map) search.region = live.map.region;
+  const key = suggestKey(query, language, live.map?.region);
+  const cached = suggestCache.get(key);
+  if (cached) return cached;
   const rows = await new Promise<PlaceSuggestion[]>((resolve) => {
     // Only real PLACES: Apple also returns query completions («adidas · Search Nearby») that carry no coordinate and
     // land nowhere (owner 2026-11-01 saw one in the route fields).
@@ -326,7 +332,7 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   // its two lines and no tag — never dropped, never a fake kind.
   const country = language === 'ar' ? 'المملكة العربية السعودية' : 'Saudi Arabia';
   const resolve1 = (r: PlaceSuggestion) => new Promise<PlaceSuggestion>((resolve) => {
-    const timer = setTimeout(() => resolve(r), 1500);
+    const timer = setTimeout(() => resolve(r), RESOLVE_BUDGET_MS);   // was 1,500 ms: the list waited for the slowest row
     search.search(r, (err, data) => {
       clearTimeout(timer);
       const p = !err && data?.places?.[0];
@@ -343,7 +349,9 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   const named = resolved.map((r) => ({ ...r, apple: r.apple ?? r, name: r.name ?? r.displayLines[0] }));
   // A user-written description («طريق الملك فهد اللي دايم زحمه») is not a place; what was typed sorts first.
   const places = named.filter((r) => !isNoiseName(r.name));
-  return sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
+  const out = sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
+  if (rows.length) suggestCache.set(key, out);   // an empty answer may be a failed call: never remembered
+  return out;
 }
 
 /** HOW MANY PINS A FILTER LEAVES IN THE CURRENT VIEW (the popup's button): one coarse count-cell read over the
@@ -625,7 +633,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     void fetchAreasFeed(); void fetchMapDots();
     const keyed = new Map<string, unknown>();   // the annotations on the map, by what they show — a pan keeps what stays
     const loc = localeRef.current === 'ar' ? 'ar' : 'en';
-    // PINS NEVER SIT ON EACH OTHER (owner 2026-11-05, src/lib/mapPins.ts mergeOverlapping): heads are measured with the
+    // ONE PIN = ONE PLACE, NEIGHBOURS SIDE BY SIDE (owner 2026-11-10, src/lib/mapPins.ts placeApart): heads are measured with the
     // font they are drawn in and placed through MapKit's own projection, so «touching» means touching on this screen.
     const measure = document.createElement('canvas').getContext('2d');
     if (measure) measure.font = '600 11px -apple-system,system-ui,sans-serif';
@@ -672,7 +680,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           : 'border-radius:10px;padding:4px 7px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);position:relative');
       el.textContent = cell > 0 ? '' : pinHead(row, loc);
       if (counted && cell > 0 && row.n > 1) el.textContent = areaCount(row.n, loc);
-      if (cell === 0) {
+      // A head on its own spot points at it with a tip; a head drawn beside its neighbour gets a line back to its spot
+      // instead, drawn under every head by drawStems() below.
+      if (cell === 0 && !row.shift) {
         const tip = document.createElement('div');
         tip.style.cssText = `position:absolute;left:50%;bottom:-5px;width:0;height:0;margin-left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid ${color}`;
         el.appendChild(tip);
@@ -710,7 +720,29 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       });
       return el;
     };
-    const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; keyed.clear(); };
+    const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; keyed.clear(); clearStems(); };
+    // THE LINE BACK TO THE AD'S OWN SPOT (owner 2026-11-10, src/lib/mapPins.ts pinStemTo): a head drawn beside its
+    // neighbour never claims the place it was moved to. MapKit overlays are drawn on the map itself, under every
+    // annotation, so a line or its dot never crosses another head's text. Never a tap target (enabled: false).
+    let stems: unknown[] = [];
+    const clearStems = () => { for (const o of stems) m.removeOverlay(o); stems = []; };
+    const drawStems = (rows: PinRow[]) => {
+      clearStems();
+      const box = (hostRef.current as unknown as HTMLElement | null)?.getBoundingClientRect();
+      const metresPerPx = m.region.span.latitudeDelta * 111_320 / Math.max(1, box?.height ?? 600);
+      for (const row of rows) {
+        const to = row.noPin ? null : pinStemTo(row.shift, headWidth(row) / 2);
+        if (!to) continue;
+        const [x, y] = onScreen(row.lat, row.lng);
+        const spot = new mk.Coordinate(row.lat, row.lng);
+        const head = m.convertPointOnPageToCoordinate(new DOMPoint(x + to[0], y + to[1]));
+        const color = pinColor(row);
+        const halo = new mk.PolylineOverlay([spot, head], { style: new mk.Style({ strokeColor: '#ffffff', strokeOpacity: 0.9, lineWidth: 4 }), enabled: false });
+        const line = new mk.PolylineOverlay([spot, head], { style: new mk.Style({ strokeColor: color, strokeOpacity: 1, lineWidth: 2 }), enabled: false });
+        const dot = new mk.CircleOverlay(spot, 3 * metresPerPx, { style: new mk.Style({ strokeColor: '#ffffff', strokeOpacity: 1, lineWidth: 1.5, fillColor: color, fillOpacity: 1 }), enabled: false });
+        for (const o of [halo, line, dot]) { m.addOverlay(o); stems.push(o); }
+      }
+    };
     // EVERY SPOT, AT ANY ZOOM (owner 2026-11-02: «even when I am zoomed out they all show»): zoomed out with no
     // narrowing (deal only), the dots feed — every pinned listing's 1 km cell, downloaded once — is painted on a canvas
     // over the map: all 23k spots in a few ms, where 23k annotations would freeze a phone. The canvas is hidden while
@@ -783,11 +815,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       });
       return el;
     };
-    const drawAreas = (areas: AreaRow[], level: AreaLevel) => {
+    const drawAreas = (areas: AreaRow[], level: AreaLevel, whole: AreaRow[] | null = null) => {
       // The pill names where the view is at every zoom (owner 2026-11-05): the country, then the region, the city, the
       // district most of the view's listings are in — «في هذه المنطقة» only when no one place holds most of them.
-      const place = areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
+      // The whole-Kingdom view shows regions (owner 2026-11-09): the pill keeps the country and its WHOLE total, read
+      // over COUNTRY_BOX, so a pan that leaves a region off screen never shrinks «… في السعودية».
+      const place = whole ? areaPlace(whole, 'country', loc, translitPlace, m.region.center, m.region.span) : areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
       setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
+      clearStems();   // area labels replace the pins: no line may outlive the head it belonged to
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
       for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
@@ -796,7 +831,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const maxN = Math.max(1, ...areas.map((a) => a.n));
       for (const [k, a] of next) {
         if (keyed.has(k)) continue;
-        const ann = new mk.Annotation(new mk.Coordinate(a.lat, a.lng), () => areaElement(a, level), {
+        const ann = new mk.Annotation(new mk.Coordinate((a.at ?? a).lat, (a.at ?? a).lng), () => areaElement(a, level), {
           calloutEnabled: false, collisionMode: mk.Annotation.CollisionMode?.Rectangle, displayPriority: 250 + Math.round(499 * a.n / maxN),
         });
         keyed.set(k, ann); m.addAnnotation(ann);
@@ -829,7 +864,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const placed: DOMRect[] = [];
       for (const a of [...areas].sort((x, y) => y.n - x.n)) {
         let pt: { x: number; y: number };
-        try { pt = toPage(new mk.Coordinate(a.lat, a.lng)); } catch { continue; }
+        try { pt = toPage(new mk.Coordinate((a.at ?? a).lat, (a.at ?? a).lng)); } catch { continue; }
         const el = areaElement(a, level);
         el.style.position = 'absolute';
         el.style.left = `${pt.x - ox}px`;
@@ -860,14 +895,19 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const { center, span } = m.region;
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
-      const level = narrowed ? null : areaLevelFor(span.latitudeDelta);
+      const level = narrowed ? null : areaLevelShown(span.latitudeDelta);
       if (level) {
         const areas = await fetchMapAreas(paddedBox(center, span), level, pins.deals);
         if (my !== seq || mapRef.current !== m) return;
         if (areas !== 'unknown') {
           hideCanvas(); shown = [];
-          drawAreas(visibleAreas(areas, level), level);
-          setPinCount(areasTotal(areas));
+          // The opening zoom: the country's own total for the pill (the feed is already on the phone; a failed read
+          // leaves the pill to the labels in view, never a partial count named «السعودية»).
+          const wholeRead = areaLevelFor(span.latitudeDelta) === 'country' ? await fetchMapAreas(COUNTRY_BOX, 'country', pins.deals) : 'unknown';
+          if (my !== seq || mapRef.current !== m) return;
+          const whole = Array.isArray(wholeRead) && wholeRead.length ? wholeRead : null;
+          drawAreas(visibleAreas(areas, level), level, whole);
+          setPinCount(whole ? areasTotal(whole) : areasTotal(areas));
           return;
         }
         // The labels failed to load: the dots below, never an empty map.
@@ -903,7 +943,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       let drawCell = cell;
       // DEEPEST ZOOM (🔧 2026-11-06, owner 2026-11-05 «user cannot select what he wants»): where a bubble would be bigger
       // than the view, a tap on it cannot zoom closer, so the listings would stay hidden behind a number. Read every
-      // exact point of the view instead and let mergeOverlapping fold the touching heads into counted gold heads.
+      // exact point of the view instead; placeApart sets them side by side (a pile with no room left joins as a counted head).
       let dense = cell === 0 && (crowdedByDots || rows.length > PIN_SHOW_MAX);
       if (dense && !bubblesCanZoomIn(span.latitudeDelta)) {
         const every = await fetchMapPins(paddedBox(center, span), 0, pins, PIN_LIMIT);
@@ -932,8 +972,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
         }
       }
-      // Heads that would touch on this screen become one gold head with their count (src/lib/mapPins.ts).
-      if (drawCell === 0) rows = mergeOverlapping(rows, onScreen, headWidth);
+      // A head whose spot is taken is drawn beside its neighbour, never on it and never joined to it (src/lib/mapPins.ts).
+      if (drawCell === 0) rows = placeApart(rows, onScreen, headWidth);
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
@@ -942,7 +982,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
       // head would change (count, deal, price, cell size) is replaced.
-      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}`;
+      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}|${r.shift ? r.shift.join(',') : ''}`;
       const next = new Map<string, PinRow>(); for (const row of rows) next.set(keyOf(row), row);
       // The district markers join the same diff. A FAILED marker read keeps the markers already on the map (A FAILED
       // FETCH IS NOT AN EMPTY ANSWER: a marker that vanished after an error would read as «no such listings here»).
@@ -958,11 +998,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         const a = row.noPin
           ? new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => noPinElement(row), { data: { pin: row, cell: 0 }, calloutEnabled: false, displayPriority: 1000 })
           : new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell, cell === 0 && drawCell > 0), {
-            data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -6),
+            data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(...pinAnchorOffset(row.shift)),
           });
         keyed.set(k, a); m.addAnnotation(a);
       }
       mine = [...keyed.values()];
+      drawStems(drawCell === 0 ? rows : []);
     };
     const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 120); };
     const onSelect = (e: { annotation?: { data?: { pin?: PinRow; cell?: number } } }) => {
@@ -1119,7 +1160,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {onExpand && !failed && !drawing ? (
-        <Pressable style={s.closeBtn} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+        <Pressable style={[s.closeBtn, s.closeBtnLeft]} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
@@ -1136,11 +1177,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {drawing && !sketch ? <View style={s.hint} pointerEvents="none"><Text style={s.hintT}>{t('Drag on the map to draw an area')}</Text></View> : null}
       {onClose && !drawing ? (
-        <Pressable style={s.closeBtn} onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-close-full">
+        // The X is top RIGHT, always, in both languages (owner 2026-11-10: «x for everything must always be on the top right
+        // no matter what, even if it's in English»); «رسم» / «مسار» move to the top left while it shows. `left`/`right`
+        // are physical here (measured live 2026-11-10: left: 12 sat at the physical left under Arabic RTL).
+        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-close-full">
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       ) : null}
-      {roomy ? <View style={s.topRight} pointerEvents="box-none">
+      {roomy ? <View style={[s.topRight, onClose && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
       {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
           becomes «إزالة المسار ✕». */}
       {onRoute && !failed && !drawing ? (
@@ -1219,7 +1263,13 @@ const s = StyleSheet.create({
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
-  topRight: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
+  // Each side is its OWN style (review of #11614): React Native Web drops a style value set to undefined, so clearing `left` that way
+  // would have left the base `left: 12` in place next to `right: 12`.
+  topRight: { position: 'absolute', top: 12, flexDirection: 'row', gap: 8 },
+  topRightAt: { right: 12 },
+  topRightAsLeft: { left: 12 },
+  closeBtnLeft: { left: 12 },
+  closeBtnRight: { right: 12 },
   drawBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
     paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
@@ -1245,7 +1295,7 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   closeBtn: {
-    position: 'absolute', top: 12, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
+    position: 'absolute', top: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   boundaryBtn: { borderColor: colors.primary, borderWidth: 1.5, backgroundColor: colors.tintFill },

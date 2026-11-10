@@ -59,6 +59,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.named_city import single_named_city  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 SITE = "https://erapulse.sa"
 API = "https://api.erapulse.sa"
@@ -197,7 +198,7 @@ _REGION_RE = re.compile(r"منطقة\s+([^,،]+)")
 # (governorate), an admin-locality marker like "مدينة"/"منطقة" that's already stripped elsewhere
 # (e.g. "غرناطة محافظة النبهانبة" -> "غرناطة").
 _CITY_SUFFIX_RE = re.compile(
-    r"\s*[-–]?\s*(?:محافظة\s+)?(" + "|".join(map(re.escape, QASSIM_CITY_WORDS)) + r")\s*$"
+    r"\s*[-–]?\s*(?:(?:محافظة|مدينة)\s+)?(" + "|".join(map(re.escape, QASSIM_CITY_WORDS)) + r")\s*$"
 )
 
 
@@ -451,6 +452,13 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
         "description": description,
         "photo_urls": _photos(p),
         "rega_location_verified": False,
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the API record's `publishedAt` — the moment
+        # moderation put the ad live. Measured 2026-11-09 on all 69 live records: it is never later than our
+        # first sighting, and where `createdAt` (the draft) is weeks earlier, publishedAt sits hours before we
+        # first saw the ad (REF-MU2WZ5DI-HQNG5 created 09-15, published 2026-10-24T15:40:22.000Z, first seen
+        # 10-25 05:45 UTC); the 2026-08-13 mass edit moved `updatedAt` only. Never createdAt / updatedAt /
+        # adExpiryDate. A null publishedAt (1 of 69) stays NULL.
+        "date_added": site_posting_date(p.get("publishedAt")),
         "additional_info": info,
     }
     return row, category

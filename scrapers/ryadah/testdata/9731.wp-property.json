@@ -1,0 +1,102 @@
+{
+ "id": 9731,
+ "date": "2022-09-20T09:30:41",
+ "date_gmt": "2022-09-20T09:30:41",
+ "modified_gmt": "2025-07-28T20:48:37",
+ "slug": "%d8%a7%d9%84%d8%b3%d9%8a%d9%81-%d8%a8%d9%84%d8%a7%d8%b2%d8%a7",
+ "status": "publish",
+ "type": "property",
+ "link": "https://ryadah.com.sa/property/%d8%a7%d9%84%d8%b3%d9%8a%d9%81-%d8%a8%d9%84%d8%a7%d8%b2%d8%a7/",
+ "title": {
+  "rendered": "السيف بلازا"
+ },
+ "content": {
+  "rendered": "",
+  "protected": false
+ },
+ "property_meta": {
+  "REAL_HOMES_property_price": "",
+  "REAL_HOMES_property_old_price": "",
+  "REAL_HOMES_property_price_prefix": "",
+  "REAL_HOMES_property_price_postfix": "",
+  "REAL_HOMES_property_size": "4,162",
+  "REAL_HOMES_property_size_postfix": "متر مربع",
+  "REAL_HOMES_property_lot_size": "",
+  "REAL_HOMES_property_lot_size_postfix": "",
+  "REAL_HOMES_property_bedrooms": "",
+  "REAL_HOMES_property_bathrooms": "",
+  "REAL_HOMES_property_garage": "",
+  "REAL_HOMES_property_id": "RH-9731-property",
+  "REAL_HOMES_property_year_built": "",
+  "REAL_HOMES_featured": "1",
+  "REAL_HOMES_additional_details_list": [
+   [
+    "عدد الوحدات",
+    "19"
+   ],
+   [
+    "عدد النماذج",
+    "6"
+   ]
+  ],
+  "REAL_HOMES_property_location": {
+   "latitude": "26.360748209808",
+   "longitude": "50.073263175702",
+   "zoom": "17"
+  },
+  "REAL_HOMES_property_address": "شارع أبو بكر الصديق ، الشعلة ، الدمام 34265 ،، الشعلة ، الدمام 34265 ، المملكة العربية السعودية",
+  "REAL_HOMES_property_map": "",
+  "REAL_HOMES_change_gallery_slider_type": "0",
+  "REAL_HOMES_gallery_slider_type": "thumb-on-right",
+  "inspiry_floor_plans": [],
+  "inspiry_video_group": [],
+  "REAL_HOMES_360_virtual_tour": "",
+  "REAL_HOMES_display_agency_info": "",
+  "REAL_HOMES_energy_class": "none",
+  "REAL_HOMES_energy_performance": "",
+  "REAL_HOMES_epc_current_rating": "",
+  "REAL_HOMES_epc_potential_rating": "",
+  "ere_property_schedule_tour": "global",
+  "ere_property_schedule_time_slots": "",
+  "ere_property_schedule_description": "",
+  "REAL_HOMES_sticky": "0",
+  "inspiry_property_label": "",
+  "inspiry_property_label_color": "",
+  "inspiry_property_tax": "",
+  "inspiry_additional_fee": "",
+  "REAL_HOMES_attachments": [],
+  "REAL_HOMES_add_in_slider": "no",
+  "REAL_HOMES_slider_image": [],
+  "REAL_HOMES_page_banner_image": [],
+  "REAL_HOMES_hide_property_advance_search": "0",
+  "inspiry_service": "",
+  "inspiry_property_overview": "",
+  "inspiry_نظرة_عامة_على_العقار:": "",
+  "REAL_HOMES_custom_header_display": "12929",
+  "REAL_HOMES_custom_header_position": "relative",
+  "REAL_HOMES_custom_footer_display": "13466",
+  "REAL_HOMES_hide_advance_search": "0",
+  "REAL_HOMES_custom_search_form": "default",
+  "REAL_HOMES_search_form_margin_top": "",
+  "REAL_HOMES_search_form_margin_bottom": ""
+ },
+ "_page": {
+  "status": "للإيجار",
+  "price_text": "عند الاتصال",
+  "crumbs": [
+   "السعودية",
+   "المنطقة الشرقية",
+   "الدمام"
+  ],
+  "features": [
+   "الأمن",
+   "كاميرات المراقبة على مدار الساعة",
+   "نظام مكافحة الحرائق",
+   "وحدات تكييف الهواء"
+  ]
+ },
+ "_type_terms": [
+  "تجاري",
+  "محل"
+ ]
+}

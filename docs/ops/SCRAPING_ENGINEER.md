@@ -15,6 +15,10 @@
 > 5. **Never apply a migration to production before its PR exists.** Open the PR with the exact file first, then apply.
 >    (Five deploys in a row were refused 11-08 → 11-09 by migrations applied before their PRs.) A PR stuck on CodeRabbit
 >    «rate limited»: comment `@coderabbitai review` once; never open a duplicate PR.
+> 6. **Your score = your open bugs went DOWN (owner 2026-11-09).** At :start AND :end run
+>    `select count(*) from alert_event where resolved_at is null and owner_routine = '<your routine>'` and write both numbers in :end.
+>    A night is GOOD only if end < start, with every closed alert closed by a proven fix (rule 1), not by hiding or resolving by hand.
+>    Equal or higher = a bad night whatever else you did: write why, and the ONE root cause you will hit first next run.
 
 
 > **🔒 MERGE LOCK 2026-11-08 (owner: «fully automate with the engineers and CodeRabbit»).** `safe-pr-merge.ts` (and so the robot) REFUSES a PR

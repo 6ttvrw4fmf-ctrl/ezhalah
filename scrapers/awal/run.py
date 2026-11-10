@@ -57,6 +57,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 BASE = "https://awaalun.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/rtcl_listing"
 WORKERS = int(os.environ.get("AWAL_WORKERS", "5"))
@@ -147,8 +148,11 @@ DIST_FIELD_RE = re.compile(r"الحي\s*:\s*([^:|]+?)(?:\s+(?:المدينة|ا�
 PLAN_FIELD_RE = re.compile(r"رقم\s*المخطط\s*:\s*([^\n:]+?)(?:\s+(?:رقم|المساحة|الحي)\b|$)")
 LOT_FIELD_RE = re.compile(r"رقم\s*القطع[ةه]\s*:\s*([^\s\n:]+)")
 # Area: "المساحة م² : 600" | "المساحة الإجمالية 1183م" | "مساحة الأرض : 792م" | "مساحة 630م"
+#       | "مساحتها 630" | "مساحة الصك 240 م" (⚡ 2026-11-09 blind-spot hunt: 4 of 44 served cards, e.g. 645516
+#       «قطعة ارض … مساحتها 630», showed no area while the ad's own text states it)
 AREA_RE = re.compile(
-    r"(?:المساح[ةه]\s*(?:م²|م2)?\s*:?|مساح[ةه]\s*(?:الأرض|الارض|الإجمالي[ةه]|الاجمالي[ةه])?\s*:?)\s*"
+    r"(?:المساح[ةه]\s*(?:م²|م2)?\s*:?|مساحت(?:ها|ه)\s*:?|"
+    r"مساح[ةه]\s*(?:الأرض|الارض|الإجمالي[ةه]|الاجمالي[ةه]|الصك)?\s*:?)\s*"
     r"([\d٠-٩][\d٠-٩.,]*)\s*(?:م²|م2|م\b|متر)?"
 )
 # District from free-text Arar ads: "حي غرناطه" / "بحي القدس" — stop at structural connectors.
@@ -585,6 +589,11 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, Opti
         "active": None if gone is None else not gone,   # None = unread; main() never upserts it
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` (UTC). Checked
+        # live 2026-11-09 on 19725: date_gmt 2026-02-14T14:23:24 == the ad page's own
+        # article:published_time / JSON-LD datePublished «2026-02-14T14:23:24+00:00». Never
+        # `modified_gmt` / dateModified (an edit).
+        "date_added": site_posting_date(f"{p['date_gmt']}Z") if p.get("date_gmt") else None,
         "area_m2": int(round(area)) if area else None,
         "bedrooms": bedrooms,
         "bathrooms": baths,

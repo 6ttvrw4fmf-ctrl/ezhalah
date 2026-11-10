@@ -50,6 +50,7 @@ export function noPinArgs(box: { s: number; w: number; n: number; e: number }, f
     p_area_min: f.areaMin ?? null, p_area_max: f.areaMax ?? null,
     p_price_min: f.priceMin ?? null, p_price_max: f.priceMax ?? null,
     p_limit: limit,
+    ...(f.furnished != null ? { p_furnished: f.furnished } : {}),
   };
 }
 
