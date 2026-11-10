@@ -808,7 +808,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const maxN = Math.max(1, ...areas.map((a) => a.n));
       for (const [k, a] of next) {
         if (keyed.has(k)) continue;
-        const ann = new mk.Annotation(new mk.Coordinate(a.lat, a.lng), () => areaElement(a, level), {
+        const ann = new mk.Annotation(new mk.Coordinate((a.at ?? a).lat, (a.at ?? a).lng), () => areaElement(a, level), {
           calloutEnabled: false, collisionMode: mk.Annotation.CollisionMode?.Rectangle, displayPriority: 250 + Math.round(499 * a.n / maxN),
         });
         keyed.set(k, ann); m.addAnnotation(ann);
@@ -841,7 +841,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const placed: DOMRect[] = [];
       for (const a of [...areas].sort((x, y) => y.n - x.n)) {
         let pt: { x: number; y: number };
-        try { pt = toPage(new mk.Coordinate(a.lat, a.lng)); } catch { continue; }
+        try { pt = toPage(new mk.Coordinate((a.at ?? a).lat, (a.at ?? a).lng)); } catch { continue; }
         const el = areaElement(a, level);
         el.style.position = 'absolute';
         el.style.left = `${pt.x - ox}px`;
