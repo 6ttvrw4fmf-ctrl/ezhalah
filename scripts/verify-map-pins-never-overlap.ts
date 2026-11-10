@@ -163,7 +163,7 @@ check('a shifted head gets a line back to its own spot, drawn as map overlays th
   && /new mk\.PolylineOverlay\(\[spot, head\], \{ style: new mk\.Style\(\{ strokeColor: color, strokeOpacity: 1, lineWidth: 2 \}\), enabled: false \}\)/.test(map)
   && /drawStems\(drawCell === 0 \? rows : \[\]\);/.test(map));
 check('no line is drawn inside a head\'s own element (it would cover its neighbours)', !/map-pin-stem/.test(map));
-check('the lines leave with the pins (clear, and when area labels take over)', /keyed\.clear\(\); clearStems\(\); \};/.test(map) && /clearStems\(\);   \/\/ area labels replace the pins/.test(map));
+check('the lines leave with the pins (clear, and when area labels take over)', /keyed\.clear\(\); clearStems\(\); \};/.test(map) && /setPlaceCount\(place\?\.n \?\? null\);\n\s*clearStems\(\);/.test(map));
 // MapKit draws the element at (point − anchorOffset): measured on ezhalah.com/map 2026-11-10, (50, −30) → 50 px left, 30 px down.
 const eq = (a: number[], b: number[]) => a.length === b.length && a.every((v, k) => Math.abs(v - b[k]) < 1e-9);
 check('an unshifted head keeps its (0, −6) anchor', eq(lib.pinAnchorOffset(undefined), [0, -6]));
