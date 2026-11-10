@@ -63,7 +63,8 @@ for (const k of ['{n} listings in {district}', 'No exact location', 'The source 
 const dir = join(root, 'supabase/migrations');
 const migs = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().reverse();
 const latest = (re: RegExp) => { const f = migs.find((x) => re.test(readFileSync(join(dir, x), 'utf8'))); return f ? readFileSync(join(dir, f), 'utf8') : ''; };
-const refresh = latest(/create or replace function public\.map_nopin_refresh_ar\(/);
+// Only the function's own text: the file that defines it may define other functions too.
+const refresh = ((f: string) => { const i = f.indexOf('create or replace function public.map_nopin_refresh_ar('); if (i < 0) return ''; const a = f.indexOf('$$', i); const b = a < 0 ? -1 : f.indexOf('$$', a + 2); return b < 0 ? f.slice(i) : f.slice(i, b); })(latest(/create or replace function public\.map_nopin_refresh_ar\(/));
 const RULES: Array<[string, RegExp]> = [
   ['only listings with no pin of their own are placed', /where \(s\.latitude is null or s\.longitude is null\)/],
   ['a listing that borrowed its sure twin\'s pin is never placed twice', /not exists \(select 1 from public\.map_pin_borrow b where b\.source_table = s\.source_table and b\.listing_id = s\.listing_id\)/],
