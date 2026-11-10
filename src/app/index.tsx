@@ -43,6 +43,7 @@ import { InsightHowItWorks } from '@/components/InsightHowItWorks';
 import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
+import { oneAtATime, sharedCardRetryMs } from '@/lib/flowState';
 import { sentenceName } from '@/lib/nameSync';
 import { typedDir } from '@/lib/typedDir';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
@@ -177,13 +178,20 @@ export default function Home() {
     if (raw) { try { window.history.replaceState(null, '', window.location.pathname); } catch { /* cosmetic */ } }
     if (isShareCode(raw)) {
       let alive = true;
-      const load = async (tries: number) => {
+      // A card that could not be READ is asked for again on a widening schedule (sharedCardRetryMs: 1.5 s, 3 s, 6 s,
+      // 12 s) — it used to stop after two quick tries, and a link opened on a slow connection silently became a plain
+      // home page. A card that is genuinely absent (null) is never retried.
+      const load = async (attempt: number) => {
         const card = await fetchSharedChatCard(raw!);
         if (!alive) return;
-        if (isProbeFailure(card)) { if (tries > 0) setTimeout(() => void load(tries - 1), 1500); return; }
+        if (isProbeFailure(card)) {
+          const wait = sharedCardRetryMs(attempt);
+          if (wait !== null) setTimeout(() => { if (alive) void load(attempt + 1); }, wait);
+          return;
+        }
         if (card) setSharedSearch({ q: card.q, name: card.name, code: raw! });
       };
-      void load(2);
+      void load(0);
       return () => { alive = false; };
     }
     const s = decodeSharePayload(raw);
@@ -199,7 +207,10 @@ export default function Home() {
     if (!user) openAuth(shareJoinNote(sharedJoin.name, locale === 'en' ? 'en' : 'ar') ?? undefined);
     setSharedJoin(null);
   }, [sharedJoin, authChecked, user, openAuth, locale]);
-  const openSharedSearch = useCallback(async (s: { q: SearchQuery | null; code?: string }) => {
+  // ONE AT A TIME: the banner tap and the after-sign-in effect can both ask for the same link while its chat is
+  // still being read, and two runs meant two copies in the history (oneAtATime, src/lib/flowState.ts).
+  const openingSharedRef = useRef(false);
+  const openSharedSearch = useCallback((s: { q: SearchQuery | null; code?: string }) => oneAtATime(openingSharedRef, async () => {
     try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
     setSharedSearch(null);
     if (s.code) {
@@ -211,7 +222,14 @@ export default function Home() {
         router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q ?? emptyQuery()), replay: '0', hid: prior } });
         return;
       }
-      const chat = await fetchSharedChat(s.code);
+      const askedAt = Date.now();
+      let chat = await fetchSharedChat(s.code);
+      // A read that failed FAST is a blip: ask once more before giving up the conversation. A read that timed out
+      // is not asked again — the visitor has already waited, and the shared search below still opens.
+      if (isProbeFailure(chat) && Date.now() - askedAt < 3000) {
+        await new Promise((r) => setTimeout(r, 1200));
+        chat = await fetchSharedChat(s.code);
+      }
       if (chat && !isProbeFailure(chat)) {
         const hid = importSharedChat(chat.q, chat.transcript);
         try { localStorage.setItem(SHARED_IMPORTED_KEY, JSON.stringify({ ...done, [s.code]: hid })); } catch { /* per-device only */ }
@@ -222,7 +240,7 @@ export default function Home() {
       // search has nothing to run — Home stays.
     }
     if (s.q) router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
-  }, [router, history, importSharedChat]);
+  }), [router, history, importSharedChat]);
   // OPENING A SHARED LINK (owner 2026-10-18: «the pop up should be the log in and sign up … with a message
   // of what the user wants to send him … when user clicks sign up / log in the screen shows the history
   // and it gets saved in the side»). Once the session is known: a visitor who is not signed in gets the

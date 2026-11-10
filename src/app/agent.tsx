@@ -116,6 +116,8 @@ import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryPr
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
+import { failedTurnMsgs, mayFailTurn } from '@/lib/flowState';
+import { reportError } from '@/lib/observability';
 import { PLATFORM_META, type LoaderPlatform } from '@/data/loaderPlatforms';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «🎯 دقّق مع الذكاء الاصطناعي» button
@@ -1063,6 +1065,7 @@ export default function Agent() {
     voiceBaseRef.current = typed;
     voiceActiveRef.current = true; // synchronous latch — a second tap in the same tick is a no-op
     setVoiceState('recording'); // morph now; a denied permission gracefully restores below
+    try {
     await startVoiceInput({
       onFailure: (kind, detail) => {
         voiceActiveRef.current = false;
@@ -1090,6 +1093,14 @@ export default function Agent() {
         showVoiceNotice(detail ? `${msg} (${detail})` : msg);
       },
     });
+    } catch (e) {
+      // startVoiceInput reports its failures through onFailure; one that THROWS instead left the composer stuck in
+      // recording mode with the mic latched. Same clean restore, same honest line (2026-11-10).
+      reportError(e, { source: 'agent.startVoice' });
+      voiceActiveRef.current = false;
+      setVoiceState('idle');
+      showVoiceNotice(t('Voice input is not available right now.'));
+    }
   };
   // ■ Stop — finish listening WITHOUT submitting: capture stops instantly (synchronous teardown,
   // exactly as before); a brief "processing" beat then shows a loading indicator in the waveform's
@@ -2278,6 +2289,11 @@ export default function Agent() {
       const revealIsTerminal =
         revealTo >= Math.min(SECOND_PAGE_CAP, totalForCap) || (!hasMoreNow && revealTo >= mergedLen);
       if (revealIsTerminal) setCompleted(true);
+    } catch (e) {
+      // A press that THREW is a failed press, said out loud — the same line a failed page already says. Nothing was
+      // merged and nothing is claimed finished; the button is released by the `finally` below.
+      reportError(e, { source: 'agent.loadMore' });
+      if (conversationEpochRef.current === epoch) setMsgs((prev) => [...prev, { id: uid(), role: 'agent', text: t('Loading listings — please try again in a few seconds.') }]);
     } finally {
       setLoadingMore((s) => ({ ...s, [mid]: false }));
     }
@@ -2625,6 +2641,18 @@ export default function Agent() {
   // asked dimension into the SAME filter, and re-search. (user 2026-06-27.)
   // `opts.onFetched` reports the honest RPC total as soon as it's known (drives the mining beat);
   // `opts.guided` attaches the interview's facets to the results turn for the removable pills.
+  // A TURN THAT THREW IS OVER, NOT STILL RUNNING (2026-11-10). send() and runRefine() awaited the network and the card
+  // reveal with no catch: anything thrown in between left `busy` true and the spinner turning forever — a dead
+  // composer until a reload. sendFilter already ended its turn this way; this is the same ending for the other two.
+  // The decisions live in src/lib/flowState.ts (mayFailTurn / failedTurnMsgs) so a guard can RUN them; the error is
+  // still reported, because catching it here takes it away from the global unhandled-rejection reporter.
+  const failTurn = (run: Run, statusId: string, err: unknown, where: string) => {
+    reportError(err, { source: where });
+    if (!mayFailTurn(run, runRef.current)) return;
+    setMsgs((m) => failedTurnMsgs(m, statusId, { id: uid(), role: 'agent', text: locale === 'en' ? nextVariant(SEARCH_FAILED_EN) : nextVariant(SEARCH_FAILED_AR) } as ChatMsg));
+    setBusy(false);
+    runRef.current = null;
+  };
   const runRefine = async (
     baseQ: SearchQuery, dim: string, value: string, label: string,
     opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[]; pools?: Array<number | null> } },
@@ -2655,6 +2683,7 @@ export default function Agent() {
     // on screen; the later passes settle it ~80 px under the top with the loader below it. All land
     // within the first 1.5 s, long before the user has had reason to scroll.
     for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);
+    try {
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
     prefetchNarrowing(result.query ?? refined, opts?.guided?.asked ?? []);  // AFTER the search — see prefetchNarrowing
@@ -2694,6 +2723,7 @@ export default function Agent() {
     // beginCardDrip already eases the new turn's TOP to ~80px under the viewport top (the 2026-07-09
     // "don't drag the whole screen down" rule), which is exactly where the owner wants a completed
     // round to land: the selection receipt, then the new count, then the new cards.
+    } catch (e) { failTurn(run, statusId, e, 'agent.runRefine'); return; }
     setBusy(false); runRef.current = null;
   };
 
@@ -3385,6 +3415,7 @@ export default function Agent() {
     setMsgs((m) => [...m, { id: uid(), role: 'user', text: v }, { id: statusId, role: 'status', phase: 'thinking' }]);
     toBottom();
 
+    try { // closed by failTurn at the end of send(): a turn that throws ends, it never spins forever
     // Remember everything the user has said this search attempt, so a forced scrape can read the
     // whole conversation ("a house" + "floor") and not just the last vague line.
     saidRef.current = [...saidRef.current, v];
@@ -3581,6 +3612,7 @@ export default function Agent() {
         m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: reply, typing: true } : x)),
       );
     }
+    } catch (e) { failTurn(run, statusId, e, 'agent.send'); return; }
     // The network turn is done; the cards then reveal on their own timers (busy is free, so the user can
     // type a new message — which finalizes the reveal via finalizeReveal). interview returns earlier.
     setBusy(false);

@@ -39,6 +39,7 @@ import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, 
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 import { onSurface } from '@/lib/mapSurface';
+import { pillCount } from '@/lib/flowState';
 import { RESOLVE_BUDGET_MS, makeSuggestCache, suggestKey } from '@/lib/placeSearch';
 
 // The soil mascot (assets/images/soil-mascot.svg) wore this button for a day; owner 2026-11-03: «hide the mascot,
@@ -936,6 +937,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const crowdedByDots = dots !== 'unknown' && dotsEstimateInBox(dots, pins.deals, { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 }) > CROWD_ESTIMATE;
       // Exact points are read with a small cap: one row over PIN_SHOW_MAX is enough to know the view is too dense.
       let rows: PinRow[] | 'unknown' = crowdedByDots ? [] : await fetchMapPins(paddedBox(center, span), cell, pins, cell === 0 ? PIN_SHOW_MAX + 1 : PIN_LIMIT);
+      // The read FAILED for the view on screen: its count is unknown, so the pill hides (pillCount → null) instead of
+      // keeping the previous view's number over this one. The drawn layer is still kept, as before.
+      if (my === seq && mapRef.current === m && rows === 'unknown') setPinCount(pillCount(rows));
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
       // DENSE VIEW: the exact-point read hit its cap, so pins would silently show a PART of the listings (downtown
       // Riyadh holds thousands in one city-zoom view). Never a partial set — read the same view again as a fine bubble
@@ -969,6 +973,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           rows = bubblesFromDots(dotsInView(dots, pins.deals, paddedBox(center, span))).map((b) => ({ ...b, type_ar: null, platforms: 0, ids: null, price: null, platform: null }) as PinRow);
         } else {
           rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
+          if (my === seq && mapRef.current === m && rows === 'unknown') setPinCount(pillCount(rows));
           if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
         }
       }
@@ -976,7 +981,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (drawCell === 0) rows = placeApart(rows, onScreen, headWidth);
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
-      setPinCount(rows.reduce((a, r) => a + r.n, 0));
+      setPinCount(pillCount(rows));
       setPlaceCount(null);
       void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc, translitPlace)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,

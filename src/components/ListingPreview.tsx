@@ -18,6 +18,7 @@ import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAs
 import { listingOpenUrl } from '@/lib/openListing';
 import { safeHttpUrl } from '@/lib/safeUrl';
 import type { Listing } from '@/data/listings';
+import { reportError } from '@/lib/observability';
 
 // THE IN-APP AD PAGE for the sites that cannot be framed (lib/inAppViewer.ts IN_APP_PREVIEW_HOSTS):
 // Ezhalah's own copy of the ad, exactly as the site published it, inside the viewer's tab.
@@ -251,8 +252,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
       const price = Number(row?.price_total), area = Number(row?.area_m2);
       void Promise.all([fetchAskingPrices(row), fetchGroupPrices(row, commercial ? 'Commercial' : 'Residential'), fetchMojSales(row, commercial ? 'تجاري' : 'سكني'), fetchSameAd(row), fetchMojDeals(row, commercial ? 'تجاري' : 'سكني'), fetchSimilarListings(row)]).then(([stats, group, moj, same, deals, similar]) => {
         if (alive) setPrices({ stats, group, moj, deals, similar, same, price: Number.isFinite(price) && price > 0 ? price : null, area: Number.isFinite(area) && area > 0 ? area : null, typeAr: String(row?.type_ar ?? '') });
-      });
-    });
+      }).catch((e) => reportError(e, { source: 'ListingPreview.prices' })); // a failed price read leaves the block empty, never an unhandled rejection
+    }).catch((e) => reportError(e, { source: 'ListingPreview.adPage' }));
     return () => { alive = false; };
   }, [l]); // eslint-disable-line react-hooks/exhaustive-deps
   // This ad's own m² price (its price ÷ its area, both as the source published them) and its place among

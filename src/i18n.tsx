@@ -2002,6 +2002,7 @@ const AR: Record<string, string> = {
   'Signing out…': 'جارٍ تسجيل الخروج…',
   'Deleting account…': 'جارٍ حذف الحساب…',
   'Apple sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر Apple غير متاح حالياً. جرّب طريقة أخرى.',
+  'Google sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر Google غير متاح حالياً. جرّب طريقة أخرى.',
   'Send code': 'إرسال الرمز',
   'Cancel': 'إلغاء',
   'Back': 'رجوع',

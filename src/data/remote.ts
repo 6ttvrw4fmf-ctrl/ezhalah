@@ -1983,6 +1983,9 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   // ONE inventory — see DEEPLINK_TABLES. Never re-list the tables here: this loop is the surface a
   // deep link and a restored session both land on, and a private copy of the fleet is how it came to
   // miss aqarmonthly (a live, monthly-searchable platform) while still probing three retired ones.
+  // A FAILED READ IS NOT «NO SUCH AD». If any table's read errored and no table held the ad, the answer is unknown:
+  // throw, so the caller shows «couldn't load» instead of «Listing not found.» (2026-11-10).
+  let readFailed = false;
   for (const table of DEEPLINK_TABLES) {
     // `.eq('active', true)` — A DEEP LINK IS A SEARCH SURFACE (P1, incident #34, found by routine #11's
     // first run). Every other surface — results, AF, Trending, counts, pagination — resolves through
@@ -1995,10 +1998,12 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     // Proven with the production ANON key, not privileged SQL: ids 585260 / 629782 / 4744698 each
     // returned a full card payload carrying "active": false.
     const { data, error } = await supabase.from(table).select(listSelectFor(table)).eq('id', id).eq('active', true).limit(1);
+    if (error) readFailed = true;
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
     if (row) { row.sourceTable = table; LISTING_CACHE.set(row.id, row); return row; }
   }
+  if (readFailed) throw new Error('listing lookup failed');
   return null;
 }
 

@@ -8,6 +8,7 @@ import { Spinner } from '@/components/ui';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { oauthOutcome, oneAtATime } from '@/lib/flowState';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SkyEagleLightUp } from '@/components/SidebarSky';
 import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
@@ -199,7 +200,6 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
   const [step, setStep] = useState<Step>('main');
   const [faceDone, setFaceDone] = useState(false);
   const [hideEmail, setHideEmail] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [oauthErr, setOauthErr] = useState('');
 
   const done = (u: AuthUser) => {
@@ -248,13 +248,20 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
 
   // Google: real OAuth when a backend is configured; the rendered chooser is the preview-only design
   // fallback (Google's own sheet takes over in production). Unchanged from the old route.
-  const onGoogle = async (fallback: AuthUser) => {
-    const r = await signInWithProvider('google');
-    if (r.redirected) return; // store adopts the session via onAuthStateChange; the OAuth redirect
+  // ONE at a time (a second tap while Google is opening starts nothing), and the result is read by oauthOutcome()
+  // (src/lib/flowState.ts). A LIVE backend whose Google sign-in failed says so — it used to fall through to
+  // done(fallback) and sign the visitor in as a made-up «User / user@gmail.com» (found 2026-11-10).
+  const googleBusyRef = useRef(false);
+  const onGoogle = (fallback: AuthUser) => oneAtATime(googleBusyRef, async () => {
+    const r: Awaited<ReturnType<typeof signInWithProvider>> = await signInWithProvider('google').catch(() => ({ error: 'threw' }));
+    const outcome = oauthOutcome(r, isBackendLive);
+    if (outcome === 'redirected') return; // store adopts the session via onAuthStateChange; the OAuth redirect
     // lands on the tiny /auth stub, which bounces back to '/' or '/agent' already signed in.
-    if (r.user) return done(r.user);
-    done(fallback);
-  };
+    if (outcome === 'signed-in') return done(r.user!);
+    if (outcome === 'preview') return done(fallback); // no backend at all: the design preview's pretend account
+    setStep('main');
+    setOauthErr(t('Google sign-in isn’t available right now. Please try another method.'));
+  });
 
   const onAppleContinue = async () => {
     // Live backend → real Apple OAuth (mirrors Google). NEVER fall back to a fake "Apple User"
