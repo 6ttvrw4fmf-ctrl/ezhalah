@@ -1888,7 +1888,8 @@ export async function fetchListingsForQuery(
     // The bath count the card prints is the one the index SERVES when the site's own box is empty (Rule B: the
     // seller's words fill it) — otherwise a customer who filtered «3 حمامات» reaches a card showing none
     // (card_parity_card_missing fkralemar/aqargate, 🔧 2026-11-10; src/lib/indexBathrooms.ts).
-    l.bathrooms = bathroomsForCard(l.bathrooms, c.af_canon?.bathrooms) ?? 0;
+    const servedBaths = c.af_canon?.bathrooms;   // read only; the canonical row itself is attached verbatim above
+    l.bathrooms = bathroomsForCard(l.bathrooms, servedBaths) ?? 0;
     // A land «total» the index read as a PER-METRE price (owner 2026-11-04) prints the index's «≈ figure × area», so the
     // client budget net below keeps the card the server matched (src/lib/landPerMeterTotal.ts).
     followIndexPerMeterVerdict(l, c.effective_price);

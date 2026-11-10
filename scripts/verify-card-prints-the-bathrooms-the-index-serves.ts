@@ -29,7 +29,7 @@ check('(mutation) the raw-only card is caught: it prints no bath count for an em
 // Both card paths call the rule.
 const remote = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
 check('the search path hands the index row\'s bathrooms to the rule right where af_canon travels with the card',
-  /l\.canon = c\.af_canon;[\s\S]{0,600}?l\.bathrooms = bathroomsForCard\(l\.bathrooms, c\.af_canon\?\.bathrooms\) \?\? 0;/.test(remote));
+  /l\.canon = c\.af_canon;[\s\S]{0,700}?const servedBaths = c\.af_canon\?\.bathrooms;[^\n]*\n\s*l\.bathrooms = bathroomsForCard\(l\.bathrooms, servedBaths\) \?\? 0;/.test(remote));
 check('the in-app ad page\'s sibling cards read the index\'s bathrooms with the Arabic place and hand it to the rule',
   /select\('listing_id,region_ar,city_ar,district_ar,bathrooms'\)/.test(remote) && /r\.bathrooms = bathroomsForCard\(r\.bathrooms, bathsById\.get\(Number\(r\.id\)\)\) \?\? 0;/.test(remote));
 check('the rule is imported from one module', /import \{ bathroomsForCard \} from '@\/lib\/indexBathrooms';/.test(remote));
