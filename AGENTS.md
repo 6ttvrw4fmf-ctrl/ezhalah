@@ -786,6 +786,18 @@ auto-reactivated (owner, 2026-08-30)."*
 `ops_adjudicated_listing` is a VIEW; write to **`ops_adjudicated_retraction`** (`source_table`,
 `listing_id`, `reason`, `evidence` jsonb).
 
+**Since 2026-11-09 the register also outlives the CRAWL UPSERT, not only the recovery job.** Measured
+that day: four adjudicated rows (dealapp 22045812, three gathern units) were active again because every
+platform's upsert payload writes `active=true` and nothing checked the ledger on that path — the
+recovery job's exemption never saw them. `trg_keep_adjudicated_hidden` (BEFORE UPDATE on every
+`*_residential_listings` / `*_commercial_listings` table, false→true flip only) refuses the flip for any
+row in `ops_adjudicated_listing` unless `ops_adjudication_superseded` records its OWN page read live after
+the adjudication, and logs the refusal in `ops_adjudicated_reactivation_blocked`.
+`mon_detect_adjudication_guard_missing()` re-measures attachment from `pg_trigger` every sweep. So: a
+source that republishes an adjudicated listing is recorded in `ops_adjudication_superseded` (own-page
+live reading, evidence) — never by deleting the ledger row and never by dropping the trigger. Migration
+`20261109124411`; guard `scripts/verify-adjudicated-rows-cannot-be-reactivated-by-upsert.ts`.
+
 **How this was earned.** The owner said «delete the 99 please» about راكز's «البيع على الخارطة»
 (off-plan) units on 2026-09-14. They were deactivated, a detector was added to watch them, and they
 were **active again the next day**. Three days were then spent suspecting the scraper, which was
