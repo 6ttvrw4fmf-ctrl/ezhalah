@@ -1474,6 +1474,65 @@ def muhaysini_page(url: str, fetch=None) -> dict | None:
             "text_head": " | ".join(lines)[:1500]}
 
 
+_MOBASHER_RECORDS: "dict | None" = None
+
+
+def mobasher_page(url: str, fetch=None) -> dict | None:
+    """A mobasher ad read from the platform's OWN discovery record (🆕 2026-11-10). mobasher.sa/direct/realestate/<slug>
+    is a JS shell to the independent reader (re-read run 42773173060: title only), so the score compared our structured
+    values with the seller's one-line prose: 26222806 stores propertySpace 300 / bathrooms 5 (the record's own fields)
+    and the prose says «مساحة الأرض: 250 م²»; 25881325 stores askingPrice 3,100,000 and the prose names no price —
+    both scored MISMATCH and capped the 11-10 night at 5 (mobasher 83.3 %). The scraper writes the box (Rule B), so
+    the comparison reads the box. Keyed by the record's slugAr (listing_url = SITE + quote(slugAr)); the list is
+    walked once per run; None when it cannot be read or lacks the ad (unknown, never wrong)."""
+    global _MOBASHER_RECORDS
+    m = re.search(r"mobasher\.sa/direct/realestate/([^?#]+)", url or "")
+    if not m:
+        return None
+    from urllib.parse import unquote
+    try:
+        if _MOBASHER_RECORDS is None:
+            if fetch is not None:
+                items = fetch()
+            else:
+                from scrapers.mobasher import run as mb
+                s, _ = mb.retry_smarter_session(mb.API, timeout=40)
+                items = mb.walk(s)[0]
+            _MOBASHER_RECORDS = {unquote(str((x.get("searchableAttributes") or {}).get("slugAr") or x.get("slugAr") or "")): x
+                                 for x in items if isinstance(x, dict)}
+        x = _MOBASHER_RECORDS.get(unquote(m.group(1)).rstrip("/"))
+    except Exception:  # noqa: BLE001 — a failed read is unknown, never wrong
+        return None
+    if not isinstance(x, dict):
+        return None
+    a = x.get("searchableAttributes") if isinstance(x.get("searchableAttributes"), dict) else {}
+
+    def g(k):
+        return x.get(k) if x.get(k) not in (None, "") else a.get(k)
+    lines: list[str] = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0, "0"):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", "للبيع" if x.get("listingType") == "DIRECT_SALE" else None)
+    put("المنطقة", g("regionNameAr"))
+    put("المدينة", g("cityNameAr"))
+    put("الحي", g("neighborhoodNameAr"))
+    put("نوع العقار", g("propertyTypeAr"))
+    put("المساحة", g("propertySpace"), " م²")
+    put("عدد الغرف", g("rooms"))
+    put("دورات المياه", g("bathrooms"))
+    put("السعر", g("askingPrice"), " ريال")
+    put("عرض الشارع", g("streetWidth"))
+    title = str(g("titleAr") or "")
+    summary = re.sub(r"<[^>]+>", " ", str(g("summaryAr") or ""))
+    lines += [title] if title else []
+    lines += [y.strip() for y in summary.splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _TUBA_RECORDS: "dict | None" = None
 
 
@@ -1552,6 +1611,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
         if "aqaralmuhaysini.com/propertydetails/" in url:
             own = muhaysini_page
+        if "mobasher.sa/direct/realestate/" in url:
+            own = mobasher_page
         if "dallali.com/advertisements/" in url:
             own = dallali or dallali_page
         if "safainv.sa" in url:
