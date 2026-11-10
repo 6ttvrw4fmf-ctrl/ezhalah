@@ -112,3 +112,19 @@ export function pickResultsSearch<T extends { body: any; seq: number }>(kept: T 
   if (!isResultsPage(arrived.body)) return kept;
   return !kept || arrived.seq > kept.seq ? arrived : kept;
 }
+
+/**
+ * Read the headline only AFTER the drop count is measured, and keep re-reading both until they agree or the
+ * bounded wait ends (CodeRabbit, PR 11725): the app may still be updating its headline while hydration lands,
+ * so a headline read before the wait is stale. The verdict is always the LAST pair read; nothing is excused.
+ */
+export async function settleHeadline<D extends { n: number | null }>(
+  readUi: () => Promise<number | null>, readDrops: () => D, rpc: number | null,
+  sleep: () => Promise<void>, tries = 20,
+): Promise<{ ui: number | null; drops: D; ok: boolean }> {
+  let drops = readDrops();
+  for (let i = 0; i < tries && drops.n == null; i++) { await sleep(); drops = readDrops(); }
+  let ui = await readUi();
+  for (let i = 0; i < tries && !honestHeadline(ui, rpc, drops.n); i++) { await sleep(); drops = readDrops(); ui = await readUi(); }
+  return { ui, drops, ok: honestHeadline(ui, rpc, drops.n) };
+}

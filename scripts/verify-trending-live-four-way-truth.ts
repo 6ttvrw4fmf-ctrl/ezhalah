@@ -26,7 +26,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
-import { newHydrationLedger, recordHydration, dropsOf, honestHeadline, pickResultsSearch, isHydrationRequest, hydrationRequestTracker } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, dropsOf, pickResultsSearch, isHydrationRequest, hydrationRequestTracker, settleHeadline } from './lib/hydrationDrops.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { pickScreenCityCall } from './lib/trendingScreenCall.ts';
@@ -447,8 +447,6 @@ async function runJourney(j: Journey) {
         Array.isArray(body.p_cities) && body.p_cities.includes(city),
         `p_cities=${JSON.stringify(body.p_cities)}`);
 
-      const uiTxt = await page.evaluate(() => document.body.innerText);
-      const uiCount = resultsFoundCount(uiTxt);
       // AN UNREADABLE TOTAL IS A DEFECT, NOT A SKIP (2026-09-19, routine #5). This was
       // `if (uiCount != null) { check(...) }` over a parser pinned to the retired «لقينا N إعلان».
       // When PR #3186 rotated the sentence the parse returned null on every cohort, the `if` fell
@@ -461,10 +459,15 @@ async function runJourney(j: Journey) {
       // still be reading a hydration body when the headline settles, so wait (bounded) for the count to be MEASURED;
       // if it never is, the strict rule applies — an unmeasured difference is never excused (CodeRabbit, PR 11725).
       const pageKeys = rows.map((r: any) => `${r.source_table}:${r.listing_id}`);
-      let drops = dropsOf(hyd, pageKeys, (lastSearch as any).seq);
-      for (let w = 0; w < 20 && drops.n == null; w++) { await page.waitForTimeout(500); drops = dropsOf(hyd, pageKeys, (lastSearch as any).seq); }
+      // The headline is read AFTER the drops are measured and re-read until the pair agrees (bounded): a headline read
+      // before the wait can be stale (CodeRabbit, PR 11725). The verdict is the last pair read.
+      const searchSeq = (lastSearch as any).seq;
+      const settled = await settleHeadline(
+        async () => resultsFoundCount(await page.evaluate(() => document.body.innerText)),
+        () => dropsOf(hyd, pageKeys, searchSeq), rpcTotal, () => page.waitForTimeout(500));
+      const uiCount = settled.ui, drops = settled.drops;
       check(`${name}: the displayed result count == the search RPC's total_count (minus the measured hydration drops)`,
-        honestHeadline(uiCount, rpcTotal, drops.n),
+        settled.ok,
         uiCount == null
           ? `the rendered total could not be READ (rpc=${rpcTotal}). The pool-derived matcher matched `
             + 'nothing on a settled screen — check scripts/verify-results-sentence-parsers-track-the-pool.ts '

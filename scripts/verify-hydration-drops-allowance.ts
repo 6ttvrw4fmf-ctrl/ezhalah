@@ -1,6 +1,6 @@
 // Hermetic proof of scripts/lib/hydrationDrops.ts — the one rule the live count robots use to judge an honest headline.
 // Executes the functions on synthetic hydration traffic; every mutation must be caught.
-import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, isResultsPage, newestBySeq, pickResultsSearch, isHydrationRequest, hydrationRequestTracker, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, isResultsPage, newestBySeq, pickResultsSearch, isHydrationRequest, hydrationRequestTracker, settleHeadline, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); if (!ok) failed++; };
@@ -146,6 +146,35 @@ mustCatch('settling a failed hydration without stamping it would accept 99 vs 10
 const failWired = (src: string) => /page\.on\('requestfailed',[^\n]*\.settled\(req, false, /.test(src) && /hydReq\.settled\([a-z]+\.request\(\), recorded, arrived\)/.test(src);
 check('both robots stamp failed hydrations (wiring)', failWired(trending) && failWired(afSrc));
 mustCatch('a robot settling failures as recorded fails the wiring check', !failWired(afSrc.replace('settled(req, false, ', 'settled(req, true, ')));
+
+// SETTLE: the headline changes WHILE hydration is pending (100 → 99 once the drop lands). It must be read after the
+// drops are measured, and the verdict must be the settled pair (CodeRabbit, PR 11725).
+{
+  const timeline = (uiSeq: (number | null)[], dropSeq: (number | null)[]) => {
+    let t = 0;
+    return { readUi: async () => uiSeq[Math.min(t, uiSeq.length - 1)], readDrops: () => ({ n: dropSeq[Math.min(t, dropSeq.length - 1)] }), sleep: async () => { t++; } };
+  };
+  const a = timeline([100, 100, 99], [null, null, 1]);   // drop measured at t=2, headline updated at t=2
+  const ra = await settleHeadline(a.readUi, a.readDrops, 100, a.sleep);
+  check('a headline that updates during the wait is read after the drops are measured: 99 with 1 drop passes', ra.ok && ra.ui === 99 && ra.drops.n === 1);
+  const b = timeline([100, 99, 99, 99], [null, 1, 1, 1]);   // stale read would be 100 with 1 drop → wrongly red
+  const rb = await settleHeadline(b.readUi, b.readDrops, 100, b.sleep);
+  check('the settled pair (99, 1 drop) is the verdict, not the stale 100', rb.ok && rb.ui === 99);
+  const c = timeline([99], [null]);                         // never measured: strict rule, 99 vs 100 is red
+  const rc = await settleHeadline(c.readUi, c.readDrops, 100, c.sleep, 5);
+  check('an unmeasured one-row difference is still rejected after the wait', !rc.ok && rc.drops.n === null);
+  const d = timeline([98], [1]);                             // a real miscount stays red
+  check('a real miscount stays red after the wait', !(await settleHeadline(d.readUi, d.readDrops, 100, d.sleep, 5)).ok);
+  // mutation: reading the headline BEFORE the wait (the old order) judges the stale 100 against the measured drop
+  const m = timeline([100, 100, 99], [null, null, 1]);
+  const staleUi = await m.readUi(); let md = m.readDrops(); for (let i = 0; i < 20 && md.n == null; i++) { await m.sleep(); md = m.readDrops(); }
+  mustCatch('reading the headline before the wait rejects the honest settled headline', !honestHeadline(staleUi, 100, md.n));
+}
+const trendingNow = readFileSync(new URL('./verify-trending-live-four-way-truth.ts', import.meta.url), 'utf8');
+const settleWired = (src: string) => /await settleHeadline\(/.test(src) && !/const uiTxt = await page\.evaluate/.test(src);
+check('the Trending robot reads its headline through settleHeadline (wiring)', settleWired(trendingNow));
+mustCatch('a robot reading the headline before the wait fails the wiring check',
+  !settleWired(trendingNow.replace('await settleHeadline(', 'const uiTxt = await page.evaluate(() => 1); (')));
 
 console.log(failed ? `\n❌ ${failed} check(s) failed` : '\n✅ the honest-headline allowance is exact and measured');
 process.exit(failed ? 1 : 0);
