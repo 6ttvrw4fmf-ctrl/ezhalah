@@ -235,15 +235,14 @@ try {
       // challenge page — excluded and reported, never ✗. A 200 page that stays blank is still measured (99,999).
       const top = topStatus.get(u) ?? 0;
       if (seen === null && (top === 0 || top >= 400)) { console.log(`· ${site.host}: ${u} — top-level load answered HTTP ${top || 'nothing'} to this egress (WAF / block / outage), excluded as inconclusive`); continue; }
-      if (seen === null && frameDoc?.ready) await frameDoc.ready;
-      if (seen === null && topUnreadable.has(u) && !frameRefusal(frameDoc)) { console.log(`· ${site.host}: ${u} — top-level body unreadable and the frame stayed blank without proving a refusal: excluded as inconclusive`); continue; }
-      if (seen === null && topWall.has(u)) {
-        // The top-level fetch hit a wall, but the FRAME is its own request: if the frame received a real ad page (not a
-        // wall, not an error) that still carried a refusing header, that is a real refusal and fails here.
-        if (frameDoc?.ready) await frameDoc.ready;
+      if (seen === null && (topWall.has(u) || topUnreadable.has(u))) {
+        // The top-level fetch hit a wall (or its body could not be read), but the FRAME is its own request: if the
+        // frame received a real ad page (not a wall, not an error) that still carried a refusing header, that is a
+        // real refusal and FAILS here — never a 99,999 ms sample that two fast siblings could outvote (CodeRabbit, #11680).
         const refusal = frameRefusal(frameDoc);
         if (refusal) { fail(`${site.host}: ${u} — the frame received the ad page (${frameDoc.text.length} chars) with ${refusal}: REFUSES framing — take it off IN_APP_VIEWER_HOSTS`); continue; }
-        console.log(`· ${site.host}: ${u} — top-level load was a bot wall to this egress (frame: ${frameDoc ? `HTTP ${frameDoc.status}, ${frameDoc.text.length} chars` : 'no document answer'}), excluded as inconclusive`); continue;
+        const why = topWall.has(u) ? 'top-level load was a bot wall to this egress' : 'top-level body could not be read';
+        console.log(`· ${site.host}: ${u} — ${why} (frame: ${frameDoc ? `HTTP ${frameDoc.status}, ${frameDoc.text.length} chars` : 'no document answer'}), excluded as inconclusive`); continue;
       }
       times.push(seen ?? 99_999);
       console.log(`· ${site.host}: ${u} → ${seen === null ? 'NO CONTENT in 12s' : seen + ' ms'}`);

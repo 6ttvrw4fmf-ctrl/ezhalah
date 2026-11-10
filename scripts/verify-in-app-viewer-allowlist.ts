@@ -361,11 +361,11 @@ check('…and so is a CSP frame-ancestors that is not *', /frame-ancestors 'self
 check('no frame document answer at all is inconclusive (never invented)', guard.frameRefusal(null) === null);
 check('the top-level wall branch skips ONLY a wall: a full ad page with the header still fails as REFUSES framing', /if \(wall\) \{ topWall\.add\(u\); continue; \}\n\s*fail\(`\$\{site\.host\}: \$\{u\} now REFUSES framing/.test(guardSrc));
 check('an unreadable top-level body is inconclusive, never classified as a wall', /const body = await res\.text\(\)\.catch\(\(\) => null\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(body === null\) \{ topUnreadable\.add\(u\); console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc));
-check('an unreadable top-level body never becomes a 99,999 ms sample: a blank frame over it is inconclusive unless the frame proves a refusal', /topUnreadable\.add\(u\);/.test(guardSrc) && /if \(seen === null && topUnreadable\.has\(u\) && !frameRefusal\(frameDoc\)\) \{ console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc));
+check('an unreadable top-level body never becomes a 99,999 ms sample: a blank frame over it is inconclusive unless the frame proves a refusal', /topUnreadable\.add\(u\);/.test(guardSrc) && /if \(seen === null && \(topWall\.has\(u\) \|\| topUnreadable\.has\(u\)\)\) \{/.test(guardSrc) && /excluded as inconclusive`\); continue;\n\s*\}\n\s*times\.push\(seen \?\? 99_999\);/.test(guardSrc));
 check('a given-but-empty ONLY_HOSTS is refused (the bridge already reads it as partial)', /if \(\(process\.env\.ONLY_HOSTS \?\? ''\) !== '' && !only\.length\) fail\(/.test(guardSrc));
 check('the frame body read is awaited (bounded) BEFORE the browser context is closed', (() => { const a = guardSrc.indexOf('await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);'); const c = guardSrc.indexOf('await ctx.close();'); return a > 0 && c > 0 && a < c; })());
-check('the frame body read is awaited before the refusal decision', /if \(frameDoc\?\.ready\) await frameDoc\.ready;\n\s*const refusal = frameRefusal\(frameDoc\);/.test(guardSrc) && /d\.ready = r\.text\(\)\.then/.test(guardSrc));
-check('the exclusion branch consults the frame\'s evidence before excluding', /topWall\.has\(u\)\) \{\n\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(frameDoc\?\.ready\) await frameDoc\.ready;\n\s*const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc));
+check('the frame body read is awaited before the refusal decision', /d\.ready = r\.text\(\)\.then/.test(guardSrc) && guardSrc.indexOf('await Promise.race([frameDoc.ready') < guardSrc.indexOf('const refusal = frameRefusal(frameDoc);'));
+check('the exclusion branch consults the frame\'s evidence before excluding, and a proven refusal FAILS (never a 99,999 sample)', /\(topWall\.has\(u\) \|\| topUnreadable\.has\(u\)\)\) \{\n(?:\s*\/\/[^\n]*\n)+\s*const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc));
 check('the top-level log line carries no <title> (PDPL: a listing title can name a person or a phone)', !/title «\$\{title\}»/.test(guardSrc) && !/const title = \/<title/.test(guardSrc));
 check('an ONLY_HOSTS entry that is not in SITES fails the run (a typo must not read as a green run over nothing)', /const unknown = only\.filter\(\(h\) => !SITES\.some\(\(s\) => s\.host === h\)\);\n\s*if \(unknown\.length\) fail\(/.test(guardSrc));
 mustCatch('a wall test that trusts the words alone (an ad page with «captcha» read as a wall)',
@@ -375,14 +375,16 @@ mustCatch('a wall test that stops looking at the words (the 6 KB interstitial re
 mustCatch('a frame refusal that ignores what the frame received (every wall-covered blank frame excluded)',
   liftGuard(guardSrc.replace("if (!doc || doc.status >= 400 || isBotWall(doc.text)) return null;", "return null;")).frameRefusal({ status: 200, xfo: 'SAMEORIGIN', csp: '', text: adPage }) === null);
 mustCatch('an exclusion that no longer asks the frame', !/const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc.replace('const refusal = frameRefusal(frameDoc);\n        if (refusal) { fail(', 'const refusal = null;\n        if (refusal) { fail(')));
+mustCatch('a proven refusal demoted to a 99,999 sample (two fast siblings would outvote it)',
+  !/const refusal = frameRefusal\(frameDoc\);\n\s*if \(refusal\) \{ fail\(/.test(guardSrc.replace('if (refusal) { fail(', 'if (refusal) { console.log(')));
 mustCatch('a top-level branch that skips every page as a wall (`if (true)`)',
   !/if \(wall\) \{ topWall\.add\(u\); continue; \}\n\s*fail\(`\$\{site\.host\}: \$\{u\} now REFUSES framing/.test(guardSrc.replace('if (wall) { topWall.add(u); continue; }', 'if (true) { topWall.add(u); continue; }')));
 mustCatch('an unreadable body read as an empty page (a wall)',
   !/const body = await res\.text\(\)\.catch\(\(\) => null\);/.test(guardSrc.replace("const body = await res.text().catch(() => null);", "const body = await res.text().catch(() => '');")));
 mustCatch('a refusal decided before the frame body arrived',
-  !/if \(frameDoc\?\.ready\) await frameDoc\.ready;\n\s*const refusal = frameRefusal\(frameDoc\);/.test(guardSrc.replace('if (frameDoc?.ready) await frameDoc.ready;\n', '')));
+  (() => { const m = guardSrc.replace("      if (seen === null && frameDoc?.ready) await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);\n", ''); return !(m.indexOf('await Promise.race([frameDoc.ready') > 0 && m.indexOf('await Promise.race([frameDoc.ready') < m.indexOf('const refusal = frameRefusal(frameDoc);')); })());
 mustCatch('an unreadable body that still measures the blank frame (the 99,999 trap)',
-  !/if \(seen === null && topUnreadable\.has\(u\) && !frameRefusal\(frameDoc\)\) \{ console\.log\([^\n]*inconclusive[^\n]*continue; \}/.test(guardSrc.replace('if (seen === null && topUnreadable.has(u) && !frameRefusal(frameDoc)) {', 'if (false) {')));
+  !/if \(seen === null && \(topWall\.has\(u\) \|\| topUnreadable\.has\(u\)\)\) \{/.test(guardSrc.replace('if (seen === null && (topWall.has(u) || topUnreadable.has(u))) {', 'if (seen === null && topWall.has(u)) {')));
 mustCatch('a context closed before the frame body was read',
   (() => { const m = guardSrc.replace("      if (seen === null && frameDoc?.ready) await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);\n", ''); const a = m.indexOf('await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);'); const c = m.indexOf('await ctx.close();'); return !(a > 0 && c > 0 && a < c); })());
 mustCatch('the <title> back in the log', /title «\$\{title\}»/.test(guardSrc.replace('${body.length} chars${wall', '${body.length} chars, title «${title}»${wall')));
