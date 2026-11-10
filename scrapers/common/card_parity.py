@@ -46,7 +46,8 @@ from urllib.parse import urlsplit
 
 from scrapers.common.db import sb
 from scrapers.common.new_listings_score import (
-    MATCH, MISMATCH, PAGE_SILENT, PROSE_ONLY_DISTRICT, SKIP_PRICE, STORED, UNREADABLE, WE_MISS,
+    CONTACT_LINE, DISTRICT_ON_PAGE, MATCH, MISMATCH, PAGE_SILENT, PROSE_ONLY_DISTRICT, SKIP_PRICE, STORED,
+    UNREADABLE, WE_MISS,
     closed_ad_page, compare_listing, is_other_ads_page, load_owner_district_aliases, norm, norm_district,
     page_lacks_its_ad, scope_to_its_ad,
 )
@@ -205,6 +206,41 @@ def _price_as_the_page_prints_it(stored: dict, page: dict, verdict: str) -> str:
     return verdict
 
 
+# The OFFICE's own branch addresses, printed under every ad of the site: never the ad's district.
+_OFFICE_ADDRESS = re.compile(r"موقعنا الجغرافي|العنوان\s+(?:الاول|الثاني)(?!\S)")
+_DISTRICT_LABEL = re.compile(r"(?<!\S)الحي\s*[:：]\s*")
+_NEXT_LABEL = r"(?=\s*$|\s*[|،,]|\s+\S+\s*[:：])"
+
+
+def _district_as_the_page_states_it(stored: dict, page: dict) -> str:
+    """Two ways a page that does NOT contradict our district scored MISMATCH. Each was proven on the real
+    page (2026-11-09); a page that names another district of its own still scores MISMATCH.
+
+    1. The page's own labelled field carries our district. fursaghyr 4367079: «الحي: أم الجود المدينة: مكة
+       المكرمة» is what we store, and the only «حي X» the comparator saw was the deed prose («حي واحة مكة
+       التطويري الأول … مساحة الوحدة»). Every «الحي:» label on the page must carry our district, whole.
+    2. The only district named is the office's own address. sqcc 13707588: the ad page states no district
+       (ours comes from the site's list card) and its footer prints «العنوان الاول الدمام حي احد … العنوان
+       الثاني جدة حي السامر» under every ad. The page said nothing about the ad's district.
+    """
+    d = norm_district(stored.get("district_ar") or "")
+    if not d:
+        return MISMATCH
+    text = norm(page.get("_text") or "")
+    labels = [text[m.end():] for m in _DISTRICT_LABEL.finditer(text)]
+    if labels and all(re.match(r"(?:حي\s+)?" + re.escape(d) + _NEXT_LABEL, rest) for rest in labels):
+        return MATCH
+    lines = [norm(str(x)) for x in ([page.get("title") or ""] + list((page.get("meta") or {}).values())
+                                    + list(page.get("evidence_lines") or [])
+                                    + (page.get("text_head") or "").split(" | ")) if x]
+    naming = [x for x in lines if DISTRICT_ON_PAGE.search(x) and not CONTACT_LINE.search(x)]
+    if naming and not labels and all(
+            _OFFICE_ADDRESS.search(x) and not DISTRICT_ON_PAGE.search(x[:_OFFICE_ADDRESS.search(x).start()])
+            for x in naming):
+        return PAGE_SILENT
+    return MISMATCH
+
+
 def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, link_kind: str | None,
           link_repaired: bool = False, page_photo: bool | None = None) -> dict[str, str]:
     """One ad: every field's verdict. `card` None = the journey never reached the card (render checks skipped);
@@ -222,6 +258,8 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
             src["price"] = MATCH
     if page and src.get("price") in (MISMATCH, WE_MISS):
         src["price"] = _price_as_the_page_prints_it(stored, page, src["price"])
+    if page and src.get("district") == MISMATCH:
+        src["district"] = _district_as_the_page_states_it(stored, page)
     for f in SOURCE_FIELDS:
         v = src.get(f, UNREADABLE if page is None else PAGE_SILENT)
         if f == "price" and platform in SKIP_PRICE:

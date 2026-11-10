@@ -241,3 +241,39 @@ def test_a_detail_page_printing_our_rate_matches_only_when_rate_times_area_is_ou
     assert _judge(stored={**plot, "price_total": 900000}, card=None, page=page)["price"] == MISMATCH   # not rate × area
     two = _page(["1,400 ريال", "650,000 ريال", "المساحة 500 م²"])
     assert _judge(stored=plot, card=None, page=two)["price"] == MISMATCH                 # the page prints another total
+
+
+_OFFICE_FOOTER = "موقعنا الجغرافي : العنوان الاول الدمام حي احد شارع عمر بن الخطاب - العنوان الثانى جدة حي السامر شارع وهيب"
+
+
+def _district(stored_district, lines, text=None):
+    page = _page(lines)
+    if text is not None:
+        page["_text"] = text
+    return cp.judge({**STORED, "district_ar": stored_district}, None, page, platform="x", link_kind=None)["district"]
+
+
+def test_the_pages_own_district_label_is_ours_only_when_it_names_ours():   # fursaghyr 4367079 (alert 13974, 2026-11-09)
+    deed = "حي واحة مكة التطويري الأول المعدل بمدينة مكة المكرمة مساحة الوحدة من الأرض 39.235 متر"
+    label = "نوع العقار: شقة المنطقة: منطقة مكة المكرمة الحي: %s المدينة: مكة المكرمة الشارع: حارثة"
+    assert _district("أم الجود", [deed], label % "أم الجود " + deed) == "match"
+    assert _district("أم الجود", [deed], label % "حي أم الجود " + deed) == "match"
+    # the label names another district, or a longer name that only starts with ours: still wrong
+    assert _district("أم الجود", [deed], label % "الشوقية " + deed) == "mismatch"
+    assert _district("الناصرية", [deed], label % "الناصرية الغربية " + deed) == "mismatch"
+    # two labels, one of them not ours: still wrong
+    assert _district("أم الجود", [deed], label % "أم الجود" + " الحي: العوالي " + deed) == "mismatch"
+    # no label at all: the deed prose is all the page says, and it is not ours
+    assert _district("أم الجود", [deed], deed) == "mismatch"
+
+
+def test_the_offices_own_address_is_not_the_ads_district():                # sqcc 13707588 (alert 13928, 2026-11-09)
+    ad = ["أرض للبيع", "المساحة 600 م²"]
+    assert _district("الشاطئ", ad + [_OFFICE_FOOTER]) == "page_silent"
+    # the ad itself names another district: still wrong, footer or not
+    assert _district("الشاطئ", ad + ["أرض للبيع في حي النزهة", _OFFICE_FOOTER]) == "mismatch"
+    assert _district("الشاطئ", ad + ["فيلا في حي النزهة - " + _OFFICE_FOOTER]) == "mismatch"
+    assert _district("الشاطئ", ad + ["أرض للبيع في حي النزهة"]) == "mismatch"
+    # ours is on the page: unchanged
+    assert _district("الشاطئ", ad + ["حي الشاطئ", _OFFICE_FOOTER]) == "match"
+
