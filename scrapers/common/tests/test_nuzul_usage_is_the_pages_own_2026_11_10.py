@@ -145,6 +145,19 @@ def test_a_flag_that_is_not_a_yes_is_silence(site):
     assert (row["property_type"], table, _usage(row)) == ("Commercial Land", "commercial", "تجاري")
 
 
+@pytest.mark.parametrize("site", JAWHER)
+def test_the_machine_list_and_the_shown_words_use_one_yes_rule(site):
+    """`usages` (machine names) and `usage` (the page's words) come from the same flags by the same rule."""
+    item = _land(site, "residential", (C,))
+    item.update({R: "0", FARM: "false", "is_for_health": ""})        # strings that are not a yes
+    info = _mapped(site, item)[0]["additional_info"]
+    assert (info.get("usages"), info.get("usage")) == (["commercial"], "تجاري")
+    item = _land(site, "residential", ())
+    item.update({R: "0"})
+    info = _mapped(site, item)[0]["additional_info"]
+    assert info.get("usages") is None and info.get("usage") is None
+
+
 def test_the_rule_itself():
     assert U.land_category({"category": "residential", C: True}) == "commercial"
     assert U.land_category({"category": "commercial", R: True}) == "residential"
@@ -163,7 +176,7 @@ def test_the_rule_itself():
 # maqam left the Nuzul API (it reads the page's own category_ar); eightfloor is the v2 API on one office with two
 # apartments and no use flags observed — neither prints a usage row nor decides a land type from the filing.
 NOT_THE_NUZUL_USAGE_SHAPE = {"maqam", "eightfloor"}
-_TALKS_TO_NUZUL = re.compile(r"nzl-backend|is_for_(residential|commercial)|from scrapers\.(jawher|goldendeal)\.run import|from scrapers\.(jawher|goldendeal) import")
+_TALKS_TO_NUZUL = re.compile(r"nzl-backend|is_for_(residential|commercial)|\bnuzul_usage\b|nuzul\.api\.|from scrapers\.(jawher|goldendeal)\.run import|from scrapers\.(jawher|goldendeal) import")
 
 
 def _nuzul_scrapers(sources: dict[str, str]) -> list[str]:

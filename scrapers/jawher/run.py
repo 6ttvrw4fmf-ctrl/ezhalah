@@ -356,12 +356,7 @@ def nuzul_fields(d: dict[str, Any], type_overrides: Optional[dict[str, str]] = N
         "type_key": d.get("type"), "type_ar": type_ar, "purpose": purpose,
         "source_category": d.get("category"),
         "usage": nuzul_usage.usage_shown_ar(d),              # the page's «الاستخدام» words, shown on the card
-        "usages": [u for u, on in (("residential", d.get("is_for_residential")),
-                                   ("commercial", d.get("is_for_commercial")),
-                                   ("farming", d.get("is_for_farming")),
-                                   ("education", d.get("is_for_education")),
-                                   ("health", d.get("is_for_health")),
-                                   ("factory", d.get("is_for_factory"))) if on] or None,
+        "usages": nuzul_usage.uses_on(d) or None,            # same flags, same yes-rule as the row above
         "availability_status": status,
         "price_label": d.get("price_label"),
         "rent_prices_raw": {k: d.get(k) for k in ("rent_price_annually", "rent_price_monthly",
