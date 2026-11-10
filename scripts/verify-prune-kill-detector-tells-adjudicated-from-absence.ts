@@ -30,10 +30,13 @@ function latestBody(files: Record<string, string>): { file: string; body: string
   const file = defs[defs.length - 1];
   const sql = codeOnly(files[file]);
   const start = sql.search(re);
-  const open = sql.indexOf('$function$', start);
-  const close = open < 0 ? -1 : sql.indexOf('$function$', open + 10);
-  if (open < 0 || close < 0) return null;
-  return { file, body: sql.slice(open + 10, close).replace(/\s+/g, ' ') };
+  // the dollar tag is READ, never assumed: no tag or no matching close means no body (fail closed)
+  const tag = sql.slice(start).match(/\$([A-Za-z_][A-Za-z0-9_]*)?\$/);
+  if (!tag || tag.index === undefined) return null;
+  const open = start + tag.index + tag[0].length;
+  const close = sql.indexOf(tag[0], open);
+  if (close < 0) return null;
+  return { file, body: sql.slice(open, close).replace(/\s+/g, ' ') };
 }
 
 const hoursOf = (n: string, unit: string) => Number(n) * (/^day/.test(unit) ? 24 : /^min/.test(unit) ? 1 / 60 : 1);
