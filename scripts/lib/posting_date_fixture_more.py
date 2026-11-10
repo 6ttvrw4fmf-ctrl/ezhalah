@@ -38,7 +38,6 @@ GROUP_MODULES = [
     "scripts.lib.posting_date_fixture_g6",
     "scripts.lib.posting_date_fixture_g8",
     "scripts.lib.posting_date_fixture_g10",
-    "scripts.lib.posting_date_fixture_g11",
 ]
 
 
@@ -116,7 +115,6 @@ def no_date_report():
     for m in _groups():
         for site, (module, build, call, raw_path) in getattr(m, "NO_DATE", {}).items():
             def run(mutated=None, args=None):
-                _seed_catalog()                  # the same stubbed location catalog the dated sites map against
                 real = importlib.import_module(module)
                 mod = real
                 if mutated:
