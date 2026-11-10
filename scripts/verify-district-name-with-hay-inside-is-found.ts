@@ -15,6 +15,7 @@ import { bundleResolver } from './lib/bundleResolver.ts';
 const root = join(import.meta.dirname, '..');
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`); if (!ok) failed++; };
+const mustCatch = (label: string, caught: boolean, detail = '') => check(`(mutation) catches ${label}`, caught, detail);
 
 // The production index rows of 2026-11-10 14:02 UTC for the twin name, plus controls.
 const rows = [
@@ -66,7 +67,7 @@ const real = await bundleResolver(root, rows as any);
     writeFileSync(f, cut);
     const mutant = await bundleResolver(dir, rows as any);
     const b = ask(mutant, 'حي البحيرات');
-    check('(mutation) the resolver without the union is CAUGHT: it answers Jeddah alone and drops the 327 Mecca ads', !(b.ambiguous === true && b.cities.includes('Mecca')), JSON.stringify(b));
+    mustCatch('the resolver without the union: it answers Jeddah alone and drops the 327 Mecca ads', !(b.ambiguous === true && b.cities.includes('Mecca')), JSON.stringify(b));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
