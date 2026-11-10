@@ -37,6 +37,8 @@ CASES = [
     ("دور ارضي بحي البصر 3", "Floor", "residential"),                      # 7855826
     ("للبيع شقة دور أرضي – شارع عثمان بن عفان | بريدة", "Floor", "residential"),  # 648058: longest token «دور أرضي»
     ("شقة فاخرة حي الروضة", "Apartment", "residential"),                   # 3961981 stays a flat
+    ("للبيع شالية بحي السلمان", "Chalet", "residential"),                  # 21673925: the ة spelling
+    ("صالات تجارية للإيجار - مجمع روفان التجاري بريدة", "Shop", "commercial"),  # 26359507: plural commercial halls
 ]
 bad = []
 for title, want, cat in CASES:
