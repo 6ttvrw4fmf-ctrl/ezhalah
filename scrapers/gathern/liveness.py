@@ -1009,6 +1009,21 @@ def _recheck_dead(client, args, run_id: int, mode: str, now_iso: str,
     return 0
 
 
+def quarantine_cause(canary_ok, alive_rate: float, c_alive: int, c_probed: int,
+                     p_alive: int, p_probed: int) -> str:
+    """The reason a run was quarantined, in the words of the gate that actually fired (♻️ 2026-11-09).
+
+    `environment_is_trustworthy` returns False on a failed control BEFORE it looks at the alive-rate,
+    but the note always said «alive_rate=X below 20%»: on 11-08/09 runs at 92.2 %, 96.7 % and 97.5 %
+    alive were logged as «below 20%» while the real cause was one known-live control answering 404.
+    A note that names the wrong gate sends the next engineer after the wrong fix."""
+    if canary_ok is False:
+        return (f"known-live controls failed (open {c_alive}/{c_probed}, close {p_alive}/{p_probed}; "
+                f"alive_rate={alive_rate:.1%} not consulted)")
+    return (f"alive_rate={alive_rate:.1%} below {MIN_ALIVE_RATE_FOR_TRUST:.0%} "
+            f"(min_probes={MIN_PROBES_FOR_TRUST})")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Gathern detail-page liveness sweep (owner-gated)")
     ap.add_argument("--limit", type=int, default=0, help="probe at most N oldest-stale rows (0 = all stale)")
@@ -1402,8 +1417,8 @@ def main() -> int:
         # this quarantine at all. The branch is deliberately left standing — it still fires for any
         # caller that passes a canary result without bracketing it, and its text is the clearest
         # statement in the codebase of why the floor could not tell the two cases apart.
-        notes = (f"TRUST-QUARANTINED alive_rate={alive_rate:.1%} below {MIN_ALIVE_RATE_FOR_TRUST:.0%} "
-                 f"(min_probes={MIN_PROBES_FOR_TRUST}) — 0 strikes and 0 inactivations written "
+        notes = (f"TRUST-QUARANTINED {quarantine_cause(canary_ok, alive_rate, c_alive, c_probed, p_alive, p_probed)}"
+                 f" — 0 strikes and 0 inactivations written "
                  f"(would_strike={len(strike_pending)} would_inactivate={len(kill_pending)}) — "
                  + trust_quarantine_reason(bool(canary_ok), c_alive, c_probed) + ". "
                  f"Owner review required. " + notes)
