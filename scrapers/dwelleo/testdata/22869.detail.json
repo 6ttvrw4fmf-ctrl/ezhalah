@@ -1,0 +1,404 @@
+{
+ "id": 22869,
+ "slug": "2-bedroom-apartment-for-rent-in-an-nahdah-jeddah-12",
+ "title": "شقة غرفتين للإيجار في النهضة، جدة",
+ "description": "شقة مفروشة في حي النهضة بمساحة ٨١ متر مربع\n\nغرفتا نوم · حمامان · ٨١ م² · مفروشة · ٦٠٬٠٠٠ ريال سنوياً\n\nلماذا هذا العقار؟\n• فرش متكامل يتيح لكم الانتقال المباشر دون عناء التجهيز\n• توفر صالة رياضية وحديقة يمنحكم خيارات متعددة للنشاط والاسترخاء\n\nالحياة هنا\nتقع الشقة في الدور ٣، على بعد دقيقة واحدة من طريق الملك عبدالعزيز و٦ دقائق من الواجهة البحرية.\n\nالتفاصيل\nالمساحة: ٨١ م² · غرفتا نوم · حمامان\nالموقع: حي النهضة، جدة\nالمبنى: الدور ٣ · موقف سيارات واحد\nالخدمات: مياه · كهرباء\nالمميزات: مصعد · حراسة 24/7 · صالة رياضية · حديقة · موقف سيارات\n\nتواصلوا معنا لترتيب موعد المعاينة.",
+ "area": 81,
+ "bedrooms": 2,
+ "bathrooms": 2,
+ "driver_room": null,
+ "maid_room": null,
+ "livings": 1,
+ "master_bedroom_count": null,
+ "price": 60000,
+ "status": "publish",
+ "furnishing_status": "furnished",
+ "availability": "available",
+ "availability_status": "available",
+ "units_remaining": null,
+ "video_view_link": null,
+ "3d_view_link": null,
+ "building_year": 2022,
+ "rating": 0,
+ "is_favorite": false,
+ "has_user_reviewed": false,
+ "is_featured": false,
+ "is_boosted": false,
+ "placement": null,
+ "location": {
+  "address": "شارع يوم اليرموك",
+  "lat": 21.611801,
+  "lng": 39.120411
+ },
+ "ad_license_number": " 7201191774",
+ "ad_license_expires_at": "2027-07-24",
+ "direction": null,
+ "surrounding_streets": null,
+ "region": {
+  "id": 2,
+  "title": "مكة",
+  "name": "مكة",
+  "translations": {
+   "ar": {
+    "name": "مكة"
+   },
+   "en": {
+    "name": "Makkah"
+   }
+  }
+ },
+ "city": {
+  "id": 11,
+  "ai_id": 11,
+  "region_id": 2,
+  "title": "جدة",
+  "slug": "jeddah",
+  "lat": 21.5433,
+  "lng": 39.1728,
+  "name": "جدة",
+  "translations": {
+   "ar": {
+    "name": "جدة"
+   },
+   "en": {
+    "name": "Jeddah"
+   }
+  }
+ },
+ "property_area": {
+  "id": 581,
+  "ai_id": 10200018028,
+  "city_id": 11,
+  "slug": "an-nahdah",
+  "title": "حي النهضة",
+  "lat": 21.606119,
+  "lng": 39.13221,
+  "name": "حي النهضة",
+  "translations": {
+   "ar": {
+    "name": "حي النهضة"
+   },
+   "en": {
+    "name": "An Nahdah Dist."
+   }
+  }
+ },
+ "image": {
+  "id": 174784,
+  "path": "https://cdn.dwelleo.sa/174784/01M6K4WTJZ4QCRM5CNWD9QS5K2.png",
+  "path_thumbnail": "https://cdn.dwelleo.sa/174784/01M6K4WTJZ4QCRM5CNWD9QS5K2.png",
+  "mime_type": "image/png"
+ },
+ "property_video": null,
+ "number_of_images": 6,
+ "has_slider": true,
+ "amenities": [
+  {
+   "id": 3,
+   "title": "موقف سيارات",
+   "image": {
+    "id": 1128,
+    "path": "https://cdn.dwelleo.sa/1128/01KA7E5TSZDC6G0MA7M0T6SYKJ.png",
+    "path_thumbnail": "https://cdn.dwelleo.sa/1128/01KA7E5TSZDC6G0MA7M0T6SYKJ.png",
+    "mime_type": "image/png"
+   },
+   "types": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    9,
+    10,
+    11,
+    12,
+    13,
+    15,
+    16
+   ],
+   "name": "موقف سيارات",
+   "translations": {
+    "ar": {
+     "name": "موقف سيارات"
+    },
+    "en": {
+     "name": "Parking"
+    }
+   }
+  },
+  {
+   "id": 7,
+   "title": "مصعد",
+   "image": {
+    "id": 1132,
+    "path": "https://cdn.dwelleo.sa/1132/01KA7E8GW6AD01B6EM27YJ933B.png",
+    "path_thumbnail": "https://cdn.dwelleo.sa/1132/01KA7E8GW6AD01B6EM27YJ933B.png",
+    "mime_type": "image/png"
+   },
+   "types": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    9,
+    10,
+    11,
+    12,
+    13,
+    15,
+    16
+   ],
+   "name": "مصعد",
+   "translations": {
+    "ar": {
+     "name": "مصعد"
+    },
+    "en": {
+     "name": "Elevator"
+    }
+   }
+  },
+  {
+   "id": 8,
+   "title": "حراسة 24/7",
+   "image": {
+    "id": 1133,
+    "path": "https://cdn.dwelleo.sa/1133/01KA7E94H5XT00EBMNWWT4GVTV.png",
+    "path_thumbnail": "https://cdn.dwelleo.sa/1133/01KA7E94H5XT00EBMNWWT4GVTV.png",
+    "mime_type": "image/png"
+   },
+   "types": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    9,
+    10,
+    11,
+    12,
+    13,
+    15,
+    16
+   ],
+   "name": "حراسة 24/7",
+   "translations": {
+    "ar": {
+     "name": "حراسة 24/7"
+    },
+    "en": {
+     "name": "24/7 Security"
+    }
+   }
+  },
+  {
+   "id": 9,
+   "title": "مفروش",
+   "image": {
+    "id": 1134,
+    "path": "https://cdn.dwelleo.sa/1134/01KA7E9TERRZZDX7W47VMN1HSV.png",
+    "path_thumbnail": "https://cdn.dwelleo.sa/1134/01KA7E9TERRZZDX7W47VMN1HSV.png",
+    "mime_type": "image/png"
+   },
+   "types": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    9,
+    10,
+    11,
+    12,
+    13,
+    15,
+    16
+   ],
+   "name": "مفروش",
+   "translations": {
+    "ar": {
+     "name": "مفروش"
+    },
+    "en": {
+     "name": "Furnished"
+    }
+   }
+  }
+ ],
+ "tags": [
+  {
+   "id": 1,
+   "title": "حديقة",
+   "color": "#bcefff",
+   "name": "حديقة",
+   "translations": {
+    "ar": {
+     "name": "حديقة"
+    },
+    "en": {
+     "name": "Garden"
+    }
+   }
+  },
+  {
+   "id": 6,
+   "title": "مصعد",
+   "color": "#00aa99",
+   "name": "مصعد",
+   "translations": {
+    "ar": {
+     "name": "مصعد"
+    },
+    "en": {
+     "name": "Elevator"
+    }
+   }
+  }
+ ],
+ "listing_type": {
+  "key": "for-rent",
+  "label": "إيجار"
+ },
+ "property_type": {
+  "id": 1,
+  "slug": "apartment",
+  "title": "شقة",
+  "name": "شقة",
+  "translations": {
+   "ar": {
+    "name": "شقة"
+   },
+   "en": {
+    "name": "Apartment"
+   }
+  }
+ },
+ "investment_score": null,
+ "badge_status": "publish",
+ "agency_badge": false,
+ "floor_number": 3,
+ "available_date": null,
+ "handover_date": null,
+ "rejection_reason": null,
+ "total_views": 551,
+ "average_time": 500,
+ "contact_clicks": 0,
+ "saved_favorite": 0,
+ "last_viewed": "10-11-2026 01:22",
+ "average_rating": 0,
+ "rental_yield": null,
+ "number_of_floors": null,
+ "number_of_flats": null,
+ "build_permit_floors": null,
+ "utility_availability": [
+  "water",
+  "electricity"
+ ],
+ "has_pool": null,
+ "number_of_wells": null,
+ "number_of_entrances": null,
+ "fit_out": null,
+ "number_of_offices": null,
+ "number_of_entrance_points": null,
+ "number_of_shops": null,
+ "land_type": null,
+ "compound": "building",
+ "parking_space": 1,
+ "land_area": null,
+ "street_width": null,
+ "ac_type": null,
+ "parking_type": null,
+ "utilities_included": null,
+ "installments_available": null,
+ "is_bachelor": false,
+ "is_mixed": null,
+ "lifestyle_score": {
+  "lifestyle_total": null,
+  "overall": null,
+  "scores": []
+ },
+ "seo": {
+  "meta_title": "Dwelleo",
+  "meta_description": "Real estate marketplace in Saudi Arabia.",
+  "meta_keywords": null,
+  "og_title": "Dwelleo",
+  "og_description": "Real estate marketplace in Saudi Arabia.",
+  "og_image": "https://cdn.dwelleo.sa/174784/01M6K4WTJZ4QCRM5CNWD9QS5K2.png",
+  "og_type": "website",
+  "twitter_card": "summary_large_image",
+  "twitter_title": "Dwelleo",
+  "twitter_description": "Real estate marketplace in Saudi Arabia.",
+  "twitter_image": "https://cdn.dwelleo.sa/174784/01M6K4WTJZ4QCRM5CNWD9QS5K2.png",
+  "canonical_url": null,
+  "robots": "index,follow",
+  "structured_data": null,
+  "structured_data_blocks": [
+   {
+    "@context": "https://schema.org",
+    "@type": "RealEstateListing",
+    "name": "شقة غرفتين للإيجار في النهضة، جدة",
+    "description": "شقة مفروشة في حي النهضة بمساحة ٨١ متر مربع غرفتا نوم · حمامان · ٨١ م² · مفروشة · ٦٠٬٠٠٠ ريال سنوياً لماذا هذا العقار؟ • فرش متكامل يتيح لكم الانتقال المباشر دون عناء التجهيز • توفر صالة رياضية وحديقة يمنحكم خيارات متعددة للنشاط والاسترخاء الحياة هنا تقع الشقة في الدور ٣، على بعد دقيقة واحدة من طريق الملك عبدالعزيز و٦ دقائق من الواجهة البحرية. التفاصيل المساحة: ٨١ م² · غرفتا نوم · حمامان الموقع: حي النهضة، جدة المبنى: الدور ٣ · موقف سيارات واحد الخدمات: مياه · كهرباء المميزات: مصعد · حراسة 24/7…",
+    "url": "https://www.dwelleo.sa/ar/properties/22869",
+    "inLanguage": "ar",
+    "datePosted": "2026-11-03T17:12:30+03:00",
+    "offers": {
+     "@type": "Offer",
+     "price": 60000,
+     "priceCurrency": "SAR",
+     "url": "https://www.dwelleo.sa/ar/properties/22869",
+     "businessFunction": "http://purl.org/goodrelations/v1#LeaseOut"
+    },
+    "address": {
+     "@type": "PostalAddress",
+     "streetAddress": "حي النهضة",
+     "addressLocality": "جدة",
+     "addressRegion": "مكة",
+     "addressCountry": "SA"
+    },
+    "geo": {
+     "@type": "GeoCoordinates",
+     "latitude": 21.611801,
+     "longitude": 39.120411
+    },
+    "floorSize": {
+     "@type": "QuantitativeValue",
+     "value": 81,
+     "unitCode": "MTK",
+     "unitText": "م²"
+    },
+    "numberOfRooms": 2,
+    "numberOfBathroomsTotal": 2,
+    "yearBuilt": 2022
+   }
+  ]
+ },
+ "classification": {
+  "primary_cities": [
+   {
+    "id": 11,
+    "name": "جدة"
+   }
+  ],
+  "neighborhood": {
+   "id": 581,
+   "name": "حي النهضة"
+  },
+  "property_type": {
+   "id": 1,
+   "name": "شقة"
+  },
+  "transaction_type": "for-rent",
+  "related_developers": [],
+  "related_projects": [],
+  "related_properties": [],
+  "related_articles": []
+ },
+ "owner": {
+  "name": "مكتب عقاري"
+ }
+}

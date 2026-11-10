@@ -8,7 +8,7 @@
 // the owner's 2026-11-05 order forbids («user cannot select what he wants»). Two rules, both EXECUTED here:
 //   1. dotsEstimateInBox() weights each cell by the share of it inside the view;
 //   2. bubblesCanZoomIn() is false where a fine bubble would be at least half the view tall, and the map then reads
-//      every exact point (merged into counted heads by mergeOverlapping) instead of drawing bubbles.
+//      every exact point (set side by side by placeApart) instead of drawing bubbles.
 // The map component must use both (text pins + mutations), because a rule nothing calls is decoration.
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';

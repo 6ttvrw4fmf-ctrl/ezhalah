@@ -1,0 +1,57 @@
+{
+ "project": {
+  "name_ar": "مرزم فلل المرسلات",
+  "name": "مرزم فلل المرسلات",
+  "city": "الرياض",
+  "neighborhood": "حي المرسلات",
+  "category": "housing",
+  "advertisement_purpose": "sale",
+  "license_number": "7201210575",
+  "latitude": 24.75351,
+  "longitude": 46.679452,
+  "is_active": true,
+  "slug": "مرزم-فلل-المرسلات",
+  "about_ar": "",
+  "types": [
+   "دور"
+  ],
+  "images": [
+   "https://ammirbucket.oss-me-central-1.aliyuncs.com/media/images/2026/11/4/DVxog8MgzuTL2YfXNhRbhL.png",
+   "https://ammirbucket.oss-me-central-1.aliyuncs.com/media/images/2026/11/4/6gT4HVw7WWtxLN9ajopF5e.png"
+  ],
+  "url": "https://wahadat.sa/project/%D9%85%D8%B1%D8%B2%D9%85-%D9%81%D9%84%D9%84-%D8%A7%D9%84%D9%85%D8%B1%D8%B3%D9%84%D8%A7%D8%AA"
+ },
+ "unit": {
+  "id": "328cdfb9-00ab-4865-b665-a116960e622d",
+  "project": "مرزم فلل المرسلات",
+  "tags": [],
+  "created_at": "2026-11-04T14:10:47.582858+03:00",
+  "updated_at": "2026-11-04T14:10:47.582877+03:00",
+  "name": "الدور الأرضي",
+  "name_en": "الدور الأرضي",
+  "name_ar": "الدور الأرضي",
+  "status": "available",
+  "price": 1700000,
+  "meter_price": 10137.15,
+  "floor": "G",
+  "area": 167.7,
+  "rooms": 4,
+  "toilets": 3,
+  "has_private_sitting_room": true,
+  "has_basement_parking": true,
+  "note": "0.0",
+  "sold_at": null,
+  "created_by": null,
+  "updated_by": null,
+  "images": [
+   "https://ammirbucket.oss-me-central-1.aliyuncs.com/media/images/2026/11/4/DVxog8MgzuTL2YfXNhRbhL.png",
+   "https://ammirbucket.oss-me-central-1.aliyuncs.com/media/images/2026/11/4/6gT4HVw7WWtxLN9ajopF5e.png",
+   "https://ammirbucket.oss-me-central-1.aliyuncs.com/media/images/2026/11/4/cgB48hs3NoKXTxewH9yKCD.png",
+   "https://ammirbucket.oss-me-central-1.aliyuncs.com/media/images/2026/11/4/R98Yp5ahBAkeqBfw7gajGA.png"
+  ],
+  "project_type": "دور",
+  "status_display": "متاحة",
+  "neighborhood": "حي المرسلات"
+ },
+ "_note": "wahadat project page (RSC flight) parsed by parse_project, 2026-11-09; page JSON-LD datePosted 2026-11-04T14:09:31.230881+03:00 (project created_at)"
+}

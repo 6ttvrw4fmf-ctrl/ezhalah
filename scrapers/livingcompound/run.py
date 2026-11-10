@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import html as ihtml
+import json
 import re
 import sys
 import time
@@ -55,6 +56,7 @@ from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://livingcompound.com"
 SOURCE = "LivingCompound"
@@ -106,6 +108,28 @@ def detail_rows(page_html: str) -> dict[str, str]:
 def post_id(page_html: str) -> Optional[str]:
     m = re.search(r'<body[^>]*class="[^"]*\bpostid-(\d+)\b', page_html)
     return m.group(1) if m else None
+
+
+_LD_RE = re.compile(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+
+
+def published_at(page_html: str) -> Optional[str]:
+    """The WebPage node's `datePublished` in the page's own Yoast JSON-LD graph — the WordPress post date
+    (UTC «+00:00»). Never `dateModified` / article:modified_time, which move on every edit. Measured live
+    2026-11-09: 9703 datePublished 2025-10-19T13:58:47+00:00, dateModified 2025-10-22T13:02:28+00:00."""
+    for block in _LD_RE.findall(page_html):
+        try:
+            doc = json.loads(block)
+        except ValueError:
+            continue
+        nodes = doc.get("@graph", [doc]) if isinstance(doc, dict) else doc if isinstance(doc, list) else []
+        for n in nodes:
+            if not isinstance(n, dict):
+                continue
+            kinds = n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")]
+            if "WebPage" in kinds and isinstance(n.get("datePublished"), str):
+                return n["datePublished"]
+    return None
 
 
 def price_block(page_html: str) -> tuple[Optional[int], str, str]:
@@ -219,6 +243,9 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], Optional[str]
         "description": redact_pii(description(page_html)),
         "property_type": property_type,
         "transaction_type": txn,
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): see published_at(). Checked live 2026-11-09:
+        # 9703 datePublished 2025-10-19T13:58:47+00:00, first seen by us 2026-09-24 17:28 UTC.
+        "date_added": site_posting_date(published_at(page_html)),
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,

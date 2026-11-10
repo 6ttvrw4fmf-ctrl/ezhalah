@@ -48,6 +48,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize, sold_pin
+from scrapers.common.posting_date import site_posting_date
 from scrapers.common.named_city import single_named_city  # noqa: E402
 # ONE definition of "transient" for the whole fleet — a second local copy here is how the two
 # drift and a newly-seen Cloudflare status silently stops being retried on one platform only.
@@ -472,6 +473,10 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
         "region": REGION_EN,
         "neighborhood": district,
         "rega_location_verified": False,
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the marker record's own `created_at` (UTC «Z», Laravel).
+        # Measured live 2026-11-09 on /maps page 1: /x/272 created_at 2026-10-31T21:25:56.000000Z, updated_at 2026-11-01
+        # (an edit), first seen by us 2026-11-01 06:13Z. The ad page prints no date. Never updated_at.
+        "date_added": site_posting_date(rec.get("created_at")),
         "photo_urls": photos or None,
         "title": title,
         "description": description,

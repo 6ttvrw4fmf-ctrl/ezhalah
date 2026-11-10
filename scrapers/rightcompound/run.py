@@ -112,6 +112,11 @@ _DISTRICT_EN_AR = {
     ("riyadh", "nada"): "حي الندى", ("riyadh", "aqiq"): "حي العقيق",
     ("riyadh", "wurud"): "حي الورود", ("riyadh", "mursalat"): "حي المرسلات",
     ("riyadh", "khuzama"): "حي الخزامى", ("riyadh", "umm al hamam"): "حي أم الحمام",
+    # 2026-11-10 (🆕, unknown_named_districts: 3 ads in Riyadh): the site names the WEST half; the catalog holds both
+    # halves («حي ام الحمام الغربي» id 12, «حي ام الحمام الشرقي» id 8). A bare «Umm Al Hamam» stays unmatched above
+    # on purpose — it does not say which half.
+    ("riyadh", "umm al-hamam al-gharbi"): "حي ام الحمام الغربي", ("riyadh", "umm al hamam al gharbi"): "حي ام الحمام الغربي",
+    ("riyadh", "umm al-hamam al-sharqi"): "حي ام الحمام الشرقي", ("riyadh", "umm al hamam al sharqi"): "حي ام الحمام الشرقي",
     ("riyadh", "sahafa"): "حي الصحافة", ("riyadh", "maather"): "حي المعذر",
     ("riyadh", "rimal"): "حي الرمال", ("riyadh", "qadisiyah"): "حي القادسية",
     ("riyadh", "nasim"): "حي النسيم", ("riyadh", "salam"): "حي السلام",

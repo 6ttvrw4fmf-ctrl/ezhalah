@@ -492,8 +492,17 @@ function readPromptRects(selector: string = DOCKED_PROMPT_SELECTOR): PromptRect[
 /**
  * Can this mutation batch change a prompt's presence, rect or visibility? True when a prompt node
  * (or a subtree holding one) was ADDED, a watched node was REMOVED (or sits in a removed subtree),
- * or a `style`/`class` change landed ON a watched node or an ANCESTOR of one (an ancestor can hide,
- * move or re-anchor it). Everything else — a card mounting, an animation frame — cannot.
+ * a `style`/`class` change landed ON a watched node or an ANCESTOR of one (an ancestor can hide,
+ * move or re-anchor it), or an attribute change made a node START matching the selector. Everything
+ * else — a card mounting, an animation frame — cannot.
+ *
+ * THE LAST CLAUSE (2026-11-10, journey-sweep 42624835985, WebKit desktop). A prompt is recognised by
+ * its `src` (accounts.google.com/gsi/…). An iframe inserted FIRST and given that src a moment LATER
+ * matched nothing when it was added, so it was never watched — and attribute changes were only
+ * honoured on watched nodes. The sidebar then reserved nothing for the whole life of the card:
+ * reproduced on ezhalah.com by inserting the card's exact shape (fixed box at 20,20, 371×348) and
+ * setting the src 300 ms later — «إنشاء حساب / تسجيل الدخول» stayed at y 85, under the card, even
+ * after the card resized. `src` is now observed too, and a node that starts matching re-measures.
  * Exported so `verify-bottom-prompt-inset.ts` executes it.
  */
 export function mutationTouchesPrompt(
@@ -505,7 +514,8 @@ export function mutationTouchesPrompt(
   return Array.from(records).some((r) => r.type === 'childList'
     ? Array.from(r.addedNodes).some((n) => n.nodeType === 1 && ((n as Element).matches(selector) || !!(n as Element).querySelector(selector)))
       || Array.from(r.removedNodes).some(holdsWatched)
-    : holdsWatched(r.target));
+    : holdsWatched(r.target)
+      || (r.target.nodeType === 1 && (r.target as Element).matches(selector)));
 }
 
 /**
@@ -587,7 +597,7 @@ function observeDockedPrompts(
     ? new MutationObserver((records) => { if (mutationTouchesPrompt(records, selector, watched)) tick(); })
     : null;
   mo?.observe(document.documentElement, {
-    childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'],
+    childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'src'],
   });
   window.addEventListener('resize', emit);
   window.addEventListener('orientationchange', emit);

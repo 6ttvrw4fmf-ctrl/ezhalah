@@ -52,6 +52,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
@@ -302,8 +303,51 @@ def description_of(text: str) -> Optional[str]:
     return d[:2500] or None
 
 
-def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[Optional[dict], str, str]:
-    """(row, category, skip_reason). row None → skipped for skip_reason."""
+_POST_ID_RE = re.compile(r"<body[^>]*class=\"[^\"]*\bpostid-(\d+)\b|[?&]p=(\d+)['\"]")
+
+
+def page_post_id(page_html: str) -> Optional[int]:
+    """The WordPress post id the page itself states: body class «postid-1619», else its shortlink «?p=1619»."""
+    m = _POST_ID_RE.search(page_html)
+    return int(m.group(1) or m.group(2)) if m else None
+
+
+def fetch_post_dates(s: cc.Session, base: str, timeout: int = 40) -> dict[int, str]:
+    """{post id: `date_gmt`} for every /property/ post, from the tenant's own REST route — ONE request per
+    100 posts per run (12 on gudai, 17 on safera: one request each), never one per listing.
+
+    THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20). The property page prints no date and carries no
+    article:published_time; the post's `date_gmt` (UTC) is the publish instant. Measured live 2026-11-09:
+    gudai 1619 date_gmt 2025-11-10T18:32:44 (its photo is «WhatsApp Image 2025-11-09»; first seen by us
+    2026-09-20 01:15 UTC); safera 3157 date_gmt 2026-10-21T17:54:14, first seen 2026-10-22 04:26 UTC.
+    `date` equals `date_gmt` on both tenants. Never `modified` (3157 was edited 18:01:12).
+
+    Any failure returns what was read so far (possibly {}): a date we could not read is UNKNOWN, the row's
+    date_added stays None, and the upsert drops a None — so a stored date is never erased by a bad fetch."""
+    out: dict[int, str] = {}
+    page, pages = 1, 1
+    while page <= pages:
+        try:
+            r = s.get(f"{base}/wp-json/wp/v2/property",
+                      params={"per_page": 100, "page": page, "_fields": "id,date_gmt"}, timeout=timeout)
+            if r.status_code != 200:
+                print(f"  posting dates: wp/v2/property page {page} HTTP {r.status_code} — left unknown", flush=True)
+                break
+            for p in r.json():
+                if isinstance(p, dict) and isinstance(p.get("id"), int) and isinstance(p.get("date_gmt"), str):
+                    out[p["id"]] = p["date_gmt"]
+            pages = int(r.headers.get("x-wp-totalpages") or 1)
+        except Exception as e:  # noqa: BLE001 — unknown, never fatal: the listings still map
+            print(f"  posting dates: wp/v2/property page {page} {type(e).__name__} — left unknown", flush=True)
+            break
+        page += 1
+    return out
+
+
+def map_listing(url: str, page_html: str, *, source: str, prefix: str,
+                post_dates: Optional[dict[int, str]] = None) -> tuple[Optional[dict], str, str]:
+    """(row, category, skip_reason). row None → skipped for skip_reason. `post_dates` is
+    fetch_post_dates()' {post id: date_gmt}; a page whose id it lacks gets no posting date (NULL)."""
     text = visible_text(page_html)
     title = parse_title(page_html)
     if not title or not re.search(r"تفاصيل العقار|نظرة عامة", text):
@@ -391,6 +435,10 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
         # Filter cannot see it. It is a first-class column on every platform table — write it there.
         "license_number": license_number,
     }
+    # THE SITE'S OWN POSTING DATE — the post's `date_gmt` (UTC, so «Z»), see fetch_post_dates().
+    pid = page_post_id(page_html)
+    gmt = (post_dates or {}).get(pid) if pid else None
+    row["date_added"] = site_posting_date(f"{gmt}Z") if gmt else None
 
     # «مؤثثة: نعم/لا» — tri-state, and only when the source states one of the two.
     fm = _FURN_RE.search(text)
@@ -641,6 +689,7 @@ def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
         if not urls:
             raise RuntimeError(("sitemap returned no /property/ urls | " + "; ".join(trace))[:300])
         print(f"{source}: {len(urls)} listings discovered", flush=True)
+        post_dates = fetch_post_dates(s, base)
         skipped: dict[str, int] = {}
         for u in urls:
             try:
@@ -651,7 +700,7 @@ def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
             if r.status_code != 200:
                 skipped[f"http_{r.status_code}"] = skipped.get(f"http_{r.status_code}", 0) + 1
                 continue
-            row, cat, why = map_listing(u, r.text, source=source, prefix=prefix)
+            row, cat, why = map_listing(u, r.text, source=source, prefix=prefix, post_dates=post_dates)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
