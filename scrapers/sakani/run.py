@@ -912,6 +912,7 @@ def main() -> int:
         districts: dict = {}
         walled_run = 0          # consecutive details that drew no answer at all
         renegotiated = 0
+        details_read = 0        # detail records actually served this run (a late wall keeps them)
         for n_unit, (purpose, idx, rich) in enumerate(units):
             if _over_budget():
                 # The rows read so far are real and get written; the rest were never visited, so this
@@ -933,10 +934,25 @@ def main() -> int:
                 walled_run = walled_run + 1 if state == "miss" else 0
                 if walled_run >= DETAIL_WALL_AFTER:
                     if renegotiated >= MAX_RENEGOTIATIONS:
-                        raise RuntimeError(
-                            f"detail route walled: {walled_run} consecutive unread details after "
-                            f"{renegotiated} fresh sessions — stopped at unit {seen} of {len(units)}; "
-                            f"nothing written, nothing pruned")
+                        if not details_read:
+                            # Walled from the first detail (2026-10-05): nothing real was read, so
+                            # nothing is written — index-only rows would be guesses.
+                            raise RuntimeError(
+                                f"detail route walled: {walled_run} consecutive unread details after "
+                                f"{renegotiated} fresh sessions — stopped at unit {seen} of {len(units)}; "
+                                f"nothing written, nothing pruned")
+                        # A LATE wall (2026-11-10, small-sources job 129630208235): the walk had read
+                        # 2,620 units' own detail records over 1 h 40 m, the route walled at unit 2,623
+                        # of 2,840, and the old raise threw every one of them away («nothing written»).
+                        # Same as the run budget below: what was read is real and gets written; the
+                        # rest were never visited, so the run is PARTIAL and prunes nothing.
+                        cut = len(units) - n_unit
+                        skipped["detail_walled_cut"] = cut
+                        partial = True
+                        print(f"  ⛔ detail route walled after {renegotiated} fresh sessions at unit {seen} of "
+                              f"{len(units)}: keeping the {details_read} detail(s) read, {cut} left unread, "
+                              f"no prune", flush=True)
+                        break
                     renegotiated += 1
                     walled_run = 0
                     print(f"   ↻ detail route walled — fresh session {renegotiated}/{MAX_RENEGOTIATIONS}",
@@ -944,6 +960,8 @@ def main() -> int:
                     _oracle_sess = s = session()
                     state, detail = fetch_detail(s, uid)
                     walled_run = 1 if state == "miss" else 0
+                if state == "ok":
+                    details_read += 1
                 if state == "not_found":
                     # The index still lists it but its own page would bounce the user home.
                     skipped["detail_not_found"] = skipped.get("detail_not_found", 0) + 1
