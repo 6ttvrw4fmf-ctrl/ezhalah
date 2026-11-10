@@ -506,7 +506,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
     <View testID="listing-preview" style={s.root} onLayout={onRoot} ref={rootRef}>
       {/* (1) slim top bar: the source pill + this tab's ✕ — only where no viewer chrome names the site */}
       {!inViewer && (
-      <View style={s.bar} onLayout={measure('bar')}>
+      <View style={[s.bar, isRTL && { flexDirection: 'row-reverse' }]} onLayout={measure('bar')}>
         <View style={s.srcPill}>
           <View style={s.srcLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.4 }] }}><SourceBadge source={l.source} /></View></View>
           <Text numberOfLines={1} style={[s.srcTx, tx]}><Text style={s.srcName}>{name}</Text>{` · ${location}`}</Text>

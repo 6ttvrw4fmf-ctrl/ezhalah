@@ -101,6 +101,8 @@ export default function ReadAloudPlayer() {
           { opacity: anim, transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }, { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }] },
         ]}
       >
+        {/* X top right in both languages (owner 2026-11-10: «x for everything must always be on the top right no matter what»): the row lays its FIRST child at the physical right in both languages, so the × goes first. */}
+        <PillButton icon="close" size={20} onPress={onClose} label={t('Close')} />
         <PillButton
           primary
           icon={playing ? 'pause-circle' : 'play-circle'}
@@ -120,7 +122,6 @@ export default function ReadAloudPlayer() {
         </Pressable>
         <SeekButton mirrored onPress={onSeekBack} disabled={!snap.canSeekBack} label={t('Back 15 seconds')} />
         <SeekButton onPress={onSeekForward} disabled={!snap.canSeekForward} label={t('Forward 15 seconds')} />
-        <PillButton icon="close" size={20} onPress={onClose} label={t('Close')} />
       </Animated.View>
     </View>
   );

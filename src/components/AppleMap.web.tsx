@@ -1143,11 +1143,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {drawing && !sketch ? <View style={s.hint} pointerEvents="none"><Text style={s.hintT}>{t('Drag on the map to draw an area')}</Text></View> : null}
       {onClose && !drawing ? (
-        <Pressable style={s.closeBtn} onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-close-full">
+        // The X is top RIGHT, always, in both languages (owner 2026-11-10: «x for everything must always be on the top right
+        // no matter what, even if it's in English»); «رسم» / «مسار» move to the top left while it shows. `left`/`right`
+        // are physical here (measured live 2026-11-10: left: 12 sat at the physical left under Arabic RTL).
+        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-close-full">
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       ) : null}
-      {roomy ? <View style={s.topRight} pointerEvents="box-none">
+      {roomy ? <View style={[s.topRight, onClose && !drawing && s.topRightAsLeft]} pointerEvents="box-none">
       {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
           becomes «إزالة المسار ✕». */}
       {onRoute && !failed && !drawing ? (
@@ -1227,6 +1230,8 @@ const s = StyleSheet.create({
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
   topRight: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
+  topRightAsLeft: { right: undefined, left: 12 },
+  closeBtnRight: { left: undefined, right: 12 },
   drawBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
     paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,

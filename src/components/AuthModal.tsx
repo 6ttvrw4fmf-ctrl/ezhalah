@@ -303,7 +303,9 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
               {(cp || step !== 'main') && (
                 <Pressable
                   onPress={back}
-                  style={[s.popClose, cp && c.popClose]}
+                  // The × is top RIGHT in both languages (owner 2026-11-10: «x for everything must always be on the top right no matter what»): `end` flipped it left under
+                  // Arabic. The inner steps' back chevron keeps its direction-aware side.
+                  style={[s.popClose, cp && c.popClose, step === 'main' && { end: undefined, right: cp ? 8 : 14 }]}
                   hitSlop={10}
                   accessibilityRole="button"
                   accessibilityLabel={t('Close')}
