@@ -26,9 +26,11 @@ let failed = 0;
 const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
 const mustCatch = (what: string, caught: boolean) => check(`(mutation) catches ${what}`, caught);
 
-const LICENCE_NOW = /card_parity_licence_on_card_now\(s->>'listing', s->>'page'\) is not true/;
+// the whole guard, polarity included: the finding is skipped only when NO sampled card still lacks its licence
+const LICENCE_NOW = /and not exists \(select 1 from jsonb_array_elements\(r\.sample\) s\s+where coalesce\(s->>'page', ''\) ~ '\^7\[12\]\[0-9\]\{8\}\$'\s+and public\.card_parity_licence_on_card_now\(s->>'listing', s->>'page'\) is not true\) then/;
 const RECUR = /if r\.rep > 0 and \(r\.rep_latest or r\.rep_nights >= 2\) then/;
-const REP_LATEST = /night = \(select max\(r2\.night\) from recent r2 where r2\.platform = recent\.platform\)\) as rep_latest/;
+// the repair predicate too: a clean later night must never inherit an older repair
+const REP_LATEST = /bool_or\(coalesce\(\(e\.value->>'repaired'\)::int, 0\) > 0\s+and night = \(select max\(r2\.night\) from recent r2 where r2\.platform = recent\.platform\)\) as rep_latest/;
 
 check('the latest mon_detect_card_parity definition was found', latest.length > 0);
 check('a licence finding re-reads every sampled listing (unknown is never healed: «is not true»)', LICENCE_NOW.test(latest));
@@ -39,6 +41,10 @@ mustCatch('the licence re-check removed (a week of re-raises on fixed cards)',
   !LICENCE_NOW.test(latest.replace(/\n\s*and public\.card_parity_licence_on_card_now\(s->>'listing', s->>'page'\) is not true\) then/, ') then')));
 mustCatch('an unreadable sample counted as healed («= false» instead of «is not true»)',
   !LICENCE_NOW.test(latest.replace("is not true", "= false")));
+mustCatch('the licence guard\'s polarity flipped («not exists» → «exists»: skip a card that still lacks its licence)',
+  !LICENCE_NOW.test(latest.replace(/and not exists (\(select 1 from jsonb_array_elements\(r\.sample\) s\s+where coalesce\(s->>'page', ''\) ~ '\^7\[12\]\[0-9\]\{8\}\$'\s+and public\.card_parity_licence_on_card_now)/, 'and exists $1')));
+mustCatch('the repair predicate dropped from rep_latest (one old repair stands on every later clean night)',
+  !REP_LATEST.test(latest.replace("bool_or(coalesce((e.value->>'repaired')::int, 0) > 0\n                     and night", 'bool_or(night')));
 mustCatch('self-healed back on «any repair in 7 nights»', !RECUR.test(latest.replace(RECUR, 'if r.rep > 0 then')));
 
 if (failed) { console.error(`\n✗ ${failed} check(s) failed`); process.exit(1); }
