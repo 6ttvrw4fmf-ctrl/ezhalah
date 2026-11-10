@@ -2691,8 +2691,8 @@ export default function Agent() {
     try {
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
-    landed = true;
     prefetchNarrowing(result.query ?? refined, opts?.guided?.asked ?? []);  // AFTER the search — see prefetchNarrowing
+    landed = true;
     // quotableTotal, never `result.total` — that is this page's buffer length (≤ the 1500-row
     // QUERY_LIMIT), so the mining overlay quoted «لقينا 1,500 عقار» on every set larger than a page
     // while the results headline behind it stated the real match total. ONE total for both.

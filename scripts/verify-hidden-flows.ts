@@ -322,7 +322,7 @@ const REFINE_PRELUDE = [
   'const makeRun = () => ({ cancelled: false, ac: { signal: null } });',
   'const runQuery = async () => { if (bus.search === "throws") throw new Error("network"); if (bus.search === "stopped") runRef.current.cancelled = true; return { query: null }; };',
   // Everything after the search has landed is the reply itself (covered elsewhere): the harness stops there.
-  'const prefetchNarrowing = () => { throw new Error("reached-the-reply"); };',
+  'const prefetchNarrowing = () => {}; const quotableTotal = () => { throw new Error("reached-the-reply"); };',
   'const failTurn = (_r: any, _id: string, e: any, where: string, l: string) => { bus.failed.push(`${where}:${l}:${e.message}`); };',
   'const detectLocale = (t: string) => (/[a-z]/i.test(t) ? "en" : /[\u0600-\u06FF]/.test(t) ? "ar" : null);',
   'const locale: string = "ar";',
@@ -347,7 +347,7 @@ check('refine: a failed refine typed in English fails in English', (await refine
 mustCatch('a refine that threw leaving its «round done» receipt behind (the bug verbatim)',
   (await refine(mutantFile(agentSrc, '    finally { if (!landed) opts?.onNotLanded?.(); }\n', '', 'agent.tsx'), 'throws')).notLanded !== 1);
 mustCatch('a stopped refine counted as landed',
-  (await refine(mutantFile(agentSrc, '    if (run.cancelled) return;\n    landed = true;\n', '    landed = true;\n    if (run.cancelled) return;\n', 'agent.tsx'), 'stopped')).notLanded !== 1);
+  (await refine(mutantFile(agentSrc, '    if (run.cancelled) return;\n    prefetchNarrowing(result.query ?? refined', '    landed = true;\n    if (run.cancelled) return;\n    prefetchNarrowing(result.query ?? refined', 'agent.tsx'), 'stopped')).notLanded !== 1);
 mustCatch('a refine that answered taking a real round’s receipt off',
   (await refine(mutantFile(agentSrc, '    finally { if (!landed) opts?.onNotLanded?.(); }\n', '    finally { opts?.onNotLanded?.(); }\n', 'agent.tsx'), 'answers')).notLanded !== 0);
 
