@@ -26,6 +26,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
+import { newHydrationLedger, recordHydration, dropsOf, honestHeadline } from './lib/hydrationDrops.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { pickScreenCityCall } from './lib/trendingScreenCall.ts';
@@ -188,9 +189,17 @@ async function runJourney(j: Journey) {
   // matching by name alone silently pairs the wrong totals onto the wrong parameter set.
   const cityCalls: { body: any; rows: any[] }[] = [];
   const districtCalls: { body: any; rows: any[] }[] = [];
-  let lastSearch: { body: any; rows: any[] } | null = null;
+  let lastSearch: { body: any; rows: any[]; seq: number } | null = null;
+  // Raw-table hydrations (scripts/lib/hydrationDrops.ts): the app's headline is total_count minus the page rows the
+  // raw tables did not return (src/lib/honestTotal.ts), so the drops are MEASURED here, never tolerated.
+  const hyd = newHydrationLedger();
+  let hydSeq = 0;
   page.on('response', async (resp) => {
     const u = resp.url();
+    if (resp.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u)) {
+      try { recordHydration(hyd, u, resp.ok(), await resp.json(), hydSeq++); } catch {}
+      return;
+    }
     if (resp.request().method() !== 'POST') return;
     try {
       const j2 = await resp.json();
@@ -198,7 +207,7 @@ async function runJourney(j: Journey) {
       const body = JSON.parse(resp.request().postData() || '{}');
       if (u.includes('/rpc/top_cities_by_deal_ar')) cityCalls.push({ body, rows: j2 });
       else if (u.includes('/rpc/district_options_ar')) districtCalls.push({ body, rows: j2 });
-      else if (u.includes('/rpc/location_search_candidates_ar')) lastSearch = { body, rows: j2 };
+      else if (u.includes('/rpc/location_search_candidates_ar')) lastSearch = { body, rows: j2, seq: hydSeq };
     } catch {}
   });
 
@@ -434,13 +443,15 @@ async function runJourney(j: Journey) {
       // fixed in the live sweep; it recurred here because the barrier guarding the class was a
       // three-file list. The comparison is now unconditional: a screen showing results whose total
       // cannot be read fails, and says which of the two it is.
-      check(`${name}: the displayed result count == the search RPC's total_count`,
-        uiCount != null && uiCount === rpcTotal,
+      // The page-0 rows this search returned, and how many of them the raw hydration did not return.
+      const drops = dropsOf(hyd, rows.map((r: any) => `${r.source_table}:${r.listing_id}`), (lastSearch as any).seq);
+      check(`${name}: the displayed result count == the search RPC's total_count (minus the measured hydration drops)`,
+        honestHeadline(uiCount, rpcTotal, drops.n),
         uiCount == null
           ? `the rendered total could not be READ (rpc=${rpcTotal}). The pool-derived matcher matched `
             + 'nothing on a settled screen — check scripts/verify-results-sentence-parsers-track-the-pool.ts '
             + 'before accusing production.'
-          : `ui=${uiCount} rpc=${rpcTotal}`);
+          : `ui=${uiCount} rpc=${rpcTotal} drops=${drops.n ?? 'unobserved'}${drops.keys.length ? ` [${drops.keys.slice(0, 5).join(' ')}]` : ''}`);
 
       // THE LINK THAT WAS UNCHECKABLE BEFORE 2026-09-01.
       //
