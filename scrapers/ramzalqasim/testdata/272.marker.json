@@ -1,0 +1,44 @@
+{
+ "id": 272,
+ "city": "عنيزة",
+ "status": "sell",
+ "type": "role",
+ "area": 450,
+ "width_street": "20",
+ "interface": "multi",
+ "master_room": 0,
+ "bedrooms": 2,
+ "content": "[\"C\",\"E\",\"F\",\"G\",\"K\",\"L\",\"M\",\"N\"]",
+ "description": "<p><span style=\"color: rgb(68, 68, 68); font-family: \" ibm=\"\" plex=\"\" sans=\"\" arabic\",=\"\" aqar-arabic-fallback,=\"\" aqar-arabic-fallback-noto,=\"\" arial;=\"\" font-size:=\"\" medium;=\"\" font-style:=\"\" normal;=\"\" font-variant-ligatures:=\"\" font-variant-caps:=\"\" font-weight:=\"\" 400;=\"\" letter-spacing:=\"\" orphans:=\"\" 2;=\"\" text-align:=\"\" start;=\"\" text-indent:=\"\" 0px;=\"\" text-transform:=\"\" none;=\"\" widows:=\"\" word-spacing:=\"\" -webkit-text-stroke-width:=\"\" white-space:=\"\" pre-line;=\"\" background-color:=\"\" rgb(255,=\"\" 255,=\"\" 255);=\"\" text-decoration-thickness:=\"\" initial;=\"\" text-decoration-style:=\"\" text-decoration-color:=\"\" display:=\"\" inline=\"\" !important;=\"\" float:=\"\" none;\"=\"\">🏡 للبيع دور أرضي على شارعين\n\nفرصة مميزة لامتلاك دور أرضي في حي الصالحية بعنيزة، يتميز بحوش واسع وملحق خارجي مستقل، مع ت",
+ "price": "390000.00",
+ "district": "الصالحية",
+ "image": "https://ramzalqasim.com/storage/1742/conversions/1793541159-JBvMZZnSrp-thumb100.webp",
+ "latitude": 26.100874576372,
+ "longitude": 43.98784323338,
+ "enabled": 1,
+ "active": 1,
+ "created_at": "2026-10-31T21:25:56.000000Z",
+ "updated_at": "2026-11-01T14:39:22.000000Z",
+ "real_estate_age": "8",
+ "license_number": "7201191171",
+ "avalible": "available",
+ "bathroom": 3,
+ "aqar": null,
+ "x": null,
+ "location": {
+  "lat": 26.100874576372,
+  "lng": 43.98784323338
+ },
+ "media": [
+  {
+   "id": 1734,
+   "mime_type": "image/png",
+   "original_url": "https://ramzalqasim.com/storage/1734/1793482041-k8O5mTuqFW.png"
+  },
+  {
+   "id": 1735,
+   "mime_type": "image/png",
+   "original_url": "https://ramzalqasim.com/storage/1735/1793482057-aKsAOooIrI.png"
+  }
+ ]
+}

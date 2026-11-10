@@ -75,6 +75,7 @@ import {
   optionWouldRender, settleOnOneIndex, predCols, UNREADABLE_STAMP, type Pred, type Row,
 } from './lib/afSurfaceJudge.ts';
 import { pageToEnd } from './lib/pageToEnd.ts';
+import { chipOf, cohortChip, type ChipOpt } from './lib/afCohortChip.ts';
 
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
 const H: Record<string, string> = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
@@ -166,9 +167,7 @@ const enabledRows = new Set(registry.filter((r) => r.enabled).map((r) => `${r.de
 
 // ── the option catalog — mirrors src/data/advancedFilters.ts one-for-one ─────────────────────────
 // `col` is the chip's count column; a cumulative age rung (owner 2026-10-05) is the SUM of `col` and `plus`.
-type Opt = { key: string; col: string | null; plus?: string[]; countRpc: 'guided' | 'age' | null; params: Record<string, unknown>; pred: Pred };
-const chipOf = (row: Record<string, unknown>, opt: Opt): number =>
-  [opt.col, ...(opt.plus ?? [])].reduce((sum, c) => sum + Number(row[c as string]), 0);
+type Opt = ChipOpt & { key: string; params: Record<string, unknown>; pred: Pred };
 const AMENITY_COL: Record<string, string> = {
   kitchen: 'kitchen', parking: 'parking', elevator: 'elevator', ac: 'air_conditioner', private_entrance: 'private_entrance',
   maid_room: 'maid_room', driver_room: 'driver_room', car_entrance: 'car_entrance', sanitation: 'sanitation',
@@ -796,10 +795,14 @@ if (!SKIP_MULTI) {
     if (!base) continue;
     const tag = `${clean}/COMBINED(Buy∪Rent) @${scope.label}`;
     const guided = (await rpc('apartment_guided_counts_ar', countBody(base, {})))?.[0] ?? null;
+    // the age chips come from the AGE count RPC, exactly as the card asks (🔬 2026-11-10): reading them out of the
+    // guided row gave Number(undefined) = NaN for every age rung of every COMBINED cohort, and a true zero rung
+    // (Duplex «10+» @region:1, job 129595811625) then FAILED «a zero option must be zero everywhere».
+    const age = qids.includes('property_age') ? (await rpc('property_age_option_counts_ar', countBody(base, {})))?.[0] ?? null : null;
     const total = guided ? Number(guided.cnt_total_base) : null;
     const jobs: Promise<void>[] = [];
     for (const qid of qids) for (const opt of optionsFor(qid, [clean], q) ?? []) {
-      const chip = opt.col && guided ? Number(guided[opt.col]) : null;
+      const chip = cohortChip(opt, guided, age);
       M.combinedDeal++;
       jobs.push(verifyOption(`${tag} · ${opt.key}`, base, opt, chip, true, total).then(() => {}));
     }
@@ -815,10 +818,14 @@ if (!SKIP_MULTI) {
     if (!base) continue;
     const tag = `${clean}/Rent-BOTH(كلاهما) @${scope.label}`;
     const guided = (await rpc('apartment_guided_counts_ar', countBody(base, {})))?.[0] ?? null;
+    // the age chips come from the AGE count RPC, exactly as the card asks (🔬 2026-11-10): reading them out of the
+    // guided row gave Number(undefined) = NaN for every age rung of every Rent-BOTH cohort, and a true zero rung
+    // (Duplex «10+» @region:1, job 129595811625) then FAILED «a zero option must be zero everywhere».
+    const age = qids.includes('property_age') ? (await rpc('property_age_option_counts_ar', countBody(base, {})))?.[0] ?? null : null;
     const total = guided ? Number(guided.cnt_total_base) : null;
     const jobs: Promise<void>[] = [];
     for (const qid of qids) for (const opt of optionsFor(qid, [clean], q) ?? []) {
-      const chip = opt.col && guided ? Number(guided[opt.col]) : null;
+      const chip = cohortChip(opt, guided, age);
       M.bothPeriod++;
       jobs.push(verifyOption(`${tag} · ${opt.key}`, base, opt, chip, true, total).then(() => {}));
     }

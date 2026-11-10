@@ -58,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://maqrat.com"
 SOURCE = "MAQRAT"
@@ -82,6 +83,12 @@ PROSE_COLS = ("furnished", "kitchen", "air_conditioner", "parking", "maid_room",
 _PAIR_A = re.compile(r'class="pd-overview-label">(.*?)</span>.*?class="pd-overview-value[^"]*">(.*?)</span>', re.S)
 _PAIR_B = re.compile(r'class="ap-ro-field-label">([^<]*)</span>\s*<span class="ap-ro-field-value[^"]*">(.*?)</span>', re.S)
 _CHIPS = re.compile(r'class="ap-ro-field-label">خدمات العقار</span>\s*<div class="pd-chip-row">(.*?)</div>', re.S)
+# The ad's posting date: the dated pill under the title, <time class="pd-hero-pill pd-hero-date"
+# datetime="2026-11-08">2026/11/08</time>. It is NOT the licence (Details/10302: pill 2026-11-08, licence
+# end 2027/07/02; Details/39: pill 2026-08-22, end 2027/07/22), it rises with the ad id (39 → 08-22,
+# 60 → 08-25, 10301 → 11-04, 10302 → 11-08) and is never after we first saw the ad (10302 first seen
+# 2026-11-09 05:30Z; 39 on 2026-09-26). Read live 2026-11-09.
+_POSTED = re.compile(r'<time class="[^"]*\bpd-hero-date\b[^"]*"\s+datetime="([^"]*)"')
 
 
 def _clean(s: Optional[str]) -> str:
@@ -161,8 +168,9 @@ def parse_detail(page: str, pid: str) -> dict[str, Any]:
         if stems.get(stem) != "main":
             stems[stem] = kind
     photos = [f"https://api.maqrat.com/uploads/properties/Property_{pid}_{st}_{k}.webp" for st, k in stems.items()]
+    posted = _POSTED.search(page)
     return {"kv": kv, "services": services, "title": title, "description": _clean(desc.group(1)) if desc else "",
-            "photos": photos}
+            "photos": photos, "posted": posted.group(1) if posted else None}
 
 
 # Two shapes in maqrat's stored text that name a fixture which is not this unit's (replayed over every active row,
@@ -244,6 +252,7 @@ def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple
         "license_number": _val(kv, "رقم رخصة الإعلان"),
         "license_expiry": _val(kv, "تاريخ انتهاء رخصة الإعلان"),
         "photo_urls": d["photos"] or None,
+        "date_added": site_posting_date(d.get("posted")),   # the pill under the title — see _POSTED
         **row_price,
     }
     for word, col in _SERVICES.items():

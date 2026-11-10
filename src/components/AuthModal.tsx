@@ -303,7 +303,9 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
               {(cp || step !== 'main') && (
                 <Pressable
                   onPress={back}
-                  style={[s.popClose, cp && c.popClose]}
+                  // The × is top RIGHT in both languages (owner 2026-11-10: «x for everything must always be on the top right no matter what»): `end` flipped it left under
+                  // Arabic. The inner steps' back chevron keeps its direction-aware side.
+                  style={[s.popClose, cp && c.popClose, step === 'main' ? { right: cp ? 8 : 14 } : { end: cp ? 8 : 14 }]}
                   hitSlop={10}
                   accessibilityRole="button"
                   accessibilityLabel={t('Close')}
@@ -481,7 +483,7 @@ export function AuthSky({ radius }: { radius: number }) {
 // style). The preview-only google/apple/appleface steps keep full-size styles: with a live
 // backend those steps are never reached (real OAuth redirects take over).
 const c = StyleSheet.create({
-  popClose: { top: 8, end: 8, width: 26, height: 26, borderRadius: 13 },
+  popClose: { top: 8, width: 26, height: 26, borderRadius: 13 },   // side set at the call: × right, chevron `end`
   popEagle: { width: 64, height: 64, marginTop: 10, marginBottom: 6 },
   formHead: { fontSize: 15.5, lineHeight: 22, marginBottom: 2 },
   formSub: { fontSize: 11.5, lineHeight: 16, marginBottom: 4 },
@@ -530,7 +532,7 @@ const s = StyleSheet.create({
   },
   // X (or back-chevron on inner steps) pinned in the card corner — RTL-aware via `end`.
   popClose: {
-    position: 'absolute', top: 14, end: 14, zIndex: 5,
+    position: 'absolute', top: 14, zIndex: 5,   // side set at the call (an `undefined` override is dropped on web)
     width: 34, height: 34, borderRadius: 17,
     alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface2,
   },

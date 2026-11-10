@@ -72,6 +72,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 SOURCE = "Satel"
 AD_PREFIX = "ST"
 
@@ -420,6 +421,11 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
         "active": not gone,
         "property_type": property_type,
         "transaction_type": transaction_type,
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the feed item's `createdAt` (UTC «Z»). Measured
+        # 2026-11-09: C0109 createdAt 2026-10-24T11:37:59.282Z, first seen by us 10-25 04:37Z. NEVER the detail record's
+        # `publishedOn`: it is re-stamped on a re-publish — A0105 (created 2025-04-21, in our feed since 2026-08-04)
+        # reads publishedOn 2026-10-15T07:55Z, i.e. after we first saw it.
+        "date_added": site_posting_date(p.get("createdAt")),
         "area_m2": area_m2,
         "bedrooms": beds,
         "bathrooms": baths,

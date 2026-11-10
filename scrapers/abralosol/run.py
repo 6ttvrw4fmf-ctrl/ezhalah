@@ -41,6 +41,7 @@ import json
 import re
 import sys
 import time
+from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -52,6 +53,7 @@ from scrapers.common.http import retry_smarter_session
 from scrapers.common.http_liveness import LivenessProbe, removal_by_owner_approved_status
 from scrapers.common import normalize as N
 from scrapers.common.pii import redact_capture, redact_pii
+from scrapers.common.posting_date import site_posting_date
 from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link
 
 BASE = "https://abralosol.com"
@@ -361,6 +363,64 @@ def _make_verify_gone(control: Optional[dict]):
 
 # The site's own page for an ad it no longer shows (measured 2026-11-03 on /8047, /4676, /7784 → 403).
 _CANNOT_OPEN = re.compile(r"لايمكن فتح هذة الصفحة")
+
+
+# ── the SITE's posting date (2026-11-09) ────────────────────────────────────────────────────────
+# The index cell and the ad page («إعلان 4987 - 09/11/2026») print only the node's CHANGED date — the
+# bump_date. The CREATED date, when the office posted the ad, is published only in the Drupal RSS feed:
+# <pubDate> (RFC 822, +0000) is the same instant as the item's schema:dateCreated. Live 2026-11-09 on
+# /4987: page and index «09/11/2026», feed «Tue, 11 Mar 2025 20:53:35 +0000». The feed (10 items, the
+# latest CHANGED) takes an exposed `nid=` filter: rss.xml?nid=4687 → that one ad, «Sat, 04 Jan 2025».
+_FEED_ITEM = re.compile(r"<item>.*?</item>", re.S)
+_FEED_NID = re.compile(r"<guid[^>]*>\s*(\d+) at ")
+_FEED_PUB = re.compile(r"<pubDate>([^<]+)</pubDate>")
+FEED_NID_CAP = 400        # per-run ceiling on the per-ad feed reads (the ~3,000 backfill spreads over nights)
+
+
+def feed_created(xml: Optional[str]) -> dict[str, str]:
+    """{nid: pubDate} for every item of the site's Drupal node feed (guid «<nid> at <site>»)."""
+    out: dict[str, str] = {}
+    for item in _FEED_ITEM.findall(xml or ""):
+        n, p = _FEED_NID.search(item), _FEED_PUB.search(item)
+        if n and p:
+            out[n.group(1)] = p.group(1).strip()
+    return out
+
+
+def posting_date(pub: Optional[str]) -> Optional[str]:
+    """A feed pubDate → `date_added`; None when absent, unreadable or carrying no zone."""
+    try:
+        at = parsedate_to_datetime(pub)
+    except (TypeError, ValueError, IndexError):
+        return None
+    return site_posting_date(at.isoformat()) if at.tzinfo else None
+
+
+def _read_feed(s: cc.Session, url: str) -> dict[str, str]:
+    try:
+        return feed_created(_get(s, url))
+    except Exception:  # noqa: BLE001 — a feed that cannot be read dates nothing; it never fails the crawl
+        return {}
+
+
+@lru_cache(maxsize=None)
+def _dated_ad_numbers() -> Optional[frozenset[str]]:
+    """ad_numbers whose stored row already holds the posting date — a created date never changes, so
+    those need no per-ad feed read. Read lazily, once a run, at the first ad that would need one. None
+    when the lookup fails (cached too): no per-ad read this run, never a guess."""
+    try:
+        out: set[str] = set()
+        for tbl in ("abralosol_residential_listings", "abralosol_commercial_listings"):
+            for lo in range(0, 50_000, 1000):
+                page = db._execute(db.sb().table(tbl).select("ad_number").not_.is_("date_added", "null")
+                                   .order("id").range(lo, lo + 999), what=f"{tbl}.dated").data or []
+                out.update(r["ad_number"] for r in page)
+                if len(page) < 1000:
+                    break
+        return frozenset(out)
+    except Exception as e:  # noqa: BLE001 — degrade to «feed page only», never crash the crawl
+        print(f"⚠ dated-ad lookup failed: {str(e)[:160]} — no per-ad posting-date read this run", flush=True)
+        return None
 
 
 # ── detail page ─────────────────────────────────────────────────────────────────────────────────
@@ -692,6 +752,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "listing_url": f"{BASE}/{ix['nid']}",
         "source": SOURCE,
         "active": True,
+        # The node's CREATED time from the site's RSS feed (see feed_created) — never bump_date.
+        "date_added": posting_date(ix.get("posted_raw")),
         "property_type": property_type,
         "transaction_type": transaction_type,
         "city": city,
@@ -770,7 +832,11 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
     com: list[dict] = []
     seen: set[str] = set()
     stats = {"rows": 0, "skipped_no_deal": 0, "skipped_no_type": 0, "no_price": 0,
-             "per_sqm": 0, "unlabelled_price": 0, "detail_failed": 0, "detail_gone": 0, "pages": 0}
+             "per_sqm": 0, "unlabelled_price": 0, "detail_failed": 0, "detail_gone": 0, "pages": 0,
+             "posted_feed_reads": 0}
+    # One read of the feed (the 10 latest-changed ads); then rss.xml?nid= only for an ad whose stored row
+    # has no posting date yet, at most FEED_NID_CAP a run — new ads first, the old ones over a few nights.
+    feed = _read_feed(s, f"{BASE}/rss.xml") if want_detail else {}
 
     for page in range(MAX_PAGES):
         html = _get(s, f"{BASE}/node?page={page}")
@@ -804,6 +870,12 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
             if want_detail:
                 if not detail:
                     stats["detail_failed"] += 1
+                time.sleep(DETAIL_PAUSE)
+            ix["posted_raw"] = feed.get(ix["nid"])
+            if (ix["posted_raw"] is None and detail and stats["posted_feed_reads"] < FEED_NID_CAP
+                    and (dated := _dated_ad_numbers()) is not None and f"ABR{ix['nid']}" not in dated):
+                ix["posted_raw"] = _read_feed(s, f"{BASE}/rss.xml?nid={ix['nid']}").get(ix["nid"])
+                stats["posted_feed_reads"] += 1
                 time.sleep(DETAIL_PAUSE)
             mapped = map_listing(ix, detail)
             if not mapped:

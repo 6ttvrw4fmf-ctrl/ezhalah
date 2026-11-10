@@ -813,18 +813,69 @@ def _apply_lock_holder() -> str:
     return f"gathern_liveness:{('ci:' + run) if run else 'local'}:{os.getpid()}"
 
 
-def _acquire_apply_lock(client, holder: str, ttl: int) -> Optional[bool]:
+def _acquire_apply_lock(client, holder: str, ttl: int, run_id: Optional[int] = None) -> Optional[bool]:
     """Try to take the shared apply lock. Returns True (acquired), False (someone else holds an
-    unexpired lock), or None on a DB error — the caller MUST fail closed on None (never write unlocked)."""
+    unexpired lock), or None on a DB error — the caller MUST fail closed on None (never write unlocked).
+    The note names this run's scrape_runs row, so a sweep that reclaims a dead holder's lock can close it."""
     try:
         res = client.rpc("acquire_deploy_lock", {
             "p_lock_name": LOCK_NAME, "p_holder": holder,
-            "p_ttl_seconds": ttl, "p_note": "gathern liveness --apply sweep",
+            "p_ttl_seconds": ttl,
+            "p_note": "gathern liveness --apply sweep" + (f" run_id={run_id}" if run_id else ""),
         }).execute()
     except Exception as e:
         print(f"  lock acquire RPC error: {str(e)[:140]}", flush=True)
         return None
     return bool(res.data)  # a returned row = we hold it; empty = held elsewhere (unexpired)
+
+
+_CI_HOLDER_RE = re.compile(r"^gathern_liveness:ci:(\d+):\d+$")
+
+
+def _ci_run_concluded(run_id: str) -> Optional[bool]:
+    """Has GitHub Actions run `run_id` finished? True/False, or None when it cannot be asked (no token,
+    network, API error) — None is UNKNOWN and never releases anything."""
+    tok = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not tok or not repo:
+        return None
+    try:
+        import json
+        import urllib.request
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{repo}/actions/runs/{run_id}",
+            headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "ezhalah-gathern-liveness"})
+        with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310 — api.github.com, fixed scheme
+            if resp.status != 200:
+                return None
+            return (json.loads(resp.read().decode("utf-8")) or {}).get("status") == "completed"
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _reclaim_stale_ci_lock(client, held: dict) -> bool:
+    """A lock whose holder is a CI run that GitHub says has FINISHED is stale: the run died without its
+    finally (2026-11-09: «The hosted runner lost communication with the server» at 11:25 left run
+    42602133546 holding the lock until its 2 h TTL, so the 11:37 sweep skipped and a 0-row no-op row
+    paged crawl_went_silent). Releases it (and closes the dead run's scrape_runs row when the lock
+    note names it) and returns True; anything short of a confirmed-finished run returns False."""
+    holder = str((held or {}).get("holder") or "")
+    m = _CI_HOLDER_RE.match(holder)
+    if not m or m.group(1) == (os.environ.get("GITHUB_RUN_ID") or ""):
+        return False
+    if _ci_run_concluded(m.group(1)) is not True:
+        return False
+    print(f"  stale lock: holder {holder} is a CI run GitHub reports as finished — releasing it", flush=True)
+    _release_apply_lock(client, holder)
+    rm = re.search(r"run_id=(\d+)", str((held or {}).get("note") or ""))
+    if rm:
+        try:
+            end_run(int(rm.group(1)), ok=False, rows_seen=0, rows_upserted=0,
+                    notes=f"runner lost — GitHub run {m.group(1)} finished without end_run(); closed by the next sweep")
+        except Exception as e:  # noqa: BLE001
+            print(f"  could not close the dead run's row: {str(e)[:120]}", flush=True)
+    return True
 
 
 def _release_apply_lock(client, holder: str) -> None:
@@ -835,14 +886,20 @@ def _release_apply_lock(client, holder: str) -> None:
         print(f"  lock release RPC error (will self-expire): {str(e)[:140]}", flush=True)
 
 
-def _apply_lock_holder_info(client) -> str:
-    """Current holder, for the 'someone else has it' message (service role bypasses the table's RLS)."""
+def _apply_lock_holder_row(client) -> Optional[dict]:
+    """The current lock row (holder, expires_at, note), or None when it cannot be read."""
     try:
         r = (client.table("ops_deploy_lock").select("holder, expires_at, note")
              .eq("lock_name", LOCK_NAME).execute())
-        return str(r.data[0]) if r.data else "(unknown — just released?)"
+        return dict(r.data[0]) if r.data else None
     except Exception:
-        return "(unknown)"
+        return None
+
+
+def _apply_lock_holder_info(client) -> str:
+    """Current holder, for the 'someone else has it' message (service role bypasses the table's RLS)."""
+    row = _apply_lock_holder_row(client)
+    return str(row) if row else "(unknown — just released?)"
 
 
 def _recheck_dead(client, args, run_id: int, mode: str, now_iso: str,
@@ -1017,12 +1074,17 @@ def main() -> int:
     holder = _apply_lock_holder()
     holding_lock = False
     if args.apply:
-        acq = _acquire_apply_lock(client, holder, _LOCK_TTL_SECONDS)
+        acq = _acquire_apply_lock(client, holder, _LOCK_TTL_SECONDS, run_id=run_id)
         if acq is None:  # DB error acquiring → fail CLOSED, never write unlocked
             print("✗ liveness apply lock: DB error acquiring — refusing to --apply.", flush=True)
             end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes="apply aborted — lock acquire error")
             return 1
-        if not acq:  # an unexpired lock is held elsewhere → do not run a second concurrent apply
+        if not acq:
+            # Held elsewhere. A holder that is a CI run GitHub reports FINISHED died without its finally
+            # (a lost runner, 2026-11-09): release it and take the lock once; anything else waits.
+            if _reclaim_stale_ci_lock(client, _apply_lock_holder_row(client) or {}):
+                acq = _acquire_apply_lock(client, holder, _LOCK_TTL_SECONDS, run_id=run_id)
+        if not acq:  # an unexpired lock is held by a LIVE run → do not run a second concurrent apply
             held = _apply_lock_holder_info(client)
             print(f"⚠ another session holds the '{LOCK_NAME}' lock — refusing --apply. Holder: {held}", flush=True)
             end_run(run_id, ok=True, rows_seen=0, rows_upserted=0,

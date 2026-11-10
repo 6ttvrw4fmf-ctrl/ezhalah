@@ -45,6 +45,7 @@ from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common import arabic_location as AL
 from scrapers.common.arabic_location import resolve_slug
+from scrapers.common.posting_date import site_posting_date
 from scrapers.common.source_pin import pin_dict
 
 GQL = "https://sa.aqar.fm/graphql"
@@ -236,7 +237,10 @@ _ext_by_id: dict[int, dict] = {}
 # to every customer who ticks an amenity on a Monthly search (ops_af_score 2026-10-05: find 0/10).
 AMENITY_GQL_FIELDS: tuple[str, ...] = ("lift", "ketchen", "ac", "maid", "driver", "car_entrance",
                                        "special_entrance", "two_entrances", "extended_details", "wc",
-                                       "location { lat lng }")
+                                       "location { lat lng }", "create_time")
+# `create_time` (2026-11-09): the unit's own creation instant on Aqar, unix seconds — the field Aqar's page
+# labels «تاريخ الإضافة» (i18n key created_at). Unit 6560670: create_time 1769291538 = 2026-01-24T21:52:18Z.
+# Settled like the flags: a schema that rejects it drops it alone, and date_added simply stays NULL.
 # `location { lat lng }` (owner 2026-10-20 night, «most of them have a real pin, we're just missing it»):
 # the unit page draws a Leaflet map with Aqar's own pin, and the page data carries it as
 # Listing.location {lat, lng} (ad 5993983 → 24.887617, 46.60416). 0 of 3,693 Monthly units were served
@@ -688,6 +692,21 @@ def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) 
     return {**loc, "region_id": loc.get("region_id") or rid}
 
 
+def posted_at(g: dict) -> str | None:
+    """The unit's own «تاريخ الإضافة» → date_added. Listing.create_time is unix SECONDS (UTC); never
+    `last_update` / `refresh` (a bump moves those). Read live on unit 6560670 (2026-11-09): create_time
+    1769291538 → 2026-01-25T00:52:18+03:00; on the annual ad 6956339 the same field equals the page's
+    printed «تاريخ الإضافة 09/11/2026». Missing / not a number → None (UNKNOWN stays NULL)."""
+    ts = g.get("create_time")
+    if isinstance(ts, bool) or not isinstance(ts, (int, float)) or ts <= 0:
+        return None
+    try:
+        stamp = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, OverflowError, OSError):
+        return None
+    return site_posting_date(stamp)
+
+
 def map_listing(g: dict, price: dict) -> dict | None:
     uri = g.get("uri") or ""
     if not uri:
@@ -736,6 +755,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
     capture = {k: (_redact(v) if k in ("content", "content_en") else v) for k, v in g.items()}
     return {
         "ad_number":        f"AQM{g['id']}",
+        "date_added":       posted_at(g),     # Listing.create_time — see posted_at()
         "listing_url":      f"https://sa.aqar.fm/{uri}",
         "active":           True,
         # An UNKNOWN category id must not default to Apartment (that fabricates a type). None →
