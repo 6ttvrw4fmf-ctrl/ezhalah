@@ -82,7 +82,7 @@ def test_licensed_land_with_english_enums_reaches_every_column():
     row, cat, skip, facts = mapped("أرض سكنية للبيع في المحمدية حى الصفا", LAND_EN)
     assert skip == "" and cat == "residential"
     assert (row["transaction_type"], row["property_type"]) == ("Buy", "Residential Land")   # title «أرض سكنية»
-    assert row["price_total"] == 400000 and row["price_per_meter"] is None                    # its own text: a total
+    assert row["price_total"] == 400000 and row["price_per_meter"] is R.db.AUTHORITATIVE_NULL  # its own text: a total → clears an old rate (18562597)
     assert (row["direction"], row["street_width_m"], row["area_m2"]) == ("جنوب", 15, 474)
     assert row["plan_parcel"] == "465 / 45" and row["electricity"] is True and row.get("water_supply") is None
     assert (row["license_number"], row["license_expiry"]) == ("7201131815", "2027-08-31")
@@ -94,7 +94,7 @@ def test_licensed_land_with_english_enums_reaches_every_column():
 
 def test_no_person_or_phone_is_ever_stored():
     row, *_ = mapped("أرض سكنية للبيع", LAND_EN)
-    blob = json.dumps(row, ensure_ascii=False)
+    blob = json.dumps(row, ensure_ascii=False, default=str)
     for pii in ("فلان", "0500000000", "0500000001", "1200000000", "بائع مجهول", "صاحب الترخيص", "الموظف المسؤول"):
         assert pii not in blob, pii
 
@@ -446,3 +446,14 @@ def test_catchup_cursor_ignores_the_finished_licensed_only_walk():
     old = '{"catchup_before": "2026-07-20-00", "catchup_files_left": 0}'
     assert R._CURSOR.search(old) is None
     assert R._CURSOR.search('{"catchup_all_before": "2026-09-01-03"}').group(1) == "2026-09-01-03"
+
+
+def test_a_rate_stated_only_in_the_title_is_read_as_a_rate():
+    # CodeRabbit (PR #11247): «المتر 1650» in the TITLE alone; the body names the figure plainly. A body-only
+    # read settled it as a total (and cleared the stored rate); the title is now part of the read.
+    desc = (LAND_EN.replace("400,000", "1,650").replace("400000", "1650")
+            .replace("💵 سعر المتر التقريبي: 844.4 ريال\n", ""))
+    row, _cat, skip, _f = mapped("أرض سكنية للبيع في المحمدية المتر 1650", desc)
+    assert skip == "" and row["price_per_meter"] == 1650
+    row, _cat, skip, _f = mapped("أرض سكنية للبيع في المحمدية", desc)
+    assert skip == "" and row["price_per_meter"] is R.db.AUTHORITATIVE_NULL       # the body alone: a total

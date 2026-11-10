@@ -43,6 +43,7 @@ area, rooms, REGA licence line). MEASURED 2026-09-24 (live API, every id fetched
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -86,6 +87,51 @@ def walk_session() -> tuple[Any, list[str]]:
                                  headers=dict(session().headers))
 
 
+def site_changed_probe(s: Any, get_timeout: int = 25) -> str:
+    """Rulebook «a down site must fail two checks» (owner 2026-10-25): our API route answering 404 while the
+    homepage answers 200 means the site CHANGED (maqam left this same Nuzul engine for its own site on
+    2026-11-07). Report the homepage status, its final host, and the /api/ routes its own scripts name —
+    the aqargate recipe — so the next run can rebuild the route. Read-only; never raises."""
+    try:
+        r = s.get(f"{BASE}/", timeout=get_timeout, allow_redirects=True)
+    except Exception as e:  # noqa: BLE001
+        return f"homepage: {type(e).__name__}"
+    text = r.text or ""
+    apis: set[str] = set(re.findall(r"[\"'`](/api/[A-Za-z0-9_\-/.]{2,80})", text))
+    js_failed, js_first_err = 0, None       # a failed script read is COUNTED and named, never swallowed (CodeRabbit #11247)
+    for js in re.findall(r'<script[^>]+src="([^"]+\.js)"', text)[:8]:
+        try:
+            jr = s.get(js if js.startswith("http") else f"{BASE}{js if js.startswith('/') else '/' + js}",
+                       timeout=get_timeout)
+        except Exception as e:  # noqa: BLE001
+            js_failed += 1
+            js_first_err = js_first_err or f"{type(e).__name__} at {js[:60]}"
+            continue
+        if jr.status_code != 200:
+            js_failed += 1
+            js_first_err = js_first_err or f"HTTP {jr.status_code} at {js[:60]}"
+            continue
+        apis |= set(re.findall(r"[\"'`](/api/[A-Za-z0-9_\-/.]{2,80})", jr.text or ""))
+    host = re.sub(r"^https?://([^/]+).*$", r"\1", str(getattr(r, "url", "")) or BASE)
+    title = re.search(r"<title[^>]*>([^<]{0,80})", text)
+    gen = re.search(r'<meta[^>]+name="generator"[^>]+content="([^"]{0,60})"', text)
+    shapes: dict[str, int] = {}
+    for path in re.findall(r'href="(?:https?://[^/"]*senanrealestate\.sa)?(/[^"#?]{1,80})"', text):
+        seg = "/" + path.strip("/").split("/")[0]
+        shapes[seg] = shapes.get(seg, 0) + 1
+    top = sorted(shapes.items(), key=lambda kv: -kv[1])[:8]
+    sm = ""
+    for path in ("/sitemap.xml", "/robots.txt"):
+        try:
+            sr = s.get(f"https://{host}{path}", timeout=get_timeout)
+            locs = re.findall(r"<loc>\s*([^<\s]+)", sr.text or "") or re.findall(r"(?im)^sitemap:\s*(\S+)", sr.text or "")
+            sm += f" {path} {sr.status_code} n={len(locs)} first={locs[:4]};"
+        except Exception as e:  # noqa: BLE001
+            sm += f" {path} {type(e).__name__};"
+    return (f"homepage {r.status_code} at {host};{sm} scripts failed={js_failed} first={js_first_err!r}; title={title.group(1).strip() if title else None!r}; "
+            f"generator={gen.group(1) if gen else None!r}; link paths={top}; api routes named: {sorted(apis)[:12]}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -104,7 +150,8 @@ def main() -> int:
     try:
         ids, complete = fetch_ids(s, BASE, limit=args.limit)
         if not ids:
-            raise RuntimeError(f"{BASE}{API_PATH} returned no properties (route {' '.join(route)})")
+            raise RuntimeError(f"{BASE}{API_PATH} returned no properties (route {' '.join(route)})"
+                               f" | {site_changed_probe(s)}")
         print(f"{SOURCE}: {len(ids)} units discovered (complete={complete})", flush=True)
         for i, pid in enumerate(ids, 1):
             d, verdict = fetch_detail(s, BASE, pid)

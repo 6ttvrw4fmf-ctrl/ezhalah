@@ -271,7 +271,15 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
     price_total = price_annual = price_per_meter = rent_period = None
     basis = None
     if price and ptype in LAND_TYPES:
-        basis = land_price_basis(price, area, free_text)
+        # The TITLE is read too (CodeRabbit, PR #11247): «أرض 600 م² المتر 1,650» states the rate in the title
+        # alone, and a body-only read would settle that figure as a total and clear a true rate.
+        basis = land_price_basis(price, area, f"{title}\n{free_text}")
+    # A figure the ad settles as the TOTAL clears a rate an older read stored (owner 2026-11-07 row 3076: 18562597 kept
+    # 600,000 in both boxes; a plain None is dropped by the upsert). Haraj publishes ONE price per post and this
+    # scraper's only rate is that same figure read as per-metre, so a stored rate on a «total» post is the old
+    # misreading of this figure, never a separately published rate.
+    if price and basis == "total":
+        price_per_meter = db.AUTHORITATIVE_NULL
     if price and basis == "per_meter":
         price_per_meter = price
         if p["deal"] == "Buy":

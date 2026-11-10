@@ -659,3 +659,24 @@ def test_the_licence_and_its_expiry_are_stored_because_the_expiry_is_the_removal
     row, _ = _row(REST_HOUSE_SALE)
     assert row["license_number"] == "7200717409"
     assert row["license_expiry"] == "04/10/2026", "kept as the source's own text"
+
+
+def test_a_land_row_whose_rate_box_repeats_the_total_stores_no_rate():
+    """Owner 2026-11-07 (row 3076): abaad 17060146 sends price = total_price = 355000 on 710 m².
+    A rate equal to the total is impossible on more than 1 m², so the source published a total and
+    no rate. The total stays; the per-metre box is CLEARED (AUTHORITATIVE_NULL, so the stored copy
+    is overwritten rather than kept by the None-dropping upsert)."""
+    rec = {**LAND_SALE, "id": 17060146, "price": "355000", "total_price": "355000", "space": "710"}
+    row, _ = _row(rec)
+    assert row["price_total"] == 355000
+    assert row["price_per_meter"] is R.db.AUTHORITATIVE_NULL
+    # a genuine rate (LAND_SALE: 1746 vs 1099980) is untouched
+    assert _row(LAND_SALE)[0]["price_per_meter"] == 1746
+
+
+def test_a_small_figure_in_both_boxes_is_not_guessed_either_way():
+    """Below 100,000 the same figure could be a real rate (e.g. 900 SAR/m² on 600 m²): nothing is
+    cleared and the index's price_box_equals_rate_ar decides what to show."""
+    rec = {**LAND_SALE, "id": 17069999, "price": "900", "total_price": "900", "space": "600"}
+    row, _ = _row(rec)
+    assert row["price_per_meter"] == 900

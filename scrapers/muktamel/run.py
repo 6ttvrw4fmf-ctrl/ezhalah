@@ -342,6 +342,24 @@ def _note(reason: str) -> None:
         _outcomes[reason] = _outcomes.get(reason, 0) + 1
 
 
+# The first MESSAGE of each network failure class (2026-11-08: 1,050 of 1,050 reads failed as a bare
+# «network_CertificateVerifyError», and the class alone cannot tell an expired certificate from a wrong host
+# or a missing chain — rulebook lesson 10-13: name the failure in the run notes).
+_first_error: dict[str, str] = {}
+
+
+def _note_error(exc: BaseException) -> None:
+    key = f"network_{type(exc).__name__}"
+    _note(key)
+    with _outcome_lock:
+        _first_error.setdefault(key, " ".join(str(exc).split())[:110])
+
+
+def _why() -> str:
+    with _outcome_lock:
+        return "; ".join(f"{k}: {v}" for k, v in _first_error.items())
+
+
 # Ids whose OWN page this run answered 404/410 or redirected to /404 (the measured removal signal).
 _read_gone_ids: set[int] = set()
 
@@ -388,7 +406,10 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
         # Every attempt failed — record the LAST concrete reason, not just "no html". A network
         # exception (timeout/reset/refused) here on every id is the IP-block signature; an
         # accumulation of http_5xx is a different, source-side problem.
-        _note(f"network_{type(last_exc).__name__}" if last_exc is not None else "no_html_after_retries")
+        if last_exc is not None:
+            _note_error(last_exc)
+        else:
+            _note("no_html_after_retries")
         return None
     nuxt_src = _extract_nuxt(html)
     if not nuxt_src:
@@ -1053,9 +1074,13 @@ def main() -> int:
             pruned += max(n, 0)
         print(f"✓ Muktamel: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         print(f"  fetch outcomes: {dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}", flush=True)
+        why = _why()
+        if why:
+            print(f"  first error per class: {why}", flush=True)
         healthy = db.end_run(
             run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-            notes=f"pruned={pruned} outcomes={dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}"[:300],
+            notes=(f"pruned={pruned} outcomes={dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}"
+                   + (f" | why={why}" if why else ""))[:420],
             check_tables=["muktamel_residential_listings", "muktamel_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)

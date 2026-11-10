@@ -148,18 +148,23 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
-**Owed → JOB 0 on 11-08 (dated, from 11-07):** the 06:22 UTC 11-07 search sync FAILED (statement timeout after 10 min;
-routed to 🔧 «repair»), so these merged + crawled fixes reached the raw rows but not the index inside the slot. After
-the first successful sync, one phone `customer-journey.yml` run on: aqargate_residential 10029138 (Makkah القشاشية
-الجديد land 600 m², must NOT show «1,417» as the total; `search_listings_ar` aqargate rows with price_total =
-price_per_meter must read 0, was 20), tamyaz_residential 25034427 (Taif building rent 50,000) + tamyaz_commercial
-25034439 (Jeddah office 2,800,000) — new cards, tamyaz served 15 → ~19; kellerwilliams_residential 24214382 must be
-found under «حي الرائد» (KW served without district was 14). shomou #10946 (soft deadline, CodeRabbit Major fixed):
-proof crawl 42345510942 must end ok with notes «walk incomplete … deadline_cut» or complete, never «killed by SIGINT».
-**NW4349 is still shown:** #11015 stops the spot check reviving it, but the 11-07 06:33 nowaisiry crawl did NOT prune —
-«prune guard tripped: re-saw 7 of 10 active, floor 80%». On a 10-ad site 3 stale ads block the prune forever; read
-`prune_unseen`'s coverage floor for small tables (the own-post-id oracle is per-ad proof, so the floor protects nothing
-there) — that is tomorrow's own-lane fix.
+**11-08 RESULT: job 0 all PASS** (aqargate, KW, tamyaz, shomou — journeys 42449577947 + 42450154522; NW4349 pruned
+by the 11-07 09:41 crawl). **Owner row 3076 (one figure in both price boxes): abaad 7→0, aqarcity 1→0, haraj 1→0** (PR
+#11247, journey 42450843493). **aqar's 6 rows are SOURCE-PUBLISHED, not a parser bug:** `aqar-stub-recovery.yml`
+`ads=… dry_run=true include_price=true` re-reads the live pages and prints what today's enricher would write — it
+wrote exactly the stored prices, because aqar's page (and for 6896329 / 6885624 its REGA licence) prints the one figure
+in both slots. Source tables stay as published; `price_box_equals_rate_ar` picks the box on the index. **Use that dry
+run first** whenever a stored aqar price looks wrong: it is the cheapest proof of «our parser or their page».
+**ROUTED to the owner (product decision, 11-08):** backlog 1519/1520 «rooms printed, bedrooms NULL» on tuba, aqarcity,
+haraj, dealapp is ONE question — the field is «عدد الغرف» (REGA `numberOfRooms`, TOTAL rooms), and aqarcity (owner
+2026-07-28) and tuba (`run.py` trap 3) both record «never store total rooms as bedrooms». Do not reopen it without
+the owner's answer.
+**Owed → job 0 on 11-09:** maqam pins (#11247 commit 61ffba7): the 4 «مقام 17» units + MQMP13 take their project's
+`mapUrl` pin when it carries one; if the 11-08 branch crawl left them unpinned, the projects publish no pin either →
+declare it in `data/pin-sources.json` with the re-read URL (42451335417) as proof, never a guessed floor.
+**NEW (11-08): a sentinel must not outrun its evidence (CodeRabbit Major on #11247).** `AUTHORITATIVE_NULL` only where
+the page was READ and settles the field; a page missing the very element that would carry the value (aqarcity land
+rent without its displayed total) keeps `None`. Write the «partial page» test in the same PR as the sentinel.
 **NEW (11-07): a None from a scraper NEVER clears a stored value** — `_unknown_must_not_overwrite_known` drops it. When a
 fix changes a field from «a value» to «nothing» (aqargate land: total → rate), write `db.AUTHORITATIVE_NULL`, and only
 when the record was read and the source settled it (CodeRabbit: a missing price states nothing).

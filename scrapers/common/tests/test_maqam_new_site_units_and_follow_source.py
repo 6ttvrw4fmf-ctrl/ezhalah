@@ -175,3 +175,64 @@ def test_complete_needs_every_listed_page():
     w = {"units": {1: {}}, "listed": 1, "projects": {1: {}}, "listed_projects": 1, "bad": {}}
     assert R.complete(w)
     assert not R.complete({**w, "bad": {"unit_unparsed": 1}}) and not R.complete({**w, "listed": 2})
+
+
+def _no_map(page: str) -> str:
+    import re
+    return re.sub(r'<a href="https://www\.google\.com/maps[^"]*">m</a>', "", page)
+
+
+def test_a_unit_page_without_a_map_link_takes_its_projects_own_pin():
+    """Four-place rule, place 4 (the parent page): مقام 17's unit pages carry no Maps link (re-read
+    42451335417, 2026-11-08); the unit takes the pin its PROJECT's mapUrl publishes, in any shape."""
+    projects = {"مقام 18": {**PROJECTS["مقام 18"], "mapUrl": "https://www.google.com/maps?q=24.8455,46.6512"}}
+    u = R.parse_unit(_no_map(_unit_page()))
+    assert u["pin"] is None
+    (row, _), _ = R.map_unit(114, u, projects)
+    assert (row["additional_info"]["latitude"], row["additional_info"]["longitude"]) == (24.8455, 46.6512)
+
+
+def test_a_units_own_pin_wins_and_no_map_anywhere_stays_unpinned():
+    projects = {"مقام 18": {**PROJECTS["مقام 18"], "mapUrl": "https://www.google.com/maps?q=24.1111,46.2222"}}
+    (row, _), _ = R.map_unit(91, R.parse_unit(_unit_page()), projects)
+    assert row["additional_info"]["latitude"] == 24.84975                       # the unit's own link
+    (row, _), _ = R.map_unit(114, R.parse_unit(_no_map(_unit_page())), PROJECTS)  # project has no mapUrl
+    assert "latitude" not in row["additional_info"]
+
+
+def test_a_whole_project_reads_a_q_shaped_map_url():
+    p = {"id": "13", "title": "مقام 13 البيع بالكامل", "status": "available", "statusLabel": "متاح",
+         "price": "11,500,000", "neighborhood": "الياسمين", "city": "الرياض",
+         "mapUrl": "https://maps.google.com/?q=24.8231,46.6402"}
+    (row, _), _ = R.map_whole_project(13, p, unit_projects=set())
+    assert row["additional_info"]["latitude"] == 24.8231
+
+
+class _Hop:
+    def __init__(self, status, loc=None):
+        self.status_code, self.headers, self.text = status, ({"location": loc} if loc else {}), ""
+
+
+def test_a_short_map_link_is_resolved_honestly_once_per_project(monkeypatch):
+    """CodeRabbit (PR #11247): the short-link hop uses our own bot UA (no impersonation, no proxy), keeps the
+    honest client's one-request-per-gap clock, reads only the redirect, and runs ONCE per link per run."""
+    R._SHORT_PIN_CACHE.clear()
+    calls, sleeps = [], []
+    def get(url, headers=None, allow_redirects=True, timeout=None):
+        calls.append((url, headers, allow_redirects))
+        return _Hop(302, "https://www.google.com/maps/place/x/@24.812345,46.623456,17z")
+    monkeypatch.setattr(R.cc, "get", get)
+    monkeypatch.setattr(R.time, "sleep", lambda d: sleeps.append(d))
+    R.H._last[0] = R.time.time()
+    p = {"mapUrl": "https://maps.app.goo.gl/AbCdEf123"}
+    assert R._project_pin(p) == R._project_pin(p)
+    assert len(calls) == 1
+    assert calls[0][1] == {"User-Agent": R.H.UA} and calls[0][2] is False
+    assert sleeps and sleeps[0] > 0                                     # waited for the shared gap
+
+
+def test_a_wall_on_the_hop_stops_and_leaves_no_pin(monkeypatch):
+    R._SHORT_PIN_CACHE.clear()
+    monkeypatch.setattr(R.cc, "get", lambda *a, **k: _Hop(429))
+    monkeypatch.setattr(R.time, "sleep", lambda d: None)
+    assert R._project_pin({"mapUrl": "https://maps.app.goo.gl/Wall999"}) is None

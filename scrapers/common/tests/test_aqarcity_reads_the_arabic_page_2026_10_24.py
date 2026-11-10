@@ -80,3 +80,50 @@ def test_the_side_of_the_price_that_does_not_apply_is_cleared():
     from scrapers.common import db
     row, _ = R.map_listing(page(LD_AR, "ar", DL), "https://www.aqarcity.net/property/27257")
     assert row["transaction_type"] == "Buy" and row["price_annual"] is db.AUTHORITATIVE_NULL
+
+
+def test_a_page_with_no_rate_clears_a_stored_rate():
+    # Owner 2026-11-07 (row 3076): 2292952 held price_per_meter = its 200,000 rent from an older read; the
+    # parser emitted None, which the upsert drops, so the copy stayed. A page with no rate settles the box.
+    from scrapers.common import db
+    row, _ = R.map_listing(page(LD_AR, "ar", DL), "https://www.aqarcity.net/property/27257")
+    assert row["price_per_meter"] is db.AUTHORITATIVE_NULL
+
+
+
+def _land_rent(extra_html: str):
+    ld = dict(LD_AR, name="أرض للإيجار في ابها الضباب",
+              offers={"@type": "Offer", "priceCurrency": "SAR", "price": 18})
+    return R.map_listing(page(ld, "ar", DL + extra_html), "https://www.aqarcity.net/property/27257")[0]
+
+
+def test_a_rent_page_missing_its_displayed_total_keeps_the_rate_unknown():
+    # CodeRabbit (PR #11247): a land-rent page that lost the HTML holding its displayed total cannot prove
+    # «no rate», so it must not clear a rate a complete read once proved (None is dropped by the upsert).
+    row = _land_rent("")
+    assert row["transaction_type"] == "Rent" and row["area_m2"]
+    assert row["price_per_meter"] is None
+
+
+def test_a_rent_page_whose_displayed_total_is_not_a_rate_settles_no_rate():
+    from scrapers.common import db
+    row = _land_rent('<span class="btnPriceHead">18</span>')
+    assert row["price_per_meter"] is db.AUTHORITATIVE_NULL
+
+
+def test_a_page_missing_its_price_or_its_area_keeps_the_rate_unknown():
+    # CodeRabbit (PR #11247): only a read WITH price and area settles «no rate published»; a page missing
+    # either cannot clear a rate a complete read once proved (None is dropped by the upsert).
+    no_area = DL.replace("570 م²", "")
+    row, _ = R.map_listing(page(LD_AR, "ar", no_area), "https://www.aqarcity.net/property/27257")
+    assert row is None or row["price_per_meter"] is None
+    no_price = dict(LD_AR, offers={"@type": "Offer", "priceCurrency": "SAR"})
+    row, _ = R.map_listing(page(no_price, "ar", DL), "https://www.aqarcity.net/property/27257")
+    assert row is None or row["price_per_meter"] is None
+
+
+def test_an_area_only_the_json_ld_states_still_settles_the_rate():
+    from scrapers.common import db
+    ld = dict(LD_AR, floorSize={"@type": "QuantitativeValue", "value": 570, "unitCode": "MTK"})
+    row, _ = R.map_listing(page(ld, "ar", DL.replace("570 م²", "")), "https://www.aqarcity.net/property/27257")
+    assert row["area_m2"] == 570 and row["price_per_meter"] is db.AUTHORITATIVE_NULL
