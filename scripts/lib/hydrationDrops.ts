@@ -27,6 +27,25 @@ export function beginHydration(led: HydrationLedger): () => void {
   return () => { if (!closed) { closed = true; led.pending--; } };
 }
 
+/** A raw-table hydration request the app sends (fetchRawByIds: GET /rest/v1/<table>_listings?…&id=in.(…)). */
+export function isHydrationRequest(method: string, url: string): boolean {
+  let u = url; try { u = decodeURIComponent(url); } catch { /* keep raw */ }
+  return method === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u) && /[?&]id=in\./.test(u);
+}
+/**
+ * Hold the ledger open from the moment a hydration REQUEST is sent until its response is recorded or the request
+ * fails (CodeRabbit, PR 11725): a newer hydration still waiting for its response headers may carry the newer
+ * observation, so an older omission cannot be counted as a drop while it is in flight.
+ */
+export function hydrationRequestTracker<K>(led: HydrationLedger) {
+  const open = new Map<K, () => void>();
+  return {
+    sent(k: K) { if (!open.has(k)) open.set(k, beginHydration(led)); },
+    settled(k: K) { const close = open.get(k); if (close) { open.delete(k); close(); } },
+    get inFlight() { return open.size; },
+  };
+}
+
 /** Record one raw-table hydration response: its URL names the table and the ids asked for; its body holds the rows returned. */
 export function recordHydration(led: HydrationLedger, url: string, ok: boolean, body: unknown, seq: number): boolean {
   const dec = (() => { try { return decodeURIComponent(url); } catch { return url; } })();

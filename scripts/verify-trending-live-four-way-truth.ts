@@ -26,7 +26,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
-import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, pickResultsSearch } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, dropsOf, honestHeadline, pickResultsSearch, isHydrationRequest, hydrationRequestTracker } from './lib/hydrationDrops.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { pickScreenCityCall } from './lib/trendingScreenCall.ts';
@@ -194,6 +194,11 @@ async function runJourney(j: Journey) {
   // raw tables did not return (src/lib/honestTotal.ts), so the drops are MEASURED here, never tolerated.
   const hyd = newHydrationLedger();
   let hydSeq = 0;
+  // Pending from the REQUEST, not the response (CodeRabbit, PR 11725): a newer hydration still waiting for headers
+  // keeps dropsOf() at «not yet measured».
+  const hydReq = hydrationRequestTracker<object>(hyd);
+  page.on('request', (req) => { if (isHydrationRequest(req.method(), req.url())) hydReq.sent(req); });
+  page.on('requestfailed', (req) => hydReq.settled(req));
   page.on('response', async (resp) => {
     const u = resp.url();
     // ARRIVAL ORDER is stamped synchronously, before any await (CodeRabbit, PR 11725): a body read can finish in
@@ -201,8 +206,7 @@ async function runJourney(j: Journey) {
     // the one that says «this hydration belongs to that search».
     const arrived = hydSeq++;
     if (resp.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u)) {
-      const done = beginHydration(hyd);
-      try { recordHydration(hyd, u, resp.ok(), await resp.json(), arrived); } catch {} finally { done(); }
+      try { recordHydration(hyd, u, resp.ok(), await resp.json(), arrived); } catch {} finally { hydReq.settled(resp.request()); }
       return;
     }
     if (resp.request().method() !== 'POST') return;

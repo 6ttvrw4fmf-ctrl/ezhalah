@@ -1,6 +1,6 @@
 // Hermetic proof of scripts/lib/hydrationDrops.ts — the one rule the live count robots use to judge an honest headline.
 // Executes the functions on synthetic hydration traffic; every mutation must be caught.
-import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, isResultsPage, newestBySeq, pickResultsSearch, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, beginHydration, dropsOf, honestHeadline, isResultsPage, newestBySeq, pickResultsSearch, isHydrationRequest, hydrationRequestTracker, MAX_HYDRATION_DROPS } from './lib/hydrationDrops.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); if (!ok) failed++; };
@@ -95,6 +95,39 @@ const branch = at < 0 ? '' : trending.slice(at, at + 240);   // the search branc
 check('the Trending robot keeps its search through pickResultsSearch (wiring)', /lastSearch\s*=\s*pickResultsSearch\(/.test(branch));
 mustCatch('a branch that assigns lastSearch directly fails the wiring check',
   !/lastSearch\s*=\s*pickResultsSearch\(/.test(branch.replace('pickResultsSearch(lastSearch, ', '(')));
+
+// IN-FLIGHT: a newer hydration whose response headers have not arrived (CodeRabbit, PR 11725). The older one omitted
+// id 2 after the newer search started; the newer request is sent but unanswered, so nothing is measured yet.
+const fl = newHydrationLedger();
+const tr = hydrationRequestTracker<string>(fl);
+const flRows = ['t_listings:1', 't_listings:2'];
+tr.sent('older'); recordHydration(fl, url('t_listings', [1, 2]), true, [{ id: 1 }], 51); tr.settled('older');
+tr.sent('newer');                                         // newer request out, no response yet
+check('a newer hydration still waiting for headers keeps the count unmeasured', dropsOf(fl, flRows, 50).n === null);
+check('so 99 against an RPC total of 100 is not accepted while it is in flight', !honestHeadline(99, 100, dropsOf(fl, flRows, 50).n));
+recordHydration(fl, url('t_listings', [1, 2]), true, [{ id: 1 }, { id: 2 }], 53); tr.settled('newer');
+check('once it lands and returns the row, the older omission is never counted as a drop', dropsOf(fl, flRows, 50).n !== 1 && fl.pending === 0);
+const fm = newHydrationLedger();                          // mutation: pending counted only from the response
+recordHydration(fm, url('t_listings', [1, 2]), true, [{ id: 1 }], 51);
+mustCatch('pending counted from the response only would accept 99 vs 100 before the newer response arrives',
+  dropsOf(fm, flRows, 50).n === 1 && honestHeadline(99, 100, dropsOf(fm, flRows, 50).n));
+check('the hydration request shape is recognised', isHydrationRequest('GET', 'https://x/rest/v1/t_listings?select=*&id=in.(1,2)')
+  && !isHydrationRequest('POST', 'https://x/rest/v1/t_listings?id=in.(1)') && !isHydrationRequest('GET', 'https://x/rest/v1/rpc/f'));
+// WIRING: both live robots open the ledger on the REQUEST event and settle it in the response/failed handlers
+const afSrc = readFileSync(new URL('./verify-af-option-card-truth-live.ts', import.meta.url), 'utf8');
+const reqWired = (src: string) => /page\.on\('request',[^\n]*isHydrationRequest\([^\n]*\.sent\(/.test(src)
+  && /page\.on\('requestfailed',[^\n]*\.settled\(/.test(src) && /finally \{ hydReq\.settled\(/.test(src);
+check('the Trending robot holds hydrations pending from the request (wiring)', reqWired(trending));
+check('the AF robot holds hydrations pending from the request (wiring)', reqWired(afSrc));
+mustCatch('a robot without the request listener fails the wiring check', !reqWired(afSrc.replace("page.on('request',", "page.on('noop',")));
+// WIRING: the AF robot's two selection paths (waitForSearch, pairCount) return the newest ARRIVAL, never the last entry
+const body = (src: string, name: string) => { const i = src.indexOf(`const ${name} = `); return i < 0 ? '' : src.slice(i, src.indexOf('\n};', i)); };
+const ws = body(afSrc, 'waitForSearch'), pc = body(afSrc, 'pairCount');
+const picksNewest = (b: string) => /return newestBySeq\(/.test(b) && !/\[[a-z]+\.length - 1\]/.test(b);
+check('waitForSearch selects by arrival (wiring)', picksNewest(ws));
+check('pairCount selects by arrival (wiring)', picksNewest(pc));
+mustCatch('waitForSearch reverted to the last entry fails', !picksNewest(ws.replace('return newestBySeq(cands)', 'return cands[cands.length - 1]')));
+mustCatch('pairCount reverted to the last entry fails', !picksNewest(pc.replace('return newestBySeq(match)', 'return match[match.length - 1]')));
 
 console.log(failed ? `\n❌ ${failed} check(s) failed` : '\n✅ the honest-headline allowance is exact and measured');
 process.exit(failed ? 1 : 0);

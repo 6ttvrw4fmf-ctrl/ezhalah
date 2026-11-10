@@ -58,7 +58,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
-import { newHydrationLedger, recordHydration, beginHydration, dropsOf as libDropsOf, newestBySeq } from './lib/hydrationDrops.ts';
+import { newHydrationLedger, recordHydration, dropsOf as libDropsOf, newestBySeq, isHydrationRequest, hydrationRequestTracker } from './lib/hydrationDrops.ts';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
@@ -638,19 +638,23 @@ let seq = 0;
 // One ledger rule for every live count robot (scripts/lib/hydrationDrops.ts): per listing key the NEWEST hydration
 // by arrival order and whether THAT response returned it (CodeRabbit, PR 11725).
 const hyd = newHydrationLedger();
+// Pending from the REQUEST, not the response (CodeRabbit, PR 11725): a newer hydration still waiting for headers
+// keeps dropsOf() at «not yet measured».
+const hydReq = hydrationRequestTracker<object>(hyd);
+page.on('request', (req) => { if (isHydrationRequest(req.method(), req.url())) hydReq.sent(req); });
+page.on('requestfailed', (req) => hydReq.settled(req));
 page.on('response', async (r) => {
   const u = r.url();
   // Arrival order stamped before any await (CodeRabbit, PR 11725): body reads finish in any order.
   const arrived = seq++;
   if (r.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u) && /[?&]id=in\./.test(decodeURIComponent(u))) {
-    const done = beginHydration(hyd);
     try {
       const tbl = (u.match(/\/rest\/v1\/([a-z0-9_]+_listings)\?/) || [])[1];
       if (!tbl || !r.ok()) return;                     // a failed chunk is not a drop: the app shows the retry UI instead
       const j = await r.json();
       if (!Array.isArray(j)) return;
       recordHydration(hyd, u, r.ok(), j, arrived);
-    } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ } finally { done(); }
+    } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ } finally { hydReq.settled(r.request()); }
     return;
   }
   if (r.request().method() !== 'POST') return;
