@@ -657,7 +657,16 @@ def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) 
     if loc.get("city_id") and not _city_only_in_street(loc.get("city_ar"), address):
         return loc
     if loc.get("city_id"):
-        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved", "street_city_dropped": True}
+        # Dropping the street's town must drop EVERYTHING resolve_slug() derived from it (🔧 2026-11-10,
+        # aqarmonthly_district_city_suffix). Real ad 5708581 «شارع-بدر-حي-الملك-فهد-المجمعة-المجمعة»: the slug
+        # picked بدر (a catalog town, Madinah region), so the district was cleaned against «بدر» and kept the
+        # glued «المجمعة», and the row took بدر's region 3. Re-clean the district by NAME exactly as the
+        # unresolved branch of resolve_slug() does, and keep a region only when the slug itself said «منطقة».
+        d = loc.get("district_ar")
+        said_region = re.search(r"منطقه", AL.norm_ar(uri.replace("-", " ")))
+        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved", "street_city_dropped": True,
+               "region_id": loc.get("region_id") if said_region else None,
+               "district_ar": AL.strip_city_suffix(d, AL.trailing_catalog_city_norm(d)) if d else d}
     try:
         hint = AQAR_CITY_REGION.get(int(aqar_city_id or 0))
     except (TypeError, ValueError):
