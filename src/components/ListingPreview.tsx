@@ -1047,21 +1047,28 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
               <Ionicons name="open-outline" size={12} color={colors.primary} />
             </Pressable>
           </View>
-          <View style={[s.dealRow, s.dealHeadRow]}>
-            {[t('Deal date'), t('Area m²'), t('Deal price'), t('m² price'), t('Deal reference')].map((h) => (
-              <Text key={h} numberOfLines={1} style={[s.dealCell, s.dealCellHead]}>{h}</Text>
-            ))}
-          </View>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-            {prices.deals.map((d) => (
-              <View key={d.ref} style={s.dealRow}>
-                <Text numberOfLines={1} style={s.dealCell}>{d.date}</Text>
-                <Text numberOfLines={1} style={s.dealCell}>{fmtArea(d.area)}</Text>
-                <Text {...MONEY_LINE} style={s.dealCell}>{fmtInt(d.price)}</Text>
-                <Text {...MONEY_LINE} style={s.dealCell}>{fmtInt(d.ppm)}</Text>
-                <Text numberOfLines={1} style={[s.dealCell, s.dealRef]}>{d.ref}</Text>
+          {/* Every column keeps room for its longest value (DEAL_COL_MIN) and the table scrolls sideways when the sheet is
+              narrower than that: an amount is never broken over two lines and never shortened with «…»
+              (scripts/verify-web-laptop-nothing-cut-or-covered.mjs opens this table at 320 px with a ten-digit price). */}
+          <ScrollView horizontal testID="listing-preview-moj-deals-table" style={{ flex: 1 }} contentContainerStyle={s.dealsTable}>
+            <View style={{ flex: 1 }}>
+              <View style={[s.dealRow, s.dealHeadRow]}>
+                {[t('Deal date'), t('Area m²'), t('Deal price'), t('m² price'), t('Deal reference')].map((h, i) => (
+                  <Text key={h} numberOfLines={1} style={[s.dealCell, DEAL_COL[i], s.dealCellHead]}>{h}</Text>
+                ))}
               </View>
-            ))}
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+                {prices.deals.map((d) => (
+                  <View key={d.ref} style={s.dealRow}>
+                    <Text numberOfLines={1} style={[s.dealCell, DEAL_COL[0]]}>{d.date}</Text>
+                    <Text numberOfLines={1} style={[s.dealCell, DEAL_COL[1]]}>{fmtArea(d.area)}</Text>
+                    <Text {...MONEY_LINE} style={[s.dealCell, DEAL_COL[2]]}>{fmtInt(d.price)}</Text>
+                    <Text {...MONEY_LINE} style={[s.dealCell, DEAL_COL[3]]}>{fmtInt(d.ppm)}</Text>
+                    <Text numberOfLines={1} style={[s.dealCell, DEAL_COL[4], s.dealRef]}>{d.ref}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
           </ScrollView>
           <Pressable
             testID="listing-preview-moj-deals-close"
@@ -1079,6 +1086,12 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
     </View>
   );
 }
+
+// The Ministry's deals table: the least room each column needs for its longest value at 12.5 px — date, area m², deal
+// price (ten digits with commas), m² price, reference. Narrower than their sum, the table scrolls sideways.
+const DEAL_COL_MIN = [84, 80, 104, 76, 108];
+const DEAL_COL = DEAL_COL_MIN.map((minWidth) => ({ minWidth }));
+const DEALS_TABLE_MIN = DEAL_COL_MIN.reduce((a, b) => a + b, 0) + 4 * 6 + 2 * 12; // + the row's four gaps and its side padding
 
 const s = StyleSheet.create({
   root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface, overflow: 'hidden' },
@@ -1169,6 +1182,7 @@ const s = StyleSheet.create({
   dealsSub: { fontSize: 12, lineHeight: 17, color: colors.muted },
   dealRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
   dealHeadRow: { marginTop: 10, backgroundColor: colors.surface2 },
+  dealsTable: { flexGrow: 1, minWidth: DEALS_TABLE_MIN },
   dealCell: { flex: 1, minWidth: 0, fontSize: 12.5, color: colors.ink, textAlign: 'center', fontVariant: ['tabular-nums'] },
   dealCellHead: { fontSize: 11, fontWeight: '600', color: colors.muted },
   dealRef: { color: colors.muted },

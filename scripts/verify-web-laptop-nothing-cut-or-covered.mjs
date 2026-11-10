@@ -27,6 +27,10 @@
 //       • nothing clips it (not its own box, not its row, not the card) and it does not spill out of its line,
 //       • a price printed on a line that is NOT marked is a failure too, so a new price line cannot dodge the robot,
 //       • finding no money line at all is a failure, never a skip.
+//     It then opens the Ministry of Justice past-sales table inside the open ad (five columns: the tightest money
+//     lines in the app) with the LONGEST amounts in its rows, on a laptop and on 390 and 320 px phones. The robot
+//     answers the three reads behind that table itself, so the table is there on every run whatever ad the search
+//     opened; a table that does not open, or does not show the long amount, is a failure, never a skip.
 //
 // Run:  node scripts/verify-web-laptop-nothing-cut-or-covered.mjs        (after `npx expo export --platform web`)
 //       LAPTOP_ROBOT_DIST=/path/to/dist node scripts/verify-web-laptop-nothing-cut-or-covered.mjs
@@ -58,6 +62,17 @@ const ATTEMPTS = 3;              // the search talks to the live database; a rea
 // The longest prices the app can serve: a ten-digit sale (one is in the index today) and a seven-digit yearly rent.
 const WORST_PRICES = ['ر.س 2,183,845,500', 'ر.س 9,999,999/سنوياً', 'ر.س 999,999,999'];
 const WORST_MONTHLY = 'السعر المعلن 999,999 شهرياً';
+// The Ministry of Justice past-sales table. LONG_AMOUNT is the longest sale price we hold (ten digits); the table must
+// show it whole. The rows below are the robot's own answer to the app's reads of moj_district_sales / moj_district_deals.
+const LONG_AMOUNT = '2,183,845,500';
+const MOJ_SUMMARY = { moj_region: 'الرياض', moj_area: 'الرياض/الملقا', fetched_at: '2026-11-08T03:00:00+00:00', deals: 12, avg_deal: 2183845500, avg_ppm: 9999999,
+  p10_deal: 999999999, p90_deal: 2183845500, window_from: '2025-11-01', window_to: '2026-10-31', source_refreshed_at: '2026-11-07T00:00:00+00:00' };
+const MOJ_DEAL_SHAPES = [[123456.78, 2183845500, 9999999], [99999.99, 999999999, 1234567], [612.5, 1250000, 2041]];
+const MOJ_DEALS = Array.from({ length: 12 }, (_, i) => {
+  const [area_m2, price, ppm] = MOJ_DEAL_SHAPES[i % MOJ_DEAL_SHAPES.length];
+  return { deal_ref: String(1234567890123 + i), deal_date: `2026-10-${String(28 - i).padStart(2, '0')}`, area_m2, price, ppm };
+});
+const DEALS_SHEET = '[data-testid="listing-preview-moj-deals-sheet"]';
 
 let failed = 0;
 const check = (label, ok, detail = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail && !ok ? `\n        ${detail}` : ''}`); };
@@ -100,6 +115,8 @@ export function moneyProblems(s) {
   for (const t of s.unmarked) out.push(`«${t}» is a price on a line that is not marked data-money (src/lib/moneyLine.ts) — the robot cannot watch it`);
   return out;
 }
+/** Lines that MUST be among the measured money lines (so "the table showed nothing long" can never read as a pass). */
+export const missingLines = (s, mustShow) => mustShow.filter((t) => !s.lines.some((x) => x.text === t)).map((t) => `the line «${t}» is not on the screen`);
 const mustCatch = (label, caught) => check(`MUTATION — ${label}`, caught);
 const R = (l, t, r, b) => ({ l, t, r, b });
 const clearScreen = { vw: 1366, vh: 768, signIn: R(1142, 132, 1350, 429), signInH: 297, cookie: R(0, 668, 1366, 768), covered: [] };
@@ -130,13 +147,17 @@ mustCatch('a price spilling over what is beside it is rejected', moneyProblems({
 mustCatch('a price on an unmarked line is rejected', moneyProblems({ lines: [whole], unmarked: ['ر.س 2,700,000'] }).length > 0);
 mustCatch('no money line at all is a failure, never a skip', moneyProblems({ lines: [], unmarked: [] }).length > 0);
 check('…and a whole price is accepted (not simply always-false)', moneyProblems({ lines: [whole], unmarked: [] }).length === 0);
+mustCatch('a past-sales table that does not show the long amount is not a pass', missingLines({ lines: [{ ...whole, text: '1,250,000' }] }, [LONG_AMOUNT]).length > 0);
+check('…and a table that shows it is accepted', missingLines({ lines: [{ ...whole, text: LONG_AMOUNT }] }, [LONG_AMOUNT]).length === 0);
 
 if (!existsSync(join(DIST, 'index.html'))) { console.error(`FAIL  ${DIST}index.html missing — build first: npx expo export --platform web`); process.exit(1); }
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
+const PROBE_PATH = '__robot-pass-probe';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
 const server = createServer(async (req, res) => {
   try {
     const rel = decodeURIComponent(req.url.split('?')[0].split('#')[0]).replace(/^\/+/, '');
+    if (rel === PROBE_PATH) { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end(req.headers['x-probe-pass'] === '1' ? 'pass-kept' : 'pass-lost'); }
     let file = join(DIST, rel || 'index.html');
     if (rel && existsSync(file) && (await stat(file)).isDirectory()) file = join(file, 'index.html');
     else if (rel && !existsSync(file) && existsSync(`${file}.html`)) file = `${file}.html`;
@@ -176,8 +197,33 @@ async function visitor(width, height) {
     };
     requestAnimationFrame(tick);
   });
-  await ctx.route('**/*', (route) => (route.request().frame().parentFrame() ? route.abort() : route.continue()));
+  await ctx.route('**/*', keepOutFrames());
   return { ctx, page: await ctx.newPage() };
+}
+// The visitor's request filter: a third-party frame's requests are dropped, everything else is PASSED ON (fallback),
+// never sent out (continue). Playwright runs the newest route first, and scripts/lib/robotPass.mjs has already put the
+// robot pass on this context: a filter that continues sends the request out before the pass is added, and from CI's
+// network every database call is then refused — the search shows no cards (CI run 42915775169, 2026-11-10).
+function keepOutFrames(how = 'fallback') {
+  return (route) => (route.request().frame().parentFrame() ? route.abort() : route[how]());
+}
+// Proven on every run, with a stand-in pass and this robot's own server (no secret needed): a header added by a route
+// registered BEFORE the filter must still reach the server.
+async function passSurvives(how) {
+  const ctx = await browser.newContext();
+  try {
+    await ctx.route(`**/${PROBE_PATH}`, (route) => route.continue({ headers: { ...route.request().headers(), 'x-probe-pass': '1' } }));
+    await ctx.route('**/*', keepOutFrames(how));
+    const page = await ctx.newPage();
+    await page.goto(`${BASE}/${PROBE_PATH}`, { timeout: 20000 });
+    return (await page.evaluate(() => document.body.innerText)).trim();
+  } catch (e) { return `error: ${String(e?.message ?? e).split('\n')[0]}`; } finally { await ctx.close().catch(() => {}); }
+}
+{
+  const kept = await passSurvives('fallback');
+  check("the robot's own request filter keeps the robot pass that was put on the browser before it", kept === 'pass-kept', kept);
+  const lost = await passSurvives('continue');
+  mustCatch('a request filter that sends requests out itself (continue) loses the robot pass', lost === 'pass-lost');
 }
 
 // ── PART A: nothing covered ───────────────────────────────────────────────────────────────────────────────────────────
@@ -368,14 +414,52 @@ const writeWorst = ({ prices, monthly }) => {
   for (const e of document.querySelectorAll('[data-testid="card-price"], [data-testid="listing-preview-price"]')) put(e, prices[i++ % prices.length]);
   for (const e of document.querySelectorAll('[data-testid="card-monthly-line"], [data-testid="listing-preview-monthly-line"]')) put(e, monthly);
 };
-async function moneyAt(page, where, { worst = false, needCards = true } = {}) {
+async function moneyAt(page, where, { worst = false, needCards = true, mustShow = [] } = {}) {
   await page.waitForTimeout(900);
   if (worst) { await page.evaluate(writeWorst, { prices: WORST_PRICES, monthly: WORST_MONTHLY }); await page.waitForTimeout(300); }
   const s = await page.evaluate(measureMoney);
-  const problems = [...new Set(moneyProblems(s))];
+  const problems = [...new Set([...moneyProblems(s), ...missingLines(s, mustShow)])];
   if (needCards && !s.cardPrices) problems.push('no card price is on the screen');
   check(`no money line cut — ${where}${worst ? ', longest prices written in' : ''}: ${s.lines.length} lines`, problems.length === 0, problems.slice(0, 12).join('\n        '));
   await shot(page, `money-${where.replace(/[^a-z0-9]+/gi, '-')}${worst ? '-worst' : ''}`);
+}
+// The three reads behind the Ministry's past-sales table, answered by the robot so the table is on every run:
+//   • the opened ad's own index row is answered as an ad the «الأسعار» block is drawn for (src/data/adPageData.ts
+//     pricesBlockEligible), under the ad's own table and id. Answered, not re-fetched: a re-fetch from inside a route
+//     skips every other route on the browser, the robot pass included,
+//   • the district's ministry summary and its deals are the robot's rows above, with the longest amounts.
+// Must be set BEFORE the first ad is opened: the ad page reads each of these once and remembers the answer.
+async function answerMinistryReads(ctx) {
+  const table = (name) => (url) => url.pathname.endsWith(`/rest/v1/${name}`);
+  const answer = (route, rows) => route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8',
+    headers: { 'access-control-allow-origin': route.request().headers().origin || '*' }, body: JSON.stringify(rows) });
+  await ctx.route(table('moj_district_sales'), (route) => answer(route, [MOJ_SUMMARY]));
+  await ctx.route(table('moj_district_deals'), (route) => answer(route, MOJ_DEALS));
+  await ctx.route(table('search_listings_ar'), async (route) => {
+    const q = new URL(route.request().url()).searchParams;
+    const eq = (k) => (q.get(k) || '').replace(/^eq\./, '');
+    if (route.request().method() !== 'GET' || !(q.get('select') || '').includes('latitude') || !eq('listing_id') || !eq('source_table')) return route.fallback();
+    return answer(route, [{ latitude: null, longitude: null, type_ar: 'فيلا', deal_ar: 'بيع', city_ar: 'الرياض', district_ar: 'الملقا', price_total: 2183845500,
+      area_m2: 612.5, license_number: null, platform: 'aqar', source_table: eq('source_table'), listing_id: Number(eq('listing_id')), bedrooms: null }]);
+  });
+}
+// Open the past-sales table inside the open ad. Crossing the side-by-side width re-mounts the ad page, which closes the
+// table — so every size asks again, and re-opens an ad first if none is up.
+async function openDealsSheet(page) {
+  const up = (sel) => page.locator(sel).first().isVisible().catch(() => false);
+  if (await up(DEALS_SHEET)) return true;
+  if (!(await up('[data-testid="listing-preview"]'))) {
+    for (const gold of (await page.$$('[data-testid="card-open-gold"]')).slice(0, 12)) {
+      await gold.scrollIntoViewIfNeeded().catch(() => {});
+      await gold.click({ timeout: 4000 }).catch(() => {});
+      if (await page.waitForSelector('[data-testid="listing-preview"]', { state: 'visible', timeout: 2500 }).catch(() => null)) break;
+    }
+  }
+  const button = page.locator('[data-testid="listing-preview-moj-deals"]').first();
+  if (!(await button.waitFor({ state: 'visible', timeout: 20000 }).then(() => true, () => false))) return false;
+  await button.scrollIntoViewIfNeeded().catch(() => {});
+  await button.click({ timeout: 5000 }).catch(() => {});
+  return !!(await page.waitForSelector(DEALS_SHEET, { state: 'visible', timeout: 6000 }).catch(() => null));
 }
 // One real search, the way a visitor does it: type the city, pick it, press «بحث».
 async function searchRiyadh() {
@@ -411,6 +495,7 @@ if (ONLY !== 'cover') {
   if (s) {
     const { ctx, page } = s;
     try {
+      await answerMinistryReads(ctx);   // before any ad is opened
       // Roomy cards: nothing open beside the results.
       await moneyAt(page, 'cards 1366x700');
       for (const [w, h] of [[1920, 950], [1024, 640]]) { await page.setViewportSize({ width: w, height: h }); await moneyAt(page, `cards ${w}x${h}`); }
@@ -428,6 +513,17 @@ if (ONLY !== 'cover') {
       if (beside) {
         for (const [w, h] of [[1024, 640], [1100, 700], [1280, 720], [1366, 700]]) { await page.setViewportSize({ width: w, height: h }); await moneyAt(page, `ad beside ${w}x${h}`); }
         for (const [w, h] of [[1024, 640], [1280, 720]]) { await page.setViewportSize({ width: w, height: h }); await moneyAt(page, `ad beside ${w}x${h}`, { worst: true }); }
+        // The Ministry's past-sales table inside the ad: five columns, the longest amounts, laptop and phone widths.
+        for (const [w, h] of [[1366, 700], [1024, 640], [390, 844], [320, 640]]) {
+          await page.setViewportSize({ width: w, height: h });
+          await page.waitForTimeout(700);
+          const open = await openDealsSheet(page);
+          check(`the Ministry's past-sales table opens inside the ad — ${w}x${h}`, open);
+          if (open) await moneyAt(page, `past-sales table ${w}x${h}`, { needCards: false, mustShow: [LONG_AMOUNT] });
+        }
+        await page.locator('[data-testid="listing-preview-moj-deals-close"]:visible').first().click({ timeout: 3000 }).catch(() => {});
+        await page.setViewportSize({ width: 1366, height: 700 });
+        await page.waitForTimeout(700);
         await page.locator('[data-testid="ad-viewer-hide"]:visible, [data-testid="ad-viewer-close"]:visible').first().click({ timeout: 4000 }).catch(() => {});
         await page.waitForTimeout(800);
       }
