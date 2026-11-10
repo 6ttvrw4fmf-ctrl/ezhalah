@@ -1690,9 +1690,16 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // WITH AN EXPLICIT CITY the typed name is the probe AFTER the city was cut out («حي الفحياء، المجمعة» → «الفاء»),
   // never the whole phrase: comparing the whole phrase found nothing, so a «حي» inside the word plus a named city
   // lost the district outright (CodeRabbit on #11683, 2026-11-10). The city still scopes the rows (callers below).
+  // The city-cut rows are SCOPED to the named city (EXACT LOCATION ONLY): «حي الفحياء، الرياض» must never answer
+  // Al Majmaah's district because its name happens to match — only the whole-phrase rows keep the «town inside the
+  // district's own name» semantics the callers below rely on (CodeRabbit on #11683, second round).
+  const inNamedCity = (d: LiveDistrict) => {
+    const dc = flatLoc(d.city);
+    return dc === cityKey || dc === cityKeyAr || (!!cityKeyAr && flatLoc(CITY_AR_DISPLAY[dc] || '') === cityKeyAr);
+  };
   const namedExactly = () => {
     const whole = liveNamedExactly(raw);
-    const cut = cityKey && probe !== normDist(raw) ? liveNamedExactlyKey(probe) : [];
+    const cut = cityKey && probe !== normDist(raw) ? liveNamedExactlyKey(probe).filter(inNamedCity) : [];
     return cut.length ? [...whole, ...cut.filter((d) => !whole.includes(d))].sort((a, b) => b.n - a.n) : whole;
   };
   if (probe.length < 2) return DISTRICT_MARKER.test(raw) ? namedExactly() : []; // input is just a city (or nothing district-specific)
