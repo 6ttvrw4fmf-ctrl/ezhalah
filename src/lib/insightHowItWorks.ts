@@ -11,7 +11,7 @@ export const HOW_IT_WORKS: Record<'ar' | 'en', Copy> = {
     title: 'كيف نحسبها؟',
     falconer: 'صقارنا',
     story: (n) =>
-      `الصقار يربي صقره ويعتني به ويحسن إطعامه. وصقارنا يجمع كل يوم الإعلانات من جميع المواقع العقارية في السعودية${n ? `، وعددها ${n}` : ''}، ويقدم هذه البيانات الثمينة لصقره شاهين، ليجيبك بدقة عند سؤاله. ومن هذه البيانات نفسها تأتي هذه المعلومة: الأسعار، والإعلانات الجديدة، والتغيرات، للمساكن والأراضي والمحلات.`,
+      `الصقار يربي صقره ويعتني به ويحسن إطعامه. وصقارنا يجمع كل يوم الإعلانات من جميع المواقع العقارية في السعودية${n ? `، وعددها ${n}` : ''}، ويقدم هذه البيانات الثمينة لصقره شاهين، ليجيبك بدقة عند سؤاله. وشاهين نموذج ذكاء اصطناعي، وقد يخطئ أحيانا، لذا تحقق دائما من الإعلان الأصلي. ومن هذه البيانات نفسها تأتي هذه المعلومة: الأسعار، والإعلانات الجديدة، والتغيرات، للمساكن والأراضي والمحلات.`,
     rulesTitle: 'القواعد',
     rules: [
       { title: 'إعلانات حقيقية فقط', body: 'كل معلومة مصدرها إعلانات منشورة في هذه المواقع.' },
@@ -26,7 +26,7 @@ export const HOW_IT_WORKS: Record<'ar' | 'en', Copy> = {
     title: 'How we calculate it',
     falconer: 'Our falconer',
     story: (n) =>
-      `A falconer raises his falcon, cares for it and feeds it well. Every day our falconer collects the listings from every property website in Saudi Arabia${n ? `, and there are ${n} of them,` : ''} and gives this valuable data to his falcon Shaheen, so it answers you accurately when you ask. This fact comes from that same data: prices, new listings and changes, for homes, land and shops.`,
+      `A falconer raises his falcon, cares for it and feeds it well. Every day our falconer collects the listings from every property website in Saudi Arabia${n ? `, and there are ${n} of them,` : ''} and gives this valuable data to his falcon Shaheen, so it answers you accurately when you ask. Shaheen is an AI model and can sometimes make mistakes, so always check the original listing. This fact comes from that same data: prices, new listings and changes, for homes, land and shops.`,
     rulesTitle: 'The rules',
     rules: [
       { title: 'Only real listings', body: 'Every fact comes from listings published on these sites.' },

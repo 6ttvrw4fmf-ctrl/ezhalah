@@ -1679,7 +1679,7 @@ new detector needing a longer history must raise the retention in the same chang
   إزهله»: ✕ ALWAYS on the physical right; in the centre the sign-in eagle story played 2× slower
   (`assets/images/falconer-howto.svg`, built by `scripts/build-howto-falconer.mjs`), mirrored in Arabic, replayed each
   open; «صقارنا» with Shaheen's purple mark; the owner-approved falconer story (Ezhalah's falconer collects every site's
-  listings and gives them to his falcon Shaheen; the fact comes from the same data) and five rules (only real listings;
+  listings and gives them to his falcon Shaheen; Shaheen is AI and can make mistakes, so check the original listing; the fact comes from the same data) and five rules (only real listings;
   the site's own posting date, undated = not counted; asking prices, duplicates once, checked twice; a new fact every
   hour about your city/district; information only, not financial advice). Formal Arabic, no diacritics. No «تمام»
   button — ✕ or a tap outside closes it. The site count is the LIVE `siteCount.ts` number the share card uses; unknown →

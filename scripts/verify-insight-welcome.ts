@@ -260,6 +260,7 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
     HOW_IT_WORKS.ar.falconer === 'صقارنا' && arS.includes('لصقره شاهين') && enStory.includes('his falcon Shaheen'));
   check('the site count is the LIVE number when known, and the clause is LEFT OUT when unknown — never a guessed number',
     arS.includes('وعددها 155') && enStory.includes('there are 155 of them') && !/\d/.test(HOW_IT_WORKS.ar.story(null)) && !/\d/.test(HOW_IT_WORKS.en.story(null)));
+  check('it says Shaheen is AI and can make mistakes — check the original listing (owner 2026-11-11)', arS.includes('نموذج ذكاء اصطناعي، وقد يخطئ أحيانا') && enStory.includes('AI model and can sometimes make mistakes'));
   check('the date rule: the site\'s own posting date, and an undated ad is not counted', ar.includes('تاريخ نشر الإعلان في موقعه') && ar.includes('لا يحتسب') && enS.includes("isn't counted"));
   check('it says asking prices, duplicates once, checked twice', ar.includes('وليست أسعار صفقات منفذة') && ar.includes('مرة واحدة') && ar.includes('مرتين') && enS.includes('counted once'));
   check('it says information only, not financial or investment advice', ar.includes('ليست نصيحة مالية أو استثمارية') && enS.includes('Not financial or investment advice'));
