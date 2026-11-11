@@ -83,7 +83,7 @@ jobs:
         run: |
           ok=""
           for i in 1 2 3; do
-            if npx playwright install --with-deps chromium; then ok=1; break; fi
+            if timeout 240 npx playwright install --with-deps chromium; then ok=1; break; fi
             echo "playwright --with-deps failed (attempt $i)"; sleep 20
           done
           if [ -z "$ok" ]; then

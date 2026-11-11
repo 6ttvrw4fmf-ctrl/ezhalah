@@ -755,8 +755,11 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         // The سنوي and كلاهما arms also admit price on request (price_annual NULL) — the line the clause
         // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»). Under شهري («إقامات قصيرة»)
         // an unpriced row is admitted ONLY from the two stay-length platforms (owner 2026-10-26, migration
-        // 20261026071543: «shift those to annual rent»).
-        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
+        // 20261026071543: «shift those to annual rent»). Since 2026-11-11 (migration 20261111141500) the سنوي and
+        // كلاهما arms admit an unpriced row only when it is NOT in the short-stays pool (rent_period_ar is distinct
+        // from 'شهري' → PostgREST or(is.null, neq)): Haraj's daily/weekly rents carry no price by owner order and
+        // were leaking into yearly searches.
+        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${enc('شهري')})))`);
         else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))`);
         // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
         //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
@@ -764,7 +767,7 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         //                                 or (s.rent_period_ar = 'شهري' and coalesce(s.rent_now_pay_later,false)))
         // It is the union of the two single-period arms — NOT "no period filter": a rent row whose
         // source published no period at all stays OUT (R1.5.1; migration rent_period_both_monthly_and_annual).
-        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
+        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${enc('شهري')})))`);
         else unhandled.push(`p_rent_period=${v}`);
         break;
       // beds/bath/price/floor are handled ABOVE, where the clause's exact-vs-min and
