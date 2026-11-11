@@ -60,13 +60,16 @@ const real = problems(migs);
 check('retired-place homes move region-safely; the district alarms read spelling, Aqar address and own-name towns as correct', real.length === 0, real.join('; '));
 
 const later = (s: string) => [...migs, { f: '29990101000000_x.sql', s }];
-const lastWith = (needle: string) => migs.filter((m) => m.s.includes(needle)).at(-1)!;
+const lastWith = (needle: string) => migs.filter((m) => m.s.toLowerCase().includes(needle.toLowerCase())).at(-1)!;
 const swap = (needle: string, from: string, to: string) => {
   const m = lastWith(needle); const s = m.s.replace(from, to);
   if (s === m.s) throw new Error(`mutation was a no-op: ${from}`);
   return migs.map((x) => (x.f === m.f ? { f: x.f, s } : x));
 };
-mustCatch('the hourly refresh dropping the remap', problems(swap('n := n + public.refresh_retired_place_remap()', '  n := n + public.refresh_retired_place_remap();\n', '')).length > 0);
+// The needle names the DEFINITION, not the line: 20261111025049 splices a hook next to that line inside a DO block
+// (live-body splice, no `create or replace function` text), so «last file containing the line» stopped being the file
+// problems() reads, and the mutation hit a file the check never looks at.
+mustCatch('the hourly refresh dropping the remap', problems(swap('create or replace function public.refresh_listing_city_correction', '  n := n + public.refresh_retired_place_remap();\n', '')).length > 0);
 mustCatch('a city move allowed across regions', problems(swap('create or replace function public.retired_place_remap_rows', 'n.region_id = tc2.src_region or tc2.dup', 'true')).length > 0);
 mustCatch('a move landing on a retired city', problems(swap('create or replace function public.retired_place_remap_rows', 'case when t.retired_at is null then tc.t1 end', 'tc.t1')).length > 0);
 mustCatch('the contradiction view losing its MATERIALIZED fence', problems(swap('text_disagrees AS MATERIALIZED', 'text_disagrees AS MATERIALIZED', 'text_disagrees AS')).length > 0);
