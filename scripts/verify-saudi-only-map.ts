@@ -1,17 +1,18 @@
 // THE MAP IS ABOUT SAUDI ARABIA ONLY (owner 2026-11-11: «just Saudi Arabia focus … not everything shows»). Measured
 // live that day on a phone: the map's home view showed Iraq, Iran, Egypt, Syria and the UAE as brightly as the Kingdom,
 // and could be dragged anywhere. The «خريطة» map now (src/components/AppleMap.web.tsx):
-//   • fades every country around Saudi Arabia (one polygon with the Kingdom cut out, from public/ksa-outline.json);
-//   • lets the fade go as the user zooms in, so a simplified border never fogs an ad on the coast or the border;
-//   • keeps its centre near the Kingdom and stops zooming out a little past the home view.
+//   • keeps its centre near the Kingdom and stops zooming out a little past the home view;
+//   • suggests ONLY places inside the Kingdom in its search (owner, later that day: «I don't like how it shows
+//     highlighted in Saudi … what I meant was the search on top should only get Saudi») — every suggestion is checked
+//     against public/ksa-outline.json (src/lib/saudiOutline.ts). The fade over the neighbours was REMOVED.
 // And on a phone the place search opens as a full-screen page (owner, same day: «I don't like how when you click
 // search it shows like this») — src/components/MapDealRow.tsx.
 //
 // What this EXECUTES: the outline against the 13 region shapes and real cities (point-in-polygon), and the real
-// maskStrength() lifted from the map. The wiring checks carry mutations.
+// keepSaudiPlaces() the search runs, against Saudi and foreign places. The wiring checks carry mutations.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { liftSymbols } from './lib/liftSymbols.ts';
+import { keepSaudiPlaces } from '../src/lib/saudiOutline.ts';
 import { windowBetween } from './lib/sourceWindow.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -54,12 +55,21 @@ const CITIES: [string, number, number][] = [
 const outside = CITIES.filter(([, x, y]) => !inSaudi([x, y]));
 check('cities: 15 cities incl. coast and border towns are inside the outline', outside.length === 0, outside.map((c) => c[0]).join(', '));
 const map = read('src/components/AppleMap.web.tsx');
-const lifted = await liftSymbols(join(ROOT, 'src/components/AppleMap.web.tsx'),
-  [{ header: 'const MASK_FULL', endsWith: /^const MASK_GONE/ }, { header: 'export const maskStrength' }], ['maskStrength']);
-const maskStrength = lifted.maskStrength as (ratio: number) => number;
-check('fade: full at the home view and when zoomed out', maskStrength(1) === 1 && maskStrength(2) === 1);
-check('fade: gone at a region-sized view and closer (no fog over coastal ads)', maskStrength(0.2) === 0 && maskStrength(0.05) === 0 && maskStrength(0.01) === 0);
-check('fade: never grows as the user zooms in', [1, 0.6, 0.45, 0.4, 0.3, 0.25, 0.2, 0.1].every((r, i, a) => i === 0 || maskStrength(r) <= maskStrength(a[i - 1])));
+const at = (name: string, lng: number, lat: number) => ({ name, coordinate: { latitude: lat, longitude: lng } });
+const saudiPlaces = CITIES.map(([n, x, y]) => at(n, x, y));
+const FOREIGN = [at('Dubai', 55.27, 25.2), at('Baghdad', 44.36, 33.31), at('Cairo', 31.24, 30.04), at('Amman', 35.93, 31.95), at('Kuwait City', 47.98, 29.37),
+  at('Manama', 50.58, 26.23), at('Doha', 51.53, 25.29), at('Sanaa', 44.21, 15.35), at('Basra', 47.78, 30.51), at('Aqaba', 35.0, 29.53)];
+const kept = keepSaudiPlaces([...saudiPlaces, ...FOREIGN], outline).map((p) => p.name);
+check('search: every Saudi city stays a suggestion', saudiPlaces.every((p) => kept.includes(p.name)));
+check('search: no foreign place is suggested (Dubai, Baghdad, Cairo, Amman, Kuwait, Manama, Doha, Sanaa, Basra, Aqaba)', FOREIGN.every((p) => !kept.includes(p.name)), FOREIGN.filter((p) => kept.includes(p.name)).map((p) => p.name).join(', '));
+check('search: a place with no coordinate is dropped; with no outline, Apple\'s Saudi-only answer stands', keepSaudiPlaces([{ name: 'x' }], outline).length === 0 && keepSaudiPlaces(FOREIGN, null).length === FOREIGN.length);
+const searchWired = (src: string) => /live\.search = new mk\.Search\(\{ language, limitToCountries: 'SA', includePointsOfInterest: true \}\);/.test(src)
+  && /const rings = await loadOutline\(\)\.catch\(\(\) => null\);\n\s*const out = keepSaudiPlaces\(sortByKind\(dropAreaShadows\(dedupePlaces\(places\.length \? places : named\)\), query\), rings\)\.slice\(0, 6\);/.test(src);
+check('search: Apple is asked for Saudi places, and every suggestion passes the outline before it is shown', searchWired(map));
+mustCatch('the outline check removed from the search', !searchWired(map.replace('keepSaudiPlaces(sortByKind(', '((x: unknown[]) => x)(sortByKind(')));
+const noFade = (src: string) => !/ensureSaudiMask|MASK_FADE|new mk\.PolygonOverlay\(\[world/.test(src);
+check('map: no fade over the neighbouring countries (owner 2026-11-11)', noFade(map));
+mustCatch('the fade coming back', !noFade(map + '\nensureSaudiMask(mk, map);'));
 
 // 3. Wiring in the map, each with a mutation.
 // The camera box: every city must be centrable (CodeRabbit on #11818: the first box shut out Tabuk, Jazan, Haql).
@@ -73,34 +83,21 @@ mustCatch('the first, too-small box (±6° × ±7° around 23.5, 45.5)', shutOut
 
 // A missing marker reads as «not wired» (windowBetween throws), never as the rest of the file.
 const win = (src: string, start: string, end: string) => { try { return windowBetween(src, start, end, 'AppleMap.web.tsx'); } catch { return ''; } };
-const setup = (src: string) => win(src, 'map.cameraBoundary = ', 'ensureSaudiMask(mk, map);');
-const helper = (src: string) => win(src, 'function ensureSaudiMask(', '/** INSTANT FIRST MAP');
+const setup = (src: string) => win(src, 'map.cameraBoundary = ', '// The 13 regions:');
 const wired = (src: string) => ({
   boundary: /map\.cameraBoundary = new mk\.CoordinateRegion\(new mk\.Coordinate\(SAUDI_BOX_CENTER\.latitude, SAUDI_BOX_CENTER\.longitude\)/.test(src),
   // Set as the map is made, from the view it settled on — never inside the outline's .then (a zoom meanwhile would
   // become «home» and the user could not zoom back out to the Kingdom; review of #11818).
-  zoom: /map\.cameraZoomRange = new mk\.CameraZoomRange\(0, map\.cameraDistance \* MAX_ZOOM_OUT\);/.test(setup(src)) && !/cameraZoomRange/.test(helper(src)),
-  mask: /new mk\.PolygonOverlay\(\[world, \.\.\.holes\], \{\s*enabled: false,/.test(src) && /m\.addOverlay\(mask\)/.test(helper(src)),
-  fades: /mask\.style\.fillOpacity = MASK_FADE \* k;/.test(src) && /const k = maskStrength\(m\.region\.span\.latitudeDelta \/ home\);/.test(src),
-  // Tied to the map: a parked map still gets it, a return visit retries a failure, and a failure reaches Sentry.
-  // The outline loader reports every failure itself — so the prewarm path (before the map opens) is covered too.
-  retried: /ensureSaudiMask\(mkKept, kept\.map\);/.test(src) && /saudiMasked\.delete\(m\); reportError\(e, \{ where: 'map: Saudi fade' \}\)/.test(helper(src))
-    && /\}\)\.catch\(\(\) => \{ saudiMasked\.delete\(m\); \}\);/.test(helper(src))
-    && /\.catch\(\(e\) => \{ outlineLoad = null; reportError\(e, \{ where: 'map: Saudi outline' \}\); throw e; \}\);/.test(win(src, 'function loadOutline(', 'return outlineLoad;\n}'))
+  zoom: /map\.cameraZoomRange = new mk\.CameraZoomRange\(0, map\.cameraDistance \* MAX_ZOOM_OUT\);/.test(setup(src)),
+  outlineReported: /\.catch\(\(e\) => \{ outlineLoad = null; reportError\(e, \{ where: 'map: Saudi outline' \}\); throw e; \}\);/.test(win(src, 'function loadOutline(', 'return outlineLoad;\n}'))
     && /void loadOutline\(\)\.catch\(\(\) => \{\}\);/.test(win(src, 'export function prewarmMap(', '\n}\n')),
-  noGone: !/\bgone\b/.test(helper(src)),
 });
 const w = wired(map);
 check('map: centre kept near the Kingdom (cameraBoundary)', w.boundary);
 check('map: zoom-out stops past the home view (cameraZoomRange)', w.zoom);
-check('map: the fade polygon is drawn, and never takes a tap (enabled: false)', w.mask);
-check('map: the fade follows the zoom through maskStrength()', w.fades);
-check('map: the fade belongs to the map — a return visit retries it, a failure is reported to Sentry', w.retried && w.noGone);
-mustCatch('the zoom limit set inside the outline wait again', !wired(map.replace('      map.cameraZoomRange = new mk.CameraZoomRange(0, map.cameraDistance * MAX_ZOOM_OUT);\n', '').replace("    const onView = () => {", "    m.cameraZoomRange = new mk.CameraZoomRange(0, m.cameraDistance * MAX_ZOOM_OUT);\n    const onView = () => {")).zoom);
-mustCatch('a return visit no longer retrying the fade', !wired(map.replace('ensureSaudiMask(mkKept, kept.map);', '')).retried);
-mustCatch('an outline failure going unreported (the prewarm path included)', !wired(map.replace("outlineLoad = null; reportError(e, { where: 'map: Saudi outline' }); throw e;", 'outlineLoad = null; throw e;')).retried);
-mustCatch('the fade polygon taking taps', !wired(map.replace(/enabled: false,(\s*style: new mk\.Style\(\{ fillColor: MASK_COLOR)/, 'enabled: true,$1')).mask);
-mustCatch('the fade not following the zoom', !wired(map.replace('mask.style.fillOpacity = MASK_FADE * k;', 'mask.style.fillOpacity = MASK_FADE;')).fades);
+check('map: the outline loads early and a failure reaches Sentry', w.outlineReported);
+mustCatch('the zoom limit removed', !wired(map.replace('      map.cameraZoomRange = new mk.CameraZoomRange(0, map.cameraDistance * MAX_ZOOM_OUT);\n', '')).zoom);
+mustCatch('an outline failure going unreported (the prewarm path included)', !wired(map.replace("outlineLoad = null; reportError(e, { where: 'map: Saudi outline' }); throw e;", 'outlineLoad = null; throw e;')).outlineReported);
 mustCatch('the boundary removed', !wired(map.replace('map.cameraBoundary = ', 'void ')).boundary);
 
 // 4. The phone's full-screen search.
@@ -131,4 +128,4 @@ mustCatch('the list closing on blur again', !search(row.replace('const open = (f
 mustCatch('the map search no longer opting in', !search(row.replace(/testID="map-search"\s*fullOnPhone/, 'testID="map-search"')).opts);
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
-console.log('\nSaudi-only map + phone search page: OK');
+console.log('\nSaudi-only search + phone search page: OK');

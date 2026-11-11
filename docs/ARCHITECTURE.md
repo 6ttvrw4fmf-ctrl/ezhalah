@@ -483,6 +483,8 @@ most-shared spot (`map_pin_snap`, refreshed hourly by `map_pin_snap_refresh_ar()
 tapping it lists every ad. Two DIFFERENT sites keep their own spot (owner 2026-11-03: same-site copies stay, cross-site
 is normal) — but see the next rule: their heads never overlap on screen. Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`, `20261105071552`).
 
+**The map search suggests Saudi places only; the map itself is NOT faded (owner 2026-11-11, permanent).** «I don't like how it shows highlighted in Saudi … what I meant was the search on top should only get Saudi.» The fade over the neighbouring countries (added earlier that day) was removed; the map looks like Apple's. Every place suggestion — the map search and the route fields — must lie inside the Kingdom's outline (`public/ksa-outline.json`, `keepSaudiPlaces` in src/lib/saudiOutline.ts), on top of Apple's `limitToCountries: 'SA'`. The camera still stays near the Kingdom. Guard: scripts/verify-saudi-only-map.ts.
+
 **«نُشر خلال» — PUBLISHED WITHIN, and «إعلان جديد» on pins (owner 2026-11-11, permanent).** A choice in BOTH the main
 Filter and the map filter, every deal except short stays: Any / 1 / 7 / 14 / 30 / 90 days / 6 / 12 / 24 / 36 months, each a
 MAXIMUM age like Zillow's «Time on Zillow». It reads the listing SITE's own posting date — `search_listings_ar.posted_at`
