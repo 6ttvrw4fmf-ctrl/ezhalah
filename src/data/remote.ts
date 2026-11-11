@@ -8,7 +8,7 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
-import { bathroomsForCard } from '@/lib/indexBathrooms';
+import { bathroomsForCard, indexBathLookup, servedBathsFor, type IndexBathRow } from '@/lib/indexBathrooms';
 import { reportMessage } from '@/lib/observability';
 import { honestTotal } from '@/lib/honestTotal';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
@@ -1763,6 +1763,23 @@ async function bounded<T = any>(builder: any, ms = RPC_TIMEOUT_MS, signal?: Abor
 // chunks, and fail-closed — any chunk error rejects the table (caller → null → retry UI, never a short
 // grid) and no NEW chunk starts after it. Pinned by scripts/verify-raw-card-chunks-run-concurrently.ts.
 const RAW_CHUNK_CONCURRENCY = 4;
+// The index's served bath counts for search candidates that carry no af_canon (src/lib/indexBathrooms.ts). Bounded; a
+// failed read is REPORTED and yields an empty lookup, so the card shows the site's own box exactly as before — never a
+// blank-for-error, never a guessed count (A FAILED FETCH IS NOT AN EMPTY ANSWER: the card stays honest either way).
+async function indexBathsForSearch(cands: { source_table: string; listing_id: number }[], signal?: AbortSignal): Promise<Map<string, number>> {
+  if (!supabase || !cands.length) return new Map();
+  const tables = [...new Set(cands.map((c) => c.source_table))];
+  const ids = [...new Set(cands.map((c) => c.listing_id))];
+  const { data, error } = await bounded<IndexBathRow[]>(supabase.from('search_listings_ar').select('source_table,listing_id,bathrooms')
+    .in('source_table', tables).in('listing_id', ids).not('bathrooms', 'is', null).limit(Math.min(1000, ids.length * tables.length)), RPC_TIMEOUT_MS, signal);
+  if (error) {
+    if (!error.cancelled) reportMessage('search: served bath counts read failed', { tables: tables.length, ids: ids.length, error: String(error.message ?? error) });
+    return new Map();
+  }
+  const want = new Set(cands.map((c) => `${c.source_table}:${c.listing_id}`));
+  return new Map([...indexBathLookup(data)].filter(([k]) => want.has(k)));
+}
+
 async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?: AbortSignal): Promise<Listing[]> {
   const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
   const pages: Listing[][] = [];
@@ -1945,6 +1962,9 @@ export async function fetchListingsForQuery(
   // there). Broad-Commercial residential candidates are already commercial-only (RPC scope A constrained them
   // to commercial type_ar), so the plain by-id fetch returns exactly them — no separate type re-filter needed.
   const entries = [...byTable];
+  // The bath count the index SERVES, for the candidates whose search carried no af_canon (every ordinary Filter
+  // search): ONE bounded read, started beside the card reads so it adds no wait (src/lib/indexBathrooms.ts).
+  const servedBathsP = indexBathsForSearch(cleanCands.filter((c) => !c.af_canon), signal);
   let fetched: Listing[][];
   try {
     fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids, signal)));
@@ -1957,6 +1977,7 @@ export async function fetchListingsForQuery(
   // 4) Rebuild in newest-first order (dropping rows the raw filters / index↔raw drift removed), attach
   //    each row's city + region, then DIVERSIFY by geography according to the search scope so broad
   //    searches show the whole market, not 25 cards from one city/platform. (user: adaptive ordering.)
+  const servedBathLookup = await servedBathsP;
   const ranked: Ranked[] = [];
   for (const c of cleanCands) {
     const l = map.get(`${c.source_table}:${c.listing_id}`);
@@ -1978,7 +1999,7 @@ export async function fetchListingsForQuery(
     // The bath count the card prints is the one the index SERVES when the site's own box is empty (Rule B: the
     // seller's words fill it) — otherwise a customer who filtered «3 حمامات» reaches a card showing none
     // (card_parity_card_missing fkralemar/aqargate, 🔧 2026-11-10; src/lib/indexBathrooms.ts).
-    const servedBaths = c.af_canon?.bathrooms;   // read only; the canonical row itself is attached verbatim above
+    const servedBaths = servedBathsFor(c, servedBathLookup);   // af_canon when the search had one, else the index read
     l.bathrooms = bathroomsForCard(l.bathrooms, servedBaths) ?? 0;
     // A land «total» the index read as a PER-METRE price (owner 2026-11-04) prints the index's «≈ figure × area», so the
     // client budget net below keeps the card the server matched (src/lib/landPerMeterTotal.ts).
