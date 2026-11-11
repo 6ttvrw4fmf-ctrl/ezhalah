@@ -23,10 +23,13 @@ export default function PostedWindowMenu({ value, counts, onChange, testID = 'po
   onChange: (days: number | null) => void;
   testID?: string;
 }) {
-  const { t, isRTL } = useI18n();
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const rows: (number | null)[] = [null, ...POSTED_WINDOWS];
-  const row = isRTL ? 'row-reverse' : 'row';
+  // Plain 'row': the page is already right-to-left in Arabic (document dir=rtl, I18nManager on native), so 'row' puts the
+  // label on the RIGHT and the chevron on the left. 'row-reverse' flipped it back to left-to-right (owner 2026-11-11:
+  // «اي وقت should be far right not left in Arabic»).
+  const row = 'row';
   return (
     <>
       <Pressable onPress={() => setOpen(true)} accessibilityRole="button" testID={`${testID}-field`}
