@@ -53,3 +53,65 @@ def test_a_cut_index_still_blocks_the_prune(monkeypatch):
     late = S.SOFT_DEADLINE_S + 5.0
     runs, pruned = _run(monkeypatch, [0.0, late, late, late, late, late])
     assert pruned == []
+
+
+def test_the_oracle_controls_are_only_ads_this_run_read(monkeypatch):
+    # CodeRabbit on #11484: unread ads (SHQ102, SHQ103) sort before nothing here, but in general they could
+    # fill all three control slots. The oracle must be built over the READ set, never the protected one.
+    built, kws = [], []
+    monkeypatch.setattr(S.db, "sb", lambda: "client")
+    monkeypatch.setattr(S.db, "own_page_status_oracle",
+                        lambda c, tbl, seen, **kw: built.append((tbl, set(seen))) or (lambda ad: ("unknown", "stub")))
+    sess, runs, pruned = T._Sess(), [], []
+    it = iter([0.0, 0.5, 1.0, S.SOFT_DEADLINE_S + 1.0, S.SOFT_DEADLINE_S + 2.0])
+    monkeypatch.setattr(S, "_clock", lambda: next(it))
+    monkeypatch.setattr(S, "retry_smarter_session", lambda url, **kw: (sess, ["direct/chrome124:200"]))
+    monkeypatch.setattr(S, "parse_detail", lambda nid, page: {"nid": nid})
+    monkeypatch.setattr(S, "map_detail", lambda d: ({"ad_number": f"SHQ{d['nid']}"}, "residential", None))
+    for name, fn in (("begin_run", lambda slug: 7), ("end_run", lambda rid, **kw: runs.append(kw) or True),
+                     ("upsert_shomou_residential_batch", lambda rows: None),
+                     ("upsert_shomou_commercial_batch", lambda rows: None),
+                     ("retire_superseded_siblings", lambda **kw: 0)):
+        monkeypatch.setattr(S.db, name, fn)
+
+    def prune(tbl, seen, **kw):
+        kw["verify_gone"]("SHQ999")      # one at-grace read builds the oracle
+        pruned.append((tbl, set(seen)))
+        return 0
+
+    monkeypatch.setattr(S.db, "prune_unseen", prune)
+    monkeypatch.setattr(S.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(sys, "argv", ["shomou"])
+    assert S.main() == 0
+    assert dict(pruned)[S.RES_TABLE] == {"SHQ101", "SHQ102", "SHQ103"}   # unread ads still protected
+    assert dict(built)[S.RES_TABLE] == {"SHQ101"}                       # controls: read ads only
+    assert dict(built)[S.COM_TABLE] == set()                            # nothing read there: no control
+
+
+class _FailingLaterIndexPage(T._Sess):
+    def get(self, url, **kw):
+        if "page=1" in url:
+            raise ConnectionError("reset by peer")
+        return super().get(url, **kw)
+
+
+def test_a_failed_later_index_page_is_not_the_end_of_the_list(monkeypatch):
+    # CodeRabbit on #11484: index page 1 raised on every retry; that must read as an incomplete index, so a
+    # deadline cut afterwards can never prune ads that sat on the unread index pages.
+    sess, runs, pruned = _FailingLaterIndexPage(), [], []
+    it = iter([0.0, 0.5, 1.0, S.SOFT_DEADLINE_S + 1.0, S.SOFT_DEADLINE_S + 2.0, S.SOFT_DEADLINE_S + 3.0])
+    monkeypatch.setattr(S, "_clock", lambda: next(it))
+    monkeypatch.setattr(S, "retry_smarter_session", lambda url, **kw: (sess, ["direct/chrome124:200"]))
+    monkeypatch.setattr(S, "parse_detail", lambda nid, page: {"nid": nid})
+    monkeypatch.setattr(S, "map_detail", lambda d: ({"ad_number": f"SHQ{d['nid']}"}, "residential", None))
+    for name, fn in (("begin_run", lambda slug: 7), ("end_run", lambda rid, **kw: runs.append(kw) or True),
+                     ("upsert_shomou_residential_batch", lambda rows: None),
+                     ("upsert_shomou_commercial_batch", lambda rows: None),
+                     ("retire_superseded_siblings", lambda **kw: 0),
+                     ("prune_unseen", lambda tbl, seen, **kw: pruned.append(tbl) or 0)):
+        monkeypatch.setattr(S.db, name, fn)
+    monkeypatch.setattr(S.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(sys, "argv", ["shomou"])
+    assert S.main() == 0
+    assert pruned == []
+    assert "index_cut=1" in runs[0]["notes"]
