@@ -47,10 +47,10 @@ export default function PostedWindowMenu({ value, counts, onChange, testID = 'po
                 return (
                   <Pressable key={String(days)} onPress={() => { onChange(days); setOpen(false); }} accessibilityRole="button"
                     accessibilityState={{ selected: on }} testID={`${testID}-opt-${days ?? 'any'}`}
-                    style={({ hovered }: any) => [s.opt, { flexDirection: row }, hovered && s.optHover]}>
-                    <View style={s.tick}>{on ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : null}</View>
+                    style={({ hovered }: any) => [s.opt, { flexDirection: row }, hovered && !on && s.optHover, on && s.optPicked]}>
+                    <View style={s.tick}>{on ? <Ionicons name="checkmark" size={18} color={colors.onFill} /> : null}</View>
                     <Text style={[s.optT, on && s.optOn]}>{t(postedWindowLabel(days))}</Text>
-                    <Text style={s.optN}>{n == null ? '' : n.toLocaleString('en-US')}</Text>
+                    <Text style={[s.optN, on && s.optNOn]}>{n == null ? '' : n.toLocaleString('en-US')}</Text>
                   </Pressable>
                 );
               })}
@@ -71,6 +71,9 @@ const s = StyleSheet.create({
   optHover: { backgroundColor: colors.tintFill },
   tick: { width: 20, alignItems: 'center' },
   optT: { flex: 1, minWidth: 0, fontSize: 16, color: colors.ink },
-  optOn: { fontWeight: '700', color: colors.primary },
+  // The picked row is filled, not just ticked (owner 2026-11-11: «make it clearly when it's on the tick»).
+  optPicked: { backgroundColor: colors.selFill, borderRadius: 14, marginHorizontal: 6 },
+  optOn: { fontWeight: '700', color: colors.onFill },
+  optNOn: { color: colors.onFill, fontWeight: '600' },
   optN: { fontSize: 14, color: colors.muted, fontVariant: ['tabular-nums'] },
 });

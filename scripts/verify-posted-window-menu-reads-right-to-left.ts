@@ -41,5 +41,14 @@ const mutants: [string, string][] = [
 ];
 for (const [name, code] of mutants) mustCatch(name, code !== src && labelSideInArabic(code) !== 'right');
 
+// The picked row is FILLED, not just ticked (owner 2026-11-11: «make it clearly when it's on the tick»).
+function pickedRowIsFilled(code: string): boolean {
+  return /on && s\.optPicked\]/.test(code)
+    && /optPicked: \{[^}]*backgroundColor: colors\.selFill/.test(code)
+    && /optOn: \{[^}]*color: colors\.onFill/.test(code);
+}
+check('the picked period is a filled plum row with white text', pickedRowIsFilled(src));
+mustCatch('a picked row that is only ticked again', !pickedRowIsFilled(src.replace(', on && s.optPicked]', ']')));
+
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log('\n«نُشر خلال» reads right-to-left in Arabic: OK');
