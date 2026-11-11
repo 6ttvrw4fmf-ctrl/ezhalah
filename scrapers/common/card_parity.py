@@ -142,6 +142,11 @@ def card_shows(field: str, stored: dict, card_text: str) -> bool | None:
                 cands.add(int(round(float(ppm) * float(area))))
         return bool(cands & nums) if cands else None
     if field == "rent_period":
+        # A rent with no price prints «السعر عند الطلب» and NO period, by owner rule (2026-09-28, src/data/remote.ts
+        # cardFetchPeriodOr): there is no figure a period could qualify. Nothing to look for (🔧 2026-11-11, hazim
+        # 13106686 «اتصل للاستفسار», alert card_parity_card_missing:hazim:rent_period).
+        if not any(stored.get(k) for k in ("price_annual", "price_total")):
+            return None
         p = stored.get("rent_period_ar")
         words = {"سنوي": r"سنوي|سنه|/yr|year", "شهري": r"شهري|شهر|/mo|month"}.get(p or "")
         return bool(re.search(words, txt, re.I)) if words else None
