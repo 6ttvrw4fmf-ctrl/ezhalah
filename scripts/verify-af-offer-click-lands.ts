@@ -382,6 +382,35 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
   const r2 = await clickWitnessed(silent as any, { x: 1, y: 2 }, { testid: 'x' });
   mustCatch('a page that reports no click reading as a landing (fail closed)',
     r2.landed === false && r2.hit === '(no click event seen)');
+
+  // 🔬 2026-11-11 (alert 11763): the mouse produced NO event at all → one witnessed tap by test id
+  const seq: string[] = [];
+  let h3: any = null;
+  const mobile = {
+    evaluate: async (fn: any) => {
+      if (fn === ARM_CLICK_WITNESS_SRC) { seq.push('arm'); h3 = null; return undefined; }
+      if (fn === READ_CLICK_WITNESS_SRC) { seq.push('read'); const h = h3; h3 = null; return h; }
+      return undefined;
+    },
+    mouse: { click: async () => { seq.push('click'); } },
+    locator: (sel: string) => ({ first: () => ({ click: async () => { seq.push(`locator:${sel}`); h3 = { onTarget: true, tid: 'x', txt: '' }; } }) }),
+  };
+  const r3 = await clickWitnessed(mobile as any, { x: 1, y: 2 }, { testid: 'x' });
+  check('a mouse click the document never saw is retried ONCE by test id, armed and read again',
+    r3.landed === true && seq.join(',') === 'arm,click,read,arm,locator:[data-testid="x"],read', seq.join(','));
+  const deaf = { ...mobile, locator: () => ({ first: () => ({ click: async () => {} }) }) };
+  const r4 = await clickWitnessed(deaf as any, { x: 1, y: 2 }, { testid: 'x' });
+  mustCatch('a locator tap the page never reports reading as a landing (the witness still decides)',
+    r4.landed === false && r4.hit === '(no click event seen)');
+  let locatorCalls = 0;
+  const elsewhere = {
+    evaluate: async (fn: any) => (fn === READ_CLICK_WITNESS_SRC ? { onTarget: false, tid: 'card-listing-1', txt: '' } : undefined),
+    mouse: { click: async () => {} },
+    locator: () => ({ first: () => ({ click: async () => { locatorCalls++; } }) }),
+  };
+  const r5 = await clickWitnessed(elsewhere as any, { x: 1, y: 2 }, { testid: 'x' });
+  check('a click that landed on something ELSE is a real miss — no second tap is spent on it',
+    r5.landed === false && r5.hit === 'card-listing-1' && locatorCalls === 0, `${JSON.stringify(r5)} locatorCalls=${locatorCalls}`);
 }
 
 // ── 10. MOBILE 2026-11-05: the CTA is far below the screen while the cards still reveal ─────────────
