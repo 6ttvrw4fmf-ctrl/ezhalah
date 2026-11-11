@@ -1759,10 +1759,15 @@ would be useful if someone uses the AI agent to do comparables»; «your job is 
   date (`site_date_added`, raw `date_added`), first seen, first and last price, number of price changes, last seen, gone,
   removed. No photos, descriptions or contact details.
 - **How.** ONE trigger function `tg_listing_price_diary()` on every `_(residential|commercial)_listings` table (insert;
-  update only when a price or `active` changed; delete). It never raises — errors go to `listing_price_diary_errors`.
-  `mon_detect_price_diary_health()` (in the detector roster) re-attaches it to any listing table without it (a new
-  platform) and raises P2 `price_diary_unhealthy` if one still lacks it or the trigger swallowed errors in the last day.
-  Migrations `20261111035037` + `20261111035153`; guard `scripts/verify-price-diary.ts`.
+  update only when a price or `active` changed; delete) does TWO PLAIN INSERTS per event — the diary line and a
+  `listing_card_queue` row — and nothing else: no exception block, because a per-row subtransaction overflows
+  Postgres's 64-entry cache on a scraper batch (CodeRabbit, PR #11776). The diary line is written in the same
+  transaction as the change. The CARD is rebuilt out of the write path by `listing_cards_refresh()` (set-based, one
+  table at a time; a removed ad's card from `purged_listings_archive`), run by `mon_detect_price_diary_health()` in the
+  hourly detector sweep — so a card can lag up to an hour. A NEW listing table is connected at CREATE TABLE by the event
+  trigger `listing_price_diary_born_attached`; the detector also re-attaches any table without the diary, and raises
+  P2 `price_diary_unhealthy` on a missing table, refresh errors (`listing_price_diary_errors`) or a queue row older than
+  6 hours. All four diary tables are private (REVOKE ALL from public/anon/authenticated). Guard `scripts/verify-price-diary.ts`.
 - **Filled from the past on 2026-11-11:** 699,465 cards (471,066 live, 111,293 hidden, 117,106 already removed — from
   `purged_listings_archive`), 927,866 diary lines. Price changes BEFORE that day were never recorded and are gone.
 - **Rules.** Never delete or update diary lines; never drop the triggers to clear the alarm. PRICE = SOURCE: prices are the
