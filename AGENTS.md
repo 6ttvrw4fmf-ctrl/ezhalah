@@ -452,6 +452,11 @@ runs on push to `main` — and the owner directed that it not be reverted, since
 green, production-aligned and drift-free. The lesson is recorded here rather than in any one agent's
 memory so the next session cannot repeat it.
 
+**CodeRabbit out of money is skipped (owner, 2026-11-11 — «Skip code rabbit»).** The CodeRabbit account sits at its
+$50 spending cap and answers «Review rate limited»; the owner chose not to raise it again. `scripts/lib/mergeGate.ts`
+rule 0b⁗ passes a rate-limited CodeRabbit on ANY PR, while every other check must still be SUCCESS and no CodeRabbit
+Major may be open. Any other CodeRabbit NEUTRAL, FAILURE or pending still blocks. Guard: `scripts/verify-merge-gate.ts`.
+
 **Merge gate — use `scripts/safe-pr-merge.ts`, never a bare `gh pr merge` (permanent, 2026-08-24):**
 `gh pr checks --watch` returning means "nothing is still running" — NOT "safe to merge." PR #1046
 merged on 2026-08-24 while its required checks had been CANCELLED by a rebase/force-push race; the

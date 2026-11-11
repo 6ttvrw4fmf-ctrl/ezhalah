@@ -130,8 +130,9 @@ const limited: CheckRun = { context: 'CodeRabbit', conclusion: 'NEUTRAL', title:
 const RL = { requiredContexts: REQ, requiredContextsKnown: true, checks: [...allGreen, limited], ...CLEAN };
 check('CodeRabbit rate-limited after a review, no open Major → ALLOWED (#11367 sat 5 h on this)',
   decideMerge({ ...RL, codeRabbitReviewed: true, openReviewMajors: [] }).allow);
-check('CodeRabbit rate-limited, never reviewed this PR → BLOCKED',
-  !decideMerge({ ...RL, codeRabbitReviewed: false, openReviewMajors: [] }).allow);
+// 0b⁗ (owner 2026-11-11, «Skip code rabbit»): out of money → skipped on any PR, every other rule still runs.
+check('CodeRabbit rate-limited, never reviewed this PR, no open Major → ALLOWED (owner 2026-11-11: skip it)',
+  decideMerge({ ...RL, codeRabbitReviewed: false, openReviewMajors: [] }).allow);
 check('CodeRabbit rate-limited, threads unreadable → BLOCKED',
   !decideMerge({ ...RL, codeRabbitReviewed: true, openReviewMajors: null }).allow);
 check('CodeRabbit rate-limited with an open Major → BLOCKED',
@@ -141,9 +142,10 @@ check('CodeRabbit NEUTRAL for any other reason → BLOCKED',
 // 0b‴ (owner 2026-11-09): a PROVEN mirror of production passes a rate-limited CodeRabbit that never read it.
 check('rate-limited, never reviewed, PROVEN mirror of production, no open Major → ALLOWED (#11493 and 10 more sat on this)',
   decideMerge({ ...RL, codeRabbitReviewed: false, mirrorOfProduction: true, openReviewMajors: [] }).allow);
-check('rate-limited, never reviewed, parity NOT measured → BLOCKED',
-  !decideMerge({ ...RL, codeRabbitReviewed: false, openReviewMajors: [] }).allow
-    && !decideMerge({ ...RL, codeRabbitReviewed: false, mirrorOfProduction: false, openReviewMajors: [] }).allow);
+check('rate-limited and skipped still does NOT excuse a failing check, an open Major or unreadable threads',
+  !decideMerge({ ...RL, checks: [...allGreen.slice(1), { ...allGreen[0], conclusion: 'FAILURE' }, limited], openReviewMajors: [] }).allow
+    && !decideMerge({ ...RL, codeRabbitReviewed: false, openReviewMajors: ['x'] }).allow
+    && !decideMerge({ ...RL, codeRabbitReviewed: false, openReviewMajors: null }).allow);
 check('proven mirror with an open Major, or unreadable threads → BLOCKED',
   !decideMerge({ ...RL, mirrorOfProduction: true, openReviewMajors: ['x'] }).allow
     && !decideMerge({ ...RL, mirrorOfProduction: true, openReviewMajors: null }).allow);
@@ -198,12 +200,12 @@ mustCatch('a skip exemption widened to ANY optional check would wrongly allow a 
 mustCatch('a skip exemption that ignores the REQUIRED list would wrongly allow a required CodeRabbit that skipped',
   !decideMerge({ requiredContexts: ['CodeRabbit'], requiredContextsKnown: true, checks: [{ context: 'CodeRabbit', conclusion: 'SKIPPED' }], ...CLEAN }).allow);
 
-mustCatch('a rate-limit pass that skips the «reviewed before» test would merge a PR CodeRabbit never read',
-  !decideMerge({ ...RL, openReviewMajors: [] }).allow);
+mustCatch('a rate-limit pass that skips the open-Major test would merge over an unanswered Major',
+  !decideMerge({ ...RL, openReviewMajors: ['Price shown is not the source price.'] }).allow);
 mustCatch('a mirror pass widened to a REQUIRED CodeRabbit would bypass branch protection',
   !decideMerge({ ...RL, requiredContexts: [...REQ, 'CodeRabbit'], mirrorOfProduction: true, openReviewMajors: [] }).allow);
-mustCatch('a mirror pass that accepts a truthy non-boolean («unknown», 1) would pass an unmeasured PR',
-  !decideMerge({ ...RL, mirrorOfProduction: 'unknown' as unknown as boolean, openReviewMajors: [] }).allow);
+mustCatch('a rate-limit pass that ignores the title would let any NEUTRAL CodeRabbit through',
+  !decideMerge({ ...RL, checks: [...allGreen, { ...limited, title: 'Review failed' }], openReviewMajors: [] }).allow);
 mustCatch('a rate-limit pass widened to a REQUIRED CodeRabbit would bypass branch protection',
   !decideMerge({ ...RL, requiredContexts: [...REQ, 'CodeRabbit'], codeRabbitReviewed: true, openReviewMajors: [] }).allow);
 mustCatch('a gate that ignores unresolved CodeRabbit Majors would merge #11247 (9 unanswered, PRICE = SOURCE)',
