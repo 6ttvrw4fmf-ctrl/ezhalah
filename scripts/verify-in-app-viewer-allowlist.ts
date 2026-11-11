@@ -9,6 +9,7 @@
 import ts from 'typescript';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import * as arabicText from '../src/lib/arabicText.ts';
+import * as moneyLine from '../src/lib/moneyLine.ts';
 import { stripTypeScriptTypes } from 'node:module';
 import { arabicOrPlaceholderForFreeText, translateTrailingPeriodWord } from '../src/lib/arabicText.ts';
 import { readFileSync } from 'node:fs';
@@ -631,6 +632,8 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
     // listingSearchedTypeAr (2026-11-03, the headline type) is not what this barrier measures; a shim returning the source word keeps the render as before
     '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price', monthlyLineText: () => null, listingSearchedTypeAr: (l: { type?: string }) => l.type ?? '' },
     '@/lib/arabicText': arabicText,
+    // the REAL marker every money line spreads (2026-11-10) — the real module, so the preview renders as it ships
+    '@/lib/moneyLine': moneyLine,
     '@/lib/translitPlace': { translitPlace: (x: string) => x }, '@/lib/freeTextEn': { freeTextEn: (x: string) => x }, '@/lib/afEvidence': { DIRECTION_LABEL: {} },
     '@/lib/useAtLeast': { useAtLeast: () => false }, '@/lib/responsive': { PICKER_SHEET_BREAKPOINT: 768 }, '@/lib/useReducedMotion': { useReducedMotion: () => true },
     '@/components/ResultCard': { SourceBadge: 'SourceBadge', FEATURE_META: [], arAttrValue: (_l: string, v: string) => v, isBlankAttrValue: () => false },

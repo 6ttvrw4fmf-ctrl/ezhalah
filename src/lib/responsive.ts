@@ -95,3 +95,18 @@ export const PLATFORM_LOGO_BREAKPOINT = 720;
 export const VIEWER_SPLIT_BREAKPOINT = 1024;
 /** Laptop result cards sit 3 across (nothing open beside them) at/above this width; below it, 2 across. */
 export const CARDS_THREE_ACROSS_BREAKPOINT = 1360;
+
+// THE TWO SIDE CARDS NEVER SIT ON THE SEARCH FORM (owner 2026-11-10: «make sure never ever get this mistake ever. Ever
+// again»). Both used to switch on at DOCK_BREAKPOINT — but that is where the SIDEBAR docks, not where a free column
+// exists beside the form. Measured that day on the built app: from 900 to ~1305 px wide the floating sign-in card sat
+// ON the search boxes (a tap meant for the form opened Apple sign-in), and from 900 to ~1433 the cookie corner card
+// covered «بحث». The home column is 560 wide, centred in what the 300 px sidebar leaves, so:
+//   · the 208 px sign-in card (16 px from the right edge) clears the white panel from ~1306 → it floats from 1366,
+//     the common laptop width. Below that the top-bar sign-in pill and the sidebar button are the way in.
+//   · the 280 px cookie corner card (20 px from the right edge) clears the form's controls from 1434 → it is a corner
+//     card from 1440 (the width it was designed against). Below that it is the full-width bottom sheet whose height
+//     the page already reserves (lib/bottomPromptInset.ts), so nothing sits under it.
+// The browser robot scripts/verify-web-laptop-nothing-cut-or-covered.mjs measures both on every PR, at ten window
+// sizes, in Arabic and English, and after resizing the window.
+export const SIGNIN_CARD_BREAKPOINT = 1366;
+export const COOKIE_CORNER_BREAKPOINT = 1440;
