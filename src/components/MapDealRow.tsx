@@ -7,7 +7,7 @@
 // takes effect at once; the popup stays open for more ticks and closes with the X or a tap outside. Design only for now: the choice is kept here and nothing on the map reads
 // it yet; the filter button opens nothing yet — pins, the list and the filter sheet come one step at a time.
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
@@ -30,8 +30,10 @@ const DEALS: { id: MapDeal; label: string }[] = [
 
 /** One place field with Apple's suggestions under it (Saudi Arabia, UI language). `onPick` gets the chosen place;
  *  `onClear` fires on the ✕. `dot` draws a coloured dot before the text (the route's from / to). */
-function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocus }: {
+function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocus, fullOnPhone = false }: {
   value: string; placeholder: string; onPick: (p: PlaceSuggestion) => void; onClear?: () => void; dot?: string; testID: string; autoFocus?: boolean;
+  /** On a phone, tapping the field turns it into a full-screen search page (see `full` below). */
+  fullOnPhone?: boolean;
 }) {
   const { t, isRTL, locale } = useI18n();
   const [q, setQ] = useState(value);
@@ -40,6 +42,14 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
   const hits = hitsToShow(q, found);
   const setHits = (rows: PlaceSuggestion[], forQ = q) => setFound(rows.length ? { q: forQ, rows } : null);
   const [focused, setFocused] = useState(false);
+  // FULL-SCREEN SEARCH ON A PHONE (owner 2026-11-11, screenshot of the squeezed map under the keyboard: «I don't like
+  // how when you click search it shows like this»). Like Zillow: the tap opens a clean page — the field at the top,
+  // «إلغاء» beside it, the suggestions filling the screen. The SAME input stays mounted (only styles change), so the
+  // keyboard iOS opened for the tap stays up. It closes on a pick or «إلغاء» — not on blur, so hiding the keyboard
+  // to read the list keeps the page.
+  const phone = useWindowDimensions().width < PHONE_MAX;
+  const [fullOpen, setFullOpen] = useState(false);
+  const full = fullOnPhone && phone && fullOpen;
   // A finger is down on a suggestion: the field's blur must not close the list under it (a 0.35 s tap lost it, live).
   const pressing = useRef(false);
   // The pressed row can vanish mid-press (a newer answer replaced the list); RN Web then never calls its onPressOut, so
@@ -56,34 +66,43 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
   }, [q, locale, value]);
   // THE KEYBOARD CLOSES ON A PICK (owner 2026-11-02, phone: «doesn't look nice on a phone» — the keyboard stayed up
   // over a squeezed map). Blurring the field is what dismisses iOS's keyboard; the state flag alone does not.
-  const pick = (p: PlaceSuggestion) => { setQ(p.name ?? p.displayLines[0]); setHits([]); setFocused(false); inputRef.current?.blur(); onPick(p); };
-  const open = focused && hits.length > 0;
+  const pick = (p: PlaceSuggestion) => { setQ(p.name ?? p.displayLines[0]); setHits([]); setFocused(false); setFullOpen(false); inputRef.current?.blur(); onPick(p); };
+  const cancel = () => { setFullOpen(false); setFocused(false); inputRef.current?.blur(); };
+  const open = (focused || full) && hits.length > 0;
   return (
-    <View style={s.searchWrap}>
-      <View style={s.search}>
-        {dot ? <View style={[s.dot, { backgroundColor: dot }]} /> : <Ionicons name="search" size={16} color={colors.muted} />}
-        <TextInput
-          ref={inputRef}
-          style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
-          value={q}
-          onChangeText={setQ}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => { if (!pressing.current) setFocused(false); }, 150)}
-          placeholder={placeholder}
-          placeholderTextColor={colors.muted}
-          accessibilityLabel={placeholder}
-          autoCorrect={false}
-          autoFocus={autoFocus}
-          testID={testID}
-        />
-        {q ? (
-          <Pressable onPress={() => { setQ(''); setHits([]); onClear?.(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')}>
-            <Ionicons name="close-circle" size={17} color={colors.muted} />
+    <View style={[s.searchWrap, full && s.fullWrap]} testID={full ? `${testID}-full` : undefined}>
+      <View style={s.searchRow}>
+        <View style={[s.search, s.searchFlex, full && s.searchFull]}>
+          {dot ? <View style={[s.dot, { backgroundColor: dot }]} /> : <Ionicons name="search" size={16} color={colors.muted} />}
+          <TextInput
+            ref={inputRef}
+            style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
+            value={q}
+            onChangeText={setQ}
+            onFocus={() => { setFocused(true); if (fullOnPhone && phone) setFullOpen(true); }}
+            onBlur={() => setTimeout(() => { if (!pressing.current) setFocused(false); }, 150)}
+            placeholder={placeholder}
+            placeholderTextColor={colors.muted}
+            accessibilityLabel={placeholder}
+            autoCorrect={false}
+            autoFocus={autoFocus}
+            testID={testID}
+          />
+          {q ? (
+            <Pressable onPress={() => { setQ(''); setHits([]); onClear?.(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')}>
+              <Ionicons name="close-circle" size={17} color={colors.muted} />
+            </Pressable>
+          ) : null}
+        </View>
+        {full ? (
+          <Pressable onPress={cancel} hitSlop={8} accessibilityRole="button" testID={`${testID}-cancel`} style={s.cancel}>
+            <Text style={s.cancelT}>{t('Cancel')}</Text>
           </Pressable>
         ) : null}
       </View>
+      {full && !open ? <Text style={s.fullHint}>{t('Type a city, district, street or landmark in Saudi Arabia')}</Text> : null}
       {open ? (
-        <View style={s.hits} testID={`${testID}-hits`}>
+        <View style={[s.hits, full && s.hitsFull]} testID={`${testID}-hits`}>
           {hits.slice(0, 6).map((p, i) => (
             <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPressIn={() => { pressing.current = true; }}
               onPressOut={() => { setTimeout(() => { pressing.current = false; if (!inputRef.current?.isFocused?.()) setFocused(false); }, 0); }} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
@@ -120,9 +139,13 @@ export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
       onPick={(p) => { setValue(p.name ?? p.displayLines[0]); onPick?.(); flyToPlace(p); }}
       onClear={() => { setValue(''); clearPlaceMark(); }}
       testID="map-search"
+      fullOnPhone
     />
   );
 }
+
+// Phones get the full-screen search page; the same width the map filter uses for its full-screen sheet.
+const PHONE_MAX = 768;
 
 const FROM = '#60466e';
 const TO = '#c84646';
@@ -262,6 +285,15 @@ const s = StyleSheet.create({
   // BLENDED into the sky, not white (owner 2026-10-31: «I don't like how it's white, blend it more into the
   // background»): a translucent fill the clouds show through, the pill's own hairline border, no drop shadow.
   searchWrap: { zIndex: 3 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  searchFlex: { flex: 1 },
+  // The phone's full-screen search page: pinned to the whole viewport, above the map and the page.
+  fullWrap: { position: (Platform.OS === 'web' ? 'fixed' : 'absolute') as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, backgroundColor: colors.surface, paddingHorizontal: 16, paddingTop: 8 },
+  searchFull: { height: 44 },
+  cancel: { marginTop: 10, paddingVertical: 8 },
+  cancelT: { fontSize: 15, fontWeight: '700', color: colors.primary },
+  fullHint: { fontSize: 14, color: colors.muted, marginTop: 18, paddingHorizontal: 4, textAlign: 'center' },
+  hitsFull: { position: 'relative', top: 0, marginTop: 10, borderWidth: 0, padding: 0, shadowOpacity: 0, elevation: 0, backgroundColor: 'transparent' },
   dot: { width: 12, height: 12, borderRadius: 6 },
   routeWrap: { zIndex: 3 },
   routeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingHorizontal: 4 },
