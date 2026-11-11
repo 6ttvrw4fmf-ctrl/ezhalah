@@ -86,3 +86,11 @@ def test_a_hidden_feature_block_supplies_no_facade():
     ev = page_evidence(f"<html><body>{SEARCH_FORM}{FILLER}{hidden}</body></html>")
     assert "واجهة العقار غربية" not in ev["evidence_lines"]
     assert compare_listing({"direction_ar": "غرب"}, ev)["direction_ar"] != MATCH
+
+
+def test_a_calendar_year_after_the_age_label_is_not_one_year():
+    # CodeRabbit on #11465: «عمر العقار: عام 2020» is a date, never an age of one
+    from scrapers.common.new_listings_score import AGE_KW, _cmp_number, norm
+    for text in ("عمر العقار: عام 2020", "عمر العقار: سنة ٢٠١٩"):
+        line = norm(text)
+        assert _cmp_number(1, [line], line, AGE_KW) != MATCH

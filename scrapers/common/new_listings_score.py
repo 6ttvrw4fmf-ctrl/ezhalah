@@ -435,7 +435,7 @@ def facade_stated(lines: list[str], kw: str) -> bool:
 # «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
 PER_FLOOR = re.compile(r"(?:تفاصيل\s+)?الدور\s*:?\s*(?:الارضي|الاول|الثاني|الثالث|العلوي)")
 PER_FLOOR_COUNTS = frozenset({"living_rooms", "majlis_rooms", "bathrooms"})
-SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
+SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])(?!\\s*[\\d\u0660-\u0669])")
 # ONE bedroom / bathroom is written as the bare noun in a components list: sadiqeltajer 25456611 (2026-11-08 score,
 # backlog 1350) «المكونات : صاله . غرفه . دورة مياة», stored 1 / 1, scored MISMATCH because the same description's
 # area «246» and street «15» were the only figures. A service room («غرفة خادمة», «حمام سباحة») is not one, and a
@@ -557,7 +557,7 @@ def facade_adjectives(stored) -> Optional[str]:
     if not bases or len(bases) > 2 or any(b not in _FACADE_BASES for b in bases):
         return None
     return (r"(?<![\u0621-\u064A])" + r"\s*[-–/،,]?\s*(?:و)?".join(r"(?:ال)?" + b + r"(?:يه|ي)?" for b in bases)
-            + r"(?![\u0621-\u064A])")
+            + r"(?![\u0621-\u064A])(?!\\s*[\\d\u0660-\u0669])")
 
 
 # «م» alone is metres too (🔬 2026-11-07): justsa prints «<span>عرض الشارع</span> <strong>18 م</strong>» (just.sa/l/595,
@@ -595,7 +595,7 @@ DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حما
 WORD_NUMBERS = {"ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6,
                 "سبع": 7, "سبعه": 7, "ثمان": 8, "ثماني": 8, "ثمانيه": 8, "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10}
 WORD_NUMBER = re.compile(r"(?<![\u0621-\u064A])(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
-                         + r")(?![\u0621-\u064A])")
+                         + r")(?![\u0621-\u064A])(?!\\s*[\\d\u0660-\u0669])")
 
 EN_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
               "ten": 10, "eleven": 11, "twelve": 12}
@@ -609,9 +609,9 @@ WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len,
 DUAL_VALUE_LINE = re.compile(r"^\s*(?:سنتين|سنتان|عامين|عامان|غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان)\s*$")
 # «اكثر من عشر سنوات», «أكثر من 10 سنوات», «+10 سنوات»: an open bucket whose floor is the figure (norm folds أ→ا).
 AGE_FLOOR = re.compile(r"(?:اكثر|أكثر|فوق|اعلى|أعلى)\s+من\s+([\d٠-٩]{1,3}|" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
-                       + r")(?![\u0621-\u064A\d])\s*(?:سنوات|سنه|سنة|سنين|عام|اعوام|أعوام)(?![\u0621-\u064A])")
+                       + r")(?![\u0621-\u064A\d])\s*(?:سنوات|سنه|سنة|سنين|عام|اعوام|أعوام)(?![\u0621-\u064A])(?!\\s*[\\d\u0660-\u0669])")
 # a year word: «اكثر من 10 اشهر» (months) is never a year floor, and a value line before the label must name years
-AGE_UNIT = re.compile(r"(?:سنوات|سنه|سنة|سنين|سنتين|سنتان|عام|اعوام|أعوام)(?![\u0621-\u064A])")
+AGE_UNIT = re.compile(r"(?:سنوات|سنه|سنة|سنين|سنتين|سنتان|عام|اعوام|أعوام)(?![\u0621-\u064A])(?!\\s*[\\d\u0660-\u0669])")
 
 
 def _age_floor(line: str, own: bool) -> Optional[float]:
@@ -664,8 +664,8 @@ def _structured_age(stored, lines: list[str], jsonld: str, now_year: Optional[in
 
 
 # A bare singular year states ONE year, on the label's own line («عمر العقار: سنة») or as the label's value line
-# («عمر العقار» / «سنة») — CodeRabbit on #11465. «\uFF1A» is the full-width colon some pages print.
-_ONE_YEAR_ON_LABEL = re.compile("عمر العقار\\s*[:\uFF1A]?\\s*(?:سنه|سنة|عام)(?![\u0621-\u064A])")
+# («عمر العقار» / «سنة») — CodeRabbit on #11465. A calendar year after it («عمر العقار: عام 2020») is a date, not age 1. «\uFF1A» is the full-width colon some pages print.
+_ONE_YEAR_ON_LABEL = re.compile("عمر العقار\\s*[:\uFF1A]?\\s*(?:سنه|سنة|عام)(?![\u0621-\u064A])(?!\\s*[\\d\u0660-\u0669])")
 _ONE_YEAR_LINE = re.compile(r"^\s*(?:سنه|سنة|عام)\s*[.،,]?\s*$")
 
 
