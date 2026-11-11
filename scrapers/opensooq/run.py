@@ -163,6 +163,8 @@ def _page_pin(s: cc.Session, ad_id: Any, said: Optional[dict] = None) -> dict:
         time.sleep(0.3)
         if said is not None and r.status_code == 200 and (got := page_amenities(r.text)) is not None:
             said["answers"] = got
+        if said is not None and r.status_code == 200 and (lic := page_licence(r.text)):
+            said["licence"] = lic
         return pin_from_html(r.text) if r.status_code == 200 else {}
     except Exception:  # noqa: BLE001 — a failed page read is "no pin this fetch"
         return {}
@@ -296,6 +298,21 @@ def page_amenities(body: Optional[str]) -> Optional[dict[str, bool]]:
     return {c: v for c, v in normalize.amenities_from_text("\n".join(items)).items() if c in _PROSE_COLS and v}
 
 
+# THE AD LICENCE LIVES ON THE AD PAGE (🔧 2026-11-11, alert 13927 card_parity_card_missing:opensooq:licence, backlog
+# 1737). The SERP JSON prints the REGA ad licence as a chip on a few posts only (3 of 70 active ads carried one on
+# 2026-11-11); the ad page prints it for every licensed post as a spec row — «رقم ترخيص الإعلان العقاري» followed by
+# the number as a link (source-reread 42912650547, 18634456 / 20927386). Only the AD licence (7[12] + 8 digits) right
+# after that label counts: the office's «رقم رخصة فال» row sits in the same list and is never the ad's licence.
+_AD_LICENCE_ROW = re.compile(r"رقم\s+ترخيص\s+الإعلان(?:\s+العقاري)?\s*(?:</?(?!a\b)[^>]*>|\s|[:：])*(?:<a\b[^>]*>)?\s*(7[12]\d{8})\b")
+
+
+def page_licence(body: Optional[str]) -> Optional[str]:
+    """The ad's own REGA ad licence from its page, or None when the page prints no «رقم ترخيص الإعلان» row (pure)."""
+    flat = re.sub(r'\\+"', '"', html.unescape(body or ""))
+    m = _AD_LICENCE_ROW.search(flat)
+    return m.group(1) if m else None
+
+
 RES_TABLE, COM_TABLE = "opensooq_residential_listings", "opensooq_commercial_listings"
 _ARCHIVED = "هذا الإعلان غير متوفر"      # the «Archive Listing» page of a removed ad (measured 2026-10-02)
 
@@ -386,6 +403,8 @@ def main() -> int:
                 for c in _PROSE_COLS:
                     row.pop(c, None)
                 row.update(said["answers"])
+            if not row.get("license_number") and said.get("licence"):
+                row["license_number"] = said["licence"]          # the ad page's own licence row (alert 13927)
             if pin:
                 row["additional_info"] = {**(row.get("additional_info") or {}), **pin}
             (com if cat == "commercial" else res).append(row)
