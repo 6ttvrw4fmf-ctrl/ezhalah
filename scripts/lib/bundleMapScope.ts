@@ -15,6 +15,9 @@ export type MapScopeModule = {
   bedsOffered: (f: { category: string | null; groups: string[] }) => boolean;
   typeArForTypes: (types: string[]) => string[] | null;
   groupMembers: (group: string) => string[];
+  rpcAllNarrowingParams?: (q: unknown) => Record<string, unknown>;
+  mapFilterSearchQuery?: (f: unknown, deals: readonly string[]) => Record<string, unknown> | null;
+  noPinArgs?: (box: unknown, f: unknown, limit?: number) => Record<string, unknown>;
 };
 
 export async function bundleMapScope(srcRoot: string): Promise<MapScopeModule> {
@@ -28,7 +31,7 @@ export async function bundleMapScope(srcRoot: string): Promise<MapScopeModule> {
   };
   const out = await build({
     stdin: {
-      contents: `export { mapTypeScope } from './data/remote.ts'; export { pinFilterOf, bedsOffered } from './lib/mapFilter.ts'; export { rpcArgs } from './lib/mapPins.ts'; export { typeArForTypes, groupMembers, groupsFor } from './data/propertyTypes.ts';`,
+      contents: `export { mapTypeScope, rpcAllNarrowingParams, mapFilterSearchQuery } from './data/remote.ts'; export { noPinArgs } from './lib/mapNoPin.ts'; export { pinFilterOf, bedsOffered } from './lib/mapFilter.ts'; export { rpcArgs } from './lib/mapPins.ts'; export { typeArForTypes, groupMembers, groupsFor } from './data/propertyTypes.ts';`,
       resolveDir: join(srcRoot, 'src'), loader: 'ts',
     },
     bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent',

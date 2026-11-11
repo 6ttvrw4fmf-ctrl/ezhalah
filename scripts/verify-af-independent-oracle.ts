@@ -113,7 +113,7 @@ const CASES: Case[] = [
 // in «شهري» (the «إقامات قصيرة» pool) ONLY for gathern + aqarmonthly (owner 2026-10-26, migration 20261026071543:
 // «we need to shift those to annual rent» — 6,229 price-on-request rows from other sites had leaked into short stays).
 const periodRest = (p?: string) =>
-  p === 'سنوي'  ? '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),price_annual.is.null)'
+  p === 'سنوي'  ? '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.شهري)))' // 2026-11-11: a pooled short stay (rent_period_ar شهري) with no price is never a yearly rent
   : p === 'شهري' ? '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))'
   : '';
 

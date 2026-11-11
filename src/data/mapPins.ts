@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
 import { pinsFrom, rpcArgs, type PinFilter, type PinRow, type ViewPlace } from '@/lib/mapPins';
 
-export { cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, bubbleText, polygonOf, idsByTable, orderLike, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow, type ViewPlace } from '@/lib/mapPins';
+export { cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, bubbleText, polygonOf, idsByTable, orderLike, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow, type ViewPlace } from '@/lib/mapPins';
 
 /** The pins (or count cells) for one view. 'unknown' when the fetch failed — the caller keeps what it has. */
 // RECENT VIEWS ARE REMEMBERED (owner 2026-11-03: «I want it to feel smooth»): a pan or zoom back to a view read in the

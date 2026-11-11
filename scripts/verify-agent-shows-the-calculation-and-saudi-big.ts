@@ -83,6 +83,7 @@ import { bigAreaMin } from ${JSON.stringify(join(ROOT, 'src/data/bigSize.ts'))};
 import { detailFor } from ${JSON.stringify(join(ROOT, 'src/data/taxonomy.ts'))};
 import { AMENITY_LABEL } from ${JSON.stringify(join(ROOT, 'src/lib/afEvidence.ts'))};
 import { furnishingLabelKey } from ${JSON.stringify(join(ROOT, 'src/lib/furnishingWords.ts'))};
+import { postedPhrase, postedWindowLabel, postedWindowParam } from ${JSON.stringify(join(ROOT, 'src/lib/postedWindows.ts'))};
 type Locale = 'ar' | 'en'; type SearchQuery = any;
 const getLocale = () => 'ar'; const translate = (loc: string, key: string, v?: any) => v ? key.replace(/\\{(\\w+)\\}/g, (_: string, n: string) => String(v[n])) : key;
 const tWord = (k: string) => k; const tPlace = (k: string) => k; const tPriceTab = (k: string) => k; const tDetailOption = (k: string) => k;
