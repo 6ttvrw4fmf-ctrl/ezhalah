@@ -945,7 +945,7 @@ def _negated_before(prev: list[str]) -> Optional[int]:
     """How many words back the negation starts, or None. A list of catalogue words may sit in between."""
     j = len(prev)
     affirmed = False
-    for _ in range(3):
+    for _ in range(6):     # «لا يوجد مطبخ أو مكيفات أو مصعد متوفر»: a longer denied list (CodeRabbit on #11820)
         if j >= 1 and (prev[j - 1] in _NEG1 or _strip_wa(prev[j - 1]) in _NEG1):
             return len(prev) - (j - 1)
         if j >= 2 and (" ".join(prev[j - 2:j]) in _NEG2 or (_strip_wa(prev[j - 2]) + " " + prev[j - 1]) in _NEG2):
@@ -1003,7 +1003,7 @@ def _billing_not_supply(fact: str, prev: list[str], nxt: list[str]) -> bool:
 # recall sample, aqar 23092840 / 22064297 / 14846870 / 9242120 / 14860625): the «لا يوجد» opens the NEXT item — the
 # ACs, the lift, the payments — so it is not this token's no. «مطبخ لا يوجد», «المطبخ: لا يوجد», «مطبخ لا يوجد حاليا»
 # and «… لا يوجد فيها» stay a no.
-_NEG_TAIL = frozenset(_n(w) for w in ("فيه", "فيها", "به", "بها", "له", "لها", "معه", "معها", "حاليا", "حالياً", "ابدا",
+_NEG_TAIL = frozenset(_n(w) for w in ("في", "فيه", "فيها", "به", "بها", "له", "لها", "معه", "معها", "حاليا", "حالياً", "ابدا",
                                       "اطلاقا", "نهائيا", "للاسف", "بالشقه", "بالعقار", "بالفيلا", "بالدور"))
 
 
@@ -1222,7 +1222,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «كل خدمات الشقه مستقله / منفصلة»: separate utilities; «جميع
                                                      # الخدمات ومطبخ مستقل» keeps it — the kitchen is separate (CodeRabbit #11820)
     if fact == "garden" and p2 and _strip_wa(p2[-1]) in ("شارع", "شارعين") and t[ws:we].startswith("و") \
-            and not (gn[:1] and _strip_wa(gn[0]) in _OWN_AFTER):
+            and not _owned_after(gn):
         return None, s, e                            # «أرض سكنية شارع وحديقة»: the plot's neighbours (aqar 3543112);
                                                      # «على شارع وبها حديقة خاصة» keeps its own (CodeRabbit on #11820)
     if fact == "reception" and re.match(r"^(?:ل|لل)استقبال(?:ك|كم|كن|كي)$", _n(t[ws:we]).lstrip("و")):
@@ -2939,6 +2939,9 @@ def selftest() -> None:
         ("فيلا على شارع وحديقة خاصة", {"garden": True}, ()),
         ("كل خدمات الشقة منفصلة", {}, ("all_services",)),
         ("جميع الخدمات ومطبخ مستقل", {"all_services": True}, ()),
+        ("لا يوجد مطبخ أو مكيفات أو مصعد متوفر لا يوجد حوش", {"elevator": False}, ()),   # CodeRabbit on #11820: denied, never yes
+        ("مطبخ راكب: لا يوجد في الشقة", {"kitchen": False}, ()),
+        ("أرض سكنية شارع وحديقة خاصة بالحي", {}, ("garden",)),
         ("قريب من المسجد، خدمات المبنى، نادي رياضي، حضانة", {"gym": True}, ()),
         # 🔬 2026-11-11 kitchen recall sample: a «لا يوجد» that opens the NEXT item is not this one's no
         ("٣ غرف وصاله ٢ دورتين مياه مطبخ راكب لا يوجد مكيفات الشق الدور الاول", {"kitchen": True, "air_conditioner": False}, ()),  # aqar 23092840
