@@ -1,4 +1,8 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-11-11 (migration 20261111141500 pooled_short_stays_never_under_yearly, 🔧): CHANGED — the price-on-request
+--   arm admits a no-price rent under «سنوي»/«كلاهما» only when the row is NOT in the short-stays pool (s.rent_period_ar is
+--   distinct from ''شهري''); the شهري half (gathern + aqarmonthly) is unchanged. One arm, everything else byte-identical.
+--   md5 of pg_get_functiondef (verify-sql-mirrors-not-stale): a3170d067bb001f8fda86f1c34ee99cf
 -- Refreshed 2026-11-11 (migration 20261111103754 filter_published_within_window): CHANGED — one predicate appended after
 --   the p_furnished_in union: «نُشر خلال» keeps an ad only when its site published it within p_posted_within_days days
 --   (s.posted_at, the site's own date; undated = in no window). Everything else byte-identical.
@@ -280,7 +284,7 @@ AS $function$ select E'
       and (p_deal       is null or s.deal_ar = p_deal)
       and (p_rent_period is null
            or s.deal_ar <> ''إيجار''
-           or (s.price_annual is null and (p_rent_period in (''سنوي'',''كلاهما'') or (p_rent_period = ''شهري'' and s.platform in (''gathern'',''aqarmonthly''))))  -- price on request: no figure a period could misstate (owner 2026-09-28)
+           or (s.price_annual is null and ((p_rent_period in (''سنوي'',''كلاهما'') and s.rent_period_ar is distinct from ''شهري'') or (p_rent_period = ''شهري'' and s.platform in (''gathern'',''aqarmonthly''))))  -- price on request: no figure a period could misstate (owner 2026-09-28)
            or (p_rent_period = ''شهري'' and s.payment_monthly = true and not coalesce(s.rent_now_pay_later, false))
            or (p_rent_period = ''سنوي'' and (s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
            or (p_rent_period = ''كلاهما'' and (s.payment_monthly = true or s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
