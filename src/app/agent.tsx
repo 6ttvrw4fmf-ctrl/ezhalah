@@ -118,6 +118,10 @@ import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates
 import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
 import { failedTurnMsgs, mayFailTurn, withoutReceipt } from '@/lib/flowState';
 import { reportError } from '@/lib/observability';
+
+// Smart Broker's «بحث» site-picker chip is HIDDEN for now (owner 2026-11-10: «remove it for now … hide it»).
+// Flip to true to bring it back; the picker code stays untouched.
+const SHOW_CHAT_SITE_PICKER = false;
 import { PLATFORM_META, type LoaderPlatform } from '@/data/loaderPlatforms';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «🎯 دقّق مع الذكاء الاصطناعي» button
@@ -5186,7 +5190,7 @@ export default function Agent() {
                   SHOWS ONLY AT THE START (owner 2026-10-17: «when a user sends a message, remove this search
                   button, it just shows at the start» — supersedes 2026-10-10). While a search runs it is already
                   gone, so nothing in the row moves mid-turn; the mic and Send/Stop keep their places. */}
-                {!modeSearched ? (
+                {SHOW_CHAT_SITE_PICKER && !modeSearched ? (
                 <Pressable
                   testID="initial-chat-search"
                   accessibilityRole="button"
