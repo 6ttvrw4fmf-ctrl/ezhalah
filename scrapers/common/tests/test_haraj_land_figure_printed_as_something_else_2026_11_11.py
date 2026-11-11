@@ -97,6 +97,12 @@ def test_a_numbered_list_item_is_not_a_stated_total():
     assert R.land_price_basis(3, 308, text) == "per_meter"
 
 
+@pytest.mark.parametrize("text", ["السعر المطلوب (50000) ريال", "المطلوب ( 50000 )", "السعر (50000)"])
+def test_a_price_in_brackets_stays_a_stated_total(text):
+    # CodeRabbit on #11799: «)» closing a bracket is not a list-item marker
+    assert R.land_price_basis(50000, 600, text) == "total"
+
+
 def test_a_currency_word_belongs_to_the_figure_before_it():
     # «السعر 500 ريال 300 م2»: the riyal is 500's; 300 is the area, never a stated total (the ladder decides)
     assert R._printed_as_something_else("السعر 500 ريال 300 م2", list(R._NUMS.finditer("السعر 500 ريال 300 م2"))[1])

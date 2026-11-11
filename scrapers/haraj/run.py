@@ -145,7 +145,11 @@ _AREA_BEFORE = re.compile(r"مساح\S*\s*[:\uff1a\-/|]?\s*$")
 def _printed_as_something_else(t: str, m: "re.Match[str]") -> bool:
     """True when this mention of the figure is an area, a plot / plan / street number, a share or an age."""
     before, after = t[max(0, m.start() - 24): m.start()], t[m.end(): m.end() + 12]
-    if _PRICE_BEFORE.search(before) or _PRICE_AFTER.match(t, m.end()):
+    # A figure in brackets — «السعر المطلوب (50000) ريال» — reads as if the brackets were not there (CodeRabbit on
+    # #11799): its «)» is the bracket closing, never a numbered list item.
+    if re.search(r"\(\s*$", before) and re.match(r"\s*\)", after):
+        before, after = re.sub(r"\(\s*$", "", before), re.sub(r"^\s*\)", "", after)
+    if _PRICE_BEFORE.search(before) or _PRICE_AFTER.match(after):
         return False
     # «7000 المتر» is the metre price even with no price word before it (CodeRabbit on #11747) — unless the figure is
     # introduced as the area («المساحة 1000 المتر»). A bare «متر» after a figure stays an area.
@@ -153,7 +157,7 @@ def _printed_as_something_else(t: str, m: "re.Match[str]") -> bool:
         return False      # «بطول 30 المتر» / «عرض 20 المتر» stay measurements (CodeRabbit on #11747)
     if before.endswith("م") and m.group(0) in ("2", "٢"):        # the 2 of «م2»
         return True
-    return bool(_OTHER_BEFORE.search(before) or _OTHER_AFTER.search(after))
+    return bool(_OTHER_BEFORE.search(before) or _OTHER_AFTER.search(after))  # (after: brackets already dropped)
 
 
 def land_price_basis(price: int, area: Optional[float], text: str) -> Optional[str]:

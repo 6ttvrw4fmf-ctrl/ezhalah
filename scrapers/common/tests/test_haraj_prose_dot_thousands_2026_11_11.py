@@ -22,6 +22,13 @@ def test_value(num, scale, want):
     assert P._value(num, scale) == want
 
 
+@pytest.mark.parametrize("text,want", [("السعر 1.250.000 ريال", 1_250_000), ("المطلوب 85.000", 85_000),
+                                       ("السعر 2.5 مليون", 2_500_000)])
+def test_dotted_prices_are_read_whole_through_asking_price(text, want):
+    # CodeRabbit on #11799: the capture itself must take every dotted group, not only the converter
+    assert P.asking_price("", text)["price"] == want
+
+
 def test_the_audit_post_reads_300_thousand():
     out = P.asking_price("", "أرض بضاحية اسكان جليل للبيع مساحــة 450 م المطلـوب:300.000💸 التواصل")
     assert out["price"] == 300_000

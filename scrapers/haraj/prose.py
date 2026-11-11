@@ -121,7 +121,8 @@ def type_of(title: str, body: str) -> tuple[Optional[str], str]:
 
 
 # ── numbers ───────────────────────────────────────────────────────────────────────────────────
-_NUM = r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
+# «1.250.000»: dotted thousands groups are captured whole first (CodeRabbit on #11799 — it read as 1.250 → 1,250).
+_NUM = r"(\d{1,3}(?:\.\d{3}){2,}(?!\d)|\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
 _SCALE = r"(?:\s*(الف|الاف|آلاف|ألف|k|K|مليون|ملايين|مليونين))?"
 _PHONE = re.compile(r"(?<!\d)(?:\+?966|00966|0)?5\d{8}(?!\d)")
 
