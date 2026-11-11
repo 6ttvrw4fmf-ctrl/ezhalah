@@ -101,3 +101,10 @@ def test_a_single_bearing_does_not_match_a_diagonal_facade():
     assert compare_listing({"direction_ar": "شرق"}, page("جنوبية شرقية"))["direction_ar"] == MISMATCH
     assert compare_listing({"direction_ar": "جنوب شرق"}, page("جنوبية شرقية"))["direction_ar"] == MATCH
     assert compare_listing({"direction_ar": "شرق"}, page("شرقية"))["direction_ar"] == MATCH
+
+
+def test_a_singular_year_value_line_past_text_head_reaches_the_score():
+    # CodeRabbit on #11465: «عمر العقار» / «سنة» as sibling elements beyond text_head's 1,500 characters
+    p = page_evidence(f"<html><body>{FILLER}<div>عمر العقار</div><div>سنة</div></body></html>")
+    assert "عمر العقار سنة" in p["evidence_lines"]
+    assert compare_listing({"property_age": 1}, p)["property_age"] == MATCH

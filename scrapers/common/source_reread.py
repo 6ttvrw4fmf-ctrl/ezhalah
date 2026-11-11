@@ -119,7 +119,7 @@ HOUZEZ_CARD = re.compile(r'<div class="item-body\b[^"]*"[^>]*>.*?</ul>', re.S | 
 # The unit may be written in Latin letters: akariyoun prints «مساحة العقار: 578 m²» (17512660 / 17512661,
 # 2026-10-13); with only the Arabic units the value line was dropped, the description's «المساحة : 900م» was
 # all that reached the score, and our structured 578 scored a mismatch on both ads.
-SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|m²|m2|sqm|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد)$")
+SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|m²|m2|sqm|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد|سنة|سنه|عام)$")   # a bare «سنة» is one year (CodeRabbit on #11465)
 
 
 def _with_values(lines: list[str]) -> list[str]:
