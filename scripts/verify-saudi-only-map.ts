@@ -61,20 +61,40 @@ check('fade: gone at a region-sized view and closer (no fog over coastal ads)', 
 check('fade: never grows as the user zooms in', [1, 0.6, 0.45, 0.4, 0.3, 0.25, 0.2, 0.1].every((r, i, a) => i === 0 || maskStrength(r) <= maskStrength(a[i - 1])));
 
 // 3. Wiring in the map, each with a mutation.
+// The camera box: every city must be centrable (CodeRabbit on #11818: the first box shut out Tabuk, Jazan, Haql).
+const num = (name: string, field: string) => Number(map.match(new RegExp(`const ${name} = \\{[^}]*${field}: ([\\d.]+)`))?.[1]);
+const box = { lat: num('SAUDI_BOX_CENTER', 'latitude'), lng: num('SAUDI_BOX_CENTER', 'longitude'), dLat: num('SAUDI_CENTRE_BOX', 'latitudeDelta'), dLng: num('SAUDI_CENTRE_BOX', 'longitudeDelta') };
+const inBox = (b: typeof box, x: number, y: number) => Math.abs(y - b.lat) <= b.dLat / 2 && Math.abs(x - b.lng) <= b.dLng / 2;
+const shutOut = (b: typeof box) => CITIES.filter(([, x, y]) => !inBox(b, x, y)).map((c) => c[0]);
+check('camera box: read from the map source', Object.values(box).every((v) => Number.isFinite(v) && v > 0));
+check('camera box: all 15 cities can be centred (Haql, Tabuk, Jazan, Arar, Al Khafji included)', shutOut(box).length === 0, shutOut(box).join(', '));
+mustCatch('the first, too-small box (±6° × ±7° around 23.5, 45.5)', shutOut({ lat: 23.5, lng: 45.5, dLat: 12, dLng: 14 }).length > 0);
+
+const setup = (src: string) => src.slice(src.indexOf('map.cameraBoundary = '), src.indexOf('ensureSaudiMask(mk, map);'));
+const helper = (src: string) => src.slice(src.indexOf('function ensureSaudiMask('), src.indexOf('/** INSTANT FIRST MAP'));
 const wired = (src: string) => ({
-  boundary: /map\.cameraBoundary = new mk\.CoordinateRegion\(/.test(src),
-  zoom: /map\.cameraZoomRange = new mk\.CameraZoomRange\(0, homeDistance \* MAX_ZOOM_OUT\)/.test(src),
-  mask: /new mk\.PolygonOverlay\(\[world, \.\.\.holes\], \{\s*enabled: false,/.test(src) && /map\.addOverlay\(mask\)/.test(src),
-  fades: /mask\.style\.fillOpacity = MASK_FADE \* k;/.test(src) && /const k = maskStrength\(lat \/ home\);/.test(src),
+  boundary: /map\.cameraBoundary = new mk\.CoordinateRegion\(new mk\.Coordinate\(SAUDI_BOX_CENTER\.latitude, SAUDI_BOX_CENTER\.longitude\)/.test(src),
+  // Set as the map is made, from the view it settled on — never inside the outline's .then (a zoom meanwhile would
+  // become «home» and the user could not zoom back out to the Kingdom; review of #11818).
+  zoom: /map\.cameraZoomRange = new mk\.CameraZoomRange\(0, map\.cameraDistance \* MAX_ZOOM_OUT\);/.test(setup(src)) && !/cameraZoomRange/.test(helper(src)),
+  mask: /new mk\.PolygonOverlay\(\[world, \.\.\.holes\], \{\s*enabled: false,/.test(src) && /m\.addOverlay\(mask\)/.test(helper(src)),
+  fades: /mask\.style\.fillOpacity = MASK_FADE \* k;/.test(src) && /const k = maskStrength\(m\.region\.span\.latitudeDelta \/ home\);/.test(src),
+  // Tied to the map: a parked map still gets it, a return visit retries a failure, and a failure reaches Sentry.
+  retried: /ensureSaudiMask\(mkKept, kept\.map\);/.test(src) && (helper(src).match(/saudiMasked\.delete\(m\); reportError\(e,/g) ?? []).length === 2,
+  noGone: !/\bgone\b/.test(helper(src)),
 });
 const w = wired(map);
 check('map: centre kept near the Kingdom (cameraBoundary)', w.boundary);
 check('map: zoom-out stops past the home view (cameraZoomRange)', w.zoom);
 check('map: the fade polygon is drawn, and never takes a tap (enabled: false)', w.mask);
 check('map: the fade follows the zoom through maskStrength()', w.fades);
-mustCatch('the fade polygon taking taps', !wired(map.replace('enabled: false,\n          style: new mk.Style({ fillColor: MASK_COLOR', 'enabled: true,\n          style: new mk.Style({ fillColor: MASK_COLOR')).mask);
+check('map: the fade belongs to the map — a return visit retries it, a failure is reported to Sentry', w.retried && w.noGone);
+mustCatch('the zoom limit set inside the outline wait again', !wired(map.replace('      map.cameraZoomRange = new mk.CameraZoomRange(0, map.cameraDistance * MAX_ZOOM_OUT);\n', '').replace("    const onView = () => {", "    m.cameraZoomRange = new mk.CameraZoomRange(0, m.cameraDistance * MAX_ZOOM_OUT);\n    const onView = () => {")).zoom);
+mustCatch('a return visit no longer retrying the fade', !wired(map.replace('ensureSaudiMask(mkKept, kept.map);', '')).retried);
+mustCatch('an outline failure going to the console only', !wired(map.replace("}).catch((e) => { saudiMasked.delete(m); reportError(e, { where: 'map: Saudi outline' }); });", "}).catch((e) => { console.error(e); });")).retried);
+mustCatch('the fade polygon taking taps', !wired(map.replace(/enabled: false,(\s*style: new mk\.Style\(\{ fillColor: MASK_COLOR)/, 'enabled: true,$1')).mask);
 mustCatch('the fade not following the zoom', !wired(map.replace('mask.style.fillOpacity = MASK_FADE * k;', 'mask.style.fillOpacity = MASK_FADE;')).fades);
-mustCatch('the boundary removed', !wired(map.replace(/map\.cameraBoundary = /, 'void ')).boundary);
+mustCatch('the boundary removed', !wired(map.replace('map.cameraBoundary = ', 'void ')).boundary);
 
 // 4. The phone's full-screen search.
 const row = read('src/components/MapDealRow.tsx');
@@ -84,11 +104,21 @@ const search = (src: string) => ({
   stays: /const open = \(focused \|\| full\) && hits\.length > 0;/.test(src),
   cancel: /onPress=\{cancel\}/.test(src) && /const cancel = \(\) => \{ setFullOpen\(false\);/.test(src),
   pickCloses: /setFullOpen\(false\); inputRef\.current\?\.blur\(\); onPick\(p\);/.test(src),
+  // A failed lookup shows «البحث غير متاح الآن» + «حاول مرة أخرى», never the «nothing found» line (review of #11818).
+  failedShown: /setStatus\(r\.failed \? 'failed' : 'done'\)/.test(src) && /status === 'failed' \? \(/.test(src) && /onPress=\{\(\) => setRetry\(\(n\) => n \+ 1\)\}/.test(src) && /\[q, locale, value, retry\]\);/.test(src),
+  // The list scrolls on the phone page only (a scroll box would clip the desktop dropdown's absolute position).
+  scrolls: /\{full && list \? \(\s*<ScrollView style=\{s\.fullScroll\}/.test(src) && /\) : list\}/.test(src),
 });
+const lookup = (src: string) => /if \(err \|\| !data\) \{ lookupFailed = true; resolve\(\[\]\); return; \}/.test(src) && /if \(lookupFailed\) return \{ rows: \[\], failed: true \};/.test(src)
+  && /try \{ mk = await loadMapKit\(\); \} catch \{ return \{ rows: \[\], failed: true \}; \}/.test(src);
 const r0 = search(row);
 check('phone search: the map\'s search field opts in to the full-screen page', r0.opts);
 check('phone search: a tap opens it; a pick and «إلغاء» close it', r0.opens && r0.cancel && r0.pickCloses);
 check('phone search: the list stays while the page is open even with the keyboard hidden', r0.stays);
+check('phone search: a failed lookup says so, with «حاول مرة أخرى» (never «no places»)', r0.failedShown && lookup(map));
+check('phone search: the list scrolls on the phone page, the desktop dropdown is untouched', r0.scrolls);
+mustCatch('an autocomplete error read as an empty answer again', !lookup(map.replace('if (err || !data) { lookupFailed = true; resolve([]); return; }', 'if (err || !data) { resolve([]); return; }')));
+mustCatch('a failed lookup shown as «nothing found»', !search(row.replace("setStatus(r.failed ? 'failed' : 'done')", "setStatus('done')")).failedShown);
 mustCatch('the list closing on blur again', !search(row.replace('const open = (focused || full) && hits.length > 0;', 'const open = focused && hits.length > 0;')).stays);
 mustCatch('the map search no longer opting in', !search(row.replace(/testID="map-search"\s*fullOnPhone/, 'testID="map-search"')).opts);
 

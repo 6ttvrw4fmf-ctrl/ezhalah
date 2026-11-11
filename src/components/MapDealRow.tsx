@@ -7,12 +7,12 @@
 // takes effect at once; the popup stays open for more ticks and closes with the X or a tap outside. Design only for now: the choice is kept here and nothing on the map reads
 // it yet; the filter button opens nothing yet — pins, the list and the filter sheet come one step at a time.
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { hitsToShow } from '@/lib/placeSearch';
-import { suggestPlaces, flyToPlace, clearPlaceMark, routeBetween, type PlaceSuggestion } from '@/components/AppleMap';
+import { suggestPlacesResult, flyToPlace, clearPlaceMark, routeBetween, type PlaceSuggestion } from '@/components/AppleMap';
 import { KIND_LABEL, type PlaceKind } from '@/lib/placeKind';
 
 const KIND_ICON: Record<PlaceKind, keyof typeof Ionicons.glyphMap> = {
@@ -57,18 +57,44 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
   useEffect(() => { pressing.current = false; }, [found]);
   const seq = useRef(0);
   const inputRef = useRef<TextInput>(null);
+  // What the last lookup for these words came to — the phone page tells «searching», «nothing found» and «could not
+  // search» apart (a failed lookup is never shown as «no places»); `retry` re-runs it.
+  const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'failed'>('idle');
+  const [retry, setRetry] = useState(0);
   useEffect(() => { setQ(value); }, [value]);
   useEffect(() => {
     const id = ++seq.current;
-    if (q.trim().length < 2 || q === value) { setHits([]); return; }
-    const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r, q); }); }, 180);
+    if (q.trim().length < 2 || q === value) { setHits([]); setStatus('idle'); return; }
+    setStatus('loading');
+    const h = setTimeout(() => {
+      suggestPlacesResult(q, locale).then((r) => { if (seq.current === id) { setHits(r.rows, q); setStatus(r.failed ? 'failed' : 'done'); } });
+    }, 180);
     return () => clearTimeout(h);
-  }, [q, locale, value]);
+  }, [q, locale, value, retry]);
   // THE KEYBOARD CLOSES ON A PICK (owner 2026-11-02, phone: «doesn't look nice on a phone» — the keyboard stayed up
   // over a squeezed map). Blurring the field is what dismisses iOS's keyboard; the state flag alone does not.
   const pick = (p: PlaceSuggestion) => { setQ(p.name ?? p.displayLines[0]); setHits([]); setFocused(false); setFullOpen(false); inputRef.current?.blur(); onPick(p); };
   const cancel = () => { setFullOpen(false); setFocused(false); inputRef.current?.blur(); };
   const open = (focused || full) && hits.length > 0;
+  const list = open ? (
+    <View style={[s.hits, full && s.hitsFull]} testID={`${testID}-hits`}>
+      {hits.slice(0, 6).map((p, i) => (
+        <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPressIn={() => { pressing.current = true; }}
+          onPressOut={() => { setTimeout(() => { pressing.current = false; if (!inputRef.current?.isFocused?.()) setFocused(false); }, 0); }} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
+          <Ionicons name={KIND_ICON[p.kind ?? 'place']} size={16} color={colors.primary} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <View style={s.hitTop}>
+              <Text style={s.hitT} numberOfLines={1}>{p.name ?? p.displayLines[0]}</Text>
+              {/* The kind tag (owner 2026-11-01): «مدينة» / «الحي» / «مسجد» … in the UI language, so six rows named
+                  «الرياض» read as a city, a region, a district and three villages. No tag when Apple did not resolve the row. */}
+              {p.kind ? <Text style={s.hitKind} numberOfLines={1}>{t(KIND_LABEL[p.kind])}</Text> : null}
+            </View>
+            {(p.subtitle ?? p.displayLines[1]) ? <Text style={s.hitSub} numberOfLines={1}>{p.subtitle ?? p.displayLines[1]}</Text> : null}
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  ) : null;
   return (
     <View style={[s.searchWrap, full && s.fullWrap]} testID={full ? `${testID}-full` : undefined}>
       <View style={s.searchRow}>
@@ -100,26 +126,25 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
           </Pressable>
         ) : null}
       </View>
-      {full && !open ? <Text style={s.fullHint}>{t('Type a city, district, street or landmark in Saudi Arabia')}</Text> : null}
-      {open ? (
-        <View style={[s.hits, full && s.hitsFull]} testID={`${testID}-hits`}>
-          {hits.slice(0, 6).map((p, i) => (
-            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPressIn={() => { pressing.current = true; }}
-              onPressOut={() => { setTimeout(() => { pressing.current = false; if (!inputRef.current?.isFocused?.()) setFocused(false); }, 0); }} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
-              <Ionicons name={KIND_ICON[p.kind ?? 'place']} size={16} color={colors.primary} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={s.hitTop}>
-                  <Text style={s.hitT} numberOfLines={1}>{p.name ?? p.displayLines[0]}</Text>
-                  {/* The kind tag (owner 2026-11-01): «مدينة» / «الحي» / «مسجد» … in the UI language, so six rows named
-                      «الرياض» read as a city, a region, a district and three villages. No tag when Apple did not resolve the row. */}
-                  {p.kind ? <Text style={s.hitKind} numberOfLines={1}>{t(KIND_LABEL[p.kind])}</Text> : null}
-                </View>
-                {(p.subtitle ?? p.displayLines[1]) ? <Text style={s.hitSub} numberOfLines={1}>{p.subtitle ?? p.displayLines[1]}</Text> : null}
-              </View>
+      {full && !open ? (
+        status === 'failed' ? (
+          <View style={s.fullState} testID={`${testID}-failed`}>
+            <Text style={s.fullHint}>{t('Search is not available right now')}</Text>
+            <Pressable onPress={() => setRetry((n) => n + 1)} accessibilityRole="button" style={s.retry} testID={`${testID}-retry`}>
+              <Text style={s.cancelT}>{t('Try again')}</Text>
             </Pressable>
-          ))}
-        </View>
+          </View>
+        ) : (
+          <Text style={s.fullHint} testID={`${testID}-state-${status}`}>
+            {status === 'loading' ? t('Searching…') : status === 'done' ? t('No matching places in Saudi Arabia') : t('Type a city, district, street or landmark in Saudi Arabia')}
+          </Text>
+        )
       ) : null}
+      {/* On the phone page the list scrolls, with room under it, so the keyboard never hides the last suggestion. The
+          dropdown elsewhere stays a plain overlay (a scroll box would clip its absolute position). */}
+      {full && list ? (
+        <ScrollView style={s.fullScroll} contentContainerStyle={s.fullScrollIn} keyboardShouldPersistTaps="handled">{list}</ScrollView>
+      ) : list}
     </View>
   );
 }
@@ -293,6 +318,10 @@ const s = StyleSheet.create({
   cancel: { marginTop: 10, paddingVertical: 8 },
   cancelT: { fontSize: 15, fontWeight: '700', color: colors.primary },
   fullHint: { fontSize: 14, color: colors.muted, marginTop: 18, paddingHorizontal: 4, textAlign: 'center' },
+  fullState: { alignItems: 'center' },
+  retry: { marginTop: 10, paddingVertical: 8, paddingHorizontal: 16 },
+  fullScroll: { flex: 1 },
+  fullScrollIn: { paddingBottom: 340 },
   hitsFull: { position: 'relative', top: 0, marginTop: 10, borderWidth: 0, padding: 0, shadowOpacity: 0, elevation: 0, backgroundColor: 'transparent' },
   dot: { width: 12, height: 12, borderRadius: 6 },
   routeWrap: { zIndex: 3 },

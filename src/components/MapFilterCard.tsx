@@ -65,6 +65,9 @@ export default function MapFilterCard({ value, onApply, onClose, onClear, countP
   // What «تطبيق» hands the map: a furniture choice the row no longer offers is dropped (no hidden filter left behind).
   const applied: MapFilterState = f.furnished != null && !furnitureOffered(deals, f.category) ? { ...f, furnished: null } : f;
   const clearAll = () => { setF(EMPTY_MAP_FILTER); onClear(); };
+  // Clear stays on while the MAP still has a filter, even if every box here was un-ticked by hand (review of #11818):
+  // otherwise X would keep the old filter with no way to reset it from here.
+  const canClear = isNarrowed(f) || isNarrowed(value);
   const toggleBed = (b: '1' | '2' | '3' | '4' | '5+') => setF((x) => ({ ...x, beds: x.beds.includes(b) ? x.beds.filter((y) => y !== b) : [...x.beds, b] }));
 
   return (
@@ -142,15 +145,15 @@ export default function MapFilterCard({ value, onApply, onClose, onClear, countP
               <Range icon={RANGE_ICON.priceFrom} label={t('From')} unit={t('SAR')} value={f.priceMin} onChange={(v) => setF((x) => ({ ...x, priceMin: digits(v) }))} testID="map-filter-price-min" />
               <Range icon={RANGE_ICON.priceTo} label={t('To')} unit={t('SAR')} value={f.priceMax} onChange={(v) => setF((x) => ({ ...x, priceMax: digits(v) }))} testID="map-filter-price-max" />
             </View>
-            {!phone && isNarrowed(f) ? (
+            {!phone && canClear ? (
               <Pressable onPress={clearAll} accessibilityRole="button" style={s.reset}><Text style={s.resetT}>{t('Clear all')}</Text></Pressable>
             ) : null}
           </ScrollView>
           {phone ? (
             // Fixed bottom bar (Zillow «Reset all filters» | «Apply»): clear on the start side, the button fills the rest.
             <View style={[s.foot, s.footRow, { flexDirection: isRTL ? 'row-reverse' : 'row', paddingBottom: 12 + insets.bottom }]}>
-              <Pressable onPress={clearAll} disabled={!isNarrowed(f)} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
-                <Text style={[s.resetT, !isNarrowed(f) && { color: colors.muted }]}>{t('Clear all')}</Text>
+              <Pressable onPress={clearAll} disabled={!canClear} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
+                <Text style={[s.resetT, !canClear && { color: colors.muted }]}>{t('Clear all')}</Text>
               </Pressable>
               <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
                 <Text style={s.applyT}>{t('Show listings')}</Text>

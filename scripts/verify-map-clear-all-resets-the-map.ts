@@ -42,6 +42,11 @@ function journey(card: string, map: string): unknown {
 }
 
 check('applied filter → «مسح الكل» → X leaves the map with NO filter', journey(cardSrc, mapSrc) === EMPTY);
+// Clear stays on while the MAP still has a filter, even when every box was un-ticked by hand (review of #11818).
+const clearGate = (card: string) => /const canClear = isNarrowed\(f\) \|\| isNarrowed\(value\);/.test(card)
+  && /\{!phone && canClear \? \(/.test(card) && /disabled=\{!canClear\}/.test(card) && !/isNarrowed\(f\) \? \(|disabled=\{!isNarrowed\(f\)\}/.test(card);
+check('«مسح الكل» stays available while the map still has a filter (boxes un-ticked by hand)', clearGate(cardSrc));
+mustCatch('the clear button gated on the draft boxes only', !clearGate(cardSrc.replace('const canClear = isNarrowed(f) || isNarrowed(value);', 'const canClear = isNarrowed(f);')));
 
 // Mutations: each is the old behaviour or a plausible regression, executed through the same journey.
 const mutants: [string, string, string][] = [

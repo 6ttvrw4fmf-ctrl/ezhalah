@@ -36,11 +36,11 @@ mustCatch('a key on the centre alone (a Kingdom-wide answer reused inside one di
 // Wiring: the web search uses the budget and the cache, and never remembers an empty (maybe failed) answer.
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 check('suggestPlaces waits RESOLVE_BUDGET_MS per row, not 1,500 ms', /setTimeout\(\(\) => resolve\(r\), RESOLVE_BUDGET_MS\)/.test(web) && !/resolve\(r\), 1500\)/.test(web));
-check('suggestPlaces answers from the cache and stores only non-empty answers', /const cached = suggestCache\.get\(key\);\n\s*if \(cached\) return cached;/.test(web) && /if \(rows\.length\) suggestCache\.set\(key, out\);/.test(web));
+check('suggestPlaces answers from the cache and stores only non-empty answers', /const cached = suggestCache\.get\(key\);\n\s*if \(cached\) return \{ rows: cached, failed: false \};/.test(web) && /if \(rows\.length\) suggestCache\.set\(key, out\);/.test(web));
 
 // 3. The field: rows remember their words, and a finger on a suggestion keeps the list open through the blur.
 const f = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
-check('the field shows hitsToShow(q, found), never a list kept from other words', /const hits = hitsToShow\(q, found\);/.test(f) && /setHits\(r, q\)/.test(f));
+check('the field shows hitsToShow(q, found), never a list kept from other words', /const hits = hitsToShow\(q, found\);/.test(f) && /setHits\(r\.rows, q\)/.test(f));
 check('the press flag clears whenever the list changes (a row that vanished mid-press never calls onPressOut)', /useEffect\(\(\) => \{ pressing\.current = false; \}, \[found\]\);/.test(f));
 check('suggestPlaces keys its cache on the whole view (centre AND span)', /suggestKey\(query, language, live\.map\?\.region\)/.test(web));
 check('a press on a suggestion holds the list open through the field\'s blur', /onPressIn=\{\(\) => \{ pressing\.current = true; \}\}/.test(f) && /onBlur=\{\(\) => setTimeout\(\(\) => \{ if \(!pressing\.current\) setFocused\(false\); \}, 150\)\}/.test(f));

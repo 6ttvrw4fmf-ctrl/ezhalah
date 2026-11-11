@@ -2024,6 +2024,8 @@ const AR: Record<string, string> = {
   'Send code': 'إرسال الرمز',
   'Cancel': 'إلغاء',
   'Type a city, district, street or landmark in Saudi Arabia': 'اكتب مدينة أو حي أو شارع أو معلم في السعودية',
+  'Search is not available right now': 'البحث غير متاح الآن',
+  'No matching places in Saudi Arabia': 'لا توجد أماكن مطابقة في السعودية',
   'Back': 'رجوع',
   'Delete your account?': 'حذف حسابك؟',
   "This permanently removes your account, saved searches, and chat history. This can't be undone.":
