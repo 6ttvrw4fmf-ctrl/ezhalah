@@ -801,6 +801,15 @@ def fetch_detail(s: cc.Session, listing_url: str) -> dict:
     return {}
 
 
+def merge_detail_into_current(current: Any, detail: dict) -> dict:
+    """The detail page's fields (suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text,
+    rating, reviews_count, extra_sections) over the row's CURRENT additional_info. Every other key — the crawl's
+    monthly_price, district, amenities — is whatever the row holds NOW, never an older snapshot."""
+    base = dict(current) if isinstance(current, dict) else {}
+    base.update(detail)
+    return base
+
+
 def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
                      shards: Optional[int] = None) -> tuple[int, int]:
     """Fill description (column) + the rich detail fields (additional_info) for ACTIVE Gathern rows that
@@ -837,10 +846,20 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
         if not d:
             continue
         desc = d.pop("description", None)
-        info = r.get("additional_info")
-        if not isinstance(info, dict):
-            info = {}
-        info.update(d)  # suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text, rating, reviews_count, extra_sections
+        # Merge into the row's CURRENT additional_info, re-read right before the write — never into the worklist
+        # snapshot taken at the start of the pass. Since 2026-11-11 this pass also runs right after the crawl
+        # (workflow_run), so a sync retry may rewrite monthly_price etc. while we fetch pages (CodeRabbit #11809).
+        # A failed re-read skips the row: writing the snapshot would restore stale crawl values.
+        try:
+            cur = (client.table("gathern_residential_listings").select("additional_info")
+                   .eq("ad_number", r["ad_number"]).limit(1).execute())
+        except Exception as e:  # noqa: BLE001
+            print("  ⚠ re-read failed", r.get("ad_number"), str(e)[:80])
+            continue
+        rows = (cur.data if cur else None) or []
+        if not rows:
+            continue
+        info = merge_detail_into_current(rows[0].get("additional_info"), d)
         payload: dict[str, Any] = {"additional_info": info}
         # The page's own count fills a bathroom count the list's icon never gave; a stored value stays.
         if r.get("bathrooms") is None and (n := _bathrooms_from_sections(d.get("extra_sections"))):

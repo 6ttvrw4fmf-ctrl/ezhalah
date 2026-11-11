@@ -27,7 +27,12 @@ export function problems(backfill: string, sync: string): string[] {
     if (!/types:\s*\[\s*completed\s*\]/.test(wr)) p.push('the backfill must run when the crawl has COMPLETED');
   }
   if (!/^\s{2}schedule:/m.test(on)) p.push('the 02:00 backfill schedule is gone (units the crawl never revisits would stay unread)');
-  if (/^\s{4}if:\s*github\.event_name\s*==\s*'schedule'/m.test(backfill)) p.push('the backfill job runs only on schedule — the after-crawl run would do nothing');
+  // Any job-level `if:` that names the event must still let workflow_run through (CodeRabbit #11809: an
+  // «event_name != 'workflow_run'» condition would switch off every after-crawl run while the trigger stays).
+  const job = /^\s{2}backfill:\n([\s\S]*?)(?=^\s{2}\S|(?![\s\S]))/m.exec(backfill)?.[1] ?? '';
+  const cond = /^\s{4}if:\s*(.+)$/m.exec(job)?.[1] ?? '';
+  if (/event_name/.test(cond) && !/event_name\s*==\s*'workflow_run'/.test(cond.replace(/\$\{\{|\}\}/g, '')))
+    p.push(`the backfill job's condition «${cond.trim()}» can skip the after-crawl run`);
   return p;
 }
 
@@ -43,6 +48,8 @@ mustCatch('the after-crawl trigger removed', problems(swap(/  workflow_run:\n   
 mustCatch('the trigger following another workflow', problems(swap('workflows: ["Gathern sync"]', 'workflows: ["Gathern liveness"]'), SYNC).length > 0);
 mustCatch('the crawl renamed without the trigger', problems(BACKFILL, SYNC.replace(/^name:\s*Gathern sync\s*$/m, 'name: Gathern crawl')).length > 0);
 mustCatch('the trigger firing on request instead of completion', problems(swap('types: [completed]', 'types: [requested]'), SYNC).length > 0);
+mustCatch('a job condition that skips the after-crawl run', problems(swap('  backfill:\n', "  backfill:\n    if: ${{ github.event_name != 'workflow_run' }}\n"), SYNC).length > 0);
+mustCatch('a job condition that keeps only the schedule', problems(swap('  backfill:\n', "  backfill:\n    if: github.event_name == 'schedule'\n"), SYNC).length > 0);
 mustCatch('the 02:00 schedule dropped', problems(swap('  schedule:\n    - cron: "0 2 * * *"\n', ''), SYNC).length > 0);
 
 if (failed) { console.error(`\n❌ verify-gathern-details-follow-the-crawl: ${failed} check(s) failed.`); process.exit(1); }
