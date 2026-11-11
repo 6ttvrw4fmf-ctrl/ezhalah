@@ -596,7 +596,8 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "raised_plot": (("سعر", "اسعار", "قيمه", "ايجار", "اسقف", "سقف", "ارتفاع", "نسبه", "طلب"), ()),   # a high price / ceiling
     "all_services": (("حولها", "حوله", "حواليها", "حواليه", "جنبها", "جنبه"),                       # «حولها كل خدمات»: around it
                      ("قريبه", "قريب", "بالقرب", "المجاوره", "مجاوره", "حولها", "حوله",            # «جميع الخدمات قريبة»
-                      "الشقه", "مستقل", "مستقله")),      # «كل خدمات الشقه مستقله»: separate utilities (P2 13085, 🔬 2026-11-11)
+                      "مستقل", "مستقله")),      # «كل خدمات الشقه مستقله»: separate utilities (P2 13085, 🔬 2026-11-11);
+                                                  # «جميع خدمات الشقة متوفرة» stays a yes (CodeRabbit on #11820)
     "street_lights": (("جوهره"), ("تحميل", "للتحميل", "تنزيل", "للتنزيل", "والتحميل")),                                        # «رصيف تحميل» is a dock
     "approved_plan": (("مكتب", "مسوق", "وسيط", "مقاول", "مهندس", "مقيم", "مثمن", "وكيل"), ()),
     "direct_owner": (("تفويض", "توكيل", "وكاله", "بتفويض", "مفوض", "مفوضين", "وكيل", "موكل"), ()),
@@ -626,7 +627,7 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "office_inside": (("التواصل", "تواصل", "اتصل", "بالتواصل", "تواصلوا", "راسل"), ()),
     # «غرفة حفلات ومناسبات», «قاعة اجتماعات ومناسبات», «منطقة احتفالات ومناسبات للسكان»: the building's own room; «هدايا
     # ومناسبات», «ورد … ومناسبات»: what a shop sells (P2 13085 «ومناسبات», aqar 1783289 / 19532680, 🔬 2026-11-11)
-    "for_events": (("قاعه", "صاله", "قاعات", "صالات", "لاقامه", "غرفه", "غرف", "هدايا", "هديه", "ورود", "ورد",
+    "for_events": (("قاعه", "صاله", "قاعات", "صالات", "لاقامه", "غرفه", "هدايا", "هديه", "ورود", "ورد",
                     "اجتماعات", "احتفالات", "منطقه"), ()),
     "industrial_area": (("الجبيل", "جبيل", "ينبع", "شارع"), ()),
     "quad_bikes": (("توصيل", "لتوصيل", "مندوب", "مناديب"), ()),
@@ -733,7 +734,8 @@ _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "rest
 _NEAR_NEVER_FACTS = frozenset({"air_conditioner", "furnished"})
 # A VIEW is not a distance (🔬 2026-11-05): «صالة معيشة مطلة بلكونة مطبخ أمريكي» has a balcony and a kitchen. A view word only
 # silences what can be outside (a park, a pool, a sea) — never the home's own rooms.
-_ROAD_NAMED = frozenset(_n(w) for w in ("الدائري", "السريع", "العام", "الرئيسي", "الدولي", "السريعه", "الرئيسيه"))
+_ROAD_NAMED = frozenset(_n(w) for w in ("الدائري", "السريع", "العام", "الرئيسي", "الدولي", "السريعه", "الرئيسيه",
+                                        "المسمى", "المسمي"))   # «الطريق المسمى طريق الملك فهد» (CodeRabbit on #11820)
 _VIEW_WORDS = frozenset(_n(w) for w in ("مطل", "مطله", "تطل", "يطل", "اطلاله", "باطلاله", "overlooking", "views"))
 _UNIT_ROOMS = frozenset({"kitchen", "balcony", "maid_room", "driver_room", "laundry_room", "majlis", "dining_majlis", "elevator",
                          "storage", "roof", "annex", "furnished", "two_entrances", "private_entrance", "car_entrance"})
@@ -1181,7 +1183,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «دخل شهري: متوقع للشقه بعد التاثيث», «فرص تحقيق دخل شهري»: a
                                                      # forecast, not income the property earns (P2 13085 «دخل شهري», aqar
                                                      # 113914 / 38786, 🔬 2026-11-10)
-    if fact == "main_road" and _n(t[ws:we]).endswith("الطريق") \
+    if fact == "main_road" and (_n(t[ws:we]).endswith("الطريق") or (_n(t[ws:we]).endswith("طريق") and not gn)) \
             and (_starts(_strip_wa(t[ws:we].split()[0]), tuple(_VIEW_WORDS)) or any(_strip_wa(w) in _VIEW_WORDS for w in p2)) \
             and not (gn[:1] and (gn[0] in _ROAD_NAMED or _strip_wa(gn[0]) in _ROAD_NAMED or "ال" + _strip_wa(gn[0]) in _ROAD_NAMED)):
         return None, s, e                            # «بلكونه (شرفه) مطلة على الطريق», «شقه … مطله على الطريق»: a view of
@@ -2876,6 +2878,12 @@ def selftest() -> None:
         ("حولها كل خدمات وفي بداية الحي", {}, ("all_services",)),                         # aqar 15789013
         ("المساحة: 130م² كل خدمات الشقه مستقله", {}, ("all_services",)),                 # aqar 15126557
         ("ارض واصل لها جميع الخدمات", {"all_services": True}, ()),
+        # CodeRabbit on #11820
+        ("شقة مطلة على طريق", {}, ("main_road",)),
+        ("عمارة مطلة على الطريق المسمى طريق الملك فهد", {"main_road": True}, ()),
+        ("جميع خدمات الشقة متوفرة", {"all_services": True}, ()),
+        ("شاليه فيه غرفتين ومسموح للمناسبات", {"for_events": True}, ()),
+        ("شاليه فيه غرفتين ممنوع الحفلات", {"for_events": False}, ()),
     ]
     bad = []
     for text, want, absent in cases:
