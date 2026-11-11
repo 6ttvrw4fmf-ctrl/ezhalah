@@ -67,6 +67,9 @@ const searchWired = (src: string) => /live\.search = new mk\.Search\(\{ language
   && /const rings = await loadOutline\(\)\.catch\(\(\) => null\);\n\s*const out = keepSaudiPlaces\(sortByKind\(dropAreaShadows\(dedupePlaces\(places\.length \? places : named\)\), query\), rings\)\.slice\(0, 6\);/.test(src);
 check('search: Apple is asked for Saudi places, and every suggestion passes the outline before it is shown', searchWired(map));
 mustCatch('the outline check removed from the search', !searchWired(map.replace('keepSaudiPlaces(sortByKind(', '((x: unknown[]) => x)(sortByKind(')));
+const routeWired = (src: string) => /export async function suggestPlaces\(q: string, uiLanguage: string\): Promise<PlaceSuggestion\[\]> \{\n  return \(await suggestPlacesResult\(q, uiLanguage\)\)\.rows;/.test(src);
+check('search: the route fields ask the same Saudi-only lookup (suggestPlaces → suggestPlacesResult)', routeWired(map));
+mustCatch('a route lookup that bypasses the Saudi check', !routeWired(map.replace('return (await suggestPlacesResult(q, uiLanguage)).rows;', 'return [];')));
 const noFade = (src: string) => !/ensureSaudiMask|MASK_FADE|new mk\.PolygonOverlay\(\[world/.test(src);
 check('map: no fade over the neighbouring countries (owner 2026-11-11)', noFade(map));
 mustCatch('the fade coming back', !noFade(map + '\nensureSaudiMask(mk, map);'));
