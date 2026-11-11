@@ -277,3 +277,11 @@ def test_the_offices_own_address_is_not_the_ads_district():                # sqc
     # ours is on the page: unchanged
     assert _district("الشاطئ", ad + ["حي الشاطئ", _OFFICE_FOOTER]) == "match"
 
+
+
+def test_an_unpriced_rent_has_no_period_to_print():    # hazim 13106686 (alert card_parity_card_missing:hazim:rent_period)
+    rent = {**STORED, "deal_ar": "إيجار", "rent_period_ar": "سنوي", "price_total": None, "price_annual": None}
+    assert cp.card_shows("rent_period", rent, "السعر عند الطلب | 22,500 م²") is None
+    priced = {**rent, "price_annual": 60000}
+    assert cp.card_shows("rent_period", priced, "SAR 60,000 | 22,500 م²") is False      # still caught when priced
+    assert cp.card_shows("rent_period", priced, "SAR 60,000 سنوي") is True

@@ -47,5 +47,21 @@ mustCatch('the repair predicate dropped from rep_latest (one old repair stands o
   !REP_LATEST.test(latest.replace("bool_or(coalesce((e.value->>'repaired')::int, 0) > 0\n                     and night", 'bool_or(night')));
 mustCatch('self-healed back on «any repair in 7 nights»', !RECUR.test(latest.replace(RECUR, 'if r.rep > 0 then')));
 
+// 🔧 2026-11-11 (20261111220000): a non-licence card_missing stands down when the platform's LATEST reading decided the
+// field with zero misses — a card fix (indexBathrooms.ts) no longer re-raises for a week. Only the raise is skipped.
+const TODAY_CLEAN = /v_cm_today_clean := r\.field <> 'licence' and r\.mm = 0\s+and coalesce\(r\.latest_decided, 0\) > 0 and coalesce\(r\.latest_cm, 0\) = 0;/;
+const RAISE_GATED = /if v_wrong >= 2 and 2 \* v_wrong >= v_decided and not v_cm_today_clean then/;
+const LATEST_CM = /sum\(coalesce\(\(e\.value->>'card_missing'\)::int, 0\)\)\s+filter \(where night = \(select max\(r2\.night\) from recent r2 where r2\.platform = recent\.platform\)\) as latest_cm/;
+check('a card_missing whose latest reading is clean stands down (never a licence, never over a source mismatch)', TODAY_CLEAN.test(latest));
+check('only the raise is gated by today\'s clean reading', RAISE_GATED.test(latest));
+check('«latest» card_missing is counted on the platform\'s own latest night', LATEST_CM.test(latest));
+mustCatch('the clean-today gate also covering a source mismatch (r.mm = 0 dropped)',
+  !TODAY_CLEAN.test(latest.replace("r.field <> 'licence' and r.mm = 0", "r.field <> 'licence'")));
+mustCatch('a reading that decided nothing counted as clean (latest_decided > 0 dropped)',
+  !TODAY_CLEAN.test(latest.replace('and coalesce(r.latest_decided, 0) > 0 ', '')));
+mustCatch('the gate removed from the raise (a week of re-raises on fixed cards)',
+  !RAISE_GATED.test(latest.replace(' and not v_cm_today_clean then', ' then')));
+mustCatch('latest_cm summed over the whole window', !LATEST_CM.test(latest.replace(/(as latest_decided,\s+sum\(coalesce\(\(e\.value->>'card_missing'\)::int, 0\)\))\s+filter \([^\n]+\)\) as latest_cm/, '$1 as latest_cm')));
+
 if (failed) { console.error(`\n✗ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ the card-parity detector judges the current card; self-heal alerts stand only while repairs recur');
