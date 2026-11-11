@@ -321,6 +321,13 @@ export function joinPins(a: PinRow, b: PinRow): PinRow {
   const fa = priceFacts(a), fb = priceFacts(b);
   const lo = [fa.min, fb.min].filter((x): x is number => x !== null);
   const hi = [fa.max, fb.max].filter((x): x is number => x !== null);
+  // A head joining buy AND rent shows its count (pinHead), so it carries no price: a sale figure and a rent are never
+  // one number, and a later join must not re-read a rent through the sale floor.
+  if (a.deal !== b.deal) return {
+    lat: (a.lat * a.n + b.lat * b.n) / n, lng: (a.lng * a.n + b.lng * b.n) / n, n,
+    deal: 'mixed', type_ar: null, platforms: Math.max(a.platforms || 0, b.platforms || 0),
+    ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null, price: null, platform: null, price_max: null, unpriced: 0,
+  };
   return {
     lat: (a.lat * a.n + b.lat * b.n) / n, lng: (a.lng * a.n + b.lng * b.n) / n, n,
     deal: a.deal === b.deal ? a.deal : 'mixed', type_ar: null, platforms: Math.max(a.platforms || 0, b.platforms || 0),

@@ -59,6 +59,8 @@ const j3 = joinPins(row({ n: 3, price: 600000, price_max: 600000, unpriced: 0 })
 check('a priced spot joined with a no-price spot → «من 600 ألف»', pinHead(j3, 'ar') === 'من 600 ألف');
 check('two no-price ads joined → «السعر عند الطلب»', pinHead(joinPins(row({}), row({})), 'ar') === 'السعر عند الطلب');
 check('a joined head keeps every id of both', joinPins(row({ ids: [{ t: 'a', i: 1 }] }), row({ ids: [{ t: 'b', i: 2 }] })).ids?.length === 2);
+const mixedJoin = joinPins(joinPins(row({ deal: 'buy', price: 750000 }), row({ deal: 'rent', price: 5000 })), row({ deal: 'rent', price: 3000 }));
+check('a head joining buy and rent carries no price, even when joined again (no rent re-read through the sale floor)', mixedJoin.deal === 'mixed' && mixedJoin.price === null && mixedJoin.price_max === null);
 const droppedJoin = { ...j2, price: null, price_max: null, unpriced: 0 };
 mustCatch('a joined head that drops its price (the old joinPins)', pinHead(droppedJoin, 'ar') !== 'من 750 ألف');
 
