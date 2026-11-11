@@ -270,9 +270,30 @@ def _number_first_lines(body: str) -> list[str]:
     return out
 
 
+# A commented-out block is not on the page (🔬 2026-11-11, af-score 11-10 tuba 13261455 / 13261520): tuba ships its old
+# details template inside «<!-- … -->» — empty «واجهة العقار :» labels and «lorem ipsum» / «yes/no» values — ABOVE the
+# ad's real «تفاصيل العقار». The empty label in text_head made the facade read «stated», the real «شمالية» sat past the
+# evidence cap, and our correct «شمال» scored MISMATCH three nights running.
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+# tuba's real details are «<div class="newest-title">واجهة العقار :</div><div class="newest-value">شمالية</div>»
+# pairs; rejoined as one line «LABEL VALUE» so they reach the score whatever the page's length.
+_TITLE_VALUE_PAIR = re.compile(r'<div class="newest-title">\s*([^<]{1,40}?)\s*</div>\s*<div class="newest-value">\s*([^<]{1,80}?)\s*</div>', re.S)
+
+
+def _title_value_lines(body: str) -> list[str]:
+    out = []
+    for m in _TITLE_VALUE_PAIR.finditer(body or ""):
+        label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip().rstrip(":：").strip()
+        value = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
+        if label and value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)):
+            out.append(f"{label} {value}")
+    return out
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
-    body = HOUZEZ_CARD.sub(" ", RESULT_CARD_TEXT.sub(" ", body or ""))   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
+    body = HTML_COMMENT.sub(" ", body or "")
+    body = HOUZEZ_CARD.sub(" ", RESULT_CARD_TEXT.sub(" ", body))   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
     body = FACET_CHECKBOX.sub(" ", SELECT_BLOCK.sub(" ", drop_radio_controls(body)))   # …nor the site's own search-filter choices
     body = MENU_ITEM_LINK.sub(r"\1 ", BUTTON_BLOCK.sub(" ", body))  # …nor its buttons and menu links
     jsonld = []
@@ -297,7 +318,8 @@ def page_evidence(body: str) -> dict:
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
         "evidence_lines": list(dict.fromkeys(_payload_area_lines(body) + _payload_place_lines(body) + _houzez_place_lines(body) + _label_value_lines(body)
-                           + _number_first_lines(body) + _feature_block_lines(shown) + _with_values(lines)))[:400],   # once each: duplicates never push a later field past the cap
+                           + _number_first_lines(body) + _feature_block_lines(shown) + _title_value_lines(shown)
+                           + _with_values(lines)))[:400],   # once each: duplicates never push a later field past the cap
         "text_head": " | ".join(lines)[:1500],
     }
 

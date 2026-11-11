@@ -869,10 +869,15 @@ def _cmp_bool(stored, lines: list[str], kw: str) -> str:
     hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
     if not hit:
         return PAGE_SILENT
-    page_yes = not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
+    page_yes = not all(re.search(NEG + "(?:" + kw + ")", x) or re.search("(?:" + kw + ")" + LABEL_NO, x) for x in hit)
     if stored is None:
         return WE_MISS
     return MATCH if bool(stored) == page_yes else MISMATCH
+
+
+# A LABELLED «no» after the field (🔬 2026-11-11, af-score 11-10 tuba 13261393): tuba's description lists «- مفروشة: لا»,
+# we store false, and only a «no» BEFORE the word was known, so a correct false scored MISMATCH (and a wrong true MATCH).
+LABEL_NO = r"[\u0621-\u064A]*\s*[:：]\s*(?:لا|لايوجد|لا يوجد|no)(?![\u0621-\u064Aa-z])"
 
 
 # Hofuf's ضاحية هجر sub-districts are written three ways for ONE place: the catalog's «الضاحية الرابع», and
