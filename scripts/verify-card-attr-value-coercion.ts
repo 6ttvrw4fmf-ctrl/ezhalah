@@ -98,6 +98,7 @@ const englishCatalogText = i18n.englishCatalogText as (text: string) => string;
 const declarations = [
   { header: 'const AR_YESNO:', endsWith: /;$/ },
   { header: 'const FURNISH_VALUES_AR:' }, { header: 'const AR_ENUM:' },
+  { header: 'const AD_SOURCE_AR', endsWith: /;$/ }, { header: 'const BUILD_YEAR', endsWith: /;$/ },
   { header: 'export function arAttrValue(' },
 ];
 const translitSource = readFileSync('src/lib/translitPlace.ts', 'utf8').replace(/export /g, '').replace("import sa from '@/data/sa-locations.json';", 'const sa = ' + readFileSync('src/data/sa-locations.json', 'utf8') + ';');
@@ -159,6 +160,59 @@ for (const [value, expected] of [
 check('Arabic source authority retained', format('Ad source', 'الهيئة العامة للعقار', 'ar') === 'الهيئة العامة للعقار');
 check('Arabic explicit absence retained', format('Other obligations on the property', 'لايوجد', 'ar') === 'لايوجد');
 check('Arabic enum rendering retained', format('Facade', 'east', 'ar') === 'شرقية');
+// Office sites (aldarim, abwbna, alobid, bahadhabab), owner 2026-11-10 «Fix all bro these issues can't happen»: aldarim
+// 50820's card printed «الواجهة بيان غير محدد» where the ad page prints «شمالية جنوبية شرقية غربية», and a build year
+// «2018» under «عمر العقار». Every side joined by «_» reads as the page's sides; a year reads as a build year.
+for (const [value, ar, en] of [
+  ['north_south_east_west', 'شمالية جنوبية شرقية غربية', 'North South East West'],
+  ['north_west', 'شمالية غربية', 'North West'], ['south_east_west', 'جنوبية شرقية غربية', 'South East West'],
+  ['east_west', 'شرقية غربية', 'East West'], ['south', 'جنوبية', 'South'],
+]) {
+  check(`Arabic Facade ${value}`, format('Facade', value, 'ar') === ar, `got «${format('Facade', value, 'ar')}»`);
+  check(`English Facade ${value}`, format('Facade', value, 'en') === en, `got «${format('Facade', value, 'en')}»`);
+}
+check('a facade part that is not a side is never half-translated', format('Facade', 'north_garden', 'ar') !== 'شمالية garden'
+  && !/شمالية/.test(format('Facade', 'north_garden', 'ar')));
+// wasalt's English values on the Arabic card — every English value production served on 2026-11-10 was run through
+// this formatter; these were the ones still printed in English or as «بيان غير محدد».
+for (const [label, value, ar] of [
+  ['Ad source', 'SAKANI', 'سكني'], ['Ad source', 'wasalt', 'وصلت'],
+  ['Other obligations on the property', 'Non', 'لا يوجد'], ['Other obligations on the property', 'N/A', 'لا يوجد'],
+  ['Other obligations on the property', 'nothing', 'لا يوجد'], ['Other obligations on the property', 'NIL', 'لا يوجد'],
+  ['Property usage', 'Residential Commercial', 'سكني تجاري'],
+]) check(`Arabic ${label}: ${value}`, format(label, value, 'ar') === ar, `got «${format(label, value, 'ar')}»`);
+check('a typed obligation that is not a «none» word stays as the source wrote it', format('Other obligations on the property', 'gh', 'ar') === 'gh');
+check('Arabic Age 2018 is a build year', format('Age', '2018', 'ar') === 'بُني عام 2018', `got «${format('Age', '2018', 'ar')}»`);
+check('English Age 2018 is a build year', format('Age', '2018', 'en') === 'Built in 2018');
+check('Arabic Age 24 stays a number of years as published', format('Age', '24', 'ar') === '24');
+check('Arabic Age «5 years» keeps its meaning', format('Age', '5 years', 'ar') === '5 سنوات');
+
+// EVERY row name a scraper writes has an Arabic name on the card — discovered from the scrapers, not listed here.
+// A label with no AR{} entry printed «بيان غير محدد» on 450+ office-site rows (street sides, living rooms, parking).
+// Shapes: the office sites' `_EXTRA_FIELDS = [("key", "Label"), …]` lists and every `"label": "Label"` literal.
+{
+  const AR_CAT = (await liftSymbols('src/i18n.tsx', [{ header: 'const AR:' }], ['AR'])).AR as Record<string, string>;
+  const { readdirSync, existsSync } = await import('node:fs');
+  const found = new Map<string, string>();
+  for (const dir of readdirSync('scrapers')) {
+    const f = join('scrapers', dir, 'run.py');
+    if (!existsSync(f)) continue;
+    const py = readFileSync(f, 'utf8');
+    for (const [, label] of py.matchAll(/"label":\s*"([A-Z][^"]*)"/g)) found.set(label, f);
+    const block = /^_EXTRA_FIELDS\s*=\s*\[([\s\S]*?)^\]/m.exec(py);
+    if (block) for (const [, label] of block[1].matchAll(/\("[a-z_0-9]+",\s*"([^"]+)"\)/g)) found.set(label, f);
+  }
+  check('the scraper label discovery found the office-site lists', ['Street width (E)', 'Living rooms', 'Facade'].every((l) => found.has(l)),
+    `found ${found.size}`);
+  const missingIn = (cat: Record<string, string>) => [...found].filter(([l]) => !/[ء-ي]/.test(cat[l] ?? ''));
+  const missing = missingIn(AR_CAT);
+  check(`every scraper row name has an Arabic card name (${found.size} names)`, missing.length === 0,
+    missing.map(([l, f]) => `«${l}» (${f})`).join(', '));
+  // Mutation: drop one entry from the catalog and the check must see it.
+  const { 'Street width (E)': _dropped, ...mutantCat } = AR_CAT;
+  check('MUTATION: a scraper row name missing from the catalog is caught',
+    missingIn(mutantCat).some(([l]) => l === 'Street width (E)'));
+}
 for (const [, name] of readFileSync('src/lib/listingDisplay.ts', 'utf8').matchAll(/return '([^']*[ء-ي][^']*)'/g)) {
   check(`English platform name: ${name}`, !/[ء-ي]/.test(englishCatalogText(name)));
 }
