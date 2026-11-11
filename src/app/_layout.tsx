@@ -19,7 +19,7 @@ import { installTapDebug } from '@/lib/tapDebug';
 import { warmMapSoon } from '@/lib/mapWarmup';
 import { Image as ExpoImage } from 'expo-image';
 import { PLATFORM_META } from '@/data/loaderPlatforms';
-import { scheduleLogoPrefetch } from '@/lib/prefetchLoaderLogos';
+import { afterMapIsLabelled, scheduleLogoPrefetch } from '@/lib/prefetchLoaderLogos';
 import Head from 'expo-router/head';
 import { OG_IMAGE, PAGE_TITLE_AR, PAGE_TITLE_EN, SHARE_BLURB_AR, SHARE_CARD_DESC_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -131,7 +131,8 @@ function Shell() {
   // because a route's module only runs once that route opens — in SearchLoader it never ran on Home.
   // Web only: native ships its assets inside the app. scripts/verify-live-loader-logos.ts proves it live.
   useEffect(() => {
-    if (Platform.OS === 'web') scheduleLogoPrefetch(PLATFORM_META.map((p) => p.logo), (uris) => ExpoImage.prefetch(uris));
+    // On the map, its city names download first (afterMapIsLabelled: measured 2026-11-11, src/lib/prefetchLoaderLogos.ts).
+    if (Platform.OS === 'web') scheduleLogoPrefetch(PLATFORM_META.map((p) => p.logo), (uris) => afterMapIsLabelled(() => { void ExpoImage.prefetch(uris); }));
   }, []);
   const homedRef = useRef(false);
   useEffect(() => {
