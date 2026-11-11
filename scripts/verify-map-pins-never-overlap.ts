@@ -59,7 +59,9 @@ function verdict(lib: Lib, input: Row[]) {
   const idsOut = out.flatMap((r) => r.ids ?? []).map((x) => `${x.t}:${x.i}`).sort();
   const sameIds = idsIn.length === idsOut.length && idsIn.every((v, k) => v === idsOut[k]);
   const sameCount = input.reduce((s, r) => s + r.n, 0) === out.reduce((s, r) => s + r.n, 0);
-  const goldMerged = out.every((r) => r.n === 1 || (r.price == null && r.platform == null));
+  // A joined head carries the LOWEST real price of the ads it joins (owner 2026-11-10 price rule), never one site's name.
+  const lowest = Math.min(...input.map((x) => Number(x.price)).filter((x) => Number.isFinite(x) && x > 0), Infinity);
+  const goldMerged = out.every((r) => r.n === 1 || (r.platform == null && (r.price == null || Number(r.price) >= lowest)));
   return { out, touching, sameIds, sameCount, goldMerged, tooFar };
 }
 const verdictWith = (l: Lib, input: Row[]) => verdict(l, input);
@@ -100,7 +102,7 @@ const s = await sweep(real);
 check(`120 random street views (piles of up to 400 heads): no two heads touch (${s.inputHeads} → ${s.heads} heads)`, s.touching === 0, `${s.touching} touching pairs`);
 check('…every listing id is still there exactly once (nothing dropped, nothing added — MATCH FIRST)', s.lost === 0, `${s.lost} views lost ids`);
 check('…the counts add up', s.miscount === 0);
-check('…a joined head shows its count, never one ad\'s price', s.priced === 0);
+check('…a joined head shows the lowest price of what it joins, never one site\'s name', s.priced === 0);
 check(`…no head is drawn more than ${lib.PIN_MAX_SHIFT_PX} px from its own spot`, s.tooFar === 0, `${s.tooFar} heads too far`);
 
 const joinNear = real.replace('export const PIN_MAX_SHIFT_PX = 84;', 'export const PIN_MAX_SHIFT_PX = 0;');

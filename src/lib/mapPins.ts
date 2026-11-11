@@ -93,10 +93,8 @@ export function priceHead(min: number | null, max: number | null, unpriced: numb
 export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform' | 'price_max' | 'unpriced'>, loc: 'ar' | 'en'): string {
   if (row.deal === 'short' || isStayLengthPlatform(row.platform)) return loc === 'ar' ? 'إقامة قصيرة' : 'Short stay';
   if (row.deal === 'mixed' && row.n > 1) return loc === 'ar' ? `${row.n} ${row.n === 2 ? 'إعلانان' : row.n <= 10 ? 'إعلانات' : 'إعلان'}` : `${row.n} listings`;
-  const min = pinPrice(row.price, row.deal);
-  const max = row.n > 1 ? pinPrice(row.price_max, row.deal) : min;
-  const unpriced = row.n > 1 ? Number(row.unpriced ?? 0) : 0;
-  return priceHead(min, max, unpriced, row.deal, loc);
+  const f = priceFacts(row);
+  return priceHead(f.min, f.max, f.unpriced, row.deal, loc);
 }
 
 /** ZOOM → WHAT TO ASK FOR. From about city zoom inward (a view under ~0.12° ≈ 13 km tall) the map asks for exact
@@ -309,13 +307,26 @@ type Placed = { row: PinRow; x: number; y: number; w: number };
 export function headsTouch(a: { x: number; y: number; w: number }, b: { x: number; y: number; w: number }): boolean {
   return Math.abs(a.x - b.x) < (a.w + b.w) / 2 + PIN_GAP_PX && Math.abs(a.y - b.y) < PIN_H_PX + PIN_GAP_PX;
 }
-/** Two heads as one: the count and every id of both, at their weighted centre; deal kept only when both agree. */
+/** A head's price facts: its lowest and highest real price and how many of its ads show none (pinPrice's floor). */
+export function priceFacts(r: Pick<PinRow, 'n' | 'deal' | 'price' | 'price_max' | 'unpriced'>): { min: number | null; max: number | null; unpriced: number } {
+  const min = pinPrice(r.price, r.deal);
+  if (r.n <= 1) return { min, max: min, unpriced: min === null ? 1 : 0 };
+  return { min, max: pinPrice(r.price_max, r.deal) ?? min, unpriced: Number(r.unpriced ?? 0) };
+}
+/** Two heads as one: every id of both at their weighted centre, deal kept only when both agree — and, under the price
+ *  rule, the LOWEST real price of both, the highest, and their no-price ads added up (CodeRabbit #11777: a joined head
+ *  used to drop its price and read «السعر عند الطلب» over priced ads). */
 export function joinPins(a: PinRow, b: PinRow): PinRow {
   const n = a.n + b.n;
+  const fa = priceFacts(a), fb = priceFacts(b);
+  const lo = [fa.min, fb.min].filter((x): x is number => x !== null);
+  const hi = [fa.max, fb.max].filter((x): x is number => x !== null);
   return {
     lat: (a.lat * a.n + b.lat * b.n) / n, lng: (a.lng * a.n + b.lng * b.n) / n, n,
     deal: a.deal === b.deal ? a.deal : 'mixed', type_ar: null, platforms: Math.max(a.platforms || 0, b.platforms || 0),
-    ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null, price: null, platform: null,
+    ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null,
+    price: lo.length ? Math.min(...lo) : null, platform: null,
+    price_max: hi.length ? Math.max(...hi) : null, unpriced: fa.unpriced + fb.unpriced,
   };
 }
 /** How far a head may be drawn from its own spot to sit beside a neighbour. A head is ~60 px wide, so «beside» needs
@@ -335,7 +346,7 @@ function shiftsWithin(max: number): [number, number][] {
 }
 /**
  * The heads to draw for one view, none touching another. `at` places a coordinate on the screen (px), `widthOf` gives
- * a head's width for the text it will show (a joined head shows its count, so its width is re-measured). A row comes
+ * a head's width for the text it will show (a joined head shows the lowest price of both, so its width is re-measured). A row comes
  * back unchanged when it sits on its own spot, with `shift` when it is drawn beside it, or joined (joinPins) when no
  * place within `maxShift` was free. Shared spots are placed first so they keep their own place; the rest in a fixed
  * order, so a pan does not reshuffle who moved.

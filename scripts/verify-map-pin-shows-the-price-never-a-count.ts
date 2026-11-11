@@ -11,7 +11,7 @@
 // pinHead() is EXECUTED here on every case, with mutations; the SQL half is read from the committed migration.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { pinHead, priceHead, pinPrice, PIN_PRICE_FLOOR, type PinRow } from '../src/lib/mapPins.ts';
+import { pinHead, priceHead, pinPrice, joinPins, PIN_PRICE_FLOOR, type PinRow } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
 let failed = 0;
@@ -48,6 +48,19 @@ const highest = (o: R) => priceHead(pinPrice(o.price_max, o.deal), null, 0, o.de
 mustCatch('a head that shows the highest price instead of the lowest', highest(r({ n: 3, price: 600000, price_max: 900000 })) !== 'من 600 ألف');
 const noFloor = (p: number) => priceHead(p, p, 0, 'buy', 'ar');
 mustCatch('a head that prints a placeholder «1» as a price', noFloor(1) !== head({ price: 1 }));
+
+// 3b. Two heads joined on a crowded screen keep the rule (CodeRabbit #11777): the lowest real price of both, «من».
+const row = (o: Partial<PinRow>): PinRow => ({ lat: 24.7, lng: 46.7, n: 1, deal: 'buy', type_ar: null, platforms: 1, ids: null, price: null, platform: null, ...o });
+const j1 = joinPins(row({ price: 900000 }), row({ price: 750000 }));
+check('two joined single ads (900k, 750k) → «من 750 ألف»', pinHead(j1, 'ar') === 'من 750 ألف');
+const j2 = joinPins(row({ price: 750000 }), row({ price: null }));
+check('a priced ad joined with a no-price ad → «من 750 ألف», never «السعر عند الطلب»', pinHead(j2, 'ar') === 'من 750 ألف');
+const j3 = joinPins(row({ n: 3, price: 600000, price_max: 600000, unpriced: 0 }), row({ n: 2, price: null, price_max: null, unpriced: 2 }));
+check('a priced spot joined with a no-price spot → «من 600 ألف»', pinHead(j3, 'ar') === 'من 600 ألف');
+check('two no-price ads joined → «السعر عند الطلب»', pinHead(joinPins(row({}), row({})), 'ar') === 'السعر عند الطلب');
+check('a joined head keeps every id of both', joinPins(row({ ids: [{ t: 'a', i: 1 }] }), row({ ids: [{ t: 'b', i: 2 }] })).ids?.length === 2);
+const droppedJoin = { ...j2, price: null, price_max: null, unpriced: 0 };
+mustCatch('a joined head that drops its price (the old joinPins)', pinHead(droppedJoin, 'ar') !== 'من 750 ألف');
 
 // 4. The database half (the committed migration production runs).
 const dir = join(root, 'supabase/migrations');

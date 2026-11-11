@@ -94,7 +94,7 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
           {groups.map(({ main, others }) => (
             <View key={`${main.sourceTable}#${main.id}`} style={s.card}>
               <ResultCard listing={main} onOpen={() => { void openListing(main); }} row="tight" />
-              {others.length ? <Text style={s.alsoLabel} testID="map-pin-sheet-also-on">{t('Same property on other sites:')}</Text> : null}
+              {others.length ? <Text style={s.alsoLabel} testID="map-pin-sheet-also-on">{t('Same property, more ads:')}</Text> : null}
               {others.map((o) => (
                 <ResultCard key={`${o.sourceTable}#${o.id}`} listing={o} onOpen={() => { void openListing(o); }} row="tight" />
               ))}
