@@ -6,6 +6,7 @@ annualised; the row stores the seller's word ('daily' / 'weekly') and joins «إ
 own, so the «≤ 10,000 looks monthly» rule made it ×12. The rent phrase states the period → stored, price cleared.
 """
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,8 @@ from scrapers.common import db  # noqa: E402
 from scrapers.haraj import prose as X  # noqa: E402
 from scrapers.haraj import run as R  # noqa: E402
 from scrapers.haraj.classify import classify  # noqa: E402
+
+TODAY = date(2026, 11, 10)   # the licence below expires 2027-12-31: pinned so the test never ages out
 
 
 @pytest.mark.parametrize("title,body,want", [
@@ -28,6 +31,8 @@ from scrapers.haraj.classify import classify  # noqa: E402
     ("فيلا للبيع", "صيانة اسبوعية", None),
     ("شقة للإيجار", "يمنع الإيجار اليومي", None),                 # a rule the ad forbids is not an offer
     ("شقة للإيجار", "ممنوع التأجير اليومي، متوفر للإيجار الأسبوعي", "weekly"),
+    ("فيلا للإيجار اليومي", "", "daily"),                         # «فيلا» ends in «لا»: not a negation
+    ("شقة للإيجار الشهري", "الإيجار اليومي ممنوع", None),        # the prohibition can follow the phrase
 ])
 def test_short_stay_is_read_only_from_a_rent_phrase(title, body, want):
     assert X.short_stay_rent(title, body) == want
@@ -83,7 +88,7 @@ def test_licensed_post_daily_rent_keeps_the_word_and_never_reads_the_licence_blo
     ld = {"@type": "RealEstateListing", "name": "شقة للإيجار اليومي", "description": body,
           "url": "https://haraj.com.sa/1/x/", "address": {"addressLocality": "الرياض"}, "image": []}
     v, why = classify(ld["name"], body)
-    row, _, skip, _ = R.map_post("18749721", ld, "رقم الترخيص 7201131815", v, why)
+    row, _, skip, _ = R.map_post("18749721", ld, "رقم الترخيص 7201131815", v, why, today=TODAY)
     assert skip == "" and row["license_number"] == "7201131815"
     assert row["rent_period"] == "daily" and row["price_annual"] is db.AUTHORITATIVE_NULL
     assert row["additional_info"]["short_stay"] == "daily" and row["additional_info"]["unit_price_printed"] == "350"
@@ -91,5 +96,5 @@ def test_licensed_post_daily_rent_keeps_the_word_and_never_reads_the_licence_blo
     lic = body.replace("شقة مفروشة للإيجار اليومي", "شقة مفروشة للإيجار الشهري").replace(
         "نوع العقار: شقة\n", "نوع العقار: شقة\nالالتزامات الآخرى على العقار: متاح للإيجار اليومي\n")
     assert "اليومي" in lic.split("معلومات العقار حسب الرخصة")[1] and "اليومي" not in lic.split("معلومات العقار حسب الرخصة")[0]
-    row2, _, skip2, _ = R.map_post("18749722", {**ld, "name": "شقة للإيجار", "description": lic}, "رقم الترخيص 7201131815", v, why)
+    row2, _, skip2, _ = R.map_post("18749722", {**ld, "name": "شقة للإيجار", "description": lic}, "رقم الترخيص 7201131815", v, why, today=TODAY)
     assert skip2 == "" and row2["rent_period"] != "daily" and "short_stay" not in row2["additional_info"]
