@@ -1763,7 +1763,12 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     # («ارض زاويه تجاريه سكنيه», «استخدام العقار: سكني-تجاري»), a conversion («قابله للتحويل») or a near word before the
     # head («قريبه من ارض تجاريه») → none: silence is unknown, never a pick.
     land_uses: dict[str, tuple[int, int, int]] = {}
+    near_carry = False
     for ci, (_o, _c, t, _i) in enumerate(clauses):
+        # «قريبة من حي، فيه أرض تجارية»: a clause that opens with «فيه / بها / منها» continues the neighbour the last
+        # clause was near to (CodeRabbit on #11819)
+        carried = near_carry and bool(t.split()) and _strip_wa(t.split()[0]) in _NEAR_RELATIVE
+        near_carry = _near_open(_c, t, _i, len(t))
         if _LAND_CONVERT.search(t) or _LAND_CONVERTIBLE.search(t):
             land_uses["?"] = (ci, 0, 0)
             continue
@@ -1773,13 +1778,8 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             # «السعر قابل للتفاوض أرض سكنية»: the price is negotiable, not the use (CodeRabbit on #11819)
             hedges = [w for k, w in enumerate(before) if w in _LAND_NOT_STATED
                       and not (k + 1 < len(before) and before[k + 1].startswith(_n("للتفاوض")[:5]))]
-            # the near word may stand further back than three words: «وقريبة من حي فيه أرض تجارية» is the
-            # neighbour's land (CodeRabbit on #11819) — so six words back, but never past a heading («⸻ وصف العقار:
-            # ارض مسوره صك سكني», aqar 1341293: the «قريب من جميع الخدمات» before it is the location paragraph). The
-            # price is «وقريبة من الخدمات أرض سكنية» staying unstated: silence is unknown; naming a neighbour's use is not.
-            near_scope = re.split(r"[⸻:—]", t[:m.start()])[-1].split()[-6:]
-            if any(w in _NEAR_WORDS or (w.startswith("و") and w[1:] in _NEAR_WORDS) for w in near_scope) \
-                    or hedges \
+            # a near word owns everything after it up to the next heading — see _near_open (CodeRabbit on #11819)
+            if carried or _near_open(_c, t, _i, m.start()) or hedges \
                     or any(_strip_wa(w) in _LAND_WANTED for w in t[:m.start()].split()):
                 continue           # «قريبه من ارض تجاريه», a broker's «مطلوب اراضي تجاريه»: not this ad's land
             nxt = clauses[ci + 1][2].split()[:1] if ci + 1 < len(clauses) and not t[m.end():].strip() else []
@@ -1791,6 +1791,36 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         u, (ci, s0, e0) = next(iter(land_uses.items()))
         emit("land_use_ar", u, quote_of(ci, s0, e0))
     return out
+
+
+# A NEAR WORD OWNS WHAT FOLLOWS IT UNTIL A HEADING (CodeRabbit on #11819, 2026-11-11). «قريبة من حي تتوفر فيه قطع
+# متعددة منها أرض تجارية» — however many words later, the land is the neighbourhood's; a word window cannot see that, so
+# none is used. What ends the reach is a new heading: a «: / ⸻ / —» in the RAW clause (norm_map strips them, so they are
+# found through its position map — «قريب من شارع الملك وصف العقار: صك سكني»), or a description label even without its
+# colon («… وصف العقار صك سكني»). aqar 1341293 («قريب من جميع الخدمات ⸻ وصف العقار: ارض مسوره صك سكني») is the lock's
+# witness. Known price: «وقريبة من الخدمات أرض سكنية» stays unstated — silence is unknown; a neighbour's use is a lie.
+_NEAR_HEADING_RAW = re.compile(r"[:⸻—]")
+_NEAR_HEADING_WORDS = frozenset(_n(w) for w in ("وصف", "الوصف", "نوع", "استخدام", "الاستخدام", "مواصفات", "المواصفات",
+                                                 "تفاصيل", "التفاصيل", "بيانات", "معلومات"))
+_NEAR_RELATIVE = frozenset(_n(w) for w in ("فيه", "فيها", "به", "بها", "منها", "منه", "يوجد", "توجد", "تتوفر", "يتوفر",
+                                            "يضم", "تضم"))
+
+
+def _near_open(c: str, t: str, idx: list[int], end: int) -> bool:
+    """True when a near word stands in t[:end] with no heading between it and end."""
+    start = 0
+    raw_end = idx[end] if end < len(idx) else len(c)       # the head's own raw position: a collapsed space maps short
+    cut = [h.end() for h in _NEAR_HEADING_RAW.finditer(c, 0, raw_end)]
+    if cut:
+        start = bisect.bisect_left(idx, cut[-1], 0, end)
+    words = t[start:end].split()
+    near = False
+    for w in words:
+        if w in _NEAR_HEADING_WORDS or _strip_wa(w) in _NEAR_HEADING_WORDS:   # «وصف» starts with «و» itself
+            near = False
+        elif w in _NEAR_WORDS or (w.startswith("و") and w[1:] in _NEAR_WORDS):
+            near = True
+    return near
 
 
 def quote_of_t(c: str, t: str, idx: list[int], s: int, e: int) -> str:

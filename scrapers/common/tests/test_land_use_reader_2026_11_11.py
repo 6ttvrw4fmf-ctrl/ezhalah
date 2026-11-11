@@ -63,3 +63,17 @@ def test_a_near_word_further_back_still_names_the_neighbour():
     assert got.get("land_use_ar") == "سكني"
     # the stated price of the wider reach: a later own head after «قريبة من الخدمات» stays unstated, never a pick
     assert "land_use_ar" not in W.facts_of(W.clean_text(None, "أرض للبيع وقريبة من الخدمات أرض سكنية"))
+
+
+def test_a_near_word_owns_what_follows_until_a_heading():
+    # CodeRabbit on #11819 (Major): no word window — the near word's reach ends at a heading, not after N words
+    from scrapers.facts import word_checker as W
+    lu = lambda t: W.facts_of(W.clean_text(None, t)).get("land_use_ar")
+    assert lu("أرض للبيع قريبة من حي تتوفر فيه قطع متعددة منها أرض تجارية") is None
+    # a colon heading is found in the RAW clause (normalisation strips it); a label word ends the reach without one
+    assert lu("قريب من شارع الملك وصف العقار: صك سكني") == "سكني"
+    assert lu("قريب من شارع الملك وصف العقار صك سكني") == "سكني"
+    assert lu("قريب من شارع الملك ⸻ صك سكني") == "سكني"      # the raw heading alone, no label word
+    # a comma does not hand a «فيه» clause back to the ad
+    assert lu("أرض للبيع قريبة من حي، فيه أرض تجارية") is None
+    assert lu("قريبة من الخدمات، أرض سكنية") == "سكني"
