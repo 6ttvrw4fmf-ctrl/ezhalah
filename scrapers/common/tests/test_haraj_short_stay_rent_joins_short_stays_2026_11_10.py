@@ -87,7 +87,9 @@ def test_licensed_post_daily_rent_keeps_the_word_and_never_reads_the_licence_blo
     assert skip == "" and row["license_number"] == "7201131815"
     assert row["rent_period"] == "daily" and row["price_annual"] is db.AUTHORITATIVE_NULL
     assert row["additional_info"]["short_stay"] == "daily" and row["additional_info"]["unit_price_printed"] == "350"
-    # «يمنع الإيجار اليومي» sits only in the licence block; the seller's own text says monthly → not a short stay
-    row2, *_ = R.map_post("18749722", {**ld, "name": "شقة للإيجار", "description": body.replace("للإيجار اليومي", "للإيجار الشهري")
-                                       + "الالتزامات الآخرى على العقار: يمنع الإيجار اليومي\n"}, "رقم الترخيص 7201131815", v, why)
-    assert row2["rent_period"] != "daily"
+    # A plain «للإيجار اليومي» sits ONLY in the licence block; the seller's own text says monthly → not a short stay.
+    lic = body.replace("شقة مفروشة للإيجار اليومي", "شقة مفروشة للإيجار الشهري").replace(
+        "نوع العقار: شقة\n", "نوع العقار: شقة\nالالتزامات الآخرى على العقار: متاح للإيجار اليومي\n")
+    assert "اليومي" in lic.split("معلومات العقار حسب الرخصة")[1] and "اليومي" not in lic.split("معلومات العقار حسب الرخصة")[0]
+    row2, _, skip2, _ = R.map_post("18749722", {**ld, "name": "شقة للإيجار", "description": lic}, "رقم الترخيص 7201131815", v, why)
+    assert skip2 == "" and row2["rent_period"] != "daily" and "short_stay" not in row2["additional_info"]
