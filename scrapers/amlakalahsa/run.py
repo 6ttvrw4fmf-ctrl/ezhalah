@@ -166,11 +166,16 @@ def _type_for_section(box_type: Optional[str], section: Optional[str], title: Op
     if title_type in family:
         return title_type
     # The title reader prefers the longest type word, so a later landmark wins («للبيع ارض قرب فيلا» → Villa).
-    # The first word of the title that is itself a type inside the section is the ad's own type.
-    for word in re.findall(r"[\u0621-\u064A]+", title or ""):
-        word_type = normalize.map_type_exact(word)
-        if word_type in family:
-            return word_type
+    # The EARLIEST type phrase inside the section is the ad's own type; at each position the longest window is read
+    # first, so a qualified phrase («أرض تجارية» → Commercial Land) beats its bare word («أرض»).
+    words = re.findall(r"[\u0621-\u064A]+", title or "")
+    for i, word in enumerate(words):
+        if not canonical_type_from_title(word):
+            continue                                    # the phrase must START at a type word
+        for width in (3, 2, 1):
+            span_type = canonical_type_from_title(" ".join(words[i:i + width]))
+            if span_type in family:
+                return span_type
     return box_type
 
 

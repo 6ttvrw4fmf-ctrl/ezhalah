@@ -51,3 +51,4 @@ def test_agricultural_land_title_in_land_section_is_farm():                  # C
 def test_a_later_landmark_never_beats_the_ads_own_type_word():               # CodeRabbit #11800
     assert _type_for_section("Apartment", "land", "للبيع ارض قرب فيلا") == "Residential Land"
     assert _type_for_section("Apartment", "land", "للبيع قطعة أرض تجارية") == "Commercial Land"
+    assert _type_for_section("Apartment", "land", "للبيع قطعة أرض تجارية قرب صالة تجارية") == "Commercial Land"
