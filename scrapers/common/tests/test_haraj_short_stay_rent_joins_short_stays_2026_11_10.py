@@ -34,6 +34,7 @@ TODAY = date(2026, 11, 10)   # the licence below expires 2027-12-31: pinned so t
     ("فيلا للإيجار اليومي", "", "daily"),                         # «فيلا» ends in «لا»: not a negation
     ("شقة للإيجار الشهري", "الإيجار اليومي ممنوع", None),        # the prohibition can follow the phrase
     ("شقة للإيجار الشهري", "مرفوض الإيجار اليومي", None),
+    ("شقة للإيجار الشهري", "الإيجار اليومي ممنوع نهائياً", None),   # a qualifier still closes the prohibition
     ("شقة للإيجار اليومي", "ممنوع التدخين", "daily"),             # a rule on the next line is not about the rent
     ("التدخين ممنوع", "الإيجار اليومي", "daily"),                 # nor one on the line before             # a rule on the next line is not about the rent
     ("شقة للإيجار اليومي ممنوع التدخين", "", "daily"),            # nor one that goes on to name something else

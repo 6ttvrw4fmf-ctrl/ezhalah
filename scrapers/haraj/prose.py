@@ -57,7 +57,8 @@ _SHORT_STAY = re.compile(
 # the phrase, or right after it closing the clause («الإيجار اليومي ممنوع»; «… اليومي ممنوع التدخين» is about smoking).
 _NEG_WORDS = r"(?:يمنع|ممنوع|منع|مرفوض|لا[ \t]*يسمح[ \t]*ب?|غير[ \t]*مسموح[ \t]*ب?|لا)"
 _SHORT_STAY_NEG = re.compile(_B + _NEG_WORDS + r"[ \t]*\Z")    # \Z: «$» would also match before a newline
-_SHORT_STAY_NEG_AFTER = re.compile(r"^[ \t]*" + _NEG_WORDS + r"[ \t]*(?:$|[\n،,.!؛:\-])")
+_SHORT_STAY_NEG_AFTER = re.compile(r"^[ \t]*" + _NEG_WORDS
+                                   + r"(?:[ \t]+(?:نهائيا|تماما|قطعيا|باتا|منعا[ \t]+باتا))?[ \t]*(?:$|[\n،,.!؛:\-])")
 
 
 def short_stay_rent(title: str, body: str) -> Optional[str]:
