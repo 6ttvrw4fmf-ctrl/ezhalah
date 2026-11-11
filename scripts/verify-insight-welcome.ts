@@ -247,7 +247,14 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
 // ── 8. «كيف تشتغل؟» says how duplicates are counted and that it is not advice (owner 2026-10-22) ──
 {
   const ar = JSON.stringify(HOW_IT_WORKS.ar); const enS = JSON.stringify(HOW_IT_WORKS.en);
-  check('the sheet is titled «كيف تشتغل؟» / "How it works"', HOW_IT_WORKS.ar.title.startsWith('كيف تشتغل؟') && HOW_IT_WORKS.en.title.startsWith('How it works'));
+  check('the sheet is titled «كيف نحسبها؟» / "How we calculate it" (owner 2026-11-11)', HOW_IT_WORKS.ar.title === 'كيف نحسبها؟' && HOW_IT_WORKS.en.title === 'How we calculate it');
+  {
+    const home = readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
+    const link = home.match(/\{welcomeIsInsight \? \(\s*<Pressable onPress=\{\(\) => setHowOpen\(true\)\}[^>]*testID="hero-how-link">\s*<Text style=\{s\.heroHowLink\}>\{HOW_IT_WORKS\[[^\]]+\]\.title\}<\/Text>/);
+    check('a small «كيف نحسبها؟» link under the market fact opens the sheet, only when the headline is a fact (owner 2026-11-11)', !!link);
+    const style = home.match(/heroHowLink: \{ fontSize: (\d+),[^}]*textDecorationLine: 'underline'/);
+    check('the link stays small and underlined (≤ 14 px, like «الشروط والخصوصية»)', !!style && Number(style[1]) <= 14);
+  }
   check('it explains duplicates: same district, type, price and area count once, in counts and prices',
     ar.includes('نحسبه مرة وحدة بس') && ar.includes('نفس الحي') && ar.includes('في الأعداد وفي الأسعار') && enS.includes('we count it only once'));
   check('it says asking prices, not deals, and not investment advice', ar.includes('الأسعار المعروضة') && ar.includes('وليست نصيحة استثمارية') && enS.includes('not investment advice'));

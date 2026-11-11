@@ -40,6 +40,7 @@ import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
 import { NAME_PARTY_EVENT, SHINE_MS } from '@/lib/nameParty';
 import { InsightHowItWorks } from '@/components/InsightHowItWorks';
+import { HOW_IT_WORKS } from '@/lib/insightHowItWorks';
 import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
@@ -316,7 +317,7 @@ export default function Home() {
   // `welcomeSettled` gates the headline's ENTRANCE (owner 2026-10-17: it must never visibly change
   // after it appears): the title stays at opacity 0 until the session restore knows the visitor and,
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
-  // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
+  // «كيف نحسبها؟» opens when the user taps a market fact (or the small link under it) in the headline (owner 2026-10-22).
   const [howOpen, setHowOpen] = useState(false);
   const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight, celebrate: welcomeCelebrate } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
@@ -1575,6 +1576,13 @@ export default function Home() {
               <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
                 <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}</RNAnimated.Text>
               </Pressable>
+              {/* A small underlined «كيف نحسبها؟» under the market fact, so a user can SEE the fact opens an explanation (owner
+                  2026-11-11: «keep it small like» the «الشروط والخصوصية» link). Only when the headline IS a market fact. */}
+              {welcomeIsInsight ? (
+                <Pressable onPress={() => setHowOpen(true)} accessibilityRole="link" hitSlop={8} style={s.heroHowLinkWrap} testID="hero-how-link">
+                  <Text style={s.heroHowLink}>{HOW_IT_WORKS[locale === 'en' ? 'en' : 'ar'].title}</Text>
+                </Pressable>
+              ) : null}
             </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             {/* The falconer ENDS THE EZHALAH LINE, ONE FIXED SPOT (owner 2026-10-27: «for the falconer sign in sign out I want
@@ -2647,6 +2655,8 @@ const s = StyleSheet.create({
   // headline, owner 2026-10-24). Latin tracking lives in the English-only layer E. Guard:
   // scripts/verify-no-letter-spacing-on-arabic.ts
   heroTitle: { fontSize: 24, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
+  heroHowLinkWrap: { alignSelf: 'center', marginTop: 4 },
+  heroHowLink: { fontSize: 13, fontWeight: '600', color: colors.ink, textDecorationLine: 'underline', textAlign: 'center' },
   heroSub: { fontSize: 12, fontWeight: '600', color: colors.ink, textAlign: 'center', marginTop: 4, lineHeight: 17 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.

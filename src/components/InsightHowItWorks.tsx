@@ -1,4 +1,4 @@
-// «كيف تشتغل؟» — what a user sees after tapping the home headline's market fact (owner 2026-10-22: «when user
+// «كيف نحسبها؟» (was «كيف تشتغل؟») — what a user sees after tapping the home headline's market fact (owner 2026-10-22: «when user
 // clicks on it we explain how it works», «include how it works with duplicates»). Wording approved by the owner.
 // Facts only, never advice: the sheet itself says so.
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
