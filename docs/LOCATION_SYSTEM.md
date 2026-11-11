@@ -373,6 +373,20 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
   `verify-pin-district-fill-contract.ts` fails any flip whose version is not in `FLIP_ALLOWED`.
 - Undo = `applied = false` and delete the `basis = 'pin'` rows of `district_recovery` in one transaction.
 
+### 📍 Pin cities — an ad whose site gives NO city is placed by its own pin (owner 2026-11-11)
+- **Owner's words:** asked «may ads whose site gives no city be placed by their map pin?» → «Yeah of course».
+- **Only when the site gives nothing:** no city, no city name, no region on the served row. An ad whose site names a place
+  we do not list (a village, a farm, a plan) is NOT «no city» and is left alone.
+- **Only when the pin is plainly inside one city:** nearest city centre (`loc_city_center`, ≥ 20 homes, not retired)
+  ≤ 15 km, the second nearest ≥ 15 km and ≥ 2× as far, and the pin in the same governorate (`loc_gov_shape_sub`) as
+  that centre. Exam on 4,844 ads whose city we know: right for 97.6 %. Pins out in the countryside stay hidden.
+- **The site always wins:** the pin row (`listing_city_correction`, `city_source = 'pin_nearest_city'`) is deleted the
+  moment the site names a city or region; in v2's `unresolved_catchall` arm it is read LAST, after the site's own fields.
+- **Automatic:** `refresh_pin_city_for_cityless()` runs hourly at :12 (cron `pin-city-for-cityless`), ten minutes before
+  the index sync. Alarm `mon_detect_pin_city_cityless_unplaced()` (P2, rostered) fires when the job has not succeeded
+  for 3 h or a pin row is still served with no city 2 h later. Never widen the 15 km / 2× rule to clear it.
+- Undo: `delete from listing_city_correction where city_source = 'pin_nearest_city'` and unschedule the job.
+
 ### 🛡 District guards — enforced by the database (owner 2026-10-25, migration `20261025203753`)
 - **Order (owner, the main rule):**
   1. The site's own district always wins.
