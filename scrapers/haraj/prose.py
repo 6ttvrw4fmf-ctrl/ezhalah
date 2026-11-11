@@ -52,12 +52,18 @@ _SHORT_STAY = re.compile(
     _B + r"(?:لل|ل|ال)?(?:ايجار|اجار|تاجير)\s*(?:ال)?(?:(يومي|يوميه|يوميا)|(اسبوعي|اسبوعيه|اسبوعيا))" + _E)
 
 
+# A rule the ad forbids is not a rent it offers: «يمنع الإيجار اليومي» / «ممنوع التأجير اليومي» (CodeRabbit #11807).
+_SHORT_STAY_NEG = re.compile(r"(?:يمنع|ممنوع|منع|لا\s*يسمح\s*ب?|غير\s*مسموح\s*ب?|لا)\s*$")
+
+
 def short_stay_rent(title: str, body: str) -> Optional[str]:
     """'daily' / 'weekly' when the seller's rent phrase states it (title or text), else None."""
-    m = _SHORT_STAY.search(norm(f"{title}\n{body}"))
-    if not m:
-        return None
-    return "daily" if m.group(1) else "weekly"
+    t = norm(f"{title}\n{body}")
+    for m in _SHORT_STAY.finditer(t):
+        if _SHORT_STAY_NEG.search(t[max(0, m.start() - 16):m.start()]):
+            continue
+        return "daily" if m.group(1) else "weekly"
+    return None
 
 
 def deal_of(title: str, body: str) -> Optional[str]:

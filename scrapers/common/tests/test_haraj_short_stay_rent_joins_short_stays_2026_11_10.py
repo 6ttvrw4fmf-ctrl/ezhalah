@@ -26,6 +26,8 @@ from scrapers.haraj.classify import classify  # noqa: E402
     ("شقة للإيجار", "الايجار 2500 شهري تنظيف يومي", None),       # a daily CLEANING says nothing about the rent
     ("شقة للإيجار السنوي", "", None),
     ("فيلا للبيع", "صيانة اسبوعية", None),
+    ("شقة للإيجار", "يمنع الإيجار اليومي", None),                 # a rule the ad forbids is not an offer
+    ("شقة للإيجار", "ممنوع التأجير اليومي، متوفر للإيجار الأسبوعي", "weekly"),
 ])
 def test_short_stay_is_read_only_from_a_rent_phrase(title, body, want):
     assert X.short_stay_rent(title, body) == want
@@ -70,3 +72,22 @@ def test_short_stay_with_several_prices_still_clears_an_old_monthly(catalog):
 def test_a_sale_with_a_rent_phrase_is_never_a_short_stay(catalog):
     row, _, skip, _ = _post("استراحة للبيع", "كانت تستخدم للايجار اليومي")
     assert skip != "" or row["rent_period"] is None
+
+
+def test_licensed_post_daily_rent_keeps_the_word_and_never_reads_the_licence_block(catalog):
+    # A REGA-licensed post (licence block → map_post's licensed path): the seller's text says daily; the licence
+    # block is never read for the period (only the text before «معلومات العقار حسب الرخصة»).
+    body = ("شقة مفروشة للإيجار اليومي\nمعلومات العقار حسب الرخصة\nغرض الإعلان: إيجار\nسعر الوحدة: 350\n"
+            "نوع العقار: شقة\n\n تاريخ انتهاء رخصة الإعلان : 2027-12-31\n-----\nوصف موقع العقار حسب الصك\n"
+            "المدينة: الرياض\nالحي: البيان\n")
+    ld = {"@type": "RealEstateListing", "name": "شقة للإيجار اليومي", "description": body,
+          "url": "https://haraj.com.sa/1/x/", "address": {"addressLocality": "الرياض"}, "image": []}
+    v, why = classify(ld["name"], body)
+    row, _, skip, _ = R.map_post("18749721", ld, "رقم الترخيص 7201131815", v, why)
+    assert skip == "" and row["license_number"] == "7201131815"
+    assert row["rent_period"] == "daily" and row["price_annual"] is db.AUTHORITATIVE_NULL
+    assert row["additional_info"]["short_stay"] == "daily" and row["additional_info"]["unit_price_printed"] == "350"
+    # «يمنع الإيجار اليومي» sits only in the licence block; the seller's own text says monthly → not a short stay
+    row2, *_ = R.map_post("18749722", {**ld, "name": "شقة للإيجار", "description": body.replace("للإيجار اليومي", "للإيجار الشهري")
+                                       + "الالتزامات الآخرى على العقار: يمنع الإيجار اليومي\n"}, "رقم الترخيص 7201131815", v, why)
+    assert row2["rent_period"] != "daily"
