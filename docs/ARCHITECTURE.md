@@ -1687,6 +1687,15 @@ new detector needing a longer history must raise the retention in the same chang
   "new" only once we have read its site for 7 days. Every dated window counts by the SITE'S own posting date, never first-seen (§20 «Short-term facts», 2026-10-26). Built nightly by `build_welcome_insights()`, recounted
   independently by `audit_welcome_insights()` on the same snapshot (mismatch ⇒ fact removed + alarm
   `mon_detect_welcome_insights_audit`), places checked in the Filter by `verify_welcome_insights()`.
+  **A COUNT IS THE NUMBER A CUSTOMER REACHES (owner 2026-11-08: «we get sued if we get a wrong text»; supersedes
+  the cross-site de-dup for stated counts).** Every count kind declares ONE Filter search in
+  `welcome_kind_stat.repro_bound / repro_deal / repro_types`; `verify_welcome_insights()` runs it
+  (`welcome_search_total`, total_count, never `count(*)` — rows cap at 5,000): an exact count is set to the search's
+  total and «أكثر حي» to the district that search ranks first, an «at least» claim must be ≤ the search, and anything
+  it cannot repair is hidden. A count kind with no declared search is never shown, and `welcome_template_problem()`
+  refuses its line (trigger + P1 wording audit); P1 `welcome_insights_audit:repro:<kind>` when half a kind fails.
+  `city_land` = sale + residential land («الأراضي السكنية المعروضة للبيع»); `city_bld_sale` is off because
+  «عمارة» spans two Filter groups (migration `20261108214500`). Where plain «أرض» belongs is an open owner question.
   Big and medium cities (≥300 ads) only until 3 clean checker nights. The line ends with its greeting's
   emoji (☀️ 🌙 🕌 🌴 👋), changes every hour, two lines in three about the user's searched city, city
   picked before fact, never the same city or kind twice in a row; tapping it opens «كيف تشتغل؟».
