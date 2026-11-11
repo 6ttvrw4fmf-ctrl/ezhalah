@@ -1768,7 +1768,9 @@ would be useful if someone uses the AI agent to do comparables»; «your job is 
 - **Rules.** Never delete or update diary lines; never drop the triggers to clear the alarm. PRICE = SOURCE: prices are the
   site's own as stored (the rent pool ×12 rule is applied when READING, as everywhere). `gone_at` / `removed_at` mean the ad
   DISAPPEARED from the site, never proof it SOLD — say «disappeared», not «sold». The retention engine may remove an ad's
-  row; its card and diary stay.
+  row; its card and diary stay. The diary records every WRITE of a new price, so a ±1 riyal line is our own rounding
+  (seen live 2026-11-11: aqar 6601546 shows 310,024.83, stored 310,024 → 310,025) — not a market move; comparables
+  should ignore changes that small.
 - **Later (AI agent, not built yet):** a question like «asking prices in حي الملقا over the last 6 months» is answered FROM
   these two tables, filtered by their real dates (`site_date_added` / `first_seen_at` / diary `at`) — never from the model's
   own knowledge. Building that is a separate, owner-led step.
