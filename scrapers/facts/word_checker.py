@@ -1773,7 +1773,13 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             # «السعر قابل للتفاوض أرض سكنية»: the price is negotiable, not the use (CodeRabbit on #11819)
             hedges = [w for k, w in enumerate(before) if w in _LAND_NOT_STATED
                       and not (k + 1 < len(before) and before[k + 1].startswith(_n("للتفاوض")[:5]))]
-            if any(w in _NEAR_WORDS or (w.startswith("و") and w[1:] in _NEAR_WORDS) for w in before) or hedges \
+            # the near word may stand further back than three words: «وقريبة من حي فيه أرض تجارية» is the
+            # neighbour's land (CodeRabbit on #11819) — so six words back, but never past a heading («⸻ وصف العقار:
+            # ارض مسوره صك سكني», aqar 1341293: the «قريب من جميع الخدمات» before it is the location paragraph). The
+            # price is «وقريبة من الخدمات أرض سكنية» staying unstated: silence is unknown; naming a neighbour's use is not.
+            near_scope = re.split(r"[⸻:—]", t[:m.start()])[-1].split()[-6:]
+            if any(w in _NEAR_WORDS or (w.startswith("و") and w[1:] in _NEAR_WORDS) for w in near_scope) \
+                    or hedges \
                     or any(_strip_wa(w) in _LAND_WANTED for w in t[:m.start()].split()):
                 continue           # «قريبه من ارض تجاريه», a broker's «مطلوب اراضي تجاريه»: not this ad's land
             nxt = clauses[ci + 1][2].split()[:1] if ci + 1 < len(clauses) and not t[m.end():].strip() else []

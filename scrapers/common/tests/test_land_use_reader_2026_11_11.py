@@ -52,3 +52,14 @@ def test_the_overlay_never_stores_it_until_the_db_check_accepts_text_facts():
     assert any(f["fact"] == "land_use_ar" and f["value_text"] == "سكني" for f in found), found   # the reader read it…
     assert "land_use_ar" not in row["facts"], row                                                # …the overlay did not keep it
     assert all(isinstance(v["v"], (bool, int, float)) for v in row["facts"].values()), row
+
+
+def test_a_near_word_further_back_still_names_the_neighbour():
+    # CodeRabbit on #11819: «وقريبة» six words back is still the neighbour's land; a heading ends that reach
+    from scrapers.facts import word_checker as W
+    assert "land_use_ar" not in W.facts_of(W.clean_text(None, "أرض للبيع وقريبة من حي فيه أرض تجارية"))
+    # aqar 1341293 shape: the location paragraph's «قريب من» does not cross «⸻ وصف العقار:» into the deed
+    got = W.facts_of(W.clean_text(None, "قريب من جميع الخدمات الحيوية ⸻ وصف العقار: ارض مسوره صك سكني"))
+    assert got.get("land_use_ar") == "سكني"
+    # the stated price of the wider reach: a later own head after «قريبة من الخدمات» stays unstated, never a pick
+    assert "land_use_ar" not in W.facts_of(W.clean_text(None, "أرض للبيع وقريبة من الخدمات أرض سكنية"))
