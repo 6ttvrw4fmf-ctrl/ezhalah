@@ -215,8 +215,15 @@ jobs:
       - name: Install the browser the canary gate drives
         # scripts/canary-gate.sh (called inside safe-deploy.sh) runs the guardian journeys against the
         # 10% canary of a rolling release; it needs Chromium on the runner BEFORE the deploy step.
+        # The runner's apt mirrors went unreachable on 2026-11-11 (12:24–15:00 UTC, «Temporary failure resolving
+        # archive.ubuntu.com»): --with-deps failed and EVERY deploy stopped here, with nothing shipped. Retry it; if apt is
+        # still down, install Chromium alone (the runner image already carries its libraries). This never weakens the
+        # canary: a browser that cannot start fails canary-gate.sh closed, and nothing deploys.
         if: ${{ !inputs.dry_run }}
-        run: npx playwright install --with-deps chromium
+        run: |
+          for i in 1 2 3; do npx playwright install --with-deps chromium && exit 0; echo "playwright --with-deps failed (attempt $i)"; sleep 20; done
+          echo "::warning::apt unreachable after 3 tries — installing Chromium without system packages"
+          npx playwright install chromium
 
       - name: Deploy via the sanctioned guarded entrypoint
         id: deploy
