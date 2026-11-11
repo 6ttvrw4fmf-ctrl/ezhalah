@@ -57,7 +57,8 @@ THE TRAPS, EACH MEASURED:
 4. THE TYPE TOKEN IS ENGLISH; the site's own Arabic label for it lives in the page's i18n block and
    is copied into TYPE_AR (type_ar + the title fallback). Mapping goes through the shared
    normalize.map_type_en with exact overrides for the four tokens it lacks (building_studio, kiosk,
-   workshop, istraha). `land` under the source's own category=commercial is Commercial Land.
+   workshop, istraha). `land` is Commercial Land when the page's own «الاستخدام» says
+   commercial and not residential (nuzul_usage.land_category; the office's category decides a tie).
    category_for_type() then decides the table — it files Duplex/Studio/Compound as commercial.
 5. A ZERO IS NEVER PRINTED. Every count/flag is published on 100% of items, yet the page renders a
    labelled row ONLY for a positive value (measured on the visible DOM 2026-09-23): 53959
@@ -146,12 +147,13 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.common import db, normalize as N, nuzul_usage  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.honest_fetch import WALL_WORDS  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 
 class Tenant(NamedTuple):
@@ -430,7 +432,8 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
     tok = (L.get("type") or "").strip().lower()
     src_category = (L.get("category") or "").strip().lower()
     property_type = N.map_type_en(tok, TYPE_OVERRIDES_EN)
-    if tok == "land" and src_category == "commercial":
+    # land: the page's own «الاستخدام» decides; the office's category only when the page does not settle it
+    if tok == "land" and nuzul_usage.land_category(L) == "commercial":
         property_type = "Commercial Land"
     if not property_type:
         return None, "residential", "type_unmapped"
@@ -497,6 +500,11 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
         "street_width_m": next(iter(widths.values())) if len(widths) == 1 else None,   # trap 7
         "direction": N.one_direction(FACADE_AR.get(facade or "", ""), diagonal=True) or None,
         "license_number": _licence(L.get("rega_ad_number")),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20), for every tenant of this engine (yameen too): the
+        # Nuzul API item's own `created_at` (UTC «Z»). Measured live 2026-11-09 on goldendeal 48712: created_at
+        # 2026-05-03T23:51:47.000000Z, updated_at 2026-08-01 (an edit, never used); yameen 39907: 2025-10-07T06:01:24Z.
+        # The ad page prints no date of its own. Never updated_at or availability_date.
+        "date_added": site_posting_date(L.get("created_at")),
         "electricity": _positive(L.get("has_electricity")),            # the «الخدمات» strip lists
         "water_supply": _positive(L.get("has_water")),                 # only what is 1; a 0 is
         "sanitation": _positive(L.get("has_sewage")),                  # never printed → silence
@@ -514,6 +522,7 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
             "type_token": tok,
             "type_ar": TYPE_AR.get(tok),
             "source_category": src_category or None,
+            "usage": nuzul_usage.usage_shown_ar(L),          # the page's «الاستخدام» words, shown on the card
             "usages": L.get("usages") or None,
             "availability_status": status,
             "area_exact": (str(area_raw) if isinstance(area_raw, float)

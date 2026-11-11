@@ -91,6 +91,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://eilmalriyada.com"
 API = "https://api.eilmalriyada.com/api"
@@ -360,6 +361,10 @@ def map_listing(it: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         "street_width_m": None if _unset(sw_raw) else normalize.one_street_width(sw_raw),
         "direction": parse_direction(dir_raw),
         "license_number": licence if re.fullmatch(r"\d{6,}", licence) else None,
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the API record's own `created_at` (UTC «Z», Laravel).
+        # Measured live 2026-11-09 on /api/recent/683: created_at 2026-10-27T15:33:20.000000Z (= updated_at: never
+        # edited), first seen by us 2026-10-28 07:49Z. The SPA prints no date. Never updated_at (an edit).
+        "date_added": site_posting_date(it.get("created_at")),
         "photo_urls": photo_urls(it, detail)[:20] or None,
     }
     # type_ar/name can state furnished ("شقق مفروشة") more explicitly than the free-text

@@ -4,28 +4,38 @@
 // price. No transaction here (the «شراء ▾» button beside it already says it) and no city or district (the map
 // shows where you are looking). The button at the bottom carries the live count of pins the choice leaves in
 // view; pressing it closes the card and the pins follow (owner: «whatever the user keeps he gets it in terms of pins»).
+//
+// ON A PHONE IT IS FULL SCREEN (owner 2026-11-09, Zillow's mobile filter: «making it like this in terms of the results
+// on top and full screen … we include our things»): the live count is the title («158,514 نتيجة»), X top right, and a
+// bar fixed at the bottom with «مسح الكل» and «عرض الإعلانات». A wider screen keeps the centered card.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { OptionBox, FieldLabel } from '@/components/ui';
 import { CATEGORIES } from '@/data/taxonomy';
-import { groupsFor, typeArForTypes, type Macro } from '@/data/propertyTypes';
+import { groupsFor, groupMembers, typeArForTypes, type Macro } from '@/data/propertyTypes';
 import { EMPTY_MAP_FILTER, digits, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
-import { pinFilterOf as pinFilterOfWith } from '@/lib/mapFilter';
+import { pinFilterOf as pinFilterOfWith, furnitureOffered, bedsOffered } from '@/lib/mapFilter';
+import { mapTypeScope } from '@/data/remote';
 export { EMPTY_MAP_FILTER, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
 /** The popup's state → the pin query, with the site's own group → type labels mapping. */
-export const pinFilterOf = (f: MapFilterState) => pinFilterOfWith(f, typeArForTypes);
-import { categoryImg, groupImg, BED_IMG, RANGE_ICON } from '@/theme/propertyIcons';
+export const pinFilterOf = (f: MapFilterState, deals: readonly string[] = []) => pinFilterOfWith(f, typeArForTypes, groupMembers, deals, mapTypeScope);
+import { categoryImg, groupImg, typeImg, BED_IMG, RANGE_ICON, FURN_IMG } from '@/theme/propertyIcons';
 import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 
-export default function MapFilterCard({ value, onApply, onClose, countPins }: {
+export default function MapFilterCard({ value, onApply, onClose, countPins, deals = [] }: {
   value: MapFilterState; onApply: (f: MapFilterState) => void; onClose: () => void;
+  /** The map's deal choice: «الأثاث» shows only on «إيجار» alone (yearly rent), as on the Filter home. */
+  deals?: readonly string[];
   /** Pins the choice leaves in the current view; null = could not count (the button then says «عرض الإعلانات»). */
   countPins: (f: MapFilterState) => Promise<number | null>;
 }) {
   const { t, isRTL } = useI18n();
+  const phone = useWindowDimensions().width < PHONE_MAX;
+  const insets = useSafeAreaInsets();
   const [f, setF] = useState<MapFilterState>(value);
   const [count, setCount] = useState<number | null>(null);
   const seq = useRef(0);
@@ -36,18 +46,33 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
     return () => clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  const groups = useMemo(() => (f.category ? groupsFor(f.category as Macro) : [...groupsFor('Residential'), ...groupsFor('Commercial')]), [f.category]);
-  const toggleGroup = (g: string) => setF((x) => ({ ...x, groups: x.groups.includes(g) ? x.groups.filter((y) => y !== g) : [...x.groups, g] }));
+  // GROUPS ONLY AFTER A CATEGORY (owner 2026-11-08: «commercial then residential … don't show the group until user
+  // selects … similar to the filter»): «سكني» / «تجاري» come first; that category's groups appear once one is picked.
+  const groups = useMemo(() => (f.category ? groupsFor(f.category as Macro) : []), [f.category]);
+  // Un-picking a group drops its types too, so no hidden type keeps narrowing the pins.
+  const toggleGroup = (g: string) => setF((x) => {
+    const groups = x.groups.includes(g) ? x.groups.filter((y) => y !== g) : [...x.groups, g];
+    const allowed = new Set(groups.flatMap((y) => groupMembers(y)));
+    return { ...x, groups, types: (x.types ?? []).filter((ty) => allowed.has(ty)) };
+  });
+  const toggleType = (ty: string) => setF((x) => { const cur = x.types ?? []; return { ...x, types: cur.includes(ty) ? cur.filter((y) => y !== ty) : [...cur, ty] }; });
+  // PROPERTY TYPE AFTER THE GROUP (owner 2026-11-10: «the filter button on the map is incomplete, no property type, just
+  // group»): the picked groups' types, as on the Filter home.
+  const typeChoices = useMemo(() => [...new Set(f.groups.flatMap((g) => groupMembers(g)))], [f.groups]);
+  // What «تطبيق» hands the map: a furniture choice the row no longer offers is dropped (no hidden filter left behind).
+  const applied: MapFilterState = f.furnished != null && !furnitureOffered(deals, f.category) ? { ...f, furnished: null } : f;
   const toggleBed = (b: '1' | '2' | '3' | '4' | '5+') => setF((x) => ({ ...x, beds: x.beds.includes(b) ? x.beds.filter((y) => y !== b) : [...x.beds, b] }));
 
   return (
-    <Modal transparent animationType="fade" visible onRequestClose={onClose}>
-      <View style={s.backdrop}>
+    <Modal transparent animationType={phone ? 'slide' : 'fade'} visible onRequestClose={onClose}>
+      <View style={[s.backdrop, phone && s.backdropFull]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t('Close')} />
-        <View style={s.card} testID="map-filter-card">
-          {/* Title left, X top RIGHT — always (owner 2026-11-02). */}
-          <View style={s.head}>
-            <Text style={s.title}>{t('Filter')}</Text>
+        <View style={[s.card, phone && s.cardFull]} testID={phone ? 'map-filter-full' : 'map-filter-card'}>
+          {/* Title left, X top RIGHT — always (owner 2026-11-02). On a phone the title IS the live count (Zillow). */}
+          {/* Physical order: in Arabic the page is RTL and a plain row would put the X on the LEFT (measured live
+              2026-11-10: 16 px from the left edge). row-reverse under RTL keeps it top RIGHT (owner 2026-11-10). */}
+          <View style={[s.head, { flexDirection: isRTL ? 'row-reverse' : 'row' }, phone && { paddingTop: 12 + insets.top }]}>
+            <Text style={s.title} testID="map-filter-title">{phone && count !== null ? t('{n} results', { n: count.toLocaleString('en-US') }) : t('Filter')}</Text>
             <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-filter-close" style={s.close}>
               <Ionicons name="close" size={22} color={colors.ink} />
             </Pressable>
@@ -57,15 +82,31 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
             <View style={s.row}>
               {CATEGORIES.map((cat) => (
                 <OptionBox compact key={cat} label={t(cat)} img={categoryImg(cat)} selected={f.category === cat}
-                  onPress={() => setF((x) => ({ ...x, category: x.category === cat ? null : cat, groups: [] }))} />
+                  onPress={() => setF((x) => ({ ...x, category: x.category === cat ? null : cat, groups: [], types: [] }))} />
               ))}
             </View>
-            <FieldLabel>{t('Property group')}</FieldLabel>
-            <View style={s.wrap}>
-              {groups.map((g) => (
-                <OptionBox key={g.group} label={t(g.group)} img={groupImg(g.group)} selected={f.groups.includes(g.group)} onPress={() => toggleGroup(g.group)} style={s.cell} />
-              ))}
-            </View>
+            {f.category ? (
+              <>
+                <FieldLabel>{t('Property group')}</FieldLabel>
+                <View style={s.wrap}>
+                  {groups.map((g) => (
+                    <OptionBox key={g.group} label={t(g.group)} img={groupImg(g.group)} selected={f.groups.includes(g.group)} onPress={() => toggleGroup(g.group)} style={s.cell} />
+                  ))}
+                </View>
+              </>
+            ) : null}
+            {typeChoices.length ? (
+              <>
+                <FieldLabel>{t('Property type')}</FieldLabel>
+                <View style={s.wrap} testID="map-filter-types">
+                  {typeChoices.map((ty) => (
+                    <OptionBox key={ty} label={t(ty)} img={typeImg(ty)} selected={(f.types ?? []).includes(ty)} onPress={() => toggleType(ty)} style={s.cell} />
+                  ))}
+                </View>
+              </>
+            ) : null}
+            {bedsOffered(f) ? (
+              <>
             <FieldLabel>{t('Bedrooms')}</FieldLabel>
             <View style={s.wrap}>
               {(['any', '1', '2', '3', '4', '5+'] as const).map((opt) => (
@@ -73,6 +114,20 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
                   onPress={() => (opt === 'any' ? setF((x) => ({ ...x, beds: [] })) : toggleBed(opt))} style={s.cell} />
               ))}
             </View>
+              </>
+            ) : null}
+            {/* «الأثاث» — copied from the Filter home (owner 2026-11-10: «yeah you copy the filter»): yearly rent homes only. */}
+            {furnitureOffered(deals, f.category) ? (
+              <>
+                <FieldLabel>{t('Furniture')}</FieldLabel>
+                <View style={s.wrap} testID="map-filter-furniture">
+                  {([['any', null, 'Furniture: all'], ['yes', true, 'Furniture: furnished'], ['no', false, 'Furniture: unfurnished']] as const).map(([key, pref, label]) => (
+                    <OptionBox key={key} label={t(label)} img={FURN_IMG[key]} selected={(f.furnished ?? null) === pref}
+                      onPress={() => setF((x) => ({ ...x, furnished: pref }))} style={s.cell} />
+                  ))}
+                </View>
+              </>
+            ) : null}
             <View style={[s.rangeHead, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}><Image source={RANGE_ICON.areaHead} style={s.icon} /><Text style={s.rangeLabel}>{t('Area (m²)')}</Text></View>
             <View style={[s.row, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
               <Range icon={RANGE_ICON.areaFrom} label={t('From')} unit={t('m²')} value={f.areaMin} onChange={(v) => setF((x) => ({ ...x, areaMin: digits(v) }))} testID="map-filter-area-min" />
@@ -83,15 +138,27 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
               <Range icon={RANGE_ICON.priceFrom} label={t('From')} unit={t('SAR')} value={f.priceMin} onChange={(v) => setF((x) => ({ ...x, priceMin: digits(v) }))} testID="map-filter-price-min" />
               <Range icon={RANGE_ICON.priceTo} label={t('To')} unit={t('SAR')} value={f.priceMax} onChange={(v) => setF((x) => ({ ...x, priceMax: digits(v) }))} testID="map-filter-price-max" />
             </View>
-            {isNarrowed(f) ? (
+            {!phone && isNarrowed(f) ? (
               <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} accessibilityRole="button" style={s.reset}><Text style={s.resetT}>{t('Clear all')}</Text></Pressable>
             ) : null}
           </ScrollView>
-          <View style={s.foot}>
-            <Pressable style={s.apply} onPress={() => onApply(f)} accessibilityRole="button" testID="map-filter-apply">
-              <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
-            </Pressable>
-          </View>
+          {phone ? (
+            // Fixed bottom bar (Zillow «Reset all filters» | «Apply»): clear on the start side, the button fills the rest.
+            <View style={[s.foot, s.footRow, { flexDirection: isRTL ? 'row-reverse' : 'row', paddingBottom: 12 + insets.bottom }]}>
+              <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} disabled={!isNarrowed(f)} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
+                <Text style={[s.resetT, !isNarrowed(f) && { color: colors.muted }]}>{t('Clear all')}</Text>
+              </Pressable>
+              <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
+                <Text style={s.applyT}>{t('Show listings')}</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={s.foot}>
+              <Pressable style={s.apply} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
+                <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       </View>
     </Modal>
@@ -110,13 +177,20 @@ function Range({ icon, label, unit, value, onChange, testID }: { icon: unknown; 
   );
 }
 
+/** Below this width the filter is a phone screen: full screen, count on top, fixed bottom bar. */
+export const PHONE_MAX = 768;
+
 const s = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(36,35,43,0.45)', alignItems: 'center', justifyContent: 'center', padding: 14 },
+  backdropFull: { padding: 0, justifyContent: 'flex-start' },
+  cardFull: { flex: 1, maxWidth: '100%', maxHeight: '100%', borderRadius: 0, borderWidth: 0 },
+  footRow: { alignItems: 'center', gap: 14 },
+  footClear: { paddingVertical: 10, paddingHorizontal: 4 },
   card: { width: '100%', maxWidth: 560, maxHeight: '88%', backgroundColor: colors.surface, borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: colors.tintLine },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.tint, borderBottomWidth: 1, borderBottomColor: colors.tintLine },
   title: { fontSize: 18, fontWeight: '800', color: colors.ink },
   close: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  body: { flexGrow: 0 },
+  body: { flexGrow: 0, flexShrink: 1 },
   bodyInner: { padding: 14, gap: 10 },
   row: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },

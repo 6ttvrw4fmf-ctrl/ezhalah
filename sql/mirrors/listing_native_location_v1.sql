@@ -1,6 +1,15 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-11-11 after 20261111025221 (pin cities 20261111021620 / 20261111025049 / 20261111025221 only READ this
+--   matview: the pin picker and the site-wins delete test v1.city_id / city_ar / region_id): UNCHANGED, 155,497 chars.
+--   md5 of everything below this header block: 2af9ead54b06f713aa85e08b0e9eaf00 == live
+--   (md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) read from production 2026-11-11 04:20 UTC).
+--
+-- Re-verified 2026-11-10 after 20261110033609 (legacy_branch_detector_tells_stale_snapshot_from_view_defect only READS this view):
+--   UNCHANGED, 155,497 chars. md5 of everything below this header block: 2af9ead54b06f713aa85e08b0e9eaf00 == live
+--   (md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) read from production 2026-11-10 04:41 UTC).
+--
 -- Re-verified 2026-11-07 after 20261107132419 (loc_display_district_ar_plpgsql_sync_speed only READS this matview: its
 --   parity proof lists every distinct (city_id, district_ar) pair the sync can hand loc_display_district_ar()):
 --   UNCHANGED, 155,497 chars. md5 of everything below this header block: 2af9ead54b06f713aa85e08b0e9eaf00 == live

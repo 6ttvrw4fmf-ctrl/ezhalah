@@ -1,0 +1,183 @@
+{
+ "adDescription": "للبيع دبلكس\nالعزيزيه الخبر حي الشراع \nالمساحة 250 م\nشارع 18 جنوبي امام ساحه كبيره فيها حديقه مستقبليه ومسجد خلف الحديقه\n\nالدور الارضي \nمجلس رجال \nمقلط  \nدوراة مياه ومغاسل  \nمطبخ \nصالة واسعه  \nدوراة مياه ومغاسل  \n\nالدور الاول \nصاله \nاربع غرفة منها ثنتين ماستر \n\nالملحق \nصالة \nغرفه نوم \nدوره مياه \nصاله\n\nالسعر مليون 180 قابل للتفاوض \n\nالموقع \nhttps://maps.app.goo.gl/1HnEUhaiCjaM72gc9?g_st=ic",
+ "adTitle": "Villa for sale",
+ "adType": "sell",
+ "adTypeDisplay": "Sell",
+ "area": "250.00",
+ "areaDisplay": "250.00",
+ "city": "khobar",
+ "cityDisplay": "Khobar",
+ "coordinates": [
+  26.171901,
+  50.13833800000001
+ ],
+ "country": "sa",
+ "createdAt": "08 Nov 2026 - 09:32:22 AM",
+ "deedNumber": "2712922674500000",
+ "district": "al-sheraa",
+ "districtDisplay": "Al Sheraa",
+ "governmentData": [
+  {
+   "key": "adInfo",
+   "label": "Ad information",
+   "value": [
+    {
+     "key": "advertisementType",
+     "label": "Ad purpose",
+     "value": "بيع"
+    },
+    {
+     "key": "adLicenseNumber",
+     "label": "Ad license number",
+     "value": "7100348001"
+    },
+    {
+     "key": "endDate",
+     "label": "License expiry date",
+     "value": "08/11/2027"
+    }
+   ]
+  },
+  {
+   "key": "propertyDetails",
+   "label": "Property details",
+   "value": [
+    {
+     "key": "propertyType",
+     "label": "Property type",
+     "value": "فيلا"
+    },
+    {
+     "key": "propertyFace",
+     "label": "Property frontage",
+     "value": "جنوبية"
+    },
+    {
+     "key": "propertyPrice",
+     "label": "Unit price",
+     "value": 1180000
+    },
+    {
+     "key": "numberOfRooms",
+     "label": "Number of rooms",
+     "value": 7
+    },
+    {
+     "key": "propertyArea",
+     "label": "Property area",
+     "value": 250
+    },
+    {
+     "key": "propertyAge",
+     "label": "Property age",
+     "value": "جديد"
+    },
+    {
+     "key": "propertyUsages",
+     "label": "Property usage",
+     "value": "None"
+    },
+    {
+     "key": "propertyUtilities",
+     "label": "Property utilities",
+     "value": "صرف صحي, كهرباء, مياه, هاتف"
+    },
+    {
+     "key": "streetWidth",
+     "label": "Street width",
+     "value": 18
+    },
+    {
+     "key": "rerConstraints",
+     "label": "Real estate registry restrictions",
+     "value": "None"
+    },
+    {
+     "key": "obligationsOnTheProperty",
+     "label": "Obligations on the property",
+     "value": "لايوجد"
+    },
+    {
+     "key": "guaranteesAndTheirDuration",
+     "label": "Guarantees and their duration",
+     "value": ""
+    }
+   ]
+  },
+  {
+   "key": "location",
+   "label": "Location",
+   "value": [
+    {
+     "key": "region",
+     "label": "Region",
+     "value": "المنطقة الشرقية"
+    },
+    {
+     "key": "city",
+     "label": "City",
+     "value": "الخبر"
+    },
+    {
+     "key": "district",
+     "label": "District",
+     "value": "الشراع"
+    },
+    {
+     "key": "street",
+     "label": "Street name",
+     "value": "30"
+    },
+    {
+     "key": "postalCode",
+     "label": "Postal code",
+     "value": "34742"
+    },
+    {
+     "key": "buildingNumber",
+     "label": "Building number",
+     "value": "4900"
+    },
+    {
+     "key": "additionalNumber",
+     "label": "Additional number",
+     "value": "8508"
+    },
+    {
+     "key": "landNumber",
+     "label": "Land parcel number",
+     "value": "806/1"
+    },
+    {
+     "key": "planNumber",
+     "label": "Plan number",
+     "value": "2 / 92"
+    },
+    {
+     "key": "locationDescriptionOnMOJDeed",
+     "label": "Property location description per the deed",
+     "value": null
+    }
+   ]
+  }
+ ],
+ "id": 2472,
+ "isActive": true,
+ "isReserved": false,
+ "licenseExpiryDate": "08 Nov 2027",
+ "licenseNumber": "7100348001",
+ "licenseStartDate": "08 Nov 2026",
+ "mainPhotoUrl": "https://ego-aqar-bucket-production.s3.eu-west-1.amazonaws.com/units/2472/main.jpeg",
+ "numberOfRooms": 7,
+ "photo0Url": null,
+ "photo1Url": null,
+ "photo2Url": null,
+ "price": "1180000.00",
+ "priceDisplay": "1,180,000.00 SAR",
+ "region": "eastern",
+ "regionDisplay": "Eastern",
+ "status": "active",
+ "statusDisplay": "Active",
+ "type": "villa",
+ "typeDisplay": "Villa"
+}

@@ -1,0 +1,36 @@
+{
+ "id": 72526,
+ "date": "2026-09-12T20:34:51",
+ "date_gmt": "2026-09-12T17:34:51",
+ "guid": {
+  "rendered": "https://rakez.sa/en/unit/%d8%a7%d8%b1%d8%ab-%d8%a7%d9%84%d9%8a%d8%a7%d8%b3%d9%85%d9%8a%d9%86-3/"
+ },
+ "modified": "2026-11-01T20:27:38",
+ "modified_gmt": "2026-11-01T17:27:38",
+ "slug": "%d8%a7%d8%b1%d8%ab-%d8%a7%d9%84%d9%8a%d8%a7%d8%b3%d9%85%d9%8a%d9%86-3",
+ "status": "publish",
+ "type": "unit",
+ "link": "https://rakez.sa/en/unit/%d8%a7%d8%b1%d8%ab-%d8%a7%d9%84%d9%8a%d8%a7%d8%b3%d9%85%d9%8a%d9%86-3/",
+ "title": {
+  "rendered": "ارث الياسمين"
+ },
+ "featured_media": 0,
+ "template": "",
+ "acf": {
+  "unit_project": 66800,
+  "unit_status": "available",
+  "code": " D1-138-3",
+  "price": 1420000,
+  "old_price": "",
+  "rooms_count": 2,
+  "floor": "rooftop",
+  "area": 187.15,
+  "private_area": 0,
+  "view": "",
+  "description_en": "Majlis • Bathroom • Kitchen • Master Bedroom • Bedroom • 2 Outdoor Seating Areas • Outdoor Rooftop",
+  "description_ar": "مجلس • دورة مياه • مطبخ • غرفة نوم رئيسية • غرفة نوم • جلستان خارجيتان • سطح خارجي",
+  "features": "",
+  "unit_details_file": "",
+  "payment_terms_file": ""
+ }
+}

@@ -123,14 +123,18 @@ try {
 // Executed, not asserted in prose: mint the ids the way openStatic used to and show the sentence
 // really does change under the identical stubbed randomness. If this ever stops disagreeing, §3 has
 // become vacuous and the guard is decoration.
+// Since 2026-11-09 the pick follows the message id (src/lib/stablePick.ts), so two fresh ids can land on the same
+// template by chance (1 in 10) — the old two-reopen version of this mutant was flaky in CI. Twenty reopens with
+// fresh ids must produce more than one wording; the chance they all agree is 10^-19.
 try {
-  scripted([0]);
-  const first = pickResultsFoundSentence({ lang: 'ar', name: null, count: '9,999', stableKey: uid() });
-  scripted([0.5]);
-  const second = pickResultsFoundSentence({ lang: 'ar', name: null, count: '9,999', stableKey: uid() });
+  const seen = new Set<string>();
+  for (let k = 0; k < 20; k++) {
+    scripted([k / 20]);
+    seen.add(pickResultsFoundSentence({ lang: 'ar', name: null, count: '9,999', stableKey: uid() }));
+  }
   restore();
   mustCatch('re-minting the id per reopen DOES re-word the turn (the defect is real)',
-    first !== second, `both reopens produced: ${first}`);
+    seen.size > 1, `20 reopens all produced: ${[...seen][0]}`);
 } finally { restore(); }
 
 // ── 5. WIRING — openStatic must use the helper, not mint those two ids ────────────────────────────

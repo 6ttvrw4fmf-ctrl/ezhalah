@@ -23,14 +23,13 @@ import {
   canDragAuthPopup,
   clampAuthPopupOffset,
   dismissalOutlivesTransition,
-  signInCardDefaultPos,
+  signInCardRestPos,
   AUTH_POPUP_EDGE,
   SIGNIN_CARD_W,
-  SIGNIN_CARD_H,
-  COOKIE_RESERVED,
   CARD_GAP,
   type SignInCardGate,
 } from '../src/lib/authPopupBehavior.ts';
+import { DOCK_BREAKPOINT, DOCK_WIDTH, SIGNIN_CARD_BREAKPOINT, COOKIE_CORNER_BREAKPOINT } from '../src/lib/responsive.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -39,7 +38,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 
 // ── 1. WHEN THE SMALL CARD EXISTS — signed-out desktop web on Filter/Agent, until dismissed ──────
-const SHOWN: SignInCardGate = { isWeb: true, docked: true, authChecked: true, user: null, dismissed: false, modalOpen: false, pathname: '/' };
+const SHOWN: SignInCardGate = { isWeb: true, sideRoom: true, authChecked: true, user: null, dismissed: false, modalOpen: false, pathname: '/' };
 
 check('card SHOWS on the Filter home for a signed-out desktop visitor', shouldShowSignInCard(SHOWN));
 check('card SHOWS on the Agent screen too', shouldShowSignInCard({ ...SHOWN, pathname: '/agent' }));
@@ -48,8 +47,8 @@ check('LOGGED-IN users never see it (on Agent)', !shouldShowSignInCard({ ...SHOW
 check('HIDDEN while the session is still restoring (no flash at a logged-in visitor)',
   !shouldShowSignInCard({ ...SHOWN, authChecked: false }));
 check('HIDDEN on native (web only)',   !shouldShowSignInCard({ ...SHOWN, isWeb: false }));
-check('HIDDEN below the dock breakpoint — mobile keeps the pill + on-demand modal',
-  !shouldShowSignInCard({ ...SHOWN, docked: false }));
+check('HIDDEN where there is no free column beside the form — the pill + on-demand modal are the way in',
+  !shouldShowSignInCard({ ...SHOWN, sideRoom: false }));
 check('DISMISS-ON-SEND / close is respected — gone for the rest of this load',
   !shouldShowSignInCard({ ...SHOWN, dismissed: true }));
 check('…and holds across Filter↔Agent navigation (no re-appear nag)',
@@ -79,11 +78,11 @@ check('LOCKED successful login ⇒ BOTH gone (user set closes the card; done() c
 // Full truth table: 2^6 × 3 pathnames = 192 combinations; exactly the two good-gate rows show.
 {
   let shown = 0, shownSignedIn = 0, shownWithModal = 0;
-  for (const isWeb of [true, false]) for (const docked of [true, false])
+  for (const isWeb of [true, false]) for (const sideRoom of [true, false])
     for (const authChecked of [true, false]) for (const user of [null, { id: 'u' }])
       for (const dismissed of [true, false]) for (const modalOpen of [true, false])
         for (const pathname of ['/', '/agent', '/about']) {
-          const v = shouldShowSignInCard({ isWeb, docked, authChecked, user, dismissed, modalOpen, pathname });
+          const v = shouldShowSignInCard({ isWeb, sideRoom, authChecked, user, dismissed, modalOpen, pathname });
           if (v) shown++;
           if (v && user) shownSignedIn++;
           if (v && modalOpen) shownWithModal++;
@@ -117,11 +116,10 @@ check('drag DISABLED on native mobile', !canDragAuthPopup({ isWeb: false, docked
   for (let x = -2000; x <= 2000; x += 137) for (let y = -2000; y <= 2000; y += 173)
     if (!inBounds(clampAuthPopupOffset({ x, y }, card, vp))) all = false;
   check('card: every offset in a ±2000px sweep clamps fully on-screen', all);
-  const dp = signInCardDefaultPos(vp.w, vp.h);
-  const expectedY = Math.max(AUTH_POPUP_EDGE,
-    Math.min(Math.round(vp.h * 0.46), vp.h - COOKIE_RESERVED - SIGNIN_CARD_H - CARD_GAP));
-  check('card: the DEFAULT position is the retired dock’s side slot (right edge), height-aware, and in bounds',
-    dp.x === vp.w - SIGNIN_CARD_W - AUTH_POPUP_EDGE && dp.y === expectedY
+  // WHERE THE CARD RESTS (owner 2026-11-10) — from what is MEASURED on the screen, never from written-down heights.
+  const dp = signInCardRestPos({ vw: vp.w, vh: vp.h, cardH: card.height, cookieTop: null });
+  check('card: with no cookie card up it rests in the right-hand side slot, on the 0.46 line, in bounds',
+    dp.fits && dp.x === vp.w - SIGNIN_CARD_W - AUTH_POPUP_EDGE && dp.y === Math.round(vp.h * 0.46)
     && inBounds(clampAuthPopupOffset(dp, card, vp)));
 
   // ── 3b. COOKIE-COLLISION GUARD (owner-reported 2026-09-19) — SignInCard and CookieConsent are
@@ -136,28 +134,92 @@ check('drag DISABLED on native mobile', !canDragAuthPopup({ isWeb: false, docked
   // stacking SIGNIN_CARD_H + CARD_GAP + COOKIE_RESERVED with AUTH_POPUP_EDGE of top margin literally
   // does not fit in anything shorter, no matter where the card sits — that is a fixed-size layout
   // running out of room, not a positioning defect, so the sweep starts there rather than at 0.
+  //
+  // REWRITTEN 2026-11-10 (owner: «make sure never ever get this mistake ever. Ever again»). The 2026-09-19 guard
+  // above swept a formula built from two WRITTEN-DOWN heights (card 300, cookie band 320) and was green the whole
+  // time the two cards sat on each other in English: those were Arabic numbers. Measured on the built app by
+  // scripts/verify-web-laptop-nothing-cut-or-covered.mjs — sign-in card 297 px (Arabic) / 350 (English), cookie
+  // corner card 293 / 348. The placement now takes what is really on the screen, so this sweep hands it both
+  // languages' real sizes, every window height from 400 to 1400, and asks three things at each one:
+  //   · when it says the card FITS, the card (plus its gap) really ends above the cookie card and below the top margin;
+  //   · it says DOES NOT FIT exactly when stacking the two with their margins is impossible — never "fits" on top
+  //     of the cookie card, and never "no room" when there was room;
+  //   · it always sits in the right-hand slot.
   {
-    const w = 1280; // width only has to clear DOCK_BREAKPOINT; the collision itself is Y-axis only
-    const MIN_COLLISION_FREE_H = SIGNIN_CARD_H + CARD_GAP + COOKIE_RESERVED + AUTH_POPUP_EDGE;
-    let clean = true;
-    let checked = 0;
-    for (let h = MIN_COLLISION_FREE_H; h <= 1400; h += 20) {
-      checked++;
-      const pos = signInCardDefaultPos(w, h);
-      const cardBottom = pos.y + SIGNIN_CARD_H;
-      const cookieTop = h - COOKIE_RESERVED;
-      if (cardBottom > cookieTop) clean = false;
+    const MEASURED = [
+      { lang: 'Arabic', cardH: 297, cookieH: 293 },
+      { lang: 'English', cardH: 350, cookieH: 348 },
+    ];
+    const COOKIE_CORNER_BOTTOM = 20;   // CookieConsent's corner card rests 20 px above the window's bottom edge
+    let clear = true, honest = true, slot = true, checked = 0, fitted = 0, hidden = 0;
+    for (const m of MEASURED) for (const w of [SIGNIN_CARD_BREAKPOINT, COOKIE_CORNER_BREAKPOINT, 1920]) {
+      for (let h = 400; h <= 1400; h += 10) {
+        checked++;
+        const cookieTop = h - COOKIE_CORNER_BOTTOM - m.cookieH;
+        const pos = signInCardRestPos({ vw: w, vh: h, cardH: m.cardH, cookieTop });
+        const possible = AUTH_POPUP_EDGE + m.cardH + CARD_GAP <= cookieTop;
+        if (pos.fits !== possible) honest = false;
+        if (pos.x !== w - SIGNIN_CARD_W - AUTH_POPUP_EDGE) slot = false;
+        if (pos.fits) { fitted++; if (pos.y < AUTH_POPUP_EDGE || pos.y + m.cardH + CARD_GAP > cookieTop) clear = false; }
+        else hidden++;
+      }
     }
-    check(`card default position never overlaps the cookie card's reserved band across ${checked} viewport heights (${MIN_COLLISION_FREE_H}–1400px, 20px steps — the range where avoiding it is physically possible)`,
-      clean);
+    check(`card NEVER rests on the cookie card — ${checked} windows (Arabic + English real sizes, 400–1400 px tall)`, clear);
+    check('card says "no room" exactly when the two cards cannot both fit — never a guess either way', honest,
+      `fitted ${fitted}, no room ${hidden}`);
+    check('…and the sweep really met both answers (so neither check above is empty)', fitted > 0 && hidden > 0,
+      `fitted ${fitted}, no room ${hidden}`);
+    check('card always rests in the right-hand side slot', slot);
 
-    // MUTATION — reproduce the EXACT reported bug: a fixed fraction with no height/other-card
-    // awareness overlaps the cookie card on an ordinary laptop-height viewport. Proves the sweep
-    // above is not vacuously green.
-    const retiredFormulaY = Math.round(720 * 0.46); // the exact expression this file used to assert
-    const retiredOverlaps = (retiredFormulaY + SIGNIN_CARD_H) > (720 - COOKIE_RESERVED);
-    check('MUTATION — the retired fixed-0.46-fraction formula DOES overlap the cookie card at 720px tall (the reported bug, proving the sweep catches it)',
-      retiredOverlaps);
+    // No cookie card on the page: the only floor is the window's own bottom margin.
+    let alone = true;
+    for (const m of MEASURED) for (let h = 300; h <= 1400; h += 10) {
+      const pos = signInCardRestPos({ vw: 1440, vh: h, cardH: m.cardH, cookieTop: null });
+      const possible = AUTH_POPUP_EDGE + m.cardH + AUTH_POPUP_EDGE <= h;
+      if (pos.fits !== possible) alone = false;
+      if (pos.fits && (pos.y < AUTH_POPUP_EDGE || pos.y + m.cardH > h - AUTH_POPUP_EDGE)) alone = false;
+    }
+    check('card alone (no cookie card): fully on-screen with the edge margin whenever the window can hold it', alone);
+
+    // The two ordinary laptops the owner sees: where the card lands, in plain numbers.
+    const ar900 = signInCardRestPos({ vw: 1440, vh: 900, cardH: 297, cookieTop: 900 - 20 - 293 });
+    const en900 = signInCardRestPos({ vw: 1440, vh: 900, cardH: 350, cookieTop: 900 - 20 - 348 });
+    const en700 = signInCardRestPos({ vw: 1440, vh: 700, cardH: 350, cookieTop: 700 - 20 - 348 });
+    check('1440×900 Arabic: fits, 16 px above the cookie card', ar900.fits && ar900.y + 297 + CARD_GAP === 900 - 20 - 293, JSON.stringify(ar900));
+    check('1440×900 English: fits, 16 px above the cookie card', en900.fits && en900.y + 350 + CARD_GAP === 900 - 20 - 348, JSON.stringify(en900));
+    check('1440×700 English: NO ROOM — the card waits off-screen instead of sitting on the cookie card', !en700.fits, JSON.stringify(en700));
+
+    // MUTATION 1 — the retired placement, exactly as it shipped: constants 300 / 320 and no measurement. On a
+    // 1440×900 English screen it puts the card's bottom edge BELOW the cookie card's top. This is the bug.
+    const retiredY = Math.max(AUTH_POPUP_EDGE, Math.min(Math.round(900 * 0.46), 900 - 320 - 300 - CARD_GAP));
+    check('MUTATION — the retired written-down-heights placement DOES put the card on the cookie card in English at 1440×900',
+      retiredY + 350 > 900 - 20 - 348, `retired y ${retiredY}`);
+    // MUTATION 2 — a placement that never admits "no room" pins the card at the top margin and overlaps anyway.
+    check('MUTATION — a placement that always says "fits" WOULD overlap at 1440×700 English',
+      AUTH_POPUP_EDGE + 350 > 700 - 20 - 348);
+    // MUTATION 3 — the even older fixed-0.46 line (the 2026-09-19 report) still overlaps at 720 tall.
+    check('MUTATION — the fixed-0.46-of-the-window line DOES overlap the cookie card at 720 px tall',
+      Math.round(720 * 0.46) + 297 > 720 - 20 - 293);
+  }
+
+  // ── 3c. WHERE THE TWO CARDS MAY EXIST AT ALL (owner 2026-11-10) ────────────────────────────────────────────────
+  // Both cards used to switch on where the SIDEBAR docks. The home column is 560 wide, centred in what the docked
+  // sidebar leaves, so its right edge sits at  window/2 + DOCK_WIDTH/2 + 280.  A card may only float beside it
+  // when its own left edge is to the right of that. The real pixels are measured by the browser robot; this is the
+  // same sum on paper, so a breakpoint edited back down fails here first, without a browser.
+  {
+    const formRight = (vw: number) => vw / 2 + DOCK_WIDTH / 2 + 280;      // the white panel's right edge
+    const controlsRight = (vw: number) => formRight(vw) - 12;                // its boxes and buttons (12 px padding)
+    const signInLeft = (vw: number) => vw - SIGNIN_CARD_W - AUTH_POPUP_EDGE;
+    const cookieLeft = (vw: number) => vw - 280 - 20;
+    check('the sign-in card only floats where it clears the search form', signInLeft(SIGNIN_CARD_BREAKPOINT) >= formRight(SIGNIN_CARD_BREAKPOINT),
+      `card left ${signInLeft(SIGNIN_CARD_BREAKPOINT)} vs form right ${formRight(SIGNIN_CARD_BREAKPOINT)}`);
+    check('the cookie corner card only exists where it clears every box and button of the search form', cookieLeft(COOKIE_CORNER_BREAKPOINT) >= controlsRight(COOKIE_CORNER_BREAKPOINT),
+      `card left ${cookieLeft(COOKIE_CORNER_BREAKPOINT)} vs controls right ${controlsRight(COOKIE_CORNER_BREAKPOINT)}`);
+    check('MUTATION — at the sidebar\'s dock width (the old switch) BOTH cards would sit on the form',
+      signInLeft(DOCK_BREAKPOINT) < formRight(DOCK_BREAKPOINT) && cookieLeft(DOCK_BREAKPOINT) < controlsRight(DOCK_BREAKPOINT));
+    check('MUTATION — at 1280 (an ordinary laptop) both would still sit on the form',
+      signInLeft(1280) < formRight(1280) && cookieLeft(1280) < controlsRight(1280));
   }
 
   // THE CENTERED MODAL (offset mode) keeps its own bounds.
@@ -192,6 +254,7 @@ check('shouldAutoShowAuthPopup no longer EXISTS (the auto-show decision is delet
 // Comment-stripped (provenance comments citing openAuth are welcome; a CODE call is the breach —
 // same convention as verify-single-auth-invitation.ts).
 const stripComments = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+const stripLine = stripComments;   // code only — a comment may name a retired constant, code may not use it
 check('the layout never CALLS openAuth — nothing raises the centered modal unprompted',
   !stripComments(layout).includes('openAuth'));
 check('closeAuth is a plain state close again (no sessionStorage dismissal stamp)',
@@ -215,7 +278,27 @@ check('WIRING the card is mounted exactly once, AFTER the Stack (its phone <inpu
   && layout.indexOf('<SignInCard />') > layout.indexOf('</Stack>'));
 check('WIRING the card drags via the shared machinery with its own position memory',
   signInCard.includes('attachCardDrag(node, grip, {') && signInCard.includes('SIGNIN_CARD_POS_KEY')
-  && signInCard.includes('signInCardDefaultPos(innerWidth, innerHeight)'));
+  && signInCard.includes('signInCardRestPos({'));
+// Owner 2026-11-10 — the four wires that keep the card off the form and off the cookie card. Each one was the
+// missing piece of a measured failure, so each is pinned by name.
+check('WIRING the card exists only where a free column exists (its own breakpoint, through useAtLeast)',
+  signInCard.includes('const sideRoom = useAtLeast(SIGNIN_CARD_BREAKPOINT);') && /\n\s*sideRoom,\n/.test(signInCard)
+  && !stripLine(signInCard).includes('DOCK_BREAKPOINT'));
+check('WIRING the card goes back to its measured slot when the window changes (rest slot handed to the drag)',
+  /initial: slot,\s*rest: slot,/.test(signInCard));
+check('WIRING the card is taken OFF the screen when there is no room for it (and a dragged card is left alone)',
+  signInCard.includes('show(drag.pinned() || room().fits);') && signInCard.includes("node.style.visibility = 'hidden';")
+  && signInCard.includes("node.style.pointerEvents = on ? '' : 'none';"));
+check('WIRING the card hears the cookie card arrive, resize and leave',
+  signInCard.includes("observeOwnDockedCard(() => settle('cookie'))") && signInCard.includes('OWN_DOCKED_PROMPT_SELECTOR'));
+{
+  const cookie = SRC('components/CookieConsent.tsx');
+  const inset = SRC('lib/bottomPromptInset.ts');
+  check('WIRING the cookie card is a corner card only where a free corner exists (its own breakpoint)',
+    cookie.includes('const beside = useAtLeast(COOKIE_CORNER_BREAKPOINT);') && !stripLine(cookie).includes('DOCK_BREAKPOINT'));
+  check('WIRING "faded out" and "gone" are two different answers (or the card waiting for room never hears it left)',
+    /return rects\.length \? \{ top: -3, bottom: -3 \} : \{ top: -2, bottom: -2 \};/.test(inset));
+}
 // Owner 2026-09-03: the centered modal starts PERFECTLY CENTERED on every open — dragging only
 // changes its position after the user moves it, and only for that open. So: no posKey (the small
 // card keeps its own memory above).
@@ -305,7 +388,7 @@ check('EPOCH no transition keeps it (Filter↔Agent nav within one epoch)',
     dismissed: dismissalOutlivesTransition(w.signedIn, nowSignedIn) ? w.dismissed : false,
   });
   const cardOn = (w: World, pathname = '/') => shouldShowSignInCard({
-    isWeb: true, docked: true, authChecked: true, user: w.signedIn ? { id: 'u' } : null,
+    isWeb: true, sideRoom: true, authChecked: true, user: w.signedIn ? { id: 'u' } : null,
     dismissed: w.dismissed, modalOpen: false, pathname,
   });
   let w: World = { signedIn: false, dismissed: false };

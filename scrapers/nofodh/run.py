@@ -633,7 +633,15 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         # a manufactured True/False amenity flag the source never stated). No amenity is published
         # by this platform (see the module docstring), so the boolean column stays untouched and the
         # real count is preserved losslessly in additional_info instead, same as floors_count below.
-        "date_added": redact_pii(rec["overview"].get("تاريخ النشر")),
+        # NO POSTING DATE (2026-11-10). «تاريخ النشر» is the platform's IMPORT timestamp, not when the ad
+        # was posted (trap 8): five distinct values across the whole catalogue, and 2,542 of 2,556 active
+        # ads print the same one (2026-05-15; the page later re-printed it as «2026-05-14 03:26:16»).
+        # Every «new today / last 7 days» fact counts by date_added (docs/ARCHITECTURE.md §20), and one
+        # stamp shared by the whole site is not a posting date — a wrong date is worse than none. The
+        # printed text stays verbatim in source_capture.overview["تاريخ النشر"]. Re-checked by
+        # mon_detect_shared_posting_stamp() on every table, and by
+        # scripts/verify-source-posting-date-more-sites.ts on this mapper.
+        "date_added": None,
         "photo_urls": photos,
     }
     if deal == "Rent":

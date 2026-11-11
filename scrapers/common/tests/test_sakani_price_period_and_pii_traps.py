@@ -538,9 +538,10 @@ def test_an_incomplete_walk_writes_what_it_read_and_never_prunes(monkeypatch):
 
 # ==================================== 6. main() =================================================
 def _stub_db(monkeypatch):
-    calls = {"batch": [], "end_run": [], "prune": [], "retire": [], "alive": []}
+    calls = {"batch": [], "end_run": [], "prune": [], "retire": [], "alive": [], "progress": []}
     db = types.SimpleNamespace(
         begin_run=lambda platform: 77,
+        record_run_progress=lambda run_id, **kw: calls["progress"].append((run_id, kw)),
         mark_direct_alive=lambda row, *, oracle: calls["alive"].append((row["ad_number"], oracle)) or row,
         _wasalt_batch=lambda table, rows: calls["batch"].append((table, [r["ad_number"] for r in rows])),
         retire_superseded_siblings=lambda **kw: calls["retire"].append(kw) or 0,
@@ -585,6 +586,8 @@ def test_main_tallies_every_skip_into_end_run_and_prunes_only_behind_the_control
     run_id, kw = calls["end_run"][0]
     assert run_id == 77 and kw["ok"] is True
     assert kw["rows_seen"] == 6 and kw["rows_upserted"] == 2
+    # The real counts are on the row BEFORE the oracle phase, so a kill there never reads as 0 rows.
+    assert calls["progress"] == [(77, {"rows_seen": 6, "rows_upserted": 2})]
     assert kw["degraded"] is True                            # 2 of 6 rows index-only (> 20 %)
     for tally in ("sale_project_offplanx1", "purpose_salex1", "city_not_in_catalogx1", "detail_missx2", "detail_not_foundx1", "pruned=0"):
         assert tally in kw["notes"], (tally, kw["notes"])

@@ -355,6 +355,11 @@ CRAWL_ORACLES: dict[str, str] = {
     # 2026-11-07 (backlog 1427): nowaisiry re-uses slugs, so a status read of the stored URL answers for
     # ANOTHER post (NW4349's slug serves post 4513) and revived an ad prune had hidden on a direct 404.
     "nowaisiry": "scrapers.nowaisiry.run:spot_check_oracle()",
+    # 2026-11-09 (backlog 1627): both are Next.js sites that answer 200 for an ad that cannot exist, so the
+    # 09:05 score voided them every night as status-only (564 + 199 shown ads, never measured). vmksa is
+    # read by its crawl's prune oracle; sirdab by a read-only own-page reader that checks it can see death.
+    "vmksa": "scrapers.vmksa.run:spot_check_oracle()",
+    "sirdab": "scrapers.sirdab.run:spot_check_oracle()",
 }
 
 

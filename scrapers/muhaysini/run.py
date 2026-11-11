@@ -329,12 +329,29 @@ PAGE_SIZE = 30
 # against — see fetch_catalogue. Hitting it leaves complete=False, so a runaway can never prune.
 # 400 (12,000 rows) WAS hit every night from 11-02 on: the catalogue outgrew it, ~8,000 live ads were
 # never re-read (served_price_never_rechecked, 🔧 11-07) and nothing was ever pruned. 1,500 = 45,000 rows.
-MAX_PAGES = 1500
+# 3,000 = 90,000 rows (2026-11-10): the 11-08 and 11-09 walks listed 43,816 and 43,638 ads — 1,461 of the
+# 1,500 pages, one growth step from a cap that silently ends every prune.
+MAX_PAGES = 3000
 # The `retrieve` call is the slow part (~1.05 s a row: 12,000 took 215 min on 11-07) and the job has 240 min. At most
 # DETAIL_BUDGET rows get their detail read per night, chosen by detail_plan() so that EVERY listed ad is
 # read in full at least once every ceil(n / budget) nights. The list walk itself stays complete, so every
 # listed ad is SEEN (never pruned) whether or not tonight's budget reached it.
 DETAIL_BUDGET = int(os.environ.get("MUHAYSINI_DETAIL_BUDGET", "11000"))
+# THE RUN ENDS ITSELF BEFORE CI DOES (2026-11-10). 11-08 and 11-09 took 238 and 235 of the job's 240 minutes
+# (1,461 list pages + 11,000 detail reads at <= 1 request/second), and rows are only written AFTER the detail
+# loop — so a CI kill at 240 would lose the whole night and prune nothing. Past this many minutes since the
+# process started, tonight's remaining detail reads are left for a later night exactly like an over-budget
+# row: seen on the list (never a prune candidate), stored row untouched, and first in tomorrow's plan
+# because detail_plan() reads the longest-unread ids first. 205 leaves 35 min for the writes and the prune.
+DETAIL_DEADLINE_MIN = float(os.environ.get("MUHAYSINI_DETAIL_DEADLINE_MIN", "205"))
+_PROCESS_START = time.monotonic()
+
+
+def past_detail_deadline(now: float, start: float, minutes: float) -> bool:
+    """True once `minutes` have passed since `start` (monotonic seconds). A nonpositive limit is «no limit»."""
+    return minutes > 0 and (now - start) >= minutes * 60.0
+
+
 # Spacing between `retrieve` calls. The endpoint rate-limits under sustained load (987/2,827 got
 # HTTP 429 at ~3.6 req/s); override with MUHAYSINI_REQUEST_GAP.
 REQUEST_GAP = float(os.environ.get("MUHAYSINI_REQUEST_GAP", "0.35"))
@@ -907,16 +924,29 @@ def _get_json(s: cc.Session, url: str, *, what: str, tries: int = 4) -> Any:
     attempts.
     """
     r = None
+    transport: Optional[Exception] = None
     for attempt in range(tries):
         _pace()
-        r = s.get(url, timeout=45)
+        try:
+            r = s.get(url, timeout=45)
+        except cc.RequestsError as exc:
+            # A request that never got an answer (curl 28 timeout, reset, DNS) is the same kind of
+            # transient as a 429: on 2026-11-08 ONE «Operation timed out after 45002 milliseconds» on a
+            # list page, 62 minutes in, raised straight through this loop and threw the whole night away
+            # (0 rows written). Back off and try again; only `tries` failures in a row are a failure.
+            r, transport = None, exc
+            time.sleep(min(3 * (attempt + 1), 30))
+            continue
+        transport = None
         if r.status_code not in TRANSIENT_STATUSES:
             break
         # Honour the server's own Retry-After when it sends one, else back off progressively.
         wait = normalize.to_int_numeric(r.headers.get("Retry-After")) or 0
         time.sleep(min(max(wait, 3 * (attempt + 1)), 30))
-    if r is None or r.status_code != 200:
-        raise RuntimeError(f"{what} returned {getattr(r, 'status_code', 'no response')}")
+    if r is None:
+        raise RuntimeError(f"{what} gave no response in {tries} tries: {str(transport)[:160]}")
+    if r.status_code != 200:
+        raise RuntimeError(f"{what} returned {r.status_code}")
     try:
         body = r.json()
     except ValueError as exc:
@@ -1106,9 +1136,14 @@ def main() -> int:
             print(f"  detail budget {DETAIL_BUDGET}: {len(tonight)} read in full tonight, "
                   f"{len(seen_not_read)} seen on the list and read on a later night", flush=True)
         read_n = 0
+        deadline_cut = 0
         for n, listed in enumerate(items, 1):
             pid = _clean(listed.get("id"))
             if pid and pid not in tonight:
+                continue
+            if pid and past_detail_deadline(time.monotonic(), _PROCESS_START, DETAIL_DEADLINE_MIN):
+                seen_not_read.add(f"{PREFIX}{pid}")   # listed tonight, read on a later night — never pruned
+                deadline_cut += 1
                 continue
             read_n += 1               # pacing (≤ 1 request/second, retries included) lives in _get_json._pace
             detail = fetch_detail(s, pid) if pid else None
@@ -1128,6 +1163,9 @@ def main() -> int:
             if n % 500 == 0:
                 print(f"  … {n}/{len(items)} mapped={len(res) + len(com)}", flush=True)
         notes = _tally(skipped)
+        if deadline_cut:
+            print(f"  ⚠ detail deadline ({DETAIL_DEADLINE_MIN:g} min): {deadline_cut} of tonight's "
+                  f"{len(tonight)} detail reads left for a later night", flush=True)
         if skipped:
             print("  skipped (not guessed): " + notes)
         if detail_misses:
@@ -1173,6 +1211,7 @@ def main() -> int:
                              rows_upserted=len(res) + len(com),
                              notes=(f"pruned={pruned} complete={complete} "
                                     f"detail_misses={detail_misses} later_nights={len(seen_not_read)} "
+                                    f"deadline_cut={deadline_cut} "
                                     f"{notes}")[:300],
                              check_tables=["muhaysini_residential_listings",
                                            "muhaysini_commercial_listings"])

@@ -73,6 +73,84 @@ def test_release_calls_rpc_with_holder():
     assert c.released_with == "holder-xyz"
 
 
+# ── 2026-11-09: a lock held by a CI run GitHub reports FINISHED is stale ─────────────────────────
+# «The hosted runner lost communication with the server» killed run 42602133546 at 11:25 without its
+# finally; the lock stayed until its 2 h TTL, the 11:37 sweep wrote «apply skipped — lock held» (0 rows)
+# and crawl_went_silent paged. Only a CONFIRMED-finished run is reclaimed; unknown never releases.
+import scrapers.gathern.liveness as L  # noqa: E402
+
+
+class _ReclaimClient(_Client):
+    def __init__(self):
+        super().__init__(_RPC(data=[]))
+        self.released = []
+
+    def rpc(self, name, params):
+        if name == "release_deploy_lock":
+            self.released.append(params["p_holder"])
+            return _RPC(data=[True])
+        return super().rpc(name, params)
+
+
+def _held(holder, note="gathern liveness --apply sweep run_id=777"):
+    return {"holder": holder, "expires_at": "2026-11-09T12:37:23+00:00", "note": note}
+
+
+def test_reclaims_a_lock_whose_ci_run_has_finished(monkeypatch):
+    c = _ReclaimClient()
+    closed = []
+    monkeypatch.setattr(L, "_ci_run_concluded", lambda run_id: run_id == "42602133546")
+    monkeypatch.setattr(L, "end_run", lambda rid, **kw: closed.append((rid, kw)))
+    monkeypatch.setenv("GITHUB_RUN_ID", "42602999999")
+    assert L._reclaim_stale_ci_lock(c, _held("gathern_liveness:ci:42602133546:2249")) is True
+    assert c.released == ["gathern_liveness:ci:42602133546:2249"]
+    assert closed and closed[0][0] == 777 and closed[0][1]["ok"] is False, \
+        "the dead run's row is closed, not left dangling"
+
+
+def test_unknown_run_state_never_releases(monkeypatch):
+    c = _ReclaimClient()
+    monkeypatch.setattr(L, "_ci_run_concluded", lambda run_id: None)      # no token / API error = UNKNOWN
+    assert L._reclaim_stale_ci_lock(c, _held("gathern_liveness:ci:42602133546:2249")) is False
+    assert c.released == []
+
+
+def test_a_running_ci_holder_is_respected(monkeypatch):
+    c = _ReclaimClient()
+    monkeypatch.setattr(L, "_ci_run_concluded", lambda run_id: False)
+    assert L._reclaim_stale_ci_lock(c, _held("gathern_liveness:ci:42602133546:2249")) is False
+    assert c.released == []
+
+
+def test_a_local_holder_is_never_reclaimed(monkeypatch):
+    c = _ReclaimClient()
+    monkeypatch.setattr(L, "_ci_run_concluded", lambda run_id: True)
+    assert L._reclaim_stale_ci_lock(c, _held("gathern_liveness:local:4242")) is False
+    assert c.released == []
+
+
+def test_our_own_run_is_never_reclaimed(monkeypatch):
+    c = _ReclaimClient()
+    monkeypatch.setattr(L, "_ci_run_concluded", lambda run_id: True)
+    monkeypatch.setenv("GITHUB_RUN_ID", "42602133546")
+    assert L._reclaim_stale_ci_lock(c, _held("gathern_liveness:ci:42602133546:2249")) is False
+
+
+def test_no_token_means_unknown(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert L._ci_run_concluded("1") is None
+
+
+def test_lock_note_names_the_run_row():
+    class _Rec(_Client):
+        def rpc(self, name, params):
+            self.note = params.get("p_note")
+            return super().rpc(name, params)
+    c = _Rec(_RPC(data=[{"lock_name": LOCK_NAME}]))
+    assert _acquire_apply_lock(c, "h", 60, run_id=777) is True
+    assert c.note.endswith("run_id=777")
+
+
 if __name__ == "__main__":
     test_acquire_true_when_lock_row_returned()
     test_acquire_false_when_empty_means_held_elsewhere()

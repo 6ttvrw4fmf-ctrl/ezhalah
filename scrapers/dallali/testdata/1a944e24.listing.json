@@ -1,0 +1,90 @@
+{
+ "id": "1a944e24-3bc8-4a9e-af21-ce540613734d",
+ "listing_type": "rent",
+ "title": "🏡 شقة واسعة للإيجار في حي الملقا | شارع أبها",
+ "description": "🏡 شقة واسعة للإيجار في حي الملقا | شارع أبها",
+ "price": 75000,
+ "is_negotiable": false,
+ "is_featured": false,
+ "is_active": true,
+ "published_at": "2026-10-21T11:53:01.899Z",
+ "expires_at": null,
+ "created_at": "2026-10-21T11:53:09.946Z",
+ "updated_at": "2026-11-09T09:43:22.505Z",
+ "ad_license_number": "7201179167",
+ "unit": {
+  "id": "9758a2b8-f091-4b69-ba7a-6ec95917cf16",
+  "unit_number": "8",
+  "unit_type": "apartment",
+  "bedrooms": 0,
+  "bathrooms": 0,
+  "area": 103,
+  "images": null,
+  "amenities": null
+ },
+ "image_urls": [
+  "https://sbs-prod.dallali.com/storage/v1/object/public/media/a6b157cf-d3d6-4a9b-b74c-252052a83491/listings/1792583581899-swid37cp6y.jpg"
+ ],
+ "property": {
+  "city": "",
+  "district": ""
+ },
+ "rega_display_data": {
+  "notes": "",
+  "endDate": "31/03/2027",
+  "adSource": "الهيئة العامة للعقار",
+  "channels": [
+   "منصات التواصل الإجتماعي",
+   "الإذاعة",
+   "منصة مرخصة",
+   "أخرى",
+   "لوحة اعلانية"
+  ],
+  "isHalted": false,
+  "isPawned": true,
+  "location": {
+   "city": "الرياض",
+   "cityId": "84c36906-d8e6-3a66-02e6-2fc1dd7fecff",
+   "region": "منطقة الرياض",
+   "street": "ابها",
+   "cityCode": "21282",
+   "district": "الملقا",
+   "latitude": "24.79980962082926",
+   "regionId": "9d51fcb2-6e33-877a-48fc-85787e9e7eaf",
+   "longitude": "46.59419915100568",
+   "districtId": "f4ab3b50-6bbc-572f-57ae-1e25d857a840",
+   "regionCode": "1",
+   "districtCode": "2278"
+  },
+  "isTestment": false,
+  "landNumber": "3141",
+  "planNumber": "2460 / أ",
+  "propertyAge": "سبع سنوات",
+  "streetWidth": 0,
+  "creationDate": "18/10/2026",
+  "propertyArea": 141.86,
+  "propertyFace": "",
+  "propertyType": "شقة",
+  "isConstrained": false,
+  "numberOfRooms": 3,
+  "propertyPrice": 75000,
+  "landTotalPrice": null,
+  "propertyUsages": [],
+  "adLicenseNumber": "7201179167",
+  "redZoneTypeName": "لا يوجد حظر",
+  "advertisementType": "إيجار",
+  "propertyUtilities": [
+   "صرف صحي",
+   "كهرباء",
+   "مياه",
+   "تصريف الفيضانات "
+  ],
+  "titleDeedTypeName": "صك إلكتروني",
+  "landTotalAnnualRent": null,
+  "mainLandUseTypeName": "استعمال مختلط",
+  "obligationsOnTheProperty": "لايوجد",
+  "ownershipTransferFeeType": null,
+  "guaranteesAndTheirDuration": "",
+  "complianceWithTheSaudiBuildingCode": true
+ }
+}

@@ -106,6 +106,34 @@ def _pos(v) -> Optional[float]:
     return f if f > 0 else None
 
 
+def _stated_zero(v) -> bool:
+    """True only when the API printed a literal zero for this figure («0», «0.00»).
+
+    A zero in this API is the office saying "no figure published" (its own page prints «0»). That is
+    the source SPEAKING, so a figure stored from an earlier crawl must be cleared
+    (db.AUTHORITATIVE_NULL). A missing key, null, "" or unparseable text is "we could not read it"
+    and returns False: the stored figure survives. Ad 1629 on 2026-11-09 is why: the office removed
+    its 550/m² rate, the API answered «0» on every crawl since, and the card kept serving 278,300 SAR
+    (550 × 506 m²) because a plain None is dropped before the upsert.
+    """
+    if v is None or isinstance(v, bool):
+        return False
+    s = str(v).replace(",", "").strip()
+    if not s:
+        return False
+    try:
+        return float(s) == 0
+    except ValueError:
+        return False
+
+
+def _or_stated_absent(value, raw):
+    """The figure when the source published one; AUTHORITATIVE_NULL when it printed zero; else None."""
+    if value is not None:
+        return value
+    return db.AUTHORITATIVE_NULL if _stated_zero(raw) else None
+
+
 def _count(v) -> Optional[int]:
     n = normalize.to_int(v)
     return n if n and n > 0 else None
@@ -219,17 +247,19 @@ def map_listing(p: dict, d: dict, cat_name: Optional[str]) -> tuple[Optional[tup
         "date_added": p.get("createdAt") or None,
         "photo_urls": images or None,
         "video_url": d.get("video_url") or None,
-        "price_per_meter": ppm,
+        "price_per_meter": _or_stated_absent(ppm, d.get("pricePerMeter")),
     }
     for src, col in _FLAGS.items():
         if normalize.to_int(d.get(src)) and normalize.to_int(d.get(src)) > 0:
             row[col] = True
     if deal == "Buy":
-        row["price_total"] = price
+        row["price_total"] = _or_stated_absent(price, p.get("price"))
     else:
-        row["rent_period"], row["price_annual"] = normalize.rent_period_and_annual(price, None)
+        row["rent_period"], annual = normalize.rent_period_and_annual(price, None)
+        row["price_annual"] = _or_stated_absent(annual, p.get("price"))
 
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
+    stored = stored if isinstance(stored, (int, float)) else None      # the sentinel is not a figure
     row["price_evidence"] = normalize.price_evidence(
         field="price", raw=p.get("price"), stored=stored,
         kind="total" if deal == "Buy" else "annual", unit="total", origin="api",
@@ -310,7 +340,8 @@ def main() -> int:
             for row in (res[:3] + com[:2]):
                 print("   ", json.dumps({k: row.get(k) for k in
                       ("ad_number", "property_type", "transaction_type", "price_total", "price_annual",
-                       "area_m2", "city_ar", "district_ar", "listing_url")}, ensure_ascii=False)[:220])
+                       "area_m2", "city_ar", "district_ar", "listing_url")}, ensure_ascii=False,
+                      default=repr)[:220])
             return 0
 
         db.upsert_macsaib_residential_batch(res)

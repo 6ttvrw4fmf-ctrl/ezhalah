@@ -65,6 +65,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import city_by_own_pin, norm_ar  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.dealapp import liveness as dealapp_liveness  # noqa: E402
 
 SOURCE = "Deal App"
@@ -953,6 +954,24 @@ def _ad_urls(adid: str) -> list[str]:
             f"{BASE}/ar//ad-details/{adid}"]
 
 
+# Where this run's pages came from, for `scrape_runs.notes` (2026-11-09). An ORIGIN render costs one
+# paced slot (RENDERS_PER_MIN per IP); an EDGE hit is refunded. The split is the whole explanation of
+# a shard's wall-clock: dealapp:10/24 did 2,504 ids in 4 min on 11-08 (edge-hot) and 2,526 ids in
+# 157 min on 11-09 (edge-cold, every page an origin render) with the SAME code, and the only record
+# of why was a GitHub Actions log that expires. mon_detect_run_duration_explosion() reads rows/min;
+# this is what lets its SLOW_COMPLETE shape be adjudicated from SQL.
+_render_split_lock = threading.Lock()
+_render_split: collections.Counter = collections.Counter()
+
+
+def _render_split_summary() -> str:
+    """` origin_renders=N edge_hits=M` for the run note, or '' when nothing was fetched."""
+    with _render_split_lock:
+        if not _render_split:
+            return ""
+        return f" origin_renders={_render_split['origin']} edge_hits={_render_split['edge']}"
+
+
 def _get(s: Any, url: str, **kw: Any) -> tuple[Any, bool]:
     """One paced request → (response, came_from_edge)."""
     kw.setdefault("timeout", 45)
@@ -962,6 +981,8 @@ def _get(s: Any, url: str, **kw: Any) -> tuple[Any, bool]:
     edge = dealapp_liveness.from_edge(r)
     if edge:
         _ORIGIN.refund(slot)
+    with _render_split_lock:
+        _render_split["edge" if edge else "origin"] += 1
     return r, edge
 
 
@@ -1293,6 +1314,11 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "title": _redact(name) or None,
         "description": _redact(schema.get("description")),
         "photo_urls": _images(schema),
+        # THE SITE'S OWN POSTING DATE (owner 2026-10-26: every time-window fact counts by it). The schema's
+        # datePosted was kept in additional_info.date_posted only, so date_added was NULL on all 74,751 rows
+        # and no dealapp ad could ever count as «posted yesterday». Measured 2026-11-09 on those rows: every
+        # value readable, none later than the day we first saw the ad (so it is not a bump date).
+        "date_added": site_posting_date(schema.get("datePosted")),
         "additional_info": info,
         **af_answers(aprops, _redact(schema.get("description"))),
     }
@@ -1534,7 +1560,8 @@ def main() -> int:
                   "(see capture_unprovable); the run is reported degraded, never as a small catalogue.", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
                               notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)} absent={len(absent)}"
-                                    f"{' unprovable_capture' if unprovable else ''}{_fetch_fail_summary()}",
+                                    f"{' unprovable_capture' if unprovable else ''}{_fetch_fail_summary()}"
+                                    f"{_render_split_summary()}",
                               degraded=unprovable,
                               check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
         if not healthy:

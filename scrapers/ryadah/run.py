@@ -59,6 +59,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://ryadah.com.sa"
 API = BASE + "/wp-json/wp/v2/properties"
@@ -243,6 +244,10 @@ def map_property(post: dict, d: dict[str, Any], terms: list[str]) -> tuple[Optio
         "ad_number": f"{PREFIX}{post['id']}",
         "listing_url": post["link"],
         "source": SOURCE,
+        # Posting date = the WordPress post's date_gmt (UTC, so «Z»; `modified_gmt` is an edit; date =
+        # date_gmt on every post: the site clock is UTC). Live 2026-11-09: post 9731 date_gmt
+        # 2022-09-20T09:30:41 = its page's JSON-LD datePublished «2022-09-20T09:30:41+00:00».
+        "date_added": site_posting_date(post["date_gmt"] + "Z") if isinstance(post.get("date_gmt"), str) else None,
         "active": True,
         "title": redact_pii(title) or None,
         "description": redact_pii("\n".join(x for x in (overview, desc) if x)[:4000]) or None,

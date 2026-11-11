@@ -19,6 +19,7 @@
 // {name} in the logged-in variants comes from useApp().user.nameAr / .nameEn — the SAME field the
 // account menu already renders (src/store.tsx AuthUser). Never an email, never a guess, never the
 // LLM. When the user is a guest, the guest pool is picked and no name substitution ever runs.
+import { stableIndex } from '../lib/stablePick.ts';
 
 export type ResultsFoundTemplate = { lang: 'ar' | 'en'; hasName: boolean; template: string };
 
@@ -136,8 +137,14 @@ export function pickResultsFoundSentence(args: {
   if (pool.length === 0) return `${args.count}`;
   const key = `${args.lang}|${hasName}`;
   const prev = lastIndex[key] ?? -1;
-  let i = Math.floor(Math.random() * pool.length);
-  if (pool.length > 1 && i === prev) i = (i + 1) % pool.length;
+  // A message keeps ONE line on every device and every reopen (src/lib/stablePick.ts); only a pick
+  // with no message to belong to rotates at random.
+  let i: number;
+  if (args.stableKey != null) i = stableIndex(args.stableKey, pool.length);
+  else {
+    i = Math.floor(Math.random() * pool.length);
+    if (pool.length > 1 && i === prev) i = (i + 1) % pool.length;
+  }
   lastIndex[key] = i;
   let out = pool[i].template.split('{count}').join(args.count);
   if (hasName) out = out.split('{name}').join(args.name!.trim());

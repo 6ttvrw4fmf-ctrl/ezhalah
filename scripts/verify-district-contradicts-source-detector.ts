@@ -46,6 +46,11 @@ const defining = readdirSync(MIG_DIR)
 
 check('a migration defines the district-contradicts-source detector', defining.length > 0);
 const sql = defining.length ? readFileSync(join(MIG_DIR, defining[defining.length - 1]), 'utf8') : '';
+// The detector's BODY is judged on the LATEST migration that redefines it (#1, #3, #4). The one-time acts of the
+// migration that introduced it — wiring it into the roster, the owner's RED-list scope note, the data repair (#2, #5,
+// #6) — were performed ONCE, by the FIRST definer, and are judged there. Reading them from the latest definer made every
+// later body fix (🆕 2026-11-10, 20261110072248) fail contracts it never had to repeat.
+const firstSql = defining.length ? readFileSync(join(MIG_DIR, defining[0]), 'utf8') : '';
 
 // ── 1. THE VIEW MUST BECOME A DETECTOR — the whole point ─────────────────────────────────────────
 check('#1 a mon_detect_* function wraps the view',
@@ -54,11 +59,11 @@ check('#1 it reads the monitoring view rather than re-deriving the predicate',
   sql.includes('from public.mon_district_contradicts_source'));
 
 // ── 2. ROSTER WIRING — an unrostered detector is decoration ──────────────────────────────────────
-check('#2 the migration wires it into mon_run_all_detectors', sql.includes('mon_run_all_detectors'));
+check('#2 the migration wires it into mon_run_all_detectors', firstSql.includes('mon_run_all_detectors'));
 check('#2 roster insertion is idempotent',
-  /position\('mon_detect_district_contradicts_source' in def\)\s*=\s*0/.test(sql));
+  /position\('mon_detect_district_contradicts_source' in def\)\s*=\s*0/.test(firstSql));
 check('#2 roster wiring FAILS CLOSED if its anchor is gone',
-  /raise exception/i.test(sql) && sql.includes('refusing to guess'));
+  /raise exception/i.test(firstSql) && firstSql.includes('refusing to guess'));
 
 // ── 3. Lifecycle: P1, and self-heals instead of needing a manual resolve ─────────────────────────
 check('#3 raises P1', /mon_raise\(\s*'P1'/.test(sql));
@@ -78,16 +83,16 @@ check('#4 the repair guidance defers to NULL when the source fields disagree',
 // ── 5. SCOPE — measure the contradiction, never the raw-string difference ────────────────────────
 // Keying on raw drift would raise ~6,781 benign rows and invite a bulk rewrite of a resolver input.
 check('#5 the bulk raw-drift set is explicitly left to the owner',
-  /RED list/.test(sql) && /6,78/.test(sql));
+  /RED list/.test(firstSql) && /6,78/.test(firstSql));
 check('#5 normalisation-awareness is stated so a spelling variant is not a finding',
   /normalisation-aware/i.test(sql));
 
 // ── 6. The data repair must be idempotent and self-guarding ──────────────────────────────────────
 check('#6 the repair only moves rows the view still reports',
-  /exists \(select 1 from public\.mon_district_contradicts_source/i.test(sql));
+  /exists \(select 1 from public\.mon_district_contradicts_source/i.test(firstSql));
 check('#6 the repair requires the source to publish BOTH district fields',
-  sql.includes("nullif(btrim(g.neighborhood), '')")
-  && sql.includes("nullif(btrim(g.additional_info->>'district_ar'), '')"));
+  firstSql.includes("nullif(btrim(g.neighborhood), '')")
+  && firstSql.includes("nullif(btrim(g.additional_info->>'district_ar'), '')"));
 
 // ── 7. MUTATION PROOF — a raw-drift oracle fails the scope contracts ─────────────────────────────
 {

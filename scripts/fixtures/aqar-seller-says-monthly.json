@@ -1,0 +1,338 @@
+{
+ "_about": "Real seller texts from aqar rent ads whose price box said «سنوي» (read 2026-11-10; row = listing row id). monthly: the seller's text says the box figure is the MONTHLY rent. yearly: it does not — these must never be changed, also when the unit type is forced to Apartment. tricky: made-up edge cases, always judged as an Apartment. Used by scripts/verify-aqar-seller-says-monthly.ts and scrapers/common/tests/test_aqar_seller_says_monthly_2026_11_10.py.",
+ "monthly": [
+  {
+   "row": 2314166,
+   "price": 8000,
+   "type": "Apartment",
+   "text": "سعر الإيجار الشهري 8000 ريال",
+   "flips": true
+  },
+  {
+   "row": 18600263,
+   "price": 8000,
+   "type": "Apartment",
+   "text": "غرفة ماستر 7,000 شهري غرفتين مع مسبخ خاص 8,000 شهري الأسعار تشمل الكهرباء",
+   "flips": true
+  },
+  {
+   "row": 20637423,
+   "price": 8000,
+   "type": "Warehouse",
+   "text": "سعر الإيجار الشهري 8,000 = (ثمانية ألف ريال شهريا)",
+   "flips": true
+  },
+  {
+   "row": 33487,
+   "price": 8500,
+   "type": "Floor",
+   "text": "دور للإيجار الشهري 8500 ريال",
+   "flips": true
+  },
+  {
+   "row": 14845422,
+   "price": 8500,
+   "type": "Apartment",
+   "text": "السعر ((8500)) شهرياً",
+   "flips": true
+  },
+  {
+   "row": 14855407,
+   "price": 8500,
+   "type": "Apartment",
+   "text": "الإيجار الشهري: 8,500 ريال",
+   "flips": true
+  },
+  {
+   "row": 14863518,
+   "price": 8500,
+   "type": "Apartment",
+   "text": "📅 سنوي: 90,000 ريال 📅 شهري: 8,500 ريال",
+   "flips": true
+  },
+  {
+   "row": 14991519,
+   "price": 8500,
+   "type": "Apartment",
+   "text": "الأيجار الشهري 8500 ريال",
+   "flips": true
+  },
+  {
+   "row": 14999409,
+   "price": 8500,
+   "type": "Apartment",
+   "text": "Maonthly Rent: 8,500 :الايجار الشهري Yearly Rent: 75,000 :الايجار السنوي",
+   "flips": false,
+   "why_left": "the monthly word sits after the figure and a colon, in a two-language line — the strict reader leaves it as aqar published it"
+  },
+  {
+   "row": 15415544,
+   "price": 8500,
+   "type": "Floor",
+   "text": "للإيجار الشهري : 8500 شامل الكهرباء الإيجار: شهري 8500",
+   "flips": true
+  },
+  {
+   "row": 15449408,
+   "price": 8500,
+   "type": "Apartment",
+   "text": "شقة مفروشة ب8500 شهرى",
+   "flips": true
+  },
+  {
+   "row": 17936801,
+   "price": 8500,
+   "type": "Villa",
+   "text": "السعر: 8500 شهري 3000﷼ تأمين مسترد",
+   "flips": false,
+   "why_left": "a second figure (the deposit) follows the monthly word — the strict reader cannot tell whose word it is"
+  },
+  {
+   "row": 20867174,
+   "price": 8500,
+   "type": "Apartment",
+   "text": "الإيجار 8,500 ريال شهريًا",
+   "flips": true
+  },
+  {
+   "row": 21175295,
+   "price": 8699,
+   "type": "Apartment",
+   "text": "السعر:8699 ريال شهريا",
+   "flips": true
+  },
+  {
+   "row": 21175981,
+   "price": 8699,
+   "type": "Apartment",
+   "text": "السعر : 8699 ريال شهريا",
+   "flips": true
+  },
+  {
+   "row": 20867783,
+   "price": 8800,
+   "type": "Apartment",
+   "text": "مبلغ الايجار السنوي(100000 دفعة واحدة) مبلغ الايجار الشهري (8800)",
+   "flips": true
+  },
+  {
+   "row": 8846284,
+   "price": 9000,
+   "type": "Apartment",
+   "text": "الايجار تسعة الاف ريال شهرياً ( 9000) ريال",
+   "flips": true
+  },
+  {
+   "row": 15121169,
+   "price": 9166,
+   "type": "Apartment",
+   "text": "*الإيجار السنوي* 110,000 سنوي . •* 9166 ريال * شهري الايجار سنوي",
+   "flips": true
+  },
+  {
+   "row": 21175298,
+   "price": 9399,
+   "type": "Apartment",
+   "text": "السعر : 9399 ريال شهريا",
+   "flips": true
+  },
+  {
+   "row": 14990555,
+   "price": 9499,
+   "type": "Apartment",
+   "text": "السعر الشهري: 9499 ريال فقط",
+   "flips": true
+  },
+  {
+   "row": 21175994,
+   "price": 9499,
+   "type": "Apartment",
+   "text": "السعر : 9499 ريال شهريا",
+   "flips": true
+  },
+  {
+   "row": 67384,
+   "price": 9500,
+   "type": "Apartment",
+   "text": "الايجار 9500 ريال شهري",
+   "flips": true
+  },
+  {
+   "row": 18713631,
+   "price": 9900,
+   "type": "Apartment",
+   "text": "Rent SAR 9,900/ Month",
+   "flips": true
+  },
+  {
+   "row": 21413572,
+   "price": 10000,
+   "type": "Apartment",
+   "text": "شهري ١٠.٠٠٠ الاف 10,000 monthly سنوي ١٠٠.٠٠٠الف 100,000 annually",
+   "flips": true
+  }
+ ],
+ "yearly": [
+  {
+   "row": 8817715,
+   "price": 8000,
+   "type": "Room",
+   "text": "السعر : 8000 ريال دفعه واحده او دفعتين 800 شهري"
+  },
+  {
+   "row": 16639657,
+   "price": 8000,
+   "type": "Room",
+   "text": "Annual Rent: SAR 8,000"
+  },
+  {
+   "row": 22052574,
+   "price": 8000,
+   "type": "Room",
+   "text": "دفعة واحدة 8000 ريال شهري 800 ريال"
+  },
+  {
+   "row": 22882285,
+   "price": 8000,
+   "type": "Shop",
+   "text": "الإيجار السنوي: 8,000 ريال الإيجار الشهري: يبدأ من 800 ريال"
+  },
+  {
+   "row": 10514719,
+   "price": 8500,
+   "type": "Apartment",
+   "text": "الايجار 8500 تامين 500 رسوم العقد200"
+  },
+  {
+   "row": 14873182,
+   "price": 8500,
+   "type": "Apartment",
+   "text": "السنوي :8500 الف على دفعتين الشهري :1000 شهري عقد سنوي"
+  },
+  {
+   "row": 23834616,
+   "price": 8500,
+   "type": "Room",
+   "text": "دفعة وحدة = 8,500 ريال شهري = حسب الاتفاق مع المالك"
+  },
+  {
+   "row": 30156,
+   "price": 9000,
+   "type": "Room",
+   "text": "الايجار الشهري 750 ريال نصف سنوي 4500 ريال سنوي 9000 ريال"
+  },
+  {
+   "row": 2538571,
+   "price": 10000,
+   "type": "Apartment",
+   "text": "الايجار 10000الف الايجار شامل الماء والكهرباء شهري 1000ريال"
+  }
+ ],
+ "tricky": [
+  {
+   "price": 9000,
+   "text": "الايجار 9000 شهري 900 ريال",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "ايجار شهري 9000 سنوي 90000",
+   "monthly": true
+  },
+  {
+   "price": 9000,
+   "text": "شهري 9000 سنوي",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "السعر 9000 شهرين مقدم",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "9000 ريال في السنة والدفع شهري",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "الايجار 9000 ريال للسنة او 900 شهري",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "9000 ريال كل شهر",
+   "monthly": true
+  },
+  {
+   "price": 9000,
+   "text": "الدفع شهري. 9000 ريال",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "السعر 9000 سنويا",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "شقة للايجار 9000",
+   "monthly": false
+  },
+  {
+   "price": 9500,
+   "text": "الإيجار الشهري ٩٥٠٠ ريال",
+   "monthly": true
+  },
+  {
+   "price": 9500,
+   "text": "الإيجار الشهري ٩٬٥٠٠ ريال",
+   "monthly": true
+  },
+  {
+   "price": 9500,
+   "text": "الايجار الشهري 19500 ريال",
+   "monthly": false
+  },
+  {
+   "price": 9500,
+   "text": "الايجار الشهري 9500.50 ريال",
+   "monthly": false
+  },
+  {
+   "price": 9900,
+   "text": "Monthly rent: SAR 9,900",
+   "monthly": true
+  },
+  {
+   "price": 9900,
+   "text": "Annual rent 9,900 SAR, monthly payments available",
+   "monthly": false
+  },
+  {
+   "price": 9900,
+   "text": "9,900 SAR per year",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "الايجار الشهري 9000 دفعة واحدة",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "السعر 9000 ريال شهري: 900 ريال",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "900 ريال شهري 9000 ريال",
+   "monthly": false
+  },
+  {
+   "price": 9000,
+   "text": "الايجار السنوي للشقة 9000 شهري او دفعتين",
+   "monthly": false
+  }
+ ]
+}

@@ -17,6 +17,7 @@ import { SourceBadge, FEATURE_META, arAttrValue, isBlankAttrValue } from '@/comp
 import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts, districtEmbedUrl, districtPlace, type DistrictPlace, fetchSimilarListings, type SimilarCard } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import { safeHttpUrl } from '@/lib/safeUrl';
+import { MONEY_LINE } from '@/lib/moneyLine';
 import type { Listing } from '@/data/listings';
 
 // THE IN-APP AD PAGE for the sites that cannot be framed (lib/inAppViewer.ts IN_APP_PREVIEW_HOSTS):
@@ -582,7 +583,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
           <View style={s.headMain}>
             {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
             {listingPrice(l, locale) ? (
-              <Text testID="listing-preview-price" numberOfLines={1} style={[s.price, tx]}>
+              <Text testID="listing-preview-price" {...MONEY_LINE} style={[s.price, tx]}>
                 {priceRuns(listingPrice(l, locale)).map((r, i) => <Text key={i} style={r.num ? s.priceNum : s.priceUnit}>{r.text}</Text>)}
               </Text>
             ) : null}
@@ -591,14 +592,14 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             {(() => {
               const text = monthlyLineText(l, locale);
               return text == null ? null : (
-                <Text testID="listing-preview-monthly-line" numberOfLines={1} style={[s.priceUnit, tx]}>{text}</Text>
+                <Text testID="listing-preview-monthly-line" {...MONEY_LINE} style={[s.priceUnit, tx]}>{text}</Text>
               );
             })()}
             {/* Source-published discount (owner 2026-10-19): the old price struck + «خصم X٪» under the
                 final price — the same line the result card shows, only when the source showed one. */}
             {l.discount ? (
               <View style={s.discountRow} testID="listing-preview-discount">
-                <Text numberOfLines={1} style={s.discountOld}>{listingDiscountOldPrice(l.discount, locale)}</Text>
+                <Text {...MONEY_LINE} style={s.discountOld}>{listingDiscountOldPrice(l.discount, locale)}</Text>
                 <View style={s.discountBadge}><Text style={s.discountBadgeTx}>{t('Discount {pct}%', { pct: l.discount.pct })}</Text></View>
               </View>
             ) : null}
@@ -709,7 +710,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                 const cell = (label: string, value: string | null, key: string) => (
                   <View key={key} style={s.cell2}>
                     <Text numberOfLines={1} style={[s.cellK2, tx]}>{label}</Text>
-                    <Text numberOfLines={1} style={[s.cellV2, tx]}>{value ?? '—'}</Text>
+                    <Text {...MONEY_LINE} style={[s.cellV2, tx]}>{value ?? '—'}</Text>
                   </View>
                 );
                 const ours = st ? {
@@ -850,7 +851,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                       >
                         <View style={s.siteLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.5 }] }}><SourceBadge source={card.source} /></View></View>
                         <Text numberOfLines={1} style={s.siteName}>{t(sourceName(card.source))}</Text>
-                        <Text numberOfLines={1} style={s.sitePrice}>{listingPrice(card, locale)}</Text>
+                        <Text {...MONEY_LINE} style={s.sitePrice}>{listingPrice(card, locale)}</Text>
                         <Text numberOfLines={1} style={[s.siteHint, me && s.siteHintMe]}>{me ? t('this ad') : t('Tap to view it')}</Text>
                       </Pressable>
                     ))}
@@ -1004,8 +1005,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                 >
                   <View style={s.simLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.5 }] }}><SourceBadge source={card.source} /></View></View>
                   <View style={s.simMain}>
-                    <Text numberOfLines={1} style={[s.simPrice, tx]}>{listingPrice(card, locale)}</Text>
-                    <Text numberOfLines={1} style={[s.simMeta, tx]}>{`${fmtArea(area)} م² · ${fmtInt(ppm)} ${t('SAR/m²')}${beds != null ? ` · ${t('{n} bedrooms', { n: fmtInt(beds) })}` : ''}`}</Text>
+                    <Text {...MONEY_LINE} style={[s.simPrice, tx]}>{listingPrice(card, locale)}</Text>
+                    <Text {...MONEY_LINE} style={[s.simMeta, tx]}>{`${fmtArea(area)} م² · ${fmtInt(ppm)} ${t('SAR/m²')}${beds != null ? ` · ${t('{n} bedrooms', { n: fmtInt(beds) })}` : ''}`}</Text>
                     <Text numberOfLines={1} style={[s.simSite, tx]}>{t(sourceName(card.source))} · {t('Tap to view it')}</Text>
                   </View>
                   <Ionicons name="open-outline" size={16} color={colors.primary} />
@@ -1046,21 +1047,28 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
               <Ionicons name="open-outline" size={12} color={colors.primary} />
             </Pressable>
           </View>
-          <View style={[s.dealRow, s.dealHeadRow]}>
-            {[t('Deal date'), t('Area m²'), t('Deal price'), t('m² price'), t('Deal reference')].map((h) => (
-              <Text key={h} numberOfLines={1} style={[s.dealCell, s.dealCellHead]}>{h}</Text>
-            ))}
-          </View>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-            {prices.deals.map((d) => (
-              <View key={d.ref} style={s.dealRow}>
-                <Text numberOfLines={1} style={s.dealCell}>{d.date}</Text>
-                <Text numberOfLines={1} style={s.dealCell}>{fmtArea(d.area)}</Text>
-                <Text numberOfLines={1} style={s.dealCell}>{fmtInt(d.price)}</Text>
-                <Text numberOfLines={1} style={s.dealCell}>{fmtInt(d.ppm)}</Text>
-                <Text numberOfLines={1} style={[s.dealCell, s.dealRef]}>{d.ref}</Text>
+          {/* Every column keeps room for its longest value (DEAL_COL_MIN) and the table scrolls sideways when the sheet is
+              narrower than that: an amount is never broken over two lines and never shortened with «…»
+              (scripts/verify-web-laptop-nothing-cut-or-covered.mjs opens this table at 320 px with a ten-digit price). */}
+          <ScrollView horizontal testID="listing-preview-moj-deals-table" style={{ flex: 1 }} contentContainerStyle={s.dealsTable}>
+            <View style={{ flex: 1 }}>
+              <View style={[s.dealRow, s.dealHeadRow]}>
+                {[t('Deal date'), t('Area m²'), t('Deal price'), t('m² price'), t('Deal reference')].map((h, i) => (
+                  <Text key={h} numberOfLines={1} style={[s.dealCell, DEAL_COL[i], s.dealCellHead]}>{h}</Text>
+                ))}
               </View>
-            ))}
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+                {prices.deals.map((d) => (
+                  <View key={d.ref} style={s.dealRow}>
+                    <Text numberOfLines={1} style={[s.dealCell, DEAL_COL[0]]}>{d.date}</Text>
+                    <Text numberOfLines={1} style={[s.dealCell, DEAL_COL[1]]}>{fmtArea(d.area)}</Text>
+                    <Text {...MONEY_LINE} style={[s.dealCell, DEAL_COL[2]]}>{fmtInt(d.price)}</Text>
+                    <Text {...MONEY_LINE} style={[s.dealCell, DEAL_COL[3]]}>{fmtInt(d.ppm)}</Text>
+                    <Text numberOfLines={1} style={[s.dealCell, DEAL_COL[4], s.dealRef]}>{d.ref}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
           </ScrollView>
           <Pressable
             testID="listing-preview-moj-deals-close"
@@ -1078,6 +1086,12 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
     </View>
   );
 }
+
+// The Ministry's deals table: the least room each column needs for its longest value at 12.5 px — date, area m², deal
+// price (ten digits with commas), m² price, reference. Narrower than their sum, the table scrolls sideways.
+const DEAL_COL_MIN = [84, 80, 104, 76, 108];
+const DEAL_COL = DEAL_COL_MIN.map((minWidth) => ({ minWidth }));
+const DEALS_TABLE_MIN = DEAL_COL_MIN.reduce((a, b) => a + b, 0) + 4 * 6 + 2 * 12; // + the row's four gaps and its side padding
 
 const s = StyleSheet.create({
   root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface, overflow: 'hidden' },
@@ -1168,6 +1182,7 @@ const s = StyleSheet.create({
   dealsSub: { fontSize: 12, lineHeight: 17, color: colors.muted },
   dealRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
   dealHeadRow: { marginTop: 10, backgroundColor: colors.surface2 },
+  dealsTable: { flexGrow: 1, minWidth: DEALS_TABLE_MIN },
   dealCell: { flex: 1, minWidth: 0, fontSize: 12.5, color: colors.ink, textAlign: 'center', fontVariant: ['tabular-nums'] },
   dealCellHead: { fontSize: 11, fontWeight: '600', color: colors.muted },
   dealRef: { color: colors.muted },

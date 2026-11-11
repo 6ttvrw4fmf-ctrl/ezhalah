@@ -171,6 +171,28 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
     return (row, normalize.category_for_type(ptype).lower()), ""
 
 
+# ── removal oracle: «is this 200 page THIS plot's page, still published?» ───────────────────────
+# Measured 2026-11-10 with a browser. A live page (أرض-الجوهرة-التجارية, الخبر-الصدفة-بلك-36) answers
+# 200 with `<link rel="canonical" href="…/<its own slug>">` and a body the crawl maps to a plot. A
+# slug the site does not have answers HTTP 404, canonical «…/custom404page», «الصفحة خطأ». The page
+# «أرض-تجارية» (أرض الروابي التجارية) is no longer LINKED from the index «عقارات-عرش» — which is the
+# only reason the crawl stopped seeing it — but its own URL still answers 200 with its own canonical
+# and the whole plot page: ARSأرض-تجارية sat at 5 strikes on it (P1 served_after_source_gone:arsh).
+# LIVE here means exactly what the crawl means: its own canonical, and map_page() publishes it.
+_CANONICAL_RE = re.compile(r'<link rel="canonical" href="([^"]+)"')
+
+
+def page_is_this_live_ad(ad_number: str, _row: Optional[dict], body: str) -> bool:
+    slug = str(ad_number)[len(PREFIX):]
+    m = _CANONICAL_RE.search(body or "")
+    if not slug or not str(ad_number).startswith(PREFIX) or not m:
+        return False
+    if urllib.parse.unquote(ihtml.unescape(m.group(1))).rstrip("/") != BASE + slug:
+        return False
+    got, _why = map_page(parse_page(slug, body))
+    return bool(got) and got[0]["ad_number"] == str(ad_number)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -224,7 +246,9 @@ def main() -> int:
         complete = unreadable == 0 and len(slugs) > 0
         for tbl, rr in (("arsh_residential_listings", res), ("arsh_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                seen = {r["ad_number"] for r in rr}
+                n = db.prune_unseen(tbl, seen, source=SOURCE, verify_gone=db.own_page_status_oracle(
+                    db.sb(), tbl, seen, live_page=page_is_this_live_ad))
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:

@@ -68,6 +68,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://www.remalre.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -360,6 +361,11 @@ def map_listing(p: dict, images: Optional[dict[int, list[str]]] = None) -> tuple
         "active": True,                 # this source publishes no sold/rented marker
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` (UTC — this
+        # install's `date` equals it, the site clock is UTC). Checked live 2026-11-09 on post 6660:
+        # date_gmt 2024-09-29T06:53:19 and the ad page's own card data prints «سبتمبر 29, 2024».
+        # Never `modified_gmt` (an edit: 6660 was modified 2025-12-14).
+        "date_added": site_posting_date(f"{p['date_gmt']}Z") if p.get("date_gmt") else None,
         "area_m2": area,
         "bedrooms": beds,
         "bathrooms": None,

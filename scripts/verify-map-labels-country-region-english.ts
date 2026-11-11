@@ -99,11 +99,11 @@ mustCatch('the whole view\'s count printed beside one district\'s name', viewCou
 check('the pill prints the named place\'s count when there is one', /viewCountText\(placeCount \?\? pinCount, viewPlace/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 const anyTop = real.replace('  if (top.n / total >= AREA_PLACE_SHARE) {', '  if (true) {');
 mustCatch('a place named when it holds only a minority of the view', anyTop !== real && (await load(anyTop)).areaPlaceName(regions, 'region', 'ar', latin, ...V(24, 45, 30)) !== null);
-check('the map hands every label view to areaPlaceName (not a fixed «في هذه المنطقة» below the country)', /const place = areaPlace\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span\);\n\s*setViewPlace\(place\?\.name \?\? null\); setPlaceCount\(place\?\.n \?\? null\);/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+check('the map hands every label view to areaPlaceName (not a fixed «في هذه المنطقة» below the country)', /const place = (?:whole \? areaPlace\(whole, 'country', loc, translitPlace, m\.region\.center, m\.region\.span\) : )?areaPlace\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span\);\n\s*setViewPlace\(place\?\.name \?\? null\); setPlaceCount\(place\?\.n \?\? null\);/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 
 const noCountry = real.replace("  if (latitudeDelta > COUNTRY_LABELS_ABOVE) return 'country';\n", '');
 mustCatch('the opening view drawing regions or cities instead of the one Saudi total', noCountry !== real && (await load(noCountry)).areaLevelFor(17) !== 'country');
-const shareRegions = real.replace("  if (level === 'country' || level === 'region') return rows;\n", '');
+const shareRegions = real.replace("  if (level === 'country' || level === 'region') return rows.filter((r) => !r.offLabel);\n", '');
 mustCatch('small regions hidden by the city share rule', shareRegions !== real && (await load(shareRegions)).visibleAreas(lib.areasFromFeed(feed, 'region', ALL, KSA), 'region').length < 13);
 const arabicEn = real.replace("  return loc === 'en' ? latin(name) : name;", '  return name;');
 mustCatch('an English UI showing Arabic city/district names (the 2026-11-05 screenshot)', arabicEn !== real && AR.test((await load(arabicEn)).areaName({ city: 'جدة', district: 'حي الشراع' }, 'district', 'en', latin)));

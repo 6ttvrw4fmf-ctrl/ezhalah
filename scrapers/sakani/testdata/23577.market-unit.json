@@ -1,0 +1,138 @@
+{
+ "_note": "sakani.sa /marketUnitsApi/v6/market_units/23577 data.attributes, fetched 2026-11-09, identity/contact keys dropped by run._public, deed number zeroed. publish_date is the posting date; the REGA licence carries only end_date.",
+ "attributes": {
+  "amenities": {
+   "electricity": false,
+   "water": false,
+   "elevator": false,
+   "balcony": false,
+   "air_conditioning": false,
+   "kitchen": false,
+   "furnished": false,
+   "sewerage_system": false,
+   "garden": false,
+   "internal_stairs": false,
+   "independent_electricity": false,
+   "driver_room": false,
+   "basement": false,
+   "maid_room": false,
+   "parking": false,
+   "pool": false,
+   "gypsum_board_decoration": false,
+   "parkay_flooring": false,
+   "porcelain_flooring": false,
+   "marble_flooring": false,
+   "ceramic_flooring": false,
+   "marble_front": false,
+   "stone_front": false,
+   "electrical_garage_door": false,
+   "fireplace": false,
+   "ducted_split_ac_concealed": false,
+   "dressing_room": false,
+   "washing_room": false,
+   "thermal_insulation": false,
+   "electric_shutter_windows": false
+  },
+  "rega_ad_license": {
+   "ad_license_number": "7201015889",
+   "ad_license_url": "https://eservicesredp.rega.gov.sa/public/OfficesBroker/ElanDetails/08ded123-2e1e-498a-8eb0-b57b7248f407",
+   "advertisement_type": "rent",
+   "deed_number": "0000000000000000",
+   "end_date": "2027-04-04",
+   "guarantees_and_their_duration": "",
+   "land_number": "917/1",
+   "location_description_on_moj_deed": null,
+   "location": {
+    "latitude": "24.77218784270536",
+    "longitude": "46.629819987169846",
+    "postal_code": "13511",
+    "building_number": "2877",
+    "additional_number": "8088"
+   },
+   "obligations_on_the_property": "لايوجد",
+   "property_age": null,
+   "property_usage": [],
+   "property_utilities": [
+    "ELECTRICITY",
+    "WATER",
+    "SANITATION"
+   ],
+   "id_type": "1",
+   "region_obj": {},
+   "city_obj": {},
+   "district_obj": {}
+  },
+  "digitar_avg_rating": "5.0",
+  "status": "published",
+  "publish": true,
+  "publish_date": "2026-06-23",
+  "rejection_reason": null,
+  "unit_age": null,
+  "source": "digital",
+  "ad_number": 7669,
+  "unit_type": "land",
+  "main_building_face": "northern",
+  "main_street_width": "80.0",
+  "unit_area": "450.0",
+  "building_footprint": null,
+  "height": null,
+  "width": null,
+  "number_of_floors": null,
+  "floor_number": null,
+  "building_year": null,
+  "number_of_bedrooms": null,
+  "number_of_bathrooms": null,
+  "number_of_reception_rooms": null,
+  "number_of_living_rooms": null,
+  "region_id": 1,
+  "city_id": 14,
+  "district_id": 241,
+  "unit_price": "1555.56",
+  "description": "فرصة استثمارية مميزة في قلب منطقة الرياض حي العقيق. أرض سكنية بمساحة 450 متر مربع توفر قاعدة مثالية لبناء منزل أحلامك أو مشروع استثماري مميز في أحد أكثر الأحياء حيوية ونموا في الرياض. تقع الأرض في موقع استراتيجي داخل حي العقيق مما يسهل الوصول إلى أهم الخدمات والمرافق في المنطقة. بالقرب منها تجد مركز سليمان المقرن على بعد 108 متر فقط وشركة أصل الحكمة الطبية على بعد 270 متر بالإضافة إلى مدرسة حي العقيق النسائية لتحفيظ القرآن الكريم على بعد 269 متر ما يجعلها خيارا مثاليا للعائلات والمستثمرين الباحثين عن الراحة والقرب من المرافق الأساسية. يمتاز الحي ببنية تحتية متكاملة وسهولة الوصول إلى طرق رئيسية تربطك بمختلف أنحاء مدينة الرياض. هذه الأرض تمنحك فرصة تصميم وبناء منزل عصري يلبي تطلعاتك أو استثمار طويل الأمد في موقع واعد ومتطور.",
+  "latitude": "24.77218784270536",
+  "longitude": "46.629819987169846",
+  "map_link": "https://www.google.com/maps?q=24.77218784270536,46.629819987169846",
+  "interior_photos": [
+   {
+    "id": 93537,
+    "content_type": "image/jpeg",
+    "file_url": "https://cdn.sakani.sa/sakani-media-assets/sakani-market-units-service/jeF57E1XRTo87SqCVRnRHstF"
+   }
+  ],
+  "exterior_photos": [
+   {
+    "id": 93536,
+    "content_type": "image/jpeg",
+    "file_url": "https://cdn.sakani.sa/sakani-media-assets/sakani-market-units-service/seCtfEt7iqgBn5QvmqQt6Mg5"
+   }
+  ],
+  "published_actor": "broker",
+  "group_unit_id": null,
+  "media_images": [
+   {
+    "tags": [
+     "banner"
+    ],
+    "image_url": "https://cdn.sakani.sa/sakani-media-assets/sakani-market-units-service/seCtfEt7iqgBn5QvmqQt6Mg5",
+    "media_type": "image/jpeg",
+    "thumbnail_url": "https://cdn.sakani.sa/sakani-media-assets/variants/sakani-market-units-service/seCtfEt7iqgBn5QvmqQt6Mg5/a57780cb48bda9dacfb8cff22c1101fbaf60aef6378dd6d9961a65603fa29403",
+    "small_size_url": "https://cdn.sakani.sa/sakani-media-assets/variants/sakani-market-units-service/seCtfEt7iqgBn5QvmqQt6Mg5/7a32f444b8b314d491cbf71510f90153a662f39684b31bff27ab01534c19c612",
+    "medium_size_url": "https://cdn.sakani.sa/sakani-media-assets/variants/sakani-market-units-service/seCtfEt7iqgBn5QvmqQt6Mg5/f48386dad2eb2f1275d4ed6df0df57273a2c3a2ef1edec77d19015e00f9d99f6"
+   }
+  ],
+  "deed_number": "0000000000000000",
+  "number_of_rooms": null,
+  "building_license_number": null,
+  "unit_number": null,
+  "plan_number": "2347",
+  "land_type": "residential",
+  "views_count": 369,
+  "city_obj": {
+   "name_ar": "الرياض",
+   "name_en": "Riyadh",
+   "lat": 24.6526,
+   "lon": 46.72412
+  },
+  "property_videos": []
+ }
+}

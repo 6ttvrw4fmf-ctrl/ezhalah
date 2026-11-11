@@ -60,6 +60,7 @@ from scrapers.common import db, normalize
 from scrapers.common.http import retry_smarter_session
 from scrapers.common.source_pin import pin_dict
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.posting_date import site_posting_date
 from scrapers.common.source_pin import pin_dict
 
 REST = "https://aqaralsaudia.com/wp-json/wp/v2"
@@ -442,6 +443,11 @@ def map_listing(post: dict) -> tuple[Optional[dict], str]:
         "active": True,
         "property_type": property_type,
         "transaction_type": _canonical_deal(deal),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` (UTC; `date` equals
+        # it on all 19 posts). Checked live 2026-11-09: 9067 date_gmt 2026-04-14T15:56:47 = the page's
+        # JSON-LD datePublished «2026-04-14T15:56:47+00:00»; first seen by us 2026-09-13 22:14 UTC. Never
+        # `modified` (8944 was modified 2026-04-14, seven months after it was posted 2025-09-26).
+        "date_added": site_posting_date(f"{post['date_gmt']}Z") if post.get("date_gmt") else None,
         "area_m2": area,
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,

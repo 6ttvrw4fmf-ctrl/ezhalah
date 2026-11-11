@@ -261,6 +261,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://ego-aqar.com"
 API = "https://egoagar-backend.com/api/v0"      # from the app bundle's own `apiBaseUrl`
@@ -474,6 +475,21 @@ def _rent_fields(price: Optional[int], text: Optional[str]) -> tuple[Optional[st
     return None, price                  # uncorroborated multiplication → UNKNOWN, price verbatim
 
 
+_CREATED_RE = re.compile(r"(\d{1,2}) ([A-Z][a-z]{2}) (\d{4}) - (\d{1,2}):(\d{2}):(\d{2}) ([AP]M)", re.ASCII)
+_MONTHS = {m: i for i, m in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+                                       "Oct", "Nov", "Dec"), 1)}
+
+
+def _created_at(raw: Any) -> Optional[str]:
+    """«08 Nov 2026 - 09:32:22 AM» (Saudi wall time) → «2026-11-08T09:32:22»; anything else → None."""
+    m = _CREATED_RE.fullmatch(raw.strip()) if isinstance(raw, str) else None
+    if not m or m.group(2) not in _MONTHS or not 1 <= int(m.group(4)) <= 12:
+        return None
+    hour = int(m.group(4)) % 12 + (12 if m.group(7) == "PM" else 0)
+    return site_posting_date(f"{m.group(3)}-{_MONTHS[m.group(2)]:02d}-{int(m.group(1)):02d}"
+                             f"T{hour:02d}:{m.group(5)}:{m.group(6)}")
+
+
 def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason) for ONE /units/<id> detail object.
 
@@ -576,7 +592,12 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "additional_number": _clean(gov.get("additionalNumber")),
         "license_number": _clean(rec.get("licenseNumber")),
         "license_expiry": _clean(rec.get("licenseExpiryDate")),
-        "date_added": _clean(rec.get("createdAt")),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the unit's `createdAt`, printed
+        # «08 Nov 2026 - 09:32:22 AM» — which public.source_posted_at cannot read, so it was stored and
+        # never counted. It is SAUDI time: unit 2472's main photo reached S3 at 06:34:52 GMT, 2.5 min
+        # after 09:32:22 +03:00 (and 2471's at 01:23:17 GMT, 51 s after «04:22:26 AM»). Never
+        # licenseStartDate / licenseExpiryDate (the REGA licence).
+        "date_added": _created_at(rec.get("createdAt")),
         "photo_urls": _photos(rec),
     }
     if deal == "Rent":

@@ -1,5 +1,32 @@
 # 🦅 الصقر — The Falcon (owner, 2026-10-04)
 
+> **OWNER ORDER 2026-11-09 — «do good in the next run» (read before your tasks; every engineer).**
+> The numbers it answers: 11-09 proven fixes 19 of 53 (36 %, was 50 % on 11-08); 🔗 0 proven for 2 nights while claiming fixes;
+> 🔬 over-claimed (4 of 14); ⚡ 1 of 7. Open bugs 168: the OLD ones fell to 101, but checkers born since 11-07 added 67
+> (card_parity_* 29 open, repeat_bug:* , af_new_listing_capture_regression). Only 13 of 97 PRs got a CodeRabbit review.
+> 1. **A fix counts only with proof on the live site.** Say «fixed» only when you can name the check that passed AFTER the merge
+>    (query, URL, run id + UTC time). No proof yet → write it as «⏳ dated: <job> at <UTC>», never as fixed. Over-claiming = 0 for the night.
+> 2. **Root cause or it is not a fix.** Change the code/rule that made the bug AND add a check that fails if it comes back.
+>    Repairing rows, re-running a job or widening a threshold alone is a symptom fix (66 % of alerts were repeats on 11-07).
+> 3. **Job 1 = the open alerts with your `owner_routine` from the new checkers** (card parity, repeat_bug, capture regression),
+>    oldest first, before any new hunting. 🔧 QA owns card_parity_*; ♻️/🔧 own repeat_bug:* of their lane.
+> 4. **Fewer, bigger PRs.** CodeRabbit gives ~24 reviews a day for ALL of us (one GitHub author). One PR per root cause; put the
+>    migration's mirror INSIDE the fix PR (do not open a separate «mirror:» PR); no docs-only PRs during a run. Max 4 PRs per run.
+> 5. **Never apply a migration to production before its PR exists.** Open the PR with the exact file first, then apply.
+>    (Five deploys in a row were refused 11-08 → 11-09 by migrations applied before their PRs.) A PR stuck on CodeRabbit
+>    «rate limited»: comment `@coderabbitai review` once; never open a duplicate PR.
+> 6. **Your score = your open bugs went DOWN (owner 2026-11-09).** At :start AND :end run
+>    `select count(*) from alert_event where resolved_at is null and owner_routine = '<your routine>'` and write both numbers in :end.
+>    A night is GOOD only if end < start, with every closed alert closed by a proven fix (rule 1), not by hiding or resolving by hand.
+>    Equal or higher = a bad night whatever else you did: write why, and the ONE root cause you will hit first next run.
+>
+> 7. **Use CodeRabbit on every PR it reviews (owner 2026-11-10, paid usage budget is ON).** Wait for its review before merging.
+>    Fix every real finding: Major/Critical always, and any minor one that is a real bug. Add the test it suggests when it names one.
+>    On each thread, reply with the fix commit (or the proof that it is wrong), then resolve it. Never resolve a thread without one of the two.
+>    Rate-limited or «Skipped» on a PR it should review → push ONE fresh commit to re-trigger it; never merge around a review it owes.
+>    In :end write `CodeRabbit: <found> found, <fixed> fixed, <refuted> refuted` and name the best catch.
+
+
 > **🔒 MERGE LOCK 2026-11-08 (owner: «fully automate with the engineers and CodeRabbit»).** `safe-pr-merge.ts` (and so the robot) REFUSES a PR
 > with ANY unresolved CodeRabbit Major/Critical thread (#11247 was green with 9 unanswered Majors on PRICE = SOURCE). Fix it or answer it with
 > evidence, then RESOLVE the thread. Before writing :end, re-read the threads on EVERY PR you opened this run — reviews keep arriving after your last push.

@@ -61,6 +61,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.page_pin import pin_from_page  # noqa: E402
 
 BASE = "https://hazim.sa"
@@ -100,6 +101,14 @@ def parse_price(raw) -> Optional[int]:
         return None
     n = normalize.to_int(s)
     return n if n else None
+
+
+_ZONELESS_ISO = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?", re.ASCII)
+
+
+def _utc_stamp(raw: Any) -> Any:
+    """Base44 writes created_date in UTC without a zone: say so («Z») so it is not read as Saudi time."""
+    return raw.strip() + "Z" if isinstance(raw, str) and _ZONELESS_ISO.fullmatch(raw.strip()) else raw
 
 
 def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
@@ -178,6 +187,12 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "floor_number": floor_num,
         "property_age": normalize.age_from_completion_year(year, this_year=datetime.now(timezone.utc).year) if year else None,
         "license_number": None,                  # not published
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the entity's `created_date`. It carries no zone and IS UTC,
+        # so it is marked «Z» before it is stored (re-expressed in Saudi time): the 24-hex id is a MongoDB ObjectId whose
+        # first 4 bytes are the creation epoch, and on all six records (2026-11-09) that epoch equals created_date read
+        # as UTC to the second (ref 1127: 6a3120a0 = 2026-06-16T10:08:32Z, created_date 2026-06-16T10:08:32.042).
+        # Never updated_date (an edit).
+        "date_added": site_posting_date(_utc_stamp(p.get("created_date"))),
         "photo_urls": photos or None,
     }
     if furnished is not None:

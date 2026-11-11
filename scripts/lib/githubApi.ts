@@ -29,7 +29,7 @@ export type PrState = {
   files: string[];
 };
 
-export type RawCheck = { context: string; conclusion: string | null };
+export type RawCheck = { context: string; conclusion: string | null; title?: string | null };
 
 function token(): string {
   const env = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -113,12 +113,12 @@ export async function getChecks(slug: string, sha: string): Promise<RawCheck[]> 
   const out: RawCheck[] = [];
   for (let page = 1; ; page++) {
     const r = (await api(`/repos/${slug}/commits/${sha}/check-runs?per_page=100&page=${page}`)) as {
-      check_runs: Array<{ name: string; status: string; conclusion: string | null }>;
+      check_runs: Array<{ name: string; status: string; conclusion: string | null; output?: { title?: string | null } }>;
     };
     for (const c of r.check_runs) {
       // A check that has not COMPLETED has no conclusion yet — represent that as null (PENDING),
       // never as a pass.
-      out.push({ context: c.name, conclusion: c.status === 'completed' ? c.conclusion : null });
+      out.push({ context: c.name, conclusion: c.status === 'completed' ? c.conclusion : null, title: c.output?.title ?? null });
     }
     if (r.check_runs.length < 100) break;
   }
@@ -190,6 +190,16 @@ export async function getOpenCodeRabbitMajors(slug: string, n: string): Promise<
     }
     if (!t.pageInfo.hasNextPage) return out;
     after = t.pageInfo.endCursor;
+  }
+}
+
+/** Has CodeRabbit posted at least one review on PR #n (any commit)? Throws when unreadable; the caller treats that as no. */
+export async function hasCodeRabbitReview(slug: string, n: string): Promise<boolean> {
+  for (let page = 1; ; page++) {
+    const r = (await api(`/repos/${slug}/pulls/${n}/reviews?per_page=100&page=${page}`)) as Array<{ user?: { login?: string } }>;
+    if (!Array.isArray(r)) throw new Error(`could not read reviews of PR #${n}`);
+    if (r.some((v) => CODERABBIT_LOGINS.has(v.user?.login ?? ''))) return true;
+    if (r.length < 100) return false;
   }
 }
 

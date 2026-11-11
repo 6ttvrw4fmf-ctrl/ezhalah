@@ -90,6 +90,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     city_ar_for,
     find_district_in_text,
@@ -513,6 +514,11 @@ def map_listing(post: dict, terms: dict[str, dict[int, str]], media: dict[int, s
         **normalize.amenities_from_text(body),
         "property_type": property_type,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` (UTC — `date`
+        # equals it on all 54 posts, the site clock is UTC). Checked live 2026-11-09: 21280 date_gmt
+        # 2026-10-11T13:34:25, first seen by us 2026-10-12 04:27 UTC. The page prints no date.
+        # Never `modified` (kept in additional_info: an edit — 21280 was modified 2026-11-03).
+        "date_added": site_posting_date(f"{post['date_gmt']}Z") if post.get("date_gmt") else None,
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,

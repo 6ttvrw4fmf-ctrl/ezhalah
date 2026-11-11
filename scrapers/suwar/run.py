@@ -65,6 +65,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 SITE = "https://suwar.sa"
 REST = f"{SITE}/wp-json/wp/v2"
@@ -395,6 +396,11 @@ def map_listing(post: dict, detail: Optional[dict]) -> tuple[Optional[dict], str
         "active": is_active,
         "property_type": property_type,
         "transaction_type": "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` from the REST
+        # feed this scraper already reads (UTC — `date` equals it on all 164 posts, the site clock is
+        # UTC). Checked live 2026-11-09: post 22760 date_gmt 2026-10-06T15:31:50, first seen by us
+        # 2026-10-07 04:50 UTC. The page prints no date. Never `modified_gmt` (an edit).
+        "date_added": site_posting_date(f"{post['date_gmt']}Z") if post.get("date_gmt") else None,
         "area_m2": area_m2,
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,

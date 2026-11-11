@@ -17,6 +17,7 @@
 //
 // {name} comes from the SAME AuthUser field the account menu / resultsFoundRotation already use —
 // nameAr for ar, nameEn for en. A guest (or missing display name) picks the guest pool.
+import { stableIndex } from '../lib/stablePick.ts';
 
 export type NoResultsTemplate = { lang: 'ar' | 'en'; hasName: boolean; template: string };
 
@@ -143,8 +144,14 @@ export function pickNoResultsSentence(args: {
   if (pool.length === 0) return args.lang === 'ar' ? 'ما فيه نتائج تطابق بحثك حالياً.' : 'No results match your search right now.';
   const key = `${args.lang}|${hasName}`;
   const prev = lastIndex[key] ?? -1;
-  let i = Math.floor(Math.random() * pool.length);
-  if (pool.length > 1 && i === prev) i = (i + 1) % pool.length;
+  // A message keeps ONE line on every device and every reopen (src/lib/stablePick.ts); only a pick
+  // with no message to belong to rotates at random.
+  let i: number;
+  if (args.stableKey != null) i = stableIndex(args.stableKey, pool.length);
+  else {
+    i = Math.floor(Math.random() * pool.length);
+    if (pool.length > 1 && i === prev) i = (i + 1) % pool.length;
+  }
   lastIndex[key] = i;
   let out = pool[i].template;
   if (hasName) out = out.split('{name}').join(args.name!.trim());

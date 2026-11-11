@@ -35,6 +35,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.posting_date import site_posting_date
 
 BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -580,6 +581,14 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
+        # THE SITE'S OWN POSTING DATE (owner 2026-10-26 / 2026-11-09, docs/ARCHITECTURE.md §20). Wasalt
+        # publishes `publishedAt` on every search-list property: the moment the ad went live, a few
+        # minutes after `createdAt` (the draft). It is what wasalt's own «تم اضافتها قبل N يوم» counts
+        # from — measured 2026-11-09 over 92,079 active rows' ar_data: «قبل 59 يوم» ↔ 59.3 days,
+        # «قبل 141 يوم» ↔ 141.5 days. It does NOT move on an edit (`updatedAt` does: 5966658 published
+        # 2026-10-31, updated 2026-11-03), and only 1 of 91,998 is later than our first sighting.
+        # Never `updatedAt` (an edit), never propertyInfo.regaAdvLicDate (the REGA licence date).
+        "date_added": site_posting_date(prop.get("publishedAt")),
         "area_m2": area_m2,
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,

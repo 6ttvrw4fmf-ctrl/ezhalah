@@ -105,6 +105,20 @@ const SITES = [
 ];
 let failed = 0;
 const fail = (m) => { failed++; console.log(`✗ ${m}`); };
+// A bot wall / WAF page served to a datacenter robot instead of the ad: a page too small to be a listing (the ad pages
+// this robot frames run 20–400 KB; a wall is a few hundred bytes to ~1.5 KB), or known challenge words on a page still
+// far smaller than any ad page (a Cloudflare interstitial is 5–12 KB). The words alone are NOT a wall: a full ad page
+// may carry «captcha» in a contact widget, and such a page with a refusing header is a real refusal (CodeRabbit, #11680).
+export const WALL_MAX_CHARS = 20_000;
+export const isBotWall = (body) => body.length < 1500 || (body.length < WALL_MAX_CHARS && /just a moment|checking your browser|verify you are human|cf-chl|challenge-platform|__cf_chl|sucuri|imunify|wordfence|access denied|attention required|captcha|ddos-guard|bot verification|enable javascript and cookies|التحقق من المتصفح|يرجى الانتظار/i.test(body));
+/** The frame's own document answer, when it is a refusal of a real ad page (not a wall, not an error): the header it
+ *  carried, else null. A blank frame whose top-level fetch hit a wall is excluded as inconclusive ONLY when the frame's
+ *  own answer does not prove a refusal — the two are separate requests (CodeRabbit, #11680). */
+export const frameRefusal = (doc) => {
+  if (!doc || doc.status >= 400 || isBotWall(doc.text)) return null;
+  const fa = /frame-ancestors[^;]*/i.exec(doc.csp ?? '')?.[0] ?? '';
+  return doc.xfo || (fa && !/frame-ancestors\s+\*/.test(fa)) ? (doc.xfo || fa) : null;
+};
 const ok = (m) => console.log(`✓ ${m}`);
 
 // Cross-check the list against the app's own allowlist, so a new in-app site cannot skip this guard.
@@ -126,7 +140,16 @@ async function sampleUrls(table) {
 
 const browser = await chromium.launch();
 try {
-  for (const site of SITES) {
+  // ONLY_HOSTS=a.com,b.sa: a diagnostic / proof run over a few sites (the workflow then skips the alert bridge).
+  const only = String(process.env.ONLY_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean);
+  const runSites = only.length ? SITES.filter((s) => only.includes(s.host)) : SITES;
+  const unknown = only.filter((h) => !SITES.some((s) => s.host === h));
+  if (unknown.length) fail(`ONLY_HOSTS names ${unknown.join(', ')} — not in SITES; a filter that selects nothing must not read as a green run`);
+  // A filter that was GIVEN but names nothing (spaces / commas) is refused too: the workflow's alert bridge already
+  // reads such a run as partial, so running every site here would be a full run whose verdict reaches no alert.
+  if ((process.env.ONLY_HOSTS ?? '') !== '' && !only.length) fail('ONLY_HOSTS was given but names no host — refusing to run every site under a partial-run label');
+  if (only.length) console.log(`! partial run: ${runSites.map((s) => s.host).join(', ')} (ONLY_HOSTS)`);
+  for (const site of runSites) {
     let urls;
     try { urls = await sampleUrls(site.table); } catch (e) { fail(`${site.host}: cannot pick live ads (${e.message})`); continue; }
     if (!urls.length) { fail(`${site.host}: no active ads to test`); continue; }
@@ -136,6 +159,8 @@ try {
     // HTTP 403 text/plain with no cf-* header from a cloud session, NO CONTENT ×3 from the runner, 200 to a
     // phone — a WAF on datacenter egress, not a framing refusal, yet it read ✗ on every run for two days.
     const topStatus = new Map();
+    const topWall = new Set();
+    const topUnreadable = new Set();   // top-level 2xx whose body could not be read: step 2 treats a blank frame as inconclusive
     for (const u of urls) {
       const res = await fetch(u, { headers: { 'User-Agent': devices['iPhone 13'].userAgent }, redirect: 'follow' }).catch(() => null);
       topStatus.set(u, res ? res.status : 0);
@@ -151,15 +176,43 @@ try {
       if (res?.headers.get('cf-mitigated') === 'challenge') { console.log(`· ${site.host}: ${u} — Cloudflare challenged the robot (${res.status} cf-mitigated: challenge), header check skipped`); continue; }
       const xfo = res?.headers.get('x-frame-options') ?? '';
       const fa = /frame-ancestors[^;]*/i.exec(res?.headers.get('content-security-policy') ?? '')?.[0] ?? '';
-      if (xfo || (fa && !/frame-ancestors\s+\*/.test(fa))) fail(`${site.host}: ${u} now REFUSES framing (${xfo || fa}) — take it off IN_APP_VIEWER_HOSTS`);
+      if (xfo || (fa && !/frame-ancestors\s+\*/.test(fa))) {
+        // A 200 whose BODY is a bot wall (a WAF / JS-challenge page served to this datacenter egress) carries the wall's
+        // X-Frame-Options, not the ad page's. 2026-11-10 run 42817005291: six hosts (awaalun.com, villas-sa.com, 24.com.sa,
+        // qmra.sa, ryadah.com.sa, sqcc.sa) read «SAMEORIGIN» ×3 and NO CONTENT ×3 in the same run, while 24.com.sa/1306/x
+        // answered 200 with NO frame header to another vantage. Same class as the challenge page and the 4xx/5xx above:
+        // print what was read (server, size, title), exclude it as inconclusive, never ✗ — a real refusal is a full ad
+        // page (thousands of characters, no wall words) that still carries the header, and that still fails here.
+        const body = await res.text().catch(() => null);
+        // An unreadable body is neither the ad page nor a wall: say so and leave it to step 2 (CodeRabbit, #11680).
+        if (body === null) { topUnreadable.add(u); console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa} but the body could not be read: header check inconclusive`); continue; }
+        const wall = isBotWall(body);
+        // No <title> in the log: a listing's title can carry a phone number or a person's name (PDPL). Server + size say enough.
+        console.log(`· ${site.host}: ${u} — top-level ${res.status} with ${xfo || fa}; server ${res.headers.get('server') ?? '?'}, ${body.length} chars${wall ? ' → a bot wall to this egress, not the ad page: header check skipped' : ''}`);
+        if (wall) { topWall.add(u); continue; }
+        fail(`${site.host}: ${u} now REFUSES framing (${xfo || fa}) — take it off IN_APP_VIEWER_HOSTS`);
+      }
     }
     // 2. time to content inside a frame, phone + 4G
     const times = [];
     for (const u of urls) {
       const ctx = await browser.newContext({ ...devices['iPhone 13'], locale: 'ar' });
       const p = await ctx.newPage();
-      let rateLimited = false, challenged = false;
-      p.on('response', (r) => { if (r.status() === 429) rateLimited = true; if (r.headers()['cf-mitigated'] === 'challenge') challenged = true; });
+      let rateLimited = false, challenged = false, frameDoc = null;
+      p.on('response', (r) => {
+        if (r.status() === 429) rateLimited = true;
+        if (r.headers()['cf-mitigated'] === 'challenge') challenged = true;
+        // The frame's OWN document answer (a separate request from the top-level fetch above): status, framing headers
+        // and body, so a blank frame is judged on what the FRAME received, not on what the robot's fetch received.
+        if (r.request().resourceType() === 'document' && r.frame() !== p.mainFrame()) {
+          const h = r.headers();
+          const d = { status: r.status(), xfo: h['x-frame-options'] ?? '', csp: h['content-security-policy'] ?? '', text: '', ready: null };
+          // The body read is kept and AWAITED before any decision (CodeRabbit, #11680): an unresolved read would leave
+          // text '' and read as a wall, hiding a real refusal. An unreadable body stays '' (→ inconclusive, never ✗).
+          d.ready = r.text().then((t) => { d.text = t; }).catch(() => {});
+          frameDoc = d;
+        }
+      });
       const cdp = await ctx.newCDPSession(p);
       await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 800_000, uploadThroughput: 93_750 });
       const t0 = Date.now(); let seen = null;
@@ -171,6 +224,9 @@ try {
         const n = fr ? await fr.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0) : 0;
         if (n > 200) seen = Date.now() - t0;
       }
+      // The frame body read must finish WHILE the context is open (closing it would interrupt a pending read and leave
+      // text '' → «wall» → a hidden refusal; CodeRabbit, #11680). Bounded: 3 s, then the decision reads what arrived.
+      if (seen === null && frameDoc?.ready) await Promise.race([frameDoc.ready, new Promise((r) => setTimeout(r, 3000))]);
       await ctx.close();
       if (seen === null && rateLimited) { console.log(`· ${site.host}: ${u} — rate-limited by the site (429), excluded`); continue; }
       if (seen === null && challenged) { console.log(`· ${site.host}: ${u} — Cloudflare challenged the robot (cf-mitigated: challenge), excluded`); continue; }
@@ -179,6 +235,15 @@ try {
       // challenge page — excluded and reported, never ✗. A 200 page that stays blank is still measured (99,999).
       const top = topStatus.get(u) ?? 0;
       if (seen === null && (top === 0 || top >= 400)) { console.log(`· ${site.host}: ${u} — top-level load answered HTTP ${top || 'nothing'} to this egress (WAF / block / outage), excluded as inconclusive`); continue; }
+      if (seen === null && (topWall.has(u) || topUnreadable.has(u))) {
+        // The top-level fetch hit a wall (or its body could not be read), but the FRAME is its own request: if the
+        // frame received a real ad page (not a wall, not an error) that still carried a refusing header, that is a
+        // real refusal and FAILS here — never a 99,999 ms sample that two fast siblings could outvote (CodeRabbit, #11680).
+        const refusal = frameRefusal(frameDoc);
+        if (refusal) { fail(`${site.host}: ${u} — the frame received the ad page (${frameDoc.text.length} chars) with ${refusal}: REFUSES framing — take it off IN_APP_VIEWER_HOSTS`); continue; }
+        const why = topWall.has(u) ? 'top-level load was a bot wall to this egress' : 'top-level body could not be read';
+        console.log(`· ${site.host}: ${u} — ${why} (frame: ${frameDoc ? `HTTP ${frameDoc.status}, ${frameDoc.text.length} chars` : 'no document answer'}), excluded as inconclusive`); continue;
+      }
       times.push(seen ?? 99_999);
       console.log(`· ${site.host}: ${u} → ${seen === null ? 'NO CONTENT in 12s' : seen + ' ms'}`);
     }

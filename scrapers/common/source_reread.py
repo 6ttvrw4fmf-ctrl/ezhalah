@@ -202,6 +202,19 @@ _REM_PAIR = re.compile(r'rem-single-field-title"[^>]*>([^<]{1,40})</strong>(.*?)
 _REM_VALUE = re.compile(r'rem-single-field-value[^>]*>(.*)', re.S)
 
 
+# Houzez prints the ad's own place as a label and a value in sibling tags with no keyword on the line:
+# «<li class="detail-area"><strong>تسمية المنطقة</strong> <span>اللبه</span></li>» and «detail-address». The
+# keyword filter dropped both, so the only place the score saw on fursaghyr 1199451 / 4367079 / 3237532 (card
+# parity, 2026-11-08/09) was the deed's plan description («وصف موقع العقار حسب الصك : حي حلة الاحوس …»), and the
+# stored district — the very name in these two fields — scored MISMATCH. The pair is kept as the page prints it;
+# no «حي» is added, so the line can confirm a stored district and cannot by itself contradict one.
+_HOUZEZ_PLACE = re.compile(r'<li class="detail-(?:area|address)">\s*<strong>([^<]{1,40})</strong>\s*<span>([^<]{1,200})</span>')
+
+
+def _houzez_place_lines(body: str) -> list[str]:
+    return [re.sub(r"\s+", " ", html.unescape(f"{a} {b}")).strip() for a, b in _HOUZEZ_PLACE.findall(body or "")]
+
+
 def _label_value_lines(body: str) -> list[str]:
     out = []
     for m in _REM_PAIR.finditer(body or ""):
@@ -279,7 +292,7 @@ def page_evidence(body: str) -> dict:
         # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
-        "evidence_lines": (_payload_area_lines(body) + _payload_place_lines(body) + _label_value_lines(body)
+        "evidence_lines": (_payload_area_lines(body) + _payload_place_lines(body) + _houzez_place_lines(body) + _label_value_lines(body)
                            + _number_first_lines(body) + _feature_block_lines(body) + _with_values(lines))[:400],
         "text_head": " | ".join(lines)[:1500],
     }
