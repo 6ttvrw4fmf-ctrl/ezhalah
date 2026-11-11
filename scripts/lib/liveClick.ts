@@ -82,7 +82,8 @@ export async function clickWitnessed(page: any, box: { x: number; y: number }, w
     const rearmed = await page.evaluate(ARM_CLICK_WITNESS_SRC, want).then(() => true, () => false);
     if (rearmed) {
       await page.locator(`[data-testid="${want.testid}"]`).first().click({ timeout: 2500 }).catch(() => {});
-      hit = await page.evaluate(READ_CLICK_WITNESS_SRC).catch(() => null);
+      // a rejected SECOND read is as unknown as a rejected first one: the locator tap may have acted (CodeRabbit on #11821)
+      hit = await page.evaluate(READ_CLICK_WITNESS_SRC).catch(() => { readFailed = true; return null; });
     }
   }
   if (hit?.onTarget) return { landed: true, hit: want.testid || want.text || '(target)' };

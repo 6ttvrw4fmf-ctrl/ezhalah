@@ -435,6 +435,22 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
     mustCatch('a replaced document (witness read back undefined) spending a second tap', rr.landed === false && taps === 0);
     check('…and it is reported as UNKNOWN, so the caller spends no further tap either', rr.unknown === true, JSON.stringify(rr));
   }
+  // the locator tap ran, then the SECOND witness read rejected — the tap may have acted: UNKNOWN, never a clean miss
+  {
+    let reads = 0;
+    const second = {
+      evaluate: async (fn: any) => {
+        if (fn !== READ_CLICK_WITNESS_SRC) return undefined;
+        if (++reads === 2) throw new Error('context destroyed');
+        return null;
+      },
+      mouse: { click: async () => {} },
+      locator: () => ({ first: () => ({ click: async () => {} }) }),
+    };
+    const rs = await clickWitnessed(second as any, { x: 1, y: 2 }, { testid: 'x' });
+    mustCatch('a rejected second witness read reading as a confirmed miss (the caller would tap again)',
+      rs.landed === false && rs.unknown === true && reads === 2);
+  }
   const r5 = await clickWitnessed(elsewhere as any, { x: 1, y: 2 }, { testid: 'x' });
   check('a click that landed on something ELSE is a real miss — no second tap is spent on it',
     r5.landed === false && r5.hit === 'card-listing-1' && locatorCalls === 0, `${JSON.stringify(r5)} locatorCalls=${locatorCalls}`);
