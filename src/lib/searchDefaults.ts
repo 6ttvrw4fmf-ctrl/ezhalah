@@ -9,6 +9,7 @@
 import type { SearchQuery } from '@/data/search';
 import type { Deal } from '@/data/taxonomy';
 import { CLEAN_MACRO, groupsMembers, groupsOf, pruneTypesToGroups } from '../data/propertyTypes.ts';
+import { postedWindowOffered, validPostedWindow } from './postedWindows.ts';
 
 // A CROSS-MACRO SCOPE: the user is in one category and the selected type/group reaches a clean type whose
 // HOME macro is the other one — today only Residential Land offered under the commercial land group
@@ -258,6 +259,9 @@ export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
     // else it is an invisible filter, which is exactly what this allowlist exists to stop.
     ...(q.deal === 'Rent' && !q.dealCombined && validRentPeriod(q.rentPeriod) === 'annual'
         && (q.category ?? base.category) === 'Residential' && q.furnishedPref != null ? { furnishedPref: q.furnishedPref } : {}),
+    // visible: the «نُشر خلال» menu (owner 2026-11-11) — every deal but short stays; an unknown value reads as «أي وقت».
+    ...(validPostedWindow(q.postedWithinDays) != null && postedWindowOffered({ deal: q.deal, rentPeriod: validRentPeriod(q.rentPeriod) ?? base.rentPeriod, dealCombined: q.dealCombined })
+        ? { postedWithinDays: validPostedWindow(q.postedWithinDays) } : {}),
     priceMin: q.priceMin,                         // visible: price من/إلى
     priceMax: q.priceMax,
     rentPeriod: validRentPeriod(q.rentPeriod) ?? base.rentPeriod,  // visible: شهري/سنوي

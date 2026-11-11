@@ -27,10 +27,12 @@ import { cityNameEn, regionNameEn, districtNameEn, ensureLocationIndex, ensureCi
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, emptyQuery, type SearchQuery } from '@/data/search';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
-import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam, fetchApartmentGuidedCounts } from '@/data/remote';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam, fetchApartmentGuidedCounts, fetchPostedWindowCounts, type PostedWindowCounts } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
 import { reconcileCommittedAf, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
+import PostedWindowMenu from '@/components/PostedWindowMenu';
+import { postedWindowOffered } from '@/lib/postedWindows';
 import { takeSearchLeftBehind } from '@/lib/searchLeftBehind';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -1305,6 +1307,33 @@ export default function Home() {
     if (furnRow === null && query.furnishedPref != null) setQuery((q) => ({ ...q, furnishedPref: null }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [furnRow, query.furnishedPref]);
+  // «نُشر خلال» (owner 2026-11-11): every deal but short stays. The numbers are the user's exact search with the window
+  // left open — built like furnBase, but the furniture choice is KEPT (it narrows the search). Numbers appear once a city
+  // is picked, like every other row; a failed read shows the choices without numbers, never a made-up 0.
+  const postedOn = postedWindowOffered(query);
+  const postedBase: SearchQuery = (() => {
+    const filterBase = buildFilterBaseQuery();
+    if (!filterBase) return { ...queryForPeriod, postedWithinDays: null };
+    const districts = districtsSelected.length ? [...new Set(districtsSelected.flatMap((d) => d.matchValues))] : undefined;
+    return { ...filterBase, districts, postedWithinDays: null };
+  })();
+  const postedKey = JSON.stringify(postedBase);
+  const [postedCounts, setPostedCounts] = useState<PostedWindowCounts | null>(null);
+  useEffect(() => {
+    if (!postedOn || citySelected == null) { setPostedCounts(null); return; }
+    let live = true;
+    const timer = setTimeout(async () => {
+      const c = await fetchPostedWindowCounts(postedBase).catch(() => null);
+      if (live) setPostedCounts(c && !isProbeFailure(c) ? c : null);
+    }, 350);
+    return () => { live = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postedKey, postedOn, citySelected]);
+  // A hidden row never leaves a hidden filter behind (short stays).
+  useEffect(() => {
+    if (!postedOn && query.postedWithinDays != null) setQuery((q) => ({ ...q, postedWithinDays: null }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postedOn, query.postedWithinDays]);
   const furnShown = furnRow !== null && furnRow !== 'pending';
   const furnCounts = furnShown ? (furnRow as FurnRow) : {};
   // the number alone: «49,596 إعلان» was cut to «… 49,596» on a 578 px screen (live walk 2026-11-05); the row's note says what it counts
@@ -2309,6 +2338,16 @@ export default function Home() {
                       {furnUnknown ? (
                         <Text style={[s.ctxSub, x.ctxSub, { marginTop: 6 }]}>{t('{n} listings did not mention furniture; they all show under All', { n: furnUnknown.toLocaleString('en-US') })}</Text>
                       ) : null}
+                    </>
+                  )}
+
+                  {/* «نُشر خلال» — PUBLISHED WITHIN, a floating menu with each period's number (owner 2026-11-11). */}
+                  {postedOn && (
+                    <>
+                      <Text style={[s.ctxSubLabel, x.ctxSubLabel, { marginTop: 14 }]}>{t('Published within')}</Text>
+                      <PostedWindowMenu value={query.postedWithinDays ?? null} counts={postedCounts}
+                        onChange={(days) => setQuery((q) => ({ ...q, postedWithinDays: days }))} testID="filter-posted" />
+                      <Text style={[s.ctxSub, x.ctxSub, { marginTop: 6 }]}>{t('Only ads whose site shows a publish date count in a period; the rest show under Any time.')}</Text>
                     </>
                   )}
 

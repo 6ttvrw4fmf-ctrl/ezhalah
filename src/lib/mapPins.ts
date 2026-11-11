@@ -10,6 +10,8 @@ export type PinRow = {
   ids: { t: string; i: number }[] | null; price: number | string | null; platform: string | null;
   /** The spot's highest real price and how many of its ads show none (map_pins_ar, owner 2026-11-10). */
   price_max?: number | string | null; unpriced?: number | null;
+  /** How many of the spot's ads the SITE published in the last 3 days (short stays excepted): the «إعلان جديد» tag. */
+  fresh?: number | null;
   /** Set on a DISTRICT MARKER (src/lib/mapNoPin.ts): these listings have no exact location and sit at the district's
    *  centre — the sheet titles them by district and prints no head price. */
   noPin?: { city: string; district: string };
@@ -29,6 +31,8 @@ export type PinFilter = {
   priceMin?: number | null; priceMax?: number | null;
   /** «الأثاث» (owner 2026-11-10): true = furnished, false = unfurnished, null = all. Ads that do not say show only under all. */
   furnished?: boolean | null;
+  /** «نُشر خلال» (owner 2026-11-11): published within N days by the site's own date; null = any time. */
+  postedWithinDays?: number | null;
   /** GeoJSON polygon drawn by the user («رسم» → «تطبيق»): only pins strictly inside it. */
   poly?: { type: 'Polygon'; coordinates: number[][][] } | null;
 };
@@ -96,6 +100,16 @@ export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform' | 
   const f = priceFacts(row);
   return priceHead(f.min, f.max, f.unpriced, row.deal, loc);
 }
+
+/** «إعلان جديد» — A NEW AD AT THIS SPOT (owner 2026-11-11, Zillow's «New»): a spot holding an ad its SITE published in the
+ *  last 3 days (map_pins_ar's `fresh`, by the site's own posting date — never the day Ezhalah found it) shows a small tag
+ *  above its price. Short stays never get it. The word is «إعلان جديد», never «جديد» alone: «جديد» in the Filter means a
+ *  newly BUILT property. */
+export const FRESH_DAYS = 3;
+export function isFreshHead(row: Pick<PinRow, 'fresh' | 'deal'>): boolean {
+  return Number(row.fresh ?? 0) > 0 && row.deal !== 'short';
+}
+export const freshTag = (loc: 'ar' | 'en'): string => (loc === 'ar' ? 'إعلان جديد' : 'New listing');
 
 /** ZOOM → WHAT TO ASK FOR. From about city zoom inward (a view under ~0.12° ≈ 13 km tall) the map asks for exact
  *  points; wider views ask for count cells sized so the screen holds ~30 columns of bubbles, which is how 424,000
@@ -171,6 +185,7 @@ export function rpcArgs(box: { s: number; w: number; n: number; e: number }, cel
     p_area_min: f.areaMin ?? null, p_area_max: f.areaMax ?? null,
     p_price_min: f.priceMin ?? null, p_price_max: f.priceMax ?? null,
     ...(f.furnished != null ? { p_furnished: f.furnished } : {}),
+    ...(f.postedWithinDays != null ? { p_posted_within_days: f.postedWithinDays } : {}),
     ...(f.scope ? { p_tables: f.scope.tables, p_tables2: f.scope.tables2, p_types2: f.scope.types2, p_macro: f.scope.macro } : {}),
   };
 }

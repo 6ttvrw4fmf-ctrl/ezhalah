@@ -1,4 +1,8 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-11-11 (migration 20261111103754 filter_published_within_window): CHANGED — one predicate appended after
+--   the p_furnished_in union: «نُشر خلال» keeps an ad only when its site published it within p_posted_within_days days
+--   (s.posted_at, the site's own date; undated = in no window). Everything else byte-identical.
+--   md5 of pg_get_functiondef (verify-sql-mirrors-not-stale): 4c387a886a5056668e16a062c2791fc5
 -- Re-verified 2026-11-04 (migration 20261104091305 af_coverage_cliff_ignore_backfill_days READS the clause, does not change it):
 --   UNCHANGED — production md5 of pg_get_functiondef = 0688e2b44db6a79ac4d505964ec81878, as recorded below.
 -- Re-verified 2026-11-03 (migration 20261103204042 rent_period_judged_flag_follows_source_and_unlocated_rows_carry_no_city_ids
@@ -550,6 +554,8 @@ AS $function$ select E'
       -- MULTI-PICK UNIONS (owner 2026-10-03: never force the user to select one thing). Each is the
       -- union of exactly the picked options; absent or empty means no constraint; NULL is in no bucket.
       and (p_furnished_in is null or cardinality(p_furnished_in) = 0 or s.furnished = any(p_furnished_in))
+      -- PUBLISHED WITHIN (owner 2026-11-11): the listing site posting date; an undated listing is in no window.
+      and (p_posted_within_days is null or (s.posted_at is not null and s.posted_at >= now() - make_interval(days => p_posted_within_days)))
       and (p_age_buckets is null or cardinality(p_age_buckets) = 0 or (s.property_age is not null and (
             (''new'' = any(p_age_buckets) and s.property_age = 0)
          or (''1_2'' = any(p_age_buckets) and s.property_age between 1 and 2)
