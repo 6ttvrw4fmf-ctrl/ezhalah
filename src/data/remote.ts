@@ -19,7 +19,8 @@ import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
 import { dedupePhotoUrls, photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
-import { listingDiscountFrom } from '@/lib/listingDisplay';
+import { listingDiscountFrom, isStayLengthPriced } from '@/lib/listingDisplay';
+import { haramDistance } from '@/lib/haramDistance';
 import { servedSaleFigures } from '@/lib/meterBoxPrice';
 import { followIndexPerMeterVerdict } from '@/lib/landPerMeterTotal';
 import { followIndexThousandsVerdict } from '@/lib/priceInThousands';
@@ -2181,6 +2182,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     const rating = Number.isFinite(ratingNum) ? ratingNum : null;
     const reviewsNum = rawInfo && rawInfo.reviews_count != null ? Number(rawInfo.reviews_count) : NaN;
     const reviews_count = Number.isFinite(reviewsNum) ? reviewsNum : null;
+    // How far from the Haram — short stays only (Gathern / Aqar Monthly publish the pin in additional_info). (owner 2026-11-05)
+    const haram = rawInfo && isStayLengthPriced(r.source ?? '') ? haramDistance(rawInfo.latitude, rawInfo.longitude) : null;
     return {
       id: Number(r.id),
       type: r.property_type ?? 'Apartment',
@@ -2253,6 +2256,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       rega_location_verified: !!r.rega_location_verified,
       rating,
       reviews_count,
+      haram,
       districtArFallback: gathernDistrictFallback(r.source, rawInfo),
       additional_info: buildAdditionalInfo(r.additional_info, r.source),
       photos: realPhotoUrls,

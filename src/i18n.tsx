@@ -1660,6 +1660,8 @@ const AR: Record<string, string> = {
   'Check-out':                          'تسجيل الخروج',
   'House rules':                        'شروط الحجز',
   '{n} reviews':                        '{n} تقييم',
+  '≈ {d} from the Haram':               '≈ {d} من الحرم',
+  "≈ {d} from the Prophet's Mosque":    '≈ {d} من المسجد النبوي',
   'Yes':                               'نعم',
   'bd': 'غرفة',
   'Type': 'النوع',

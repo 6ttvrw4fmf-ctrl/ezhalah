@@ -114,6 +114,9 @@ export type Listing = {
   // skipped entirely, so no other platform's card changes. (Gathern Tier-1.)
   rating?: number | null;
   reviews_count?: number | null;
+  // Straight-line distance from the source's own pin to the Haram (Makkah) or al-Masjid an-Nabawi (Madinah) —
+  // short stays only (Gathern / Aqar Monthly carry the pin). null elsewhere → the card shows nothing. (owner 2026-11-05)
+  haram?: { haram: 'makkah' | 'madinah'; meters: number } | null;
   // Gathern-only display fallback for the district headline: the source's own Arabic district
   // token (additional_info.district_ar, e.g. "حي العليا"), used ONLY when the canonical location
   // index has no district for the row and the raw neighborhood isn't Arabic. Never used for grouping

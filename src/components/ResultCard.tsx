@@ -16,6 +16,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { listingSearchedTypeAr } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
+import { haramDistanceText } from '@/lib/haramDistance';
 import { monthlyLineText } from '@/lib/listingDisplay';
 
 // THE MONTHLY LINE UNDER EVERY YEARLY PRICE (owner 2026-10-26): «السعر المعلن 3,000 شهرياً» when the site quoted
@@ -172,6 +173,11 @@ export function ResultCard({
   // else → the rating element renders nothing, so no other platform's card changes. (Gathern Tier-1.)
   const ratingVal = typeof listing.rating === 'number' && Number.isFinite(listing.rating) ? listing.rating : null;
   const reviewsCount = typeof listing.reviews_count === 'number' && listing.reviews_count > 0 ? listing.reviews_count : null;
+  // «🕋 ≈ 1.2 كم من الحرم» — short stays in Makkah / Madinah only (src/lib/haramDistance.ts). (owner 2026-11-05)
+  const haramLine = listing.haram && Number.isFinite(listing.haram.meters)
+    ? `${listing.haram.haram === 'makkah' ? '🕋' : '🕌'} ${t(listing.haram.haram === 'makkah' ? '≈ {d} from the Haram' : "≈ {d} from the Prophet's Mosque",
+        { d: haramDistanceText(listing.haram.meters, locale === 'en' ? 'en' : 'ar') })}`
+    : null;
   // The scraper sometimes captured a whole junk string into `listed` (e.g. "28/04/2026 آخر تحديث منذ
   // 22 ساعة ... المشاهدات 353 ..."). Show ONLY the clean DD/MM/YYYY date; if none, fall back to a
   // localized "recently". Works in both languages, no re-scrape needed. (user request: don't show
@@ -351,6 +357,11 @@ export function ResultCard({
                 {ratingVal}
                 {reviewsCount != null ? <Text style={card.ratingCount}>{`  (${t('{n} reviews', { n: reviewsCount })})`}</Text> : null}
               </Text>
+            </View>
+          ) : null}
+          {haramLine ? (
+            <View style={card.ratingRow} testID="card-haram-distance">
+              <Text style={card.haramText}>{haramLine}</Text>
             </View>
           ) : null}
           {listing.rent_now_pay_later ? <RnplBanner monthly={listing.rent_now_pay_later_monthly ?? undefined} source={listing.source} t={t} /> : null}
@@ -570,6 +581,11 @@ export function ResultCard({
               {ratingVal}
               {reviewsCount != null ? <Text style={card.ratingCount}>{`  (${t('{n} reviews', { n: reviewsCount })})`}</Text> : null}
             </Text>
+          </View>
+        ) : null}
+        {haramLine ? (
+          <View style={card.ratingRow} testID="card-haram-distance">
+            <Text style={card.haramText}>{haramLine}</Text>
           </View>
         ) : null}
         {listing.rent_now_pay_later ? <RnplBanner monthly={listing.rent_now_pay_later_monthly ?? undefined} source={listing.source} t={t} /> : null}
@@ -1700,6 +1716,7 @@ const card = StyleSheet.create({
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
   ratingText: { fontSize: 12.5, fontWeight: '700', color: colors.ink },
   ratingCount: { fontSize: 11, fontWeight: '500', color: colors.muted },
+  haramText: { fontSize: 12.5, fontWeight: '700', color: colors.ink },
 
   // Source-published «سعر المتر» subline, rendered directly under the price line on listings that
   // have no total price. Deliberately quieter than `price` (muted, smaller) so it reads as
