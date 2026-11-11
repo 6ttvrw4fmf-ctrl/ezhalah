@@ -62,3 +62,42 @@ def test_the_job_budget_fits_the_workflow_ceiling():
     ceiling = int(re.search(r"timeout-minutes:\s*(\d+)", text).group(1))
     # setup (~3 min), the closing controls of the last site and its writes must still fit
     assert fl.RECHECK_JOB_S <= (ceiling - 20) * 60
+
+
+# CodeRabbit on #11829: the tests above stub run_site, so a run_site that ignored the override would
+# still pass them. These run the REAL run_site against the fake PostgREST of test_fleet_liveness.
+from scrapers.common.tests.test_fleet_liveness import _controls, _row, site  # noqa: E402,F401
+
+
+def _struck_backlog(n):
+    rows = [_row(i, mc=1, seen_h=30) for i in range(1, n + 1)]
+    for r in rows:
+        r["last_liveness_probe_at"] = "2026-01-01T00:00:00+00:00"   # rested well past REPROBE_MIN_HOURS
+    return rows + _controls()
+
+
+def _probed_with(site, monkeypatch, budget_s):
+    # controls (A100-A104) read live, so the run is trusted; every struck row reads UNKNOWN (no hide, no reset)
+    site(_struck_backlog(400), {f"A{100 + k}": "live" for k in range(5)}, default="unknown")
+    clock = {"t": 0.0}
+
+    def tick():
+        clock["t"] += 10.0            # every clock read is 10 s of a slow site
+        return clock["t"]
+
+    monkeypatch.setattr(fl.time, "monotonic", tick)
+    monkeypatch.setattr(fl.time, "sleep", lambda *_: None)
+    return fl.run_site("testsite", shadow=False, struck_only=True, budget_s=budget_s)["probed"]
+
+
+def test_the_real_run_site_reads_past_the_floor_when_given_more(site, monkeypatch):
+    floor = _probed_with(site, monkeypatch, None)              # no override: the 12-minute floor
+    more = _probed_with(site, monkeypatch, 3 * fl.RECHECK_BUDGET_S)
+    assert 0 < floor < 400
+    assert more > 2 * floor, (floor, more)                     # the override is what stops the loop
+
+
+def test_the_real_run_site_stops_at_the_override(site, monkeypatch):
+    short = _probed_with(site, monkeypatch, fl.RECHECK_BUDGET_S / 4)
+    floor = _probed_with(site, monkeypatch, None)
+    assert short < floor
