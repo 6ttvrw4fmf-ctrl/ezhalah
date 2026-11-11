@@ -486,6 +486,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const shapeRef = useRef<Shape | null>(null);
   const ptsRef = useRef<Coord[]>([]);
   const [drawing, setDrawing] = useState(false);
+  // The arrow sits at the pill's RIGHT end, next to ⤢, in both languages (owner 2026-11-11: «the arrow … is opposite»):
+  // an Arabic page starts 'row' at the right, so Arabic reverses it to put the arrow last on the right.
   // «اضغط لتكبير الخريطة ←» beside ⤢ (owner 2026-11-11: «an arrow … point at the zoom … so user knows to click»), until
   // this device has opened the big map once. Device storage is a convenience only: unreadable → the hint shows.
   const [expandHint, setExpandHint] = useState<boolean>(() => { try { return globalThis.localStorage?.getItem(EXPAND_HINT_KEY) !== '1'; } catch { return true; } });
@@ -1262,7 +1264,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {onExpand && expandHint && !failed && !drawing && roomy ? (
-        <Pressable style={s.expandHint} onPress={() => { closePanels(); onExpand(); openFull(); }} accessibilityRole="button" accessibilityLabel={t('Tap to open the full map')} testID="map-expand-hint">
+        <Pressable style={[s.expandHint, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row' }]} onPress={() => { closePanels(); onExpand(); openFull(); }} accessibilityRole="button" accessibilityLabel={t('Tap to open the full map')} testID="map-expand-hint">
           <Text style={s.expandHintT}>{t('Tap to open the full map')}</Text>
           <Ionicons name="arrow-forward" size={16} color={colors.surface} />
         </Pressable>
