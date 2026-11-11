@@ -53,6 +53,13 @@ def test_a_single_group_dotted_area_still_guards_the_price():
     assert P.asking_price("", text)["price"] is None
 
 
+def test_a_scaled_dotted_area_keeps_its_decimal_like_the_price():
+    # CodeRabbit on #11799: «1.250 الف» is 1,250 for the price, so the area must read 1,250 m² too — not 1,250,000
+    text = "للبيع 1.250 الف\nالمساحة 1.250 الف متر مربع"
+    assert P.area_of("", text)["area"] == 1_250
+    assert P.asking_price("", text)["price"] is None
+
+
 def test_the_arabic_decimal_mark_keeps_its_meaning():
     # CodeRabbit on #11799: «٢٥٠٫٠٠٠» is written with the DECIMAL mark — 250, not 250,000
     assert P.asking_price("", "السعر ٢٥٠٫٠٠٠ ريال")["price"] == 250

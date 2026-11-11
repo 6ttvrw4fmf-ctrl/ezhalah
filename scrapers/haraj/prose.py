@@ -299,8 +299,9 @@ def area_of(title: str, body: str) -> dict:
             num = m.group(1)
             if _DIMS_AFTER.match(t, m.end(1)):
                 continue                                         # «10 في 8» (Haraj 18263149, 2026-10-17)
-            if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", num):
-                num = num.replace(".", "")                       # «1.250» / «1.250.000» = thousands, as for the price
+            if not m.group(2) and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", num):
+                num = num.replace(".", "")                       # «1.250» / «1.250.000» = thousands, as for the price;
+                                                                 # «1.250 الف» keeps its decimal, as _value() does
             try:
                 v = float(num.replace(",", ""))
             except ValueError:
