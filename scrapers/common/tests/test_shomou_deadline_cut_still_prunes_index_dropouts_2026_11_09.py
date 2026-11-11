@@ -115,3 +115,33 @@ def test_a_failed_later_index_page_is_not_the_end_of_the_list(monkeypatch):
     assert S.main() == 0
     assert pruned == []
     assert "index_cut=1" in runs[0]["notes"]
+
+
+def test_a_later_index_page_that_answered_404_is_not_the_end_of_the_list(monkeypatch):
+    # CodeRabbit on #11484 (2nd round): get() turns a 404 into None, which used to read as «no more ads».
+    real_get = S.get
+
+    def get(s, url):
+        if "page=1" in url:
+            S._LAST.update(url=url, status=404, bytes=9)
+            return None
+        return real_get(s, url)
+
+    monkeypatch.setattr(S, "get", get)
+    sess, runs, pruned = T._Sess(), [], []
+    it = iter([0.0, 0.5, 1.0, S.SOFT_DEADLINE_S + 1.0, S.SOFT_DEADLINE_S + 2.0, S.SOFT_DEADLINE_S + 3.0])
+    monkeypatch.setattr(S, "_clock", lambda: next(it))
+    monkeypatch.setattr(S, "retry_smarter_session", lambda url, **kw: (sess, ["direct/chrome124:200"]))
+    monkeypatch.setattr(S, "parse_detail", lambda nid, page: {"nid": nid})
+    monkeypatch.setattr(S, "map_detail", lambda d: ({"ad_number": f"SHQ{d['nid']}"}, "residential", None))
+    for name, fn in (("begin_run", lambda slug: 7), ("end_run", lambda rid, **kw: runs.append(kw) or True),
+                     ("upsert_shomou_residential_batch", lambda rows: None),
+                     ("upsert_shomou_commercial_batch", lambda rows: None),
+                     ("retire_superseded_siblings", lambda **kw: 0),
+                     ("prune_unseen", lambda tbl, seen, **kw: pruned.append(tbl) or 0)):
+        monkeypatch.setattr(S.db, name, fn)
+    monkeypatch.setattr(S.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(sys, "argv", ["shomou"])
+    assert S.main() == 0
+    assert pruned == []
+    assert "index_cut=1" in runs[0]["notes"]

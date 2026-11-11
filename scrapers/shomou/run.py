@@ -323,6 +323,18 @@ def main() -> int:
                 print(f"  ✗ index page {page} failed ({_LAST.get('status')}): walk incomplete, no prune", flush=True)
                 break
         got = [n for n in parse_index(html) if n not in nids]
+        if not got and page and _LAST.get("status") != 200:
+            # CodeRabbit on #11484: a later page that answered 404 (get() returns None) or any non-200 is a
+            # failed read, not the end of the list. The catalogue's own end is a 200 page with no new ad.
+            index_cut = True
+            print(f"  ✗ index page {page} answered {_LAST.get('status')}: walk incomplete, no prune", flush=True)
+            break
+        if not got and page:
+            # The shape of the page that ENDED the walk, so the crawl log measures what a real end looks
+            # like (the cloud container cannot reach this site): a 200 with no <tbody> is the case still
+            # to be measured before it can be told apart from an unparseable page.
+            print(f"  index ends at page {page}: HTTP 200, {_LAST.get('bytes')} bytes, "
+                  f"tbody={'<tbody>' in html}", flush=True)
         if not got:
             if page == 0:
                 why = (f"index page 0 held no ad ({BASE}/?field_nw_al_qar_value=All&page=0): "
