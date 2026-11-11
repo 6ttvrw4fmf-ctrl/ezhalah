@@ -554,6 +554,30 @@ export function observeColumnPromptInset(
   );
 }
 
+/**
+ * «Our own docked card appeared, moved, changed size or went away» — a bare signal, no numbers (owner 2026-11-10).
+ *
+ * The small sign-in card rests ABOVE the cookie card, so it must hear about the cookie card. It cannot use
+ * `observePromptInsets`: that reports the band the page RESERVES, and a corner card beside the app reserves
+ * nothing — the pair stays {0,0} while the card comes, grows (Arabic → English adds ~55 px) and goes, so it never
+ * fires. This watches the card's own rect through the same observer and calls back whenever that rect changes
+ * (once at the start too). The listener reads what it needs from the page itself.
+ */
+export function observeOwnDockedCard(onChange: () => void): () => void {
+  return observeDockedPrompts(
+    OWN_DOCKED_PROMPT_SELECTOR,
+    (rects) => {
+      const r = rects.find((x) => !x.hidden && x.height > 0);
+      if (r) return { top: Math.round(r.top), bottom: Math.round(r.bottom) };
+      // THREE answers, not two: «on the page but faded out» (-3) is not «gone from the page» (-2). The card fades to
+      // nothing a beat BEFORE it is removed; with one shared answer the removal changed nothing, so nobody heard that
+      // the card had left — and a sign-in card waiting for its room would have waited for ever.
+      return rects.length ? { top: -3, bottom: -3 } : { top: -2, bottom: -2 };
+    },
+    () => onChange(),
+  );
+}
+
 /** When a prompt is measured again after a change that touched it (ms): through a slide-in or fade-in to its rest. */
 export const PROMPT_SETTLE_MS = [300, 800, 1600, 3000] as const;
 /** The browser's «this element stopped moving» events; listened for on the document, acted on for watched nodes only. */

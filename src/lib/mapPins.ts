@@ -18,6 +18,10 @@ export type PinFilter = {
   deals: ('buy' | 'rent' | 'short')[];
   category?: 'residential' | 'commercial' | null;
   types?: string[] | null;          // Arabic type_ar labels, as the index stores them
+  /** THE FILTER'S OWN SCOPE (owner 2026-11-10: «this filter is like the one we have but it shows the result in the
+   *  map»): the table sets, second type list and category gate the Filter home sends for the same choice, built by
+   *  mapTypeScope() in src/data/remote.ts. Set → `category` is not sent; the server applies the Filter's own rule. */
+  scope?: { tables: string[] | null; tables2: string[] | null; types2: string[] | null; macro: 'Residential' | 'Commercial' | null } | null;
   beds?: number[] | null;
   areaMin?: number | null; areaMax?: number | null;
   priceMin?: number | null; priceMax?: number | null;
@@ -144,6 +148,7 @@ export function rpcArgs(box: { s: number; w: number; n: number; e: number }, cel
     p_area_min: f.areaMin ?? null, p_area_max: f.areaMax ?? null,
     p_price_min: f.priceMin ?? null, p_price_max: f.priceMax ?? null,
     ...(f.furnished != null ? { p_furnished: f.furnished } : {}),
+    ...(f.scope ? { p_tables: f.scope.tables, p_tables2: f.scope.tables2, p_types2: f.scope.types2, p_macro: f.scope.macro } : {}),
   };
 }
 
