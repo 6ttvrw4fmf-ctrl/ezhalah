@@ -1734,6 +1734,7 @@ const AR: Record<string, string> = {
   'Some listings could not be loaded.': 'تعذّر تحميل بعض الإعلانات.',
   'Same property, {n} more ads:': 'نفس العقار، {n} إعلانات أخرى:',
   'Same property, one more ad:': 'نفس العقار، إعلان آخر:',
+  'Same property on other sites:': 'نفس العقار على مواقع أخرى:',
   'from {price}': 'من {price}',
   '{n} bedrooms': '{n} غرف',
   'Same district and type, area within 20% of this ad, same bedrooms when stated. Each property once, nearest first, prices as published.': 'نفس الحي والنوع، والمساحة ضمن 20% من هذا الإعلان، ونفس عدد الغرف عند ذكره. كل عقار مرة واحدة، الأقرب أولاً، والأسعار كما نُشرت.',
