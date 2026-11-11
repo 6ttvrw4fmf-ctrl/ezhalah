@@ -1563,6 +1563,49 @@ def muhaysini_page(url: str, fetch=None) -> dict | None:
             "text_head": " | ".join(lines)[:1500]}
 
 
+def rakez_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
+    """A rakez unit read from its OWN record, /wp-json/wp/v2/unit/<id> (🆕 2026-11-09).
+
+    Every unit links to its PROJECT page (scrapers/rakez/run.py: unit.link redirects home), and that page's static
+    table prints only some of the project's units: the 11-09 05:35 score (run 42568334721) read project 66463's
+    «588,000 / 708,000 / 643,000 …» rows against unit 25491881's own 622,000 and capped the night at 75 % on one ad
+    (re-read run 42578333590: our unit is not among the printed rows). The unit record is what the scraper stores
+    from — price, area + private_area (owner ruling #541, `unit_area`), rooms_count — so these lines restate it,
+    labelled the way the comparison reads. None when the record cannot be read, is not this unit, or is no longer
+    available (unknown, never wrong)."""
+    uid = (ad_number or "").replace("RKZ", "")
+    if "rakez.sa" not in (url or "") or not uid.isdigit():
+        return None
+    try:
+        from scrapers.rakez import run as rakez
+        if fetch is not None:
+            rec = fetch(uid)
+        else:
+            from curl_cffi import requests as cc
+            r = cc.get(f"{rakez.REST}/unit/{uid}", headers=rakez.HEADERS, timeout=30)
+            rec = r.json() if r.status_code == 200 else None
+    except Exception:  # noqa: BLE001 — a failed read is unknown, never wrong
+        return None
+    if not isinstance(rec, dict) or str(rec.get("id")) != uid:
+        return None
+    acf = rec.get("acf") if isinstance(rec.get("acf"), dict) else {}
+    if rakez._unit_status(acf) != rakez.INGESTIBLE_UNIT_STATUS:
+        return None
+    lines: list[str] = []
+    price, area, rooms = rakez._to_int(acf.get("price")), rakez.unit_area(acf), rakez._to_int(acf.get("rooms_count"))
+    if price:
+        lines.append(f"السعر {price} ريال")
+    if area:
+        lines.append(f"المساحة {area} م²")
+    if rooms:
+        lines.append(f"غرف النوم {rooms}")
+    if not lines:
+        return None
+    title = str(((rec.get("title") or {}).get("rendered") if isinstance(rec.get("title"), dict) else "") or "")
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines,
+            "text_head": " | ".join(lines)}
+
+
 _MOBASHER_RECORDS: "dict | None" = None
 
 
@@ -1662,7 +1705,7 @@ def tuba_rega_lines(url: str, fetch=None) -> list[str]:
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None,
-               nufouth=None, dallali=None, dwelleo=None, safa=None) -> dict:
+               nufouth=None, dallali=None, dwelleo=None, safa=None, rakez=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -1710,6 +1753,10 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             own = dallali or dallali_page
         if "safainv.sa" in url:
             own = safa or safa_page
+        if "rakez.sa/ar/project/" in url:
+            ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
+                         or [{}])[0].get("ad_number")
+            own = (lambda u, _n=ad_number: (rakez or rakez_page)(u, _n))
         if "nufouth.com" in url:
             ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
                          or [{}])[0].get("ad_number")
