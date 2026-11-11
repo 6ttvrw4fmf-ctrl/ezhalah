@@ -77,7 +77,7 @@ mustCatch('a request with the raw-land tag replaced by stored land types is not 
 // 7. The server applies the Filter's rule: the newest migration defining each function carries it.
 const dir = join(ROOT, 'supabase/migrations');
 const newest = (needle: string) => readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().reverse().map((f) => readFileSync(join(dir, f), 'utf8')).find((sql) => sql.includes(needle)) ?? '';
-const sql = newest('p_macro text DEFAULT NULL::text');
+const sql = newest('alter table public.map_nopin_ar add column if not exists unit_subtype_ar');
 check('map_pins_ar and map_nopin_markers_ar take the Filter\'s scope (p_tables, p_tables2, p_types2, p_macro)', /p_tables text\[\] DEFAULT NULL::text\[\], p_tables2 text\[\] DEFAULT NULL::text\[\], p_types2 text\[\] DEFAULT NULL::text\[\], p_macro text DEFAULT NULL::text/.test(sql) && /map_pins_ar/.test(sql) && /map_nopin_markers_ar/.test(sql));
 check('…with the raw-land tag and the known_type_ar category gate, as af_eligibility_clause has them', /s\.unit_subtype_ar = 'أرض خام' and 'أرض خام' = any \(p_types\)/.test(sql) && /from public\.known_type_ar k where k\.macro = p_macro/.test(sql) && /k\.macro = 'both'/.test(sql));
 check('…and the pins\' view and the district-marker table carry unit_subtype_ar', /s\.unit_subtype_ar/.test(sql) && /alter table public\.map_nopin_ar add column if not exists unit_subtype_ar/.test(sql));
