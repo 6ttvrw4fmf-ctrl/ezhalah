@@ -56,11 +56,12 @@ function verify(text: string, helperText = helper) {
     fingerprint.update(file);
     fingerprint.update(readFileSync(new URL(`../src/data/${file}`, import.meta.url)));
   }
-  assert.equal(files.size, 143, 'all matching ZIP logos plus the official Haraj header are used');
+  assert.equal(files.size, 149, 'all matching ZIP logos plus the official Haraj header and the 6 sources of 2026-11-04..06 are used');
   // Re-pinned 2026-10-27 (owner: «make it feel faster»): the same artwork resized to ≤320 px and saved as palette
   // PNGs with real alpha (13.1 MB → 1.7 MB, PR "Speed: platform logos"). Checked side by side: no visible change.
+  // Re-pinned 2026-11-10: +6 official logos (propertyfinder, kwsaudiarabia, almajdiah, asasmakeen, mrajhi, steam), icons resized to 256 px; mrajhi = its own site header logo, white made transparent.
   // Any OTHER change to these bytes still fails here.
-  assert.equal(fingerprint.digest('hex'), 'f6e08146739cb8fe9f11396be84548b27025923b0e459d563fcfd553072e26df');
+  assert.equal(fingerprint.digest('hex'), 'c6fd42b48af0828fa9d6ec5f3cf7360d44daeb3293964dec284797ef0e881403');
 }
 verify(source);
 function mustCatch(mutant: string) {
@@ -250,10 +251,10 @@ assert.notEqual(retainsOldScope,source);
 assert.throws(() => assert.deepEqual(load(retainsOldScope,'applyPickerSources')({sources:['aqar']},[],true).sources, []), assert.AssertionError);
 
 const homepageCatalog = load(source, 'PLATFORM_PICKER_PROFILES');
-// 150 = 149 + Haraj (official header artwork added 2026-10-17).
-assert.equal(Object.keys(homepageCatalog).length, 150);
+// 156 = 149 + Haraj (official header artwork added 2026-10-17) + the 6 sources of 2026-11-04..06 (logos 2026-11-10).
+assert.equal(Object.keys(homepageCatalog).length, 156);
 assert.ok(Object.keys(homepageCatalog).includes('Deal App'));
-console.log('PASS: the complete website catalog includes all 150 logo profiles, including Dealapp.');
+console.log('PASS: the complete website catalog includes all 156 logo profiles, including Dealapp.');
 
 const chooseMatch = agent.match(/const choosePlatform = \(source: string \| null\) => \{([\s\S]*?)\n  \};/);
 assert.ok(chooseMatch);

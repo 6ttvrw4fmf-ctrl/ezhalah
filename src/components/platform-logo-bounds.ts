@@ -4,6 +4,12 @@ type ArtworkBounds = readonly [width: number, height: number, left: number, top:
 export const platformLogoBounds = new Map<unknown, ArtworkBounds>([
   [require('../../assets/images/platform-logos/maskanre.png'), [1575, 455, 0, 0, 1575, 455]],
   [require('../../assets/images/platform-logos/wetheaddress.png'), [1024, 310, 0, 0, 1024, 310]],
+  [require('../../assets/images/platform-logos/propertyfinder-sa.png'), [256, 256, 0, 0, 256, 256]],
+  [require('../../assets/images/platform-logos/kwsaudiarabia-com.png'), [256, 256, 17, 51, 231, 193]],
+  [require('../../assets/images/platform-logos/almajdiah-com.png'), [256, 256, 2, 87, 255, 170]],
+  [require('../../assets/images/platform-logos/asasmakeen-com.png'), [300, 123, 0, 0, 300, 123]],
+  [require('../../assets/images/platform-logos/mrajhi-com-sa.png'), [101, 125, 0, 0, 101, 125]],
+  [require('../../assets/images/platform-logos/steam-realestate-com.png'), [256, 256, 1, 1, 253, 253]],
   [require('../../assets/images/abaad.png'), [68, 80, 3, 3, 65, 77]],
   [require('../../assets/images/abeea.png'), [512, 436, 125, 6, 415, 368]],
   [require('../../assets/images/abralosol.png'), [724, 638, 110, 113, 590, 566]],
