@@ -598,7 +598,7 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "raised_plot": (("سعر", "اسعار", "قيمه", "ايجار", "اسقف", "سقف", "ارتفاع", "نسبه", "طلب"), ()),   # a high price / ceiling
     "all_services": (("حولها", "حوله", "حواليها", "حواليه", "جنبها", "جنبه"),                       # «حولها كل خدمات»: around it
                      ("قريبه", "قريب", "بالقرب", "المجاوره", "مجاوره", "حولها", "حوله",            # «جميع الخدمات قريبة»
-                      "مستقل", "مستقله", "منفصل", "منفصله")),      # «كل خدمات الشقه مستقله»: separate utilities (P2 13085, 🔬 2026-11-11);
+                      )),      # «كل خدمات الشقه مستقله»: separate utilities (P2 13085, 🔬 2026-11-11);
                                                   # «جميع خدمات الشقة متوفرة» stays a yes (CodeRabbit on #11820)
     "street_lights": (("جوهره"), ("تحميل", "للتحميل", "تنزيل", "للتنزيل", "والتحميل")),                                        # «رصيف تحميل» is a dock
     "approved_plan": (("مكتب", "مسوق", "وسيط", "مقاول", "مهندس", "مقيم", "مثمن", "وكيل"), ()),
@@ -736,6 +736,9 @@ _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "rest
 _NEAR_NEVER_FACTS = frozenset({"air_conditioner", "furnished"})
 # A VIEW is not a distance (🔬 2026-11-05): «صالة معيشة مطلة بلكونة مطبخ أمريكي» has a balcony and a kitchen. A view word only
 # silences what can be outside (a park, a pool, a sea) — never the home's own rooms.
+_SEPARATE = frozenset(_n(w) for w in ("مستقل", "مستقله", "منفصل", "منفصله", "مستقلة", "منفصلة"))
+_UNIT_NOUNS = frozenset(_n(w) for w in ("الشقه", "الشقة", "الوحده", "الوحدة", "العقار", "الفيلا", "الدور", "المحل",
+                                        "شقه", "وحده", "عقار", "فيلا", "دور", "محل"))
 _ROAD_NAMED = frozenset(_n(w) for w in ("الدائري", "السريع", "العام", "الرئيسي", "الدولي", "السريعه", "الرئيسيه",
                                         "المسمى", "المسمي"))   # «الطريق المسمى طريق الملك فهد» (CodeRabbit on #11820)
 _VIEW_WORDS = frozenset(_n(w) for w in ("مطل", "مطله", "تطل", "يطل", "اطلاله", "باطلاله", "overlooking", "views"))
@@ -1214,6 +1217,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «بلكونه (شرفه) مطلة على الطريق», «شقه … مطله على الطريق»: a view of
                                                      # «the road», not a plot on a main road (P2 13085, 5 of 5 aqar,
                                                      # 🔬 2026-11-11). «مطلة على الطريق الدائري» and «على طريق الملك فهد» stay.
+    if fact == "all_services" and (gn[:1] and _strip_wa(gn[0]) in _SEPARATE
+                                   or len(gn) >= 2 and _strip_wa(gn[0]) in _UNIT_NOUNS and _strip_wa(gn[1]) in _SEPARATE):
+        return None, s, e                            # «كل خدمات الشقه مستقله / منفصلة»: separate utilities; «جميع
+                                                     # الخدمات ومطبخ مستقل» keeps it — the kitchen is separate (CodeRabbit #11820)
     if fact == "garden" and p2 and _strip_wa(p2[-1]) in ("شارع", "شارعين") and t[ws:we].startswith("و") \
             and not (gn[:1] and _strip_wa(gn[0]) in _OWN_AFTER):
         return None, s, e                            # «أرض سكنية شارع وحديقة»: the plot's neighbours (aqar 3543112);
@@ -2931,6 +2938,7 @@ def selftest() -> None:
         ("فيلا على شارع وبها حديقة خاصة", {"garden": True}, ()),                                           # CodeRabbit on #11820
         ("فيلا على شارع وحديقة خاصة", {"garden": True}, ()),
         ("كل خدمات الشقة منفصلة", {}, ("all_services",)),
+        ("جميع الخدمات ومطبخ مستقل", {"all_services": True}, ()),
         ("قريب من المسجد، خدمات المبنى، نادي رياضي، حضانة", {"gym": True}, ()),
         # 🔬 2026-11-11 kitchen recall sample: a «لا يوجد» that opens the NEXT item is not this one's no
         ("٣ غرف وصاله ٢ دورتين مياه مطبخ راكب لا يوجد مكيفات الشق الدور الاول", {"kitchen": True, "air_conditioner": False}, ()),  # aqar 23092840
