@@ -26,6 +26,7 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from scrapers.common.pii import redact_pii
 from urllib.parse import urlsplit
 
 from scrapers.common.cleanup import PLATFORMS, _probe
@@ -290,6 +291,15 @@ def _title_value_lines(body: str) -> list[str]:
     return out
 
 
+def _redacted_lines(raw: list[str]) -> list[str]:
+    out = []
+    for x in dict.fromkeys(raw):
+        y = redact_pii(x)
+        if y:
+            out.append(y)
+    return list(dict.fromkeys(out))
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     body = HTML_COMMENT.sub(" ", body or "")
@@ -317,10 +327,12 @@ def page_evidence(body: str) -> dict:
         # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
-        "evidence_lines": list(dict.fromkeys(_payload_area_lines(body) + _payload_place_lines(body) + _houzez_place_lines(body) + _label_value_lines(body)
+        # PDPL: every line and the head pass through the repo's one redactor (scrapers/common/pii.py) — they reach
+        # reread.json and the job log, and a phone can sit under any permitted label (CodeRabbit on #11465).
+        "evidence_lines": _redacted_lines(_payload_area_lines(body) + _payload_place_lines(body) + _houzez_place_lines(body) + _label_value_lines(body)
                            + _number_first_lines(body) + _feature_block_lines(shown) + _title_value_lines(shown)
-                           + _with_values(lines)))[:400],   # once each: duplicates never push a later field past the cap
-        "text_head": " | ".join(lines)[:1500],
+                           + _with_values(lines))[:400],   # once each: duplicates never push a later field past the cap
+        "text_head": redact_pii(" | ".join(lines)[:1500]) or "",
     }
 
 

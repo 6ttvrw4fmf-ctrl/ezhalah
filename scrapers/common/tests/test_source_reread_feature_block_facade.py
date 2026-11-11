@@ -160,3 +160,16 @@ def test_a_colon_label_with_the_year_on_the_next_line_is_one_year():
     lines = [norm("عمر العقار:"), norm("سنة")]
     assert _cmp_number(1, lines, " | ".join(lines), AGE_KW) == MATCH
     assert _cmp_number(None, lines, " | ".join(lines), AGE_KW) == WE_MISS
+
+
+def test_a_phone_under_any_label_never_reaches_either_output():
+    # CodeRabbit on #11465: _with_values and text_head carried a bare phone under a permitted label
+    body = ("<html><body><div>مساحة الأرض</div><div>0551234567</div><div>غرف النوم</div><div>966551234567</div>"
+            "<div>واجهة العقار</div><div>شمالية</div><div>عرض الشارع</div><div>20</div>"
+            "<div>السعر</div><div>850,000 ريال</div></body></html>")
+    p = page_evidence(body)
+    out = " ".join(p["evidence_lines"]) + p["text_head"]
+    assert "0551234567" not in out and "551234567" not in out
+    assert "عرض الشارع | 20" in p["text_head"] and "شمالية" in p["text_head"]   # the facts survive
+    assert "850,000 ريال" in p["evidence_lines"]
+    assert page_evidence(body)["evidence_lines"] == p["evidence_lines"]   # idempotent
