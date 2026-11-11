@@ -255,9 +255,12 @@ if (!base) {
       withTarget(base.replace(/^\s*WASALT_BROWSER: "1"\n/m, '')));
   }
   // 2 — a DIFFERENT wrong way: the gate is set but Chromium is never installed.
+  //     Since 2026-11-11 the install step is a retry loop with a no-apt fallback, so the step holds
+  //     TWO install commands; the mutant must drop EVERY one, or the fallback line alone keeps
+  //     the predicate green and the mutation reads as uncaught (it did, PR #11875).
   if (need('playwright install --with-deps chromium')) {
     mustCatch('Chromium never installed, so the browser path raises on launch',
-      withTarget(base.replace('python -m playwright install --with-deps chromium', 'true')));
+      withTarget(base.replace(/python -m playwright install[^\n;&|}]*chromium/g, 'true')));
   }
   // 3 — a THIRD wrong way: browser + Chromium, but no display for headless=False.
   if (need('exec xvfb-run -a python -m scrapers.common.verify_deletions')) {
