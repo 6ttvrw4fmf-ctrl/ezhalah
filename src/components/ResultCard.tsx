@@ -15,7 +15,7 @@ import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { listingSearchedTypeAr } from '@/lib/listingDisplay';
-import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
+import { isShortStayListing, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
 import { monthlyLineText } from '@/lib/listingDisplay';
 
 // THE MONTHLY LINE UNDER EVERY YEARLY PRICE (owner 2026-10-26): «السعر المعلن 3,000 شهرياً» when the site quoted
@@ -253,7 +253,7 @@ export function ResultCard({
   // nothing is derived, and a value the source did not give renders nothing.
   if (row === 'roomy') {
     const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
-    const stay = isStayLengthPriced(listing.source);
+    const stay = isShortStayListing(listing);
     const typeIcon = typeImg(listing.cleanType ?? '');
     // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
     // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
@@ -470,7 +470,7 @@ export function ResultCard({
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
         {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
-        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
+        {isShortStayListing(listing) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
         {monthlyLine(listing, locale)}
         </View>
         {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
@@ -1010,6 +1010,13 @@ const EBRIZA_LOGO = require('../../assets/images/platform-logos/ebriza-com-sa.pn
 const SHOMOU_LOGO = require('../../assets/images/platform-logos/shomoalaqar-com-sa.png');
 // Haraj: official header artwork, collected 2026-10-18 UTC.
 const HARAJ_LOGO = require('../../assets/images/platform-logos/haraj.png');
+// The 6 sources of 2026-11-04..06: official logos from each site's own header/manifest (owner 2026-11-10).
+const PROPERTYFINDER_LOGO = require('../../assets/images/platform-logos/propertyfinder-sa.png');
+const KW_LOGO = require('../../assets/images/platform-logos/kwsaudiarabia-com.png');
+const ALMAJDIAH_LOGO = require('../../assets/images/platform-logos/almajdiah-com.png');
+const ASASMAKEEN_LOGO = require('../../assets/images/platform-logos/asasmakeen-com.png');
+const MRAJHI_LOGO = require('../../assets/images/platform-logos/mrajhi-com-sa.png');
+const STEAM_LOGO = require('../../assets/images/platform-logos/steam-realestate-com.png');
 const VMKSA_LOGO = require('../../assets/images/platform-logos/vm-ksa-com.png');
 const IBAAX_LOGO = require('../../assets/images/platform-logos/ibaax-sa.png');
 const THOUSAND_LOGO = require('../../assets/images/platform-logos/1000-com-sa.png');
@@ -1268,15 +1275,13 @@ export function SourceBadge({ source }: { source: string }) {
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return <PlatformLogo source={SUPEROFFICE_LOGO} />;
   if (s.includes('شموع العقار') || s.includes('shomou')) return <PlatformLogo source={SHOMOU_LOGO} />;
   if (s.includes('حراج') || s.includes('haraj')) return <PlatformLogo source={HARAJ_LOGO} />;
-  // Property Finder: NO badge until the owner supplies the official logo file (an explicit null, never the Aqar fallback).
-  if (s.includes('بروبرتي فايندر') || s.includes('propertyfinder')) return null;
-  // The five sources staged 2026-11-05: NO badge until the owner supplies each logo (explicit null, never the Aqar
-  // fallback). Inert while staged — no row of theirs is served (docs/ops/FIVE_SOURCES_LAUNCH.md).
-  if (s.includes('كيلر وليامز') || s.includes('kellerwilliams') || s.includes('keller williams')) return null;
-  if (s.includes('الماجدية') || s.includes('almajdiah')) return null;
-  if (s.includes('أساس مكين') || s.includes('asasmakeen') || s.includes('asas makeen')) return null;
-  if (s.includes('الراجحي للتنمية') || s.includes('mrajhi') || s.includes('al rajhi development')) return null;
-  if (raw === 'steam' || s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return null;
+  // Property Finder + the five sources of 2026-11-05: official logos supplied 2026-11-10.
+  if (s.includes('بروبرتي فايندر') || s.includes('propertyfinder')) return <PlatformLogo source={PROPERTYFINDER_LOGO} />;
+  if (s.includes('كيلر وليامز') || s.includes('kellerwilliams') || s.includes('keller williams')) return <PlatformLogo source={KW_LOGO} />;
+  if (s.includes('الماجدية') || s.includes('almajdiah')) return <PlatformLogo source={ALMAJDIAH_LOGO} />;
+  if (s.includes('أساس مكين') || s.includes('asasmakeen') || s.includes('asas makeen')) return <PlatformLogo source={ASASMAKEEN_LOGO} />;
+  if (s.includes('الراجحي للتنمية') || s.includes('mrajhi') || s.includes('al rajhi development')) return <PlatformLogo source={MRAJHI_LOGO} />;
+  if (raw === 'steam' || s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return <PlatformLogo source={STEAM_LOGO} />;
   if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={MAKTAB_LOGO} />;
   if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={SIRDAB_LOGO} />;
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;

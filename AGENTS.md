@@ -88,11 +88,25 @@ figure misstates them. They are the whole of the «إقامات قصيرة» poo
   owner's approval.
 - Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
 
+# EVERY AD'S PRICES AND DATES ARE KEPT FOREVER (owner, 2026-11-11 — permanent; full text `docs/ARCHITECTURE.md` §20)
+
+**`listing_price_history` (every price change, gone, back, removed — with its date) and `listing_comparables` (one slim
+card per ad: what, where, size, rooms, first/last price, the site's posting date, first seen, gone, removed) are written by
+`tg_listing_price_diary()` on every listing table and outlive the ad, including ads the retention engine deletes.** Never
+delete or update them, never drop the triggers. «gone/removed» means the ad disappeared, never that it sold. Later the AI
+agent answers comparables («prices in this district in this time frame») FROM these tables and their dates, never from
+the model's own knowledge. **Every NEW site joins automatically**: the event trigger `listing_price_diary_born_attached` attaches the diary to
+any new listing table the moment it is created — and REFUSES the CREATE if it cannot — while the hourly watcher is only
+the safety net that rings `price_diary_unhealthy` if one is still missing; all sites share ONE diary and ONE card table —
+never a separate store per site. Guard: `scripts/verify-price-diary.ts`.
+
 # RENT POOLS AND THE CHEAP-«YEARLY» RULE (owner, 2026-10-25/26 — permanent; full text `docs/ARCHITECTURE.md` §20)
 
 **«إقامات قصيرة» (the old «شهري» pool) is Gathern + Aqar Monthly ONLY. Every other site's rent listing is
 YEARLY: a per-month figure pools under «سنوي» at ×12 and the card keeps the site's word — «السعر المعلن
-3,000 شهرياً». A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
+3,000 شهرياً». ONE per-listing exception (owner 2026-11-10, backlog 1744): a rent whose SELLER states a daily or
+weekly stay (Haraj «للإيجار اليومي» → source rent_period 'daily' / 'weekly', price never ×12, no price on the card)
+joins «إقامات قصيرة» — `SHORT_STAY_PERIODS` / `rent_pool_ar()`, migration 20261111070829. A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
 Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom, Commercial Building) is a
 per-month price and is SERVED ×12; rooms, land, rest houses, chalets, camps and farms are out.** The
 SOURCE TABLES ARE UNTOUCHED (PRICE = SOURCE, PERIOD = SOURCE still hold there) — the index serves through
