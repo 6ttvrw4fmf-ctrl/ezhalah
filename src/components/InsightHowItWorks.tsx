@@ -3,7 +3,7 @@
 //   · the ✕ is ALWAYS on the physical right, in both languages (owner: «the x is always on the right, no matter what»);
 //   · in the centre, our eagle glides in and lands on the falconer's glove — the sign-in story, played slowly
 //     (assets/images/falconer-howto.svg, scripts/build-howto-falconer.mjs), replayed on every open;
-//   · «صقارنا» with Shaheen's mark, the story, then the five rules;
+//   · «من هو الصقار؟» with Shaheen's mark, the story, then the five rules;
 //   · no «تمام» button: the ✕ or a tap anywhere outside the card closes it.
 // The site count is the live one the share card and welcome line use (siteCount.ts); unknown → the clause is left out.
 import { useEffect, useRef, useState } from 'react';
@@ -19,8 +19,8 @@ import { loadSiteCount, siteCountNow } from '@/data/siteCount';
 const EAGLE = require('../../assets/images/falconer-howto.svg');
 const SHAHEEN = require('../../assets/models/shaheen.png');
 // the eagle art: 310×385 canvas units drawn at ART_W px; the falconer's centre sits (68.5, 73.5) units off the canvas centre
-const ART_W = 170, ART_H = Math.round(ART_W * 385 / 310);
-const ART_DX = Math.round(68.5 / 310 * ART_W), ART_DY = Math.round(73.5 / 385 * ART_H) - 14;
+const ART_W = 120, ART_H = Math.round(ART_W * 385 / 310);
+const ART_DX = Math.round(68.5 / 310 * ART_W), ART_DY = Math.round(73.5 / 385 * ART_H) - 10;
 // A browser keeps ONE timeline per SVG URL, so every open needs its own URL for the eagle to fly again — but a new
 // ?play= URL is a new download, and on a phone the flight was over (or never seen) by the time it arrived. On the web
 // the SVG is fetched ONCE when the home page mounts, and each open gets a fresh blob: URL of those same bytes: no
@@ -109,20 +109,20 @@ export function InsightHowItWorks({ visible, locale, onClose }: { visible: boole
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: space.card },
-  card: { width: '100%', maxWidth: 460, maxHeight: '88%', backgroundColor: colors.surface, borderRadius: radius.sheet, overflow: 'hidden' },
+  card: { width: '100%', maxWidth: 460, maxHeight: '94%', backgroundColor: colors.surface, borderRadius: radius.sheet, overflow: 'hidden' },
   // physical right in BOTH languages — never flipped by RTL
   close: { position: 'absolute', top: space.card, right: space.card, zIndex: 2, padding: 2 },
-  body: { paddingHorizontal: space.screenSide, paddingTop: space.card, paddingBottom: space.screenSide },
+  body: { paddingHorizontal: space.screenSide, paddingTop: space.card, paddingBottom: space.card },
   title: { fontSize: 19, fontWeight: '700', color: colors.ink, textAlign: 'center', marginHorizontal: 30 },
-  eagleBox: { alignItems: 'center', justifyContent: 'center', height: 132, overflow: 'hidden', marginTop: 2 },
+  eagleBox: { alignItems: 'center', justifyContent: 'center', height: 90, overflow: 'hidden', marginTop: 0 },
   eagle: { width: ART_W, height: ART_H },
   flip: { transform: [{ scaleX: -1 }] },
   falconerRow: { alignItems: 'center', gap: space.base, marginBottom: space.base / 2 },
-  mark: { width: 30, height: 30 },
-  falconer: { fontSize: 18, fontWeight: '700', color: colors.ink },
-  story: { fontSize: 14.5, lineHeight: 23, color: colors.body, marginBottom: 12 },
-  rulesTitle: { fontSize: 16, fontWeight: '700', color: colors.ink, marginBottom: 4 },
-  rule: { fontSize: 13.5, lineHeight: 21, color: colors.body, marginBottom: 6 },
+  mark: { width: 26, height: 26 },
+  falconer: { fontSize: 17, fontWeight: '700', color: colors.ink },
+  story: { fontSize: 14, lineHeight: 21, color: colors.body, marginBottom: 8 },
+  rulesTitle: { fontSize: 15, fontWeight: '700', color: colors.ink, marginBottom: 2 },
+  rule: { fontSize: 13, lineHeight: 19, color: colors.body, marginBottom: 4 },
   // «معلومة فقط» — the whole sentence bold (owner 2026-11-11: «make the entire sentence bold»)
   ruleLast: { fontWeight: '700', color: colors.ink },
   ruleTitle: { fontWeight: '700', color: colors.ink },
