@@ -64,6 +64,14 @@ check('a head joining buy and rent carries no price, even when joined again (no 
 const droppedJoin = { ...j2, price: null, price_max: null, unpriced: 0 };
 mustCatch('a joined head that drops its price (the old joinPins)', pinHead(droppedJoin, 'ar') !== 'من 750 ألف');
 
+// 3c. Corners (owner 2026-11-11: «put this zoom in thing on the right … put the drawing on the left»): ⤢ top-right,
+// «رسم» top-left, in the small map box too.
+const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
+const CORNERS = (src: string) => /<Pressable style=\{\[s\.closeBtn, s\.closeBtnRight\]\} onPress=\{\(\) => \{ closePanels\(\); onExpand\(\); \}\}/.test(src)
+  && /\(onClose \|\| onExpand\) && !drawing \? s\.topRightAsLeft : s\.topRightAt/.test(src);
+check('the small map: ⤢ sits top-right and «رسم» top-left', CORNERS(web));
+mustCatch('⤢ moved back to the top-left', !CORNERS(web.replace('s.closeBtn, s.closeBtnRight]} onPress={() => { closePanels(); onExpand(); }}', 's.closeBtn, s.closeBtnLeft]} onPress={() => { closePanels(); onExpand(); }}')));
+
 // 4. The database half (the committed migration production runs).
 const dir = join(root, 'supabase/migrations');
 const file = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().reverse()

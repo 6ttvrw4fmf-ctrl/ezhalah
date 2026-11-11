@@ -413,7 +413,7 @@ const regionView = (mk: MapKit, r: Region) => {
   );
 };
 
-/** `onExpand` (compact box): the ⤢ button top-left opens the map full screen; the box itself pans and zooms in place
+/** `onExpand` (compact box): the ⤢ button top-right opens the map full screen; the box itself pans and zooms in place
  *  (owner 2026-10-31: «zoom in within his screen without leaving»). `full` + `onClose`: the full-screen map, with its
  *  close button top-left. */
 export default function AppleMap({ full = false, onExpand, onClose, onRoute, pins, onPinSelect }: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void; pins?: PinFilter; onPinSelect?: (row: PinRow) => void }) {
@@ -1170,7 +1170,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {onExpand && !failed && !drawing ? (
-        <Pressable style={[s.closeBtn, s.closeBtnLeft]} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
@@ -1194,7 +1194,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       ) : null}
-      {roomy ? <View style={[s.topRight, onClose && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
+      {/* Corners (owner 2026-11-11): ⤢ / ✕ top-RIGHT, «رسم» top-LEFT — in the small box and full screen alike. */}
+      {roomy ? <View style={[s.topRight, (onClose || onExpand) && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
       {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
           becomes «إزالة المسار ✕». */}
       {onRoute && !failed && !drawing ? (
