@@ -429,16 +429,26 @@ async function moneyAt(page, where, { worst = false, needCards = true, mustShow 
 //     skips every other route on the browser, the robot pass included,
 //   • the district's ministry summary and its deals are the robot's rows above, with the longest amounts.
 // Must be set BEFORE the first ad is opened: the ad page reads each of these once and remembers the answer.
+// What the ministry step saw, printed when the table does not open (so a red run says WHY, not only that).
+const ministryLog = [];
 async function answerMinistryReads(ctx) {
   const table = (name) => (url) => url.pathname.endsWith(`/rest/v1/${name}`);
-  const answer = (route, rows) => route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8',
-    headers: { 'access-control-allow-origin': route.request().headers().origin || '*' }, body: JSON.stringify(rows) });
+  ctx.on('page', (pg) => pg.on('pageerror', (e) => ministryLog.push(`page error: ${String(e.message || e).slice(0, 160)}`)));
+  ctx.on('requestfailed', (r) => { if (/\/rest\/v1\//.test(r.url())) ministryLog.push(`failed: ${r.url().split('/rest/v1/')[1]?.slice(0, 90)} — ${r.failure()?.errorText}`); });
+  const answer = (route, rows) => (ministryLog.push(`answered ${new URL(route.request().url()).pathname.split('/rest/v1/')[1]} (${rows.length} row(s))`), route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8',
+    headers: { 'access-control-allow-origin': route.request().headers().origin || '*' }, body: JSON.stringify(rows) }));
   await ctx.route(table('moj_district_sales'), (route) => answer(route, [MOJ_SUMMARY]));
   await ctx.route(table('moj_district_deals'), (route) => answer(route, MOJ_DEALS));
   await ctx.route(table('search_listings_ar'), async (route) => {
     const q = new URL(route.request().url()).searchParams;
     const eq = (k) => (q.get(k) || '').replace(/^eq\./, '');
-    if (route.request().method() !== 'GET' || !(q.get('select') || '').includes('latitude') || !eq('listing_id') || !eq('source_table')) return route.fallback();
+    if (route.request().method() !== 'GET') return route.fallback();
+    // The ad page's neighbourhood reads for the robot's made-up district (the asking-price stats page through every
+    // sale listing in الملقا; the similar-listings read): answered empty. Read for real they paged thousands of rows of
+    // production on every run, and through CI's front door took longer than the 20 s the table is given (PR #11723's
+    // first CI run: the table never opened at any size). The ministry half — the table — needs none of them.
+    if (eq('district_ar') === 'الملقا' && eq('deal_ar') === 'بيع' && !eq('listing_id')) return answer(route, []);
+    if (!(q.get('select') || '').includes('latitude') || !eq('listing_id') || !eq('source_table')) return route.fallback();
     return answer(route, [{ latitude: null, longitude: null, type_ar: 'فيلا', deal_ar: 'بيع', city_ar: 'الرياض', district_ar: 'الملقا', price_total: 2183845500,
       area_m2: 612.5, license_number: null, platform: 'aqar', source_table: eq('source_table'), listing_id: Number(eq('listing_id')), bedrooms: null }]);
   });
@@ -518,7 +528,7 @@ if (ONLY !== 'cover') {
           await page.setViewportSize({ width: w, height: h });
           await page.waitForTimeout(700);
           const open = await openDealsSheet(page);
-          check(`the Ministry's past-sales table opens inside the ad — ${w}x${h}`, open);
+          check(`the Ministry's past-sales table opens inside the ad — ${w}x${h}`, open, open ? '' : `reads seen: ${ministryLog.slice(-8).join(' | ') || 'none'}`);
           if (open) await moneyAt(page, `past-sales table ${w}x${h}`, { needCards: false, mustShow: [LONG_AMOUNT] });
         }
         await page.locator('[data-testid="listing-preview-moj-deals-close"]:visible').first().click({ timeout: 3000 }).catch(() => {});
