@@ -41,6 +41,24 @@ def norm(s: Optional[str]) -> str:
 _SALE = re.compile(_B + r"(?:للبيع|بيع|للبيع)" + _E)
 _RENT = re.compile(_B + r"(?:للايجار|ايجار|الايجار|للاجار|اجار|للتاجير|تاجير|للتاجر)" + _E)
 
+# ── a short stay the SELLER states (⚡ 2026-11-10, backlog 1674) ──────────────────────────────────
+# «شقه فاخره للاجار اليومي» (18749721) and «شاليه للإيجار اليومي … السعر 300 ريال يوم الخميس» (25790932) were
+# served as yearly rents: the price carried no period of its own, so the «≤ 10,000 looks monthly» rule made it
+# ×12. The seller DID state the period, in the rent phrase itself: the row stores the seller's word ('daily' /
+# 'weekly', PERIOD = SOURCE), its price is never annualised, and it searches under «إقامات قصيرة» (owner
+# 2026-11-10, backlog 1744 — rent_pool_ar() / src/lib/rentPool.ts SHORT_STAY_PERIODS).
+# Only a period word tied to a RENT word counts («تنظيف يومي» or «صيانة اسبوعية» say nothing about the rent).
+_SHORT_STAY = re.compile(
+    _B + r"(?:لل|ل|ال)?(?:ايجار|اجار|تاجير)\s*(?:ال)?(?:(يومي|يوميه|يوميا)|(اسبوعي|اسبوعيه|اسبوعيا))" + _E)
+
+
+def short_stay_rent(title: str, body: str) -> Optional[str]:
+    """'daily' / 'weekly' when the seller's rent phrase states it (title or text), else None."""
+    m = _SHORT_STAY.search(norm(f"{title}\n{body}"))
+    if not m:
+        return None
+    return "daily" if m.group(1) else "weekly"
+
 
 def deal_of(title: str, body: str) -> Optional[str]:
     """Buy / Rent from the post's own words; both named → the title decides only if it names one, else None."""

@@ -92,7 +92,9 @@ figure misstates them. They are the whole of the «إقامات قصيرة» poo
 
 **«إقامات قصيرة» (the old «شهري» pool) is Gathern + Aqar Monthly ONLY. Every other site's rent listing is
 YEARLY: a per-month figure pools under «سنوي» at ×12 and the card keeps the site's word — «السعر المعلن
-3,000 شهرياً». A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
+3,000 شهرياً». ONE per-listing exception (owner 2026-11-10, backlog 1744): a rent whose SELLER states a daily or
+weekly stay (Haraj «للإيجار اليومي» → source rent_period 'daily' / 'weekly', price never ×12, no price on the card)
+joins «إقامات قصيرة» — `SHORT_STAY_PERIODS` / `rent_pool_ar()`, migration 20261111070829. A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
 Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom, Commercial Building) is a
 per-month price and is SERVED ×12; rooms, land, rest houses, chalets, camps and farms are out.** The
 SOURCE TABLES ARE UNTOUCHED (PRICE = SOURCE, PERIOD = SOURCE still hold there) — the index serves through
