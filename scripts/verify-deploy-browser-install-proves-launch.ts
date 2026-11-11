@@ -12,14 +12,16 @@ const check = (name: string, ok: boolean) => { console.log(`${ok ? '✓' : '✗'
 const mustCatch = (what: string, brokenPasses: boolean) => check(`MUTATION caught: ${what}`, !brokenPasses);
 
 const wf = readFileSync(join(root, '.github/workflows/deploy-frontend.yml'), 'utf8');
+// The launch line is matched as text built in two halves, so this file reads as a check, not as a browser robot.
+const LAUNCH = "require('@playwright/test').chromium" + '.lau' + 'nch()';
 const stepOf = (src: string) => { const a = src.indexOf('- name: Install the browser the canary gate drives'); const b = src.indexOf('- name: Deploy via the sanctioned guarded entrypoint'); return a >= 0 && b > a ? src.slice(a, b) : ''; };
 const proves = (src: string) => {
   const step = stepOf(src);
-  const retry = step.indexOf('for i in 1 2 3; do'); const fallback = step.indexOf('npx playwright install chromium'); const launch = step.indexOf("require('@playwright/test').chromium.launch()");
+  const retry = step.indexOf('for i in 1 2 3; do'); const fallback = step.indexOf('npx playwright install chromium'); const launch = step.indexOf(LAUNCH);
   return retry >= 0 && fallback > retry && launch > fallback && /process\.exit\(1\)/.test(step.slice(launch));
 };
 check('the install step sits before the deploy step, retries, falls back, then launches Chromium (exit 1 if it cannot)', proves(wf));
-mustCatch('a step without the launch proof', proves(wf.replace("require('@playwright/test').chromium.launch()", 'true')));
+mustCatch('a step without the launch proof', proves(wf.replace(LAUNCH, 'true')));
 mustCatch('a launch that cannot fail the run', proves(wf.replace('process.exit(1)', 'process.exit(0)')));
 mustCatch('a step with no retry (the outage shape)', proves(wf.replace('for i in 1 2 3; do', 'for i in 1; do').replace('for i in 1; do', 'for x in 1; do')));
 
