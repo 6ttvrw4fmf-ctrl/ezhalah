@@ -152,3 +152,11 @@ def test_a_phone_in_a_title_value_never_reaches_the_evidence():
     lines = page_evidence(f"<html><body>{pair}</body></html>")["evidence_lines"]
     assert not any("0551234567" in x for x in lines)
     assert "عرض الشارع: 15 جوال <num>" in lines and "مساحة الأرض: 625" in lines
+
+
+def test_a_colon_label_with_the_year_on_the_next_line_is_one_year():
+    # CodeRabbit on #11465: «عمر العقار:» / «سنة» — the bare colon label is emptied later, so it is read first
+    from scrapers.common.new_listings_score import AGE_KW, WE_MISS, _cmp_number, norm
+    lines = [norm("عمر العقار:"), norm("سنة")]
+    assert _cmp_number(1, lines, " | ".join(lines), AGE_KW) == MATCH
+    assert _cmp_number(None, lines, " | ".join(lines), AGE_KW) == WE_MISS

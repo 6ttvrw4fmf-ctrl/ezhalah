@@ -693,6 +693,7 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     # description is cut off at «…نوع العقار: Apartment سعر الوحدة: 27000 عمر العقار:» (21839193, re-read run
     # 41288305920, 2026-11-01), and the other field's 27000 before it read as a stated age, scoring our 9 a
     # MISMATCH. That line is emptied; a label/value neighbour («عمر العقار» / «جديد») still counts.
+    one_year = kw == AGE_KW and _states_one_year(lines, kw_hits)   # before a bare «عمر العقار:» line is emptied below
     lines = ["" if i in kw_hits and re.search("(?:" + kw + r")\s*[:：]\s*$", x) else x for i, x in enumerate(lines)]
     if not AREA_UNIT.search(kw):
         lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
@@ -702,7 +703,7 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         page_states = any(AREA_LABEL_LINE.match(lines[i]) and i + 1 < len(lines)
                           and re.match(r"^\s*[\d٠-٩][\d٠-٩.,]*\s*م\s*$", lines[i + 1]) for i in kw_hits)
     if kw == AGE_KW and not page_states:
-        page_states = _states_one_year(lines, kw_hits)   # «عمر العقار: سنة» states 1 with no digit (CodeRabbit on #11465)
+        page_states = one_year   # «عمر العقار: سنة» states 1 with no digit (CodeRabbit on #11465)
     if stored is None:
         return WE_MISS if page_states else PAGE_SILENT
     pat = _num_pattern(stored)
@@ -771,7 +772,7 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # A bare singular year right after the age label is ONE year: aqarcity 30135 (aqarcity_residential_listings:
         # 2292614, 2026-11-09 score) prints «… المساحة :109 متر مربع … عمر العقار: سنة. …» on one line; stored 1, and
         # the line's 109 made «page states» true, so the night scored it a MISMATCH.
-        if kw == AGE_KW and _states_one_year(lines, kw_hits):
+        if one_year:
             worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
             worded.add(2)
