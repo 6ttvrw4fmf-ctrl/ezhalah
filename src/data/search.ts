@@ -22,6 +22,7 @@ import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
 import { pickFilterGreetingOpening } from './filterGreetingRotation';
+import { postedPhrase, postedWindowLabel, postedWindowParam } from '@/lib/postedWindows';
 import { pickEnglishFilterGreetingOpening } from './filterGreetingRotation';
 import { primeFilterGreetings } from './loaderFilterGreetings';
 
@@ -138,6 +139,9 @@ export type SearchQuery = {
   // single `typeGroup` string outright; legacy persisted values are migrated on read by
   // migrateGroups() in @/lib/searchDefaults — there is no second live field.
   typeGroups?: string[] | null;
+  // «نُشر خلال» — PUBLISHED WITHIN the last N days, by the listing SITE's own posting date (owner 2026-11-11). One of
+  // POSTED_WINDOWS (src/lib/postedWindows.ts). null = «أي وقت». Never sent for short stays; an undated ad is in no window.
+  postedWithinDays?: number | null;
   // Bedroom count selected at the CATEGORY/GROUP level — shown before the user picks a specific type.
   // Independent of `detail` so both beds and area can be set simultaneously. Ignored once a type is
   // selected (the type-level detail chip takes over). (user: no forced type selection for bed filter.)
@@ -431,7 +435,8 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
     detail: detailPhrase,
     verb,
     place,
-    price: tooLow ? '' : pricePhrase,
+    // «نُشر خلال» is part of what the user asked for too (owner 2026-11-11: «ai agent should say it in the sentence»).
+    price: (tooLow ? '' : pricePhrase) + postedPhrase(postedWindowParam(q), getLocale() === 'ar' ? 'ar' : 'en'),
   });
 
   const subWhat = selTypes.length
@@ -721,6 +726,9 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
   // The AF never asks it when this is set (FURNISHED_QUESTION's eligibility), so the two lines cannot both appear.
   const furnLine = furnishingLabelKey(q.furnishedPref);
   if (furnLine) lines.push(`• ${t('Furnishing')}: ${t(furnLine)}`);
+  // «نُشر خلال» (owner 2026-11-11): the period the user picked, in the summary too.
+  const postedDays = postedWindowParam(q);
+  if (postedDays != null) lines.push(`• ${t('Published within')}: ${t(postedWindowLabel(postedDays))}`);
   // The features the search REALLY requires (certified tokens only — an uncertified one never reaches q.amenities), so the
   // user sees «غرفة خادمة» in the restatement of «بيت مع غرفة للخادمة», not only as a tag on each card (owner 2026-10-11).
   const wantedAmenities = (q.amenities ?? []).filter((a) => a in AMENITY_LABEL);

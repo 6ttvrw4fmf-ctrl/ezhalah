@@ -483,6 +483,28 @@ most-shared spot (`map_pin_snap`, refreshed hourly by `map_pin_snap_refresh_ar()
 tapping it lists every ad. Two DIFFERENT sites keep their own spot (owner 2026-11-03: same-site copies stay, cross-site
 is normal) — but see the next rule: their heads never overlap on screen. Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`, `20261105071552`).
 
+**«نُشر خلال» — PUBLISHED WITHIN, and «إعلان جديد» on pins (owner 2026-11-11, permanent).** A choice in BOTH the main
+Filter and the map filter, every deal except short stays: Any / 1 / 7 / 14 / 30 / 90 days / 6 / 12 / 24 / 36 months, each a
+MAXIMUM age like Zillow's «Time on Zillow». It reads the listing SITE's own posting date — `search_listings_ar.posted_at`
+= `source_posted_at(date_added)`, filled by `sync_search_posted_at()` (cron every 10 min) — never the day Ezhalah found the
+ad. An undated ad is in no window and shows only under «أي وقت»; never guess a date. The choice opens as a floating menu
+with each period's number (`posted_window_counts_ar`, generated from the same eligibility clause as the results). It is a
+NORMAL narrowing (`rpcFilterParams` → every count surface), the map sends it to `map_pins_ar` / `map_nopin_markers_ar`, and
+the search sentence and summary say it («، منشور خلال آخر 7 أيام»). A map pin holding an ad its site published in the
+last 3 days (`fresh`) shows «إعلان جديد» above its price — never «جديد» alone, which means a newly BUILT property in the
+Filter. Code: `src/lib/postedWindows.ts`, `src/components/PostedWindowMenu.tsx`; guard `scripts/verify-published-within.ts`.
+
+**Map tab: THE PIN SHOWS THE PRICE, NEVER A COUNT (owner 2026-11-10, final rule — «we don't say 2 instead we just put
+the price … lowest price wins … price on request = price listed if there is»).** Every exact spot's head is a price:
+one real price and nothing else → «750 ألف»; anything else there (another price, or an ad with no price) → «من 750 ألف»,
+the LOWEST real price; no real price → «السعر عند الطلب». A rent reads per year («/سنة»); a short stay «إقامة قصيرة».
+On the pin only, a sale under 10,000 or a yearly rent under 1,000 is a placeholder, not a price (the card keeps the
+site's figure). A spot holding buy and rent ads is two pins, one per deal. The sheet title carries no count either
+(«فيلا للبيع · من 750 ألف»), and every ad — priced or not — stays in the sheet as its OWN FULL CARD (the same property's other sites right under
+it, never a small link button: owner «show all options»), never hidden or demoted. Counts remain
+only on zoomed-out bubbles and district markers. Code: `pinHead`/`priceHead`/`pinPrice` in `src/lib/mapPins.ts`;
+SQL: migration `20261111042620`; guard `scripts/verify-map-pin-shows-the-price-never-a-count.ts`.
+
 **Map tab: THE FINAL PIN RULE — one pin is one place, the same property is one card that names every site (owner
 2026-11-10, permanent; it replaces «two different sites are always two ads» above).**
 1. One pin = one place; different places sit side by side, never on top of each other.
@@ -1674,6 +1696,16 @@ new detector needing a longer history must raise the retention in the same chang
   bisht or beard (`assets/icons/insight-falconer-original.png`). Neither has a face circle.
   These replace the magnifying-glass emoji; explanatory copy and dismissal stay the same.
   Guards: `scripts/verify-insight-welcome.ts`, `scripts/verify-filter-welcome.ts`.
+  **Superseded 2026-11-11 (owner): the «كيف نحسبها؟» popup.** A small underlined «كيف نحسبها؟» / "How we calculate it"
+  sits under a market fact (13 px, like «الشروط والخصوصية»). It and the fact open a centred popup laid out like «نماذج
+  إزهله»: ✕ ALWAYS on the physical right; in the centre the sign-in eagle story played 2× slower
+  (`assets/images/falconer-howto.svg`, built by `scripts/build-howto-falconer.mjs`), mirrored in Arabic, replayed each
+  open; «صقارنا» with Shaheen's purple mark; the owner-approved falconer story (Ezhalah's falconer collects every site's
+  listings and gives them to his falcon Shaheen; Shaheen is AI and can make mistakes, so check the original listing; the fact comes from the same data) and five rules (only real listings;
+  the site's own posting date, undated = not counted; asking prices, duplicates once, checked twice; a new fact every
+  hour about your city/district; information only, not financial advice). Formal Arabic, no diacritics. No «تمام»
+  button — ✕ or a tap outside closes it. The site count is the LIVE `siteCount.ts` number the share card uses; unknown →
+  the clause is left out. Words: `src/lib/insightHowItWorks.ts`.
 
 - **The Apartments & Co-living group of «🎯 Refine with AI» has owner-LOCKED chip lists (2026-10-31)** — one list
   per type × deal (Apartment / Floor / Room / Studio / Residential building × short stays / annual rent / buy),
@@ -1756,6 +1788,7 @@ new detector needing a longer history must raise the retention in the same chang
   for its result (an Advanced Filter round's receipt comes off when its search threw or was stopped, so the buttons
   return); and a failure line in the chat is written in THAT TURN's language, not the interface's.
 
+**No Arabic diacritics (حركات) in what we write (owner, 2026-11-11: «we can never have 7arakat»).** New and edited Arabic UI copy is written without تشكيل (no ً ٌ ٍ َ ُ ِ ّ ْ). Applied first to the «كيف نحسبها؟» popup and the «نماذج إزهله» card (حر, نموذج, قريبا…), both guarded by `scripts/verify-insight-welcome.ts`; older strings elsewhere are cleaned as they are touched.
 
 **PRICE DIARY + COMPARABLES CARDS — every ad's prices and dates are kept forever, also after it is hidden or removed (owner, 2026-11-11 — permanent).**
 Owner: «let's start saving … the price before and after … the dates are important … the hidden ones, cuz they got deleted,

@@ -6,7 +6,8 @@
 // the ad page use, table by table.
 // THE SAME PROPERTY IS ONE CARD (owner 2026-11-10, the final pin rule): ads PROVEN to be one property (same licence,
 // the same site's exact repost, or a whole property of the same type and size at this pin — foldSameProperty) show as
-// one card, the cheapest, and every other ad is named right under it with its site and price, each one a link.
+// together, the cheapest first, and every other site's ad right under it as its OWN FULL CARD (owner 2026-11-10: «show
+// all options» — a small link button for the other site was not enough).
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -17,7 +18,7 @@ import { useI18n, englishCatalogText } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { foldSameProperty, idsByTable, orderLike, pinHead, sameKindSummary, type FoldFacts, type PinRow } from '@/lib/mapPins';
-import { listingPrice, sourceName } from '@/lib/listingDisplay';
+import { listingPrice } from '@/lib/listingDisplay';
 import { translitPlace } from '@/lib/translitPlace';
 
 // What the fold may compare: the index's own facts. No facts (the index read failed) → no site → never grouped.
@@ -54,18 +55,16 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
   // A BUILDING SAYS WHAT IT HOLDS (owner 2026-11-10: «12 شقة للإيجار من 40,000»): once every ad of the pin is loaded
   // and they are all one type and one deal. Until then, and for a mixed pin, the plain count stays.
   const kind = !row.noPin && cards ? sameKindSummary(row.n, cards.map((l) => ({ ...factsOf(l), showsPrice: listingPrice(l, locale) !== '' }))) : null;
-  // THE TITLE COUNTS PROPERTIES, NOT ADS (measured live 2026-11-10: «4 دور للبيع» over two cards — two floors, each
-  // advertised on two sites). One property left → no number at all.
+  // THE TITLE CARRIES NO COUNT, ONLY THE PRICE (owner 2026-11-10: «It says 8 but there is 3» → «we don't say 2 instead
+  // we just put the price»): the same price rule as the pin head (pinHead/priceHead in src/lib/mapPins.ts), after the
+  // type and deal when every ad is one kind («فيلا للبيع · من 750 ألف»).
   const groups = cards ? foldSameProperty(cards, factsOf) : [];
-  const kindTitle = kind
-    ? `${groups.length > 1 ? `${groups.length} ` : ''}${locale === 'en' ? englishCatalogText(kind.typeAr) : kind.typeAr} ${t(kind.dealAr === 'بيع' ? 'for sale' : 'for rent')}${kind.from !== null ? ` ${t('from {price}', { price: kind.from.toLocaleString('en-US') })}` : ''}`
-    : '';
+  const head = pinHead(row, isRTL ? 'ar' : 'en');
   const title = row.noPin
     ? t('{n} listings in {district}', { n: row.n, district: isRTL ? place : translitPlace(place) })
     : row.n > 1
-      ? (kindTitle || t('{n} listings at this spot', { n: row.n }))
-      : `${t('Listing')} · ${pinHead(row, isRTL ? 'ar' : 'en')}`;
-  const siteOf = (l: Listing) => (locale === 'en' ? englishCatalogText(sourceName(l.source)) : t(sourceName(l.source)));
+      ? (kind ? `${locale === 'en' ? englishCatalogText(kind.typeAr) : kind.typeAr} ${t(kind.dealAr === 'بيع' ? 'for sale' : 'for rent')} · ${head}` : head)
+      : `${t('Listing')} · ${head}`;
   const shown = row.ids?.length ?? 0;
   return (
     <View style={s.sheet} testID="map-pin-sheet">
@@ -90,20 +89,15 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
         <View style={s.center}><Text style={s.note}>{t('Could not load this listing. Try again.')}</Text></View>
       ) : (
         <ScrollView style={s.list} contentContainerStyle={s.listInner} showsVerticalScrollIndicator>
-          {/* One card per PROPERTY; every other ad of the same property is a named link under it — nothing is hidden. */}
+          {/* EVERY AD IS A FULL CARD (owner 2026-11-10: «show both … don't show like a button … show all options»). The ads
+              proven to be one property sit together: its cheapest first, then each other site's own full card. */}
           {groups.map(({ main, others }) => (
             <View key={`${main.sourceTable}#${main.id}`} style={s.card}>
               <ResultCard listing={main} onOpen={() => { void openListing(main); }} row="tight" />
-              {others.length ? (
-                <View style={[s.also, { flexDirection: isRTL ? 'row-reverse' : 'row' }]} testID="map-pin-sheet-also-on">
-                  <Text style={s.alsoLabel}>{others.length === 1 ? t('Same property, one more ad:') : t('Same property, {n} more ads:', { n: others.length })}</Text>
-                  {others.map((o) => (
-                    <Pressable key={`${o.sourceTable}#${o.id}`} onPress={() => { void openListing(o); }} accessibilityRole="link" style={s.alsoChip} testID="map-pin-sheet-also-chip">
-                      <Text style={s.alsoChipText}>{[siteOf(o), listingPrice(o, locale)].filter(Boolean).join(' · ')}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
+              {others.length ? <Text style={s.alsoLabel} testID="map-pin-sheet-also-on">{t('Same property, more ads:')}</Text> : null}
+              {others.map((o) => (
+                <ResultCard key={`${o.sourceTable}#${o.id}`} listing={o} onOpen={() => { void openListing(o); }} row="tight" />
+              ))}
             </View>
           ))}
           {failed && cards.length < (row.ids?.length ?? 0) ? <Text style={s.note}>{t('Some listings could not be loaded.')}</Text> : null}
@@ -120,11 +114,8 @@ const s = StyleSheet.create({
   close: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   list: { flexGrow: 0 },
   listInner: { padding: 10, gap: 10 },
-  card: { },
-  also: { flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingHorizontal: 6, paddingTop: 6 },
-  alsoLabel: { color: colors.muted, fontSize: 12.5, fontWeight: '600' },
-  alsoChip: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: colors.tintLine, backgroundColor: colors.surface },
-  alsoChipText: { color: colors.primary, fontSize: 12.5, fontWeight: '600' },
+  card: { gap: 8 },
+  alsoLabel: { color: colors.muted, fontSize: 12.5, fontWeight: '600', paddingHorizontal: 6 },
   center: { padding: 24, alignItems: 'center' },
   note: { color: colors.muted, fontSize: 13, textAlign: 'center', padding: 8 },
   noPinNote: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.tintLine },

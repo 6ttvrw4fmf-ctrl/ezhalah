@@ -3,7 +3,7 @@
 //   · «Same property» needs PROOF — the same government licence, the same site's exact repost, or a whole property
 //     (villa, land, building …) of the same type and size at the pin. Looking alike is never enough, and two flats in
 //     one building are two flats.
-//   · Nothing is hidden: a folded ad stays in the group, named under the lead card.
+//   · Nothing is hidden: every ad of the group is its own full card under the lead card (owner 2026-11-10: «show all options»).
 //   · A site's stand-in point for a whole district (ten or more different whole properties of several kinds on one
 //     exact point) is not a place: those ads leave the pin and show under the district's «no exact location» marker.
 //   · The same licence drawn a few metres apart by two agents is pulled onto one pin.
@@ -65,11 +65,13 @@ check('a pin whose ads are not all loaded keeps the plain count', sameKindSummar
 check('one ad that shows no price (a stay-length site) → the title carries no price at all', sameKindSummary(2, [f(), f({ showsPrice: false })])?.from === null);
 check('a single ad and an unknown type get no building title', sameKindSummary(1, [f()]) === null && sameKindSummary(2, [f({ typeAr: 'غير معروف' }), f({ typeAr: 'غير معروف' })]) === null);
 
-// 5. The sheet renders the groups and every folded ad as a link; the cards carry the index's own facts.
+// 5. The sheet renders the groups and every ad as its own full card; the cards carry the index's own facts.
 const sheet = readFileSync(join(root, 'src/components/MapPinSheet.tsx'), 'utf8');
 const remote = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
-check('the sheet renders one card per group and a link for every other ad of it', /const groups = cards \? foldSameProperty\(cards, factsOf\) : \[\]/.test(sheet) && /\{groups\.map\(/.test(sheet) && /groups\.length > 1 \? `\$\{groups\.length\} `/.test(sheet) && /testID="map-pin-sheet-also-chip"/.test(sheet) && /onPress=\{\(\) => \{ void openListing\(o\); \}\}/.test(sheet));
-check('a folded ad\'s price goes through listingPrice() (stay-length sites print none)', /\[siteOf\(o\), listingPrice\(o, locale\)\]/.test(sheet));
+check('the sheet shows EVERY ad as a full card — the same property together, each other site its own card, never a link button (owner 2026-11-10: «show all options»)', /const groups = cards \? foldSameProperty\(cards, factsOf\) : \[\]/.test(sheet) && /\{groups\.map\(/.test(sheet) && /\{others\.map\(\(o\) => \(\s*<ResultCard key=\{`\$\{o\.sourceTable\}#\$\{o\.id\}`\} listing=\{o\} onOpen=\{\(\) => \{ void openListing\(o\); \}\}/.test(sheet) && !/map-pin-sheet-also-chip/.test(sheet));
+const fullCards = (src: string) => /\{others\.map\(\(o\) => \(\s*<ResultCard key=\{`\$\{o\.sourceTable\}#\$\{o\.id\}`\} listing=\{o\}/.test(src) && !/map-pin-sheet-also-chip/.test(src);
+mustCatch('the other site shown as a small link button again', fullCards(sheet) && !fullCards(sheet.replace(/(\{others\.map\(\(o\) => \(\s*)<ResultCard/, '$1<Pressable testID="map-pin-sheet-also-chip"')));
+check('every other ad is a full ResultCard, so its price goes through listingPrice() like every card (stay-length sites print none)', /\{others\.map\(\(o\) => \(\s*<ResultCard /.test(sheet));
 check('a card without index facts has no site to match on', /site: l\.fold \? l\.source : ''/.test(sheet));
 check('the cards read the licence, deal, type, size, price and floor from the index', /license_number,deal_ar,type_ar,area_m2,price_total,price_annual,floor_number/.test(remote) && /r\.fold = foldById\.get\(Number\(r\.id\)\);/.test(remote));
 
