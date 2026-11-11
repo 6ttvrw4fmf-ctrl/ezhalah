@@ -36,6 +36,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://aqarnajran.com"
 SOURCE = "Aqar Najran"
@@ -193,6 +194,9 @@ def map_listing(post: dict) -> tuple[Optional[dict], str, str]:
         "ad_number": f"{PREFIX}{post['id']}",
         "listing_url": post.get("link"),
         "source": SOURCE,
+        # Posting date = the WordPress post's date_gmt (UTC, so «Z»; `modified_gmt` is an edit). Live
+        # 2026-11-09: post 494 date_gmt 2026-02-02T01:37:41 (date = date_gmt: the site clock is UTC).
+        "date_added": site_posting_date(post["date_gmt"] + "Z") if isinstance(post.get("date_gmt"), str) else None,
         "active": True,
         "title": title,
         "property_type": property_type,

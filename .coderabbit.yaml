@@ -29,6 +29,13 @@ reviews:
     ignore_title_keywords:
       - "mirror (auto)"
       - "chore(deploy): record approved"
+      # Owner 2026-11-09 («only send it the important fixes»): ~100 PRs/day from ONE author hit CodeRabbit's fair-use
+      # floor (1 review/hour on every flat plan), so 60 of 97 PRs sat «rate limited» and blocked merges for hours.
+      # A «mirror:» PR copies SQL production already ran (checked byte-exact by the database lane) — nothing to judge.
+      - "mirror:"
+  # Docs-only PRs are skipped. Scrapers are reviewed again (owner 2026-11-10: usage budget on, $0.25/file).
+  path_filters:
+    - "!docs/**"
   # Paid finishing touches: engineers ask «@coderabbitai generate unit tests» on every bug-fix PR, so each fix ships a test.
   finishing_touches:
     unit_tests:

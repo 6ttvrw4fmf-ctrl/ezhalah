@@ -6,7 +6,9 @@
 //   1. every exact-point read in map_pins_ar draws at the snapped spot (all three street-zoom paths, not one of them);
 //   2. a snap is ignored when the listing has since moved (~1 km), so a stale snap never misplaces a pin;
 //   3. the box filter stays on the listing's OWN coordinates (the index keeps serving it — the 2026-11-03 slow-zoom fix);
-//   4. twins are only ever grouped INSIDE one site and one deal/price/area/type/bedrooms (two sites are two ads);
+//   4. twins are only ever grouped INSIDE one site and one deal/price/area/type/bedrooms (two sites are two ads —
+//      unless they carry the same government licence: the final pin rule's second pass, owner 2026-11-10, held in
+//      verify-map-same-property-is-one-card.ts);
 //   5. placeholder pins never take part, the refresh is scheduled, and nothing is removed — the pin keeps every id.
 // Each rule has a mutation that must be caught. The live half of the claim (the aqar pair 6797149/6834756 returns one
 // spot with n = 2) is production state, measured when the change shipped, not something an offline suite can see.
@@ -56,7 +58,11 @@ const refreshFn = fnBody(refresh.body);
 const sameSiteOnly = (sql: string) => /partition by s\.source_table, s\.deal_ar, s\.price, s\.area_m2, s\.type_ar, s\.bedrooms, s\.ppm\)/.test(sql)
   && /group by 1, 2, 3, 4, 5, 6, 7 having count\(distinct \(la, lo\)\) > 1/.test(sql) && /select source_table, deal_ar, price, area_m2, type_ar, bedrooms, ppm\s/.test(sql);
 const nearOnly = (sql: string) => { const m = /ST_ClusterDBSCAN\([^,]+\([^)]*\), ([0-9.]+), 2\)/.exec(sql); return !!m && Number(m[1]) > 0 && Number(m[1]) <= 0.001; };
-const noPlaceholders = (sql: string) => /not exists \(select 1 from public\.ops_default_pin_register r/.test(sql);
+// EVERY read of the listings (the same-site pass and the licence pass) leaves the placeholder pins out — counted, so a
+// second pass cannot slip in without the exclusion.
+const count = (sql: string, re: RegExp) => (sql.match(re) ?? []).length;
+const noPlaceholders = (sql: string) => count(sql, /from public\.search_listings_ar x\b/g) > 0
+  && count(sql, /not exists \(select 1 from public\.ops_default_pin_register r/g) === count(sql, /from public\.search_listings_ar x\b/g);
 check('twins are grouped only inside ONE site with the same deal, price, area, type and bedrooms', sameSiteOnly(refreshFn));
 check('twins must be within ~100 m of each other (DBSCAN eps ≤ 0.001°)', nearOnly(refreshFn));
 check('placeholder/default pins never take part', noPlaceholders(refreshFn));

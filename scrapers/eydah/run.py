@@ -58,6 +58,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://eydah.com"
 SOURCE = "الإيضاح"
@@ -171,6 +172,9 @@ def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         "property_age": normalize.parse_property_age(specs.get("عمر العقار")),
         "license_number": licence,
         "photo_urls": photos,
+        # THE SITE'S OWN POSTING DATE (owner 2026-10-26): JSON-LD datePosted. It was filed under
+        # additional_info only, so the welcome facts could not count by it.
+        "date_added": site_posting_date(ld.get("datePosted")),
     }
     price_note = None
     if tx == "Rent":

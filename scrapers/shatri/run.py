@@ -65,6 +65,7 @@ from scrapers.common.arabic_location import city_ar_for, find_district_in_text, 
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 # THE PIN IS ON THE AD PAGE, NOT IN THE REST POST (owner 2026-10-30: 50 ads, 0 pins). Houzez prints the listing's
@@ -267,6 +268,11 @@ def map_listing(post: dict, terms: dict[str, dict[int, str]], media: dict[int, s
         **normalize.amenities_from_text(body),
         "property_type": ptype,
         "transaction_type": "Rent" if RENT_RE.search(title) else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` (UTC by WP's
+        # definition; this install's local `date` is +0h on new posts, +3h on old ones). Checked live
+        # 2026-11-09: 22261 date_gmt 2026-10-31T17:40:35, first seen by us 2026-11-01 08:46 UTC. The
+        # page prints only «تحديث في سبتمبر 10, 2026» (22251) — that is `modified`, never a posting.
+        "date_added": site_posting_date(f"{post['date_gmt']}Z") if post.get("date_gmt") else None,
         "city": normalize.map_city(city_ar), "city_ar": city_ar, "city_id": city_id, "region_id": region_id,
         "district_ar": district, "neighborhood": area_term or addr[0],
         "area_m2": normalize.to_int(_meta1(meta, "fave_property_size")),

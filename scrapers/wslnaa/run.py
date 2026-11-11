@@ -43,6 +43,7 @@ from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.page_pin import pin_from_page  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://wslnaa.com"
 SOURCE = "Waslna"
@@ -188,6 +189,13 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "bathrooms": (_bathrooms_from_text(p.get("description"))
                       if (p.get("type") or "").strip().lower() in _DWELLING_TYPES else None),
         "photo_urls": imgs[:20] or None,
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the record's `createdAt` (UTC «…Z»).
+        # Measured 2026-11-09 over all 62 records of properties.list: never later than our first sighting
+        # (commercial-building-sale-dar-albaida-riyadh created 2026-10-05T14:32:58.000Z, first seen 10-06
+        # 04:24 UTC; nada-avenue-apartment-3-malz created 10-04 23:04, seen 10-05 04:24). `updatedAt` moves
+        # on edits (a 2026-10-05 batch), so it is never used. A record with `scheduledAt` set publishes
+        # later than it was created — 0 of 62 carry one, so that case is UNKNOWN → NULL, never createdAt.
+        "date_added": None if p.get("scheduledAt") else site_posting_date(p.get("createdAt")),
     }
     if deal == "Rent":
         # The source STATES the period; it is mapped, never derived from the number.

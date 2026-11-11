@@ -331,6 +331,24 @@ def begin_run(platform: str) -> int:
     return run_id
 
 
+def record_run_progress(run_id: Optional[int], *, rows_seen: int, rows_upserted: int) -> None:
+    """Stamp the real counts on an OPEN run row before a long tail (prune / oracle phase).
+
+    `_finalize_open_run_on_signal` deliberately does not guess counts, so a job killed after its rows
+    were written used to land as rows_seen=0 / rows_upserted=0 — sakani 2026-11-09 04:35 wrote 1,629
+    rows at 06:02 and was cancelled at 07:04 inside the prune, and the row read like an empty source
+    (crawl_went_silent fired). A scraper that calls this once its writes are done leaves the truth on
+    the row whatever happens next; end_run() still overwrites it with the final figures. Conditional
+    on the row still being open, never raises, nothing for a dry run."""
+    if run_id is None:
+        return
+    try:
+        _execute(sb().table("scrape_runs").update({"rows_seen": rows_seen, "rows_upserted": rows_upserted})
+                 .is_("ok", "null").eq("id", run_id), what="scrape_runs.progress")
+    except Exception as e:  # noqa: BLE001 — bookkeeping must never stop a run
+        print(f"  ⚠ scrape_runs progress stamp failed ({type(e).__name__}: {e})", flush=True)
+
+
 def upsert_aqar_residential(row: dict[str, Any]) -> None:
     """Upsert one Aqar residential row, keyed on `ad_number`."""
     row = dict(row)
@@ -632,15 +650,46 @@ def _licence_on_card(r: dict[str, Any]) -> None:
     the fleet-wide form of the owner's 11-04 Property Finder finding. Copy the stored licence verbatim
     (10 digits, the REGA ad-licence shape) into the card's key when the row writes additional_info and
     does not already carry the key. A row that does not write additional_info is left alone: an upsert
-    replaces the whole column, so inventing one here would erase the stored panel."""
-    lic = r.get("license_number")
+    replaces the whole column, so inventing one here would erase the stored panel.
+
+    The licence the row ALREADY HOLDS counts wherever the scraper put it (card parity 2026-11-09, 12 platforms
+    «we miss it» while the source page printed the licence): a `license_number` column, the panel's own
+    `license_number` key (fursaghyr: 9 of 9 live ads), or the ad's own words in description/title («ترخيص
+    الإعلان العقاري: 7201204886» jurash, «رقم الترخيص الإعلاني: 7201102134» october, «رخصة الإعلان: 7100318476»
+    aqar — 5,100 live ads fleet-wide on 11-09). Only the REGA ad-licence shape 71/72xxxxxxxx stated ONCE
+    (normalize.ad_licence_from_prose) — never a FAL licence, never a guess between two numbers. A licence found
+    in the text also fills an EMPTY `license_number` the scraper declares, so the index's licence (the Advanced
+    Filter's «مرخص», the ad page) says what the card says."""
     info = r.get("additional_info", _MISSING)
-    if info is _MISSING or not isinstance(lic, str) or not _REGA_AD_LICENCE.match(lic.strip()):
+    if info is _MISSING or not (info is None or isinstance(info, dict)):
         return
+    lic = _stated_rega_ad_licence(r, info)
+    if not lic:
+        return
+    if "license_number" in r and not str(r.get("license_number") or "").strip():
+        r["license_number"] = lic
     if info is None:
-        r["additional_info"] = {"rega_ad_license_number": lic.strip()}
-    elif isinstance(info, dict) and not str(info.get("rega_ad_license_number") or "").strip():
-        info["rega_ad_license_number"] = lic.strip()
+        r["additional_info"] = {"rega_ad_license_number": lic}
+    elif not str(info.get("rega_ad_license_number") or "").strip():
+        info["rega_ad_license_number"] = lic
+
+
+def _stated_rega_ad_licence(r: dict[str, Any], info) -> Optional[str]:
+    """The REGA ad licence this row states, in priority: the column, the panel's license_number key, the ad's words."""
+    from scrapers.common import normalize
+    for v in (r.get("license_number"), info.get("license_number") if isinstance(info, dict) else None):
+        # A licence is the text the source printed: a bare number (int) is not one (test_licence_reaches_the_card).
+        if isinstance(v, str) and _REGA_AD_LICENCE.match(v.strip()):
+            return v.strip()
+    # aqar publishes its licence as a structured payload field (aqar/enrich_residential.ad_licence), and where both
+    # exist the prose disagrees on 181 of 7,064 live rows (advertisers paste an older licence): the structured field
+    # is the source's statement there, so aqar never falls back to its prose (🔧 2026-11-09, test_aqar_never_reads_its_prose_licence).
+    if _PROSE_LICENCE_DISTRUSTED.search(str(r.get("listing_url") or "")):
+        return None
+    return normalize.ad_licence_from_prose(" ".join(str(r.get(k) or "") for k in ("description", "title")))
+
+
+_PROSE_LICENCE_DISTRUSTED = re.compile(r"^https?://(?:[a-z]+\.)?aqar\.fm/", re.I)
 
 
 def _fold_price_evidence(r: dict[str, Any]) -> None:
@@ -932,6 +981,12 @@ def _page_gone_holds_for(table: str, ads: list[str]) -> dict[str, tuple[int, boo
     """Read what `page_gone_holds` needs for one batch: two indexed reads, only for rows that are
     hidden. A failed read holds nothing (today's behaviour) and says so loudly — it never blocks
     ingestion."""
+    from scrapers.common.liveness_policies import complete_list_absence_hides
+    if complete_list_absence_hides(table):
+        # Owner decision 2026-11-10 (LISTING_LIVENESS.md §7.3): this site's ads are hidden on complete-list
+        # absence and its own pages are never read, so no ledger row of its is an own-page «gone». The list
+        # showing the ad again is the only reading there is: it un-hides the row.
+        return {}
     hidden: list[dict[str, Any]] = []
     probes: list[dict[str, Any]] = []
     try:
@@ -1145,6 +1200,11 @@ def prune_unseen(
                     never missing from the platform, only from its index.
       • 'unknown' → hold: the strike is recorded, but nothing is deactivated. An unreachable source
                     is not evidence (§4: timeout/403/429/5xx ≠ inactive).
+      • 'absent'  → ONLY for a platform named in liveness_policies.COMPLETE_LIST_ABSENCE_HIDES
+                    (propertyfinder, owner decision 2026-11-10, LISTING_LIVENESS.md §7.3): the row is
+                    HIDDEN on complete-list absence, recorded under its own oracle name
+                    (COMPLETE_LIST_ABSENCE_ORACLE) so the record never reads as an own-page verdict.
+                    From any other platform 'absent' is held exactly like 'unknown'.
     A caller that passes no `verify_gone` keeps the previous behaviour byte-for-byte, so this is
     opt-in per platform and only for platforms with a control-validated oracle.
 
@@ -1213,7 +1273,10 @@ def prune_unseen(
         if doomed and verify_gone is not None:
             # Only rows about to be deactivated are probed — a strike that is merely ticking up
             # costs nothing and needs no network call.
+            from scrapers.common.liveness_policies import (
+                COMPLETE_LIST_ABSENCE_ORACLE, COMPLETE_LIST_ABSENCE_VERDICT as _ABSENT, complete_list_absence_hides)
             confirmed_gone, still_live = [], []
+            absent_hidden: list[str] = []   # the ONE named site's complete-list absences (owner 2026-11-10)
             why: dict[str, str] = {}   # ad_number → the oracle's stated REASON, recorded as evidence
             for ad in ads:
                 try:
@@ -1230,12 +1293,18 @@ def prune_unseen(
                 except Exception as e:  # an oracle that throws is UNKNOWN, never "gone"
                     print(f"{table}: verify_gone({ad}) raised {type(e).__name__}: {e} → unknown")
                     verdict, note = "unknown", f"oracle raised {type(e).__name__}: {e}"
+                if verdict == _ABSENT:
+                    if complete_list_absence_hides(table):
+                        absent_hidden.append(ad)
+                    else:   # absence never hides (§2): only the named site's «absent» is honoured
+                        note = (f"«absent» refused: {table.split('_', 1)[0]} is not in "
+                                f"COMPLETE_LIST_ABSENCE_HIDES — held as unknown" + (f" | {note}" if note else ""))
                 why[ad] = note
                 if verdict == "gone":
                     confirmed_gone.append(ad)
                 elif verdict == "live":
                     still_live.append(ad)
-            held = len(ads) - len(confirmed_gone) - len(still_live)
+            held = len(ads) - len(confirmed_gone) - len(still_live) - len(absent_hidden)
             if still_live:
                 # Self-heal: the source serves it, so it was never missing — only un-indexed.
                 #
@@ -1280,7 +1349,7 @@ def prune_unseen(
                              what=table + ".prune_selfheal")
             if held:
                 # Record the strike but do NOT deactivate on an unreachable source.
-                pending = [a for a in ads if a not in set(confirmed_gone) | set(still_live)]
+                pending = [a for a in ads if a not in set(confirmed_gone) | set(still_live) | set(absent_hidden)]
                 _probe_iso = datetime.now(timezone.utc).isoformat()
                 for i in range(0, len(pending), 200):
                     _execute(c.table(table).update({"missing_count": new_missing,
@@ -1294,11 +1363,16 @@ def prune_unseen(
             # this: a deactivation on an oracle-required platform with no matching GONE row is a P1.
             # Monitoring must never fail the prune itself — the rows are written either way.
             try:
-                decided = set(confirmed_gone) | set(still_live)
+                decided = set(confirmed_gone) | set(still_live) | set(absent_hidden)
                 evidence = (
                     [{"source_table": table, "ad_number": a, "verdict": "GONE",
                       "oracle": "prune_unseen.verify_gone", "listing_url": "",
                       "note": why.get(a) or ""} for a in confirmed_gone]
+                    # The named site's hide: a ledger row of its own oracle name, so SQL can always tell
+                    # «hidden on complete-list absence by owner decision» from «its own page read gone».
+                    + [{"source_table": table, "ad_number": a, "verdict": "GONE",
+                        "oracle": COMPLETE_LIST_ABSENCE_ORACLE, "listing_url": "",
+                        "note": why.get(a) or ""} for a in absent_hidden]
                     + [{"source_table": table, "ad_number": a, "verdict": "LIVE",
                         "oracle": "prune_unseen.verify_gone", "listing_url": "",
                         "note": why.get(a) or ""} for a in still_live]
@@ -1322,7 +1396,7 @@ def prune_unseen(
             # invisible to the hidden counts, the unverified-hide monitor, auto-recovery and the
             # 30-day clock. The trigger keeps a value it is given, so both paths agree.
             _now = datetime.now(timezone.utc).isoformat()
-            ads, payload = confirmed_gone, {
+            ads, payload = confirmed_gone + absent_hidden, {
                 "missing_count": new_missing, "active": False,
                 "deactivated_at": _now, "last_liveness_probe_at": _now}
             if not ads:
@@ -1402,6 +1476,23 @@ _READ_GONE_DONE: set[str] = set()
 # struck twice in one run and the collapse cap holds across both readings.
 _READ_GONE_STRUCK: dict[str, set[str]] = {}
 
+# What strike_read_gone() READ after a refused prune, per table, until end_run() writes it into the run's
+# notes (2026-11-09). A tripped guard used to leave only «prune guard tripped: …» in the notes, so
+# mon_detect_enumeration_incomplete() read superoffice — whose robots.txt-respecting window can never list
+# the whole catalogue (owner decision 4, 2026-11-03) and which then reads EVERY unseen office's own page —
+# as «delisted ads are NOT being retired». The marker says what the direct reads decided:
+#   «unseen read directly: <table> unseen=U read=R gone=G live=L unknown=K unread=U-R»
+# unread=0 ⇒ a partial WALK with a complete direct VERDICT; the detector does not raise on it.
+# unread>0 (the read cap) or no marker ⇒ raised exactly as before.
+_READ_GONE_REPORT: dict[str, dict[str, int]] = {}
+
+
+def read_gone_report_line(table: str, counts: dict[str, int]) -> str:
+    """The one line end_run() appends per table; mon_detect_enumeration_incomplete() parses `unread=`."""
+    return (f"unseen read directly: {table} unseen={counts['unseen']} read={counts['read']} "
+            f"gone={counts['gone']} live={counts['live']} unknown={counts['unknown']} "
+            f"unread={max(0, counts['unseen'] - counts['read'])}")
+
 
 def _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, n_active,
                                    max_prune_frac, min_active_guard, grace) -> None:
@@ -1468,21 +1559,34 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
     own_oracle = verify_gone is not None
     if verify_gone is None:
         verify_gone = own_page_status_oracle(c, table, seen)
-    unseen = sorted((r for r in rows if r["ad_number"] not in seen and r["ad_number"] not in struck_before),
-                    key=lambda r: str(r.get("last_seen_at") or ""))[:max_reads]
+    unseen_all = sorted((r for r in rows if r["ad_number"] not in seen and r["ad_number"] not in struck_before),
+                        key=lambda r: str(r.get("last_seen_at") or ""))
+    unseen = unseen_all[:max_reads]
     gone: list[str] = []
     live: list[str] = []
+    # the run-ledger report (2026-11-09): what the direct reads decided, so a tripped guard whose every
+    # unseen row was read is told apart from one that left rows unread (see _READ_GONE_REPORT).
+    # the LAST reading of a table wins: a caller's own-oracle pass after the default status pass supersedes it.
+    report = {"unseen": len(unseen_all), "read": 0, "gone": 0, "live": 0, "unknown": 0}
+    _READ_GONE_REPORT[table] = report
     for r in unseen:
         try:
             got = verify_gone(r["ad_number"])
         except Exception as e:  # noqa: BLE001 — an oracle that throws is UNKNOWN, never gone
             print(f"{table}: verify_gone({r['ad_number']}) raised {type(e).__name__}: {e} → unknown")
+            report["read"] += 1
+            report["unknown"] += 1
             continue
         verdict = str((got[0] if isinstance(got, (tuple, list)) else got) or "unknown").lower()
+        report["read"] += 1
         if verdict == "gone":
             gone.append(r["ad_number"])
+            report["gone"] += 1
         elif verdict == "live" and own_oracle:
             live.append(r["ad_number"])
+            report["live"] += 1
+        else:
+            report["unknown"] += 1
     # A LIVE READING IS AN ANSWER TOO (2026-10-31, ♻️). This used to keep only «gone», so an unseen ad
     # whose own page the site's own oracle read live stayed unverified and kept its strikes forever:
     # albukaeri's walk re-saw 6 of 12 every night, and 6 shown ads had no reading recorded since
@@ -1593,8 +1697,17 @@ def _stamp_seen_alive(table: str, seen_ads, verify_gone, *, source: Optional[str
     return out
 
 
-def own_page_status_oracle(c, table: str, seen, *, session=None):
+def own_page_status_oracle(c, table: str, seen, *, session=None, live_page=None):
     """verify_gone for a prune_unseen caller that supplied none (see the call site).
+
+    `live_page(ad_number, stored_row, body) -> bool` (2026-11-10) is a crawler's OWN reader of its
+    source's ad page: True only when this 200 body, still on the ad's own path, is THIS ad, published.
+    Without it a 200 is «no opinion», so an ad its site still serves but its list stopped carrying sat
+    at grace for ever (manzo, nawafeth, arsh: P1 served_after_source_gone on five live pages). With it
+    that page answers LIVE and prune_unseen clears the strikes through the liveness contract. It can
+    only ever ADD a live answer: a 404/410 is read before it, it is never asked about a moved page, an
+    exception or a falsy answer is no opinion, and no removal fires unless a control page this crawl
+    saw is recognised by the same reader (a reader the site's redesign blinded removes nothing).
 
     Each at-grace row is read at its own stored `listing_url`. Before any removal a known-live control
     must answer: up to three ads THIS crawl just saw, read the same way, at least one of which answers
@@ -1635,12 +1748,28 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
             except Exception:  # noqa: BLE001
                 continue
             if r.status_code == 200 and (r.text or "") and _own_page_status_signal(
-                    r.status_code, r.text, False) is None:
+                    r.status_code, r.text, False) is None and (
+                    live_page is None or reads_live(ad, r.text)):
                 state["v"] = (True, f"control {ad} answers 200")
                 break
         return state["v"]
 
-    probe = LivenessProbe(platform=table, signal=_own_page_status_signal, session=lambda: s,
+    def reads_live(ad_number: str, body: str) -> bool:
+        try:
+            return live_page(ad_number, row_of(ad_number), body) is True
+        except Exception:  # noqa: BLE001 — a reader that broke has no opinion
+            return False
+
+    asking = [""]
+
+    def signal(status, body, path_changed):
+        said = _own_page_status_signal(status, body, path_changed)
+        if said is None and live_page is not None and status == 200 and not path_changed and body \
+                and reads_live(asking[0], body):
+            return "live"
+        return said
+
+    probe = LivenessProbe(platform=table, signal=signal, session=lambda: s,
                           url_for=url_for, canary=canary, attempts=1, backoff=0.0)
     reads = [0]
 
@@ -1660,6 +1789,7 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
         if ended:
             return "gone", f"{OWN_PAGE_ORACLE}: the ad's own published end date {ended} has passed"
         reads[0] += 1
+        asking[0] = str(ad_number)
         verdict, why = probe.verify_gone(ad_number)
         if verdict == "unknown" and _BLOCK_WHY.search(why or ""):
             second = second_reader(ad_number)
@@ -2095,6 +2225,11 @@ def end_run(
         tag = "prune guard tripped: " + "; ".join(_PRUNE_TRIPS)
         final_notes = f"{final_notes} | {tag}" if final_notes else tag
         _PRUNE_TRIPS.clear()
+    if _READ_GONE_REPORT:
+        # what the direct reads behind the refused prune decided (2026-11-09) — see _READ_GONE_REPORT
+        tag = " | ".join(read_gone_report_line(t, c) for t, c in sorted(_READ_GONE_REPORT.items()))
+        final_notes = f"{final_notes} | {tag}" if final_notes else tag
+        _READ_GONE_REPORT.clear()
     _execute(
         sb().table("scrape_runs").update(
             {

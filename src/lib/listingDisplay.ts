@@ -49,10 +49,14 @@ export function listingLocationAr(listing: Listing): string {
 // short-stays pool and every filter/sort are unchanged. listingPrice() returns '' for them and every surface
 // (card, ad page, Read Aloud, the agent's card memory) prints nothing where the price would be.
 export const isStayLengthPriced = (source: string): boolean => /gathern|aqar\s*monthly/i.test(source || '');
+// The same rule per LISTING (owner 2026-11-10, backlog 1744): a row in the «إقامات قصيرة» pool (rentPeriod 'monthly',
+// src/lib/rentPool.ts) is priced by its stay — a Haraj «للإيجار اليومي» ad as much as Gathern — so it prints no price.
+export const isShortStayListing = (l: { source: string; rentPeriod?: string | null }): boolean =>
+  isStayLengthPriced(l.source) || l.rentPeriod === 'monthly';
 
 // The price line every surface prints (card, Read Aloud, the agent's card summary). '' = print nothing.
 export function listingPrice(listing: Listing, loc: Locale): string {
-  return isStayLengthPriced(listing.source) ? '' : tPrice(listing.price, loc);
+  return isShortStayListing(listing) ? '' : tPrice(listing.price, loc);
 }
 export function listingPriceAr(listing: Listing): string {
   return listingPrice(listing, 'ar');
@@ -66,7 +70,7 @@ export function listingPriceAr(listing: Listing): string {
 //     derived figure (the per-metre total).
 // Only on the yearly pool with a real figure; short-stay platforms and unpriced rows get null.
 export function monthlyLineText(listing: Listing, loc: Locale): string | null {
-  if (isStayLengthPriced(listing.source)) return null;
+  if (isShortStayListing(listing)) return null;
   if (listing.rentPeriod !== 'annual') return null;
   const annual = listing.priceAnnual;
   if (typeof annual !== 'number' || !Number.isFinite(annual) || annual <= 0) return null;

@@ -51,6 +51,7 @@ import html as ihtml
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -61,6 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
 from scrapers.common.source_pin import sa_pin  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://www.amaall.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -166,6 +168,19 @@ def _redact(text: Optional[str]) -> Optional[str]:
     return re.sub(r"\s{2,}", " ", t).strip() or None
 
 
+def _meta_strings(meta: dict, depth: int = 3) -> list[tuple[str, str]]:
+    """Every (key, text) a Houzez property_meta states, lists unwrapped and the «additional features»
+    title/value dicts walked in order (so «الترخيص الاعلاني» is read next to its number) — read-only."""
+    out: list[tuple[str, str]] = []
+    for k, v in (meta or {}).items():
+        for x in (v if isinstance(v, list) else [v]):
+            if isinstance(x, dict) and depth > 0:
+                out.extend(_meta_strings(x, depth - 1))
+            elif isinstance(x, (str, int, float)) and not isinstance(x, bool) and str(x).strip():
+                out.append((str(k), str(x)))
+    return out
+
+
 def _meta1(meta: dict, key: str) -> Any:
     """WP serialises single-value meta as a 1-element list; unwrap without assuming either shape.
     NOT for genuinely multi-valued meta — that mistake cost shmoualshmal 9 of its 10 photos."""
@@ -173,6 +188,61 @@ def _meta1(meta: dict, key: str) -> Any:
     if isinstance(v, list):
         return v[0] if v else None
     return v
+
+
+# The page's own «تفاصيل إضافية» list prints the REGA ad licence as
+# `<li …><strong>الترخيص الاعلاني:</strong> <span>7200807823</span></li>` (source-reread run 42907507350, 2026-11-10:
+# on 10729186 and 10729193, both crawled 21:17 UTC with the REST meta reader of #11625 and both still without a
+# licence — the REST post does not carry it in a shape that reader sees). Read from that row ONLY, the 71/72 REGA
+# ad-licence shape, stated once; the WhatsApp row printed just above it is never read.
+_PAGE_LICENCE_RE = re.compile(
+    r"<strong>\s*الترخيص\s*الاعلاني\s*:?\s*</strong>\s*<span>\s*([0-9٠-٩]{10})\s*</span>")
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def licence_from_page(page_html: Optional[str]) -> Optional[str]:
+    """The one REGA ad licence the page's «الترخيص الاعلاني» row states (filtered to the 71/72 shape BEFORE the
+    count, as normalize.ad_licence_from_prose does), else None."""
+    found = {v for v in (m.group(1).translate(_AR_DIGITS) for m in _PAGE_LICENCE_RE.finditer(page_html or ""))
+             if re.fullmatch(r"7[12]\d{8}", v)}
+    return found.pop() if len(found) == 1 else None
+
+
+PAGE_PAUSE_S = 1.0          # ≤ 1 request/second to the site (house scraping rule)
+_LAST_PAGE_READ = [0.0]
+PAGE_READ_FAILURES: dict[str, int] = {}
+
+
+def _page_html(s, link: Optional[str]) -> Optional[str]:
+    """The post's own page, for the licence row only, at most one read a second. A failed read is None (the licence
+    stays unknown, never «no») and is counted in PAGE_READ_FAILURES, which the run prints, so a blocked or throttled
+    page never fails silently."""
+    if not link:
+        return None
+    wait = PAGE_PAUSE_S - (time.monotonic() - _LAST_PAGE_READ[0])
+    if wait > 0:
+        time.sleep(wait)
+    try:
+        r = s.get(link, timeout=30)
+        why = None if r.status_code == 200 else f"http_{r.status_code}"
+        text = r.text if why is None else None
+    except Exception as e:  # noqa: BLE001
+        why, text = type(e).__name__, None
+    finally:
+        _LAST_PAGE_READ[0] = time.monotonic()
+    if why:
+        PAGE_READ_FAILURES[why] = PAGE_READ_FAILURES.get(why, 0) + 1
+    return text
+
+
+def _licence_from_own_page(s, p: dict, row: dict) -> None:
+    """Fill the card's licence from the post's own page when the REST post gave none (live rows only)."""
+    if not row.get("active") or (row.get("additional_info") or {}).get("rega_ad_license_number"):
+        return
+    lic = licence_from_page(_page_html(s, p.get("link")))
+    if lic:
+        row["license_number"] = lic
+        row.setdefault("additional_info", {})["rega_ad_license_number"] = lic
 
 
 def is_arabic_post(p: dict) -> bool:
@@ -396,6 +466,10 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "ad_number": f"{PREFIX}{int(hashlib.md5((p.get('slug') or str(p.get('id'))).encode()).hexdigest()[:12], 16)}",
         "listing_url": link,
         "source": SOURCE,
+        # Posting date = the WordPress post's date_gmt (UTC, so «Z»; `modified_gmt` is an edit). Live
+        # 2026-11-09: post 24146 date_gmt 2026-09-16T07:20:06 = the page's JSON-LD datePublished
+        # «2026-09-16T07:20:06+00:00»; first seen 2026-09-18 04:24 UTC.
+        "date_added": site_posting_date(p["date_gmt"] + "Z") if isinstance(p.get("date_gmt"), str) else None,
         "active": not gone,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
@@ -422,7 +496,10 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     }
     # The REGA ad licence the ad states in its own text («رخصة الإعلان: 7200661580»), read BEFORE _redact():
     # card parity found it on amaall's page and on 0 of 28 cards (🔧 2026-11-07).
-    lic = normalize.ad_licence_from_prose(body)
+    # … or in a Houzez meta field the body never carries («الترخيص الاعلاني: 7200807823» among the page's
+    # «عرض الشارع / الواجهة» facts — card parity 2026-11-09, on the page and on 0 of 3 sampled cards).
+    lic = normalize.ad_licence_from_prose(body) or normalize.ad_licence_from_prose(
+        " ".join(v for _, v in _meta_strings(meta)))
     if lic:
         row["license_number"] = lic
         row["additional_info"]["rega_ad_license_number"] = lic
@@ -490,6 +567,7 @@ def main() -> int:
                     if nm and nm not in TYPE_CATEGORY_TERMS:
                         unmapped[nm] = unmapped.get(nm, 0) + 1
                 continue
+            _licence_from_own_page(s, p, row)
             if not row["active"]:
                 gone_ct += 1
             if args.type != "all" and cat != args.type:
@@ -498,6 +576,8 @@ def main() -> int:
             if not row["active"]:
                 (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
 
+        if PAGE_READ_FAILURES:
+            print(f"  licence page reads failed (licence left unknown): {PAGE_READ_FAILURES}", flush=True)
         if res:
             db.upsert_amaall_residential_batch(res)
         if com:

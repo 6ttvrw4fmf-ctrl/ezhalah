@@ -78,5 +78,6 @@ def test_both_crawls_call_it():
     o = open(O.__file__, encoding="utf-8").read()
     assert 'n = db.strike_read_gone(tbl, {r["ad_number"] for r in rr}, SOURCE, verify_gone)' in o
     m = open(M.__file__, encoding="utf-8").read()
-    assert m.count("n = db.strike_read_gone(tbl, seen_all, SOURCE)") == 2, \
+    # 2026-11-10: both calls now hand over manzo's own-page reader (a live page answers LIVE)
+    assert m.count("n = db.strike_read_gone(tbl, seen_all, SOURCE, verify_gone=_oracle(tbl, seen_all))") == 2, \
         "manzo: on a guard trip AND on a walk that fell short"

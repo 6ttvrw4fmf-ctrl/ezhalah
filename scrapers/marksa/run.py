@@ -83,6 +83,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://mar-ksa.com"
 SOURCE = "مار العقارية"
@@ -283,6 +284,11 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         **{k: v for k, v in normalize.rooms_from_phrase(scan).items() if k == "halls"},
         "property_type": property_type,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the offer card's own date
+        # (<div class="date"><span>2022-02-06</span>, 881 live 2026-11-09; first seen 2026-09-24). The
+        # detail page prints none. It rises with the offer id (873-877 2022-02-02, 880-884 2022-02-06,
+        # the home slider's 283-289 2020-12 → 2022-02), so it is when the offer was posted, not an edit.
+        "date_added": site_posting_date(card.get("date")),
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,

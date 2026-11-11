@@ -74,6 +74,8 @@ import {
   judgeOption, judgeUnion, judgeIntersection, judgeZero, judgeUnknownCaption, boundaryReport,
   optionWouldRender, settleOnOneIndex, predCols, UNREADABLE_STAMP, type Pred, type Row,
 } from './lib/afSurfaceJudge.ts';
+import { pageToEnd } from './lib/pageToEnd.ts';
+import { chipOf, cohortChip, type ChipOpt } from './lib/afCohortChip.ts';
 
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
 const H: Record<string, string> = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
@@ -107,6 +109,8 @@ const CONCURRENCY = Math.max(1, Math.min(3, Number(process.env.AF_FSD_CONCURRENC
 const ONLY = (process.env.AF_FSD_ONLY || '').split(',').map((s) => s.trim()).filter(Boolean);
 const SKIP_MULTI = process.env.AF_FSD_SKIP_MULTI === '1';
 const MAX_IDS = Number(process.env.AF_FSD_MAX_IDS || 60000);
+// The oracle (DB truth) is never capped at MAX_IDS — only a runaway read stops, and then the cell is NOT measured.
+const ORACLE_CEILING = Number(process.env.AF_FSD_ORACLE_CEILING || 500000);
 type Scope = { label: string; params: Record<string, unknown> };
 const SCOPES: Scope[] = (process.env.AF_FSD_SCOPES || 'region:1').split(',').map((s) => s.trim()).filter(Boolean).map((s) => {
   const [kind, val] = s.split(':');
@@ -163,9 +167,7 @@ const enabledRows = new Set(registry.filter((r) => r.enabled).map((r) => `${r.de
 
 // ── the option catalog — mirrors src/data/advancedFilters.ts one-for-one ─────────────────────────
 // `col` is the chip's count column; a cumulative age rung (owner 2026-10-05) is the SUM of `col` and `plus`.
-type Opt = { key: string; col: string | null; plus?: string[]; countRpc: 'guided' | 'age' | null; params: Record<string, unknown>; pred: Pred };
-const chipOf = (row: Record<string, unknown>, opt: Opt): number =>
-  [opt.col, ...(opt.plus ?? [])].reduce((sum, c) => sum + Number(row[c as string]), 0);
+type Opt = ChipOpt & { key: string; params: Record<string, unknown>; pred: Pred };
 const AMENITY_COL: Record<string, string> = {
   kitchen: 'kitchen', parking: 'parking', elevator: 'elevator', ac: 'air_conditioner', private_entrance: 'private_entrance',
   maid_room: 'maid_room', driver_room: 'driver_room', car_entrance: 'car_entrance', sanitation: 'sanitation',
@@ -369,13 +371,13 @@ async function oracle(body: Record<string, unknown>, cols: string[] = []): Promi
   const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, ...(DIRECTION_VARIANTS.map ? { directionVariants: DIRECTION_VARIANTS.map } : {}) });
   if (unhandled.length) return { ids: [], rows: [], unhandled };
   const select = ['source_table', 'listing_id', ...new Set(cols)].join(',');
-  const ids: string[] = []; const rows: Row[] = [];
-  for (let off = 0; ; off += 1000) {
-    const page = await rest(`search_listings_ar?select=${select}&${qs}&order=source_table,listing_id`, { Range: `${off}-${off + 999}` });
-    for (const r of page) { ids.push(key(r)); rows.push(r); }
-    if (page.length < 1000 || off > MAX_IDS) break;
-  }
-  return { ids, rows, unhandled: [] };
+  // The TRUTH side reads to the end (scripts/lib/pageToEnd.ts): it used to stop at the 60,000 id cap and read 62,000 rows as the
+  // truth of a 63,474-row Jeddah Apartment/Buy scope (alert 11763). A read that hits the ceiling is NOT measured.
+  const read = await pageToEnd<Row>(
+    (off, size) => rest(`search_listings_ar?select=${select}&${qs}&order=source_table,listing_id`, { Range: `${off}-${off + size - 1}` }),
+    1000, ORACLE_CEILING);
+  if (read.truncated) return { ids: [], rows: [], unhandled: [`oracle read ${read.rows.length} rows and hit AF_FSD_ORACLE_CEILING=${ORACLE_CEILING} — NOT measured`] };
+  return { ids: read.rows.map(key), rows: read.rows, unhandled: [] };
 }
 async function oracleCount(body: Record<string, unknown>, extraQs = ''): Promise<number | null> {
   const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, ...(DIRECTION_VARIANTS.map ? { directionVariants: DIRECTION_VARIANTS.map } : {}) });
@@ -793,10 +795,14 @@ if (!SKIP_MULTI) {
     if (!base) continue;
     const tag = `${clean}/COMBINED(Buy∪Rent) @${scope.label}`;
     const guided = (await rpc('apartment_guided_counts_ar', countBody(base, {})))?.[0] ?? null;
+    // the age chips come from the AGE count RPC, exactly as the card asks (🔬 2026-11-10): reading them out of the
+    // guided row gave Number(undefined) = NaN for every age rung of every COMBINED cohort, and a true zero rung
+    // (Duplex «10+» @region:1, job 129595811625) then FAILED «a zero option must be zero everywhere».
+    const age = qids.includes('property_age') ? (await rpc('property_age_option_counts_ar', countBody(base, {})))?.[0] ?? null : null;
     const total = guided ? Number(guided.cnt_total_base) : null;
     const jobs: Promise<void>[] = [];
     for (const qid of qids) for (const opt of optionsFor(qid, [clean], q) ?? []) {
-      const chip = opt.col && guided ? Number(guided[opt.col]) : null;
+      const chip = cohortChip(opt, guided, age);
       M.combinedDeal++;
       jobs.push(verifyOption(`${tag} · ${opt.key}`, base, opt, chip, true, total).then(() => {}));
     }
@@ -812,10 +818,14 @@ if (!SKIP_MULTI) {
     if (!base) continue;
     const tag = `${clean}/Rent-BOTH(كلاهما) @${scope.label}`;
     const guided = (await rpc('apartment_guided_counts_ar', countBody(base, {})))?.[0] ?? null;
+    // the age chips come from the AGE count RPC, exactly as the card asks (🔬 2026-11-10): reading them out of the
+    // guided row gave Number(undefined) = NaN for every age rung of every Rent-BOTH cohort, and a true zero rung
+    // (Duplex «10+» @region:1, job 129595811625) then FAILED «a zero option must be zero everywhere».
+    const age = qids.includes('property_age') ? (await rpc('property_age_option_counts_ar', countBody(base, {})))?.[0] ?? null : null;
     const total = guided ? Number(guided.cnt_total_base) : null;
     const jobs: Promise<void>[] = [];
     for (const qid of qids) for (const opt of optionsFor(qid, [clean], q) ?? []) {
-      const chip = opt.col && guided ? Number(guided[opt.col]) : null;
+      const chip = cohortChip(opt, guided, age);
       M.bothPeriod++;
       jobs.push(verifyOption(`${tag} · ${opt.key}`, base, opt, chip, true, total).then(() => {}));
     }

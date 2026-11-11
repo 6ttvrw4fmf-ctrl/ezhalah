@@ -45,6 +45,7 @@ def _sakani_stubs(monkeypatch, n_units: int, detail):
     calls = {"end_run": [], "batch": [], "sessions": 0}
     monkeypatch.setattr(SKN, "db", types.SimpleNamespace(
         begin_run=lambda platform: 9,
+        record_run_progress=lambda run_id, **kw: None,
         mark_direct_alive=lambda row, **kw: row,
         _wasalt_batch=lambda table, rows: calls["batch"].append(table),
         retire_superseded_siblings=lambda **kw: 0,

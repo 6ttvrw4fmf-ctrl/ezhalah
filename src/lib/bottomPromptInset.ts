@@ -492,8 +492,17 @@ function readPromptRects(selector: string = DOCKED_PROMPT_SELECTOR): PromptRect[
 /**
  * Can this mutation batch change a prompt's presence, rect or visibility? True when a prompt node
  * (or a subtree holding one) was ADDED, a watched node was REMOVED (or sits in a removed subtree),
- * or a `style`/`class` change landed ON a watched node or an ANCESTOR of one (an ancestor can hide,
- * move or re-anchor it). Everything else — a card mounting, an animation frame — cannot.
+ * a `style`/`class` change landed ON a watched node or an ANCESTOR of one (an ancestor can hide,
+ * move or re-anchor it), or an attribute change made a node START matching the selector. Everything
+ * else — a card mounting, an animation frame — cannot.
+ *
+ * THE LAST CLAUSE (2026-11-10, journey-sweep 42624835985, WebKit desktop). A prompt is recognised by
+ * its `src` (accounts.google.com/gsi/…). An iframe inserted FIRST and given that src a moment LATER
+ * matched nothing when it was added, so it was never watched — and attribute changes were only
+ * honoured on watched nodes. The sidebar then reserved nothing for the whole life of the card:
+ * reproduced on ezhalah.com by inserting the card's exact shape (fixed box at 20,20, 371×348) and
+ * setting the src 300 ms later — «إنشاء حساب / تسجيل الدخول» stayed at y 85, under the card, even
+ * after the card resized. `src` is now observed too, and a node that starts matching re-measures.
  * Exported so `verify-bottom-prompt-inset.ts` executes it.
  */
 export function mutationTouchesPrompt(
@@ -505,7 +514,8 @@ export function mutationTouchesPrompt(
   return Array.from(records).some((r) => r.type === 'childList'
     ? Array.from(r.addedNodes).some((n) => n.nodeType === 1 && ((n as Element).matches(selector) || !!(n as Element).querySelector(selector)))
       || Array.from(r.removedNodes).some(holdsWatched)
-    : holdsWatched(r.target));
+    : holdsWatched(r.target)
+      || (r.target.nodeType === 1 && (r.target as Element).matches(selector)));
 }
 
 /**
@@ -544,6 +554,35 @@ export function observeColumnPromptInset(
   );
 }
 
+/**
+ * «Our own docked card appeared, moved, changed size or went away» — a bare signal, no numbers (owner 2026-11-10).
+ *
+ * The small sign-in card rests ABOVE the cookie card, so it must hear about the cookie card. It cannot use
+ * `observePromptInsets`: that reports the band the page RESERVES, and a corner card beside the app reserves
+ * nothing — the pair stays {0,0} while the card comes, grows (Arabic → English adds ~55 px) and goes, so it never
+ * fires. This watches the card's own rect through the same observer and calls back whenever that rect changes
+ * (once at the start too). The listener reads what it needs from the page itself.
+ */
+export function observeOwnDockedCard(onChange: () => void): () => void {
+  return observeDockedPrompts(
+    OWN_DOCKED_PROMPT_SELECTOR,
+    (rects) => {
+      const r = rects.find((x) => !x.hidden && x.height > 0);
+      if (r) return { top: Math.round(r.top), bottom: Math.round(r.bottom) };
+      // THREE answers, not two: «on the page but faded out» (-3) is not «gone from the page» (-2). The card fades to
+      // nothing a beat BEFORE it is removed; with one shared answer the removal changed nothing, so nobody heard that
+      // the card had left — and a sign-in card waiting for its room would have waited for ever.
+      return rects.length ? { top: -3, bottom: -3 } : { top: -2, bottom: -2 };
+    },
+    () => onChange(),
+  );
+}
+
+/** When a prompt is measured again after a change that touched it (ms): through a slide-in or fade-in to its rest. */
+export const PROMPT_SETTLE_MS = [300, 800, 1600, 3000] as const;
+/** The browser's «this element stopped moving» events; listened for on the document, acted on for watched nodes only. */
+export const PROMPT_MOTION_END_EVENTS = ['transitionend', 'transitioncancel', 'animationend', 'animationcancel'] as const;
+
 function observeDockedPrompts(
   selector: string,
   measure: (rects: PromptRect[], viewportHeight: number, viewportWidth: number) => PromptInsets,
@@ -577,7 +616,22 @@ function observeDockedPrompts(
     }
   };
 
-  const tick = () => { retarget(); emit(); };
+  // A PROMPT THAT SLIDES INTO PLACE IS MEASURED AGAIN WHEN IT COMES TO REST (2026-11-10, journey-sweep 42789448147,
+  // WebKit desktop: Google's card at 20,20 → 391,368 over «إنشاء حساب / تسجيل الدخول» while the sidebar reserved 0).
+  // A CSS transform or opacity transition moves the box with NO attribute change and NO resize, so neither observer
+  // fires after the first measurement — taken while the box was still off screen. Reproduced on ezhalah.com: a fixed
+  // box sliding in from translateY(-420px) left the CTA at y 85, under it, 2.5 s after it stopped. Two cheap answers:
+  // the browser's own «motion ended» events on a watched node (or an ancestor), and a few re-measurements after any
+  // change that touched a prompt. Neither runs for a card mounting or an animation frame elsewhere (owner 2026-10-05).
+  let settle: ReturnType<typeof setTimeout>[] = [];
+  const settleLater = () => { for (const t of settle) clearTimeout(t); settle = PROMPT_SETTLE_MS.map((ms) => setTimeout(emit, ms)); };
+  const onMotionEnd = (e: Event) => {
+    const t = e.target as Node | null;
+    if (t && watched.some((w) => w === t || t.contains(w))) emit();
+  };
+  for (const type of PROMPT_MOTION_END_EVENTS) document.addEventListener(type, onMotionEnd, true);
+
+  const tick = () => { retarget(); emit(); settleLater(); };
 
   // Only mutations that CAN change a prompt re-measure (owner 2026-10-05: «عرض المزيد takes time»).
   // Measured on a production export at 4× CPU, 100 → 500 cards: 12.6 s of 15.6 s main-thread time
@@ -587,7 +641,7 @@ function observeDockedPrompts(
     ? new MutationObserver((records) => { if (mutationTouchesPrompt(records, selector, watched)) tick(); })
     : null;
   mo?.observe(document.documentElement, {
-    childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'],
+    childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'src'],
   });
   window.addEventListener('resize', emit);
   window.addEventListener('orientationchange', emit);
@@ -598,6 +652,8 @@ function observeDockedPrompts(
     sizeObserver?.disconnect();
     window.removeEventListener('resize', emit);
     window.removeEventListener('orientationchange', emit);
+    for (const type of PROMPT_MOTION_END_EVENTS) document.removeEventListener(type, onMotionEnd, true);
+    for (const t of settle) clearTimeout(t);
   };
 }
 

@@ -45,6 +45,7 @@ from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common import arabic_location as AL
 from scrapers.common.arabic_location import resolve_slug
+from scrapers.common.posting_date import site_posting_date
 from scrapers.common.source_pin import pin_dict
 
 GQL = "https://sa.aqar.fm/graphql"
@@ -236,7 +237,10 @@ _ext_by_id: dict[int, dict] = {}
 # to every customer who ticks an amenity on a Monthly search (ops_af_score 2026-10-05: find 0/10).
 AMENITY_GQL_FIELDS: tuple[str, ...] = ("lift", "ketchen", "ac", "maid", "driver", "car_entrance",
                                        "special_entrance", "two_entrances", "extended_details", "wc",
-                                       "location { lat lng }")
+                                       "location { lat lng }", "create_time")
+# `create_time` (2026-11-09): the unit's own creation instant on Aqar, unix seconds — the field Aqar's page
+# labels «تاريخ الإضافة» (i18n key created_at). Unit 6560670: create_time 1769291538 = 2026-01-24T21:52:18Z.
+# Settled like the flags: a schema that rejects it drops it alone, and date_added simply stays NULL.
 # `location { lat lng }` (owner 2026-10-20 night, «most of them have a real pin, we're just missing it»):
 # the unit page draws a Leaflet map with Aqar's own pin, and the page data carries it as
 # Listing.location {lat, lng} (ad 5993983 → 24.887617, 46.60416). 0 of 3,693 Monthly units were served
@@ -641,6 +645,31 @@ def _placed(cid: int, rid, district_ar) -> dict:
             "district_ar": district_ar, "confidence": "address"}
 
 
+def _slug_named_region(uri: str) -> int | None:
+    """The region the slug itself NAMES («…-منطقة-الرياض-…») and the region catalogue validates, else None — the same
+    «منطقة X» read resolve_slug() makes, so a dropped street town never lends its region through an unrecognised
+    «منطقة» phrase (CodeRabbit on #11715)."""
+    AL._load()
+    mr = re.search(r"منطقه\s+([؀-ۿ]+(?:\s+[؀-ۿ]+)?)", AL.norm_ar(uri.replace("-", " ")))
+    if not mr:
+        return None
+    cand = mr.group(1)
+    for k in (cand, cand.split()[0]):
+        rid = AL._REGION_NORM.get("منطقه " + k) or AL._REGION_NORM.get(k)
+        if rid:
+            return rid
+    return None
+
+
+def _served_region(loc: dict):
+    """The region to WRITE. A region we proved came from a street-named town is cleared, not kept: a plain None
+    means «unknown this fetch» and would leave the stored wrong region in place (aqarmonthly 1097380 kept بدر's
+    region 3, 🔧 2026-11-10) — the same rule the city columns follow below."""
+    if loc.get("region_id") or not loc.get("street_city_dropped"):
+        return loc.get("region_id")
+    return db.AUTHORITATIVE_NULL
+
+
 def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) -> dict:
     """The ad's city, from the strongest evidence the source gives, in this order:
       1. the slug (resolve_slug) — unless that city appears only as a street name in the address;
@@ -653,7 +682,15 @@ def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) 
     if loc.get("city_id") and not _city_only_in_street(loc.get("city_ar"), address):
         return loc
     if loc.get("city_id"):
-        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved", "street_city_dropped": True}
+        # Dropping the street's town must drop EVERYTHING resolve_slug() derived from it (🔧 2026-11-10,
+        # aqarmonthly_district_city_suffix). Real ad 5708581 «شارع-بدر-حي-الملك-فهد-المجمعة-المجمعة»: the slug
+        # picked بدر (a catalog town, Madinah region), so the district was cleaned against «بدر» and kept the
+        # glued «المجمعة», and the row took بدر's region 3. Re-clean the district by NAME exactly as the
+        # unresolved branch of resolve_slug() does, and keep a region only when the slug itself said «منطقة».
+        d = loc.get("district_ar")
+        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved", "street_city_dropped": True,
+               "region_id": _slug_named_region(uri),
+               "district_ar": AL.strip_city_suffix(d, AL.trailing_catalog_city_norm(d)) if d else d}
     try:
         hint = AQAR_CITY_REGION.get(int(aqar_city_id or 0))
     except (TypeError, ValueError):
@@ -686,6 +723,21 @@ def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) 
     if hit:
         return _placed(hit[0], rid, hit[1])
     return {**loc, "region_id": loc.get("region_id") or rid}
+
+
+def posted_at(g: dict) -> str | None:
+    """The unit's own «تاريخ الإضافة» → date_added. Listing.create_time is unix SECONDS (UTC); never
+    `last_update` / `refresh` (a bump moves those). Read live on unit 6560670 (2026-11-09): create_time
+    1769291538 → 2026-01-25T00:52:18+03:00; on the annual ad 6956339 the same field equals the page's
+    printed «تاريخ الإضافة 09/11/2026». Missing / not a number → None (UNKNOWN stays NULL)."""
+    ts = g.get("create_time")
+    if isinstance(ts, bool) or not isinstance(ts, (int, float)) or ts <= 0:
+        return None
+    try:
+        stamp = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, OverflowError, OSError):
+        return None
+    return site_posting_date(stamp)
 
 
 def map_listing(g: dict, price: dict) -> dict | None:
@@ -736,6 +788,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
     capture = {k: (_redact(v) if k in ("content", "content_en") else v) for k, v in g.items()}
     return {
         "ad_number":        f"AQM{g['id']}",
+        "date_added":       posted_at(g),     # Listing.create_time — see posted_at()
         "listing_url":      f"https://sa.aqar.fm/{uri}",
         "active":           True,
         # An UNKNOWN category id must not default to Apartment (that fabricates a type). None →
@@ -791,7 +844,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "city_ar":          loc["city_ar"] if loc["city_ar"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
         "district_ar":      district_ar_val,
         "city_id":          loc["city_id"] if loc["city_id"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
-        "region_id":        loc["region_id"],
+        "region_id":        _served_region(loc),
         "source_capture":   capture,
         # Aqar's own pin for this unit (Listing.location), through the one KSA gate; {} → the district
         # border, never a guess. listing_rich_attrs reads additional_info.latitude/longitude.

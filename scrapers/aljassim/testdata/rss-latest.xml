@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:foaf="http://xmlns.com/foaf/0.1/" xmlns:og="http://ogp.me/ns#" xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#" xmlns:schema="http://schema.org/" xmlns:sioc="http://rdfs.org/sioc/ns#" xmlns:sioct="http://rdfs.org/sioc/types#" xmlns:skos="http://www.w3.org/2004/02/skos/core#" xmlns:xsd="http://www.w3.org/2001/XMLSchema#" version="2.0" xml:base="https://aljassimaqar.com/rss.xml?field_nw_al_qd_value=All&amp;field_nw_al_qar_value=All&amp;field__dd_alghrf_value=All&amp;field_rgm_value=">
+  <channel>
+    <title>مكتب الجاسم للخدمات العقارية - الاحساء، الهفوف، حي الفيصلية</title>
+    <link>https://aljassimaqar.com/rss.xml?field_nw_al_qd_value=All&amp;field_nw_al_qar_value=All&amp;field__dd_alghrf_value=All&amp;field_rgm_value=</link>
+    <description/>
+    <language>en</language>
+    
+    
+    
+    <item>
+  <title>محل    للايجار في     عين نجم    </title>
+  <link>https://aljassimaqar.com/5326</link>
+  <description>&lt;span property="schema:name"&gt;محل    للايجار في     عين نجم    &lt;/span&gt;
+&lt;span rel="schema:author"&gt;&lt;span lang="" about="https://aljassimaqar.com/admin" typeof="schema:Person" property="schema:name" datatype="" xml:lang=""&gt;aljassim&lt;/span&gt;&lt;/span&gt;
+&lt;span property="schema:dateCreated" content="2026-11-08T16:27:19+00:00"&gt;الأحد, 08/11/2026&lt;/span&gt;
+  &lt;div class="layout layout--onecol"&gt;
+    &lt;div class="layout__region layout__region--content"&gt;
+      
+            &lt;div&gt;محل&lt;/div&gt;
+      
+            &lt;div&gt;للايجار&lt;/div&gt;
+      
+      &lt;div&gt;
+              &lt;div property="schema:about"&gt;في     عين نجم&lt;/div&gt;
+          &lt;/div&gt;
+  
+            &lt;div&gt;مقابل الجوازات &lt;/div&gt;
+      
+            &lt;div&gt;السعر&lt;/div&gt;
+      
+            &lt;div content="16500"&gt;16,500 ريال&lt;/div&gt;
+      
+      &lt;div&gt;
+              &lt;div&gt;  &lt;img property="schema:image" src="https://aljassimaqar.com/sites/default/files/styles/medium/public/2026-11/WhatsApp%20Image%202026-11-08%20at%207.26.47%20PM.jpeg?itok=R9I3VZip" width="220" height="124" alt="" typeof="foaf:Image" /&gt;
+
+
+&lt;/div&gt;
+          &lt;/div&gt;
+  
+    &lt;/div&gt;
+  &lt;/div&gt;
+</description>
+  <pubDate>Sun, 08 Nov 2026 16:27:19 +0000</pubDate>
+    <dc:creator>aljassim</dc:creator>
+    <guid isPermaLink="false">5326 at https://aljassimaqar.com</guid>
+    </item>
+<item>
+  <title>شقة    للايجار في     الفاضلية   أربع غرف الدور الاول</title>
+  <link>https://aljassimaqar.com/3741</link>
+  <description>&lt;span property="schema:name"&gt;شقة    للايجار في     الفاضلية   أربع غرف الدور الاول&lt;/span&gt;
+&lt;span rel="schema:author"&gt;&lt;span lang="" about="https://aljassimaqar.com/admin" typeof="schema:Person" property="schema:name" datatype="" xml:lang=""&gt;aljassim&lt;/span&gt;&lt;/span&gt;
+&lt;span property="schema:dateCreated" content="2024-04-29T17:28:29+00:00"&gt;الأثنين, 29/04/2024&lt;/span&gt;
+  &lt;div class="layout layout--onecol"&gt;
+    &lt;div class="layout__region layout__region--content"&gt;
+      
+            &lt;div&gt;شقة&lt;/div&gt;
+      
+            &lt;div&gt;للايجار&lt;/div&gt;
+      
+      &lt;div&gt;
+              &lt;div property="schema:about"&gt;في     الفاضلية&lt;/div&gt;
+          &lt;/div&gt;
+  
+            &lt;div&gt;عوائل&lt;/div&gt;
+      
+            &lt;div&gt;أربع غرف&lt;/div&gt;
+      
+            &lt;div&gt;الدور الاول&lt;/div&gt;
+      
+            &lt;div&gt;شقة مكونة من 3 غرفة نوم + مجلس + صالة + مطبخ +دورتين مياه&lt;/div&gt;
+      
+            &lt;div&gt;السعر&lt;/div&gt;
+      
+            &lt;div content="15800"&gt;15,800 ريال&lt;/div&gt;
+      
+    &lt;/div&gt;
+  &lt;/div&gt;
+</description>
+  <pubDate>Mon, 29 Apr 2024 17:28:29 +0000</pubDate>
+    <dc:creator>aljassim</dc:creator>
+    <guid isPermaLink="false">3741 at https://aljassimaqar.com</guid>
+    </item>
+  </channel>
+</rss>

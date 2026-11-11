@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.muhaysini import run as R  # noqa: E402
 
-assert R.MAX_PAGES * R.PAGE_SIZE >= 40_000, "the page cap must clear today's ~20,000-ad catalogue with room"
+assert R.MAX_PAGES * R.PAGE_SIZE >= 80_000, "the page cap must clear today's ~44,000-ad catalogue with room"
 
 
 def simulate(n0: int, budget: int, nights: int, churn) -> None:
@@ -75,7 +75,7 @@ for latency in (0.0, 0.2, 1.5):
     assert min(gaps) >= R.MIN_INTERVAL - 1e-9, (latency, min(gaps))
 assert R.MIN_INTERVAL >= 1.0
 src = Path(R.__file__).read_text()
-assert "_pace()\n        r = s.get(" in src, "every GET (and every retry) must be paced"
+assert "_pace()\n        try:\n            r = s.get(" in src, "every GET (and every retry) must be paced"
 assert src.count("r = s.get(") == 1 and src.count("return self._s.get(") == 1, "a new GET call site must be paced too"
 
 # The prune's liveness probe + canary (http_liveness.LivenessProbe calls session().get() itself) share the limiter.
@@ -95,4 +95,49 @@ assert not R.needs_cursor(0, 500) and not R.needs_cursor(-1, 500), "a nonpositiv
 assert not R.needs_cursor(500, 500) and not R.needs_cursor(600, 500), "a budget covering the list needs no cursor"
 assert R.needs_cursor(100, 500)
 assert "stored_last_read() if needs_cursor(DETAIL_BUDGET, len(listed_ids)) else {}" in src
+
+# ── 2026-11-10: one unanswered request is retried, never the end of the night ───────────────────────
+# Run 101583 (2026-11-08) died 62 minutes in on ONE curl-28 timeout and wrote 0 rows. _get_json is EXECUTED
+# against a session that raises the real curl_cffi error: once → the call succeeds; every time → RuntimeError
+# (which fetch_detail turns into a counted miss), never the raw transport error.
+class _Resp:
+    status_code = 200
+    headers: dict = {}
+
+    def json(self):
+        return {"property": {"id": "7"}}
+
+
+class _Flaky:
+    def __init__(self, fail):
+        self.fail, self.calls = fail, 0
+
+    def get(self, *a, **k):
+        self.calls += 1
+        if self.calls <= self.fail:
+            raise R.cc.RequestsError("curl: (28) Operation timed out after 45002 milliseconds with 0 bytes received")
+        return _Resp()
+
+
+_rp, _rs = R._pace, R.time.sleep
+R._pace, R.time.sleep = (lambda: None), (lambda *_: None)
+try:
+    one = _Flaky(1)
+    assert R._get_json(one, "u", what="list page 9") == {"property": {"id": "7"}} and one.calls == 2
+    dead = _Flaky(99)
+    try:
+        R._get_json(dead, "u", what="list page 9")
+        raise AssertionError("a request that never answers must end as RuntimeError")
+    except RuntimeError as e:
+        assert "no response in 4 tries" in str(e) and dead.calls == 4, (str(e), dead.calls)
+    assert R.fetch_detail(_Flaky(1), "7") == {"id": "7"} and R.fetch_detail(_Flaky(99), "7") is None
+finally:
+    R._pace, R.time.sleep = _rp, _rs
+
+# ── 2026-11-10: the run ends itself before the 240-minute CI kill ───────────────────────────────────
+assert not R.past_detail_deadline(204.9 * 60, 0.0, 205) and R.past_detail_deadline(205 * 60, 0.0, 205)
+assert not R.past_detail_deadline(10**9, 0.0, 0), "a nonpositive limit is «no limit»"
+assert 0 < R.DETAIL_DEADLINE_MIN <= 210, "the detail deadline must leave the writes and the prune room inside 240 min"
+assert "past_detail_deadline(time.monotonic(), _PROCESS_START, DETAIL_DEADLINE_MIN)" in src
+assert 'seen_not_read.add(f"{PREFIX}{pid}")' in src, "a deadline-cut ad stays SEEN — it is never a prune candidate"
 print("✓ muhaysini: request starts ≥ 1 s apart at any latency, prune probe included")

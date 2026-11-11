@@ -58,6 +58,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
+import { newHydrationLedger, recordHydration, dropsOf as libDropsOf, newestBySeq, isHydrationRequest, hydrationRequestTracker } from './lib/hydrationDrops.ts';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
@@ -97,6 +98,9 @@ const INTERVIEW_STOP_AT = 25;             // R5.1.1 / R11.1
 // option with MORE than PAGE0_BUFFER rows, and up to ceil(1500/100) + 1 clicks to reach the seam.
 const PAGE0_BUFFER = 1500;
 const MAX_LOAD_MORE_CLICKS = 25;
+// Rows a page may lose between the index (counted) and the raw tables (hydrated) and still be called honest:
+// the :22 sync lag of a few deactivations. More than this is drift, which the check must keep failing on.
+const MAX_HYDRATION_DROPS = 25;
 // A FLOOR, never the first page itself: initialReveal() widens it to the number of matching
 // platforms (owner 2026-09-02). Nothing here may treat it as "the number of cards before the first
 // «عرض المزيد»" — that assumption is half of ops_incident #125.
@@ -341,6 +345,16 @@ const R = {
   /** headline == RPC total == oracle. */
   threeWayCount: (headline: number | null, rpc: number | null, oracle: number | null) =>
     headline != null && rpc != null && oracle != null && headline === rpc && rpc === oracle,
+  /** THE HONEST HEADLINE (src/lib/honestTotal.ts, owner 2026-10-30 «a count that differs from the reachable cards is a
+   *  bug»): the app prints total_count MINUS the rows of this page it asked the raw tables for and did not get back
+   *  (hidden at source since the last :22 index sync). So headline == rpc − drops, where `drops` is MEASURED from the
+   *  hydration requests this page really sent (`null` = not every row's request was observed → no allowance at all),
+   *  and rpc == oracle still holds exactly. A drop count above MAX_HYDRATION_DROPS is index↔raw drift, never allowed.
+   *  Measured drops make the expectation EXACT: with one drop the headline must be rpc − 1, and an unsubtracted
+   *  rpc is a regression of honestTotal itself (CodeRabbit, PR 11697). Unobserved drops keep headline == rpc. */
+  honestCount: (headline: number | null, rpc: number | null, oracle: number | null, drops: number | null) =>
+    headline != null && rpc != null && oracle != null && rpc === oracle &&
+    (drops == null ? headline === rpc : drops <= MAX_HYDRATION_DROPS && headline === rpc - drops),
   /** R10.1.1 — no card repeats across pages. */
   noDuplicates: (ids: string[]) => new Set(ids).size === ids.length,
   /** R10.1.1 — a later page carries byte-identical scope + AF predicate; only paging may differ. */
@@ -619,8 +633,31 @@ type Count = { rpc: Rpc; body: any; row: any; seq: number };
 const searches: Search[] = [];
 const counts: Count[] = [];
 let seq = 0;
+// Every raw-table hydration the app sent (fetchRawByIds: GET /rest/v1/<table>?…&id=in.(…)): which ids it ASKED for
+// and which came back. A row asked for and not returned is a hydration drop (src/lib/honestTotal.ts).
+// One ledger rule for every live count robot (scripts/lib/hydrationDrops.ts): per listing key the NEWEST hydration
+// by arrival order and whether THAT response returned it (CodeRabbit, PR 11725).
+const hyd = newHydrationLedger();
+// Pending from the REQUEST, not the response (CodeRabbit, PR 11725): a newer hydration still waiting for headers
+// keeps dropsOf() at «not yet measured».
+const hydReq = hydrationRequestTracker<object>(hyd);
+page.on('request', (req) => { if (isHydrationRequest(req.method(), req.url())) hydReq.sent(req); });
+page.on('requestfailed', (req) => hydReq.settled(req, false, seq++));
 page.on('response', async (r) => {
   const u = r.url();
+  // Arrival order stamped before any await (CodeRabbit, PR 11725): body reads finish in any order.
+  const arrived = seq++;
+  if (r.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u) && /[?&]id=in\./.test(decodeURIComponent(u))) {
+    let recorded = false;   // a failed / unreadable chunk stamps a failure: the overlap stays unmeasured
+    try {
+      const tbl = (u.match(/\/rest\/v1\/([a-z0-9_]+_listings)\?/) || [])[1];
+      if (!tbl || !r.ok()) return;                     // a failed chunk is not a drop: the app shows the retry UI instead
+      const j = await r.json();
+      if (!Array.isArray(j)) return;
+      recorded = recordHydration(hyd, u, r.ok(), j, arrived);
+    } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ } finally { hydReq.settled(r.request(), recorded, arrived); }
+    return;
+  }
   if (r.request().method() !== 'POST') return;
   const isSearch = u.includes('/rpc/location_search_candidates_ar');
   const isGuided = u.includes('/rpc/apartment_guided_counts_ar');
@@ -631,9 +668,9 @@ page.on('response', async (r) => {
     if (!Array.isArray(j)) return;
     const body = JSON.parse(r.request().postData() || '{}');
     if (isSearch) {
-      searches.push({ body, total: j.length ? Number(j[0]?.total_count ?? NaN) : 0, rows: j.map((x: any) => `${x.source_table}:${x.listing_id}`), seq: seq++ });
+      searches.push({ body, total: j.length ? Number(j[0]?.total_count ?? NaN) : 0, rows: j.map((x: any) => `${x.source_table}:${x.listing_id}`), seq: arrived });
     } else if (j.length) {
-      counts.push({ rpc: isGuided ? 'guided' : 'age', body, row: j[0], seq: seq++ });
+      counts.push({ rpc: isGuided ? 'guided' : 'age', body, row: j[0], seq: arrived });
     }
   } catch { /* a body we could not read is not a request we can assert on */ }
 });
@@ -676,18 +713,27 @@ const waitForSearch = async (armed: number, timeoutMs = 40_000, want?: (s: Searc
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     const cands = searches.slice(armed).filter((s) => isResultsSearch(s) && (!want || want(s)));
-    if (cands.length) return cands[cands.length - 1];
+    if (cands.length) return newestBySeq(cands);   // newest ARRIVAL, not last body read (CodeRabbit, PR 11725)
     await page.waitForTimeout(400);
   }
   return null;
 };
-const waitForHeadline = async (total: number | null, timeoutMs = 25_000): Promise<number | null> => {
+/** Rows of THIS search's page the app asked the raw tables for and did not get back; null when any row's hydration
+ *  request was not observed after the search (then nothing is excused). */
+const dropsOf = (s: Search | null): { n: number | null; keys: string[] } => {
+  if (!s) return { n: null, keys: [] };
+  return libDropsOf(hyd, s.rows, s.seq);
+};
+const waitForHeadline = async (total: number | null, timeoutMs = 25_000, honest?: () => number | null): Promise<number | null> => {
   const until = Date.now() + timeoutMs;
   let last: number | null = null;
   while (Date.now() < until) {
     const hs: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
     last = headlineNum(hs[hs.length - 1]);
-    if (last != null && last === total) return last;
+    // The number the page must print: total minus the measured hydration drops when they are known, else total.
+    // Never stop on the raw total when drops were measured — that would hide an unsubtracted headline.
+    const expected = honest?.() ?? total;
+    if (last != null && expected != null && last === expected) return last;
     await page.waitForTimeout(500);
   }
   return last;
@@ -741,7 +787,7 @@ const pairCount = (rpc: Rpc, ctxBody: any): Count | null => {
   const keysOf = (b: any) => Object.keys(b ?? {}).filter((k) => !NON_PREDICATE_KEYS.has(k) && !(rpc === 'age' && AGE_KEYS.includes(k)));
   const match = counts.filter((c) => c.rpc === rpc &&
     [...new Set([...keysOf(c.body), ...keysOf(ctxBody)])].every((k) => JN(c.body?.[k]) === JN(ctxBody?.[k])));
-  return match.length ? match[match.length - 1] : null;
+  return newestBySeq(match);   // newest ARRIVAL, not last body read (CodeRabbit, PR 11725)
 };
 
 type OptionRead = { key: string; count: number | null; label: string; col?: string; rpcVal?: number; oracle?: number | null; unhandled?: string[] };
@@ -859,8 +905,14 @@ try {
     }).map(([k]) => k);
     check('1. every option key writes a predicate of the same family as the column it reads (OPTION_COL ↔ predicateFor)', drift.length === 0, `drifted: ${drift.join(', ') || 'none'}`);
   }
-  const baseHeadline = await waitForHeadline(baseline.total);
-  check('1. R7.4.1 — baseline headline == RPC total_count', baseHeadline != null && baseHeadline === baseline.total, `headline=${baseHeadline} rpc=${baseline.total}`);
+  const honestOf = (s: Search) => () => { const d = dropsOf(s).n; return s.total != null && d != null ? s.total - d : null; };
+  const baseHeadline = await waitForHeadline(baseline.total, 25_000, honestOf(baseline));
+  {
+    const d = dropsOf(baseline);
+    check('1. R7.4.1 — baseline headline == RPC total_count (minus the measured hydration drops)',
+      R.honestCount(baseHeadline, baseline.total, baseline.total, d.n),
+      `headline=${baseHeadline} rpc=${baseline.total} drops=${d.n ?? 'unobserved'}${d.keys.length ? ` [${d.keys.slice(0, 5).join(' ')}]` : ''}`);
+  }
   {
     const { count, unhandled } = await oracleCount(baseline.body);
     if (unhandled.length) skip('1. R7.5.1 — baseline total == independent oracle', unhandled.join(', '));
@@ -992,13 +1044,14 @@ try {
   check('3. the confirm moved NO non-AF narrowing (city/type/deal/period/tables/budget/area/beds untouched)', R.scopeUntouched(base2.body, landed.body),
     SCOPE_ALL_KEYS.filter((k) => JN(base2.body[k]) !== JN(landed!.body[k])).map((k) => `${k}: ${J(base2.body[k])} → ${J(landed!.body[k])}`).join(' · ') || 'identical');
   check('3. R7.1.1 — landed RPC total == the pill the user tapped', landed.total === clickedCount, `tapped=${clickedCount} rpc=${landed.total}`);
-  const landedHeadline = await waitForHeadline(landed.total);
+  const landedHeadline = await waitForHeadline(landed.total, 25_000, honestOf(landed));
+  const landedDrops = dropsOf(landed);
   {
     const { count, unhandled } = await oracleCount(landed.body);
     landedOracle = count;
     if (unhandled.length) skip('3. R7.5.1 — headline == RPC total == oracle', unhandled.join(', '));
-    else check('3. R7.5.1 — headline == RPC total == independent oracle == tapped pill', R.threeWayCount(landedHeadline, landed.total, count) && count === clickedCount,
-      `headline=${landedHeadline} rpc=${landed.total} oracle=${count} pill=${clickedCount}`);
+    else check('3. R7.5.1 — headline == RPC total == independent oracle == tapped pill (headline minus the measured hydration drops)', R.honestCount(landedHeadline, landed.total, count, landedDrops.n) && count === clickedCount,
+      `headline=${landedHeadline} rpc=${landed.total} oracle=${count} pill=${clickedCount} drops=${landedDrops.n ?? 'unobserved'}${landedDrops.keys.length ? ` [${landedDrops.keys.slice(0, 5).join(' ')}]` : ''}`);
     if (!unhandled.length) {
       const [rIds, o] = await Promise.all([rpcIds(landed.body, landed.total ?? 0), oracleIds(landed.body)]);
       landedOracleIds = o.ids;
@@ -1416,10 +1469,11 @@ try {
     check('5. R7.1.1 — the conjunction\'s RPC total == the pill the user tapped (priced after the earlier fact)', second.total === step5.pill, `tapped=${step5.pill} rpc=${second.total}`);
     check('5. the second answer moved NO non-AF narrowing', R.scopeUntouched(prevBody, second.body) && R.scopeIs(second.body),
       SCOPE_ALL_KEYS.filter((k) => JN(prevBody[k]) !== JN(second!.body[k])).map((k) => `${k}: ${J(prevBody[k])} → ${J(second!.body[k])}`).join(' · ') || 'identical');
-    const h2 = await waitForHeadline(second.total);
+    const h2 = await waitForHeadline(second.total, 25_000, honestOf(second));
+    const d2 = dropsOf(second);
     const { count, unhandled } = await oracleCount(second.body);
     if (unhandled.length) skip('5. R7.5.1 — conjunction: headline == RPC total == oracle', unhandled.join(', '));
-    else check('5. R7.5.1 — conjunction: headline == RPC total == independent oracle', R.threeWayCount(h2, second.total, count), `headline=${h2} rpc=${second.total} oracle=${count}`);
+    else check('5. R7.5.1 — conjunction: headline == RPC total == independent oracle (minus the measured hydration drops)', R.honestCount(h2, second.total, count, d2.n), `headline=${h2} rpc=${second.total} oracle=${count} drops=${d2.n ?? 'unobserved'}`);
     check('5. the conjunction narrowed or held (AND can never widen)', second.total != null && prevTotal != null && second.total <= prevTotal, `before=${prevTotal} after=${second.total}`);
   }
 
@@ -1461,6 +1515,16 @@ try {
     mut('a request that dropped the tapped predicate is caught by carriesExactly', k != null && !R.carriesExactly({ ...landed.body, [k]: null }, clickedPred));
     mut('a request that added an uncommitted predicate is caught by carriesExactly', !R.carriesExactly({ ...landed.body, p_rating_min: 4 }, clickedPred));
     mut('a headline off by one is caught by threeWayCount', !R.threeWayCount((landed.total ?? 0) + 1, landed.total, landed.total));
+    const T = landed.total ?? 100;
+    mut('a headline ABOVE the total is caught by honestCount even with drops measured', !R.honestCount(T + 1, T, T, 1));
+    mut('a headline one below with NO observed hydration is caught by honestCount', !R.honestCount(T - 1, T, T, null));
+    mut('a headline one below with ZERO measured drops is caught by honestCount', !R.honestCount(T - 1, T, T, 0));
+    mut('an UNSUBTRACTED headline (== rpc) with one measured drop is caught by honestCount', !R.honestCount(T, T, T, 1));
+    mut('headline == rpc with zero measured drops is accepted by honestCount', R.honestCount(T, T, T, 0));
+    mut('a headline two below with ONE measured drop is caught by honestCount', !R.honestCount(T - 2, T, T, 1));
+    mut('drops above MAX_HYDRATION_DROPS are drift, caught by honestCount', !R.honestCount(T - (MAX_HYDRATION_DROPS + 1), T, T, MAX_HYDRATION_DROPS + 1));
+    mut('rpc ≠ oracle is caught by honestCount whatever the drops', !R.honestCount(T - 1, T, T + 1, 1));
+    mut('a headline one below with exactly one measured drop is accepted by honestCount', R.honestCount(T - 1, T, T, 1));
     if (unionIds.length) mut('a duplicated card across pages is caught by noDuplicates', !R.noDuplicates([...unionIds, unionIds[0]]));
     const later = { ...landed.body, p_offset: 1500, [k]: null };
     mut(`a later page that dropped ${k} is caught by samePredicate`, k != null && !R.samePredicate(landed.body, later));

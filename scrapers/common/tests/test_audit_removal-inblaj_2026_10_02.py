@@ -197,7 +197,7 @@ def _run_inblaj(monkeypatch, pages: dict[str, int], argv=("run",), titles: dict[
             return Resp(200, sitemap)
         return Resp(pages[url.rstrip("/").rsplit("/", 1)[-1]], "page")
 
-    def fake_map(url, html, *, source, prefix):
+    def fake_map(url, html, *, source, prefix, post_dates=None):
         key = url.rstrip("/").rsplit("/", 1)[-1]
         return _row(prefix + key, (titles or {}).get(key, "شقة للبيع")), ("commercial" if key.startswith("c") else "residential"), ""
 

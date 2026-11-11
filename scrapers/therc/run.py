@@ -58,6 +58,7 @@ from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common.page_pin import pin_from_page
 from scrapers.common.pii import redact_pii
+from scrapers.common.posting_date import site_posting_date
 
 BASE = "https://therc.aqar.digital"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -411,6 +412,10 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
         # border ads carried one. Rows keep their legacy shape under "rows" (buildAdditionalInfo unwraps it).
         "additional_info": {"rows": extra, **pin_from_page(page)},
         "source_capture": capture,
+        # The page's own JSON-LD datePosted («2026-06-10T14:58:40+03:00»). It was kept in source_capture and as
+        # a details row only, so date_added was NULL on all 457 rows. The sitemap's lastmod is a change date
+        # and is never read as a posting date.
+        "date_added": site_posting_date(ld.get("datePosted")),
         "price_evidence": N.price_evidence(
             field="offers.price",
             raw=raw_price,

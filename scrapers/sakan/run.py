@@ -115,6 +115,7 @@ from scrapers.common.liveness_policies import policy_for  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_capture  # noqa: E402
 from scrapers.common.page_pin import pin_from_html  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://sa.sakan.co"
@@ -296,6 +297,10 @@ def parse_page(url: str, page: str) -> dict[str, Any]:
             # 2026-09-30 redesign: the dwelling's block moved under `about`, typed by what it is
             # (Apartment, Accommodation, SingleFamilyResidence, …), and `offers` is no longer printed.
             res = d["about"]
+            # The ad's own posting date sits on the OUTER listing block («datePosted": "2026-11-08»), the
+            # same day the page prints as «تاريخ النشر». It was never read, so date_added was NULL on all
+            # 3,340 rows (2026-11-09).
+            out["date_posted"] = d.get("datePosted")
         elif d.get("@type") == "BreadcrumbList":
             crumbs = [c for c in d.get("itemListElement") or [] if isinstance(c, dict)]
 
@@ -571,6 +576,9 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         # The REGA ad licence is a real column (listing_extra_attrs reads it); the card keeps reading
         # additional_info.rega_ad_license_number below.
         "license_number": p.get("licence"),
+        # The site's own posting date (parse_page: RealEstateListing.datePosted). Never the licence's issue
+        # date, which the same page prints and which is a different day.
+        "date_added": site_posting_date(p.get("date_posted")),
     }
     if deal == "Rent":
         # PERIOD = SOURCE. The token comes from the price block alone («/ شهري», «/ سنوي»); the
@@ -598,6 +606,7 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "agency_id": p.get("agency_id"),
         "agency_name": agency or None,
         "rega_ad_license_number": p.get("licence"),
+        "date_posted": p.get("date_posted"),
         "photo_urls_full_res": p.get("photos_full") or None,
         "spec_table": specs or None,
         "services": p.get("services") or None,

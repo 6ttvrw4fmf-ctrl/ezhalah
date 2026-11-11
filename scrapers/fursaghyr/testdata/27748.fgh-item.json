@@ -1,0 +1,58 @@
+{
+ "id": 27748,
+ "title": "عمارتين للبيع في المدينة المنورة حي شوران",
+ "permalink": "https://fursaghyr.com/property/%d8%b9%d9%85%d8%a7%d8%b1%d8%a9-%d8%a8%d9%8a%d8%b9-%d9%85%d9%86%d8%b7%d9%82%d8%a9-%d8%a7%d9%84%d9%85%d8%af%d9%8a%d9%86%d8%a9-%d8%a7%d9%84%d9%85%d9%86%d9%88%d8%b1%d8%a9/",
+ "created_at": "2026-10-29T15:15:54+00:00",
+ "updated_at": "2026-10-29T15:15:54+00:00",
+ "images": [
+  "https://fursaghyr.com/wp-content/uploads/2026/10/922E6337-0EC7-493B-93B9-6C257645D817-768x1152.png"
+ ],
+ "rea": {
+  "license_number": "7100334767",
+  "broker_license": "1100187390",
+  "license_url": "https://eservicesredp.rega.gov.sa/public/IndividualBroker/ElanDetails/f84dcf72-59f1-4085-94b7-cb43ff8e751f",
+  "license_source": "الهيئة العامة للعقار",
+  "license_start": "26/10/2026",
+  "license_end": "29/08/2027",
+  "property_type": "عمارة",
+  "purpose": "بيع",
+  "land_area": 814.97,
+  "meter_price": 4500000,
+  "total_price": null,
+  "region": "منطقة المدينة المنورة",
+  "city": "المدينة المنورة",
+  "district": "السد",
+  "street": "عمر ابن الوليد",
+  "postal_code": "42385",
+  "building_no": "2620",
+  "additional_no": "8091",
+  "longitude": 39.64271717191718,
+  "latitude": 24.39531812699626,
+  "front": "جنوبية",
+  "street_width": 30,
+  "ad_channels": [
+   "منصات التواصل الإجتماعي",
+   "أخرى",
+   "الإذاعة",
+   "لوحة اعلانية",
+   "منصة مرخصة"
+  ],
+  "usages": null,
+  "utilities": [
+   "مياه",
+   "كهرباء",
+   "صرف صحي"
+  ],
+  "moj_location_desc": "حي  شوران / ج بمدينة المدينة المنورة .",
+  "location_text": "منطقة المدينة المنورة - المدينة المنورة - السد - عمر ابن الوليد - 42385 - 2620 - 8091",
+  "location_parts": {
+   "region": "منطقة المدينة المنورة",
+   "city": "المدينة المنورة",
+   "district": "السد",
+   "street": "عمر ابن الوليد",
+   "postal_code": "42385",
+   "building_no": "2620",
+   "additional_no": "8091"
+  }
+ }
+}

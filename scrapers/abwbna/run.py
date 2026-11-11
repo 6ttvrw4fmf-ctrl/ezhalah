@@ -49,9 +49,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize
+from scrapers.common import db, normalize, nuzul_usage
 from scrapers.common.arabic_location import to_catalog
 from scrapers.common.pii import redact_pii
+from scrapers.common.posting_date import site_posting_date
 from scrapers.common.source_pin import pin_dict
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
@@ -73,7 +74,7 @@ PER_PAGE = 50
 # (golden proof: scrapers/common/tests/test_normalize_unification_golden.py). Aldarim currently
 # needs NO per-platform overrides; if one ever appears, pass overrides= per the
 # normalize.map_type_exact contract instead of forking a private map.
-# A few types we treat as commercial-land when category is commercial (call-site rule, stays here).
+# Land is Commercial Land when the page's own usage says commercial (nuzul_usage.land_category).
 _LAND_TYPES = {"land"}
 
 
@@ -257,8 +258,9 @@ _EXTRA_FIELDS = [
 
 def _additional_info(L: dict) -> list[dict[str, Any]]:
     rows = []
-    # Usage (Residential/Commercial) — shown on aldarim.sa, wanted on our card.
-    usage = (L.get("category") or "").title()
+    # «الاستخدام» exactly as the ad page prints it (the is_for_* flags). NOT `category`: that is the office's
+    # hidden filing pick, never shown on the page (scrapers/common/nuzul_usage.py). No flag on → no row.
+    usage = nuzul_usage.usage_shown_ar(L)
     if usage:
         rows.append({"key": "usage", "label": "Property usage", "value": usage})
     for key, label in _EXTRA_FIELDS:
@@ -282,8 +284,12 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     # Unmapped type → RAW preserved, title-cased (never a guessed default; Batch 2 type-truth
     # contract) — byte-identical to the old `TYPE_MAP.get(t, t.title() if t else None)`.
     property_type = normalize.map_type_en(t) or (t.title() if t else None)
-    if t in _LAND_TYPES and category == "commercial":
-        property_type = "Commercial Land"
+    if t in _LAND_TYPES:
+        # A land ad is what the page's own «الاستخدام» says it is; the office's `category` decides only when the
+        # page does not settle it. The table follows (owner 2026-11-10; scrapers/common/nuzul_usage.py).
+        category = nuzul_usage.land_category(L)
+        if category == "commercial":
+            property_type = "Commercial Land"
 
     area = _int(L.get("area")) or _int(L.get("built_up_area"))
     # Rent fidelity (monthly-rent contract; 2026-07-16 unification follow-up): price_annual is truly
@@ -343,6 +349,11 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "photo_urls": _photos(L),
         "property_age": None if property_type in AGELESS_TYPES
                         else _age_from_year_built(L.get("year_built")),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the Nuzul API item's own `created_at` (UTC «Z»).
+        # Measured live 2026-11-09 on abwbna 55210:
+        # created_at 2026-11-08T18:40:45.000000Z, updated_at 18:43:10, first seen by us 05:53Z next day.
+        # The ad page prints no date of its own. Never updated_at (an edit) or availability_date.
+        "date_added": site_posting_date(L.get("created_at")),
         "rega_location_verified": bool(L.get("rega_ad_number")),
         # Owner 2026-10-20: the API item's own latitude/longitude (strings). The panel rows keep their
         # legacy shape under "rows" (src/data/remote.ts buildAdditionalInfo unwraps it); the index reads

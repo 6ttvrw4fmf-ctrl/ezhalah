@@ -37,6 +37,10 @@ export type MergeGateInput = {
   openReviewMajors?: string[] | null;
   // CodeRabbit has posted at least one review on this PR (any commit). Only an explicit `true` counts.
   codeRabbitReviewed?: boolean;
+  // The PR is a PROVEN mirror of production: every file is a supabase/migrations or sql/mirrors file, at least one is a
+  // migration, and every migration is byte-exact to what production already ran (measured by safe-pr-merge.ts running
+  // scripts/pr-migrations-match-production.ts at the verified head). Only an explicit `true` counts; unmeasured = false.
+  mirrorOfProduction?: boolean;
 };
 
 export type MergeGateResult = { allow: boolean; reasons: string[] };
@@ -58,12 +62,18 @@ export const ADVISORY_MAY_SKIP = ['CodeRabbit'];
 // re-reviews by itself. #11367 (three byte-exact mirrors) had every Major CodeRabbit raised fixed and resolved, yet sat
 // 5 h on that NEUTRAL while the drift gate refused every deploy. It passes ONLY when CodeRabbit already reviewed this
 // PR AND its threads were read with no open Major (rule 3b still runs) AND it is not required.
+// 0b‴ (owner 2026-11-09, «let them in of course»): the same rate limit also froze mirrors CodeRabbit had NEVER read
+// (#11444 #11445 #11471 #11485 #11493 #11496-#11500): ~16 PRs unmergeable, every deploy refused by the drift gate. A
+// PROVEN mirror of production (mirrorOfProduction) carries nothing to review — merging it changes nothing production
+// has not already run — so it passes a rate-limited CodeRabbit without a prior review. Still not when it is required,
+// not with an open Major or unreadable threads, and not for any PR whose parity was not measured.
 export const RATE_LIMITED = /rate limited/i;
 const advisorySkip = (c: CheckRun, input: MergeGateInput) => {
   if (!ADVISORY_MAY_SKIP.includes(c.context) || input.requiredContexts.includes(c.context)) return false;
   const k = normaliseConclusion(c.conclusion);
   return k === 'SKIPPED'
-    || (k === 'NEUTRAL' && RATE_LIMITED.test(c.title ?? '') && input.codeRabbitReviewed === true
+    || (k === 'NEUTRAL' && RATE_LIMITED.test(c.title ?? '')
+      && (input.codeRabbitReviewed === true || input.mirrorOfProduction === true)
       && Array.isArray(input.openReviewMajors) && input.openReviewMajors.length === 0);
 };
 

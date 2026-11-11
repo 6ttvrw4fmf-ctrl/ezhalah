@@ -70,6 +70,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://wahadat.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -360,6 +361,12 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
         "bathrooms": u.get("toilets") if isinstance(u.get("toilets"), int) else None,
         "parking": True if u.get("has_basement_parking") else None,
         "license_number": proj.get("license_number") or None,
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the UNIT's own `created_at` in unitsData (units of
+        # one project are added months apart: امتياز المساكن 11 → C2 2025-05-18, D1 2025-07-22). The page's JSON-LD
+        # datePosted is the PROJECT's created_at and agrees with its first units — measured 2026-11-09 on مرزم فلل
+        # المرسلات: datePosted 2026-11-04T14:09:31+03:00, unit 328cdfb9 created 14:10:47 the same minute. Never
+        # updated_at / the project's dateModified / enabled_at, nor advertisement_issueDate (the licence).
+        "date_added": site_posting_date(u.get("created_at")),
         # The PROJECT's own gallery (see _main_project). Units carry no images of their own on
         # this source, so every unit of a project shows that project's photos.
         "photo_urls": proj.get("images") or None,

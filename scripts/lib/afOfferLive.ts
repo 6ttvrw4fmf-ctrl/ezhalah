@@ -240,6 +240,8 @@ export async function openAfOffer(
         attempts++;
         const w = await clickWitnessed(page, box, { testid: AF_OFFER_TESTID, text: AF_OFFER_CTA });
         if (w.landed) return { opened: true, waitedMs: Date.now() - t0, attempts };
+        // the witness was lost (the page was replaced): the tap may have acted — never spend another one on it
+        if (w.unknown) return { opened: false, reason: 'intercepted', waitedMs: Date.now() - t0, attempts, hit: w.hit };
         // The page moved under the pointer anyway. Say what took the click, let the conversation
         // settle, and measure again — never report a tap that the CTA did not receive.
         lastHit = w.hit;

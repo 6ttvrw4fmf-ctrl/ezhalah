@@ -88,11 +88,25 @@ figure misstates them. They are the whole of the «إقامات قصيرة» poo
   owner's approval.
 - Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
 
+# EVERY AD'S PRICES AND DATES ARE KEPT FOREVER (owner, 2026-11-11 — permanent; full text `docs/ARCHITECTURE.md` §20)
+
+**`listing_price_history` (every price change, gone, back, removed — with its date) and `listing_comparables` (one slim
+card per ad: what, where, size, rooms, first/last price, the site's posting date, first seen, gone, removed) are written by
+`tg_listing_price_diary()` on every listing table and outlive the ad, including ads the retention engine deletes.** Never
+delete or update them, never drop the triggers. «gone/removed» means the ad disappeared, never that it sold. Later the AI
+agent answers comparables («prices in this district in this time frame») FROM these tables and their dates, never from
+the model's own knowledge. **Every NEW site joins automatically**: the event trigger `listing_price_diary_born_attached` attaches the diary to
+any new listing table the moment it is created — and REFUSES the CREATE if it cannot — while the hourly watcher is only
+the safety net that rings `price_diary_unhealthy` if one is still missing; all sites share ONE diary and ONE card table —
+never a separate store per site. Guard: `scripts/verify-price-diary.ts`.
+
 # RENT POOLS AND THE CHEAP-«YEARLY» RULE (owner, 2026-10-25/26 — permanent; full text `docs/ARCHITECTURE.md` §20)
 
 **«إقامات قصيرة» (the old «شهري» pool) is Gathern + Aqar Monthly ONLY. Every other site's rent listing is
 YEARLY: a per-month figure pools under «سنوي» at ×12 and the card keeps the site's word — «السعر المعلن
-3,000 شهرياً». A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
+3,000 شهرياً». ONE per-listing exception (owner 2026-11-10, backlog 1744): a rent whose SELLER states a daily or
+weekly stay (Haraj «للإيجار اليومي» → source rent_period 'daily' / 'weekly', price never ×12, no price on the card)
+joins «إقامات قصيرة» — `SHORT_STAY_PERIODS` / `rent_pool_ar()`, migration 20261111070829. A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
 Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom, Commercial Building) is a
 per-month price and is SERVED ×12; rooms, land, rest houses, chalets, camps and farms are out.** The
 SOURCE TABLES ARE UNTOUCHED (PRICE = SOURCE, PERIOD = SOURCE still hold there) — the index serves through
@@ -709,6 +723,12 @@ after the point of no return is not a guard. Knowing about this class is demonst
 avoid it — on 2026-09-27 one session did it twice four hours apart, the second time after being
 caught by the first and writing the rule down.
 
+**The same run asks a REPAIR for its registry row (2026-11-10).** A migration that UPDATEs listing rows is
+refused by that check until you pass `--repair-will-be-enrolled`, and it prints the exact
+`insert into ops_repair_guarantee_registry …` to run right after the apply (or the waiver line to add to
+`scripts/repair-enrollment-waivers.txt`). Skipping it pages `seam_check_failed` within 30 minutes — seven times in
+seven days before the check asked. Guard: `scripts/verify-repair-is-asked-for-before-apply.ts`.
+
 **The guard checks all FOUR drift conditions (owner extended it 2026-08-21), in both directions:**
 1. **applied-but-not-committed** — a migration live in prod with no git file (the classic drift).
 2. **committed-but-not-applied** — a git migration file whose version was never applied to prod.
@@ -785,6 +805,18 @@ auto-reactivated (owner, 2026-08-30)."*
 
 `ops_adjudicated_listing` is a VIEW; write to **`ops_adjudicated_retraction`** (`source_table`,
 `listing_id`, `reason`, `evidence` jsonb).
+
+**Since 2026-11-09 the register also outlives the CRAWL UPSERT, not only the recovery job.** Measured
+that day: four adjudicated rows (dealapp 22045812, three gathern units) were active again because every
+platform's upsert payload writes `active=true` and nothing checked the ledger on that path — the
+recovery job's exemption never saw them. `trg_keep_adjudicated_hidden` (BEFORE UPDATE on every
+`*_residential_listings` / `*_commercial_listings` table, false→true flip only) refuses the flip for any
+row in `ops_adjudicated_listing` unless `ops_adjudication_superseded` records its OWN page read live after
+the adjudication, and logs the refusal in `ops_adjudicated_reactivation_blocked`.
+`mon_detect_adjudication_guard_missing()` re-measures attachment from `pg_trigger` every sweep. So: a
+source that republishes an adjudicated listing is recorded in `ops_adjudication_superseded` (own-page
+live reading, evidence) — never by deleting the ledger row and never by dropping the trigger. Migration
+`20261109124411`; guard `scripts/verify-adjudicated-rows-cannot-be-reactivated-by-upsert.ts`.
 
 **How this was earned.** The owner said «delete the 99 please» about راكز's «البيع على الخارطة»
 (off-plan) units on 2026-09-14. They were deactivated, a detector was added to watch them, and they

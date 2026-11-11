@@ -87,14 +87,22 @@ def test_an_unpriced_villa_is_kept_with_an_authoritative_null_and_its_counters()
     assert row["title"] == "فيلا للبيع في حي الورود"
 
 
-def test_the_offices_own_category_qualifies_land_not_the_use_flags():
+def test_the_pages_own_usage_qualifies_land_and_the_offices_category_only_breaks_a_tie():
+    # Owner 2026-11-10: a land ad is what the ad page's «الاستخدام» says (the use flags); the office's hidden `category`
+    # decides only when the page does not settle it. This test pinned the opposite until then, and 11 active m3tmd
+    # lands the site calls «تجاري» were served as Residential Land. scrapers/common/nuzul_usage.py.
     row, cat, _ = R.map_listing(PER_METRE_PROSE)
     assert (row["property_type"], cat) == ("Commercial Land", "commercial")
     assert row["additional_info"]["usages"] == ["commercial"]
+    assert row["additional_info"]["usage"] == "تجاري"     # the word the page prints
     res = json.loads(json.dumps(PER_METRE_PROSE))
-    res["category"] = "residential"                   # use flags unchanged: commercial-only
+    res["category"] = "residential"                   # use flags unchanged: commercial-only → still commercial
+    row, cat, _ = R.map_listing(res)
+    assert (row["property_type"], cat) == ("Commercial Land", "commercial")
+    res["is_for_residential"] = True                  # both uses on → the page does not settle it → the filing does
     row, cat, _ = R.map_listing(res)
     assert (row["property_type"], cat) == ("Residential Land", "residential")
+    assert row["additional_info"]["usage"] == "سكني، تجاري"
 
 
 def test_a_stored_zero_price_is_the_platforms_not_set_sentinel_kept_auditable_never_a_0_riyal_price():

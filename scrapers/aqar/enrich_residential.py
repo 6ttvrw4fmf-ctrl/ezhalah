@@ -200,14 +200,8 @@ def source_pin(html: str) -> Optional[dict[str, float]]:
     return None
 
 
-def _listing_json(html: str) -> Optional[dict[str, Any]]:
-    """The listing object aqar embeds in its RSC flight payload, or None if it is not present.
-
-    None means we could not read aqar's structured data on this fetch — NOT that the flat lacks
-    amenities. Callers must treat it as unknown.
-    """
-    if not html or '"listing"' not in html and '\\"listing\\"' not in html:
-        return None
+def _flight_blob(html: str) -> str:
+    """aqar's RSC flight payload as one decoded string (the self.__next_f.push chunks joined and unescaped)."""
     # The payload arrives as JS string literals inside self.__next_f.push([1,"..."]) chunks; joining
     # them and unescaping reconstitutes the JSON. Fall back to the raw html for already-plain markup.
     chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html, re.S)
@@ -223,6 +217,55 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
             blob = blob.encode("latin-1", "ignore").decode("utf-8", "ignore")
         except UnicodeError:      # already clean on some payload shapes — keep what we have
             pass
+    return blob
+
+
+# THE SELLER'S TEXT BEHIND A FLIGHT REFERENCE (2026-11-11, owner launch audit). When the description is long, aqar
+# does not put it inline: `listing.content` is a reference such as «$8a», and the text travels as its own flight row
+# «8a:T8ae,<0x8ae bytes of UTF-8>». The audit ad itself (6560368, «السعر الشهري: 9499») is one: the seller-says-monthly
+# rule received the literal «$8a» and could not read a word of it (dry run, Actions 42936167561). An unresolvable
+# reference is unknown text — None, never the reference string.
+_FLIGHT_REF = re.compile(r"\$([0-9a-f]+)")
+
+
+def seller_text(obj: Optional[dict[str, Any]], html: str) -> Optional[str]:
+    """The seller's own description: `listing.content` itself, or the flight text row it points to."""
+    c = (obj or {}).get("content")
+    if not isinstance(c, str):
+        return None
+    ref = _FLIGHT_REF.fullmatch(c.strip())
+    if not ref:
+        return c
+    blob = _flight_text_blob(html)
+    row = re.search(r"(?:^|\n)" + re.escape(ref.group(1)) + r":T([0-9a-f]+),", blob)
+    if not row:
+        return None
+    return blob[row.end():].encode("utf-8")[:int(row.group(1), 16)].decode("utf-8", "ignore") or None
+
+
+def _flight_text_blob(html: str) -> str:
+    """The flight payload decoded LOSSLESSLY, for byte-counted text rows (CodeRabbit on #11753). Each push chunk is a
+    JSON string literal, so json.loads restores every character — an emoji written as «\\ud83d\\udd25» included —
+    where _flight_blob's latin-1 round trip drops what it cannot map and the «T<bytes>» length then cuts the seller's
+    text short or runs into the next row. A chunk json cannot read falls back to _flight_blob's reading."""
+    chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html, re.S)
+    if not chunks:
+        return _flight_blob(html)
+    try:
+        return "".join(_json.loads('"' + c + '"') for c in chunks)
+    except ValueError:
+        return _flight_blob(html)
+
+
+def _listing_json(html: str) -> Optional[dict[str, Any]]:
+    """The listing object aqar embeds in its RSC flight payload, or None if it is not present.
+
+    None means we could not read aqar's structured data on this fetch — NOT that the flat lacks
+    amenities. Callers must treat it as unknown.
+    """
+    if not html or '"listing"' not in html and '\\"listing\\"' not in html:
+        return None
+    blob = _flight_blob(html)
     # raw_decode, not a brace counter: the counter ignored strings, so an ad whose own text holds a
     # «{» or «}» closed the object mid-string, failed to parse, and the WHOLE payload read as None —
     # photos, pin, price and amenities all unknown. Live 2026-10-10: ad 6753755 and 42 more rows kept
@@ -470,6 +513,109 @@ def _period_beside(price: Optional[int], text: str, is_rnpl_page: bool = False) 
             if re.search(rf"{re.escape(num)}{_CUR}\s*/?\s*{pattern}", text):
                 return period
     return None
+
+
+# ── aqar's price box says «سنوي»; the SELLER says «شهري» about the SAME figure (owner, 2026-11-10) ──────
+# Launch audit: the cheapest Jeddah rental on Ezhalah was aqar ad 6560368 — 9,499 «سنوي» in aqar's price
+# box, «السعر الشهري: 9499 ريال فقط» in the seller's own text. A flat for 9,499 a YEAR, first in every
+# price-sorted search. Owner rule (2026-09-26, MAQRAT): «check the price — if it looks monthly, put it
+# monthly, even though it has written yearly». Under 8,000 the search already reads a "yearly" rent on a
+# home or business unit as monthly (rent_price_annual_ar — do NOT ×12 those here, that is the serve rule's
+# job). This closes the band above it, and only on the seller's OWN WORD, never on the number's size alone:
+#   • aqar's figure is 8,000–10,000 (N.MONTHLY_LOOKING_MAX) and aqar did not call it monthly;
+#   • the unit is a home or a business unit — the serve rule's own list. Rooms, land, rest houses,
+#     chalets, camps and farms are out: a room really does rent for 9,000 a year;
+#   • the seller's description ties a monthly word DIRECTLY to this very figure («الشهري: 9499»,
+#     «8,500 ريال شهريًا»);
+#   • and nothing in it ties a yearly word or «دفعة واحدة» to the same figure.
+# The PRICE stays aqar's structured number — no price is ever read from prose; only its PERIOD is read
+# from the seller. Whatever this cannot read for certain changes nothing: the ad stays as aqar published it.
+SELLER_MONTHLY_MIN = 8_000
+SELLER_MONTHLY_TYPES = frozenset({
+    "Apartment", "Villa", "Floor", "Duplex", "Studio", "House", "Building", "Residential Building",
+    "Office", "Shop", "Warehouse", "Showroom", "Commercial Building",
+})
+_AR = r"(?![ء-ي])"                       # the word ends here: «شهرين» (two months) is not «شهري»
+_EN = r"(?![A-Za-z])"
+_M_AR = rf"(?:ال)?شهر[يى](?:اً|ًا|ا|ة|ه)?{_AR}"
+_Y_AR = rf"(?:ال)?سنو[يى](?:اً|ًا|ا|ة|ه)?{_AR}"
+# A period word that HEADS a figure («الشهري: 9499», «Monthly rent: SAR 9,900») …
+_M_HEAD = rf"(?:{_M_AR}|monthly(?:\s+rent)?{_EN})"
+_Y_HEAD = rf"(?:{_Y_AR}|(?:yearly|annual)(?:\s+rent)?{_EN})"
+# … and one that CLOSES it («9499 ريال شهريا», «9,900/ Month»).
+_M_TAIL = rf"(?:{_M_AR}|(?:بالشهر|في\s+الشهر|للشهر|لكل\s+شهر|كل\s+شهر){_AR}" \
+          rf"|(?:monthly|per\s+month|/\s*month|a\s+month){_EN})"
+# The yearly side is deliberately the WIDER one: a yearly word tied to the figure stops the change.
+_Y_TAIL = rf"(?:{_Y_AR}|(?:(?:بال|في\s+ال|لل|ال|لكل\s+|كل\s+)?سن[ةه]|(?:بال|في\s+ال|لل|لكل\s+|كل\s+)عام){_AR}" \
+          rf"|(?:yearly|annually|annual|per\s+year|/\s*year|a\s+year){_EN})"
+_SELLER_CUR = r"(?:ريال(?:\s+سعودي)?|ر\.?\s?س\.?|﷼|§|SAR|SR)"
+# What may sit between a heading word and its figure, and between a figure and its closing word.
+_HEAD_GAP = rf"[\s:：=\-–—(\[*«\"]{{0,8}}(?:(?:ب|بـ|بسعر|بمبلغ|هو|فقط)\s*)?(?:{_SELLER_CUR}\s*)?[(\[*\s]{{0,3}}"
+_TAIL_GAP = rf"[\s)*\]»\"]{{0,6}}(?:{_SELLER_CUR}[\s)*\]»\".]{{0,6}})?(?:فقط[\s)*\]]{{0,4}})?"
+_SELLER_NUM = r"\d[\d,.]*"
+_LUMP = r"دفع[ةه]\s+(?:واحد[ةه]|وحد[ةه]|كامل[ةه])"      # «دفعة واحدة»: the figure is the YEAR paid at once
+_I = re.IGNORECASE
+
+
+def _seller_ties(price: int, text: str, head: str, tail: str, smaller_owns: bool) -> bool:
+    """Does `text` tie this period word DIRECTLY to the figure `price`?
+
+    A word squeezed between two figures belongs to one of them: a MONTHLY word to the smaller
+    («دفعة واحدة 8000 ريال شهري 800» — the 800 is the monthly one), a YEARLY word to the larger. Where the
+    neighbour cannot be read as a number the answer is the careful one for the caller: not tied for the
+    monthly question, tied for the yearly one.
+    """
+    def other_owns(raw: str) -> bool:
+        other = N.to_int(raw)
+        if not other or other == price:
+            return smaller_owns                    # unreadable neighbour: the careful answer
+        return (other < price) if smaller_owns else (other > price)
+
+    for num in {str(price), f"{price:,}"}:
+        for m in re.finditer(rf"(?<![\d,.]){re.escape(num)}(?![,.]?\d)", text):
+            before, after = text[:m.start()], text[m.end():]
+            h = re.search(rf"({head}){_HEAD_GAP}$", before, _I)
+            if h:
+                prev = re.search(rf"({_SELLER_NUM})\s*{_SELLER_CUR}?[\s*)\]]{{0,3}}$", before[:h.start(1)], _I)
+                if not (prev and other_owns(prev.group(1))):
+                    return True
+            t = re.match(rf"{_TAIL_GAP}({tail})", after, _I)
+            if t:
+                rest = after[t.end(1):]
+                if re.match(r"\s*[=:：]", rest):
+                    continue                        # «شهري = حسب الاتفاق»: the word heads what FOLLOWS it
+                nxt = re.match(rf"[\s(\[*]{{0,3}}(?:{_SELLER_CUR}\s*)?({_SELLER_NUM})", rest, _I)
+                if not (nxt and other_owns(nxt.group(1))):
+                    return True
+    return False
+
+
+def _seller_lump_sum(price: int, text: str) -> bool:
+    """«دفعة واحدة 8000 ريال» / «8000 ريال دفعه واحده»: the figure is a whole year paid in one go."""
+    for num in {str(price), f"{price:,}"}:
+        for m in re.finditer(rf"(?<![\d,.]){re.escape(num)}(?![,.]?\d)", text):
+            before, after = text[max(0, m.start() - 30):m.start()], text[m.end():m.end() + 30]
+            b = list(re.finditer(_LUMP, before))
+            if b and not re.search(_M_AR, before[b[-1].end():]):
+                return True
+            a = re.search(_LUMP, after)
+            if a and not re.search(_M_AR, after[:a.start()]):
+                return True
+    return False
+
+
+def seller_says_monthly(price: Optional[int], content: Any, property_type: Optional[str]) -> bool:
+    """True only when the seller's own text says, about aqar's own figure, that it is the MONTHLY rent."""
+    if not price or not isinstance(content, str) or property_type not in SELLER_MONTHLY_TYPES:
+        return False
+    if not (SELLER_MONTHLY_MIN <= price <= N.MONTHLY_LOOKING_MAX):
+        return False
+    text = content.translate(N._TRANS).replace("٬", ",").replace("٫", ".").replace("ـ", "")
+    if _seller_ties(price, text, _Y_HEAD, _Y_TAIL, smaller_owns=False) or _seller_lump_sum(price, text):
+        return False
+    if N.stated_rent_period(price, text) == "annual":   # the fleet's own reader disagrees → not certain
+        return False
+    return _seller_ties(price, text, _M_HEAD, _M_TAIL, smaller_owns=True)
 
 
 def _tri_state(raw: Any) -> Optional[bool]:
@@ -846,6 +992,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # (This costs aqar nothing in practice: its residential rent product is annual, 0 of 23,907 live
     # rows are monthly, and its UI renders «سنوي» — so the value is now the same but EVIDENCED.)
     rent_period: Optional[str] = None
+    rent_period_from: Optional[str] = None     # set only when the SELLER'S text, not aqar's box, named the period
 
     # Cross-listing contamination guard (2026-07-27 audit, live-proven on 6723041): the de-tagged
     # page text INCLUDES the related-listings strip at the bottom, so on a PRICE-LESS listing the
@@ -922,6 +1069,16 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             # «N شهريا» financing line or a neighbouring listing card can never supply the answer.
             rent_period = _RENT_PERIOD_ENUM.get((obj or {}).get("rent_period")) \
                 or _period_beside(s_price, text, is_rnpl_page)
+            # aqar did not call it monthly, but the SELLER'S own text does, about this very figure, in the
+            # 8,000–10,000 band on a home or business unit (owner 2026-11-10) — see seller_says_monthly.
+            # A financing (pay-later) page is NOT skipped. Its «ابتداءً من 981 ريال شهريا» line is an instalment, and
+            # the rule only fires on the PUBLISHED figure tied to the seller's word — an instalment never equals it.
+            # Skipping those pages left the very ad of the owner's audit (aqar 6560368, a pay-later page) at 9,499
+            # «a year» and 12 of the 21 known cases unfixed (dry run 2026-11-11, Actions run 42931691834).
+            if rent_period != "monthly" \
+                    and seller_says_monthly(s_price, seller_text(obj, html), property_type):
+                rent_period = "monthly"
+                rent_period_from = "seller_text"
             if rent_period == "monthly" and price_annual:
                 # price_annual holds the ANNUAL figure by schema contract and the app divides by 12
                 # to display a monthly price, so ×12 round-trips back to exactly what aqar printed.
@@ -1141,6 +1298,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # Where a plot's type came from (owner 2026-10-10 audit): aqar_field · description · none.
     if land_usage_from:
         source_capture["land_usage_from"] = land_usage_from
+    # The period came from the seller's own words about aqar's figure, not from aqar's price box (2026-11-10).
+    if rent_period_from:
+        source_capture["rent_period_from"] = rent_period_from
 
     # Owner decision #4 (2026-11-04): «سعر المتر 1» is a placeholder; a price equal to 1 × area is aqar's
     # multiplication, not the advertiser's figure. Both are written as an authoritative NULL.
