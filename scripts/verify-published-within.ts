@@ -79,6 +79,11 @@ mustCatch('menu numbers that keep the picked window (every row would read the sa
 mustCatch('menu numbers that drop the type choice', sameAsPins({ ...pc, p_types: null }));
 const card = readFileSync(join(ROOT, 'src/components/MapFilterCard.tsx'), 'utf8');
 const mapScreen = readFileSync(join(ROOT, 'src/app/map.tsx'), 'utf8');
+const webMap = readFileSync(join(ROOT, 'src/components/AppleMap.web.tsx'), 'utf8');
+const drawCounted = (src: string) => (src.match(/poly: live\.poly \?\? filter\.poly \?\? null/g) ?? []).length === 2
+  && /useEffect\(\(\) => \{ live\.poly = poly; return \(\) => \{ live\.poly = null; \}; \}, \[poly\]\);/.test(src);
+check('a drawn area narrows the button count AND the menu numbers, as it narrows the pins (CodeRabbit #11903)', drawCounted(webMap));
+mustCatch('a menu count that ignores the drawing', drawCounted(webMap.replace('fetchMapPostedWindowCounts(paddedBox(center, span), { ...filter, poly: live.poly ?? filter.poly ?? null })', 'fetchMapPostedWindowCounts(paddedBox(center, span), filter)')));
 check('…the menu asks the in-view counter, never the nationwide Filter count; old numbers clear the moment the choices change',
   /countPostedWindows\(\{ \.\.\.f, postedWithinDays: null \}\)/.test(card) && !/fetchPostedWindowCounts/.test(card)
   && /countPostedWindows=\{\(f\) => M\.countPostedWindowsInView\(\{ deals, \.\.\.pinFilterOf\(f, deals\) \}\)\}/.test(mapScreen)

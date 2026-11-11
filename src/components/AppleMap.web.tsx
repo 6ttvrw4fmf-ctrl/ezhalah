@@ -310,7 +310,7 @@ function initOnce(mk: MapKit, language: string) {
 // ── The page's search field talks to the map through this (MapDealRow's MapSearchBar) ─────────────────────────
 // One map per page, so one handle: the mounted map registers itself; the field asks Apple for places and flies there.
 // `history`: the views left behind by a jump (a search pick, a region tap) so «رجوع» can return to them.
-const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown; shapes?: unknown[] }; markSeq: number; route: unknown[]; onRoute?: (on: boolean) => void } = { map: null, search: null, lang: '', history: [], mark: {}, markSeq: 0, route: [] };
+const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown; shapes?: unknown[] }; markSeq: number; route: unknown[]; onRoute?: (on: boolean) => void; poly?: PinFilter['poly'] } = { map: null, search: null, lang: '', history: [], mark: {}, markSeq: 0, route: [] };
 
 /** Remove the drawn route (band, line, end pins). */
 export function clearRoute() {
@@ -446,7 +446,8 @@ export async function countPinsInView(filter: PinFilter): Promise<number | null>
   const m = live.map;
   if (!m) return null;
   const { center, span } = m.region;
-  const rows = await fetchMapPins(paddedBox(center, span), Math.max(0.01, span.latitudeDelta / 4), filter, 5000);
+  // A DRAWN AREA COUNTS TOO (CodeRabbit #11903): the pins keep only what is inside the applied drawing, so the counts do.
+  const rows = await fetchMapPins(paddedBox(center, span), Math.max(0.01, span.latitudeDelta / 4), { ...filter, poly: live.poly ?? filter.poly ?? null }, 5000);
   if (rows === 'unknown') return null;
   return rows.reduce((a, r) => a + r.n, 0);
 }
@@ -456,7 +457,7 @@ export async function countPostedWindowsInView(filter: PinFilter): Promise<Recor
   const m = live.map;
   if (!m) return null;
   const { center, span } = m.region;
-  return fetchMapPostedWindowCounts(paddedBox(center, span), filter);
+  return fetchMapPostedWindowCounts(paddedBox(center, span), { ...filter, poly: live.poly ?? filter.poly ?? null });
 }
 
 /** Glide the map to a suggestion: Apple's bounding region for it when it has one, else a town-sized view around it. */
@@ -726,6 +727,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // failed fetch keeps what is on screen (A FAILED FETCH IS NOT AN EMPTY ANSWER — an empty map must never read as
   // «no listings here»). Tapping a bubble zooms into it; tapping a pin hands its row up (the card sheet).
   const pinFilter: PinFilter | undefined = pins ? { ...pins, poly: poly ?? pins.poly ?? null } : undefined;
+  // The counters outside this component (countPinsInView, countPostedWindowsInView) read the applied drawing from here.
+  useEffect(() => { live.poly = poly; return () => { live.poly = null; }; }, [poly]);
   const pinsKey = JSON.stringify(pinFilter ?? null);
   // A number, 'failed' (the read for the view on screen failed — «try again» is shown), or null (nothing read yet).
   const [pinCount, setPinCount] = useState<PillCount | null>(null);

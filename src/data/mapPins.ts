@@ -4,6 +4,7 @@
 // the RPC arguments — live in src/lib/mapPins.ts so the barrier can execute them.
 import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
+import { reportError, reportMessage } from '@/lib/observability';
 import { pinsFrom, rpcArgs, postedCountArgs, type PinFilter, type PinRow, type ViewPlace } from '@/lib/mapPins';
 
 export { cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, bubbleText, polygonOf, idsByTable, orderLike, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow, type ViewPlace } from '@/lib/mapPins';
@@ -42,9 +43,11 @@ export async function fetchMapPostedWindowCounts(box: { s: number; w: number; n:
   try {
     const result = await boundedRpc<Record<string, number>>(supabase.rpc('map_posted_window_counts_ar', postedCountArgs(box, filter)));
     const { data, error } = result as { data: Record<string, number> | null; error: unknown };
-    if (error || !data || typeof data !== 'object' || typeof data.any !== 'number') return null;
+    if (error) { reportMessage('map_posted_window_counts_ar failed (map menu numbers left blank)', { error: String((error as { message?: string }).message ?? error) }); return null; }
+    if (!data || typeof data !== 'object' || typeof data.any !== 'number') return null;
     return data;
-  } catch {
+  } catch (e) {
+    reportError(e, { where: 'map: «نُشر خلال» counts' });
     return null;
   }
 }
