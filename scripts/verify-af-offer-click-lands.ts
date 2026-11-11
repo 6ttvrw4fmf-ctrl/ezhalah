@@ -408,6 +408,21 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
     mouse: { click: async () => {} },
     locator: () => ({ first: () => ({ click: async () => { locatorCalls++; } }) }),
   };
+  // a witness that failed to ARM or to READ cannot say «no event» — no second tap (CodeRabbit on #11821)
+  for (const broken of ['arm', 'read'] as const) {
+    let taps = 0;
+    const p = {
+      evaluate: async (fn: any) => {
+        if (broken === 'arm' && fn === ARM_CLICK_WITNESS_SRC) throw new Error('context destroyed');
+        if (broken === 'read' && fn === READ_CLICK_WITNESS_SRC) throw new Error('context destroyed');
+        return fn === READ_CLICK_WITNESS_SRC ? null : undefined;
+      },
+      mouse: { click: async () => {} },
+      locator: () => ({ first: () => ({ click: async () => { taps++; } }) }),
+    };
+    const rb = await clickWitnessed(p as any, { x: 1, y: 2 }, { testid: 'x' });
+    mustCatch(`a failed witness ${broken} spending a second tap (or reading as a landing)`, rb.landed === false && taps === 0);
+  }
   const r5 = await clickWitnessed(elsewhere as any, { x: 1, y: 2 }, { testid: 'x' });
   check('a click that landed on something ELSE is a real miss — no second tap is spent on it',
     r5.landed === false && r5.hit === 'card-listing-1' && locatorCalls === 0, `${JSON.stringify(r5)} locatorCalls=${locatorCalls}`);

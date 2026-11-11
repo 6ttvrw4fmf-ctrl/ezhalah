@@ -64,17 +64,22 @@ export type WitnessedClick = { landed: boolean; hit: string };
 
 /** Click a measured point and report what the page says took it. Never assumes. */
 export async function clickWitnessed(page: any, box: { x: number; y: number }, want: ClickTarget): Promise<WitnessedClick> {
-  await page.evaluate(ARM_CLICK_WITNESS_SRC, want).catch(() => {});
+  const armed = await page.evaluate(ARM_CLICK_WITNESS_SRC, want).then(() => true, () => false);
   await page.mouse.click(box.x, box.y);
-  let hit = await page.evaluate(READ_CLICK_WITNESS_SRC).catch(() => null);
+  let readFailed = false;
+  let hit = await page.evaluate(READ_CLICK_WITNESS_SRC).catch(() => { readFailed = true; return null; });
   // NO EVENT AT ALL is not a miss onto something else — the document never saw a click (🔬 2026-11-11, alert 11763:
   // MOBILE الرياض/إيجار سنوي/شقة, run 42912318746, six stable reachable taps in 15 s, every one «(no click event seen)»).
   // Then ask Playwright to tap the control by its own test id (it scrolls, waits for it to be stable and hit-testable),
   // and STILL believe only the witness: a locator click that the page does not report on the target is not a landing.
-  if (!hit && want.testid && typeof page.locator === 'function') {
-    await page.evaluate(ARM_CLICK_WITNESS_SRC, want).catch(() => {});
-    await page.locator(`[data-testid="${want.testid}"]`).first().click({ timeout: 2500 }).catch(() => {});
-    hit = await page.evaluate(READ_CLICK_WITNESS_SRC).catch(() => null);
+  // Only a witness that ARMED and READ cleanly can say «no event»: when either evaluate failed, the first click may have
+  // acted on something already, and a second tap would act again (CodeRabbit on #11821).
+  if (armed && !readFailed && !hit && want.testid && typeof page.locator === 'function') {
+    const rearmed = await page.evaluate(ARM_CLICK_WITNESS_SRC, want).then(() => true, () => false);
+    if (rearmed) {
+      await page.locator(`[data-testid="${want.testid}"]`).first().click({ timeout: 2500 }).catch(() => {});
+      hit = await page.evaluate(READ_CLICK_WITNESS_SRC).catch(() => null);
+    }
   }
   if (hit?.onTarget) return { landed: true, hit: want.testid || want.text || '(target)' };
   return { landed: false, hit: hit ? (hit.tid || hit.txt || '(unlabelled)') : '(no click event seen)' };
