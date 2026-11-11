@@ -53,9 +53,11 @@ _SHORT_STAY = re.compile(
 
 
 # A rule the ad forbids is not a rent it offers: «يمنع الإيجار اليومي» / «ممنوع التأجير اليومي» (CodeRabbit #11807).
-# The negation is a whole word («فيلا للإيجار اليومي» ends in «لا» and is an offer), before or right after the phrase.
-_SHORT_STAY_NEG = re.compile(_B + r"(?:يمنع|ممنوع|منع|لا\s*يسمح\s*ب?|غير\s*مسموح\s*ب?|لا)\s*$")
-_SHORT_STAY_NEG_AFTER = re.compile(r"^\s*(?:ممنوع|يمنع|غير\s*مسموح|لا\s*يسمح|مرفوض)" + _E)
+# The negation is a whole word on the SAME line («فيلا للإيجار اليومي» ends in «لا» and is an offer): right before
+# the phrase, or right after it closing the clause («الإيجار اليومي ممنوع»; «… اليومي ممنوع التدخين» is about smoking).
+_NEG_WORDS = r"(?:يمنع|ممنوع|منع|مرفوض|لا[ \t]*يسمح[ \t]*ب?|غير[ \t]*مسموح[ \t]*ب?|لا)"
+_SHORT_STAY_NEG = re.compile(_B + _NEG_WORDS + r"[ \t]*$")
+_SHORT_STAY_NEG_AFTER = re.compile(r"^[ \t]*" + _NEG_WORDS + r"[ \t]*(?:$|[\n،,.!؛:\-])")
 
 
 def short_stay_rent(title: str, body: str) -> Optional[str]:

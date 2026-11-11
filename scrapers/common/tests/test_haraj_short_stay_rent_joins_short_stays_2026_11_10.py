@@ -33,6 +33,9 @@ TODAY = date(2026, 11, 10)   # the licence below expires 2027-12-31: pinned so t
     ("شقة للإيجار", "ممنوع التأجير اليومي، متوفر للإيجار الأسبوعي", "weekly"),
     ("فيلا للإيجار اليومي", "", "daily"),                         # «فيلا» ends in «لا»: not a negation
     ("شقة للإيجار الشهري", "الإيجار اليومي ممنوع", None),        # the prohibition can follow the phrase
+    ("شقة للإيجار الشهري", "مرفوض الإيجار اليومي", None),
+    ("شقة للإيجار اليومي", "ممنوع التدخين", "daily"),             # a rule on the next line is not about the rent
+    ("شقة للإيجار اليومي ممنوع التدخين", "", "daily"),            # nor one that goes on to name something else
 ])
 def test_short_stay_is_read_only_from_a_rent_phrase(title, body, want):
     assert X.short_stay_rent(title, body) == want
