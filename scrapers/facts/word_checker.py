@@ -941,10 +941,18 @@ def _strip_wa(w: str) -> str:
 _AFFIRM = frozenset(_n(w) for w in ("يوجد", "توجد"))
 
 
+# «لا يوجد في المبنى مصعد», «لا يوجد بالعمارة مصعد» (CodeRabbit on #11820): ONE place phrase may sit between the no and
+# the item — it says where the lift is missing, not that something else is.
+_NEG_PLACES = frozenset(_n(w) for w in ("المبنى", "المبني", "العماره", "العمارة", "الشقه", "الشقة", "العقار", "الفيلا",
+                                         "الفله", "الدور", "البيت", "المنزل", "الموقع"))
+_NEG_PLACES_B = frozenset("ب" + w for w in _NEG_PLACES)
+
+
 def _negated_before(prev: list[str]) -> Optional[int]:
     """How many words back the negation starts, or None. A list of catalogue words may sit in between."""
     j = len(prev)
     affirmed = False
+    placed = False
     for _ in range(6):     # «لا يوجد مطبخ أو مكيفات أو مصعد متوفر»: a longer denied list (CodeRabbit on #11820)
         if j >= 1 and (prev[j - 1] in _NEG1 or _strip_wa(prev[j - 1]) in _NEG1):
             return len(prev) - (j - 1)
@@ -952,6 +960,14 @@ def _negated_before(prev: list[str]) -> Optional[int]:
             return len(prev) - (j - 2)
         if affirmed:
             return None
+        if not placed and j == len(prev) and j >= 3 and prev[j - 2] == "في" and prev[j - 1] in _NEG_PLACES:
+            placed = True
+            j -= 2
+            continue
+        if not placed and j == len(prev) and j >= 2 and prev[j - 1] in _NEG_PLACES_B:
+            placed = True
+            j -= 1
+            continue
         # «او» joins a denied list like «و» does: «لا يوجد مطبخ أو مكيفات راكبة» denies the ACs too (reinvest 19994388,
         # 🔬 2026-11-11 — read when a trailing «لا يوجد» after «راكبة» stopped answering for them)
         if j >= 1 and _strip_wa(prev[j - 1]) in _LIST_WORDS | {"اي", "وجود", "يوجد", "او"}:
@@ -1014,6 +1030,11 @@ def _affirmed(descriptor: str, fact: str) -> bool:
 
 def _negates_next_item(rest: list[str]) -> bool:
     """True when words follow a «لا يوجد» that are another item, not this token's tail."""
+    # «لا يوجد في المبنى مصعد»: a place, THEN an item — the lift is the no, not the fitted kitchen (CodeRabbit on #11820).
+    # «لا يوجد في الشقة» (nothing after the place) stays a tail.
+    if len(rest) >= 3 and rest[0] == "في" and rest[2] not in _NEG_TAIL and _strip_wa(rest[2]) not in _NEG_TAIL \
+            and not rest[2].isdigit():
+        return True
     return bool(rest) and not rest[0].isdigit() and _strip_wa(rest[0]) not in _NEG_TAIL and rest[0] not in _NEG_TAIL
 
 
@@ -1217,10 +1238,12 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «بلكونه (شرفه) مطلة على الطريق», «شقه … مطله على الطريق»: a view of
                                                      # «the road», not a plot on a main road (P2 13085, 5 of 5 aqar,
                                                      # 🔬 2026-11-11). «مطلة على الطريق الدائري» and «على طريق الملك فهد» stay.
-    if fact == "all_services" and (gn[:1] and _strip_wa(gn[0]) in _SEPARATE
+    if fact == "all_services" and not _strip_wa(t[ws:we].split()[-1]).startswith(_n("مخدوم")) \
+            and (gn[:1] and _strip_wa(gn[0]) in _SEPARATE
                                    or len(gn) >= 2 and _strip_wa(gn[0]) in _UNIT_NOUNS and _strip_wa(gn[1]) in _SEPARATE):
         return None, s, e                            # «كل خدمات الشقه مستقله / منفصلة»: separate utilities; «جميع
-                                                     # الخدمات ومطبخ مستقل» keeps it — the kitchen is separate (CodeRabbit #11820)
+                                                     # الخدمات ومطبخ مستقل» keeps it — the kitchen is separate (CodeRabbit #11820);
+                                                     # «أرض مخدومة مستقلة بصك» keeps it — «مستقلة» is the plot's (CodeRabbit #11820)
     if fact == "garden" and p2 and _strip_wa(p2[-1]) in ("شارع", "شارعين") and t[ws:we].startswith("و") \
             and not _owned_after(gn):
         return None, s, e                            # «أرض سكنية شارع وحديقة»: the plot's neighbours (aqar 3543112);
