@@ -122,7 +122,7 @@ class _Resp:
 def _page(listing, slot, rnpl=False):
     inner = json.dumps({"listing": listing}, ensure_ascii=False)
     blob = f"<script>self.__next_f.push([1,{json.dumps(inner, ensure_ascii=False)}])</script>"
-    extra = '<a href="/rnpl/apply">x</a>' if rnpl else ""
+    extra = '<a href="/rnpl/apply">x</a><p>استأجر الآن وأدفع لاحقًا ابتداءً من981 § ريال شهريا</p>' if rnpl else ""
     return (f"<html><body><h1>شقة للإيجار</h1><div><h3><span>{slot}</span></h3></div>"
             f"<div>تفاصيل الإعلان المساحة 120 م²</div><p>{listing.get('content') or ''}</p>{extra}{blob}</body></html>")
 
@@ -174,8 +174,15 @@ def test_page_outside_the_band_is_untouched(monkeypatch, price):
     assert "rent_period_from" not in row["source_capture"]
 
 
-def test_page_pay_later_rnpl_is_untouched(monkeypatch):
+def test_page_pay_later_seller_says_monthly_is_monthly(monkeypatch):
+    """aqar 6560368 itself is a pay-later page: «10,999 → 9,499 سنوي … ابتداءً من 981 ريال شهريا … السعر الشهري: 9499»."""
     row = _read(monkeypatch, rnpl=True)
+    assert (row["rent_period"], row["price_annual"]) == ("monthly", 113988)
+    assert row["source_capture"]["rent_period_from"] == "seller_text"
+
+
+def test_page_pay_later_instalment_line_alone_is_not_monthly(monkeypatch):
+    row = _read(monkeypatch, rnpl=True, content="شقة مفروشة راقية 3 غرف نوم")
     assert (row["rent_period"], row["price_annual"]) == ("annual", 9499)
     assert "rent_period_from" not in row["source_capture"]
 
