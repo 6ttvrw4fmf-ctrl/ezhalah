@@ -135,3 +135,20 @@ def test_a_phone_in_a_feature_value_never_reaches_the_evidence():
     lines = page_evidence(f"<html><body>{blk}</body></html>")["evidence_lines"]
     assert not any("0551234567" in x for x in lines)
     assert "عرض الشارع 20 للتواصل <num>" in lines
+
+
+def test_a_title_value_no_past_text_head_stays_a_no():
+    # CodeRabbit on #11465: tuba's «مفروشة :» / «لا» joined without its colon read as a yes
+    pair = '<div class="newest-title">مفروشة :</div><div class="newest-value">لا</div>'
+    filler = "<p>" + ("تفاصيل العقار " * 200) + "</p>"   # neutral: FILLER's «مؤثثة» is itself a yes
+    p = page_evidence(f"<html><body>{filler}{pair}</body></html>")
+    assert "مفروشة: لا" in p["evidence_lines"]
+    assert compare_listing({"furnished": False}, p)["furnished"] == MATCH
+
+
+def test_a_phone_in_a_title_value_never_reaches_the_evidence():
+    pair = ('<div class="newest-title">عرض الشارع :</div><div class="newest-value">15 جوال 0551234567</div>'
+            '<div class="newest-title">مساحة الأرض :</div><div class="newest-value">625</div>')
+    lines = page_evidence(f"<html><body>{pair}</body></html>")["evidence_lines"]
+    assert not any("0551234567" in x for x in lines)
+    assert "عرض الشارع: 15 جوال <num>" in lines and "مساحة الأرض: 625" in lines

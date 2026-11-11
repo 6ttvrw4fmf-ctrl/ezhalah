@@ -286,7 +286,7 @@ def _title_value_lines(body: str) -> list[str]:
         label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip().rstrip(":：").strip()
         value = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
         if label and value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)):
-            out.append(f"{label} {value}")
+            out.append(f"{label}: {_PHONE.sub('<num>', value)}")   # the colon keeps «مفروشة: لا» a no; PDPL: no phone in the log
     return out
 
 

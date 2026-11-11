@@ -35,7 +35,7 @@ def villa() -> dict:
 
 def test_the_real_facade_pair_reaches_the_score_on_a_long_page():
     ev = villa()
-    assert "واجهة العقار شمالية" in ev["evidence_lines"]
+    assert "واجهة العقار: شمالية" in ev["evidence_lines"]
     assert compare_listing({"direction_ar": "شمال"}, ev)["direction_ar"] == MATCH
     assert compare_listing({"direction_ar": "جنوب"}, ev)["direction_ar"] == MISMATCH
 
