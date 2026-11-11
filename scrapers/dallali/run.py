@@ -49,6 +49,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 API = "https://p1.dallali.com/listings/public"
 SITE = "https://dallali.com/advertisements/property"
@@ -183,6 +184,11 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "license_number": x.get("ad_license_number") or rega.get("adLicenseNumber"),
         "license_expiry": rega.get("endDate"),
         "photo_urls": x.get("image_urls") or None,
+        # The listing's own publish instant (`published_at`, UTC «Z»; the dashboard sets it to
+        # new Date().toISOString() on publish) — NOT rega.creationDate, the licence's date. Live
+        # 1a944e24 (2026-11-09): published_at «2026-10-21T11:53:01.899Z», licence creationDate
+        # «18/10/2026»; we first saw it 2026-10-22 05:00 UTC.
+        "date_added": site_posting_date(x.get("published_at")),
         **row_price,
     }
     for word, col in _UTILITIES.items():

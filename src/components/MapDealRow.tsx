@@ -11,6 +11,7 @@ import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'r
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
+import { hitsToShow } from '@/lib/placeSearch';
 import { suggestPlaces, flyToPlace, clearPlaceMark, routeBetween, type PlaceSuggestion } from '@/components/AppleMap';
 import { KIND_LABEL, type PlaceKind } from '@/lib/placeKind';
 
@@ -34,15 +35,23 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
 }) {
   const { t, isRTL, locale } = useI18n();
   const [q, setQ] = useState(value);
-  const [hits, setHits] = useState<PlaceSuggestion[]>([]);
+  // The rows AND the words they were found for (src/lib/placeSearch.ts): a list never shows under other words.
+  const [found, setFound] = useState<{ q: string; rows: PlaceSuggestion[] } | null>(null);
+  const hits = hitsToShow(q, found);
+  const setHits = (rows: PlaceSuggestion[], forQ = q) => setFound(rows.length ? { q: forQ, rows } : null);
   const [focused, setFocused] = useState(false);
+  // A finger is down on a suggestion: the field's blur must not close the list under it (a 0.35 s tap lost it, live).
+  const pressing = useRef(false);
+  // The pressed row can vanish mid-press (a newer answer replaced the list); RN Web then never calls its onPressOut, so
+  // the flag is cleared whenever the list itself changes (review of #11635).
+  useEffect(() => { pressing.current = false; }, [found]);
   const seq = useRef(0);
   const inputRef = useRef<TextInput>(null);
   useEffect(() => { setQ(value); }, [value]);
   useEffect(() => {
     const id = ++seq.current;
     if (q.trim().length < 2 || q === value) { setHits([]); return; }
-    const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r); }); }, 220);
+    const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r, q); }); }, 180);
     return () => clearTimeout(h);
   }, [q, locale, value]);
   // THE KEYBOARD CLOSES ON A PICK (owner 2026-11-02, phone: «doesn't look nice on a phone» — the keyboard stayed up
@@ -59,7 +68,7 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
           value={q}
           onChangeText={setQ}
           onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 150)}
+          onBlur={() => setTimeout(() => { if (!pressing.current) setFocused(false); }, 150)}
           placeholder={placeholder}
           placeholderTextColor={colors.muted}
           accessibilityLabel={placeholder}
@@ -76,7 +85,8 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
       {open ? (
         <View style={s.hits} testID={`${testID}-hits`}>
           {hits.slice(0, 6).map((p, i) => (
-            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
+            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPressIn={() => { pressing.current = true; }}
+              onPressOut={() => { setTimeout(() => { pressing.current = false; if (!inputRef.current?.isFocused?.()) setFocused(false); }, 0); }} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
               <Ionicons name={KIND_ICON[p.kind ?? 'place']} size={16} color={colors.primary} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={s.hitTop}>
@@ -106,7 +116,8 @@ export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
     <PlaceField
       value={value}
       placeholder={t('Region, city, landmark, district or street')}
-      onPick={(p) => { setValue(p.displayLines[0]); onPick?.(); flyToPlace(p); }}
+      // The same words the field shows after a pick (p.name), so the text does not jump to Apple's raw first line.
+      onPick={(p) => { setValue(p.name ?? p.displayLines[0]); onPick?.(); flyToPlace(p); }}
       onClear={() => { setValue(''); clearPlaceMark(); }}
       testID="map-search"
     />
@@ -121,7 +132,7 @@ const TO = '#c84646';
  *  Once both are picked, Apple's driving route draws with a soft band around it and the map fits it; `onRouted`
  *  opens the full-screen map. */
 export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onRouted?: () => void }) {
-  const { t } = useI18n();
+  const { t, isRTL } = useI18n();
   const [from, setFrom] = useState<PlaceSuggestion | null>(null);
   const [to, setTo] = useState<PlaceSuggestion | null>(null);
   const [failed, setFailed] = useState(false);
@@ -134,7 +145,8 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
   const swap = () => { const a = from, b = to; setFrom(b); setTo(a); go(b, a); };
   return (
     <View style={s.routeWrap} testID="map-route-fields">
-      <View style={s.routeHead}>
+      {/* X top right in both languages (owner 2026-11-10: «x for everything must always be on the top right no matter what»). */}
+      <View style={[s.routeHead, isRTL && { flexDirection: 'row-reverse', justifyContent: 'flex-end', gap: 8 }]}>
         <Text style={s.routeTitle}>{t('Route')}</Text>
         <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-route-close">
           <Ionicons name="close" size={20} color={colors.muted} />
@@ -142,19 +154,19 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
       </View>
       {/* The fields SAY what can be typed (owner 2026-11-01: «it doesn't show clearly that the user can type a street,
           landmark, district…»). */}
-      <PlaceField value={from?.displayLines[0] ?? ''} placeholder={`${t('From')}: ${t('Region, city, landmark, district or street')}`} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
+      <PlaceField value={from ? (from.name ?? from.displayLines[0]) : ''} placeholder={`${t('From')}: ${t('Region, city, landmark, district or street')}`} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
       <View style={s.swapRow}>
         <Pressable style={s.swapBtn} onPress={swap} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Swap')} testID="map-route-swap">
           <Ionicons name="swap-vertical" size={18} color={colors.primary} />
         </Pressable>
       </View>
-      <PlaceField value={to?.displayLines[0] ?? ''} placeholder={`${t('To')}: ${t('Region, city, landmark, district or street')}`} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
+      <PlaceField value={to ? (to.name ?? to.displayLines[0]) : ''} placeholder={`${t('To')}: ${t('Region, city, landmark, district or street')}`} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
       {failed ? <Text style={s.routeFail}>{t('No route found between these two places')}</Text> : null}
     </View>
   );
 }
 
-export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filterOn = false }: { deals?: MapDeal[]; onDeals?: (d: MapDeal[]) => void; onFilter?: () => void; filterOn?: boolean } = {}) {
+export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filterOn = false, filterCount = 0 }: { deals?: MapDeal[]; onDeals?: (d: MapDeal[]) => void; onFilter?: () => void; filterOn?: boolean; filterCount?: number } = {}) {
   const { t, isRTL } = useI18n();
   // THE DEAL BUTTON DRIVES THE PINS (owner 2026-11-02: «when the user clicks buy or rent or short stays he sees the
   // option»): the choice lives in the map screen when it passes `deals`, so the pin layer reads the same state.
@@ -197,6 +209,8 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
       >
         <Ionicons name="options-outline" size={17} color={filterOn ? colors.primary : colors.ink} />
         <Text style={[s.btnText, filterOn && s.btnTextActive]}>{t('Filter')}</Text>
+        {/* How many choices are picked (owner 2026-11-11, Zillow's «Filters ①»). */}
+        {filterCount > 0 ? <View style={s.countDot} testID="map-filter-count"><Text style={s.countDotT}>{filterCount}</Text></View> : null}
         <Ionicons name="chevron-down" size={15} color={filterOn ? colors.primary : colors.ink} />
       </Pressable>
 
@@ -276,6 +290,8 @@ const s = StyleSheet.create({
   btnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
   btnText: { fontSize: 14, fontWeight: '700', color: colors.ink, includeFontPadding: false },
   btnTextActive: { color: colors.primary },
+  countDot: { minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  countDotT: { fontSize: 12, fontWeight: '700', color: colors.surface, includeFontPadding: false },
   // CENTERED, a normal popup (owner 2026-10-31: «I don't like how it's not in the centre; a small popup, normal»).
   // Pinned to the WHOLE screen, not `flex: 1`: on iPhone Safari the modal wrapper does not stretch, so a flex child
   // collapsed to its content and the card sat at the top (owner 2026-10-31: «on the phone it doesn't pop up in the

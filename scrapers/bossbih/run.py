@@ -126,6 +126,7 @@ import html as html_mod
 import re
 import sys
 import time
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -138,6 +139,7 @@ from scrapers.common.arabic_location import find_district_in_text, norm_ar, to_c
 from scrapers.common.http_liveness import (LivenessProbe, live_control_url,  # noqa: E402
                                            removal_by_owner_approved_status)
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 
 BASE = "https://bossbihoffice.com.sa"
@@ -713,6 +715,8 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         "listing_url": f"{BASE}/{ix['nid']}",
         "source": SOURCE,
         "active": True,
+        # The node's CREATED time from the site's RSS feed (see feed_created) — never bump_date.
+        "date_added": posting_date(ix.get("posted_raw")),
         "title": title or None,
         "description": redact_pii(description),
         # Tri-state, four outcomes: named → True, negated → False, «مؤسس» (prepared-only) → NULL,
@@ -782,6 +786,47 @@ RES_TABLE = "bossbih_residential_listings"
 COM_TABLE = "bossbih_commercial_listings"
 
 
+# ── the SITE's posting date (2026-11-09) ────────────────────────────────────────────────────────
+# The index card («تاريخ 2026-11-04») and the ad page («إعلان12496 -09/11/2026») print only the node's
+# CHANGED date — the bump_date. The CREATED date, when the office posted the ad, is published only in the
+# Drupal RSS feed: <pubDate> (RFC 822, +0000) is the same instant as the item's schema:dateCreated and the
+# feed's own «الأحد, 03/08/2025» line. Live 2026-11-09 on /12496: page «09/11/2026», feed «Sun, 03 Aug
+# 2025 19:57:35 +0000». The feed holds only the 10 latest-CHANGED ads — it ignores ?page= and has no
+# nid filter — so an ad is dated when it was among those 10 at a crawl, and stays NULL otherwise.
+# Shared with shomou (same theme, imported).
+_FEED_ITEM = re.compile(r"<item>.*?</item>", re.S)
+_FEED_NID = re.compile(r"<guid[^>]*>\s*(\d+) at ")
+_FEED_PUB = re.compile(r"<pubDate>([^<]+)</pubDate>")
+
+
+def feed_created(xml: Optional[str]) -> dict[str, str]:
+    """{nid: pubDate} for every item of a Drupal node feed (guid «<nid> at <site>»)."""
+    out: dict[str, str] = {}
+    for item in _FEED_ITEM.findall(xml or ""):
+        n, p = _FEED_NID.search(item), _FEED_PUB.search(item)
+        if n and p:
+            out[n.group(1)] = p.group(1).strip()
+    return out
+
+
+def posting_date(pub: Optional[str]) -> Optional[str]:
+    """A feed pubDate → `date_added`; None when absent, unreadable or carrying no zone."""
+    try:
+        at = parsedate_to_datetime(pub)
+    except (TypeError, ValueError, IndexError):
+        return None
+    return site_posting_date(at.isoformat()) if at.tzinfo else None
+
+
+def read_feed(s: cc.Session, base: str) -> dict[str, str]:
+    """One read of <base>/rss.xml → {nid: pubDate}; {} when it cannot be read (dates nothing, fails nothing)."""
+    try:
+        r = s.get(f"{base}/rss.xml", timeout=40)
+        return feed_created(r.text) if r.status_code == 200 else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 # ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
 # Absence from the index only SELECTS candidates; prune_unseen asks this oracle before it may
 # deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a 403/429/5xx,
@@ -849,12 +894,14 @@ def main() -> int:
         if printed_total and not args.limit and len(cards) != printed_total:
             # Not fatal — but it must be RECORDED, or a half-crawl looks like a shrinking catalog.
             print(f"  ! crawl/total mismatch: enumerated {len(cards)} vs printed {printed_total}")
+        feed = read_feed(s, BASE)       # one request a run: the 10 latest-changed ads' CREATED times
         for c in cards:
             detail = fetch_detail(s, c["nid"])
             time.sleep(DETAIL_PAUSE)
             if detail is None:
                 skipped["detail_fetch_failed"] = skipped.get("detail_fetch_failed", 0) + 1
                 continue
+            c["posted_raw"] = feed.get(c["nid"])
             row, cat, why = map_listing(c, detail)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1

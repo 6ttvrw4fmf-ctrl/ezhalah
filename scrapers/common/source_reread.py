@@ -26,6 +26,7 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields
 from urllib.parse import urlsplit
 
 from scrapers.common.cleanup import PLATFORMS, _probe
@@ -119,7 +120,7 @@ HOUZEZ_CARD = re.compile(r'<div class="item-body\b[^"]*"[^>]*>.*?</ul>', re.S | 
 # The unit may be written in Latin letters: akariyoun prints «مساحة العقار: 578 m²» (17512660 / 17512661,
 # 2026-10-13); with only the Arabic units the value line was dropped, the description's «المساحة : 900م» was
 # all that reached the score, and our structured 578 scored a mismatch on both ads.
-SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|m²|m2|sqm|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد)$")
+SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|m²|m2|sqm|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد|سنة|سنه|عام)$")   # a bare «سنة» is one year (CodeRabbit on #11465)
 
 
 def _with_values(lines: list[str]) -> list[str]:
@@ -202,6 +203,19 @@ _REM_PAIR = re.compile(r'rem-single-field-title"[^>]*>([^<]{1,40})</strong>(.*?)
 _REM_VALUE = re.compile(r'rem-single-field-value[^>]*>(.*)', re.S)
 
 
+# Houzez prints the ad's own place as a label and a value in sibling tags with no keyword on the line:
+# «<li class="detail-area"><strong>تسمية المنطقة</strong> <span>اللبه</span></li>» and «detail-address». The
+# keyword filter dropped both, so the only place the score saw on fursaghyr 1199451 / 4367079 / 3237532 (card
+# parity, 2026-11-08/09) was the deed's plan description («وصف موقع العقار حسب الصك : حي حلة الاحوس …»), and the
+# stored district — the very name in these two fields — scored MISMATCH. The pair is kept as the page prints it;
+# no «حي» is added, so the line can confirm a stored district and cannot by itself contradict one.
+_HOUZEZ_PLACE = re.compile(r'<li class="detail-(?:area|address)">\s*<strong>([^<]{1,40})</strong>\s*<span>([^<]{1,200})</span>')
+
+
+def _houzez_place_lines(body: str) -> list[str]:
+    return [re.sub(r"\s+", " ", html.unescape(f"{a} {b}")).strip() for a, b in _HOUZEZ_PLACE.findall(body or "")]
+
+
 def _label_value_lines(body: str) -> list[str]:
     out = []
     for m in _REM_PAIR.finditer(body or ""):
@@ -212,6 +226,57 @@ def _label_value_lines(body: str) -> list[str]:
         label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()
         if label and value:
             out.append(f"{label} {value}")
+    return out
+
+
+# A FEATURE-BLOCK pair: vmksa renders the ad's own REGA block as «<div class="feature-block"><i …></i><h2>واجهة العقار
+# </h2><span>شرقية</span></div>» (vm-ksa.com/ar/ads/742, re-read via net.http_get 2026-11-09). Split on tags the bare
+# value «شرقية» is neither EVIDENCE nor a SHORT_VALUE, and the block sits past text_head's 1,500 characters, so the
+# score saw only the site's SEARCH-FORM label «واجهة العقار» near the top and called our stored facade wrong: 9 of 12
+# vmksa direction answers MISMATCH in dry run 42593890418 (stored «شرق» = the page's «شرقية», backlog 1512). The pair is
+# rejoined as one line «LABEL VALUE». Only a field label (EVIDENCE, a facade or the street width): a deed / licence
+# number in the same grid is never printed (PDPL).
+_FEATURE_PAIR = re.compile(r'<div class="feature-block"[^>]*>\s*(?:<i\b[^>]*>\s*</i>)?\s*<h2[^>]*>([^<]{1,40})</h2>\s*'
+                           r'<span[^>]*>([^<]{1,80})</span>', re.S)
+_FEATURE_LABEL = re.compile(r"واجهة|الواجهة|عرض الشارع")
+
+
+
+
+# A facade value is a bearing (or «لا يوجد»), a street width is a figure: anything else under those labels — a name, a
+# phone, a note — is not the fact and never enters the evidence (PDPL, CodeRabbit on #11465).
+_FACADE_VALUE = re.compile(r"شمال|جنوب|شرق|غرب|north|south|east|west|لا يوجد|لايوجد|^\s*-\s*$", re.I)
+
+
+_BEARING_TOKEN = re.compile(r"^(?:ال)?(?:شمال|جنوب|شرق|غرب)(?:ي|يه|ية|يا)?$|^(?:north|south|east|west)(?:ern)?$", re.I)   # whole word forms only: «شمالية/محمد» is not a bearing
+_SAFE_TOKEN = re.compile(r"^(?:[0-9٠-٩][0-9٠-٩.,٬]*|م|م²|م2|متر|مربع|ريال|ر\.س|SAR|سنة|سنه|سنوات|عام|شهري|سنوي|"
+                         r"نعم|لا|يوجد|لايوجد|جديد|[-+:])$", re.I)
+
+
+def _fact_value(label: str, value: str) -> str | None:
+    """Only the FACT a permitted label carries ever leaves this reader — never the raw value. A facade is its bearing
+    words, a street width its figure, any other label a value made only of figures, units and yes/no words; anything
+    else («شمالية محمد أحمد», «20 للتواصل ابو فهد») is not emitted at all (PDPL, CodeRabbit on #11465)."""
+    toks = value.replace("-", " - ").split()
+    if re.search(r"واجهة|الواجهة", label):
+        if re.fullmatch(r"\s*(?:لا يوجد|لايوجد|-)\s*", value):
+            return value.strip()
+        bear = [t for t in toks if _BEARING_TOKEN.match(t)]
+        return " ".join(bear) if bear and all(_BEARING_TOKEN.match(t) or t == "-" for t in toks) else None
+    if "عرض الشارع" in label:
+        m = re.fullmatch(r"\s*([0-9٠-٩]+(?:[.,][0-9٠-٩]+)?)\s*(م|متر)?\s*", value)
+        return (m.group(1) + (" " + m.group(2) if m.group(2) else "")) if m else None
+    return value if toks and all(_SAFE_TOKEN.match(t) for t in toks) else None
+
+
+def _feature_block_lines(body: str) -> list[str]:
+    out = []
+    for m in _FEATURE_PAIR.finditer(body or ""):
+        label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()
+        value = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
+        value = _fact_value(label, value) if label and value else None
+        if value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)):
+            out.append(f"{label} {value}")   # PDPL: a phone in a feature value never reaches the log
     return out
 
 
@@ -232,9 +297,40 @@ def _number_first_lines(body: str) -> list[str]:
     return out
 
 
+# A commented-out block is not on the page (🔬 2026-11-11, af-score 11-10 tuba 13261455 / 13261520): tuba ships its old
+# details template inside «<!-- … -->» — empty «واجهة العقار :» labels and «lorem ipsum» / «yes/no» values — ABOVE the
+# ad's real «تفاصيل العقار». The empty label in text_head made the facade read «stated», the real «شمالية» sat past the
+# evidence cap, and our correct «شمال» scored MISMATCH three nights running.
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+# tuba's real details are «<div class="newest-title">واجهة العقار :</div><div class="newest-value">شمالية</div>»
+# pairs; rejoined as one line «LABEL VALUE» so they reach the score whatever the page's length.
+_TITLE_VALUE_PAIR = re.compile(r'<div class="newest-title">\s*([^<]{1,40}?)\s*</div>\s*<div class="newest-value">\s*([^<]{1,80}?)\s*</div>', re.S)
+
+
+def _title_value_lines(body: str) -> list[str]:
+    out = []
+    for m in _TITLE_VALUE_PAIR.finditer(body or ""):
+        label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip().rstrip(":：").strip()
+        value = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
+        value = _fact_value(label, value) if label and value else None
+        if value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)):
+            out.append(f"{label}: {value}")   # the colon keeps «مفروشة: لا» a no; PDPL: no phone in the log
+    return out
+
+
+def _redacted_lines(raw: list[str]) -> list[str]:
+    out = []
+    for x in dict.fromkeys(raw):
+        y = redact_pii(x)
+        if y:
+            out.append(y)
+    return list(dict.fromkeys(out))
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
-    body = HOUZEZ_CARD.sub(" ", RESULT_CARD_TEXT.sub(" ", body or ""))   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
+    body = HTML_COMMENT.sub(" ", body or "")
+    body = HOUZEZ_CARD.sub(" ", RESULT_CARD_TEXT.sub(" ", body))   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
     body = FACET_CHECKBOX.sub(" ", SELECT_BLOCK.sub(" ", drop_radio_controls(body)))   # …nor the site's own search-filter choices
     body = MENU_ITEM_LINK.sub(r"\1 ", BUTTON_BLOCK.sub(" ", body))  # …nor its buttons and menu links
     jsonld = []
@@ -246,20 +342,24 @@ def page_evidence(body: str) -> dict:
     meta = {k: html.unescape(v) for k, v in META.findall(body or "")
             if k.startswith(("og:", "twitter:", "description", "product:"))}
     title = TITLE.search(body or "")
-    text = TAG.sub("\n", DROP.sub(" ", RELATED_CARD.sub(" ", NOT_PRESENT.sub(" ", body or ""))))
+    shown = DROP.sub(" ", RELATED_CARD.sub(" ", NOT_PRESENT.sub(" ", body or "")))   # what the page DISPLAYS
+    text = TAG.sub("\n", shown)
     lines = [re.sub(r"\s+", " ", html.unescape(x)).strip() for x in text.split("\n")]
     lines = [x for x in lines if x]
     return {
-        "title": html.unescape(title.group(1).strip()) if title else None,
-        "meta": meta,
-        "jsonld": jsonld[:5],
+        "title": redact_pii(html.unescape(title.group(1).strip())) if title else None,
+        "meta": redact_capture(meta),       # PDPL: reread.json carries these too — contact keys dropped, free text scrubbed
+        "jsonld": redact_capture(strip_pii_fields(jsonld[:5])),   # seller/agent/owner blocks dropped whole: never the property
         # 400, not 60: a rakez project page lists every unit (price · rooms · area), and unit #C22 of
         # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
-        "evidence_lines": (_payload_area_lines(body) + _payload_place_lines(body) + _label_value_lines(body)
-                           + _number_first_lines(body) + _with_values(lines))[:400],
-        "text_head": " | ".join(lines)[:1500],
+        # PDPL: every line and the head pass through the repo's one redactor (scrapers/common/pii.py) — they reach
+        # reread.json and the job log, and a phone can sit under any permitted label (CodeRabbit on #11465).
+        "evidence_lines": _redacted_lines(_payload_area_lines(body) + _payload_place_lines(body) + _houzez_place_lines(body) + _label_value_lines(body)
+                           + _number_first_lines(body) + _feature_block_lines(shown) + _title_value_lines(shown)
+                           + _with_values(lines))[:400],   # once each: duplicates never push a later field past the cap
+        "text_head": (redact_pii(" | ".join(lines)) or "")[:1500],   # redact BEFORE the cut: a phone across it leaves no digits
     }
 
 
@@ -350,6 +450,14 @@ def page_structured_props(page: dict, limit: int = 40) -> list[str]:
     for b in (page or {}).get("jsonld") or []:
         walk(b)
     return out[:limit]
+
+
+def artifact(items: list[dict]) -> list[dict]:
+    """What reread.json keeps: everything except the page's raw visible-text head. text_head is the page's own prose,
+    where an UNLABELLED personal name cannot be told from an ordinary word by any pattern (PDPL, CodeRabbit on #11465,
+    backlog 1781). Nothing reads it back from the file — the scorers build their own in memory — so it never leaves the run."""
+    return [{**it, "page": {k: v for k, v in (it.get("page") or {}).items() if k != "text_head"}} if "page" in it else it
+            for it in items]
 
 
 def log_lines(item: dict, n_evidence: int = 15) -> list[str]:
@@ -506,7 +614,7 @@ def main() -> int:
                     print(f"   wasalt key probe failed: {e!r}", flush=True)
         out.append(item)
 
-    text = json.dumps(out, ensure_ascii=False, indent=1, default=str)
+    text = json.dumps(artifact(out), ensure_ascii=False, indent=1, default=str)
     with open("reread.json", "w", encoding="utf-8") as f:
         f.write(text)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

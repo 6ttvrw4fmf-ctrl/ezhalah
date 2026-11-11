@@ -292,6 +292,15 @@ def map_unit(unit: dict, page: dict) -> tuple[Optional[tuple[dict, str]], str]:
     if not price or price <= 0:
         return None, "no_price"
     period, annual = normalize.rent_period_from_ad(price, price_text, None, label)
+    # The site quotes a monthly figure with fils («621.68» for BB94, printed «622 SAR»); to_int floors it to 621 and
+    # ×12 made 7,452 a year, so the card said 621 a month against the page's 622 (card parity 2026-11-08). The
+    # annual figure is the EXACT monthly ×12, rounded once — PRICE = SOURCE to the riyal.
+    try:
+        exact = float(str(term["price"]).replace(",", ""))
+    except (TypeError, ValueError):
+        exact = None
+    if period == "monthly" and annual and exact and exact > 0:
+        annual = int(round(exact * 12))
 
     addr = page.get("address") or ""
     if CITY_AR not in addr:

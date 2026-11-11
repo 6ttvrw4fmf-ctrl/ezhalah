@@ -1,0 +1,162 @@
+{
+ "id": 127,
+ "status": "1",
+ "active": "1",
+ "is_marketing": "0",
+ "is_reservation": "0",
+ "ref_number": "1372127",
+ "license_number": "7100347190",
+ "title": "دور مكتبي مؤثث للايجار",
+ "description": "NOOR SPACE\n\nمساحات عمل ترتقي بطموحاتك\n\nفي NOOR SPACE، نقدم مكاتب تجارية مجهزة بالكامل للإيجار في حي الملك عبدالله المالي (KAFD) بمدينة الرياض، صُممت لتواكب احتياجات الشركات ورواد الأعمال والمستقلين، وتوفر لهم بيئة عمل متكاملة تجمع بين الرقي والمرونة والكفاءة.\n\nنؤمن بأن بيئة العمل المثالية تتجاوز مفهوم المكتب التقليدي؛ لذلك حرصنا على تقديم مساحات عصرية تجمع بين التصميم الأنيق والحلول العملية، بما ي",
+ "furnisher": "مؤثث",
+ "category_id": "1",
+ "is_special": "0",
+ "main_image": "assets/images/offices/images/17938846701355388878.webp",
+ "space": "20.00",
+ "interface_id": null,
+ "property_age_id": "1",
+ "street_width": "0",
+ "down_payment": null,
+ "type_down_payment": null,
+ "views": "29",
+ "lastUpdate": null,
+ "is_completed": "1",
+ "advertiser_type": "owner_agent",
+ "ad_license_url": "https://eservicesredp.rega.gov.sa/public/IndividualBroker/ElanDetails/221cab3a-fef1-402f-9f57-20b0faff6eb7",
+ "license_create_date": "2026-11-04",
+ "license_end_date": "2027-07-11",
+ "created_at": "2026-11-05T12:53:13.000000Z",
+ "updated_at": "2026-11-08T20:32:09.000000Z",
+ "deleted_at": null,
+ "rate": 0,
+ "location": {
+  "id": 94,
+  "lat": "24.78155520253429",
+  "lng": "46.643877812074344",
+  "zoom": "18",
+  "address": "الثمامة الفرعي,الصحافة,الرياض,منطقة الرياض",
+  "region": "منطقة الرياض",
+  "city": "الرياض",
+  "neighborhood": "الصحافة",
+  "street": "الثمامة الفرعي"
+ },
+ "interface_aqar": null,
+ "type_aqars": [],
+ "ads_files": [
+  {
+   "id": 283,
+   "path": "assets/images/offices/images/1793884670308392129.webp",
+   "type_file": "image"
+  }
+ ],
+ "category_aqar": {
+  "id": 1,
+  "status": "1",
+  "ar_name": "مكتب مؤثث",
+  "en_name": "Furnished Office",
+  "icon": "assets/images/category_aqar/Furnished_Office.png",
+  "num_sort": "1"
+ },
+ "property_age": {
+  "id": 1,
+  "code": "New",
+  "name_ar": "جديد",
+  "name_en": "New",
+  "created_at": "2026-02-28T02:39:44.000000Z",
+  "updated_at": "2026-02-28T02:39:44.000000Z"
+ },
+ "property_utilities": [
+  {
+   "id": 1,
+   "ar_name": "كهرباء",
+   "en_name": "Electricity",
+   "code": "Electricity",
+   "icon": "assets/images/property_utilities/electricity.png",
+   "created_at": null,
+   "updated_at": null,
+   "pivot": {
+    "ad_id": "127",
+    "property_utility_id": "1"
+   }
+  },
+  {
+   "id": 2,
+   "ar_name": "مياه",
+   "en_name": "Waters",
+   "code": "Waters",
+   "icon": "assets/images/property_utilities/water.png",
+   "created_at": null,
+   "updated_at": null,
+   "pivot": {
+    "ad_id": "127",
+    "property_utility_id": "2"
+   }
+  },
+  {
+   "id": 3,
+   "ar_name": "صرف صحي",
+   "en_name": "Sanitation",
+   "code": "Sanitation",
+   "icon": "assets/images/property_utilities/sanitation.png",
+   "created_at": null,
+   "updated_at": null,
+   "pivot": {
+    "ad_id": "127",
+    "property_utility_id": "3"
+   }
+  },
+  {
+   "id": 5,
+   "ar_name": "هاتف",
+   "en_name": "Fixed Phone",
+   "code": "FixedPhone",
+   "icon": "assets/images/property_utilities/fixed_phone.png",
+   "created_at": null,
+   "updated_at": null,
+   "pivot": {
+    "ad_id": "127",
+    "property_utility_id": "5"
+   }
+  },
+  {
+   "id": 6,
+   "ar_name": "الياف ضوئية",
+   "en_name": "Fiber Optic Internet",
+   "code": "FibreOptics",
+   "icon": "assets/images/property_utilities/fiber_optic.png",
+   "created_at": null,
+   "updated_at": null,
+   "pivot": {
+    "ad_id": "127",
+    "property_utility_id": "6"
+   }
+  }
+ ],
+ "ads_prices": [
+  {
+   "id": 95,
+   "price": "999999.99",
+   "status": "1",
+   "type_res_id": "4",
+   "type_res": {
+    "id": 4,
+    "ar_name": "سنوي",
+    "en_name": "yearly"
+   },
+   "offers": []
+  }
+ ],
+ "license_data": {
+  "isHalted": false,
+  "advertisementType": "إيجار",
+  "endDate": "11/07/2027",
+  "creationDate": "04/11/2026",
+  "adLicenseNumber": "7100347190",
+  "propertyType": "مكتب",
+  "location": {
+   "region": "منطقة الرياض",
+   "city": "الرياض",
+   "district": "الصحافة"
+  }
+ }
+}

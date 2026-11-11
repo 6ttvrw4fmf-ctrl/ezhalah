@@ -58,6 +58,7 @@ import json
 import re
 import time
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
@@ -70,6 +71,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://www.tamyaz-sa.com"
 SOURCE = "تمايز العقارية"
@@ -124,6 +126,22 @@ def _amenities(items: list) -> tuple[dict[str, Any], list[str]]:
             if d:
                 cols["direction"] = d
     return cols, labels
+
+
+def _created_at(raw: Any) -> Optional[str]:
+    """The record's `createdAt` — epoch MILLISECONDS (UTC) — as a zoned ISO stamp, or None.
+
+    Measured live 2026-11-09 on /api/properties (24 records): the 16 real «prop-…» records carry a
+    13-digit epoch-ms value, and the id itself is that save instant in base 36 (prop-mvo4ong6na1v:
+    createdAt 1792950681151 = 2026-10-25T17:51:21Z; int("mvo4ong6", 36) = 1792950919350, four minutes
+    later). The 8 theme SEED records (luxury-villa … modern-studio) carry 1..8 — a sort order, not a time —
+    so anything before 2001-09-09 (1e12 ms) is not a date and stays NULL."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 1e12:
+        return None
+    try:
+        return datetime.fromtimestamp(raw / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
@@ -181,6 +199,10 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         **chip_cols,
         "property_type": property_type,
         "transaction_type": "Buy" if for_sale else "Rent",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the record's `createdAt` (see _created_at).
+        # Checked live 2026-11-09: prop-mvo4ong6na1v created 2026-10-25T17:51:21Z, first seen by us
+        # 2026-10-26 05:30 UTC. The record has no update/bump stamp; the hash-route page prints no date.
+        "date_added": site_posting_date(_created_at(p.get("createdAt"))),
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,

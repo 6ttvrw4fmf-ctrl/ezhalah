@@ -121,6 +121,7 @@ import json
 import re
 import sys
 import time
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -133,6 +134,7 @@ from scrapers.common import normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://aljassimaqar.com"
@@ -752,6 +754,8 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "listing_url": f"{BASE}/{ix['nid']}",
         "source": SOURCE,
         "active": True,
+        # The node's CREATED time from the site's RSS feed (see feed_created) — never bump_date.
+        "date_added": posting_date(ix.get("posted_raw")),
         "title": _clean(detail.get("title") or title_text) or None,
         "description": description,
         **N.amenities_from_text(description),
@@ -808,6 +812,37 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     return row, category, ""
 
 
+# ── the SITE's posting date (2026-11-09) ────────────────────────────────────────────────────────
+# The index row and the ad page («إعلان 3741 - 31/10/2026») print only the node's CHANGED date — the
+# bump_date. The CREATED date, when the office posted the ad, is published only in the Drupal RSS feed:
+# <pubDate> (RFC 822, +0000) is the same instant as the item's schema:dateCreated
+# («2026-11-08T16:27:19+00:00» on 5326). Live 2026-11-09 on /3741: page «31/10/2026», feed «Mon, 29 Apr
+# 2024 17:28:29 +0000». The feed holds only the 10 latest-CHANGED ads — it ignores ?page= and has no nid
+# filter — so an ad is dated when it was among those 10 at a crawl, and stays NULL otherwise.
+_FEED_ITEM = re.compile(r"<item>.*?</item>", re.S)
+_FEED_NID = re.compile(r"<guid[^>]*>\s*(\d+) at ")
+_FEED_PUB = re.compile(r"<pubDate>([^<]+)</pubDate>")
+
+
+def feed_created(xml: Optional[str]) -> dict[str, str]:
+    """{nid: pubDate} for every item of the site's Drupal node feed (guid «<nid> at <site>»)."""
+    out: dict[str, str] = {}
+    for item in _FEED_ITEM.findall(xml or ""):
+        n, p = _FEED_NID.search(item), _FEED_PUB.search(item)
+        if n and p:
+            out[n.group(1)] = p.group(1).strip()
+    return out
+
+
+def posting_date(pub: Optional[str]) -> Optional[str]:
+    """A feed pubDate → `date_added`; None when absent, unreadable or carrying no zone."""
+    try:
+        at = parsedate_to_datetime(pub)
+    except (TypeError, ValueError, IndexError):
+        return None
+    return site_posting_date(at.isoformat()) if at.tzinfo else None
+
+
 # ── crawl ───────────────────────────────────────────────────────────────────────────────────────
 def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[dict], int, dict]:
     res: list[dict] = []
@@ -820,8 +855,11 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
     if not recs:
         raise RuntimeError("index table returned no Views rows (challenge unsolved or theme changed)")
     stats["seen"] = len(recs)
+    # One request a run: the 10 latest-changed ads' CREATED times (see feed_created).
+    feed = feed_created(_get(s, f"{BASE}/rss.xml")) if want_detail else {}
     for rec in recs:
         ix = parse_index(rec)
+        ix["posted_raw"] = feed.get(ix["nid"])
         detail: dict = {}
         if want_detail:
             detail = parse_detail(_get(s, f"{BASE}/{ix['nid']}"), ix["nid"])

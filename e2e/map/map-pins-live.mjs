@@ -6,7 +6,7 @@
 // On the real ezhalah.com, like a user on a phone: open the Map tab, go to street level over the densest places we
 // know — the 504 m² land scheme in حي البوادي, Jeddah (~35 heads within 30 m, the same plots on several sites), and a
 // street in حي الشراع — at two zoom levels each, and check what the user sees:
-//   1. NO TWO PINS OVERLAP: every pair of price/count heads on screen is apart (src/lib/mapPins.ts mergeOverlapping);
+//   1. NO TWO PINS OVERLAP: every pair of price/count heads on screen is apart (src/lib/mapPins.ts placeApart);
 //   2. EVERY PIN CAN BE TAPPED: the point at the centre of each head belongs to that head, not to one drawn over it;
 //   3. THE COUNT NAMES THE DISTRICT: the pill says «… في حي …», not «في هذه المنطقة», over a view inside one district;
 //   4. NOT VACUOUS: the densest view shows pins at all (a map that draws nothing would pass 1-2 trivially).

@@ -66,8 +66,18 @@ export function ledgerAwareProblems(files: Record<string, string>): string[] {
   // ── Every arm declares its own confirmed-dead vocabulary ──────────────────────────────────────
   need('the gathern arm declares no ledger verdict', /d\.verdict\s+in\s*\(\s*'kill'\s*,\s*'dead_confirmed'\s*\)/);
   need('the wasalt arms declare no ledger verdict', /d\.get_verdict\s*=\s*'dead'/);
-  need("the aqar/dealapp arms declare no ledger verdict — and aqar's death is a 200, so without it "
-     + 'those arms cannot fire at all', /d\.verdict\s*=\s*'kill'/);
+  // Per ARM, not "anywhere in the file" (2026-11-09): the dealapp limbs now read
+  // `(d.verdict = 'kill' and d.applied is true)`, so a file-wide match would stay green while the
+  // aqar limbs lost their vocabulary — judge each limb's own text.
+  for (const [plat, ledger] of [['aqar', 'aqar_liveness_detail'], ['dealapp', 'dealapp_liveness_detail']]) {
+    for (const kind of ['residential', 'commercial']) {
+      const limb = sql.match(new RegExp(`'${plat}_${kind}_listings'::text[\\s\\S]*?from public\\.${ledger}`));
+      if (!limb || !/d\.verdict\s*=\s*'kill'/.test(limb[0])) {
+        bad.push(`${latest}: the ${plat}_${kind} arm declares no ledger verdict (d.verdict = 'kill') — `
+          + "aqar's death is a 200 and dealapp has no 404, so without it that arm cannot fire at all");
+      }
+    }
+  }
 
   // ── ledger_dead survives the pipeline: named in probes, carried through latest_probe ──────────
   need('the probes CTE does not carry ledger_dead, so no arm can report one',

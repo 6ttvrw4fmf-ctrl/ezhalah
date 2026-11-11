@@ -109,6 +109,9 @@ def test_verify_gone_reads_the_purpose_from_the_ad_number(monkeypatch):
             got["url"] = url_for("x")
             got["sig"] = signal(200, _detail_body(DETAIL_24798_SALE), False)
 
+        def fetch(self, url):
+            return None, "", False          # the cheap first look fails over to verify_gone below
+
         def verify_gone(self, ad):
             return got["sig"], "probe"
     monkeypatch.setattr(R, "LivenessProbe", _Probe)

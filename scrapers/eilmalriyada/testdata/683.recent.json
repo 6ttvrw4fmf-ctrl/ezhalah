@@ -1,0 +1,47 @@
+{
+ "id": 683,
+ "cover": "images/recent/1793115200.jpg",
+ "filePdfRecent": "pdfs/recent/1793115200.pdf",
+ "name": "دبلكس زاوية نموذج الجوري للإيجار في ضاحية الخزام",
+ "name_en": "Corner Al Jouri Model Duplex for Rent in Dhahiyat Khuzam",
+ "location": "ضاحية الخزام - الرياض",
+ "location_en": "Khazam Suburb - Riyadh",
+ "category": "للإيجار",
+ "category_en": "For Rent",
+ "price": "75,000 ريال",
+ "price_en": "SAR 75,000",
+ "type": "فيلا",
+ "type_en": "villa",
+ "property_area": "250m²",
+ "street_direction": "0",
+ "street_direction_en": "0",
+ "bathrooms": "8",
+ "bedrooms": "5",
+ "land_length": "0",
+ "property_age": "0",
+ "property_age_en": "0",
+ "street_width": "0",
+ "land_width": "0",
+ "description": "دبلكس زاوية نموذج الجوري للإيجار في ضاحية الخزام بالرياض.\r\n\r\n*المساحات:*\r\nمساحة الأرض: 250 م²\r\nمسطح البناء: 342 م²\r\n\r\n*مكونات العقار:*\r\nملحق\r\nمجلس\r\nصالة مع منطقة طعام\r\n5 غرف نوم\r\nغرفة عاملة منزلية\r\n8 دورات مياه\r\n\r\n*الإيجار السنوي المذكور:* 75,000 ريال.",
+ "description_en": "Corner Al Jouri-model duplex for rent in Dhahiyat Khuzam, Riyadh.\r\n\r\n*Areas:*\r\nLand area: 250 sqm\r\nBuilt-up area: 342 sqm\r\n\r\n*Features:*\r\nAnnex\r\nMajlis\r\nLiving and dining area\r\n5 bedrooms\r\nMaid’s room\r\n8 bathrooms\r\n\r\n*Annual rent as provided:*  SAR 75,000",
+ "license_number": "#",
+ "map_location": "https://maps.app.goo.gl/1aVGUUjNaVKCES5g9?g_st=iw",
+ "created_at": "2026-10-27T15:33:20.000000Z",
+ "updated_at": "2026-10-27T15:33:20.000000Z",
+ "recent_imags": [
+  {
+   "id": 11366,
+   "recent_id": 683,
+   "url": "images/recent/1793115200-WhatsApp Image 2026-10-21 at 5.27.35 PM.jpeg",
+   "created_at": "2026-10-27T15:33:20.000000Z",
+   "updated_at": "2026-10-27T15:33:20.000000Z"
+  },
+  {
+   "id": 11367,
+   "recent_id": 683,
+   "url": "images/recent/1793115200-WhatsApp Image 2026-10-21 at 5.27.36 PM.jpeg",
+   "created_at": "2026-10-27T15:33:20.000000Z",
+   "updated_at": "2026-10-27T15:33:20.000000Z"
+  }
+ ]
+}

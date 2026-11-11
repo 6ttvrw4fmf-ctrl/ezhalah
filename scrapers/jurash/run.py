@@ -56,9 +56,11 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote, unquote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from curl_cffi import requests as cc
 
@@ -68,6 +70,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 BASE = "https://jurash.sa"
 INDEX = f"{BASE}/العقارات"
 WORKERS = int(os.environ.get("JURASH_WORKERS", "5"))
@@ -252,6 +255,25 @@ def _dump_fields(body: str) -> dict[str, str]:
     return out
 
 
+# The dump's `pt_date` is the ad's creation time in the SERVER's clock, America/Denver (not Saudi, not
+# UTC): each photo file is named by the upload's unix time, and the creation photo matches pt_date to the
+# second at −6 h in summer and −7 h in winter (live 2026-11-09: #87 pt_date 2026-06-17 07:53:11 ↔
+# property_1781704392 = 13:53:12 UTC; #77 2026-01-02 23:46:05 ↔ property_1767422765 = 06:46:05 UTC).
+# `pt_updated` is an edit time and is never read.
+try:
+    _SERVER_TZ: Optional[ZoneInfo] = ZoneInfo("America/Denver")
+except ZoneInfoNotFoundError:          # no tz database on this machine: the date stays unknown, the crawl runs
+    _SERVER_TZ = None
+
+
+def _posted_at(raw: Optional[str]) -> Optional[str]:
+    try:
+        at = datetime.strptime((raw or "").strip(), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return site_posting_date(at.replace(tzinfo=_SERVER_TZ).isoformat()) if _SERVER_TZ else None
+
+
 def _description(fields: dict[str, str]) -> Optional[str]:
     return _redact(fields.get("tr_description"))
 
@@ -391,6 +413,9 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     row: dict[str, Any] = {
         "ad_number": f"JR{pid}",
         "listing_url": url,
+        # Posting date = the dump's pt_date (server clock, see _SERVER_TZ); live #132 pt_date
+        # 2026-11-02 05:15:15 → 2026-11-02T15:15:15+03:00, first seen 2026-11-03 04:32 UTC.
+        "date_added": _posted_at(f.get("pt_date")),
         "source": "Jurash",
         "active": not gone,
         "property_type": stored_property_type,

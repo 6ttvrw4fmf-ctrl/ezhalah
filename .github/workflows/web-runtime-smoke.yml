@@ -124,6 +124,11 @@ jobs:
       # screen when the page is usable and never change, even when today's facts are slow (replayed as a 4 s, failing read).
       - name: Welcome headline never pops in late (signed-in phone, slow facts)
         run: node scripts/verify-web-welcome-never-late.mjs
+      # Owner 2026-11-10, after the launch audit found a price showing as «00,000…» and the sign-in card sitting on the
+      # search boxes of a laptop: «make sure never ever get this mistake ever. Ever again». The built app at ten laptop
+      # sizes, Arabic and English: no side card covers a control, and no price on a card is cut. One live search.
+      - name: Nothing cut or covered on a laptop (side cards vs the search form, price lines)
+        run: node scripts/verify-web-laptop-nothing-cut-or-covered.mjs
 
       # Now that this runs unattended on a schedule, a red run has to reach a human. One open P1 per
       # workflow file, self-healing on the next green run. `always()` so a failing run still gets here.

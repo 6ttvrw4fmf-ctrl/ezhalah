@@ -1,0 +1,127 @@
+{
+ "id": 66825,
+ "date": "2026-07-27T22:20:49",
+ "date_gmt": "2026-07-27T19:20:49",
+ "modified": "2026-07-28T14:14:58",
+ "modified_gmt": "2026-07-28T11:14:58",
+ "slug": "%d8%a3%d8%af%d9%88%d8%a7%d8%b1-%d8%a5%d8%b1%d8%ab-%d8%a7%d9%8a-%d9%83%d9%8a%d9%88-%d8%a7%d9%84%d9%8a%d8%a7%d8%b3%d9%85%d9%8a%d9%86-%d8%a7%d9%84%d8%b1%d9%8a%d8%a7%d8%b6",
+ "status": "publish",
+ "type": "project",
+ "link": "https://rakez.sa/ar/project/66825/",
+ "title": {
+  "rendered": "أدوار إرث ( اي كيو ) &#8211; الياسمين الرياض"
+ },
+ "_embedded": {
+  "wp:term": [
+   [
+    {
+     "id": 719,
+     "name": "الياسمين",
+     "slug": "%d8%a7%d9%84%d9%8a%d8%a7%d8%b3%d9%85%d9%8a%d9%86",
+     "taxonomy": "city"
+    },
+    {
+     "id": 1434,
+     "name": "شمال الرياض",
+     "slug": "%d8%b4%d9%85%d8%a7%d9%84-%d8%a7%d9%84%d8%b1%d9%8a%d8%a7%d8%b6",
+     "taxonomy": "city"
+    }
+   ],
+   [],
+   [
+    {
+     "id": 214,
+     "name": "خزان مستقل",
+     "slug": "%d8%ae%d8%b2%d8%a7%d9%86-%d9%85%d8%b3%d8%aa%d9%82%d9%84",
+     "taxonomy": "feature"
+    },
+    {
+     "id": 1215,
+     "name": "عداد كهرباء منفصل",
+     "slug": "%d8%b9%d8%af%d8%a7%d8%af-%d9%83%d9%87%d8%b1%d8%a8%d8%a7%d8%a1-%d9%85%d9%86%d9%81%d8%b5%d9%84",
+     "taxonomy": "feature"
+    },
+    {
+     "id": 220,
+     "name": "مواقف خاصة",
+     "slug": "%d9%85%d9%88%d8%a7%d9%82%d9%81-%d8%ae%d8%a7%d8%b5%d8%a9",
+     "taxonomy": "feature"
+    }
+   ],
+   [],
+   [],
+   [
+    {
+     "id": 864,
+     "name": "متاح",
+     "slug": "%d9%85%d8%aa%d8%a7%d8%ad",
+     "taxonomy": "property-status"
+    }
+   ],
+   [
+    {
+     "id": 1047,
+     "name": "أدوار",
+     "slug": "%d8%a7%d8%af%d9%88%d8%a7%d8%b1",
+     "taxonomy": "property-type"
+    }
+   ],
+   [],
+   [
+    {
+     "id": 1869,
+     "name": "smart home",
+     "slug": "smart-home-ar",
+     "taxonomy": "warranty"
+    },
+    {
+     "id": 3755,
+     "name": "الأفياش والمفاتيح",
+     "slug": "%d8%a7%d9%84%d8%a3%d9%81%d9%8a%d8%a7%d8%b4-%d9%88%d8%a7%d9%84%d9%85%d9%81%d8%a7%d8%aa%d9%8a%d8%ad",
+     "taxonomy": "warranty"
+    },
+    {
+     "id": 1599,
+     "name": "العزل المائي والحراري",
+     "slug": "%d8%a7%d9%84%d8%b9%d8%b2%d9%84-%d8%a7%d9%84%d9%85%d8%a7%d8%a6%d9%8a-%d9%88%d8%a7%d9%84%d8%ad%d8%b1%d8%a7%d8%b1%d9%8a",
+     "taxonomy": "warranty"
+    },
+    {
+     "id": 1540,
+     "name": "اللوحات الكهربائية",
+     "slug": "%d8%a7%d9%84%d9%84%d9%88%d8%ad%d8%a7%d8%aa-%d8%a7%d9%84%d9%83%d9%87%d8%b1%d8%a8%d8%a7%d8%a6%d9%8a%d8%a9",
+     "taxonomy": "warranty"
+    },
+    {
+     "id": 1399,
+     "name": "الهيكل الإنشائي",
+     "slug": "%d8%a7%d9%84%d9%87%d9%8a%d9%83%d9%84-%d8%a7%d9%84%d8%a5%d9%86%d8%b4%d8%a7%d8%a6%d9%8a",
+     "taxonomy": "warranty"
+    },
+    {
+     "id": 1139,
+     "name": "بيت ذكي",
+     "slug": "%d8%a8%d9%8a%d8%aa-%d8%b0%d9%83%d9%8a",
+     "taxonomy": "warranty"
+    },
+    {
+     "id": 1353,
+     "name": "تمديدات السباكة",
+     "slug": "%d8%aa%d9%85%d8%af%d9%8a%d8%af%d8%a7%d8%aa-%d8%a7%d9%84%d8%b3%d8%a8%d8%a7%d9%83%d8%a9-ar",
+     "taxonomy": "warranty"
+    },
+    {
+     "id": 1360,
+     "name": "تمديدات الكهرباء",
+     "slug": "%d8%aa%d9%85%d8%af%d9%8a%d8%af%d8%a7%d8%aa-%d8%a7%d9%84%d9%83%d9%87%d8%b1%d8%a8%d8%a7%d8%a1",
+     "taxonomy": "warranty"
+    }
+   ]
+  ],
+  "wp:featuredmedia": [
+   {
+    "source_url": "https://rakez.sa/wp-content/uploads/2026/07/WhatsApp-Image-2026-07-13-at-7.34.01-PM.webp"
+   }
+  ]
+ }
+}

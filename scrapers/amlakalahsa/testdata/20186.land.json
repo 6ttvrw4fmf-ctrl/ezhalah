@@ -1,0 +1,56 @@
+{
+ "_note": "amlakalahsa /wp-json/wp/v2/land/20186 fetched 2026-11-09 (owner/contact ACF keys pw-snot, pw-onr-num, مدخل_العقار_ removed). This WordPress runs on UTC: date == date_gmt; the page prints «إعلان 483 - منذ يومين» on 2026-11-09.",
+ "id": 20186,
+ "date": "2026-11-07T15:15:07",
+ "date_gmt": "2026-11-07T15:15:07",
+ "modified": "2026-11-07T15:15:09",
+ "modified_gmt": "2026-11-07T15:15:09",
+ "slug": "%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%a7%d8%b1%d8%b6-%d9%81%d9%8a-%d8%a7%d9%84%d8%ad%d9%8a-%d8%a7%d9%84%d8%a3%d9%88%d9%84-%d8%a8%d8%b6%d8%a7%d8%ad%d9%8a%d8%a9-%d9%87%d8%ac%d8%b1",
+ "status": "publish",
+ "type": "land",
+ "link": "https://amlakalahsa.com/land/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%a7%d8%b1%d8%b6-%d9%81%d9%8a-%d8%a7%d9%84%d8%ad%d9%8a-%d8%a7%d9%84%d8%a3%d9%88%d9%84-%d8%a8%d8%b6%d8%a7%d8%ad%d9%8a%d8%a9-%d9%87%d8%ac%d8%b1/",
+ "title": {
+  "rendered": "للبيع ارض في الحي الأول بضاحية هجر"
+ },
+ "content": {
+  "rendered": "\n<p class=\"wp-block-paragraph\">للبيع ارض في الحي الأول بضاحية هجر</p>\n\n\n\n<p class=\"wp-block-paragraph\">أرض رقم 483/ ب</p>\n\n\n\n<p class=\"wp-block-paragraph\">شارع عرض 15 * 15</p>\n\n\n\n<p class=\"wp-block-paragraph\">مساحة 685 م</p>\n\n\n\n<p class=\"wp-block-paragraph\">الأطوال والأبعاد 23 * 33</p>\n\n\n\n<p class=\"wp-block-paragraph\">السعر على السوم</p>\n",
+  "protected": false
+ },
+ "acf": {
+  "pw-num": "483",
+  "pw-cnt": "للبيع",
+  "pw-typ": "ارض",
+  "pw-dis": "الضاحية الاول",
+  "pw-ltr": "ب",
+  "pw-prc-typ": "على السوم",
+  "pw-prc": 0,
+  "pw-taf-num": "",
+  "pw-squ": "685",
+  "pw-squ-rel": "",
+  "pw-str": "15",
+  "pw-front": "",
+  "pw-age": "",
+  "pw-map": {
+   "address": "9Q62+W8H الطرف",
+   "lat": 25.3623125,
+   "lng": 49.7508594,
+   "zoom": 15,
+   "state": "المنطقة الشرقية",
+   "country": "السعودية",
+   "country_short": "SA"
+  },
+  "pw-pnot": "",
+  "offer-typ": [
+   "مباشر"
+  ],
+  "pw-swp": null,
+  "pw-pln-img": "",
+  "pw-pln-pdf": "",
+  "pw-pln-map": "",
+  "land-num": "483",
+  "pw-prc-mtr": "",
+  "land-tkh": "سكنية",
+  "pw-dahia": "",
+  "land-invest": ""
+ }
+}

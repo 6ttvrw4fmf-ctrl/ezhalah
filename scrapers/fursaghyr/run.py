@@ -38,6 +38,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize
 from scrapers.common.http_liveness import stored_listing_url
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.posting_date import site_posting_date
 
 BASE = "https://fursaghyr.com"
 LIST = f"{BASE}/wp-json/fgh/v1/properties"
@@ -506,6 +507,11 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
         "additional_number": rea.get("additional_no") or None,
         "direction": rea.get("front") or None,
         "street_width_m": _int(rea.get("street_width")),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the feed item's `created_at` (+00:00) is the WordPress
+        # post's own publish date — measured 2026-11-09: post 27748 created_at 2026-10-29T15:15:54+00:00 = wp/v2 date_gmt
+        # 2026-10-29T15:15:54 (date 18:15:54 Saudi), and the same on the five next-newest posts. Never updated_at, nor
+        # rea.license_start / license_end (the REGA licence, DD/MM/YYYY).
+        "date_added": site_posting_date(item.get("created_at")),
         "rega_location_verified": bool(rea.get("license_number")),
         "title": title,
         "photo_urls": photos,

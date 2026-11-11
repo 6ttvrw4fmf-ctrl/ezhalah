@@ -63,6 +63,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://aalbarrak.com"
 SOURCE = "البراك للعقارات"
@@ -227,6 +228,11 @@ def map_listing(post: dict, tax: dict, photos: list[str]) -> tuple[Optional[dict
         **normalize.amenities_from_text(_PREPARED_RE.sub(" ", body)),
         "property_type": property_type,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` from the
+        # /wp/v2/properties list this scraper already reads — WordPress's publish instant in UTC (hence
+        # the «Z»). Stored rows hold it as additional_info.published_at (e.g. 2026-02-14T17:09:11, first
+        # seen 2026-09-24); the ad page prints no date. Never `modified_gmt` (an edit).
+        "date_added": site_posting_date(f"{post['date_gmt']}Z") if post.get("date_gmt") else None,
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,

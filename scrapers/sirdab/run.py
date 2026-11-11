@@ -41,6 +41,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 LIST = "https://marketplace.sirdab.co/ar/ads"
 SITE = "https://marketplace.sirdab.co/ar/ads/"
@@ -187,6 +188,11 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "direction": normalize.one_direction(_FACADE_AR.get(p.get("facade") or ""), diagonal=True),
         "street_width_m": p.get("street_width") if isinstance(p.get("street_width"), (int, float)) and p["street_width"] > 0 else None,
         "license_number": lic if lic and lic.startswith("7") else None,   # a REGA AD licence only
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the AD's `created_at` (UTC), which the ad page prints
+        # as JSON-LD datePosted — measured 2026-11-09 on 302869aa: 2026-11-01T15:45:52.306996+00:00 both. Never
+        # available_from / available_to (the rental window), updated_at, or property.created_at (the zone-less
+        # property record, entered minutes before the ad).
+        "date_added": site_posting_date(a.get("created_at")),
         "photo_urls": photos,
         **row_price,
     }
@@ -225,6 +231,98 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
     cap = {k: v for k, v in a.items() if k not in _NEVER_STORE and k != "property"}
     row["source_capture"] = strip_pii_fields({"schema": "sirdab.ad.v1", "ad": cap, "property": cap_prop})
     return (row, category), ""
+
+
+# ── LIVENESS READER (♻️ 2026-11-09, backlog 1627) ───────────────────────────────────────────────
+# The 09:05 dead-visible score voided sirdab every night: a status read of this Next.js site answers 200
+# for an ad that cannot exist (…/ads/<uuid ending 000000000000>), so «status-only» could not see a dead
+# ad (564 shown ads, never measured). This reads the ad's OWN page by its stored listing_url:
+#   404/410                                  → gone
+#   200 carrying this ad's own record id      → live (ad_number = SRD + the record id, page url = its slug)
+#   200 with the store's GENERIC title and no record id → gone. Measured from CI 2026-11-09 (spot-check
+#     42609553513): a made-up ad answers 200, 117 KB, title «سوق سرداب - مستودعات، احواش، ورش، محلات
+#     وغيرها», no record id; a live ad answers 200, 206 KB, its OWN title («مستودع للإيجار بمساحة 900 م2 |
+#     سرداب») and its record id. Both carry Next's 404 template text, so that text is NOT a signal.
+#   anything else (shell, block, redirect, a short page) → no opinion = UNKNOWN
+# It is READ-ONLY tonight: it feeds the lifecycle spot check and the dead-visible score, never
+# prune_unseen, until it has agreed with itself on paced re-reads (fleet lesson 2026-11-06 ②).
+# And it must be able to SEE death before it is believed at all: every reader it builds first opens a
+# negative control (the control ad's own url with its id token zeroed). If that does not read gone,
+# every verdict it gives is UNKNOWN — blindness never reads as health (lesson 2026-10-31).
+SIRDAB_TABLES = ("sirdab_commercial_listings", "sirdab_residential_listings")
+_TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
+_STORE_TITLE = "سوق سرداب"        # the store's own title: the page for an ad that does not exist
+_MIN_FULL_PAGE = 50_000            # a full render (117 KB for not-found); a short body is a shell/block
+
+
+def _own_signal(record_id: str):
+    def signal(status, body, moved):
+        if status in (404, 410):
+            return "gone"
+        if status != 200 or moved or not body:
+            return None
+        if record_id and record_id in body:
+            return "live"
+        m = _TITLE_RE.search(body)
+        title = (m.group(1) if m else "").strip()
+        if len(body) >= _MIN_FULL_PAGE and title.startswith(_STORE_TITLE) and "| سرداب" not in title:
+            return "gone"
+        return None
+    return signal
+
+
+def _negative_url(url: Optional[str]) -> Optional[str]:
+    """The control's own url with its trailing id token replaced by zeros (an ad that cannot exist)."""
+    if not url or "/ads/" not in url:
+        return None
+    head, _, tok = url.rstrip("/").rpartition("/")
+    return f"{head}/{'0' * len(tok)}" if len(tok) >= 8 else None
+
+
+def _make_reader(control: Optional[dict], *, url_for=None, session=None):
+    from scrapers.common.http_liveness import LivenessProbe, stored_listing_url
+    s = session or cc.Session(impersonate="chrome")
+    url_for = url_for or stored_listing_url(SIRDAB_TABLES)
+
+    def probe(ad_number: str, url: Optional[str] = None) -> tuple[str, str]:
+        rid = ad_number[len(PREFIX):] if (ad_number or "").startswith(PREFIX) else ""
+        if not rid:
+            return "unknown", f"{ad_number!r} is not a sirdab ad number"
+        return LivenessProbe(platform=SLUG, signal=_own_signal(rid), session=lambda: s,
+                             url_for=lambda _a: url or url_for(ad_number)).verify_gone(ad_number)
+
+    ctl_ad = (control or {}).get("ad_number") if isinstance(control, dict) else control
+    ctl_url = (control or {}).get("listing_url") if isinstance(control, dict) else None
+    neg = _negative_url(ctl_url)
+    sees_death, why = False, "no control ad to build a negative control from"
+    if neg:
+        verdict, w = probe(PREFIX + "00000000-0000-0000-0000-000000000000", url=neg)
+        sees_death, why = verdict == "gone", f"negative control {neg}: {verdict} ({w})"
+    print(f"  sirdab reader: {why}", flush=True)
+    live_ctl = {"ok": None}
+
+    def canary() -> tuple[bool, str]:
+        if live_ctl["ok"] is None:
+            v, w = probe(ctl_ad) if ctl_ad else ("unknown", "no positive control")
+            live_ctl["ok"], live_ctl["why"] = v == "live", f"positive control {ctl_ad}: {v} ({w})"
+        return live_ctl["ok"], live_ctl["why"]
+
+    def read(ad_number: str) -> tuple[str, str]:
+        time.sleep(1.0)                          # ≤ 1 request/second between row reads
+        if not sees_death:
+            return "unknown", f"reader cannot see a dead ad here — {why}"
+        verdict, w = probe(ad_number)
+        if verdict == "gone":
+            ok, cw = canary()
+            if not ok:
+                return "unknown", f"removal withheld — {cw} (would have been: {w})"
+        return verdict, w
+    return read
+
+
+def spot_check_oracle(control=None):
+    """The lifecycle spot check / dead-visible score reader (lifecycle_spot_check.CRAWL_ORACLES)."""
+    return _make_reader(control)
 
 
 def main() -> int:

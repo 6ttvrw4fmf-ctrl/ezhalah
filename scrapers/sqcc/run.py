@@ -41,6 +41,7 @@ PDPL: the footer's phone/e-mail are outside the listing block and never read; al
 from __future__ import annotations
 
 import argparse
+import email.utils
 import html as ihtml
 import json
 import re
@@ -57,11 +58,13 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     find_district_in_text, is_ambiguous_standalone_word, norm_district_tok, to_catalog)
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://sqcc.sa"
 SITEMAP = BASE + "/wp-sitemap-posts-realestate-1.xml"
 CATS = BASE + "/wp-sitemap-taxonomies-realestate_cats-1.xml"
+FEED = BASE + "/feed/?post_type=realestate"
 SOURCE = "مجموعة صالح القرشي العقارية"
 PREFIX = "SQC"
 SLUG = "sqcc"
@@ -97,6 +100,56 @@ def fetch(s: cc.Session, url: str) -> Any:
 
 def clean(fragment: Optional[str]) -> str:
     return re.sub(r"\s+", " ", ihtml.unescape(re.sub(r"<[^>]+>", " ", fragment or ""))).strip()
+
+
+# POSTING DATE (2026-11-09). The post page prints no date (no meta time, no JSON-LD date) and «realestate» has
+# no REST route, but WordPress's own RSS feed for the type is public: /feed/?post_type=realestate, 10 posts a
+# page, each <item> carrying the post id in its <guid> («…?post_type=realestate&#038;p=215») and <pubDate> —
+# WordPress prints post_date_gmt there, the PUBLISH date (an edit moves `modified`, which the feed never shows).
+# Read live 2026-11-09: 4 pages = all 33 posts; post 215 «فيلا للبيع» → «Tue, 16 Jul 2024 08:05:11 +0000»
+# (first seen by us 2026-09-27; its photos sit under uploads/2024/07). One feed walk per run, never per ad.
+_FEED_ITEM = re.compile(r"<item>(.*?)</item>", re.S)
+_FEED_ID = re.compile(r"[?&](?:#038;|amp;)?p=(\d+)\s*</guid>")
+_FEED_PUB = re.compile(r"<pubDate>([^<]+)</pubDate>")
+
+
+def feed_dates(xml: str) -> dict[str, str]:
+    """{post id: the item's <pubDate> exactly as printed} for one feed page."""
+    out: dict[str, str] = {}
+    for item in _FEED_ITEM.findall(xml or ""):
+        pid, pub = _FEED_ID.search(item), _FEED_PUB.search(item)
+        if pid and pub:
+            out.setdefault(pid.group(1), pub.group(1).strip())
+    return out
+
+
+def fetch_feed_dates(s: cc.Session, max_pages: int = 30) -> dict[str, str]:
+    """Every realestate post's <pubDate>, walking the feed's pages until one adds nothing. Any failure → what was
+    read so far ({} at worst): a missing date stays NULL, it never stops the crawl."""
+    out: dict[str, str] = {}
+    for page in range(1, max_pages + 1):
+        try:
+            r = fetch(s, FEED if page == 1 else f"{FEED}&paged={page}")
+        except Exception:  # noqa: BLE001
+            break
+        got = feed_dates(r.text) if r.status_code == 200 else {}
+        new = {k: v for k, v in got.items() if k not in out}
+        if not new:
+            break
+        out.update(new)
+        time.sleep(0.3)
+    return out
+
+
+def _rss_instant(pub: Optional[str]) -> Optional[str]:
+    """«Tue, 16 Jul 2024 08:05:11 +0000» → «2024-07-16T08:05:11+00:00». A stamp without a stated zone → None."""
+    if not isinstance(pub, str):
+        return None
+    try:
+        at = email.utils.parsedate_to_datetime(pub)
+    except (TypeError, ValueError, IndexError):
+        return None
+    return at.isoformat() if at is not None and at.tzinfo is not None else None
 
 
 def walk_categories(s: cc.Session) -> tuple[dict[str, set[str]], dict[str, str]]:
@@ -204,7 +257,7 @@ def place(where: Optional[str]) -> tuple[Optional[str], Optional[str]]:
 
 
 def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
-                where: Optional[str]) -> tuple[Optional[tuple[dict, str]], str]:
+                where: Optional[str], posted: Optional[dict[str, str]] = None) -> tuple[Optional[tuple[dict, str]], str]:
     if not d.get("id"):
         return None, "no_stable_id"
     title, specs, pt = d["title"], d["specs"], d["price_text"]
@@ -280,6 +333,8 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
         "bathrooms": rooms.get("icons140"),
         "property_age": ages.pop() if len(ages) == 1 else None,
         "photo_urls": list(d["photos"]),
+        # the post's own WordPress publish date, read from the type's RSS feed (see feed_dates)
+        "date_added": site_posting_date(_rss_instant((posted or {}).get(d["id"]))),
         **row_price,
         **normalize.amenities_from_text("\n".join([*specs, *feats])),
     }
@@ -296,6 +351,7 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
         "location_text": where,
         "location_conflict": sorted(cat_cities) if conflict else None,
         "categories": in_cats,
+        "feed_pub_date": (posted or {}).get(d["id"]),
         "latitude": d.get("lat"),
         "longitude": d.get("lng"),
     }
@@ -380,6 +436,8 @@ def main() -> int:
     print(f"  route: {' · '.join(tried)}", flush=True)
     urls = [urllib.parse.unquote(u) for u in re.findall(r"<loc>([^<]+)</loc>", fetch(s, SITEMAP).text)]
     cats, where = walk_categories(s)
+    posted = fetch_feed_dates(s)
+    print(f"  feed: {len(posted)} post date(s) from {FEED}", flush=True)
     print(f"{SOURCE}: {len(urls)} realestate post(s) in the sitemap; categories "
           + ", ".join(f"{k}={len(v)}" for k, v in cats.items()), flush=True)
 
@@ -394,7 +452,7 @@ def main() -> int:
             if r.status_code != 200:
                 unreadable += 1
                 continue
-            got, why = map_listing(url, parse_page(r.text), cats, where.get(url))
+            got, why = map_listing(url, parse_page(r.text), cats, where.get(url), posted)
             time.sleep(0.3)
             if not got:
                 skipped[why] = skipped.get(why, 0) + 1

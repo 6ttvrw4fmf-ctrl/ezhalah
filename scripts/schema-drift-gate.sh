@@ -82,6 +82,16 @@ if [ "$HTTP" = "200" ]; then
     rm -f "$RESP"
     exit 0
   fi
+  # Owner 2026-11-09 («Yes»): drift whose SQL already sits BYTE-EXACT in an open PR cannot be lost, so it no longer
+  # freezes every deploy while that PR waits for CI. Duplicate overloads still refuse, and so does any drift the
+  # helper cannot prove is held (unreadable, unmatched, different → it exits 1). scripts/drift-held-in-open-prs.ts.
+  if [ "$DUPS" = "0" ] && [ "$MISSING" != "parse_error" ]; then
+    echo "   $MISSING migration(s) applied to prod are not on main yet — checking each is held byte-exact in an open PR:"
+    if node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/drift-held-in-open-prs.ts "$RESP"; then
+      echo "OK [${PHASE}]: no duplicate overloads; every migration missing from main is held byte-exact in an open PR."
+      exit 0
+    fi
+  fi
   echo ""
   echo "❌ ${REFUSAL}: production schema drift detected."
   echo "   missing_in_git: $MISSING migration(s) applied to prod but absent from this repo"

@@ -1,0 +1,180 @@
+{
+ "id": 90,
+ "listing_origin_mode": "broker_full_representation",
+ "listing_entry_method": "rega_query",
+ "region_id": 3,
+ "city_id": 313,
+ "district_id": 2456,
+ "property_type_id": null,
+ "property_subtype_id": null,
+ "space": "1350.47",
+ "reference_number": "2609240005",
+ "total_price": 2900000,
+ "min_price": "2000.00",
+ "price_per_meter": 2147.4,
+ "property_age": 0,
+ "property_face": "شرقية - غربية",
+ "advertisement_type": "Sell",
+ "is_registered_eyn": false,
+ "name": "عقار 1350.47م² للبيع - المدينة المنورة",
+ "description": "🏢 **عمارة سكنية للبيع داخل حدود الحرم – المدينة المنورة**\r\n\r\n⭕️ شارعين متظاهرين \r\n\r\n📍 **الموقع:** على شارع **25 متر (يحيى بن مسلم)**، قطعة زاوية بين شارع **100 متر**، داخل حدود الحرم، بموقع مميز وسهل الوصول.\r\n\r\n📐 **تفاصيل العقار:**\r\n• مساحة الأرض: **1,350 م²**\r\n• الأبعاد: **27 × 50 متر**\r\n• عدد الأدوار: **دوران + ملحق**\r\n• عدد الشقق: **5 شقق**\r\n\r\n🏠 **تفاصيل الشقق:**\r\n• مساحة كل شقة: حوالي **150 م²**\r\n• غرفتا نوم (إحداهما ماستر)\r\n• صالة معيشة\r\n• صالون\r\n• مطبخ\r\n• غرفة غسيل أو مخزن\r\n• **3 حمامات**\r\n (الملحق يحتوي",
+ "slug": "aakar-135047m2-llbyaa-almdyn-almnor-lp4pHECk",
+ "is_negotiable": 1,
+ "listing_status_id": 28,
+ "views_count": 88,
+ "collaboration_mode": "none",
+ "was_published_before_hide": false,
+ "created_at": "2026-09-24T00:23:18.000000Z",
+ "updated_at": "2026-11-09T19:46:35.000000Z",
+ "deleted_at": null,
+ "rental_price_basis": null,
+ "rega_advertisements": [
+  {
+   "id": 139,
+   "listing_id": 90,
+   "property_type": "عمارة",
+   "location": {
+    "region": "منطقة المدينة المنورة",
+    "regionCode": "3",
+    "city": "المدينة المنورة",
+    "cityCode": "14001",
+    "district": "شوران",
+    "districtCode": "1936",
+    "street": "يحيىى بن مسلم",
+    "postalCode": "42386",
+    "buildingNumber": "8314",
+    "additionalNumber": "3300",
+    "longitude": "39.62330054599703",
+    "latitude": "24.38812866978424",
+    "districtId": "705852d8-15dd-ba0c-0e9f-307b41b7b686",
+    "cityId": "650ecabc-a462-a88b-22f1-b91e57ed05bc",
+    "regionId": "f61a0ad5-83bb-004f-45a8-06690d9eafc5"
+   },
+   "property_area": "1350.47",
+   "is_featured": false,
+   "rega_advertisement_id": "7201072817",
+   "status": "approved",
+   "rega_status": "Active",
+   "published_at": "2026-09-24T00:25:52.000000Z",
+   "ad_license_number": "7201072817",
+   "ad_license_end_date": "2027-08-05T00:00:00.000000Z",
+   "property_price": "2900000.00",
+   "land_total_price": null,
+   "plan_number": "634\\ت\\1413\\أ",
+   "property_age": "عشر سنوات",
+   "guarantees_and_their_duration": null,
+   "property_usages": [],
+   "number_of_rooms": 20,
+   "obligations_on_the_property": "رهن",
+   "property_face": "شرقية - غربية",
+   "street_width": "25.00",
+   "property_utilities": [
+    "كهرباء",
+    "مياه"
+   ],
+   "land_number": "421"
+  }
+ ],
+ "property_attributes": [],
+ "media": {
+  "images": [
+   "https://mizlaj.com.sa/files/479/%D9%84%D9%82%D8%B7%D8%A9-%D8%B4%D8%A7%D8%B4%D8%A9-%D9%A2%D9%A0%D9%A2%D9%A6-%D9%A0%D9%A9-%D9%A2%D9%A4-%D9%81%D9%8A-%D9%A3.%D9%A2%D9%A2.%D9%A3%D9%A6%C2%A0%D8%B5.png"
+  ]
+ },
+ "rega_advertisement": {
+  "ad_license_number": "7201072817",
+  "ad_license_end_date": "2027-08-05",
+  "property_price": 2900000,
+  "land_total_price": 2900000,
+  "property_type": "عمارة",
+  "plan_number": "634\\ت\\1413\\أ",
+  "property_age": "عشر سنوات",
+  "guarantees_and_their_duration": null,
+  "property_usages": [],
+  "number_of_rooms": 20,
+  "obligations_on_the_property": "رهن",
+  "property_area": 1350.47,
+  "property_face": "شرقية - غربية",
+  "street_width": 25,
+  "property_utilities": [
+   "كهرباء",
+   "مياه"
+  ],
+  "land_number": "421",
+  "location": {
+   "region": "المدينة المنورة",
+   "regionName": "المدينة المنورة",
+   "city": "المدينة المنورة",
+   "cityName": "المدينة المنورة",
+   "district": "شوران",
+   "districtName": "شوران"
+  }
+ },
+ "regaAdvertisement": {
+  "ad_license_number": "7201072817",
+  "ad_license_end_date": "2027-08-05",
+  "property_price": 2900000,
+  "land_total_price": 2900000,
+  "property_type": "عمارة",
+  "plan_number": "634\\ت\\1413\\أ",
+  "property_age": "عشر سنوات",
+  "guarantees_and_their_duration": null,
+  "property_usages": [],
+  "number_of_rooms": 20,
+  "obligations_on_the_property": "رهن",
+  "property_area": 1350.47,
+  "property_face": "شرقية - غربية",
+  "street_width": 25,
+  "property_utilities": [
+   "كهرباء",
+   "مياه"
+  ],
+  "land_number": "421",
+  "location": {
+   "region": "المدينة المنورة",
+   "regionName": "المدينة المنورة",
+   "city": "المدينة المنورة",
+   "cityName": "المدينة المنورة",
+   "district": "شوران",
+   "districtName": "شوران"
+  }
+ },
+ "propertyType": {
+  "id": "عمارة",
+  "name": "غير متوفر",
+  "name_ar": "غير متوفر",
+  "code": "عمارة"
+ },
+ "propertySubType": null,
+ "city": {
+  "id": 313,
+  "name": "المدينة المنورة",
+  "name_ar": "المدينة المنورة",
+  "name_en": "Madinah",
+  "code": "14001",
+  "region_id": 3
+ },
+ "district": {
+  "id": 2456,
+  "name": "شوران",
+  "name_ar": "شوران",
+  "name_en": "Al Shouran",
+  "code": "1936",
+  "city_id": 313
+ },
+ "region": {
+  "id": 3,
+  "name": "المدينة المنورة",
+  "name_ar": "المدينة المنورة",
+  "name_en": "Al Madinah Al Munawwarah",
+  "code": "3"
+ },
+ "latitude": 24.388128669784,
+ "longitude": 39.623300545997,
+ "coordinates": {
+  "lat": null,
+  "lng": null
+ },
+ "is_reserved": false,
+ "is_sold": false
+}

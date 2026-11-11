@@ -64,6 +64,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from curl_cffi import requests as cc
@@ -75,6 +76,7 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://raghdan.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -626,6 +628,33 @@ _UTILITIES = {
 }
 
 
+# ── The ad's own posting instant (2026-11-09) ─────────────────────────────────────────────────────
+# The page's RSC payload carries the Firestore record, `"createdAt":{"seconds":N}` beside the licence
+# fields; the panel's «تاريخ النشر» is that value's Saudi date. Two kinds of record, measured live:
+#   · ads entered on raghdan (Firebase ids): a real instant — T9ylxTlxzuwptEDcp2dI createdAt
+#     1794121573 = 2026-11-08 10:06:13 Saudi, page «08/11/2026», first seen by us 2026-11-09 04:24 UTC;
+#     X6L6WfHmQiVKhja4CruO 2026-11-06 18:02:43 Saudi, «06/11/2026», first seen 2026-11-07 06:08 UTC.
+#   · ads imported with their REGA licence (12-digit ids): createdAt is EXACTLY Saudi midnight, the
+#     same date-only shape as the licence's endDate, and on 80 of 213 it is endDate − 1 year to the day
+#     (659188181231: 2026-10-19 00:00 / 2027-10-19 00:00) — the licence's issue date, not a posting.
+# So a midnight stamp is not read; nor is one the printed «تاريخ النشر» contradicts, nor an ambiguous
+# page carrying two different stamps.
+_RIYADH = timezone(timedelta(hours=3))
+_CREATED_RE = re.compile(r'\\?"createdAt\\?":\{\\?"seconds\\?":(\d{9,11})\}')
+
+
+def _posted_at(body: str, printed: Optional[str]) -> Optional[str]:
+    stamps = set(_CREATED_RE.findall(body or ""))
+    if len(stamps) != 1:
+        return None
+    at = datetime.fromtimestamp(int(stamps.pop()), timezone.utc).astimezone(_RIYADH)
+    if (at.hour, at.minute, at.second) == (0, 0, 0):
+        return None                                   # date-only: the imported licence's issue date
+    if printed and printed.strip() != at.strftime("%d/%m/%Y"):
+        return None                                   # the page says another day: trust neither
+    return site_posting_date(at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+
 def _rendered_specs(body: str) -> dict[str, str]:
     """Label → verbatim value from the rendered spec/licence/deed cards. Placeholders drop out."""
     out: dict[str, str] = {}
@@ -953,9 +982,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "registry_restrictions": sp.get("registry_restrictions"),
         "obligations": sp.get("obligations"),
         "warranties": sp.get("warranties"),
-        # kept as source text in JSONB rather than the typed `date_added` column: raghdan prints
-        # DD/MM/YYYY, and dropping that into a column other platforms fill in a different shape
-        # would create a field nobody can parse without knowing the platform first.
+        # the panel's «تاريخ النشر», verbatim (DD/MM/YYYY). date_added is NOT copied from it: on
+        # licence-imported ads it is the licence's issue date — see _posted_at.
         "published_at": sp.get("published_at"),
         "ld_description": _redact(description_raw),
         **_rendered_panel(body),
@@ -995,6 +1023,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "title": title,
         "description": description,
         "photo_urls": _images(ld),
+        # The ad's own creation instant (see _posted_at) — never the licence dates in the same panel.
+        "date_added": _posted_at(body, sp.get("published_at")),
         "additional_info": info,
         # utilities: listed ⇒ True, not listed ⇒ absent ⇒ NULL (never False)
         **_rendered_utilities(body),

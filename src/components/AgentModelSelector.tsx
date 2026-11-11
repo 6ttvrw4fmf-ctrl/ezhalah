@@ -17,13 +17,13 @@ const MODELS = [
     descriptionEn: 'Lightning-fast precision for instant answers',
     // Why the name, and what it does (owner 2026-10-10, approved wording). Describes the model only —
     // never «best», never a recommendation about a property.
-    storyAr: 'الشاهين أسرع الطيور انقضاضاً، ومن هنا جاء اسمه. نموذجٌ يفهم طلبك من أول جملة، ويعرض لك الإعلانات المطابقة بسرعة ودقة.',
+    storyAr: 'الشاهين أسرع الطيور انقضاضا، ومن هنا جاء اسمه. نموذج يفهم طلبك من أول جملة، ويعرض لك الإعلانات المطابقة بسرعة ودقة.',
     storyEn: 'The Shaheen (peregrine falcon) is the fastest bird when it dives. That is where the name comes from. A model that understands your request from the first sentence and shows you the matching listings quickly and accurately.' },
-  { id: 'hurr', ar: 'حُر', en: 'Hurr', version: '4.4',
+  { id: 'hurr', ar: 'حر', en: 'Hurr', version: '4.4',
     mark: require('../../assets/models/hurr.png'),
     descriptionAr: 'قوة وتحمل فائق لأصعب المهام والمعالجات',
     descriptionEn: 'Unmatched endurance for your toughest challenges',
-    storyAr: 'الحُرّ أقوى صقور الجزيرة العربية وأكثرها صبراً في الصيد، ومن هنا جاء اسمه. نموذجٌ يبحث بعمق في جميع المواقع، ويتعامل مع الطلبات المعقّدة متعددة الشروط.',
+    storyAr: 'الحر أقوى صقور الجزيرة العربية وأكثرها صبرا في الصيد، ومن هنا جاء اسمه. نموذج يبحث بعمق في جميع المواقع، ويتعامل مع الطلبات المعقدة متعددة الشروط.',
     storyEn: 'The Hurr (saker falcon) is the strongest falcon in the Arabian Peninsula and the most patient hunter. That is where the name comes from. A model that searches deeply across all websites and handles complex requests with many conditions.' },
 ] as const;
 
@@ -91,7 +91,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
                 onPress={() => { setSelected(item.id); close(); trigger.current?.focus(); }}
                 style={({ pressed }) => [styles.option, { flexDirection: arabic ? 'row-reverse' : 'row' }, item.id === 'hurr' && styles.unavailable, pressed && styles.pressed]}>
                 {/* Name + its one-line sentence (owner 2026-10-10: «for the models include the sentence»); an
-                    unavailable model says «قريباً» in words instead of an ⓘ glyph. */}
+                    unavailable model says «قريبا» in words instead of an ⓘ glyph. */}
                 <View style={styles.copy}>
                   <View style={[styles.modelIdentity, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row' }]}>
                     <ModelMark model={item} size={22} />
@@ -101,7 +101,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
                 </View>
                 <View style={styles.check}>
                   {selected === item.id ? <Ionicons name="checkmark" size={18} color={colors.primary} />
-                    : item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريباً' : 'Soon'}</Text> : null}
+                    : item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريبا' : 'Soon'}</Text> : null}
                 </View>
               </Pressable>
             ))}
@@ -111,15 +111,15 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
               style={({ pressed }) => [styles.aboutRow, styles.aboutLink, { flexDirection: 'row' }, pressed && styles.pressed]}>
               {/* The arrow sits beside the words, small and quiet — a link, not a far-away chevron. The page is
                   dir=rtl in Arabic, so a plain row already starts at the right edge (row-reverse put it on the left). */}
-              <Text style={styles.aboutText}>{arabic ? 'لماذا شاهين وحُر؟' : 'Why Shaheen and Hurr?'}</Text>
+              <Text style={styles.aboutText}>{arabic ? 'لماذا شاهين وحر؟' : 'Why Shaheen and Hurr?'}</Text>
               <Ionicons name={arabic ? 'chevron-back' : 'chevron-forward'} size={12} color={colors.muted} style={arabic ? styles.rtlFlip : undefined} />
             </Pressable>
               </>
           </View>
         </View>
       </Modal>
-      {/* «لماذا شاهين وحُر؟» — a small card in the MIDDLE of the screen (owner 2026-10-10): why each model is
-          named so, and what it does. Hurr stays dimmed with «قريباً», as in the menu. */}
+      {/* «لماذا شاهين وحر؟» — a small card in the MIDDLE of the screen (owner 2026-10-10): why each model is
+          named so, and what it does. Hurr stays dimmed with «قريبا», as in the menu. */}
       <Modal visible={about} transparent animationType="fade" onRequestClose={() => setAbout(false)}>
         <View style={styles.storyOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setAbout(false)}
@@ -142,7 +142,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
                 <View style={[styles.modelIdentity, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row' }]}>
                   <ModelMark model={item} size={wide ? 38 : 30} />
                   <Text style={[styles.name, styles.storyName, wide && styles.storyNameWide]}>{arabic ? item.ar : item.en} {item.version}</Text>
-                  {item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريباً' : 'Coming soon'}</Text> : null}
+                  {item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريبا' : 'Coming soon'}</Text> : null}
                 </View>
                 <Text style={[styles.storyText, wide && styles.storyTextWide, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.storyAr : item.storyEn}</Text>
               </View>

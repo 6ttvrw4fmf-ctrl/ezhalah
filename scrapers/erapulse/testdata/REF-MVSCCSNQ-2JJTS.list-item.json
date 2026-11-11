@@ -1,0 +1,97 @@
+{
+ "id": "cmvsccsqj0081u3243mrpmpt2",
+ "title": "للبيع شالية بحي السلمان",
+ "description": "لبيع شالية بحي السلمان\nبمساحة 304 م\nوجهه شمالية \n\nطبعا يتوفر شاليهين للبيع \n\nاجمالي المساحة 454\nطبعا واحد مؤجر اب 9 سنوي/ مساحة  150م\nالاخر استعمال شخصي/  مساحة304 م\nبصك واحد \nمكونات الشالية الشخصي \nيحتوي على صالة ومقلط وغرفة نوم ومطبخ  وحديقة خارجية مع مدخل سيارة \nطبعا شامل الاثاث المطبخ راكب كذالك مكيفات راكبه \n .\nالشالية المؤجر \nيحتوي على \nغرفة نوم وصاله ومطبخ ومستودع مع مدخل سيارة \n\nالموقع : حي السلمان \nشركة نبض العصر للعقارات \n[redacted]",
+ "salePrice": 700000,
+ "currency": "SAR",
+ "location": "للبيع شالية بحي السلمان",
+ "googleMapsUrl": "https://www.google.com/maps?q=%D8%B4%D8%A7%D9%84%D9%8A%D8%A9+%D8%B3%D9%83%D9%86+%D8%AE%D8%A7%D8%B5%D8%8C+%D8%AD%D9%8A+%D8%A7%D9%84%D8%AC%D8%B2%D9%8A%D8%B1%D8%A9%D8%8C+%D8%A8%D8%B1%D9%8A%D8%AF%D8%A9+52585&ftid=0x157f552e3db9524d:0xc8a8053573f4da37&entry=gps&lucs=,94246479,94242601,94224825,94227247,94227248,47071704,47069508,94218641,94228348,94233079,94203019,47084304,94208458,94208447&g_ep=CAISDTYuMTQxLjAuOTE2NjAYACCenQoqfiw5NDI0NjQ3OSw5NDI0MjYwMSw5NDIyNDgyNSw5NDIyNzI0Nyw5NDIyNzI0OCw0NzA3MTcwNCw0NzA2OTUwOCw5NDIxODY0MSw5NDIyODM0OCw5NDIzMzA3OSw5NDIwMzAxOSw0NzA4NDMwNCw5NDIwODQ1OCw5NDIwODQ0N0ICU0E%3D&g_st=com.google.maps.preview.copy",
+ "latitude": null,
+ "longitude": null,
+ "postalCode": null,
+ "districtId": null,
+ "country": "SA",
+ "usage": "RESIDENTIAL",
+ "subType": "OTHER_RESIDENTIAL",
+ "type": "RESIDENTIAL",
+ "status": "ACTIVE",
+ "area": 454,
+ "bedrooms": null,
+ "bathrooms": null,
+ "floors": 1,
+ "age": 5,
+ "furnished": true,
+ "parkingSpaces": 2,
+ "balcony": false,
+ "garden": true,
+ "pool": false,
+ "gym": false,
+ "security": false,
+ "maintenanceFee": null,
+ "landLength": null,
+ "landWidth": null,
+ "streetWidth": null,
+ "hasBasement": false,
+ "isBankFinanceAccepted": false,
+ "paymentOptions": null,
+ "tenantType": null,
+ "serviceFees": null,
+ "isForSale": true,
+ "isForRent": false,
+ "rentPrice": null,
+ "rentPeriod": "ANNUAL",
+ "askingPrice": 650000,
+ "actualYield": null,
+ "expectedYield": null,
+ "yieldType": "EXPECTED",
+ "yieldCalculatedAt": null,
+ "yieldCalculationMethod": null,
+ "moderationStatus": "APPROVED",
+ "publishedAt": "2026-10-28T16:51:20.000Z",
+ "refNumber": "REF-MVSCCSNQ-2JJTS",
+ "isVerified": false,
+ "isPremium": false,
+ "isFeatured": false,
+ "metadata": {
+  "licenses": {
+   "ad": {
+    "number": "7201192518",
+    "expiryDate": "2030-12-31"
+   },
+   "fal": {
+    "number": "1200011697",
+    "expiryDate": null
+   }
+  },
+  "documents": {
+   "adNumber": null,
+   "permitNumber": null,
+   "permitStatus": null
+  }
+ },
+ "createdAt": "2026-10-28T16:41:08.000Z",
+ "updatedAt": "2026-10-28T16:51:20.000Z",
+ "elevator": false,
+ "slug": "llbya-shalya-bhy-alslman-residential-sale-ref-mvsccsnq-2jjts",
+ "arabicSlug": "OTHER-RESIDENTIAL-للبيع-حي-السلمان-REF-MVSCCSNQ-2JJTS",
+ "urlPath": "/العقارات/للبيع/فلة/للبيع-شالية-بحي-السلمان/للبيع-شالية-بحي-السلمان-REF-MVSCCSNQ-2JJTS",
+ "adNumber": "7201192518",
+ "adExpiryDate": "2030-12-31T00:00:00.000Z",
+ "permitNumber": "1200011697",
+ "permitStatus": "ACTIVE",
+ "permitExpiryDate": null,
+ "images": [
+  {
+   "id": "cmvsccurf0084u3241j730ova",
+   "url": "/uploads/images/cmvsccsqj0081u3243mrpmpt2/main_b178e48f-5e19-4843-b508-2ad2a998ee76_1793205670092.webp",
+   "thumbnailUrl": "/uploads/images/cmvsccsqj0081u3243mrpmpt2/thumb_b178e48f-5e19-4843-b508-2ad2a998ee76_1793205670092.webp"
+  }
+ ],
+ "district": null,
+ "statistics": {
+  "viewsCount": 23
+ },
+ "_count": {
+  "favorites": 0
+ }
+}

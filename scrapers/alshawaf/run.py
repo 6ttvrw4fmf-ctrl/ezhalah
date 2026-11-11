@@ -78,6 +78,7 @@ own text including its plot reference, per the standing district_ar=match / neig
 from __future__ import annotations
 
 import argparse
+import email.utils
 import html as html_mod
 import json
 import re
@@ -97,6 +98,7 @@ from scrapers.common.arabic_location import (  # noqa: E402
 from scrapers.common.http_liveness import (LivenessProbe, live_control_url,  # noqa: E402
                                            removal_by_owner_approved_status)
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://alshawaf.com.sa"
 # The DB `source` string is also what the app's SourceBadge/sourceHost matcher greps for a platform
@@ -412,12 +414,17 @@ def parse_index(rec: dict) -> dict:
     }
 
 
-def fetch_index(s: cc.Session, max_pages: int = MAX_PAGES) -> list[dict]:
-    """Every listing the Views table publishes, de-duplicated by nid."""
+def fetch_index(s: cc.Session, max_pages: int = MAX_PAGES,
+                terms: Optional[dict[str, str]] = None) -> list[dict]:
+    """Every listing the Views table publishes, de-duplicated by nid. `terms`, when given, is filled
+    with the district-term ids from the page's own «الحي» filter (term_ids), read off a page this
+    walk already fetches."""
     seen: set[str] = set()
     out: list[dict] = []
     for page in range(max_pages):
         html = _get(s, f"{BASE}/table?page={page}")
+        if terms is not None and not terms:
+            terms.update(term_ids(html or ""))
         recs = index_rows(html or "")
         if not recs:
             break
@@ -432,6 +439,78 @@ def fetch_index(s: cc.Session, max_pages: int = MAX_PAGES) -> list[dict]:
             break
         time.sleep(PAGE_PAUSE)
     return out
+
+
+# ── posting date (/taxonomy/term/<tid>/feed) ────────────────────────────────────────────────────
+# The «التاريخ» the index and the node page print is Drupal's `changed` — a BUMP date (bump_date):
+# old nodes re-saved yesterday print yesterday. The node's `created` is published in ONE place: the
+# district term's own RSS feed, where Drupal core's node_rss row writes <pubDate> from
+# getCreatedTime() and <guid> «<nid> at https://alshawaf.com.sa». Measured 2026-11-10 on
+# /taxonomy/term/3/feed: 22226 pubDate 08 Sep 2026 while its «التاريخ» reads 2026-09-28; 21788
+# 27 Apr vs 30 Jun; 22416 05 Nov 04:46Z with «التاريخ» 2026-11-05 (first seen 05:47Z that day).
+# A feed holds the term's 10 newest nodes (?page= is ignored), so every NEW node is in its term's
+# feed and an older node in a busy term may not be — that node gets None, which the upsert drops,
+# so a date read on an earlier run is never erased. One request per distinct term (~175), not per
+# listing. The term ids come from the «الحي» <select> on /table, which fetch_index already reads.
+_TERM_SELECT = re.compile(r'<select[^>]*name="field_tags_target_id\[\]"[^>]*>(.*?)</select>', re.S)
+_TERM_OPTION = re.compile(r'<option value="(\d+)"[^>]*>([^<]*)</option>')
+_FEED_ITEM = re.compile(r"<item>(.*?)</item>", re.S)
+_FEED_GUID = re.compile(r"<guid[^>]*>\s*(\d+) at https://alshawaf\.com\.sa\s*</guid>")
+_FEED_PUBDATE = re.compile(r"<pubDate>([^<]+)</pubDate>")
+
+
+def _term_key(name: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", html_mod.unescape(name or "")).strip()
+
+
+def term_ids(page_html: str) -> dict[str, str]:
+    """{district term name: term id} from the page's own «الحي» filter <select>."""
+    m = _TERM_SELECT.search(page_html or "")
+    return {_term_key(name): tid for tid, name in _TERM_OPTION.findall(m.group(1))} if m else {}
+
+
+def parse_term_feed(xml: str) -> dict[str, str]:
+    """{nid: <pubDate> as published} for every <item> of one term feed."""
+    out: dict[str, str] = {}
+    for item in _FEED_ITEM.findall(xml or ""):
+        g, p = _FEED_GUID.search(item), _FEED_PUBDATE.search(item)
+        if g and p:
+            out[g.group(1)] = p.group(1).strip()
+    return out
+
+
+def rfc822_to_iso(raw: Optional[str]) -> Optional[str]:
+    """«Thu, 05 Nov 2026 04:46:14 +0000» → «2026-11-05T04:46:14+00:00» (same instant, ISO notation).
+    A stamp without a zone, or anything unreadable, is None — never a guess."""
+    if not raw:
+        return None
+    try:
+        dt = email.utils.parsedate_to_datetime(raw)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if dt is None or dt.tzinfo is None:
+        return None
+    return dt.isoformat()
+
+
+def fetch_created(s: cc.Session, listings: list[dict], tids: dict[str, str]) -> tuple[dict[str, str], dict]:
+    """{nid: raw pubDate} from the feed of every district term these listings name, + a tally."""
+    wanted = sorted({_term_key(ix.get("district_term")) for ix in listings if ix.get("district_term")})
+    created: dict[str, str] = {}
+    tally = {"terms": len(wanted), "feeds_ok": 0, "feeds_failed": 0, "term_without_id": 0}
+    for name in wanted:
+        tid = tids.get(name)
+        if not tid:
+            tally["term_without_id"] += 1
+            continue
+        xml = _get(s, f"{BASE}/taxonomy/term/{tid}/feed")
+        if xml is None:
+            tally["feeds_failed"] += 1
+        else:
+            tally["feeds_ok"] += 1
+            created.update(parse_term_feed(xml))
+        time.sleep(PAGE_PAUSE)
+    return created, tally
 
 
 # ── detail (/{nid}) ─────────────────────────────────────────────────────────────────────────────
@@ -787,6 +866,10 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         # A detail fetch that FAILED is not the source saying "no photos" — None lets db's
         # unknown-must-not-overwrite-known guard drop the key so a stored list survives.
         "photo_urls": (photos[:20] or None) if (detail or photos) else None,
+        # The SITE's posting date = the node's `created`, read from its district term feed (see
+        # fetch_created) — never «التاريخ»/bump_date, which is `changed`. Live 2026-11-10: SHW22416
+        # pubDate «Thu, 05 Nov 2026 04:46:14 +0000» → 2026-11-05T07:46:14+03:00.
+        "date_added": site_posting_date(rfc822_to_iso(ix.get("created_raw"))),
         "price_evidence": N.price_evidence(
             field=f"table cell «{p['label']}»" if p["label"] else "table price cell (no label)",
             raw=p["raw"], stored=(price_per_meter if price_per_meter is not None
@@ -816,7 +899,8 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
             "lat": detail.get("lat"),
             "lng": detail.get("lng"),
             "bump_date": ix["bump_date"],        # a REFRESH date, not created_at
-            "city_basis": city_basis,            # DERIVED — see the module docstring
+            "created_pubdate_raw": ix.get("created_raw"),   # the term feed's <pubDate>, verbatim
+            "city_basis": city_basis,           # DERIVED — see the module docstring
             "district_source_text": ix["district_term"],
             "detail_read": bool(detail) or None,
         }.items() if v is not None}),
@@ -845,13 +929,20 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
     stats: dict[str, Any] = {"seen": 0, "no_price": 0, "per_sqm": 0, "detail_failed": 0,
                              "skipped": skipped}
 
-    listings = fetch_index(s)
+    tids: dict[str, str] = {}
+    listings = fetch_index(s, terms=tids)
     if not listings:
         raise RuntimeError("/table?page=0 returned no Views rows (block or markup change)")
     stats["seen"] = len(listings)
     print(f"{SOURCE}: {len(listings)} listings enumerated from /table", flush=True)
 
-    for ix in (listings[:limit] if limit else listings):
+    todo = listings[:limit] if limit else listings
+    created, stats["created_feeds"] = fetch_created(s, todo, tids)
+    print(f"{SOURCE}: posting dates for {sum(1 for ix in todo if ix['nid'] in created)}/{len(todo)} "
+          f"listings from district term feeds {stats['created_feeds']}", flush=True)
+
+    for ix in todo:
+        ix["created_raw"] = created.get(ix["nid"])
         detail = fetch_detail(s, ix["nid"]) if want_detail else {}
         if want_detail:
             if not detail:

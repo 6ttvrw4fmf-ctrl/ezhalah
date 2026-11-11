@@ -62,6 +62,7 @@ from scrapers.common.http_liveness import decide  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     _REGION_AR_FOR, catalog_district, city_ar_for, find_district_in_text, norm_ar, only_city_with_district, to_catalog,
 )
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 SITE = "https://rakez.sa"
@@ -541,6 +542,15 @@ def _project_exclusion(en_project: Optional[dict], ar_project: Optional[dict]) -
     return None
 
 
+def unit_posted_at(unit: dict) -> Optional[str]:
+    """The unit post's own WordPress publish instant → date_added. `date_gmt` is UTC with no zone mark
+    (the site's `date` is the same instant at +03:00); `modified` is an edit and is never read. Read live
+    2026-11-09 on /wp-json/wp/v2/unit/72526: date «2026-09-12T20:34:51», date_gmt «2026-09-12T17:34:51»,
+    first seen by us 2026-09-14. The unit page itself redirects home, so the API is the only place it lives."""
+    g = unit.get("date_gmt")
+    return site_posting_date(g.strip() + "Z") if isinstance(g, str) and g.strip() else None
+
+
 def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
              tree: dict[int, dict], pins: Optional[dict[int, dict]] = None) -> tuple[Optional[dict], str]:
     """`pins` is the map feed read this crawl (fetch_project_pins): the unit inherits its project's pin,
@@ -588,6 +598,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
 
     row = {
         "ad_number": f"RKZ{uid}",
+        "date_added": unit_posted_at(unit),   # the unit post's WordPress date_gmt — see unit_posted_at()
         # THE PROJECT PAGE, deliberately — unit.link redirects to the home page (see module docstring).
         "listing_url": f"{SITE}/ar/project/{en_id}/",
         "source": "Rakez",

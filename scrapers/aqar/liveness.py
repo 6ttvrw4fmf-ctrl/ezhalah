@@ -445,6 +445,14 @@ def main() -> None:
                          "--only-struck: the same reader, the same known-live controls, the same "
                          "3-strike grace. It lets the second and third readings of an ad aqar "
                          "removed land ~12 h apart instead of a day apart (fast confirm, 2026-10-06).")
+    ap.add_argument("--recheck-all", action="store_true",
+                    help="RECHECK every active row, struck or not, that nothing looked at in the last "
+                         "RECHECK_MIN_GAP_HOURS — a SECOND daily pass under the recheck's own run label. "
+                         "Same reader, same known-live controls, same 3-strike grace, same 6 h rest "
+                         "between readings. Exists because aqarmonthly's SLA is 24 h and the daily sweep "
+                         "is its only full pass: whenever that sweep starts later than the day before "
+                         "(03:12 on 11-09 vs 01:31 on 11-08), every row ages past 24 h at once and "
+                         "repeat_bug:liveness_sla:aqarmonthly re-raises (3 times in 7 days).")
     ap.add_argument("--report-only", action="store_true",
                     help="VERIFY without deactivating. Suppresses the dead path entirely — no "
                          "active=false, no missing_count increment — and reports the verdicts it "
@@ -457,7 +465,8 @@ def main() -> None:
     table = args.table
     # A recheck gets its OWN run label (LISTING_LIVENESS.md §9: a liveness job needs its own label,
     # or its silence hides inside the daily sweep's rows).
-    kind = "aqar_liveness_recheck" if args.min_strikes > 0 and not args.only_struck else "aqar_liveness"
+    is_recheck = (args.min_strikes > 0 or args.recheck_all) and not args.only_struck
+    kind = "aqar_liveness_recheck" if is_recheck else "aqar_liveness"
     platform = f"{kind}:{table}:{args.shard}/{args.shards}"
     client = sb()
     # Before opening our own run row: finalize any stub WE left behind on a previous day —
@@ -472,10 +481,11 @@ def main() -> None:
 
     def _cohort(q):
         q = q.eq("active", True)
-        if args.min_strikes > 0 and not args.only_struck:
+        if is_recheck:
             # Three SEPARATE readings: a row looked at in the last RECHECK_MIN_GAP_HOURS waits.
-            q = (q.gte("missing_count", args.min_strikes)
-                 .or_(f"last_liveness_probe_at.is.null,last_liveness_probe_at.lt.{recheck_cut}"))
+            if args.min_strikes > 0:
+                q = q.gte("missing_count", args.min_strikes)
+            q = q.or_(f"last_liveness_probe_at.is.null,last_liveness_probe_at.lt.{recheck_cut}")
         return q.gte("missing_count", args.grace) if args.only_struck else q
 
     # ── PHASE 1: this shard's worklist, by id modulo (fix 2026-09-24, see shard_partition.py) ────

@@ -179,12 +179,19 @@ def test_a_missing_id_is_skipped_VARIANT():
 
 
 # ── TYPE + CATEGORY ──────────────────────────────────────────────────────────────────────────────
-def test_land_filed_commercial_by_the_office_is_commercial_land_and_use_flags_do_not_decide():
+def test_a_land_ad_is_what_the_pages_own_usage_says_and_the_office_filing_only_breaks_a_tie():
+    # Owner 2026-11-10 («Fix all bro these issues can't happen»): the ad page prints «الاستخدام» from the use flags and
+    # never shows the office's `category`. Until then the flags did not decide (this test pinned that) and 51496 —
+    # page «الاستخدام: تجاري», title «أرض تجارية للبيع» — was served as Residential Land. scrapers/common/nuzul_usage.py.
     assert R.map_listing(LAND)[1] == "residential" and _row(LAND)["property_type"] == "Residential Land"
-    row, cat, _ = R.map_listing(RENT)             # category «commercial», both use flags on
+    row, cat, _ = R.map_listing(RENT)             # category «commercial», both use flags on → the filing decides
     assert (row["property_type"], cat) == ("Commercial Land", "commercial")
-    # commercial-only USE with the office's category still residential → the base type
-    assert _row(_variant(LAND, is_for_residential=False, is_for_commercial=True))["property_type"] == "Residential Land"
+    # commercial-only USE while the office filed it residential → the page's word wins, and the table follows
+    row, cat, _ = R.map_listing(_variant(LAND, is_for_residential=False, is_for_commercial=True))
+    assert (row["property_type"], cat) == ("Commercial Land", "commercial")
+    # …and the other way round
+    row, cat, _ = R.map_listing(_variant(RENT, is_for_residential=True, is_for_commercial=False))
+    assert (row["property_type"], cat) == ("Residential Land", "residential")
     assert _row(_variant(NOPRICE, category="commercial"))["property_type"] == "Commercial Building"
     assert _row(_variant(LAND, type="building_apartment"))["property_type"] == "Apartment"
     assert _row(_variant(LAND, type="townhouse"))["property_type"] == "تاون هاوس"

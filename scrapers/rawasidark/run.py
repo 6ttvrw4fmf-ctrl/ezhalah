@@ -50,6 +50,7 @@ from typing import Any, Optional
 from curl_cffi import requests as cc
 
 from scrapers.common import normalize as N
+from scrapers.common.posting_date import site_posting_date
 
 BASE = "https://www.rawasi-dark.com"
 SOURCE = "Rawasi Dark"
@@ -291,6 +292,11 @@ def map_object(o: dict) -> Optional[tuple[dict, str]]:
         "region": N.region_for_city(city),
         "neighborhood": district,
         "area_m2": _positive_int(o.get("area")),
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the catalog object's `createdAt` (UTC «Z», «$D» sentinel
+        # removed). It is the record's birth: the source's own cuid id encodes the same instant (cmrvc7lr6… → 2026-07-22
+        # 00:21:34.818Z vs createdAt 00:21:34.815Z, measured 2026-11-09), while updatedAt is rewritten in bulk (all
+        # 2026-11-09T05:50Z). The ad page prints no date. Never updatedAt.
+        "date_added": site_posting_date(_date(o.get("createdAt"))),
         # NOT PUBLISHED by this source in any structured field — prose is never mined for them.
         "bedrooms": None,
         "bathrooms": None,

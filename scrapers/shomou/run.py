@@ -52,7 +52,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.bossbih.run import (  # noqa: E402  same theme, same town: one vocabulary, not two
     DWELLING_TYPES, LOCAL_SUBSTRING_TYPES, OFFICE_CITY_AR, REGION_HINT, RETIRED_TOKENS, TYPE_OVERRIDES,
-    TYPE_UNMAPPABLE, _BED_RE, _area, _counts, _price_basis, resolve_district,
+    TYPE_UNMAPPABLE, _BED_RE, _area, _counts, _price_basis, posting_date, read_feed, resolve_district,
 )
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
@@ -217,6 +217,10 @@ def map_detail(d: dict[str, Any], today: Any = None) -> tuple[Optional[dict], st
         "listing_url": f"{BASE}/{d['nid']}",
         "source": SOURCE,
         "active": True,
+        # The node's CREATED time from the site's RSS feed (bossbih.feed_created; live 2026-11-09: /5855's
+        # page prints «إعلان 5855 - 07/11/2026», the feed «Mon, 17 Apr 2023 12:43:29 +0000»). Never the
+        # page's «posted_or_bumped» date (the CHANGED date) and never «تاريخ إنتهاء الإعلان».
+        "date_added": posting_date(d.get("posted_raw")),
         "title": redact_pii(d.get("title")) or None,
         "description": redact_pii(description),
         # «الخدمات المتعلقة بالعقار: كهرباء وماء» — the source says YES; silence stays NULL, never False
@@ -320,6 +324,9 @@ def main() -> int:
     skipped: dict[str, int] = {}
     unreadable = 0
     cut = 0
+    # One request a run, made at the first ad page that reads: the 10 latest-changed ads' CREATED times
+    # (this feed has no paging and no nid filter).
+    feed: Optional[dict[str, str]] = None
     try:
         for i, nid in enumerate(nids):
             if _clock() - t0 > SOFT_DEADLINE_S:
@@ -334,6 +341,9 @@ def main() -> int:
             if not d:
                 unreadable += 1
                 continue
+            if feed is None:
+                feed = read_feed(s, BASE)
+            d["posted_raw"] = feed.get(nid)
             row, cat, why = map_detail(d)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1

@@ -116,7 +116,7 @@ def _run_main(monkeypatch, db, argv, canaries=((True, 10, 10, "200x10"), (True, 
     monkeypatch.setattr(lv, "detail_session", lambda: types.SimpleNamespace())
     monkeypatch.setattr(lv, "probe", lambda s, url: 404)
     monkeypatch.setattr(lv, "_run_canary", lambda s, c, n: canary_results.pop(0))
-    monkeypatch.setattr(lv, "_acquire_apply_lock", lambda c, h, t: True)
+    monkeypatch.setattr(lv, "_acquire_apply_lock", lambda c, h, t, **kw: True)
     monkeypatch.setattr(lv, "_release_apply_lock", lambda c, h: None)
     monkeypatch.setattr(sys, "argv", ["liveness", *argv])
     assert lv.main() == 0

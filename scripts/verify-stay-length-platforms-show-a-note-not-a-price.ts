@@ -34,6 +34,7 @@ const { advertisedMonthly } = await import('../src/lib/rentPool.ts');
 (globalThis as Record<string, unknown>).__advertisedMonthly = advertisedMonthly;
 const display = await liftSymbols(join(root, 'src/lib/listingDisplay.ts'), [
   { header: 'export const isStayLengthPriced', endsWith: /;$/ },
+  { header: 'export const isShortStayListing', endsWith: /;$/ },
   { header: 'export function listingPrice(' },
   { header: 'export function monthlyLineText(' },
 ], ['listingPrice', 'monthlyLineText'],
@@ -55,6 +56,8 @@ const problemsFor = (price: PriceFn, rd: (rel: string) => string): string[] => {
   check('a Gathern card prints NO price line in Arabic — not the figure, not the old note', price(gathern, 'ar') === '');
   check('a Gathern card prints NO price line in English either', price(gathern, 'en') === '');
   check('an Aqar Monthly card prints NO price line either', price(aqarMonthly, 'ar') === '' && price(aqarMonthly, 'en') === '');
+  const harajDaily = { source: 'Haraj', price: 'Price on request', rentPeriod: 'monthly', sourceRentPeriod: 'daily', priceAnnual: null };
+  check('a Haraj «للإيجار اليومي» row in the short-stays pool prints NO price line, like Gathern (backlog 1744)', price(harajDaily, 'ar') === '' && price(harajDaily, 'en') === '');
   check('every other platform still prints its own price', price(aqar, 'ar') === 'ر.س 4,200/شهرياً' && price(aqar, 'en') === 'SAR 4,200/mo');
   check('a stay-length card gets no monthly line either', monthlyLineText(gathern, 'ar') === null && monthlyLineText(aqarMonthly, 'en') === null);
 
@@ -62,7 +65,7 @@ const problemsFor = (price: PriceFn, rd: (rel: string) => string): string[] => {
   check('the result card prints listingPrice(), not the raw listing.price', /\{listingPrice\(listing, locale\)\}/.test(card) && !/\{tPrice\(listing\.price\)\}/.test(card));
   check('both card layouts print NOTHING where the price would be on a stay-length row',
     /\{stay \? null : <Text style=\{\[card\.price, card\.lpPrice\]\}/.test(card)
-    && /\{isStayLengthPriced\(listing\.source\) \? null : <Text style=\{\[card\.price, row && card\.priceRow/.test(card));
+    && /\{isShortStayListing\(listing\) \? null : <Text style=\{\[card\.price, row && card\.priceRow/.test(card));
   check('the ad page prints the price line only when listingPrice() is non-empty', /\{listingPrice\(l, locale\) \? \(\s*\n\s*<Text testID="listing-preview-price"/.test(rd('src/components/ListingPreview.tsx')));
   check('Read Aloud speaks listingPrice() and skips it when empty', /return listingPrice\(listing, 'ar'\);/.test(rd('src/lib/listingDisplay.ts'))
     && /const sentences = \[headline, price\]\.filter\(Boolean\);/.test(rd('src/lib/readAloudScript.ts')));
@@ -104,6 +107,7 @@ const swap = (rel: string, from: string, to: string) => (r: string) => {
 const mustCatch = (what: string, caught: boolean) => { if (!caught) problems.push(`MUTANT SURVIVED: ${what}`); };
 mustCatch('Gathern priced like everyone else', problemsFor((l, loc) => tPrice(l.price, loc), READ).length > 0);
 mustCatch('the old note back on Gathern', problemsFor((l, loc) => (/gathern/i.test(l.source) ? (loc === 'ar' ? OLD_NOTE_AR : 'Tap to see prices by length of stay') : listingPrice(l, loc)), READ).length > 0);
+mustCatch('a Haraj short stay priced like a yearly rent', problemsFor((l, loc) => (/haraj/i.test(l.source) ? tPrice(l.price, loc) : listingPrice(l, loc)), READ).length > 0);
 mustCatch('Aqar Monthly left out of the rule', problemsFor((l, loc) => (/aqar\s*monthly/i.test(l.source) ? tPrice(l.price, loc) : listingPrice(l, loc)), READ).length > 0);
 mustCatch('the card printing the raw price', problemsFor(listingPrice, swap('src/components/ResultCard.tsx', '{listingPrice(listing, locale)}', '{tPrice(listing.price)}')).length > 0);
 mustCatch('the laptop card drawing the (empty) price Text for a stay-length row', problemsFor(listingPrice, swap('src/components/ResultCard.tsx', '{stay ? null : <Text style={[card.price, card.lpPrice]}', '{<Text style={[card.price, card.lpPrice]}')).length > 0);

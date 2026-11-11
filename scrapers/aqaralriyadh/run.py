@@ -59,12 +59,13 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
 BASE = "https://aqaralriyadh.com"
 SOURCE = "عقار الرياض"
 PREFIX = "AQR"
 POSTS = f"{BASE}/wp-json/wp/v2/posts"
-FIELDS = "id,link,title,content,status,categories"
+FIELDS = "id,link,title,content,status,categories,date_gmt"
 
 # The category taxonomy's PLURAL type words → canonical type (map_type_exact's per-platform
 # escape hatch; exact match only). Absent on purpose: «استوديو», «دوبلكس», «مجمعات», «عقارات
@@ -245,6 +246,11 @@ def map_listing(post: dict, categories: dict[int, str]) -> tuple[Optional[dict],
         "bathrooms": count(facts.get("دورات المياه")),
         "floor_number": _FLOOR.get((facts.get("الدور") or "").strip()) if facts.get("الدور") else None,
         "photo_urls": None,      # source-does-not-publish (featured_media 0, no <img>, no og:image)
+        # THE SITE'S OWN POSTING DATE (docs/ARCHITECTURE.md §20): the post's `date_gmt` (UTC; `date` equals
+        # it on all 14 posts). Checked live 2026-11-09: post 310 date_gmt 2026-06-30T03:21:23 = the page's
+        # article:published_time «2026-06-30T03:21:23+00:00» and its printed «يونيو 30, 2026»; first seen by
+        # us 2026-09-24 17:24 UTC. Never `modified` (310: 03:28:37, an edit).
+        "date_added": site_posting_date(f"{post['date_gmt']}Z") if post.get("date_gmt") else None,
         "price_evidence": normalize.price_evidence(
             field="content «السعر:»", raw=price_raw, stored=price,
             kind="annual" if deal == "Rent" else "total", origin="structured"),
