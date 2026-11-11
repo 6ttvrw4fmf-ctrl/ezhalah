@@ -594,7 +594,9 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
                   ("الصحيح", "صحيح")),
     # ── group B (owner handoff 2026-11-01) ──
     "raised_plot": (("سعر", "اسعار", "قيمه", "ايجار", "اسقف", "سقف", "ارتفاع", "نسبه", "طلب"), ()),   # a high price / ceiling
-    "all_services": ((), ("قريبه", "قريب", "بالقرب", "المجاوره", "مجاوره", "حولها", "حوله")),       # «جميع الخدمات قريبة»
+    "all_services": (("حولها", "حوله", "حواليها", "حواليه", "جنبها", "جنبه"),                       # «حولها كل خدمات»: around it
+                     ("قريبه", "قريب", "بالقرب", "المجاوره", "مجاوره", "حولها", "حوله",            # «جميع الخدمات قريبة»
+                      "الشقه", "مستقل", "مستقله")),      # «كل خدمات الشقه مستقله»: separate utilities (P2 13085, 🔬 2026-11-11)
     "street_lights": (("جوهره"), ("تحميل", "للتحميل", "تنزيل", "للتنزيل", "والتحميل")),                                        # «رصيف تحميل» is a dock
     "approved_plan": (("مكتب", "مسوق", "وسيط", "مقاول", "مهندس", "مقيم", "مثمن", "وكيل"), ()),
     "direct_owner": (("تفويض", "توكيل", "وكاله", "بتفويض", "مفوض", "مفوضين", "وكيل", "موكل"), ()),
@@ -622,7 +624,10 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "smart_home": (("بوابه", "بوابات", "دخول", "الدخول", "مدخل", "قفل"), ()),              # «بوابات بنظام ذكي»
     "singles": (("يمنع", "نؤجر", "اؤجر", "استقبل", "نستقبل", "نعتذر"), ()),                       # the positive word inside a refusal («يمنع سكن العزاب»)
     "office_inside": (("التواصل", "تواصل", "اتصل", "بالتواصل", "تواصلوا", "راسل"), ()),
-    "for_events": (("قاعه", "صاله", "قاعات", "صالات", "لاقامه"), ()),
+    # «غرفة حفلات ومناسبات», «قاعة اجتماعات ومناسبات», «منطقة احتفالات ومناسبات للسكان»: the building's own room; «هدايا
+    # ومناسبات», «ورد … ومناسبات»: what a shop sells (P2 13085 «ومناسبات», aqar 1783289 / 19532680, 🔬 2026-11-11)
+    "for_events": (("قاعه", "صاله", "قاعات", "صالات", "لاقامه", "غرفه", "غرف", "هدايا", "هديه", "ورود", "ورد",
+                    "اجتماعات", "احتفالات", "منطقه"), ()),
     "industrial_area": (("الجبيل", "جبيل", "ينبع", "شارع"), ()),
     "quad_bikes": (("توصيل", "لتوصيل", "مندوب", "مناديب"), ()),
     "camels": (("قرين", "جرين"), ()),                                                    # «قرين ابل» is a brand
@@ -728,6 +733,7 @@ _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "rest
 _NEAR_NEVER_FACTS = frozenset({"air_conditioner", "furnished"})
 # A VIEW is not a distance (🔬 2026-11-05): «صالة معيشة مطلة بلكونة مطبخ أمريكي» has a balcony and a kitchen. A view word only
 # silences what can be outside (a park, a pool, a sea) — never the home's own rooms.
+_ROAD_NAMED = frozenset(_n(w) for w in ("الدائري", "السريع", "العام", "الرئيسي", "الدولي", "السريعه", "الرئيسيه"))
 _VIEW_WORDS = frozenset(_n(w) for w in ("مطل", "مطله", "تطل", "يطل", "اطلاله", "باطلاله", "overlooking", "views"))
 _UNIT_ROOMS = frozenset({"kitchen", "balcony", "maid_room", "driver_room", "laundry_room", "majlis", "dining_majlis", "elevator",
                          "storage", "roof", "annex", "furnished", "two_entrances", "private_entrance", "car_entrance"})
@@ -1175,6 +1181,12 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «دخل شهري: متوقع للشقه بعد التاثيث», «فرص تحقيق دخل شهري»: a
                                                      # forecast, not income the property earns (P2 13085 «دخل شهري», aqar
                                                      # 113914 / 38786, 🔬 2026-11-10)
+    if fact == "main_road" and _n(t[ws:we]).endswith("الطريق") \
+            and (_starts(_strip_wa(t[ws:we].split()[0]), tuple(_VIEW_WORDS)) or any(_strip_wa(w) in _VIEW_WORDS for w in p2)) \
+            and not (gn[:1] and (gn[0] in _ROAD_NAMED or _strip_wa(gn[0]) in _ROAD_NAMED or "ال" + _strip_wa(gn[0]) in _ROAD_NAMED)):
+        return None, s, e                            # «بلكونه (شرفه) مطلة على الطريق», «شقه … مطله على الطريق»: a view of
+                                                     # «the road», not a plot on a main road (P2 13085, 5 of 5 aqar,
+                                                     # 🔬 2026-11-11). «مطلة على الطريق الدائري» and «على طريق الملك فهد» stay.
     if fact == "reception" and re.match(r"^(?:ل|لل)استقبال(?:ك|كم|كن|كي)$", _n(t[ws:we]).lstrip("و")):
         return None, s, e                            # «جاهزة لاستقبالك», «بيتك جاهز لاستقبالك»: «ready to welcome YOU»,
                                                      # marketing, never a reception desk (P2 13085, 5 of 5 aqar, 🔬 2026-11-09)
@@ -2852,6 +2864,18 @@ def selftest() -> None:
         ("عمارة 4 أدوار", {"floors": 4.0}, ("building_rules",)),
         ("عدد الشقق 12", {"apartments_count": 12.0}, ()),
         ("عمارة فيها محلين", {"shops_count": 2.0}, ()),
+        # 🔬 2026-11-11 (P2 13085, backlog 1773): a view of «the road», a shop's goods, a building's own events room and
+        # services AROUND the home are not the feature
+        ("+ بلكونه (شرفه) مطلة على الطريق. شاشه TV", {}, ("main_road",)),                 # aqar 15126306
+        ("٣ غرف نوم واسعه و مطله على الطريق صالون و سفره", {}, ("main_road",)),           # aqar 19285205
+        ("ارض مطلة على الطريق الدائري", {"main_road": True}, ()),
+        ("عمارة تطل على طريق الملك عبدالله", {"main_road": True}, ()),
+        ("• هدايا ومناسبات ✔ واجهة واضحة", {}, ("for_events",)),                          # aqar_commercial 19532680
+        ("* غرفة حفلات ومناسبات غرف سائقين", {}, ("for_events",)),                        # aqar 1783289
+        ("استراحة للحفلات والمناسبات", {"for_events": True}, ()),
+        ("حولها كل خدمات وفي بداية الحي", {}, ("all_services",)),                         # aqar 15789013
+        ("المساحة: 130م² كل خدمات الشقه مستقله", {}, ("all_services",)),                 # aqar 15126557
+        ("ارض واصل لها جميع الخدمات", {"all_services": True}, ()),
     ]
     bad = []
     for text, want, absent in cases:
