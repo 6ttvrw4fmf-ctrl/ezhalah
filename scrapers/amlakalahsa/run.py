@@ -170,8 +170,11 @@ def _type_for_section(box_type: Optional[str], section: Optional[str], title: Op
     # first, so a qualified phrase («أرض تجارية» → Commercial Land) beats its bare word («أرض»).
     words = re.findall(r"[\u0621-\u064A]+", title or "")
     for i, word in enumerate(words):
-        if not canonical_type_from_title(word):
-            continue                                    # the phrase must START at a type word
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        starts_here = canonical_type_from_title(word) or (
+            nxt and canonical_type_from_title(f"{word} {nxt}") not in (None, canonical_type_from_title(nxt)))
+        if not starts_here:
+            continue                    # the phrase must START here: a type word, or a pair like «صالة عرض»
         for width in (3, 2, 1):
             span_type = canonical_type_from_title(" ".join(words[i:i + width]))
             if span_type in family:

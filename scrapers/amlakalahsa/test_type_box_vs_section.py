@@ -52,3 +52,7 @@ def test_a_later_landmark_never_beats_the_ads_own_type_word():               # C
     assert _type_for_section("Apartment", "land", "للبيع ارض قرب فيلا") == "Residential Land"
     assert _type_for_section("Apartment", "land", "للبيع قطعة أرض تجارية") == "Commercial Land"
     assert _type_for_section("Apartment", "land", "للبيع قطعة أرض تجارية قرب صالة تجارية") == "Commercial Land"
+
+
+def test_a_two_word_type_whose_first_word_is_not_a_type():                  # CodeRabbit #11800
+    assert _type_for_section("Apartment", "shop", "للبيع صالة عرض قرب أرض تجارية") == "Showroom"

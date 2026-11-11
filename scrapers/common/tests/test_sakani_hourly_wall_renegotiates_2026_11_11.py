@@ -44,6 +44,7 @@ def test_periodic_walls_do_not_cut_the_walk(monkeypatch):
     kw = calls["end_run"][0]
     assert kw["ok"] is True, kw
     assert "detail_walled_cut" not in kw["notes"], kw["notes"]
+    assert kw["rows_seen"] == N + 1, kw          # every unit visited (+ the stub's off-plan project)
 
 
 def test_mutant_that_counts_every_renegotiation_cuts_the_walk(monkeypatch):
