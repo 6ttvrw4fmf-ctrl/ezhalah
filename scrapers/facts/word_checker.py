@@ -551,8 +551,10 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
               ("به", "بها", "بالغرفه", "بالصاله", "بالمطبخ", "بالمجلس", "بغرفه", "بالمبني", "بالفيلا")),
     "storage": (("خلف", "بجوار", "مقابل", "صناعي", "صناعيه", "يصلح", "تصلح", "مناسب", "مناسبه", "مثالي", "مثاليه", "ينفع", "تنفع", "لبناء", "لانشاء", "او"),     # «خلف مخازن …» is an address, «أرض صناعية ومستودعات» the type
                 ("للايجار", "للبيع", "تجاري", "صناعي", "تجاريه", "صناعيه", "مبرد", "مبرده", "للتاجير")),
-    "garden": (_BEARINGS + ("مناسب", "مثالي", "خلف", "مقابل"),   # «الوجهة: غرب حديقة» is a boundary; «مناسب للحديقة» a maybe
-               ("عامه", "عام", "الحي", "العامه")),
+    # «أرض سكنية شارع وحديقة»: the plot's neighbours, not its garden (🔬 2026-11-11 garden sample, aqar 3543112)
+    "garden": (_BEARINGS + ("مناسب", "مثالي", "خلف", "مقابل", "شارع", "شارعين"),   # «الوجهة: غرب حديقة» is a boundary
+               # «حديقة الإمام وبجانبها ملعب», «حديقة الملك عبدالله»: a named public park (aqar 10513608, 2026-11-11)
+               ("عامه", "عام", "الحي", "العامه", "الملك", "الامير", "الامام", "الشيخ", "الملكه", "الاميره")),
     "parking": (_BEARINGS, ()),
     # A POSSIBLE use or the STREET's shops are not shops inside the property (🔬 2026-11-07 two-way sample, 4 of 25
     # served yeses wrong): «مناسبة لمحلات تجارية» (aqar 20809503), «منها: كافيه أو مطعم 🏪 4 محلات حسب الرخصة» (9566204),
@@ -1374,7 +1376,10 @@ _STAR_BULLET_RE = re.compile(r"(?<=\s)\*+(?=\s)")
 # العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية» the «المرافق» is what the flat is near, not «مرافق المشروع», so the
 # area's shops / market / mosque after it are the area's. Only that one word: «قريب من الخدمات ويوجد بالمجمع مسجد» still
 # owns its mosque («يوجد»), and a second «مرافق» later in the clause still counts.
-_NEAR_OBJECT_SKIP = frozenset(_n(w) for w in ("من", "جميع", "كل", "لجميع", "لكل", "الى", "إلى", "ل", "جدا", "جداً"))
+# «قريب من أهم الخدمات والمرافق🔥:- 🕌 مسجد 🌳 حديقة» (aqar 15006770 / 15017963, 🔬 2026-11-11 garden sample): «أهم / أبرز /
+# كافة» before the services word is the same heading
+_NEAR_OBJECT_SKIP = frozenset(_n(w) for w in ("من", "جميع", "كل", "لجميع", "لكل", "الى", "إلى", "ل", "جدا", "جداً",
+                                              "اهم", "ابرز", "افضل", "كافه", "كافة", "مختلف"))
 
 
 def _near_object_at(words: list[str], at: int) -> int:
@@ -1406,6 +1411,9 @@ def _svc_heading_end(words: list[str]) -> int:
             while j < len(words) and _strip_wa(words[j]) in _NEAR_OBJECT_SKIP:
                 j += 1
             if j < len(words) and _starts(_strip_wa(words[j]), _SERVICES_OBJECT):
+                # «الخدمات والمرافق» is ONE heading object: the «مرافق» joined to it is not «مرافق المشروع» (🔬 2026-11-11)
+                while j + 1 < len(words) and words[j + 1].startswith("و") and _starts(_strip_wa(words[j + 1]), _SERVICES_OBJECT):
+                    j += 1
                 return j + 1
     return -1
 
@@ -1566,7 +1574,9 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # an item that STARTS with a place runs on as the list's item however long the clause is: «إطلالة ونافذة على: حديقة،
         # جامع، ونادي صحي خدمات الموقع القريبة: * مدارس» (aqar 15128626, 🔬 2026-11-06 — the view's gym served as the unit's)
         list_base = near_list and comma and (len(words) <= 5 or _starts(_strip_wa(words[0]), _PLACE_WORDS)) \
-            and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words)
+            and any(_starts(_strip_wa(w), _PLACE_WORDS) or _strip_wa(w) in _SERVICES_OBJECT for w in words)
+        # «بالقرب من المسجد، المدارس، الخدمات، والحديقة» (aqar 14865940, 🔬 2026-11-11): «الخدمات» is an ITEM of the list,
+        # so the park after it is still the area's
         list_in = list_base and not _owns_item(words)
         # …but only the ITEM continues the list: a spaced «*» bullet starts the next one (🔬 2026-11-07, P1 13301). aqar
         # 15128626 «إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس … * اتحاد ملاك مجاناً مميزات
@@ -2884,6 +2894,13 @@ def selftest() -> None:
         ("جميع خدمات الشقة متوفرة", {"all_services": True}, ()),
         ("شاليه فيه غرفتين ومسموح للمناسبات", {"for_events": True}, ()),
         ("شاليه فيه غرفتين ممنوع الحفلات", {"for_events": False}, ()),
+        # 🔬 2026-11-11 garden precision sample (5 of 25 served yeses were nearby places)
+        ("📍قريب من أهم الخدمات والمرافق🔥:- 🕌 مسجد 🌳 حديقة 🏃🏻‍♂️ ممشى الرحاب 🏥 مركز صحي", {}, ("garden",)),  # aqar 15006770
+        ("- مجمع كفاءات الطبي. - حديقة الإمام وبجانبها ملعب.", {}, ("garden",)),                          # aqar 10513608
+        ("◾️أرض سكنية شارع وحديقة في مركز البندرية", {}, ("garden",)),                                     # aqar 3543112
+        ("موقع مميز بالقرب من المسجد، المدارس، الخدمات، والحديقة. تفاصيل العقار", {}, ("garden",)),        # aqar 14865940
+        ("* حوش واسع. * مدخل سيارة. * حديقة خلفية. * مكيفات راكبة.", {"garden": True}, ()),                # aqar 14870810
+        ("مخازن وحديقة خاصة. ☀️ الدور الأول: صالة عائلية", {"garden": True}, ()),                          # aqar 18338000
     ]
     bad = []
     for text, want, absent in cases:
