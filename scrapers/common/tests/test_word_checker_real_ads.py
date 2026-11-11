@@ -34,8 +34,13 @@ def _rows():
     return [json.loads(line) for line in GOLD.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+# Text facts the lock also pins (🔬 2026-11-11, backlog 1718): a land's use is a verdict a customer's land group will
+# read, so a reader change that moves one must be as loud as a yes/no change.
+_LOCKED_TEXT = frozenset({"land_use_ar"})
+
+
 def _answers(text):
-    return {k: v for k, v in W.facts_of(text).items() if isinstance(v, bool)}
+    return {k: v for k, v in W.facts_of(text).items() if isinstance(v, bool) or k in _LOCKED_TEXT}
 
 
 def _diffs(rows):

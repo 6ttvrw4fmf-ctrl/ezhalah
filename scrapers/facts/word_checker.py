@@ -801,6 +801,17 @@ _STOVE_CUES = tuple(_n(w) for w in ("فرن", "الفرن", "افران", "شف�
                                     "built", "اجهز", "الاجهز", "ادوات", "صحون", "الصحون", "فريزر", "قهوه", "القهوه", "اسطوان",
                                     "مزدوج", "انفرا", "حراري", "ستيل", "اطباق", "الاطباق", "قدور", "القدور", "ملاعق",
                                     "كاسات", "اواني", "الاواني", "اوني", "سرفيس", "لطبخ", "لطهي", "كهري"))
+_LAND_USE_WORD = r"(?:ال)?(?:سكني|سكنيه|تجاري|تجاريه|زراعي|زراعيه|صناعي|صناعيه)"
+_LAND_WANTED = frozenset(_n(w) for w in ("مطلوب", "مطلوبه", "نشتري", "نبحث", "نرغب", "شراء"))
+_LAND_USE_WORD_RE = re.compile(r"(?:و)?" + _LAND_USE_WORD)
+_LAND_USE_OF = {"سكني": "سكني", "تجار": "تجاري", "زراع": "زراعي", "صناع": "صناعي"}
+_LAND_USE = re.compile(
+    r"(?<!\w)(?:"
+    r"(?:و|ب|ل|ال|وال|بال)?(?:ارض|ارضين|اراضي|ارضيه|قطعه|قطعتين|قطع)(?:[ _](?:ال)?(?:زاويه|مميزه|مميز|فضاء))?(?: (?:للبيع|للايجار))?"
+    r"|(?:و|ب)?صك(?: (?:ال)?(?:الكتروني|الكترونى))?"
+    r"|استخدام (?:ال)?(?:عقار|ارض)|(?:ال)?استخدام|نوع (?:ال)?ارض|تصريح بناء|رخصه بناء"
+    r")[ _]+(?P<u>" + _LAND_USE_WORD + r")(?:[ _]+و?(?P<u2>" + _LAND_USE_WORD + r"))?(?!\w)")
+_LAND_CONVERT = re.compile(r"(?<!\w)(?:قابل|قابله|يمكن|امكانيه)?\s?(?:لل)?(?:تحويل|تحول|تحويلها|تحويله)(?!\w)")
 _SENTENCE_END = re.compile(r"[.!?؟\n]")
 
 
@@ -1736,6 +1747,29 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             if ci0 == ci1:
                 q = quote_of(ci0, m0.start(), m1.end())
                 emit("boundaries", " ".join(q.split())[:300], q)
+    # LAND USE (owner decision 2026-11-08, backlog 1650/1718): what a plain «أرض» ad says its land is zoned for. Only a
+    # head that NAMES the land or its deed carries it — «ارض/قطعه/اراضي (زاويه|مميزه)? سكنيه», «صك زراعي», «استخدام
+    # العقار: تجاري», «نوع الارض: صناعي», «تصريح بناء سكني». «شارع تجاري», «موقع تجاري», «السجل التجاري», «مشروع سكني»,
+    # «مجمع سكني» never: they are a street, a pitch, a broker licence, a building. Two different uses anywhere in the ad
+    # («ارض زاويه تجاريه سكنيه», «استخدام العقار: سكني-تجاري»), a conversion («قابله للتحويل») or a near word before the
+    # head («قريبه من ارض تجاريه») → none: silence is unknown, never a pick.
+    land_uses: dict[str, tuple[int, int, int]] = {}
+    for ci, (_o, _c, t, _i) in enumerate(clauses):
+        if _LAND_CONVERT.search(t):
+            land_uses["?"] = (ci, 0, 0)
+            continue
+        for m in _LAND_USE.finditer(t):
+            before = t[:m.start()].split()[-3:]
+            if any(w in _NEAR_WORDS or w in _LAND_WANTED for w in before):
+                continue           # «قريبه من ارض تجاريه», a broker's «مطلوب اراضي تجاريه»: not this ad's land
+            nxt = clauses[ci + 1][2].split()[:1] if ci + 1 < len(clauses) and not t[m.end():].strip() else []
+            more = _LAND_USE_WORD_RE.fullmatch(nxt[0]).group(0) if nxt and _LAND_USE_WORD_RE.fullmatch(nxt[0]) else None
+            for u in (m.group("u"), m.group("u2"), more):    # «( تجاري / سكني )»: «/» breaks the clause, not the pair
+                if u:
+                    land_uses.setdefault(_LAND_USE_OF[u.removeprefix("و").removeprefix("ال")[:4]], (ci, m.start(), m.end()))
+    if len(land_uses) == 1 and "?" not in land_uses:
+        u, (ci, s0, e0) = next(iter(land_uses.items()))
+        emit("land_use_ar", u, quote_of(ci, s0, e0))
     return out
 
 
@@ -2852,6 +2886,31 @@ def selftest() -> None:
         ("عمارة 4 أدوار", {"floors": 4.0}, ("building_rules",)),
         ("عدد الشقق 12", {"apartments_count": 12.0}, ()),
         ("عمارة فيها محلين", {"shops_count": 2.0}, ()),
+        # 🔬 2026-11-11 (backlog 1718, owner's plain-«أرض» decision 2026-11-08): a land's use only from a head that names
+        # the land or its deed; two uses, a conversion or a near word → none
+        ("للبيع ارض زاوية سكنية شرق بريدة", {"land_use_ar": "سكني"}, ()),                 # aqar 6989916
+        ("قطعة زراعيه للبيع – النبقية", {"land_use_ar": "زراعي"}, ()),                     # haraj 19324720
+        ("ارض بصك زراعي", {"land_use_ar": "زراعي"}, ()),                                   # aqar 11510463
+        ("ارض مميزة تجارية على خط الرياض", {"land_use_ar": "تجاري"}, ()),                  # aqar 21176062
+        ("للبيع ارض صناعيه مساحة : 5000 متر", {"land_use_ar": "صناعي"}, ()),               # haraj 23548266
+        ("الأرض بمخطط معتمد وصك الكتروني سكني", {"land_use_ar": "سكني"}, ()),              # aqar 10932898
+        ("نوع الأرض : تجارية", {"land_use_ar": "تجاري"}, ()),
+        ("الاستخدام: صناعي", {"land_use_ar": "صناعي"}, ()),
+        ("ارض زاويه تجاريه سكنيه للايجار", {}, ("land_use_ar",)),                          # aqar 20871284
+        ("استخدام العقار: سكني-تجاري. عدد الشوارع: شارع واحد", {}, ("land_use_ar",)),      # aqar 17753606
+        ("ارض سكنية قريبة من ارض تجارية", {"land_use_ar": "سكني"}, ()),                 # the nearby one is not this land
+        ("أرض زراعية قابلة للتحويل إلى سكني", {}, ("land_use_ar",)),
+        ("خلف الأرض شارع تجاري • قريبه من جميع الخدمات", {}, ("land_use_ar",)),           # haraj 18743550
+        ("موقع تجاري للبيع", {}, ("land_use_ar",)),                                       # haraj 20641041
+        ("رخص فال السجل التجاري", {}, ("land_use_ar",)),                                   # haraj 18946243
+        ("للبيع مجمع سكني مطل", {}, ("land_use_ar",)),
+        ("مناسبة لإقامة مشروع استثماري أو قصر سكني", {}, ("land_use_ar",)),               # aqar 114530
+        ("أرض ليست زراعية", {}, ("land_use_ar",)),
+        ("أرض للبيع تجارية في حي طويق بالرياض", {"land_use_ar": "تجاري"}, ()),            # aqar 18818283
+        ("ارض للبيع( سكنيه ) التفاصيل", {"land_use_ar": "سكني"}, ()),                       # aqar 10530615
+        ("الارض للبيع تجاري سكني من المالك مباشرة", {}, ("land_use_ar",)),                # aqar 8017472
+        ("مطلوب أراضي تجارية على شارع الملك عبدالعزيز", {}, ("land_use_ar",)),
+        ("قطعتي ارض للبيع الاستخدام ( تجاري / سكني ) الارض على صكين", {}, ("land_use_ar",)),   # aqar 11518885
     ]
     bad = []
     for text, want, absent in cases:
