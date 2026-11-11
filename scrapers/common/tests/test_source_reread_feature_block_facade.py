@@ -94,3 +94,10 @@ def test_a_calendar_year_after_the_age_label_is_not_one_year():
     for text in ("عمر العقار: عام 2020", "عمر العقار: سنة ٢٠١٩"):
         line = norm(text)
         assert _cmp_number(1, [line], line, AGE_KW) != MATCH
+
+
+def test_a_single_bearing_does_not_match_a_diagonal_facade():
+    # CodeRabbit on #11465: stored «شرق» inside «جنوبية شرقية» is not the same facade
+    assert compare_listing({"direction_ar": "شرق"}, page("جنوبية شرقية"))["direction_ar"] == MISMATCH
+    assert compare_listing({"direction_ar": "جنوب شرق"}, page("جنوبية شرقية"))["direction_ar"] == MATCH
+    assert compare_listing({"direction_ar": "شرق"}, page("شرقية"))["direction_ar"] == MATCH

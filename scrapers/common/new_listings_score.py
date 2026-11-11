@@ -316,7 +316,17 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 # (normalised: «"name": "الواجهه", "value": "جنوبيه شرقيه"») — never a bearing in another property's value.
                 if out[name] == MISMATCH and ar and re.search(r"(?:" + kw + r")[\"' \t,:]*(?:value[\"' \t,:]*)?" + ar, norm(whole)):
                     out[name] = MATCH
+            # A single bearing is not a diagonal: stored «شرق» sits inside vmksa's «واجهة العقار جنوبية شرقية», and
+            # _cmp_word's substring test called it a MATCH (CodeRabbit on #11465). When every facade line that states a
+            # bearing states a diagonal, a one-word facade disagrees with it.
+            if name == "direction_ar" and out[name] == MATCH and stored.get(col) and len(norm(str(stored.get(col))).split()) == 1:
+                stated = [norm(x) for x in lines if re.search(kw, norm(x)) and re.search(r"شمال|جنوب|شرق|غرب", norm(x))]
+                if stated and all(_DIAGONAL.search(x) for x in stated):
+                    out[name] = MISMATCH
     return out
+
+
+_DIAGONAL = re.compile(r"(?:شمال|جنوب)\S*\s*[-–/]?\s*(?:ال)?(?:شرق|غرب)")
 
 
 def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = "") -> bool:
