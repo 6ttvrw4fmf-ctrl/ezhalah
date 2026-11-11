@@ -129,7 +129,8 @@ _NUMS = re.compile(r"\d[\d,٬.]*")
 # «mentioned» and the ladder answered «total». A mention now counts only when the figure is not printed as one of
 # those — and a price word right before it («السعر 1,400», «السوم 850», «المطلوب: 400,000») always keeps it a price.
 _THE_METRE_AFTER = re.compile(r"\s*المتر(?![\u0621-\u064A])")
-_PRICE_BEFORE = re.compile(r"(?:سعر|السعر|سوم|السوم|المطلوب|مطلوب|البيع|بسعر|بمبلغ|ريال)\s*[:\uff1a\-/]?\s*$")
+# A price LABEL right before the figure. Not «ريال»: in «السعر 500 ريال 300 م2» it belongs to the 500 (CodeRabbit on #11747).
+_PRICE_BEFORE = re.compile(r"(?:سعر|السعر|سوم|السوم|المطلوب|مطلوب|البيع|بسعر|بمبلغ)\s*[:\uff1a\-/]?\s*$")
 # A currency word right after the figure makes it a price whatever stands before it — «عرض 1400 ريال» is an offer of
 # 1,400, not a street width (CodeRabbit on #11747).
 _PRICE_AFTER = re.compile(r"\s*(?:ريال|ر\.?\s?س|SAR|\ufdfc)", re.I)
@@ -147,8 +148,8 @@ def _printed_as_something_else(t: str, m: "re.Match[str]") -> bool:
         return False
     # «7000 المتر» is the metre price even with no price word before it (CodeRabbit on #11747) — unless the figure is
     # introduced as the area («المساحة 1000 المتر»). A bare «متر» after a figure stays an area.
-    if _THE_METRE_AFTER.match(t, m.end()) and not _AREA_BEFORE.search(before):
-        return False
+    if _THE_METRE_AFTER.match(t, m.end()) and not (_AREA_BEFORE.search(before) or _OTHER_BEFORE.search(before)):
+        return False      # «بطول 30 المتر» / «عرض 20 المتر» stay measurements (CodeRabbit on #11747)
     if before.endswith("م") and m.group(0) in ("2", "٢"):        # the 2 of «م2»
         return True
     return bool(_OTHER_BEFORE.search(before) or _OTHER_AFTER.search(after))

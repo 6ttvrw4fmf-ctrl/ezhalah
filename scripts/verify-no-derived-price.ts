@@ -152,9 +152,9 @@ for (const f of pyFiles) {
 // (2026-10-18: 332 → 338 — the district-precedence change above it added six lines; still the only call.)
 // (2026-10-19: 349 → 379 — licence_district() and its hook above it added thirty lines; still the only call.)
 // (2026-10-19: 379 → 400 — deal_conflict() above map_post (backlog 656/672) added 21 lines; still the only call.)
-// (2026-11-11: 415 → 454 — _printed_as_something_else() and its regexes above land_price_basis (owner launch audit,
-//  «we can get sued»; CodeRabbit on #11747) added 39 lines; still the only call.)
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663', 'scrapers/haraj/run.py:454']);
+// (2026-11-11: 415 → 455 — _printed_as_something_else() and its regexes above land_price_basis (owner launch audit,
+//  «we can get sued»; CodeRabbit on #11747) added 40 lines; still the only call.)
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663', 'scrapers/haraj/run.py:455']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);

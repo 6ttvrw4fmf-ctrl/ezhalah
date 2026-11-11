@@ -85,6 +85,18 @@ def test_the_metre_word_needs_no_price_word_and_no_area(area):
     assert R.land_price_basis(7000, area, "أرض للبيع في حي العارض 7000 المتر على شارعين") == "per_meter"
 
 
+@pytest.mark.parametrize("text", ["بطول 30 المتر", "شارع عرض 30 المتر", "قطعة رقم 30 المتر"])
+def test_a_length_or_number_before_the_metre_word_is_not_a_price(text):
+    # CodeRabbit on #11747: only the AREA used to be excluded; a length or a plot number stays a measurement too
+    assert R.land_price_basis(30, None, text) is None
+
+
+def test_a_currency_word_belongs_to_the_figure_before_it():
+    # «السعر 500 ريال 300 م2»: the riyal is 500's; 300 is the area, never a stated total (the ladder decides)
+    assert R._printed_as_something_else("السعر 500 ريال 300 م2", list(R._NUMS.finditer("السعر 500 ريال 300 م2"))[1])
+    assert R.land_price_basis(300, 300, "السعر 500 ريال 300 م2") == "per_meter"
+
+
 def test_an_area_written_with_the_metre_word_is_still_an_area():
     assert R._printed_as_something_else("المساحة 1000 المتر", next(R._NUMS.finditer("المساحة 1000 المتر")))
 
