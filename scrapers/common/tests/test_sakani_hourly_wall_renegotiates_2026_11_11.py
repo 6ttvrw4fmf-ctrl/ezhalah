@@ -52,3 +52,20 @@ def test_mutant_that_counts_every_renegotiation_cuts_the_walk(monkeypatch):
     monkeypatch.setattr(SKN, "SESSION_PRODUCTIVE", 10 ** 9)
     calls = _run(monkeypatch)
     assert "detail_walled_cut" in calls["end_run"][0]["notes"], calls["end_run"][0]["notes"]
+
+
+def test_a_failed_handshake_after_real_reads_keeps_them(monkeypatch):            # CodeRabbit #11800
+    calls = _sakani_stubs(monkeypatch, N, _hourly_wall())
+    made = {"n": 0}
+
+    def flaky_session():
+        made["n"] += 1
+        if made["n"] > 1:
+            raise RuntimeError("handshake refused")
+        return object()
+    monkeypatch.setattr(SKN, "session", flaky_session)
+    monkeypatch.setattr(SKN, "_controls_live",
+                        lambda ads: (_ for _ in ()).throw(AssertionError("a partial run must not prune")))
+    assert SKN.main() == 0
+    assert calls["batch"] == ["sakani_residential_listings", "sakani_commercial_listings"], calls["batch"]
+    assert "detail_walled_cut" in calls["end_run"][0]["notes"]

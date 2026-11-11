@@ -225,7 +225,8 @@ def map_project(card: dict, d: dict[str, Any]) -> tuple[Optional[tuple[dict, str
     info = {"source_id": pid, "status_ar": tags, "type_ar": type_ar, "distance_to_haram_ar": haram,
             "amenities_ar": d.get("amenities") or None,
             # The pin the project's own map button names. The page was read and has no button → the source's
-            # silence (pin_absent); a button whose hop failed says nothing, so keep_stored_pin keeps the old pair.
+            # silence (pin_absent); a button whose hop failed says nothing (no pin_absent). NOTE: daraa tables carry no
+            # keep_stored_pin trigger yet (backlog, ⚡ 11-11), so a failed hop can drop a stored pair on rewrite.
             **(d.get("pin") or ({} if d.get("pin_link") else {"pin_absent": True})),
             "pin_link": d.get("pin_link")}
     row["additional_info"] = redact_capture(strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [], {})}))

@@ -156,7 +156,10 @@ def gallery_url(u: Any) -> Optional[str]:
     u = u.strip()
     if u.startswith("/") and not u.startswith("//"):
         return BASE + quote(u, safe="/")
-    parts = urlsplit(u if not u.startswith("//") else "https:" + u)
+    try:
+        parts = urlsplit(u if not u.startswith("//") else "https:" + u)
+    except ValueError:                      # a malformed entry («http://[x/a.jpg») is no photo, never a crash
+        return None
     if parts.scheme in ("http", "https") and (parts.hostname or "").lower() in ("www.tamyaz-sa.com", "tamyaz-sa.com") \
             and parts.path.startswith("/"):
         return BASE + quote(unquote(parts.path), safe="/")

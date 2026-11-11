@@ -971,7 +971,17 @@ def main() -> int:
                     print(f"   ↻ detail route walled — fresh session {renegotiated}/{MAX_RENEGOTIATIONS} "
                           f"(after {details_read} details read)", flush=True)
                     time.sleep(WALL_COOLDOWN_S)
-                    _oracle_sess = s = session()
+                    try:
+                        _oracle_sess = s = session()
+                    except Exception as e:  # noqa: BLE001 — a failed handshake after real reads is a late wall
+                        if not details_read:
+                            raise
+                        cut = len(units) - n_unit
+                        skipped["detail_walled_cut"] = cut
+                        partial = True
+                        print(f"  ⛔ fresh session failed ({type(e).__name__}) at unit {seen} of {len(units)}: "
+                              f"keeping the {details_read} detail(s) read, {cut} left unread, no prune", flush=True)
+                        break
                     state, detail = fetch_detail(s, uid)
                     walled_run = 1 if state == "miss" else 0
                 if state == "ok":

@@ -22,3 +22,12 @@ def test_relative_path_still_works_and_other_hosts_never_do():
     assert R.gallery_url("https://cdn.example.com/x.jpg") is None
     assert R.gallery_url("//evil.example/x.jpg") is None
     assert R.gallery_url("") is None and R.gallery_url(None) is None
+
+
+def test_map_listing_keeps_a_same_host_absolute_gallery_url(monkeypatch):     # CodeRabbit #11800
+    from scrapers.common.tests.test_tamyaz_hash_route_investment_and_ui_period import ROOF, _p
+    monkeypatch.setattr(R, "to_catalog", lambda c, region_hint=None: (18, 2) if c == "جدة" else (None, None))
+    monkeypatch.setattr(R, "find_district_in_text", lambda t, c: None)
+    p = _p(ROOF, gallery=["http://www.tamyaz-sa.com/uploads/u-1791904013725-aee4ae1f.jpg", "http://[bad/x.jpg"])
+    row, _, why = R.map_listing(p)
+    assert why == "" and row["photo_urls"] == ["https://www.tamyaz-sa.com/uploads/u-1791904013725-aee4ae1f.jpg"]
