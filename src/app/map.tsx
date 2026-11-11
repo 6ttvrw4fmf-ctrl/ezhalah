@@ -22,6 +22,7 @@ import { filterCount, furnitureOffered, postedOffered } from '@/lib/mapFilter';
 type MapModules = {
   AppleMap: typeof import('@/components/AppleMap').default;
   countPinsInView: typeof import('@/components/AppleMap').countPinsInView;
+  countPostedWindowsInView: typeof import('@/components/AppleMap').countPostedWindowsInView;
   MapDealRow: typeof import('@/components/MapDealRow').default;
   MapSearchBar: typeof import('@/components/MapDealRow').MapSearchBar;
   MapRouteFields: typeof import('@/components/MapDealRow').MapRouteFields;
@@ -34,7 +35,7 @@ function useMapModules(): MapModules | null {
     if (loadedMods) return;
     let on = true;
     Promise.all([import('@/components/AppleMap'), import('@/components/MapDealRow')]).then(([a, d]) => {
-      loadedMods = { AppleMap: a.default, countPinsInView: a.countPinsInView, MapDealRow: d.default, MapSearchBar: d.MapSearchBar, MapRouteFields: d.MapRouteFields };
+      loadedMods = { AppleMap: a.default, countPinsInView: a.countPinsInView, countPostedWindowsInView: a.countPostedWindowsInView, MapDealRow: d.default, MapSearchBar: d.MapSearchBar, MapRouteFields: d.MapRouteFields };
       if (on) setMods(loadedMods);
     });
     return () => { on = false; };
@@ -171,7 +172,7 @@ export default function MapRoute() {
       {M && <M.AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals, ...pinFilterOf(mapFilter, deals) }} onPinSelect={(row) => { setPinRow(row); }} />}
       {pinRow ? <MapPinSheet row={pinRow} onClose={() => setPinRow(null)} /> : null}
       </View>
-      {filterOpen && M ? <MapFilterCard value={mapFilter} deals={deals} onClose={() => setFilterOpen(false)} onClear={() => { setMapFilter(EMPTY_MAP_FILTER); setPinRow(null); }} onApply={(f) => { setMapFilter(f); setFilterOpen(false); setPinRow(null); }} countPins={(f) => M.countPinsInView({ deals, ...pinFilterOf(f, deals) })} /> : null}
+      {filterOpen && M ? <MapFilterCard value={mapFilter} deals={deals} onClose={() => setFilterOpen(false)} onClear={() => { setMapFilter(EMPTY_MAP_FILTER); setPinRow(null); }} onApply={(f) => { setMapFilter(f); setFilterOpen(false); setPinRow(null); }} countPins={(f) => M.countPinsInView({ deals, ...pinFilterOf(f, deals) })} countPostedWindows={(f) => M.countPostedWindowsInView({ deals, ...pinFilterOf(f, deals) })} /> : null}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
     </View>

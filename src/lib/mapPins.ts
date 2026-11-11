@@ -190,6 +190,13 @@ export function rpcArgs(box: { s: number; w: number; n: number; e: number }, cel
   };
 }
 
+/** The arguments of map_posted_window_counts_ar(): map_pins_ar's own, minus the cell, the cap and the window (every window
+ *  is counted at once) — so the map menu's numbers count exactly the pins the map's button counts. */
+export function postedCountArgs(box: { s: number; w: number; n: number; e: number }, f: PinFilter): Record<string, unknown> {
+  const { p_cell: _c, p_limit: _l, p_posted_within_days: _p, ...args } = rpcArgs(box, 0, { ...f, postedWithinDays: null }) as Record<string, unknown>;
+  return args;
+}
+
 /** Pure: the RPC's `{ data, error }` → rows, or 'unknown' when the fetch failed (A FAILED FETCH IS NOT AN EMPTY ANSWER:
  *  an empty map after an error must never read as «no listings here»). */
 export function pinsFrom(result: { data: unknown; error: unknown }): PinRow[] | 'unknown' {

@@ -22,4 +22,5 @@ const s = StyleSheet.create({
   frame: { flex: 1, borderRadius: 16, backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
 });
 export async function countPinsInView(_f: unknown): Promise<number | null> { return null; }
+export async function countPostedWindowsInView(_f: unknown): Promise<Record<string, number> | null> { return null; }
 export function prewarmMap(): void {}
