@@ -199,10 +199,13 @@ check('Arabic Age «5 years» keeps its meaning', format('Age', '5 years', 'ar')
     if (!existsSync(f)) continue;
     const py = readFileSync(f, 'utf8');
     for (const [, label] of py.matchAll(/"label":\s*"([A-Z][^"]*)"/g)) found.set(label, f);
+    // Row helpers called as add("key", "Label", value) — aqargate, wasalt (CodeRabbit on #11739).
+    for (const [, label] of py.matchAll(/\badd\(\s*"[A-Za-z_0-9]+",\s*"([A-Z][^"]*)"/g)) found.set(label, f);
     const block = /^_EXTRA_FIELDS\s*=\s*\[([\s\S]*?)^\]/m.exec(py);
     if (block) for (const [, label] of block[1].matchAll(/\("[a-z_0-9]+",\s*"([^"]+)"\)/g)) found.set(label, f);
   }
-  check('the scraper label discovery found the office-site lists', ['Street width (E)', 'Living rooms', 'Facade'].every((l) => found.has(l)),
+  check('the scraper label discovery found the office-site lists and the add(...) helpers',
+    ['Street width (E)', 'Living rooms', 'Facade', 'Ad source', 'License Issuance Date'].every((l) => found.has(l)),
     `found ${found.size}`);
   const missingIn = (cat: Record<string, string>) => [...found].filter(([l]) => !/[ء-ي]/.test(cat[l] ?? ''));
   const missing = missingIn(AR_CAT);
@@ -212,6 +215,9 @@ check('Arabic Age «5 years» keeps its meaning', format('Age', '5 years', 'ar')
   const { 'Street width (E)': _dropped, ...mutantCat } = AR_CAT;
   check('MUTATION: a scraper row name missing from the catalog is caught',
     missingIn(mutantCat).some(([l]) => l === 'Street width (E)'));
+  const { 'Ad source': _dropped2, ...mutantCat2 } = AR_CAT;
+  check('MUTATION: a label passed to an add(...) helper missing from the catalog is caught',
+    missingIn(mutantCat2).some(([l]) => l === 'Ad source'));
 }
 for (const [, name] of readFileSync('src/lib/listingDisplay.ts', 'utf8').matchAll(/return '([^']*[ء-ي][^']*)'/g)) {
   check(`English platform name: ${name}`, !/[ء-ي]/.test(englishCatalogText(name)));
