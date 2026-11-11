@@ -61,7 +61,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 from curl_cffi import requests as cc
 
@@ -144,6 +144,25 @@ def _created_at(raw: Any) -> Optional[str]:
         return None
 
 
+def gallery_url(u: Any) -> Optional[str]:
+    """One gallery entry → an absolute https photo URL on the site's OWN host, else None.
+
+    The 2026-09-24 records wrote a relative path («/images/…»). Every record saved since ~2026-10-07 writes the
+    full address instead («http://www.tamyaz-sa.com/uploads/u-1791904013725-aee4ae1f.jpg», probe run 42762143257,
+    7 of 7 photo-less ads), which the old «starts with /» test dropped: 7 of 17 served cards had no photo
+    (backlog 1643). Another host is never taken (a photo the site does not serve is not its photo)."""
+    if not isinstance(u, str) or not u.strip():
+        return None
+    u = u.strip()
+    if u.startswith("/") and not u.startswith("//"):
+        return BASE + quote(u, safe="/")
+    parts = urlsplit(u if not u.startswith("//") else "https:" + u)
+    if parts.scheme in ("http", "https") and (parts.hostname or "").lower() in ("www.tamyaz-sa.com", "tamyaz-sa.com") \
+            and parts.path.startswith("/"):
+        return BASE + quote(unquote(parts.path), safe="/")
+    return None
+
+
 def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     pid = str(p.get("id") or "").strip()
     if not pid:
@@ -185,7 +204,7 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     desc = redact_pii(str((p.get("desc") or {}).get("ar") or "").strip() or None)
     chip_cols, labels = _amenities(p.get("amenities") or [])
     amen_text = "، ".join(labels) + "\n" + (desc or "")
-    photos = [BASE + quote(u, safe="/") for u in (p.get("gallery") or []) if isinstance(u, str) and u.startswith("/")] or None
+    photos = [u for u in (gallery_url(x) for x in (p.get("gallery") or [])) if u] or None
     price = _pos(p.get("price"))
     for_sale = bool(p.get("forSale"))
     row: dict[str, Any] = {

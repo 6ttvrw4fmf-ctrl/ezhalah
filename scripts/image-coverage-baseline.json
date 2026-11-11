@@ -923,6 +923,12 @@
       "today_pct": 100.0,
       "active_rows": 12,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 12 of 12 rows carried photo_urls (12 mapped of the 27 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~8 points; floor set one listing below the observation."
+    },
+    "propertyfinder": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 4677,
+      "note": "Declared 2026-11-10 (⚡): live since 2026-11-04 and never declared, so loader-active-platforms-check failed «4575 live rows but NOT in the baseline» every 6 h. mon_image_coverage 2026-11-05..11-10: 100.0% every day (4,541 → 4,677 active, with_images = active_rows); scrapers/propertyfinder/run.py stores images[].medium|small. Floor 95: a real capture regression (~230 ads) fires, churn does not."
     }
   }
 }
