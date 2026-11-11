@@ -67,16 +67,16 @@ mustCatch('a joined head that drops its price (the old joinPins)', pinHead(dropp
 // 3c. Corners (owner 2026-11-11: «put this zoom in thing on the right … put the drawing on the left»): ⤢ top-right,
 // «رسم» top-left, in the small map box too.
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
-const CORNERS = (src: string) => /<Pressable style=\{\[s\.closeBtn, s\.closeBtnRight\]\} onPress=\{\(\) => \{ openFull\(\); closePanels\(\); onExpand\(\); \}\}/.test(src)
+const CORNERS = (src: string) => /<Pressable style=\{\[s\.closeBtn, s\.closeBtnRight\]\} onPress=\{\(\) => \{ closePanels\(\); onExpand\(\); openFull\(\); \}\}/.test(src)
   && /\(onClose \|\| onExpand\) && !drawing \? s\.topRightAsLeft : s\.topRightAt/.test(src);
 check('the small map: ⤢ sits top-right and «رسم» top-left', CORNERS(web));
-mustCatch('⤢ moved back to the top-left', !CORNERS(web.replace('s.closeBtn, s.closeBtnRight]} onPress={() => { openFull(); closePanels(); onExpand(); }}', 's.closeBtn, s.closeBtnLeft]} onPress={() => { openFull(); closePanels(); onExpand(); }}')));
+mustCatch('⤢ moved back to the top-left', !CORNERS(web.replace('s.closeBtn, s.closeBtnRight]} onPress={() => { closePanels(); onExpand(); openFull(); }}', 's.closeBtn, s.closeBtnLeft]} onPress={() => { closePanels(); onExpand(); openFull(); }}')));
 
 // 3d. The «tap to open» hint points at ⤢ until this device has opened the big map once (owner 2026-11-11).
 const HINT = (src: string) => /testID="map-expand-hint"/.test(src) && /onExpand && expandHint && !failed && !drawing && roomy/.test(src)
-  && /onPress=\{\(\) => \{ openFull\(\); closePanels\(\); onExpand\(\); \}\} hitSlop=\{8\}/.test(src) && /setItem\(EXPAND_HINT_KEY, '1'\)/.test(src);
+  && /onPress=\{\(\) => \{ closePanels\(\); onExpand\(\); openFull\(\); \}\} hitSlop=\{8\}/.test(src) && /setItem\(EXPAND_HINT_KEY, '1'\)/.test(src);
 check('a hint with an arrow points at ⤢, opens the map when tapped, and stops once the big map was opened', HINT(web));
-mustCatch('a hint that never goes away (⤢ forgets to remember it was opened)', !HINT(web.replace("onPress={() => { openFull(); closePanels(); onExpand(); }} hitSlop={8}", "onPress={() => { closePanels(); onExpand(); }} hitSlop={8}")));
+mustCatch('a hint that never goes away (⤢ forgets to remember it was opened)', !HINT(web.replace("onPress={() => { closePanels(); onExpand(); openFull(); }} hitSlop={8}", "onPress={() => { closePanels(); onExpand(); }} hitSlop={8}")));
 
 // 4. The database half (the committed migration production runs).
 const dir = join(root, 'supabase/migrations');
