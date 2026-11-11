@@ -137,7 +137,8 @@ _PRICE_AFTER = re.compile(r"\s*(?:ريال|ر\.?\s?س|SAR|\ufdfc)", re.I)
 # «565 الف» is 565 THOUSAND: the licence figure is then neither the total nor the metre price — unknown, never a guess.
 _THOUSANDS_AFTER = re.compile(r"\s*(?:الف|ألف|آلاف|الاف)(?![\u0621-\u064A])")
 _OTHER_BEFORE = re.compile(r"(?:مساح\S*|قطع\S*|رقم|مخطط|بلك|بطول|طول|عرض|شارع|نسبة|بنسبة|قبل|حد)\s*[:\uff1a\-/|]?\s*(?:رقم\s*)?$")
-_OTHER_AFTER = re.compile(r"^\s*(?:%|٪|م\s*[2²٢]|م(?![\u0621-\u064A])|متر|sqm|ساع|يوم|أيام|ايام|دقيق)")
+_OTHER_AFTER = re.compile(r"^\s*(?:%|٪|م\s*[2²٢]|م(?![\u0621-\u064A])|متر|sqm|ساع|يوم|أيام|ايام|دقيق"
+                          r"|[-–)]\s*[\u0621-\u064A])")   # «3-تم الاتفاق»: a numbered list item, never a price
 _AREA_BEFORE = re.compile(r"مساح\S*\s*[:\uff1a\-/|]?\s*$")
 
 

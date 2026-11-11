@@ -91,6 +91,12 @@ def test_a_length_or_number_before_the_metre_word_is_not_a_price(text):
     assert R.land_price_basis(30, None, text) is None
 
 
+def test_a_numbered_list_item_is_not_a_stated_total():
+    # HRJ 11190023115: «1- تم استخراج كاروكي … 2-تم عمل فحص تربه 3-تم الاتفاق …» and licence «سعر الوحدة: 3»
+    text = "مميزات الأرض 1- تم استخراج كاروكي للارض 2-تم عمل فحص تربه 3-تم الاتفاق مع مكتب هندسي بقيمة 11000"
+    assert R.land_price_basis(3, 308, text) == "per_meter"
+
+
 def test_a_currency_word_belongs_to_the_figure_before_it():
     # «السعر 500 ريال 300 م2»: the riyal is 500's; 300 is the area, never a stated total (the ladder decides)
     assert R._printed_as_something_else("السعر 500 ريال 300 م2", list(R._NUMS.finditer("السعر 500 ريال 300 م2"))[1])

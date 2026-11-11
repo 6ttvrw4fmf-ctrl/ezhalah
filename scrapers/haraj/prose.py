@@ -127,6 +127,11 @@ _PHONE = re.compile(r"(?<!\d)(?:\+?966|00966|0)?5\d{8}(?!\d)")
 
 
 def _value(num: str, scale: Optional[str]) -> Optional[int]:
+    # «المطلوب:300.000» is 300,000: a dot followed by groups of exactly three digits is the thousands mark sellers type
+    # (HRJ 11188704307 was stored as a 300 SAR plot, 2026-11-11 launch audit; «1.500» read as 2). With a scale word the
+    # dot stays a decimal point — «1.500 مليون» is 1.5 million.
+    if not scale and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", num):
+        num = num.replace(".", "")
     try:
         v = float(num.replace(",", ""))
     except ValueError:
