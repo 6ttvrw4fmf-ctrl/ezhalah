@@ -65,11 +65,24 @@ const id = (x: string[]) => x;
 check('the map sends the window on buy / rent, never when short stays are shown', pinFilterOf(mf, id, () => [], ['buy']).postedWithinDays === 30 && pinFilterOf(mf, id, () => [], ['rent', 'short']).postedWithinDays === null && postedOffered(['buy']) && !postedOffered(['short']));
 check('the map pin and district reads carry p_posted_within_days', m.rpcArgs({ s: 1, w: 1, n: 2, e: 2 }, 0, { deals: ['buy'], postedWithinDays: 30 }).p_posted_within_days === 30 && m.noPinArgs!({ s: 1, w: 1, n: 2, e: 2 }, { deals: ['buy'], postedWithinDays: 30 }).p_posted_within_days === 30);
 check('a picked window narrows the map and counts as one choice', isNarrowed(mf) && filterCount(mf) === 1 && !isNarrowed(EMPTY_MAP_FILTER));
-const mq = m.mapFilterSearchQuery as (f: unknown, d: 'buy' | 'rent') => { q?: Record<string, unknown>; args?: Record<string, unknown> };
-const facts = (cat: string | null) => ({ category: cat, types: cat ? ['Villa'] : [], beds: [], furnished: null, areaMin: '', areaMax: '', priceMin: '500000', priceMax: '' });
-check('the map menu numbers: a category → the Filter\'s own nationwide search; no category → every type for the deal', mq(facts('Residential'), 'buy').q?.deal === 'Buy' && mq(facts(null), 'rent').args?.p_deal === 'إيجار' && mq(facts(null), 'rent').args?.p_rent_period === 'سنوي' && mq(facts(null), 'buy').args?.p_price_min === 500000 && !('p_tables' in (mq(facts(null), 'buy').args ?? {})));
+// The map menu counts what the map's button counts (live 2026-11-11: the menu said «أي وقت 311,791» — the whole country —
+// beside «عرض 300,755 إعلان», the pins in view). Same arguments as map_pins_ar minus cell / cap / window, and the SQL keeps
+// exactly map_pins_ar's rows.
+const box = { s: 24.5, w: 46.5, n: 24.9, e: 46.9 };
+const pf = { deals: ['rent'], category: 'residential', types: ['شقة'], beds: [2], areaMin: 100, priceMax: 90000, furnished: true, postedWithinDays: 30 };
+const pc = m.postedCountArgs!(box, pf);
+const pinArgs = m.rpcArgs(box, 0, pf, 5000);
+const sameAsPins = (pc: Record<string, unknown>) => Object.keys(pinArgs).filter((k) => !['p_cell', 'p_limit', 'p_posted_within_days'].includes(k)).every((k) => JSON.stringify(pc[k]) === JSON.stringify(pinArgs[k]))
+  && Object.keys(pc).every((k) => k in pinArgs) && !('p_posted_within_days' in pc) && !('p_cell' in pc) && !('p_limit' in pc);
+check('the map menu numbers take the pins\' own box and choices, every window at once', sameAsPins(pc));
+mustCatch('menu numbers that keep the picked window (every row would read the same)', sameAsPins(m.rpcArgs(box, 0, pf)));
+mustCatch('menu numbers that drop the type choice', sameAsPins({ ...pc, p_types: null }));
 const card = readFileSync(join(ROOT, 'src/components/MapFilterCard.tsx'), 'utf8');
-check('…buy and rent picked together are added up, and old numbers clear the moment the choices change', /Promise\.all\(postedDeals\.map\(/.test(card) && /useEffect\(\(\) => \{\n    setPostedCounts\(null\);/.test(card) && /const my = \+\+seq\.current;\n\s*setCount\(null\);/.test(card));
+const mapScreen = readFileSync(join(ROOT, 'src/app/map.tsx'), 'utf8');
+check('…the menu asks the in-view counter, never the nationwide Filter count; old numbers clear the moment the choices change',
+  /countPostedWindows\(\{ \.\.\.f, postedWithinDays: null \}\)/.test(card) && !/fetchPostedWindowCounts/.test(card)
+  && /countPostedWindows=\{\(f\) => M\.countPostedWindowsInView\(\{ deals, \.\.\.pinFilterOf\(f, deals\) \}\)\}/.test(mapScreen)
+  && /useEffect\(\(\) => \{\n    setPostedCounts\(null\);/.test(card) && /const my = \+\+seq\.current;\n\s*setCount\(null\);/.test(card));
 check('a short-stay-capable rent side («شهري» or «كلاهما») never gets a window', !postedWindowOffered({ deal: 'Rent', rentPeriod: 'both', dealCombined: false }) && !postedWindowOffered({ deal: 'Buy', rentPeriod: 'monthly', dealCombined: true }) && postedWindowOffered({ deal: 'Buy', rentPeriod: 'annual', dealCombined: true }));
 
 // 7. «إعلان جديد» on a pin: by the site's date (map_pins_ar `fresh`), never on short stays, never the word «جديد» alone.
@@ -97,6 +110,18 @@ const af = find('p_posted_within_days integer DEFAULT NULL::integer$x$;');
 check('the Filter clause keeps only dated ads inside the window, in every generated RPC', /s\.posted_at is not null and s\.posted_at >= now\(\) - make_interval\(days => p_posted_within_days\)/.test(af) && /perform \* from rebuild_af_filter_rpcs\(\)/.test(af) && /'posted_window_counts_ar'/.test(af));
 const map = find('map_asks_published_within') || find('p_posted_within_days integer DEFAULT NULL::integer, p_posted_within_days') || find('unpriced integer, fresh integer)');
 check('the map reads take the window and return `fresh` (3 days, short stays excepted)', /unpriced integer, fresh integer\)/.test(map) && /k\.deal <> ''short'' and k\.posted_at >= now\(\) - interval ''3 days''/.test(map) && /m\.posted_at is not null and m\.posted_at >= now\(\)/.test(map));
+const mpc = find('create or replace function public.map_posted_window_counts_ar(');
+const MPC_RULES: [string, RegExp][] = [
+  ['the same pin rows (map_listing_points_ar, default-pin register)', /from public\.map_listing_points_ar s[\s\S]*not exists \(select 1 from public\.ops_default_pin_register r/],
+  ['the short-stay pool, from the same cached pairs', /from public\.map_short_pairs_ar p/],
+  ['category, tables, types and macro', /p_category = 'residential'[\s\S]*s\.source_table = any \(p_tables2\)[\s\S]*k\.macro = p_macro/],
+  ['beds, furniture and area', /s\.bedrooms = any \(p_beds\)[\s\S]*s\.furnished = p_furnished[\s\S]*s\.area_m2 <= p_area_max/],
+  ['the drawn shape', /extensions\.ST_Contains\(v_geom/],
+  ['deal and price after the pool', /k\.deal = any \(p_deals\)[\s\S]*k\.price <= p_price_max/],
+  ['every window from the site\'s own date', /'d1095', count\(\*\) filter \(where f\.posted_at >= now\(\) - make_interval\(days => 1095\)\)/],
+];
+for (const [what, re] of MPC_RULES) check(`map_posted_window_counts_ar keeps map_pins_ar's rule: ${what}`, re.test(mpc));
+mustCatch('a count that forgets the type choice', MPC_RULES[2][1].test(mpc.replace('s.source_table = any (p_tables2)', 's.source_table is not null')));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log('\n«نُشر خلال» works the same in the Filter, the map and the sentence — by the site\'s own date, never on short stays');

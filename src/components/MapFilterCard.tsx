@@ -17,8 +17,8 @@ import { OptionBox, FieldLabel } from '@/components/ui';
 import { CATEGORIES } from '@/data/taxonomy';
 import { groupsFor, groupMembers, typeArForTypes, type Macro } from '@/data/propertyTypes';
 import { EMPTY_MAP_FILTER, digits, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
-import { pinFilterOf as pinFilterOfWith, furnitureOffered, bedsOffered, postedOffered, typeSelection } from '@/lib/mapFilter';
-import { mapTypeScope, fetchPostedWindowCounts, fetchPostedWindowCountsArgs, mapFilterSearchQuery, type PostedWindowCounts } from '@/data/remote';
+import { pinFilterOf as pinFilterOfWith, furnitureOffered, bedsOffered, postedOffered } from '@/lib/mapFilter';
+import { mapTypeScope, type PostedWindowCounts } from '@/data/remote';
 import PostedWindowMenu from '@/components/PostedWindowMenu';
 export { EMPTY_MAP_FILTER, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
 /** The popup's state → the pin query, with the site's own group → type labels mapping. */
@@ -27,7 +27,7 @@ import { categoryImg, groupImg, typeImg, BED_IMG, RANGE_ICON, FURN_IMG } from '@
 import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 
-export default function MapFilterCard({ value, onApply, onClose, onClear, countPins, deals = [] }: {
+export default function MapFilterCard({ value, onApply, onClose, onClear, countPins, countPostedWindows, deals = [] }: {
   value: MapFilterState; onApply: (f: MapFilterState) => void; onClose: () => void;
   /** «مسح الكل» resets the MAP at once, not only the boxes here — so closing with X afterwards keeps it cleared
    *  (owner 2026-11-11: «when I click clear all then x … doesn't get reset»). */
@@ -36,6 +36,8 @@ export default function MapFilterCard({ value, onApply, onClose, onClear, countP
   deals?: readonly string[];
   /** Pins the choice leaves in the current view; null = could not count (the button then says «عرض الإعلانات»). */
   countPins: (f: MapFilterState) => Promise<number | null>;
+  /** «نُشر خلال» numbers for the pins in view (any + every window); null = could not count (no numbers shown). */
+  countPostedWindows?: (f: MapFilterState) => Promise<Record<string, number> | null>;
 }) {
   const { t, isRTL } = useI18n();
   const phone = useWindowDimensions().width < PHONE_MAX;
@@ -67,26 +69,19 @@ export default function MapFilterCard({ value, onApply, onClose, onClear, countP
   // What «تطبيق» hands the map: a furniture choice the row no longer offers is dropped (no hidden filter left behind).
   const applied0: MapFilterState = f.furnished != null && !furnitureOffered(deals, f.category) ? { ...f, furnished: null } : f;
   const applied: MapFilterState = applied0.postedWithinDays != null && !postedOffered(deals) ? { ...applied0, postedWithinDays: null } : applied0;
-  // «نُشر خلال» numbers (owner 2026-11-11): the Filter's own nationwide count for these choices, each window left open —
-  // one read per picked deal, added up (buy and yearly rent never share an ad). Cleared the moment the choices change, so
-  // a number on the menu is always for what is picked now; a failed read leaves the numbers blank, never zeros.
+  // «نُشر خلال» numbers (owner 2026-11-11): the pins in VIEW for these choices, every window at once — the same count the
+  // «عرض N إعلان» button makes, so «أي وقت» and the button always agree (live that day the menu counted the whole country,
+  // 311,791, beside a 300,755 button). Cleared the moment the choices change, so a number on the menu is always for what
+  // is picked now; a failed read leaves the numbers blank, never zeros.
   const [postedCounts, setPostedCounts] = useState<PostedWindowCounts | null>(null);
-  const postedFacts = { ...f, types: typeSelection(f, groupMembers).flatMap((x) => (f.groups.includes(x) && groupMembers(x).length ? groupMembers(x) : [x])), furnished: furnitureOffered(deals, f.category) ? f.furnished : null };
-  const postedDeals = deals.filter((d): d is 'buy' | 'rent' => d === 'buy' || d === 'rent');
-  const postedKey = JSON.stringify([postedFacts, postedDeals]);
+  const postedKey = JSON.stringify([{ ...f, postedWithinDays: null }, deals]);
   useEffect(() => {
     setPostedCounts(null);
-    if (!postedOffered(deals) || !postedDeals.length) return;
+    if (!postedOffered(deals) || !countPostedWindows) return;
     let live = true;
     const h = setTimeout(() => {
-      Promise.all(postedDeals.map((d) => { const r = mapFilterSearchQuery(postedFacts, d); return 'q' in r ? fetchPostedWindowCounts(r.q) : fetchPostedWindowCountsArgs(r.args); }))
-        .then((all) => {
-          if (!live) return;
-          if (all.some((c) => !c || typeof c !== 'object' || !('any' in c))) { setPostedCounts(null); return; }
-          const sum = {} as PostedWindowCounts;
-          for (const c of all as PostedWindowCounts[]) for (const [k, v] of Object.entries(c)) (sum as Record<string, number>)[k] = ((sum as Record<string, number>)[k] ?? 0) + Number(v);
-          setPostedCounts(sum);
-        })
+      countPostedWindows({ ...f, postedWithinDays: null })
+        .then((c) => { if (live) setPostedCounts(c && typeof c.any === 'number' ? (c as unknown as PostedWindowCounts) : null); })
         .catch(() => { if (live) setPostedCounts(null); });
     }, 300);
     return () => { live = false; clearTimeout(h); };
@@ -167,7 +162,8 @@ export default function MapFilterCard({ value, onApply, onClose, onClear, countP
             {postedOffered(deals) ? (
               <>
                 <FieldLabel>{t('Published within')}</FieldLabel>
-                <PostedWindowMenu value={f.postedWithinDays ?? null} counts={postedCounts}
+                <PostedWindowMenu value={f.postedWithinDays ?? null}
+                  counts={postedCounts && count != null && f.postedWithinDays == null ? { ...postedCounts, any: count } : postedCounts}
                   onChange={(days) => setF((x) => ({ ...x, postedWithinDays: days }))} testID="map-filter-posted" />
               </>
             ) : null}
