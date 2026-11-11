@@ -85,6 +85,17 @@ const ARROW = (src: string) => /<Pressable style=\{\[s\.expandHint, \{ flexDirec
 check('the hint\'s arrow sits beside ⤢ and points at it, in Arabic and English', ARROW(web));
 mustCatch('the arrow back on the far side of the text in Arabic', !ARROW(web.replace("flexDirection: locale === 'ar' ? 'row-reverse' : 'row'", "flexDirection: 'row'")));
 
+// 3f. «رجوع» sits in the top row on the right of «رسم», in both languages (owner 2026-11-11: «make the button back top
+// left beside it draw»), and the hint steps aside on a phone-width box so the two never overlap.
+const BACK = (src: string) => /const backEl = zoomed && !failed && !drawing \?/.test(src)
+  && /pointerEvents="box-none">\n\s*\{locale === 'ar' \? backEl : null\}/.test(src)
+  && /\{locale === 'ar' \? null : backEl\}\n\s*<\/View> : null\}/.test(src)
+  && !/backBtn: \{\s*position: 'absolute'/.test(src)
+  && /roomy && !\(narrow && zoomed\)/.test(src);
+check('«رجوع» sits beside «رسم» in the top row, and the hint never covers it on a phone', BACK(web));
+mustCatch('«رجوع» floating on its own again under «رسم»', !BACK(web.replace("backBtn: {\n    width: 36,", "backBtn: {\n    position: 'absolute', top: 56, left: 12, width: 36,")));
+mustCatch('the hint shown over «رسم» + «رجوع» on a phone', !BACK(web.replace('roomy && !(narrow && zoomed)', 'roomy')));
+
 // 4. The database half (the committed migration production runs).
 const dir = join(root, 'supabase/migrations');
 const file = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().reverse()

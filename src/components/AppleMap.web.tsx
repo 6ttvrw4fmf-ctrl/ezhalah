@@ -1246,24 +1246,27 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // keyboard up the box is ~120 px tall and «رسم», + / − and the layers button piled on top of each other. Under
   // 280 px those three hide; the full-screen map never is that short.
   const [short, setShort] = useState(false);
+  const [narrow, setNarrow] = useState(false);  // a phone-width box: no room for the hint AND «رسم» + «رجوع» in one row
   const roomy = full || !short;
+  // «رجوع» in the top row, just right of «رسم» (owner 2026-11-11: «make the button back top left beside it draw»;
+  // first added 2026-10-31: «a button that allows the user to go back»): returns to the view before the last jump,
+  // and with none left, to the whole Kingdom. An Arabic page lays a row out from the right, so the button goes FIRST
+  // there and LAST in English: either way it lands on the right of «رسم».
+  const backEl = zoomed && !failed && !drawing ? (
+    <Pressable key="back" style={s.backBtn} onPress={goBack} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Back')} testID="map-back">
+      <Ionicons name="arrow-undo-outline" size={19} color={colors.ink} />
+    </Pressable>
+  ) : null;
   return (
-    <View style={s.frame} onLayout={(e) => { const boxPx = e.nativeEvent.layout.height; setShort(boxPx < 280); }}>
+    <View style={s.frame} onLayout={(e) => { const boxPx = e.nativeEvent.layout.height; setShort(boxPx < 280); setNarrow(e.nativeEvent.layout.width < 480); }}>
       <View ref={hostRef} style={s.host} />
       {/* Compact: ⤢ top-left opens the map full screen; the box itself pans and zooms in place. */}
-      {/* «رجوع» under the top-left button, only once zoomed in (owner 2026-10-31: «a button that allows the user to go
-          back»): returns to the view before the last jump, and with none left, to the whole Kingdom. */}
-      {zoomed && !failed && !drawing ? (
-        <Pressable style={s.backBtn} onPress={goBack} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Back')} testID="map-back">
-          <Ionicons name="arrow-undo-outline" size={19} color={colors.ink} />
-        </Pressable>
-      ) : null}
       {onExpand && !failed && !drawing ? (
         <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={() => { closePanels(); onExpand(); openFull(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
-      {onExpand && expandHint && !failed && !drawing && roomy ? (
+      {onExpand && expandHint && !failed && !drawing && roomy && !(narrow && zoomed) ? (
         <Pressable style={[s.expandHint, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row' }]} onPress={() => { closePanels(); onExpand(); openFull(); }} accessibilityRole="button" accessibilityLabel={t('Tap to open the full map')} testID="map-expand-hint">
           <Text style={s.expandHintT}>{t('Tap to open the full map')}</Text>
           <Ionicons name="arrow-forward" size={16} color={colors.surface} />
@@ -1291,6 +1294,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {/* Corners (owner 2026-11-11): ⤢ / ✕ top-RIGHT, «رسم» top-LEFT — in the small box and full screen alike. */}
       {roomy ? <View style={[s.topRight, (onClose || onExpand) && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
+      {locale === 'ar' ? backEl : null}
       {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
           becomes «إزالة المسار ✕». */}
       {onRoute && !failed && !drawing ? (
@@ -1310,6 +1314,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           {hasShape ? <Ionicons name="close" size={17} color={colors.primary} /> : null}
         </Pressable>
       ) : null}
+      {locale === 'ar' ? null : backEl}
       </View> : null}
       {/* + / − above the layers button, same column. */}
       {roomy && !failed && !drawing ? (
@@ -1400,7 +1405,7 @@ const s = StyleSheet.create({
   hint: { position: 'absolute', top: 60, left: 0, right: 0, alignItems: 'center' },
   hintT: { fontFamily: font.family.medium, fontSize: 13, color: colors.ink, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, overflow: 'hidden', borderWidth: 1, borderColor: colors.tintLine },
   backBtn: {
-    position: 'absolute', top: 56, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
+    width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   expandHint: {
