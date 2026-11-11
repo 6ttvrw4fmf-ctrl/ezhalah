@@ -754,6 +754,13 @@
       "proven_on": "2026-10-30",
       "note": "Partial: pinned ad has JSON + Maps link; 287995454 and 287440508 show nothing. Served 71/88 (80.7%) on 2026-10-30 before today's fixes."
     },
+    "propertyfinder": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://www.propertyfinder.sa/ar/plp/buy/full-floor-for-sale-ar-riyadh-al-janadriyah-51860401.html",
+      "proven_on": "2026-11-06",
+      "note": "each ad's own payload property.location.coordinates {lat, lon} (scrapers/propertyfinder/run.py _location); 4,544 of 4,549 served ads pinned on 2026-11-06, and source-reread run 42279053408 found json-lat/lng on the ad page (propertyfinder 23818204)."
+    },
     "qmra": {
       "pin_source": "none",
       "floor_pct": 0,
