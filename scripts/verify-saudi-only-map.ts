@@ -83,7 +83,11 @@ const wired = (src: string) => ({
   mask: /new mk\.PolygonOverlay\(\[world, \.\.\.holes\], \{\s*enabled: false,/.test(src) && /m\.addOverlay\(mask\)/.test(helper(src)),
   fades: /mask\.style\.fillOpacity = MASK_FADE \* k;/.test(src) && /const k = maskStrength\(m\.region\.span\.latitudeDelta \/ home\);/.test(src),
   // Tied to the map: a parked map still gets it, a return visit retries a failure, and a failure reaches Sentry.
-  retried: /ensureSaudiMask\(mkKept, kept\.map\);/.test(src) && (helper(src).match(/saudiMasked\.delete\(m\); reportError\(e,/g) ?? []).length === 2,
+  // The outline loader reports every failure itself — so the prewarm path (before the map opens) is covered too.
+  retried: /ensureSaudiMask\(mkKept, kept\.map\);/.test(src) && /saudiMasked\.delete\(m\); reportError\(e, \{ where: 'map: Saudi fade' \}\)/.test(helper(src))
+    && /\}\)\.catch\(\(\) => \{ saudiMasked\.delete\(m\); \}\);/.test(helper(src))
+    && /\.catch\(\(e\) => \{ outlineLoad = null; reportError\(e, \{ where: 'map: Saudi outline' \}\); throw e; \}\);/.test(win(src, 'function loadOutline(', 'return outlineLoad;\n}'))
+    && /void loadOutline\(\)\.catch\(\(\) => \{\}\);/.test(win(src, 'export function prewarmMap(', '\n}\n')),
   noGone: !/\bgone\b/.test(helper(src)),
 });
 const w = wired(map);
@@ -94,7 +98,7 @@ check('map: the fade follows the zoom through maskStrength()', w.fades);
 check('map: the fade belongs to the map — a return visit retries it, a failure is reported to Sentry', w.retried && w.noGone);
 mustCatch('the zoom limit set inside the outline wait again', !wired(map.replace('      map.cameraZoomRange = new mk.CameraZoomRange(0, map.cameraDistance * MAX_ZOOM_OUT);\n', '').replace("    const onView = () => {", "    m.cameraZoomRange = new mk.CameraZoomRange(0, m.cameraDistance * MAX_ZOOM_OUT);\n    const onView = () => {")).zoom);
 mustCatch('a return visit no longer retrying the fade', !wired(map.replace('ensureSaudiMask(mkKept, kept.map);', '')).retried);
-mustCatch('an outline failure going to the console only', !wired(map.replace("}).catch((e) => { saudiMasked.delete(m); reportError(e, { where: 'map: Saudi outline' }); });", "}).catch((e) => { console.error(e); });")).retried);
+mustCatch('an outline failure going unreported (the prewarm path included)', !wired(map.replace("outlineLoad = null; reportError(e, { where: 'map: Saudi outline' }); throw e;", 'outlineLoad = null; throw e;')).retried);
 mustCatch('the fade polygon taking taps', !wired(map.replace(/enabled: false,(\s*style: new mk\.Style\(\{ fillColor: MASK_COLOR)/, 'enabled: true,$1')).mask);
 mustCatch('the fade not following the zoom', !wired(map.replace('mask.style.fillOpacity = MASK_FADE * k;', 'mask.style.fillOpacity = MASK_FADE;')).fades);
 mustCatch('the boundary removed', !wired(map.replace('map.cameraBoundary = ', 'void ')).boundary);

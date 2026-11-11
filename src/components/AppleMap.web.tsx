@@ -222,7 +222,8 @@ function loadRegions(): Promise<Region[]> {
 
 let outlineLoad: Promise<[number, number][][]> | null = null;
 /** Saudi Arabia's outline ([lng, lat] rings), fetched once per page. A failed fetch is an error: the map then simply
- *  shows no fading (never a wrong one). */
+ *  shows no fading (never a wrong one). Every failure is reported HERE, once — whoever asked (the map, or the quiet
+ *  prewarm before the map opens; review of #11818). */
 function loadOutline(): Promise<[number, number][][]> {
   if (outlineLoad) return outlineLoad;
   outlineLoad = fetchWithRetry(OUTLINE_URL)
@@ -232,7 +233,7 @@ function loadOutline(): Promise<[number, number][][]> {
       if (!Array.isArray(j) || !j.length || !j.every((ring) => Array.isArray(ring) && ring.length >= 4)) throw new Error('outline file is not rings');
       return j;
     })
-    .catch((e) => { outlineLoad = null; throw e; });
+    .catch((e) => { outlineLoad = null; reportError(e, { where: 'map: Saudi outline' }); throw e; });
   return outlineLoad;
 }
 
@@ -265,7 +266,7 @@ function ensureSaudiMask(mk: MapKit, m: MKMap): void {
       m.addEventListener('region-change-end', onView);
       onView();
     } catch (e) { saudiMasked.delete(m); reportError(e, { where: 'map: Saudi fade' }); }   // a map destroyed meanwhile
-  }).catch((e) => { saudiMasked.delete(m); reportError(e, { where: 'map: Saudi outline' }); });
+  }).catch(() => { saudiMasked.delete(m); });   // loadOutline() already reported it; the next visit retries
 }
 
 /** INSTANT FIRST MAP (owner 2026-11-04: «why does it feel slow moving between tabs»). Measured on ezhalah.com: the first
