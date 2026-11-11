@@ -116,6 +116,7 @@ const s = StyleSheet.create({
   story: { fontSize: 14.5, lineHeight: 23, color: colors.body, marginBottom: 12 },
   rulesTitle: { fontSize: 16, fontWeight: '700', color: colors.ink, marginBottom: 4 },
   rule: { fontSize: 13.5, lineHeight: 21, color: colors.body, marginBottom: 6 },
-  ruleLast: { color: colors.muted },
+  // «معلومة فقط» — the whole sentence bold (owner 2026-11-11: «make the entire sentence bold»)
+  ruleLast: { fontWeight: '700', color: colors.ink },
   ruleTitle: { fontWeight: '700', color: colors.ink },
 });

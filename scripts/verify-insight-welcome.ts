@@ -273,6 +273,7 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
     check('no «تمام» button: the ✕ or a tap outside closes it', !/insight-how-ok/.test(pop) && /testID="insight-how-backdrop"/.test(pop) && /onPress=\{onClose\}[^>]*testID="insight-how-close"/.test(pop));
     check('the slow eagle animation and Shaheen\'s mark are shown', pop.includes("falconer-howto.svg") && pop.includes("models/shaheen.png"));
     check('the eagle is preloaded once and each open replays it from memory (a fresh blob: URL, no download on tap)', /export function preloadHowEagle/.test(pop) && /URL\.createObjectURL\(eagleBlob\)/.test(pop) && /useEffect\(\(\) => \{ void preloadHowEagle\(\); \}, \[\]\)/.test(pop));
+    check('the «information only» rule is bold as a whole sentence (owner 2026-11-11)', /ruleLast: \{ fontWeight: '700'/.test(pop) && /i === c\.rules\.length - 1 && s\.ruleLast/.test(pop));
     check('the popup stays compact: eagle box ≤ 140 px and crops the spare sky', /eagleBox: \{[^}]*height: (\d+)[^}]*overflow: 'hidden'/.test(pop) && Number(pop.match(/eagleBox: \{[^}]*height: (\d+)/)![1]) <= 140);
     check('the site count comes from siteCount.ts — the same number as the share card', /from '@\/data\/siteCount'/.test(pop) && /c\.story\(sites\)/.test(pop));
     const svg = readFileSync(new URL('../assets/images/falconer-howto.svg', import.meta.url), 'utf8');
