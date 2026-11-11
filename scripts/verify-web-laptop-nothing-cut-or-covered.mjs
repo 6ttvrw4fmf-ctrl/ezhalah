@@ -494,10 +494,12 @@ async function openDealsSheet(page) {
       if (link ? opensOwnPage(link) : PREVIEW_HOSTS.some((h) => label.includes(h))) own.push(card);
     }
     for (const card of own.slice(0, 6)) {
-      const gold = await card.$('[data-testid="card-open-gold"]');
-      if (!gold) continue;
-      await gold.scrollIntoViewIfNeeded().catch(() => {});
-      await gold.click({ timeout: 4000 }).catch(() => {});
+      // The roomy card opens from its gold button; the tight (ad open beside) and phone cards open from their photo, a
+      // role="link" control (src/components/ResultCard.tsx) — CodeRabbit on #11754.
+      const opener = (await card.$('[data-testid="card-open-gold"]')) || (await card.$('[role="link"]'));
+      if (!opener) continue;
+      await opener.scrollIntoViewIfNeeded().catch(() => {});
+      await opener.click({ timeout: 4000 }).catch(() => {});
       if (await page.waitForSelector('[data-testid="listing-preview"]', { state: 'visible', timeout: 3000 }).catch(() => null)) break;
     }
     if (!own[0]) ministryLog.push(`no result card from a site that opens as Ezhalah's own ad page (marked card: ${ownPageCard ?? 'none'}) (links known for ${cardLink.size} card(s): ${[...new Set([...cardLink.values()].map((u) => { try { return new URL(u).hostname; } catch { return '?'; } }))].slice(0, 10).join(', ')})`);
