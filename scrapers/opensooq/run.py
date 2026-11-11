@@ -303,7 +303,12 @@ def page_amenities(body: Optional[str]) -> Optional[dict[str, bool]]:
 # 2026-11-11); the ad page prints it for every licensed post as a spec row — «رقم ترخيص الإعلان العقاري» followed by
 # the number as a link (source-reread 42912650547, 18634456 / 20927386). Only the AD licence (7[12] + 8 digits) right
 # after that label counts: the office's «رقم رخصة فال» row sits in the same list and is never the ad's licence.
-_AD_LICENCE_ROW = re.compile(r"رقم\s+ترخيص\s+الإعلان(?:\s+العقاري)?\s*(?:</?(?!a\b)[^>]*>|\s|[:：])*(?:<a\b[^>]*>)?\s*(7[12]\d{8})\b")
+# The licence is read ONLY from the spec ROW — an <li> whose <span> label is «رقم ترخيص الإعلان [العقاري]» followed by
+# the value cell — never from the same words in the seller's prose (a description can quote another ad's licence,
+# and a description with no row must read as «no licence», CodeRabbit on PR #11873).
+_AD_LICENCE_ROW = re.compile(
+    r"<li\b[^>]*>\s*<span\b[^>]*>\s*رقم\s+ترخيص\s+الإعلان(?:\s+العقاري)?\s*[:：]?\s*</span>"  # noqa: RUF001 — the page prints either colon
+    r"\s*(?:<a\b[^>]*>|<span\b[^>]*>)?\s*(7[12]\d{8})\b")
 
 
 def page_licence(body: Optional[str]) -> Optional[str]:

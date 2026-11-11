@@ -38,3 +38,15 @@ def test_a_page_without_the_row_says_nothing():
 def test_the_row_is_read_only_at_its_own_label_not_from_any_72_number_on_the_page():
     # a phone-shaped or id-shaped 72… figure elsewhere on the page is not a licence
     assert page_licence('<p>رقم الإعلان 7211122233</p><span>رقم ترخيص الإعلان العقاري</span><a href="#">—</a>') is None
+
+
+PROSE = '<div class="description"><p>شقة للبيع. رقم ترخيص الإعلان العقاري: 7100000000 (إعلان آخر للمكتب)</p></div>'
+
+
+def test_prose_before_the_row_never_wins_over_the_row():
+    # CodeRabbit on PR #11873: the seller's text can quote another ad's licence under the same words — the ROW is the ad's
+    assert page_licence("<html><body>" + PROSE + ROW + "</body></html>") == "7201136326"
+
+
+def test_prose_without_the_row_is_no_licence():
+    assert page_licence("<html><body>" + PROSE + OFFICE + "</body></html>") is None
