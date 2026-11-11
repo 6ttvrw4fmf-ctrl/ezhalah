@@ -756,7 +756,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:5;opacity:0;transition:opacity .15s';
     host?.appendChild(canvas);
     let shown: MapDot[] = []; let project: ((lat: number, lng: number) => [number, number]) | null = null;
-    const narrowed = !!(pins.category || pins.types?.length || pins.beds?.length || pins.areaMin != null || pins.areaMax != null
+    const narrowed = !!(pins.category || pins.scope || pins.furnished != null || pins.types?.length || pins.beds?.length || pins.areaMin != null || pins.areaMax != null
       || pins.priceMin != null || pins.priceMax != null || pins.poly);
     const paint = (dots: MapDot[]) => {
       const rect = canvas.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;

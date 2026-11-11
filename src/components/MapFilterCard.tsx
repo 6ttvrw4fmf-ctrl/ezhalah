@@ -17,10 +17,11 @@ import { OptionBox, FieldLabel } from '@/components/ui';
 import { CATEGORIES } from '@/data/taxonomy';
 import { groupsFor, groupMembers, typeArForTypes, type Macro } from '@/data/propertyTypes';
 import { EMPTY_MAP_FILTER, digits, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
-import { pinFilterOf as pinFilterOfWith, furnitureOffered } from '@/lib/mapFilter';
+import { pinFilterOf as pinFilterOfWith, furnitureOffered, bedsOffered } from '@/lib/mapFilter';
+import { mapTypeScope } from '@/data/remote';
 export { EMPTY_MAP_FILTER, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
 /** The popup's state → the pin query, with the site's own group → type labels mapping. */
-export const pinFilterOf = (f: MapFilterState, deals: readonly string[] = []) => pinFilterOfWith(f, typeArForTypes, groupMembers, deals);
+export const pinFilterOf = (f: MapFilterState, deals: readonly string[] = []) => pinFilterOfWith(f, typeArForTypes, groupMembers, deals, mapTypeScope);
 import { categoryImg, groupImg, typeImg, BED_IMG, RANGE_ICON, FURN_IMG } from '@/theme/propertyIcons';
 import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
@@ -104,6 +105,8 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
                 </View>
               </>
             ) : null}
+            {bedsOffered(f) ? (
+              <>
             <FieldLabel>{t('Bedrooms')}</FieldLabel>
             <View style={s.wrap}>
               {(['any', '1', '2', '3', '4', '5+'] as const).map((opt) => (
@@ -111,6 +114,8 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
                   onPress={() => (opt === 'any' ? setF((x) => ({ ...x, beds: [] })) : toggleBed(opt))} style={s.cell} />
               ))}
             </View>
+              </>
+            ) : null}
             {/* «الأثاث» — copied from the Filter home (owner 2026-11-10: «yeah you copy the filter»): yearly rent homes only. */}
             {furnitureOffered(deals, f.category) ? (
               <>
