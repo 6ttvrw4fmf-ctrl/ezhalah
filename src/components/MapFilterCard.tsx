@@ -27,8 +27,11 @@ import { categoryImg, groupImg, typeImg, BED_IMG, RANGE_ICON, FURN_IMG } from '@
 import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 
-export default function MapFilterCard({ value, onApply, onClose, countPins, deals = [] }: {
+export default function MapFilterCard({ value, onApply, onClose, onClear, countPins, deals = [] }: {
   value: MapFilterState; onApply: (f: MapFilterState) => void; onClose: () => void;
+  /** «مسح الكل» resets the MAP at once, not only the boxes here — so closing with X afterwards keeps it cleared
+   *  (owner 2026-11-11: «when I click clear all then x … doesn't get reset»). */
+  onClear: () => void;
   /** The map's deal choice: «الأثاث» shows only on «إيجار» alone (yearly rent), as on the Filter home. */
   deals?: readonly string[];
   /** Pins the choice leaves in the current view; null = could not count (the button then says «عرض الإعلانات»). */
@@ -89,6 +92,10 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
     return () => { live = false; clearTimeout(h); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postedKey]);
+  const clearAll = () => { setF(EMPTY_MAP_FILTER); onClear(); };
+  // Clear stays on while the MAP still has a filter, even if every box here was un-ticked by hand (review of #11818):
+  // otherwise X would keep the old filter with no way to reset it from here.
+  const canClear = isNarrowed(f) || isNarrowed(value);
   const toggleBed = (b: '1' | '2' | '3' | '4' | '5+') => setF((x) => ({ ...x, beds: x.beds.includes(b) ? x.beds.filter((y) => y !== b) : [...x.beds, b] }));
 
   return (
@@ -174,15 +181,15 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
               <Range icon={RANGE_ICON.priceFrom} label={t('From')} unit={t('SAR')} value={f.priceMin} onChange={(v) => setF((x) => ({ ...x, priceMin: digits(v) }))} testID="map-filter-price-min" />
               <Range icon={RANGE_ICON.priceTo} label={t('To')} unit={t('SAR')} value={f.priceMax} onChange={(v) => setF((x) => ({ ...x, priceMax: digits(v) }))} testID="map-filter-price-max" />
             </View>
-            {!phone && isNarrowed(f) ? (
-              <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} accessibilityRole="button" style={s.reset}><Text style={s.resetT}>{t('Clear all')}</Text></Pressable>
+            {!phone && canClear ? (
+              <Pressable onPress={clearAll} accessibilityRole="button" style={s.reset}><Text style={s.resetT}>{t('Clear all')}</Text></Pressable>
             ) : null}
           </ScrollView>
           {phone ? (
             // Fixed bottom bar (Zillow «Reset all filters» | «Apply»): clear on the start side, the button fills the rest.
             <View style={[s.foot, s.footRow, { flexDirection: isRTL ? 'row-reverse' : 'row', paddingBottom: 12 + insets.bottom }]}>
-              <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} disabled={!isNarrowed(f)} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
-                <Text style={[s.resetT, !isNarrowed(f) && { color: colors.muted }]}>{t('Clear all')}</Text>
+              <Pressable onPress={clearAll} disabled={!canClear} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
+                <Text style={[s.resetT, !canClear && { color: colors.muted }]}>{t('Clear all')}</Text>
               </Pressable>
               <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
                 {/* The count lives in the button (owner 2026-11-11, Zillow's «See 201 rentals»), the title says «تصفية». */}
