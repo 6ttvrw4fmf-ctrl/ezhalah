@@ -59,6 +59,15 @@ check('a bedrooms choice left over from before is not sent where bedrooms are no
 const card = readFileSync(join(ROOT, 'src/components/MapFilterCard.tsx'), 'utf8');
 check('the card hides the bedrooms row by the same rule and builds its request with mapTypeScope', /\{bedsOffered\(f\) \? \(\s*<>\s*<FieldLabel>\{t\('Bedrooms'\)\}<\/FieldLabel>/.test(card) && /pinFilterOfWith\(f, typeArForTypes, groupMembers, deals, mapTypeScope\)/.test(card));
 
+// 5b. A category alone carries the scope, so the dots layer's «nothing chosen» shortcut must read the scope too
+// (CodeRabbit #11738): with the scope sent, p_category is null, and a test of category/types alone said «unfiltered».
+const resOnly = ask({ category: 'Residential', groups: [], types: [] });
+const web = readFileSync(join(ROOT, 'src/components/AppleMap.web.tsx'), 'utf8');
+const NARROWED = /const narrowed = !!\(pins\.category \|\| pins\.scope \|\| pins\.furnished != null \|\|/;
+check('«سكني» alone sends a scope (so it is a narrowing, never the unfiltered dots)', resOnly.pf.scope != null && resOnly.args.p_macro === 'Residential');
+check('the dots layer counts the scope and furniture as a narrowing', NARROWED.test(web));
+mustCatch('the old «nothing chosen» test that ignored the scope', NARROWED.test('const narrowed = !!(pins.category || pins.types?.length || pins.beds?.length'));
+
 // 6. MUTATION: without the Filter's scope the request is the defect — a stored-type list and a table-name category.
 const old = ask({ category: 'Commercial', groups: ['Commercial & Industrial Plots'], types: ['Raw Land'] }, false);
 mustCatch('the old request (no Filter scope, table-name category) is not the Filter\'s', asksLikeFilter(old.args, rawF));
