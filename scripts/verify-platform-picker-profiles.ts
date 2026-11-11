@@ -59,9 +59,9 @@ function verify(text: string, helperText = helper) {
   assert.equal(files.size, 149, 'all matching ZIP logos plus the official Haraj header and the 6 sources of 2026-11-04..06 are used');
   // Re-pinned 2026-10-27 (owner: «make it feel faster»): the same artwork resized to ≤320 px and saved as palette
   // PNGs with real alpha (13.1 MB → 1.7 MB, PR "Speed: platform logos"). Checked side by side: no visible change.
-  // Re-pinned 2026-11-10: +6 official logos (propertyfinder, kwsaudiarabia, almajdiah, asasmakeen, mrajhi, steam), icons resized to 256 px; mrajhi = its own site header logo, white made transparent.
+  // Re-pinned 2026-11-10: +6 official logos (propertyfinder, kwsaudiarabia, almajdiah, asasmakeen, mrajhi, steam), icons resized to 256 px; propertyfinder = its official Arabic wordmark SVG rendered at 320 px; mrajhi = its own site header logo, white made transparent.
   // Any OTHER change to these bytes still fails here.
-  assert.equal(fingerprint.digest('hex'), 'c6fd42b48af0828fa9d6ec5f3cf7360d44daeb3293964dec284797ef0e881403');
+  assert.equal(fingerprint.digest('hex'), '23e15dd406113d0b155533eefa1cd725c02891f2fe14c66853a4a60e072237b8');
 }
 verify(source);
 function mustCatch(mutant: string) {

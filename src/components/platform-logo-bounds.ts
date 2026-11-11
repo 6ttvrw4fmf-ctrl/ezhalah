@@ -4,7 +4,7 @@ type ArtworkBounds = readonly [width: number, height: number, left: number, top:
 export const platformLogoBounds = new Map<unknown, ArtworkBounds>([
   [require('../../assets/images/platform-logos/maskanre.png'), [1575, 455, 0, 0, 1575, 455]],
   [require('../../assets/images/platform-logos/wetheaddress.png'), [1024, 310, 0, 0, 1024, 310]],
-  [require('../../assets/images/platform-logos/propertyfinder-sa.png'), [256, 256, 0, 0, 256, 256]],
+  [require('../../assets/images/platform-logos/propertyfinder-sa.png'), [320, 147, 0, 0, 320, 147]],
   [require('../../assets/images/platform-logos/kwsaudiarabia-com.png'), [256, 256, 17, 51, 231, 193]],
   [require('../../assets/images/platform-logos/almajdiah-com.png'), [256, 256, 2, 87, 255, 170]],
   [require('../../assets/images/platform-logos/asasmakeen-com.png'), [300, 123, 0, 0, 300, 123]],
