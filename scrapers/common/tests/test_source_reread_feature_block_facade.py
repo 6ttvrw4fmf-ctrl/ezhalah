@@ -134,7 +134,7 @@ def test_a_phone_in_a_feature_value_never_reaches_the_evidence():
     blk = '<div class="feature-block"><h2>عرض الشارع</h2><span>20 للتواصل 0551234567</span></div>'
     lines = page_evidence(f"<html><body>{blk}</body></html>")["evidence_lines"]
     assert not any("0551234567" in x for x in lines)
-    assert "عرض الشارع 20 للتواصل <num>" in lines
+    assert not any("للتواصل" in x for x in lines)   # a mixed value is not the fact: dropped whole (73f3535+)
 
 
 def test_a_title_value_no_past_text_head_stays_a_no():
@@ -151,7 +151,7 @@ def test_a_phone_in_a_title_value_never_reaches_the_evidence():
             '<div class="newest-title">مساحة الأرض :</div><div class="newest-value">625</div>')
     lines = page_evidence(f"<html><body>{pair}</body></html>")["evidence_lines"]
     assert not any("0551234567" in x for x in lines)
-    assert "عرض الشارع: 15 جوال <num>" in lines and "مساحة الأرض: 625" in lines
+    assert not any("جوال" in x for x in lines) and "مساحة الأرض: 625" in lines
 
 
 def test_a_colon_label_with_the_year_on_the_next_line_is_one_year():
@@ -211,3 +211,28 @@ def test_redaction_is_idempotent_on_every_output():
     p = page_evidence(body)
     for x in p["evidence_lines"] + [p["text_head"]]:
         assert redact_pii(x) == x
+
+
+def test_only_the_fact_leaves_a_mixed_value():
+    # CodeRabbit on #11465: «شمالية محمد أحمد» / «20 ابو فهد» carried the name with the fact
+    blk = ('<div class="feature-block"><h2>واجهة العقار</h2><span>شمالية محمد أحمد</span></div>'
+           '<div class="feature-block"><h2>عرض الشارع</h2><span>20 ابو فهد</span></div>'
+           '<div class="newest-title">غرف النوم :</div><div class="newest-value">3 للتواصل سالم</div>'
+           '<div class="newest-title">عرض الشارع :</div><div class="newest-value">15 م</div>'
+           '<div class="newest-title">الواجهة :</div><div class="newest-value">جنوبية - شرقية</div>')
+    p = page_evidence(f"<html><body>{blk}</body></html>")
+    lines = p["evidence_lines"]
+    pairs = [x for x in lines if x.startswith(("واجهة العقار", "عرض الشارع", "غرف النوم", "الواجهة"))]
+    assert not any(n in x for x in pairs for n in ("محمد", "فهد", "سالم"))
+    assert "عرض الشارع: 15 م" in lines and "الواجهة: جنوبية شرقية" in lines
+
+
+def test_json_ld_seller_block_is_dropped_whole():
+    import json as _json
+    ld = {"@type": "Product", "seller": {"@type": "Person", "name": "محمد أحمد"}, "floorSize": {"value": 150},
+          "additionalProperty": [{"name": "الواجهة", "value": "شمالية"}]}
+    p = page_evidence(f'<html><head><script type="application/ld+json">{_json.dumps(ld, ensure_ascii=False)}'
+                      '</script></head><body></body></html>')
+    dumped = _json.dumps(p["jsonld"], ensure_ascii=False)
+    assert "محمد" not in dumped and "seller" not in dumped
+    assert '"value": 150' in dumped and "شمالية" in dumped

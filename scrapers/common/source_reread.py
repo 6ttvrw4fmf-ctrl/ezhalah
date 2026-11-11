@@ -26,7 +26,7 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from scrapers.common.pii import redact_capture, redact_pii
+from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields
 from urllib.parse import urlsplit
 
 from scrapers.common.cleanup import PLATFORMS, _probe
@@ -241,7 +241,6 @@ _FEATURE_PAIR = re.compile(r'<div class="feature-block"[^>]*>\s*(?:<i\b[^>]*>\s*
 _FEATURE_LABEL = re.compile(r"واجهة|الواجهة|عرض الشارع")
 
 
-_PHONE = re.compile(r"(?:\+?966|0)?5\d{8}|\d{9,}")
 
 
 # A facade value is a bearing (or «لا يوجد»), a street width is a figure: anything else under those labels — a name, a
@@ -249,12 +248,25 @@ _PHONE = re.compile(r"(?:\+?966|0)?5\d{8}|\d{9,}")
 _FACADE_VALUE = re.compile(r"شمال|جنوب|شرق|غرب|north|south|east|west|لا يوجد|لايوجد|^\s*-\s*$", re.I)
 
 
-def _value_fits(label: str, value: str) -> bool:
+_BEARING_TOKEN = re.compile(r"^(?:ال)?(?:شمال|جنوب|شرق|غرب)\S*$|^(?:north|south|east|west)\S*$", re.I)
+_SAFE_TOKEN = re.compile(r"^(?:[0-9٠-٩][0-9٠-٩.,٬]*|م|م²|م2|متر|مربع|ريال|ر\.س|SAR|سنة|سنه|سنوات|عام|شهري|سنوي|"
+                         r"نعم|لا|يوجد|لايوجد|جديد|[-+:])$", re.I)
+
+
+def _fact_value(label: str, value: str) -> str | None:
+    """Only the FACT a permitted label carries ever leaves this reader — never the raw value. A facade is its bearing
+    words, a street width its figure, any other label a value made only of figures, units and yes/no words; anything
+    else («شمالية محمد أحمد», «20 للتواصل ابو فهد») is not emitted at all (PDPL, CodeRabbit on #11465)."""
+    toks = value.replace("-", " - ").split()
     if re.search(r"واجهة|الواجهة", label):
-        return bool(_FACADE_VALUE.search(value))
+        if re.fullmatch(r"\s*(?:لا يوجد|لايوجد|-)\s*", value):
+            return value.strip()
+        bear = [t for t in toks if _BEARING_TOKEN.match(t)]
+        return " ".join(bear) if bear and all(_BEARING_TOKEN.match(t) or t == "-" for t in toks) else None
     if "عرض الشارع" in label:
-        return bool(re.search(r"[0-9٠-٩]", value))
-    return True
+        m = re.fullmatch(r"\s*([0-9٠-٩]+(?:[.,][0-9٠-٩]+)?)\s*(م|متر)?\s*", value)
+        return (m.group(1) + (" " + m.group(2) if m.group(2) else "")) if m else None
+    return value if toks and all(_SAFE_TOKEN.match(t) for t in toks) else None
 
 
 def _feature_block_lines(body: str) -> list[str]:
@@ -262,8 +274,9 @@ def _feature_block_lines(body: str) -> list[str]:
     for m in _FEATURE_PAIR.finditer(body or ""):
         label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()
         value = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
-        if label and value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)) and _value_fits(label, value):
-            out.append(f"{label} {_PHONE.sub('<num>', value)}")   # PDPL: a phone in a feature value never reaches the log
+        value = _fact_value(label, value) if label and value else None
+        if value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)):
+            out.append(f"{label} {value}")   # PDPL: a phone in a feature value never reaches the log
     return out
 
 
@@ -299,8 +312,9 @@ def _title_value_lines(body: str) -> list[str]:
     for m in _TITLE_VALUE_PAIR.finditer(body or ""):
         label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip().rstrip(":：").strip()
         value = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
-        if label and value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)) and _value_fits(label, value):
-            out.append(f"{label}: {_PHONE.sub('<num>', value)}")   # the colon keeps «مفروشة: لا» a no; PDPL: no phone in the log
+        value = _fact_value(label, value) if label and value else None
+        if value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)):
+            out.append(f"{label}: {value}")   # the colon keeps «مفروشة: لا» a no; PDPL: no phone in the log
     return out
 
 
@@ -335,7 +349,7 @@ def page_evidence(body: str) -> dict:
     return {
         "title": redact_pii(html.unescape(title.group(1).strip())) if title else None,
         "meta": redact_capture(meta),       # PDPL: reread.json carries these too — contact keys dropped, free text scrubbed
-        "jsonld": redact_capture(jsonld[:5]),
+        "jsonld": redact_capture(strip_pii_fields(jsonld[:5])),   # seller/agent/owner blocks dropped whole: never the property
         # 400, not 60: a rakez project page lists every unit (price · rooms · area), and unit #C22 of
         # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
