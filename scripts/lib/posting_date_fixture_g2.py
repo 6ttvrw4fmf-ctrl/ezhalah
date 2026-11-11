@@ -390,18 +390,22 @@ def hajer_args(date_gmt, modified_gmt="2026-10-19T13:53:44"):
     return [post, page]
 
 
-PLATFORMS |= {
-    "hajer": ("scrapers.hajer.run", hajer_args, lambda m, a: (m.map_listing(*a)[0], "")),
+# NOT A POSTING DATE (2026-11-10): hajer's WordPress date_gmt moves forward when an ad is re-published (post 1022 /
+# HJ4010: «2026-10-10», modified the same second, though that link was stored on 2026-06-21). The mapper stores NULL
+# and keeps the verbatim value as additional_info["date_gmt"]; the mutation restores the old reading.
+def _hajer_nd(*_):
+    return hajer_args("2026-10-19T13:53:44")
+
+
+NO_DATE = {
+    "hajer": ("scrapers.hajer.run", _hajer_nd, lambda m, a: (m.map_listing(*a)[0], ""), ["additional_info", "date_gmt"]),
 }
 
-CASES |= {
+MUTATIONS |= {
     "hajer": [
-        [["2026-10-19T13:53:44"], "2026-10-19T16:53:44+03:00",
-         "REST date_gmt read live on hajer post 1555 (UTC; the page prints «19/10/2026») → Saudi time"],
-        [["2026-11-08T22:30:00"], "2026-11-09T01:30:00+03:00",
-         "a late-evening UTC publish lands on the Saudi day"],
-        [[None], None, "no date_gmt → NULL, the ad still maps"],
-        [[None, "2026-11-09T08:00:00"], None, "only modified_gmt (an edit) is present → NULL"],
+        ("hajer: the re-publish date_gmt stored as the posting date again", "scrapers/hajer/run.py",
+         'verbatim value is kept as additional_info["date_gmt"].\n        "date_added": None,',
+         'verbatim value is kept as additional_info["date_gmt"].\n        "date_added": site_posting_date(f"{p[\'date_gmt\']}Z"),', []),
     ],
 }
 

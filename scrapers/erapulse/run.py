@@ -60,6 +60,7 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.named_city import single_named_city  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.posting_date import site_posting_date  # noqa: E402
+from scrapers.common.type_from_title import canonical_type_from_title  # noqa: E402
 
 SITE = "https://erapulse.sa"
 API = "https://api.erapulse.sa"
@@ -89,6 +90,10 @@ SUBTYPE_MAP = {
     "HALL": "Hall", "COMMERCIAL_LAND": "Commercial Land",
     "COMMERCIAL": "Office", "OTHER_COMMERCIAL": "Office",
 }
+# subTypes that name no property: the form's catch-all. They never decide the type while the title names one.
+CATCH_ALL_SUBTYPES = {"RESIDENTIAL", "OTHER_RESIDENTIAL", "COMMERCIAL", "OTHER_COMMERCIAL", "OTHER", ""}
+# The catch-alls that are the site's «تجاري»: never a home, whatever the top-level type says.
+COMMERCIAL_CATCH_ALL = {"COMMERCIAL", "OTHER_COMMERCIAL"}
 COMMERCIAL_TYPES = {
     "Office", "Shop", "Showroom", "Warehouse", "Workshop", "Factory", "Hotel",
     "Gas Station", "Commercial Building", "Commercial Land", "Hall",
@@ -330,11 +335,31 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
     subtype = (p.get("subType") or "").strip().upper()
     top = (p.get("type") or "").strip().upper()
     usage = (p.get("usage") or "").strip().upper()
-    property_type = SUBTYPE_MAP.get(subtype)
+    property_type = None if subtype in CATCH_ALL_SUBTYPES else SUBTYPE_MAP.get(subtype)
+    type_source = "subtype" if property_type else None
     if not property_type:
-        # fall back on top-level type
-        property_type = {"LAND": "Residential Land", "COMMERCIAL": "Office",
-                         "RESIDENTIAL": "Apartment"}.get(top)
+        # THE OFFICE'S OWN WORD BEFORE ANY GUESS (🦅 2026-11-10): Era Pulse's form ends in a catch-all
+        # («OTHER_RESIDENTIAL»), and 21 of the 24 live rows it sent were lands, villas, chalets and a
+        # warehouse we stored as «Apartment» — «فله مودرن -حي الربوة للبيع» (648074), «ارض للبيع - حي الواحه»
+        # (646391), «شاليه بحي التوفيق» (648063), «مستودع / حوش بمحافظة الشماسية» (2203407). The title the
+        # office typed names the property; the closed vocabulary reader shared with the inblaj tenants
+        # (scrapers/common/type_from_title.py → parse_type_ar: longest token first, Arabic-letter boundaries,
+        # so «حي الشقة» is never a «شقة»).
+        property_type = canonical_type_from_title(p.get("title"))
+        type_source = "title" if property_type else None
+    if not property_type:
+        # The site states no specific type and neither does the title: the coarse type only, IN THE SITE'S OWN
+        # WORD, recorded as such so an auditor can find every row that took this road.
+        # 2026-11-10, read on the site's own ad pages: a catch-all residential ad is printed «فلة للبيع …»
+        # (648057, 648056, 646397, 21673925 — path /العقارات/للبيع/فلة/…) and we showed «شقة»; a catch-all
+        # COMMERCIAL subType under a RESIDENTIAL top-level type is printed «عقار تجاري للإيجار» (26359507,
+        # «صالات تجارية للإيجار») and we showed a residential flat. «Apartment» was our word, never the site's.
+        if subtype in COMMERCIAL_CATCH_ALL:
+            property_type = "Office"
+        else:
+            property_type = {"LAND": "Residential Land", "COMMERCIAL": "Office",
+                             "RESIDENTIAL": "Villa"}.get(top)
+        type_source = "top_level_type" if property_type else None
     if not property_type:
         return None, "residential"
     # Land usage routing: a commercial/mixed-use plot is a Commercial Land.
@@ -405,6 +430,7 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
         **({"city_source": city_source} if city_source else {}),
         "ref_number": ref,
         "subtype": subtype or None,
+        "type_source": type_source,
         "usage": usage or None,
         "furnished": bool(p.get("furnished")) or None,
         "pool": bool(p.get("pool")) or None,

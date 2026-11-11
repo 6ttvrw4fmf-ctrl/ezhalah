@@ -154,6 +154,8 @@ const AR: Record<string, string> = {
   // Top-nav ModeSwitch pill's third tab (owner 2026-10-30): the Map way to search.
   'Map': 'خريطة',
   'The map could not load': 'تعذّر تحميل الخريطة',
+  'Couldn’t load the listings here. Try again': 'تعذّر تحميل الإعلانات هنا. حاول مرة أخرى',
+  'Couldn’t open the shared chat. Check your connection and try again.': 'تعذّر فتح المحادثة المشتركة. تأكد من اتصالك وحاول مرة أخرى.',
   'Whole Kingdom': 'كل المملكة',
 
   // Home
@@ -1599,6 +1601,19 @@ const AR: Record<string, string> = {
   'Plan number':                        'رقم المخطط',
   'Land number':                        'رقم القطعة',
   'Street width':                       'عرض الشارع',
+  // The office sites (aldarim, abwbna, alobid, bahadhabab) send one row per street side; the ad page prints
+  // «عرض الشارع الشرقي…». Without these the card printed «بيان غير محدد 100» (owner 2026-11-10, aldarim 50820).
+  'Street width (N)':                   'عرض الشارع الشمالي',
+  'Street width (E)':                   'عرض الشارع الشرقي',
+  'Street width (S)':                   'عرض الشارع الجنوبي',
+  'Street width (W)':                   'عرض الشارع الغربي',
+  'Living rooms':                       'الصالات',
+  'Parking spots':                      'مواقف السيارات',
+  'Feature':                            'ميزة',
+  // therc rows carry their Arabic name in `key`; the catalog now knows the label too, so every scraper label resolves.
+  'Reference':                          'رقم المرجع',
+  'Date posted':                        'تاريخ النشر',
+  'Price as published':                 'السعر كما نشر',
   'Street':                             'الشارع',
   'Property services':                  'خدمات العقار',
   'Other obligations on the property':  'التزامات أخرى على العقار',
@@ -1717,6 +1732,9 @@ const AR: Record<string, string> = {
   'Listing': 'الإعلان',
   'Could not load this listing. Try again.': 'تعذّر تحميل الإعلان. حاول مرة أخرى.',
   'Some listings could not be loaded.': 'تعذّر تحميل بعض الإعلانات.',
+  'Same property, {n} more ads:': 'نفس العقار، {n} إعلانات أخرى:',
+  'Same property, one more ad:': 'نفس العقار، إعلان آخر:',
+  'from {price}': 'من {price}',
   '{n} bedrooms': '{n} غرف',
   'Same district and type, area within 20% of this ad, same bedrooms when stated. Each property once, nearest first, prices as published.': 'نفس الحي والنوع، والمساحة ضمن 20% من هذا الإعلان، ونفس عدد الغرف عند ذكره. كل عقار مرة واحدة، الأقرب أولاً، والأسعار كما نُشرت.',
   'Tap «Show the similar listings» under our half to see the ads closest to this one (same district and type, area within 20%, same bedrooms when stated), each on its own website at its published price.': 'اضغط «عرض الإعلانات المشابهة» تحت جانبنا لترى أقرب الإعلانات لهذا الإعلان (نفس الحي والنوع، والمساحة ضمن 20%، ونفس عدد الغرف عند ذكره)، كلٌّ في موقعه الأصلي وبسعره المنشور.',
@@ -2002,6 +2020,7 @@ const AR: Record<string, string> = {
   'Signing out…': 'جارٍ تسجيل الخروج…',
   'Deleting account…': 'جارٍ حذف الحساب…',
   'Apple sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر Apple غير متاح حالياً. جرّب طريقة أخرى.',
+  'Google sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر Google غير متاح حالياً. جرّب طريقة أخرى.',
   'Send code': 'إرسال الرمز',
   'Cancel': 'إلغاء',
   'Back': 'رجوع',

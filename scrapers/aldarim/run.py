@@ -34,8 +34,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, http_liveness, normalize
-from scrapers.common.arabic_location import to_catalog
+from scrapers.common import db, http_liveness, normalize, nuzul_usage
+from scrapers.common.arabic_location import to_catalog, twin_city_by_district
 from scrapers.common.pii import redact_pii
 from scrapers.common.posting_date import site_posting_date
 from scrapers.common.source_pin import pin_dict
@@ -59,7 +59,7 @@ PER_PAGE = 50
 # (golden proof: scrapers/common/tests/test_normalize_unification_golden.py). Aldarim currently
 # needs NO per-platform overrides; if one ever appears, pass overrides= per the
 # normalize.map_type_exact contract instead of forking a private map.
-# A few types we treat as commercial-land when category is commercial (call-site rule, stays here).
+# Land is Commercial Land when the page's own usage says commercial (nuzul_usage.land_category).
 _LAND_TYPES = {"land"}
 
 
@@ -390,8 +390,9 @@ _EXTRA_FIELDS = [
 
 def _additional_info(L: dict) -> list[dict[str, Any]]:
     rows = []
-    # Usage (Residential/Commercial) — shown on aldarim.sa, wanted on our card.
-    usage = (L.get("category") or "").title()
+    # «الاستخدام» exactly as the ad page prints it (the is_for_* flags). NOT `category`: that is the office's
+    # hidden filing pick, never shown on the page (scrapers/common/nuzul_usage.py). No flag on → no row.
+    usage = nuzul_usage.usage_shown_ar(L)
     if usage:
         rows.append({"key": "usage", "label": "Property usage", "value": usage})
     for key, label in _EXTRA_FIELDS:
@@ -415,8 +416,12 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     # Unmapped type → RAW preserved, title-cased (never a guessed default; Batch 2 type-truth
     # contract) — byte-identical to the old `TYPE_MAP.get(t, t.title() if t else None)`.
     property_type = normalize.map_type_en(t) or (t.title() if t else None)
-    if t in _LAND_TYPES and category == "commercial":
-        property_type = "Commercial Land"
+    if t in _LAND_TYPES:
+        # A land ad is what the page's own «الاستخدام» says it is; the office's `category` decides only when the
+        # page does not settle it. The table follows (owner 2026-11-10; scrapers/common/nuzul_usage.py).
+        category = nuzul_usage.land_category(L)
+        if category == "commercial":
+            property_type = "Commercial Land"
 
     area = _int(L.get("area")) or _int(L.get("built_up_area"))
     # Rent fidelity (monthly-rent contract; 2026-07-16 unification follow-up): price_annual is truly
@@ -439,12 +444,15 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
 
     # Native Arabic R/C/D (ADDITIVE — live city/neighborhood above untouched). The API already carries
     # city.name_ar / district.name_ar; we just stopped discarding them. No region signal from Aldarim,
-    # so same-name twins (rare here — mostly Riyadh) stay region_id-null rather than guessing.
+    # so a same-name twin is settled only by the ad's OWN district when exactly one twin has that
+    # district (twin_city_by_district); otherwise it stays null rather than guessing.
     cityd = L.get("city") if isinstance(L.get("city"), dict) else {}
     distd = L.get("district") if isinstance(L.get("district"), dict) else {}
     city_ar = (cityd.get("name_ar") or "").strip() or None
     district_ar = (distd.get("name_ar") or "").strip() or None
     cid, rid = to_catalog(city_ar)
+    if cid is None:
+        cid, rid = twin_city_by_district(city_ar, district_ar) or (cid, rid)
     row = {
         "ad_number": f"ALD{pid}",
         "listing_url": f"https://www.aldarim.sa/en/properties/{pid}",

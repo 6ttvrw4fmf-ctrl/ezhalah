@@ -9,6 +9,8 @@ import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
 import { openListing } from '@/lib/openListing';
 import { safeHttpUrl } from '@/lib/safeUrl';
+import { frameNext, frameTimerRuns, type FrameState } from '@/lib/flowState';
+import { reportError } from '@/lib/observability';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -30,21 +32,29 @@ export default function Browser() {
   // The proxied Aqar page fetches ~170KB of CSS/JS through our proxy, so it styles itself a beat
   // after the HTML appears. We cover the iframe with a spinner until it fully loads (iframe onLoad,
   // or a safety timeout) so the user never sees the raw unstyled flash. (user-reported.)
-  const [frameLoaded, setFrameLoaded] = useState(false);
-  const [frameError, setFrameError] = useState(false);
+  // ONE state for the framed page (src/lib/flowState.ts frameNext). It used to be two booleans that could both be
+  // true: the 12 s timer raised the error, the page then arrived, and the «couldn't load» cover stayed on top of it.
+  const [frame, setFrame] = useState<FrameState>('loading');
+  // The ad could not be LOOKED UP (a failed read) — not the same as «no such ad».
+  const [lookupFailed, setLookupFailed] = useState(false);
+  // «Retry» after a failed lookup: bumping this runs the lookup again, so one bad read is not a dead end.
+  const [lookupTry, setLookupTry] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   // If the proxied page doesn't load within ~12s, treat it as a failure and show a graceful in-app
   // fallback (Reload / Open on AQAR) instead of Chrome's bare "couldn't load" page. Proxying a live
   // site is intermittently flaky, so we never leave the user stuck. (user-reported.)
+  // The clock starts when the frame is on screen (the ad was found), never while the ad is still being looked up.
+  const frameOnScreen = IS_WEB && !resolving && !!listing;
   useEffect(() => {
-    if (frameLoaded || frameError) return;
-    const tmr = setTimeout(() => { if (!frameLoaded) setFrameError(true); }, 12000);
+    if (!frameTimerRuns(frame, frameOnScreen)) return;
+    const tmr = setTimeout(() => setFrame((f) => frameNext(f, 'timeout')), 12000);
     return () => clearTimeout(tmr);
-  }, [frameLoaded, frameError, reloadKey]);
+  }, [frame, reloadKey, frameOnScreen]);
 
   useEffect(() => {
     let alive = true;
     setResolving(true);
+    setLookupFailed(false);
     findListing(Number(id)).then((l) => {
       if (!alive) return;
       setListing(l);
@@ -52,10 +62,17 @@ export default function Browser() {
       if (l) trackOpen(l);
       // NATIVE: hand off to the in-app browser overlay and close this route.
       if (l && !IS_WEB) { void openListing(l); router.back(); }
+    }).catch((e: unknown) => {
+      // A lookup that FAILED ends the spinner with an honest «couldn't load», never an endless wait — and it is
+      // reported, because catching it here takes it away from the global unhandled-rejection reporter.
+      reportError(e, { source: 'browser.findListing' });
+      if (!alive) return;
+      setLookupFailed(true);
+      setResolving(false);
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, lookupTry]);
 
   // Localize the partner URL to the app language (Aqar has an /en variant).
   const localize = (url?: string | null): string | undefined => {
@@ -79,7 +96,8 @@ export default function Browser() {
   if (!listing || !proxyUrl) {
     return (
       <View style={[s.center, { paddingTop: insets.top }]}>
-        <Text>{t('Listing not found.')}</Text>
+        <Text>{lookupFailed ? t("Couldn't load the preview here.") : t('Listing not found.')}</Text>
+        {lookupFailed && <Pressable onPress={() => setLookupTry((n) => n + 1)}><Text style={{ color: colors.primary, marginTop: 8 }}>{t('Retry')}</Text></Pressable>}
         <Pressable onPress={() => router.back()}><Text style={{ color: colors.primary, marginTop: 8 }}>{t('Done')}</Text></Pressable>
       </View>
     );
@@ -132,26 +150,26 @@ export default function Browser() {
               <Frame
                 key={reloadKey}
                 src={proxyUrl}
-                onLoad={() => setFrameLoaded(true)}
-                onError={() => setFrameError(true)}
+                onLoad={() => setFrame((f) => frameNext(f, 'load'))}
+                onError={() => setFrame((f) => frameNext(f, 'error'))}
                 sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
                 style={{ flex: 1, width: '100%', height: '100%', border: 0, background: '#fff' }}
               />
               {/* Spinner overlay until the proxied page is fully loaded + styled — hides the raw flash. */}
-              {!frameLoaded && !frameError ? (
+              {frame === 'loading' ? (
                 <View style={s.frameLoading} pointerEvents="none">
                   <ActivityIndicator size="large" color={colors.primary} />
                   <Text style={s.frameLoadingText}>{t('Loading listing…')}</Text>
                 </View>
               ) : null}
               {/* Graceful failure (proxy hiccup) — our own retry + Open-on-AQAR, never Chrome's error. */}
-              {frameError ? (
+              {frame === 'error' ? (
                 <View style={s.frameLoading}>
                   <Ionicons name="cloud-offline-outline" size={40} color={colors.muted} />
                   <Text style={[s.frameLoadingText, { fontSize: 15 }]}>{t("Couldn't load the preview here.")}</Text>
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
                     <Pressable
-                      onPress={() => { setFrameError(false); setFrameLoaded(false); setReloadKey((k) => k + 1); }}
+                      onPress={() => { setFrame((f) => frameNext(f, 'reload')); setReloadKey((k) => k + 1); }}
                       style={s.retryBtn}
                     >
                       <Ionicons name="refresh" size={15} color="#fff" />

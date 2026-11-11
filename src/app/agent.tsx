@@ -116,6 +116,12 @@ import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryPr
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
+import { failedTurnMsgs, mayFailTurn, withoutReceipt } from '@/lib/flowState';
+import { reportError } from '@/lib/observability';
+
+// Smart Broker's «بحث» site-picker chip is HIDDEN for now (owner 2026-11-10: «remove it for now … hide it»).
+// Flip to true to bring it back; the picker code stays untouched.
+const SHOW_CHAT_SITE_PICKER = false;
 import { PLATFORM_META, type LoaderPlatform } from '@/data/loaderPlatforms';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «🎯 دقّق مع الذكاء الاصطناعي» button
@@ -1063,6 +1069,7 @@ export default function Agent() {
     voiceBaseRef.current = typed;
     voiceActiveRef.current = true; // synchronous latch — a second tap in the same tick is a no-op
     setVoiceState('recording'); // morph now; a denied permission gracefully restores below
+    try {
     await startVoiceInput({
       onFailure: (kind, detail) => {
         voiceActiveRef.current = false;
@@ -1090,6 +1097,16 @@ export default function Agent() {
         showVoiceNotice(detail ? `${msg} (${detail})` : msg);
       },
     });
+    } catch (e) {
+      // startVoiceInput reports its failures through onFailure; one that THROWS instead left the composer stuck in
+      // recording mode with the mic latched. Same clean restore, same honest line (2026-11-10).
+      reportError(e, { source: 'agent.startVoice' });
+      // The microphone may already be open (access granted, then the recognizer threw): let go of it.
+      cancelVoiceInput();
+      voiceActiveRef.current = false;
+      setVoiceState('idle');
+      showVoiceNotice(t('Voice input is not available right now.'));
+    }
   };
   // ■ Stop — finish listening WITHOUT submitting: capture stops instantly (synchronous teardown,
   // exactly as before); a brief "processing" beat then shows a loading indicator in the waveform's
@@ -1921,7 +1938,9 @@ export default function Agent() {
 
   // Shared "found" choreography: the typed reply ("answer respond") → a held "Ezhalah is searching…"
   // beat → the results header + cards. `statusId` is the thinking bubble we morph into the reply.
-  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string, afCompleted = false) => {
+  // Resolves TRUE once the results bubble is on screen, FALSE when the run was stopped during the loader beat
+  // (nothing new was shown). runRefine reads it: a round only «landed» if its results appeared (2026-11-10).
+  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string, afCompleted = false): Promise<boolean> => {
     // 1) SEARCHING phase: status bubble shows the slogan + summary. Slogan language follows the
     // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
     // who chat in one language and have their UI in the other still get the matching slogan.
@@ -1960,12 +1979,12 @@ export default function Agent() {
     }
     delete loaderPresentedRef.current[statusId];
     delete searchingAtRef.current[statusId];
-    if (run.cancelled) return;
+    if (run.cancelled) return false;
     // Soft completion (owner v4): the loader fades out gently instead of vanishing in a single
     // frame — flag it `exiting`, give the fade its beat, then morph into the results state.
     setMsgs((m) => m.map((x) => (x.id === statusId && x.role === 'status' ? { ...x, exiting: true } : x)));
     await waitRun(run, LOADER_EXIT_MS);
-    if (run.cancelled) return;
+    if (run.cancelled) return false;
     // 2) RESULTS: ONE consolidated bubble in the exact order the user wants:
     //    [slogan] → [Search Summary] → [Result intro] → [Sort line] → [Property cards].
     //    The slogan + summary CARRY OVER from the searching status into this same bubble — they don't
@@ -2002,6 +2021,7 @@ export default function Agent() {
     // to show. R11.1's own setCompleted(true) call in the AF-round onFetched path is left in place —
     // this is a superset, not a replacement, so no existing AF-round behavior changes.
     if (searchIsFinishedAtThreshold(quotableTotal(result), INTERVIEW_STOP_AT)) setCompleted(true);
+    return true;
   };
 
   // «عرض المزيد» (Load more) — 100, THEN THE CHOICE, THEN EVERYTHING (owner product rule
@@ -2278,6 +2298,11 @@ export default function Agent() {
       const revealIsTerminal =
         revealTo >= Math.min(SECOND_PAGE_CAP, totalForCap) || (!hasMoreNow && revealTo >= mergedLen);
       if (revealIsTerminal) setCompleted(true);
+    } catch (e) {
+      // A press that THREW is a failed press, said out loud — the same line a failed page already says. Nothing was
+      // merged and nothing is claimed finished; the button is released by the `finally` below.
+      reportError(e, { source: 'agent.loadMore' });
+      if (conversationEpochRef.current === epoch) setMsgs((prev) => [...prev, { id: uid(), role: 'agent', text: t('Loading listings — please try again in a few seconds.') }]);
     } finally {
       setLoadingMore((s) => ({ ...s, [mid]: false }));
     }
@@ -2625,9 +2650,23 @@ export default function Agent() {
   // asked dimension into the SAME filter, and re-search. (user 2026-06-27.)
   // `opts.onFetched` reports the honest RPC total as soon as it's known (drives the mining beat);
   // `opts.guided` attaches the interview's facets to the results turn for the removable pills.
+  // A TURN THAT THREW IS OVER, NOT STILL RUNNING (2026-11-10). send() and runRefine() awaited the network and the card
+  // reveal with no catch: anything thrown in between left `busy` true and the spinner turning forever — a dead
+  // composer until a reload. sendFilter already ended its turn this way; this is the same ending for the other two.
+  // The decisions live in src/lib/flowState.ts (mayFailTurn / failedTurnMsgs) so a guard can RUN them; the error is
+  // still reported, because catching it here takes it away from the global unhandled-rejection reporter.
+  // `replyLocale` is the language of the turn that failed (an English message gets the English line even when the
+  // interface is Arabic — CHAT LANGUAGE AND UI LANGUAGE ARE SEPARATE), never the interface language.
+  const failTurn = (run: Run, statusId: string, err: unknown, where: string, replyLocale: Locale) => {
+    reportError(err, { source: where });
+    if (!mayFailTurn(run, runRef.current)) return;
+    setMsgs((m) => failedTurnMsgs(m, statusId, { id: uid(), role: 'agent', text: replyLocale === 'en' ? nextVariant(SEARCH_FAILED_EN) : nextVariant(SEARCH_FAILED_AR) } as ChatMsg));
+    setBusy(false);
+    runRef.current = null;
+  };
   const runRefine = async (
     baseQ: SearchQuery, dim: string, value: string, label: string,
-    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[]; pools?: Array<number | null> } },
+    opts?: { onFetched?: (total: number | null) => void; onNotLanded?: () => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[]; pools?: Array<number | null> } },
   ) => {
     pendingRefineRef.current = null;
     finalizeReveal();
@@ -2655,6 +2694,11 @@ export default function Agent() {
     // on screen; the later passes settle it ~80 px under the top with the loader below it. All land
     // within the first 1.5 s, long before the user has had reason to scroll.
     for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);
+    // `landed`: this turn's results are ON SCREEN (playListings says so). A refine that threw, or was stopped before
+    // that — in the search OR in the loader beat after it — tells its caller (onNotLanded), so nothing it set up
+    // for «the new results» is left behind.
+    let landed = false;
+    try {
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
     prefetchNarrowing(result.query ?? refined, opts?.guided?.asked ?? []);  // AFTER the search — see prefetchNarrowing
@@ -2683,7 +2727,7 @@ export default function Agent() {
     }
     // A round of the Advanced Filter reads the ORIGINAL summary plus every committed answer (owner
     // 2026-10-03); any other refine keeps summarising the query it ran.
-    await playListings(run, statusId,
+    landed = await playListings(run, statusId,
       opts?.guided ? guidedSearchSummary(opts.guided.baseQ, opts.guided.facets) : buildScrapeIntro(result.query ?? refined),
       result, label, !!opts?.guided);
     if (run.cancelled) return;
@@ -2694,6 +2738,8 @@ export default function Agent() {
     // beginCardDrip already eases the new turn's TOP to ~80px under the viewport top (the 2026-07-09
     // "don't drag the whole screen down" rule), which is exactly where the owner wants a completed
     // round to land: the selection receipt, then the new count, then the new cards.
+    } catch (e) { failTurn(run, statusId, e, 'agent.runRefine', (label ? detectLocale(label) : null) ?? locale); return; }
+    finally { if (!landed) opts?.onNotLanded?.(); }
     setBusy(false); runRef.current = null;
   };
 
@@ -2996,6 +3042,9 @@ export default function Agent() {
     const roundLabel = ageFlowLabelsRef.current.join(locale === 'ar' ? '، ' : ', ');
     void runRefine(q, '__guided__', '', roundLabel ? pickAfCourtesyOpening(Math.random, locale) + roundLabel : roundLabel, {
       guided,
+      // The round never produced results (it threw, or was stopped first): the turn it started from gets its
+      // buttons back — a «round done» receipt over a round that never ran was a dead end (no way back in).
+      onNotLanded: () => { if (carry && roundCommitted) setAfReceipt((r) => withoutReceipt(r, carry.msgId)); },
       // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
       // One beat per answered question, in the chips' own words without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات»),
       // each with the size of the set it was checked against — the beat reads «نفحص 1,425 عقار…» → «نفحص 830 عقار…».
@@ -3385,6 +3434,7 @@ export default function Agent() {
     setMsgs((m) => [...m, { id: uid(), role: 'user', text: v }, { id: statusId, role: 'status', phase: 'thinking' }]);
     toBottom();
 
+    try { // closed by failTurn at the end of send(): a turn that throws ends, it never spins forever
     // Remember everything the user has said this search attempt, so a forced scrape can read the
     // whole conversation ("a house" + "floor") and not just the last vague line.
     saidRef.current = [...saidRef.current, v];
@@ -3581,6 +3631,7 @@ export default function Agent() {
         m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: reply, typing: true } : x)),
       );
     }
+    } catch (e) { failTurn(run, statusId, e, 'agent.send', replyLocale); return; }
     // The network turn is done; the cards then reveal on their own timers (busy is free, so the user can
     // type a new message — which finalizes the reveal via finalizeReveal). interview returns earlier.
     setBusy(false);
@@ -5139,7 +5190,7 @@ export default function Agent() {
                   SHOWS ONLY AT THE START (owner 2026-10-17: «when a user sends a message, remove this search
                   button, it just shows at the start» — supersedes 2026-10-10). While a search runs it is already
                   gone, so nothing in the row moves mid-turn; the mic and Send/Stop keep their places. */}
-                {!modeSearched ? (
+                {SHOW_CHAT_SITE_PICKER && !modeSearched ? (
                 <Pressable
                   testID="initial-chat-search"
                   accessibilityRole="button"

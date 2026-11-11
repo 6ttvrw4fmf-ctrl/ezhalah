@@ -39,6 +39,7 @@ import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, 
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 import { onSurface } from '@/lib/mapSurface';
+import { pillCount, type PillCount } from '@/lib/flowState';
 import { RESOLVE_BUDGET_MS, makeSuggestCache, suggestKey } from '@/lib/placeSearch';
 
 // The soil mascot (assets/images/soil-mascot.svg) wore this button for a day; owner 2026-11-03: «hide the mascot,
@@ -616,7 +617,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // «no listings here»). Tapping a bubble zooms into it; tapping a pin hands its row up (the card sheet).
   const pinFilter: PinFilter | undefined = pins ? { ...pins, poly: poly ?? pins.poly ?? null } : undefined;
   const pinsKey = JSON.stringify(pinFilter ?? null);
-  const [pinCount, setPinCount] = useState<number | null>(null);
+  // A number, 'failed' (the read for the view on screen failed — «try again» is shown), or null (nothing read yet).
+  const [pinCount, setPinCount] = useState<PillCount | null>(null);
+  const retryPinsRef = useRef<(() => void) | null>(null);
   // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
   const [viewPlace, setViewPlace] = useState<string | null>(null);
   // The named place's OWN count (owner 2026-11-05): beside «في حي النرجس» the pill prints النرجس's number, not the view's.
@@ -753,7 +756,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:5;opacity:0;transition:opacity .15s';
     host?.appendChild(canvas);
     let shown: MapDot[] = []; let project: ((lat: number, lng: number) => [number, number]) | null = null;
-    const narrowed = !!(pins.category || pins.types?.length || pins.beds?.length || pins.areaMin != null || pins.areaMax != null
+    const narrowed = !!(pins.category || pins.scope || pins.furnished != null || pins.types?.length || pins.beds?.length || pins.areaMin != null || pins.areaMax != null
       || pins.priceMin != null || pins.priceMax != null || pins.poly);
     const paint = (dots: MapDot[]) => {
       const rect = canvas.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
@@ -936,6 +939,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const crowdedByDots = dots !== 'unknown' && dotsEstimateInBox(dots, pins.deals, { s: center.latitude - span.latitudeDelta / 2, n: center.latitude + span.latitudeDelta / 2, w: center.longitude - span.longitudeDelta / 2, e: center.longitude + span.longitudeDelta / 2 }) > CROWD_ESTIMATE;
       // Exact points are read with a small cap: one row over PIN_SHOW_MAX is enough to know the view is too dense.
       let rows: PinRow[] | 'unknown' = crowdedByDots ? [] : await fetchMapPins(paddedBox(center, span), cell, pins, cell === 0 ? PIN_SHOW_MAX + 1 : PIN_LIMIT);
+      // The read FAILED for the view on screen (a pan, a zoom or a FILTER change — all of them run this load): its count
+      // is unknown, so the pill becomes «couldn't load — try again» (pillCount → 'failed') instead of keeping the
+      // previous view's number over this one. The drawn layer is still kept, as before.
+      if (my === seq && mapRef.current === m && rows === 'unknown') setPinCount(pillCount(rows));
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
       // DENSE VIEW: the exact-point read hit its cap, so pins would silently show a PART of the listings (downtown
       // Riyadh holds thousands in one city-zoom view). Never a partial set — read the same view again as a fine bubble
@@ -969,6 +976,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           rows = bubblesFromDots(dotsInView(dots, pins.deals, paddedBox(center, span))).map((b) => ({ ...b, type_ar: null, platforms: 0, ids: null, price: null, platform: null }) as PinRow);
         } else {
           rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
+          if (my === seq && mapRef.current === m && rows === 'unknown') setPinCount(pillCount(rows));
           if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
         }
       }
@@ -976,7 +984,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (drawCell === 0) rows = placeApart(rows, onScreen, headWidth);
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
-      setPinCount(rows.reduce((a, r) => a + r.n, 0));
+      setPinCount(pillCount(rows));
       setPlaceCount(null);
       void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc, translitPlace)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
@@ -1021,7 +1029,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     m.addEventListener('region-change-start', closePanels);
     m.addEventListener('region-change-start', clearBridge);
     void load();
+    retryPinsRef.current = () => { void load(); };
     return () => {
+      retryPinsRef.current = null;
       seq++; if (timer) clearTimeout(timer);
       m.removeEventListener('region-change-end', onRegion as unknown as (e: unknown) => void);
       m.removeEventListener('region-change-start', hideCanvas as unknown as (e: unknown) => void);
@@ -1249,7 +1259,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </View>
       ) : null}
       {/* Zillow's «Only N matching results»: what the view (or the drawn boundary) holds, since the dots carry no number. */}
-      {!drawing && pinCount !== null ? (
+      {!drawing && pinCount === 'failed' ? (
+        <Pressable style={s.countPill} onPress={() => retryPinsRef.current?.()} accessibilityRole="button" testID="map-pin-retry"><Text style={s.countPillT}>{t('Couldn’t load the listings here. Try again')}</Text></Pressable>
+      ) : null}
+      {!drawing && typeof pinCount === 'number' ? (
         <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}</Text></View>
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}

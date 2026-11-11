@@ -19,6 +19,18 @@
 >    `select count(*) from alert_event where resolved_at is null and owner_routine = '<your routine>'` and write both numbers in :end.
 >    A night is GOOD only if end < start, with every closed alert closed by a proven fix (rule 1), not by hiding or resolving by hand.
 >    Equal or higher = a bad night whatever else you did: write why, and the ONE root cause you will hit first next run.
+>
+> 7. **Use CodeRabbit on every PR it reviews (owner 2026-11-10, paid usage budget is ON).** Wait for its review before merging.
+>    Fix every real finding: Major/Critical always, and any minor one that is a real bug. Add the test it suggests when it names one.
+>    On each thread, reply with the fix commit (or the proof that it is wrong), then resolve it. Never resolve a thread without one of the two.
+>    Rate-limited, «Skipped» or «Reviews paused» on a PR it should review → comment `@coderabbitai review` (or push ONE fresh commit);
+>    never merge around a review it owes. «Reviews paused» means too many commits, NOT the budget (usage billing is on).
+>    In :end write `CodeRabbit: <found> found, <fixed> fixed, <refuted> refuted` and name the best catch.
+>
+> 8. **Owner orders in your backlog are JOB 0 (owner 2026-11-11).** At :start run
+>    `select id, item from ops_engineer_backlog where status = 'open' and item ilike 'OWNER %' and engineer ilike '<your lane>%'`.
+>    Every row is the owner's decision: do it first, never re-ask it in LINE 1, and close it (status 'done') only with customer proof.
+>    The scraping lane missed backlog 1744 (Haraj daily rents → short stays) on 11-11 and asked the owner again.
 
 
 > **🔒 MERGE LOCK 2026-11-08 (owner: «fully automate with the engineers and CodeRabbit»).** `safe-pr-merge.ts` (and so the robot) REFUSES a PR

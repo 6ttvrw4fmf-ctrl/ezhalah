@@ -115,6 +115,7 @@ def no_date_report():
     for m in _groups():
         for site, (module, build, call, raw_path) in getattr(m, "NO_DATE", {}).items():
             def run(mutated=None, args=None):
+                _seed_catalog()                  # the same stubbed location catalog the dated sites map against
                 real = importlib.import_module(module)
                 mod = real
                 if mutated:

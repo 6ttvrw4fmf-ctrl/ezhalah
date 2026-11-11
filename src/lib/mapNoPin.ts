@@ -51,6 +51,7 @@ export function noPinArgs(box: { s: number; w: number; n: number; e: number }, f
     p_price_min: f.priceMin ?? null, p_price_max: f.priceMax ?? null,
     p_limit: limit,
     ...(f.furnished != null ? { p_furnished: f.furnished } : {}),
+    ...(f.scope ? { p_tables: f.scope.tables, p_tables2: f.scope.tables2, p_types2: f.scope.types2, p_macro: f.scope.macro } : {}),
   };
 }
 

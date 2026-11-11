@@ -38,16 +38,31 @@ export function typeSelection(f: Pick<MapFilterState, 'groups' | 'types'>, membe
 export const furnitureOffered = (deals: readonly string[], category: MapFilterState['category']): boolean =>
   deals.length === 1 && deals[0] === 'rent' && category === 'Residential';
 
-export function pinFilterOf(f: MapFilterState, typeAr: (groups: string[]) => string[] | null, members: (group: string) => string[] = () => [], deals: readonly string[] = []): Omit<PinFilter, 'deals' | 'poly'> {
+/** What the Filter home would send for a category + exact types (mapTypeScope in src/data/remote.ts). Injected, so
+ *  this file stays import-free. */
+export type TypeScopeOf = (category: 'Residential' | 'Commercial', types: string[]) => { types: string[] | null; tables: string[] | null; tables2: string[] | null; types2: string[] | null; macro: 'Residential' | 'Commercial' | null };
+
+/** Bedrooms apply where the Filter home offers them (detailForContext in src/data/taxonomy.ts): never under «تجاري»,
+ *  never with the residential land group picked. Anywhere else the row is hidden and its choice dropped. */
+export const bedsOffered = (f: Pick<MapFilterState, 'category' | 'groups'>): boolean =>
+  f.category !== 'Commercial' && !f.groups.includes('Residential Plots');
+
+export function pinFilterOf(f: MapFilterState, typeAr: (groups: string[]) => string[] | null, members: (group: string) => string[] = () => [], deals: readonly string[] = [], scopeOf?: TypeScopeOf): Omit<PinFilter, 'deals' | 'poly'> {
   const beds: number[] = [];
-  for (const b of f.beds) { if (b === '5+') beds.push(5, 6, 7, 8, 9, 10, 11, 12); else beds.push(Number(b)); }
+  if (bedsOffered(f)) for (const b of f.beds) { if (b === '5+') beds.push(5, 6, 7, 8, 9, 10, 11, 12); else beds.push(Number(b)); }
+  // THE FILTER'S SCOPE: with a category picked, the request is the one the Filter home builds for the same choice — a
+  // whole group is its member types, exactly as the Filter expands it.
+  const sc = scopeOf && f.category
+    ? scopeOf(f.category, typeSelection(f, members).flatMap((x) => (f.groups.includes(x) && members(x).length ? members(x) : [x])))
+    : null;
   return {
-    category: f.category === 'Residential' ? 'residential' : f.category === 'Commercial' ? 'commercial' : null,
-    types: f.groups.length ? typeAr(typeSelection(f, members)) : null,
+    category: sc ? null : f.category === 'Residential' ? 'residential' : f.category === 'Commercial' ? 'commercial' : null,
+    types: sc ? sc.types : f.groups.length ? typeAr(typeSelection(f, members)) : null,
     beds: beds.length ? beds : null,
     areaMin: num(f.areaMin), areaMax: num(f.areaMax),
     priceMin: num(f.priceMin), priceMax: num(f.priceMax),
     furnished: f.furnished != null && furnitureOffered(deals, f.category) ? f.furnished : null,
+    ...(sc ? { scope: { tables: sc.tables, tables2: sc.tables2, types2: sc.types2, macro: sc.macro } } : {}),
   };
 }
 export const isNarrowed = (f: MapFilterState): boolean => !!(f.category || f.groups.length || (f.types ?? []).length || f.furnished != null || f.beds.length || num(f.areaMin) || num(f.areaMax) || num(f.priceMin) || num(f.priceMax));
