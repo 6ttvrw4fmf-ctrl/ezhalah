@@ -58,6 +58,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
+import { newHydrationLedger, recordHydration, dropsOf as libDropsOf, newestBySeq, isHydrationRequest, hydrationRequestTracker } from './lib/hydrationDrops.ts';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
@@ -634,21 +635,27 @@ const counts: Count[] = [];
 let seq = 0;
 // Every raw-table hydration the app sent (fetchRawByIds: GET /rest/v1/<table>?…&id=in.(…)): which ids it ASKED for
 // and which came back. A row asked for and not returned is a hydration drop (src/lib/honestTotal.ts).
-const hydrationAsked = new Map<string, number>();   // `${table}:${id}` → seq of the request
-const hydrationGot = new Set<string>();
+// One ledger rule for every live count robot (scripts/lib/hydrationDrops.ts): per listing key the NEWEST hydration
+// by arrival order and whether THAT response returned it (CodeRabbit, PR 11725).
+const hyd = newHydrationLedger();
+// Pending from the REQUEST, not the response (CodeRabbit, PR 11725): a newer hydration still waiting for headers
+// keeps dropsOf() at «not yet measured».
+const hydReq = hydrationRequestTracker<object>(hyd);
+page.on('request', (req) => { if (isHydrationRequest(req.method(), req.url())) hydReq.sent(req); });
+page.on('requestfailed', (req) => hydReq.settled(req, false, seq++));
 page.on('response', async (r) => {
   const u = r.url();
+  // Arrival order stamped before any await (CodeRabbit, PR 11725): body reads finish in any order.
+  const arrived = seq++;
   if (r.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u) && /[?&]id=in\./.test(decodeURIComponent(u))) {
+    let recorded = false;   // a failed / unreadable chunk stamps a failure: the overlap stays unmeasured
     try {
       const tbl = (u.match(/\/rest\/v1\/([a-z0-9_]+_listings)\?/) || [])[1];
-      const inList = (decodeURIComponent(u).match(/[?&]id=in\.\(([^)]*)\)/) || [])[1] || '';
       if (!tbl || !r.ok()) return;                     // a failed chunk is not a drop: the app shows the retry UI instead
       const j = await r.json();
       if (!Array.isArray(j)) return;
-      const s = seq++;
-      for (const id of inList.split(',').map((x) => x.trim()).filter(Boolean)) hydrationAsked.set(`${tbl}:${id}`, s);
-      for (const row of j) if (row?.id != null) hydrationGot.add(`${tbl}:${row.id}`);
-    } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ }
+      recorded = recordHydration(hyd, u, r.ok(), j, arrived);
+    } catch { /* unread → its ids stay un-asked, so dropsOf() returns null and no allowance is made */ } finally { hydReq.settled(r.request(), recorded, arrived); }
     return;
   }
   if (r.request().method() !== 'POST') return;
@@ -661,9 +668,9 @@ page.on('response', async (r) => {
     if (!Array.isArray(j)) return;
     const body = JSON.parse(r.request().postData() || '{}');
     if (isSearch) {
-      searches.push({ body, total: j.length ? Number(j[0]?.total_count ?? NaN) : 0, rows: j.map((x: any) => `${x.source_table}:${x.listing_id}`), seq: seq++ });
+      searches.push({ body, total: j.length ? Number(j[0]?.total_count ?? NaN) : 0, rows: j.map((x: any) => `${x.source_table}:${x.listing_id}`), seq: arrived });
     } else if (j.length) {
-      counts.push({ rpc: isGuided ? 'guided' : 'age', body, row: j[0], seq: seq++ });
+      counts.push({ rpc: isGuided ? 'guided' : 'age', body, row: j[0], seq: arrived });
     }
   } catch { /* a body we could not read is not a request we can assert on */ }
 });
@@ -706,7 +713,7 @@ const waitForSearch = async (armed: number, timeoutMs = 40_000, want?: (s: Searc
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     const cands = searches.slice(armed).filter((s) => isResultsSearch(s) && (!want || want(s)));
-    if (cands.length) return cands[cands.length - 1];
+    if (cands.length) return newestBySeq(cands);   // newest ARRIVAL, not last body read (CodeRabbit, PR 11725)
     await page.waitForTimeout(400);
   }
   return null;
@@ -715,13 +722,7 @@ const waitForSearch = async (armed: number, timeoutMs = 40_000, want?: (s: Searc
  *  request was not observed after the search (then nothing is excused). */
 const dropsOf = (s: Search | null): { n: number | null; keys: string[] } => {
   if (!s) return { n: null, keys: [] };
-  const keys: string[] = [];
-  for (const k of s.rows) {
-    const asked = hydrationAsked.get(k);
-    if (asked == null || asked < s.seq) return { n: null, keys: [] };
-    if (!hydrationGot.has(k)) keys.push(k);
-  }
-  return { n: keys.length, keys };
+  return libDropsOf(hyd, s.rows, s.seq);
 };
 const waitForHeadline = async (total: number | null, timeoutMs = 25_000, honest?: () => number | null): Promise<number | null> => {
   const until = Date.now() + timeoutMs;
@@ -786,7 +787,7 @@ const pairCount = (rpc: Rpc, ctxBody: any): Count | null => {
   const keysOf = (b: any) => Object.keys(b ?? {}).filter((k) => !NON_PREDICATE_KEYS.has(k) && !(rpc === 'age' && AGE_KEYS.includes(k)));
   const match = counts.filter((c) => c.rpc === rpc &&
     [...new Set([...keysOf(c.body), ...keysOf(ctxBody)])].every((k) => JN(c.body?.[k]) === JN(ctxBody?.[k])));
-  return match.length ? match[match.length - 1] : null;
+  return newestBySeq(match);   // newest ARRIVAL, not last body read (CodeRabbit, PR 11725)
 };
 
 type OptionRead = { key: string; count: number | null; label: string; col?: string; rpcVal?: number; oracle?: number | null; unhandled?: string[] };

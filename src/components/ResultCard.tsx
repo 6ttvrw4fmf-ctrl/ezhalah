@@ -684,7 +684,7 @@ const FURNISH_VALUES_AR: Record<string, string> = {
 const AR_ENUM: Record<string, Record<string, string>> = {
   // (owner report, 2026-07-16 Arabic-only sweep) 'agricultural'/'mixed' added — eaqartabuk/erapulse
   // raw values that fell through the enum lookup and rendered raw English.
-  'property usage': { residential: 'سكني', commercial: 'تجاري', agricultural: 'زراعي', mixed: 'مختلط' },
+  'property usage': { residential: 'سكني', commercial: 'تجاري', agricultural: 'زراعي', mixed: 'مختلط', industrial: 'صناعي', educational: 'تعليمي', health: 'صحي', 'residential commercial': 'سكني تجاري' },
   // BOTH label spellings are real and must BOTH be kept — see FURNISH_VALUES_AR below.
   // (fix, 2026-07-16) satel's ADDL_FIELDS label is 'Furnishing' ('Fully furnished'/'Unfurnished'/
   //   'Partially furnished', 203 rows).
@@ -743,6 +743,9 @@ export function isBlankAttrValue(label: unknown, value: unknown): boolean {
   return /street.*width|عرض الشارع/i.test(String(label ?? '')) && /^0+(?:\.0+)?\s*(?:m|متر|م)?$/i.test(v);
 }
 
+const AD_SOURCE_AR: Record<string, string> = { sakani: 'سكني', wasalt: 'وصلت' };
+// A four-digit year 1900-2099 under «Age» is the year the building was built, never its age in years.
+const BUILD_YEAR = /^(?:19|20)\d\d$/;
 export function arAttrValue(label: string, value: string, locale: string): string {
   const v = String(value ?? '').trim();
   if (!v) return value;
@@ -756,14 +759,20 @@ export function arAttrValue(label: string, value: string, locale: string): strin
     // Translate finite source enums in either direction without changing the stored fact.
     const known = Object.entries(AR_ENUM[ll] ?? {}).find(([, ar]) => ar === v);
     if (known) return known[0].replace(/-/g, ' ');
+    if (ll === 'property usage' && /[،,/]/.test(v)) {
+      // Nuzul sites print every use of the property on one row («سكني، تجاري»): translate it word by word.
+      const uses = Object.entries(AR_ENUM[ll]);
+      return v.split(/\s*[،,/]\s*/).filter(Boolean).map(p => uses.find(([, ar]) => ar === p)?.[0] ?? freeTextEn(englishCatalogText(p))).join(', ');
+    }
     if (v === 'نعم') return 'Yes';
     if (v === 'لا') return 'No';
     if (ll === 'facade') {
-      const directions: Record<string, string> = { شرق: 'East', شرقية: 'East', غرب: 'West', غربية: 'West', شمال: 'North', شمالية: 'North', جنوب: 'South', جنوبية: 'South' };
-      const parts = v.split(/[\s-]+/);
+      const directions: Record<string, string> = { شرق: 'East', شرقية: 'East', غرب: 'West', غربية: 'West', شمال: 'North', شمالية: 'North', جنوب: 'South', جنوبية: 'South', east: 'East', west: 'West', north: 'North', south: 'South' };
+      const parts = lv.split(/[\s_-]+/).filter(Boolean);
       if (parts.every(part => directions[part])) return parts.map(part => directions[part]).join(' ');
     }
     if (/street.*width|عرض الشارع/i.test(ll)) return v.replace(/^(\d+(?:\.\d+)?)\s*(?:متر|م)$/u, '$1 m');
+    if (ll === 'age' && BUILD_YEAR.test(v)) return `Built in ${v}`;
     if (ll === 'age' || ll === 'building age (years)') {
       if (v === 'جديد') return 'New';
       if (v === 'أقل من سنة') return 'Less than 1 year';
@@ -787,7 +796,13 @@ export function arAttrValue(label: string, value: string, locale: string): strin
     return freeTextEn(englishCatalogText(v));
   }
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
+  // wasalt's English words on an Arabic card (2026-11-10 sweep of every English value production serves): the platform
+  // that sourced the ad («SAKANI» 229, «wasalt» 22) and the many ways its users typed «none» under obligations (~140).
+  if (ll === 'ad source' && AD_SOURCE_AR[lv]) return AD_SOURCE_AR[lv];
+  if (ll === 'other obligations on the property' && /^(?:non|none|n\/a|na|nothing|nil)$/.test(lv)) return 'لا يوجد';
   if (ll === 'age') {
+    // The office sites (aldarim, abwbna) send the BUILD YEAR under «Age»: «عمر العقار 2018» read as 2018 years old.
+    if (BUILD_YEAR.test(v)) return `بُني عام ${v}`;
     if (lv === 'new') return 'جديد';
     if (lv === '<1 year' || lv === 'less than 1 year') return 'أقل من سنة';
     const plus = /^(\d+)\s*\+\s*years?$/i.exec(v); if (plus) return `أكثر من ${plus[1]} سنوات`;
@@ -797,6 +812,10 @@ export function arAttrValue(label: string, value: string, locale: string): strin
   }
   if (ll === 'facade') {
     if (AR_ENUM.facade[lv]) return AR_ENUM.facade[lv];
+    // The office sites send every side joined by «_» («north_south_east_west»); the ad page prints each side:
+    // «شمالية جنوبية شرقية غربية». Each part must be a side, or the value falls through to the guard below.
+    const sides = lv.split(/[\s_-]+/).filter(Boolean);
+    if (sides.length && sides.every(p => AR_ENUM.facade[p])) return sides.map(p => AR_ENUM.facade[p]).join(' ');
     const st = /^(\d+)\s*streets?$/i.exec(v); if (st) return `${st[1]} شوارع`;
     // (fix, 2026-07-16) dealapp's scraper mis-captures raw HTML/meta-tag fragments into this
     // field (e.g. '<meta name="twitter:title" content="...') — neither the compass-direction

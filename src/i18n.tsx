@@ -1601,6 +1601,19 @@ const AR: Record<string, string> = {
   'Plan number':                        'رقم المخطط',
   'Land number':                        'رقم القطعة',
   'Street width':                       'عرض الشارع',
+  // The office sites (aldarim, abwbna, alobid, bahadhabab) send one row per street side; the ad page prints
+  // «عرض الشارع الشرقي…». Without these the card printed «بيان غير محدد 100» (owner 2026-11-10, aldarim 50820).
+  'Street width (N)':                   'عرض الشارع الشمالي',
+  'Street width (E)':                   'عرض الشارع الشرقي',
+  'Street width (S)':                   'عرض الشارع الجنوبي',
+  'Street width (W)':                   'عرض الشارع الغربي',
+  'Living rooms':                       'الصالات',
+  'Parking spots':                      'مواقف السيارات',
+  'Feature':                            'ميزة',
+  // therc rows carry their Arabic name in `key`; the catalog now knows the label too, so every scraper label resolves.
+  'Reference':                          'رقم المرجع',
+  'Date posted':                        'تاريخ النشر',
+  'Price as published':                 'السعر كما نشر',
   'Street':                             'الشارع',
   'Property services':                  'خدمات العقار',
   'Other obligations on the property':  'التزامات أخرى على العقار',
@@ -1720,6 +1733,7 @@ const AR: Record<string, string> = {
   'Could not load this listing. Try again.': 'تعذّر تحميل الإعلان. حاول مرة أخرى.',
   'Some listings could not be loaded.': 'تعذّر تحميل بعض الإعلانات.',
   'Same property, {n} more ads:': 'نفس العقار، {n} إعلانات أخرى:',
+  'Same property, one more ad:': 'نفس العقار، إعلان آخر:',
   'from {price}': 'من {price}',
   '{n} bedrooms': '{n} غرف',
   'Same district and type, area within 20% of this ad, same bedrooms when stated. Each property once, nearest first, prices as published.': 'نفس الحي والنوع، والمساحة ضمن 20% من هذا الإعلان، ونفس عدد الغرف عند ذكره. كل عقار مرة واحدة، الأقرب أولاً، والأسعار كما نُشرت.',
