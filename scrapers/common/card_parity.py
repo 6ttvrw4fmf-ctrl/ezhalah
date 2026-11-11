@@ -604,12 +604,17 @@ def check(client, picks: list[dict], cards: dict[str, dict], reader: SourceReade
 
 
 def exit_code(totals: dict) -> int:
-    """A red run, never a quiet green. Picked nothing because picking failed → red. Picked ads while production was
-    quiet and read NOT ONE card → red: the journey died (CodeRabbit on #10958 — its exit code was ignored, so the PR
-    dry-run passed after reading sources and no cards). Cards skipped because production was busy are not a death."""
+    """A red run, never a quiet green. Picked nothing because picking failed → red. A chunk whose ads were picked
+    while production was quiet and that read NOT ONE card → red: the journey died (CodeRabbit on #10958 — its exit
+    code was ignored, so the PR dry-run passed after reading sources and no cards). Judged PER CHUNK, so a busy chunk
+    elsewhere in the run cannot mask it, and an UNREADABLE load check (the RPC kept failing) is a red of its own: cards
+    were not opened for a reason nobody read (CodeRabbit on #11512). Only a chunk skipped because production was
+    confirmed busy stays green."""
     if totals["pick_errors"] and not totals["ads"]:
         return 1
-    if totals["ads"] and not totals["cards"] and not totals.get("busy_chunks"):
+    if totals.get("unreadable_chunks"):
+        return 1
+    if totals.get("dead_chunks"):
         return 1
     return 0 if totals["sites"] or not totals["ads"] else 1
 
@@ -636,7 +641,8 @@ def main() -> int:
     sites = wanted or (active if a.all else [p for p in active if slot_of(p) == slot])
     print(f"card parity: {len(sites)} website(s) (slot {slot}/{SLOTS}, {len(active)} active)", flush=True)
 
-    types, totals = tappable_types(), {"ads": 0, "cards": 0, "sources": 0, "sites": 0, "pick_errors": 0, "busy_chunks": 0}
+    types, totals = tappable_types(), {"ads": 0, "cards": 0, "sources": 0, "sites": 0, "pick_errors": 0,
+                                       "busy_chunks": 0, "unreadable_chunks": 0, "dead_chunks": 0}
     reader = SourceReader()
     try:
         # One chunk = one journey batch (<= 12 ads): pick, check the database is quiet, open the cards, read the
@@ -656,9 +662,15 @@ def main() -> int:
                 picks += got
             busy = database_quiet(client) if picks else None
             cards = {} if busy or not picks else run_journeys(picks)
-            if busy:
+            if busy and busy.startswith("load unreadable"):
+                totals["unreadable_chunks"] += 1       # not a confirmed busy: the run ends red
+                print(f"load check failed ({busy}): cards not opened for this chunk; sources still compared", flush=True)
+            elif busy:
                 totals["busy_chunks"] += 1
                 print(f"production busy ({busy}): cards not opened for this chunk; sources still compared", flush=True)
+            elif picks and not cards:
+                totals["dead_chunks"] += 1             # quiet, ads picked, not one card read: the journey died here
+                print(f"journey read no card for {len(picks)} picked ad(s): this chunk is dead", flush=True)
             rows.update(check(client, picks, cards, reader, night=night, write=not a.dry_run))
             out = list(rows.values())
             for r in out:
