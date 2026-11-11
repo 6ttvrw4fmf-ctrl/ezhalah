@@ -1320,7 +1320,8 @@ export default function Home() {
   const postedKey = JSON.stringify(postedBase);
   const [postedCounts, setPostedCounts] = useState<PostedWindowCounts | null>(null);
   useEffect(() => {
-    if (!postedOn || citySelected == null) { setPostedCounts(null); return; }
+    setPostedCounts(null);   // never a number for the previous search while the new one loads (CodeRabbit #11828)
+    if (!postedOn || citySelected == null) return;
     let live = true;
     const timer = setTimeout(async () => {
       const c = await fetchPostedWindowCounts(postedBase).catch(() => null);

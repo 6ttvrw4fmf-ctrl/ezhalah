@@ -32,7 +32,10 @@ export function validPostedWindow(v: unknown): PostedWindow | null {
 
 /** Short stays (the «إقامات قصيرة» pool = Rent with the monthly period) never get the publish filter. */
 export function postedWindowOffered(q: Pick<SearchQuery, 'deal' | 'rentPeriod' | 'dealCombined'>): boolean {
-  return !(q.deal === 'Rent' && !q.dealCombined && q.rentPeriod === 'monthly');
+  // Any rent side that can hold short stays («شهري» or «كلاهما») gets no window (CodeRabbit #11828): the window would
+  // otherwise also hide the short stays the owner kept out of it. Buy alone, and yearly rent, get it.
+  const rentSide = q.deal === 'Rent' || !!q.dealCombined;
+  return !rentSide || (q.rentPeriod ?? 'annual') === 'annual';
 }
 
 /** The window to SEND for this query: the picked one, unless the query is a short stay (then nothing). */

@@ -317,10 +317,13 @@ export const PIN_PAD_PX = 17;  // 7 px padding each side + 1.5 px border each si
 /** A head's width when the page cannot measure text (no canvas): ~6.4 px a character at 11 px semibold. */
 export function pinWidthGuess(text: string): number { return Math.ceil(text.length * 6.4) + PIN_PAD_PX; }
 
-type Placed = { row: PinRow; x: number; y: number; w: number };
+type Placed = { row: PinRow; x: number; y: number; w: number; h?: number };
 /** Two heads touch when their pills, plus the gap, overlap. Both sit centred on x, bottom on y (same height). */
-export function headsTouch(a: { x: number; y: number; w: number }, b: { x: number; y: number; w: number }): boolean {
-  return Math.abs(a.x - b.x) < (a.w + b.w) / 2 + PIN_GAP_PX && Math.abs(a.y - b.y) < PIN_H_PX + PIN_GAP_PX;
+/** A head with «إعلان جديد» above its price is one tag line taller (CodeRabbit #11828: placement assumed 22 px for all). */
+export const FRESH_TAG_PX = 13;
+export const headHeight = (row: Pick<PinRow, 'fresh' | 'deal'>): number => (isFreshHead(row) ? PIN_H_PX + FRESH_TAG_PX : PIN_H_PX);
+export function headsTouch(a: { x: number; y: number; w: number; h?: number }, b: { x: number; y: number; w: number; h?: number }): boolean {
+  return Math.abs(a.x - b.x) < (a.w + b.w) / 2 + PIN_GAP_PX && Math.abs(a.y - b.y) < ((a.h ?? PIN_H_PX) + (b.h ?? PIN_H_PX)) / 2 + PIN_GAP_PX;
 }
 /** A head's price facts: its lowest and highest real price and how many of its ads show none (pinPrice's floor). */
 export function priceFacts(r: Pick<PinRow, 'n' | 'deal' | 'price' | 'price_max' | 'unpriced'>): { min: number | null; max: number | null; unpriced: number } {
@@ -342,6 +345,7 @@ export function joinPins(a: PinRow, b: PinRow): PinRow {
     lat: (a.lat * a.n + b.lat * b.n) / n, lng: (a.lng * a.n + b.lng * b.n) / n, n,
     deal: 'mixed', type_ar: null, platforms: Math.max(a.platforms || 0, b.platforms || 0),
     ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null, price: null, platform: null, price_max: null, unpriced: 0,
+    fresh: Number(a.fresh ?? 0) + Number(b.fresh ?? 0),
   };
   return {
     lat: (a.lat * a.n + b.lat * b.n) / n, lng: (a.lng * a.n + b.lng * b.n) / n, n,
@@ -349,6 +353,7 @@ export function joinPins(a: PinRow, b: PinRow): PinRow {
     ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null,
     price: lo.length ? Math.min(...lo) : null, platform: null,
     price_max: hi.length ? Math.max(...hi) : null, unpriced: fa.unpriced + fb.unpriced,
+    fresh: Number(a.fresh ?? 0) + Number(b.fresh ?? 0),
   };
 }
 /** How far a head may be drawn from its own spot to sit beside a neighbour. A head is ~60 px wide, so «beside» needs
@@ -379,21 +384,22 @@ export function placeApart(rows: PinRow[], at: (lat: number, lng: number) => [nu
   // A grid of what is already placed, so a head is checked against its neighbours only (a deepest-zoom view can read
   // 3,000 points).
   const CELL = 64; const grid = new Map<string, Head[]>();
-  const cellsOf = (c: { x: number; y: number; w: number }): string[] => {
+  const cellsOf = (c: { x: number; y: number; w: number; h?: number }): string[] => {
     const out: string[] = [];
     const x1 = Math.floor((c.x - c.w / 2 - PIN_GAP_PX) / CELL), x2 = Math.floor((c.x + c.w / 2 + PIN_GAP_PX) / CELL);
-    const y1 = Math.floor((c.y - PIN_H_PX - PIN_GAP_PX) / CELL), y2 = Math.floor((c.y + PIN_H_PX + PIN_GAP_PX) / CELL);
+    const hh = c.h ?? PIN_H_PX;
+    const y1 = Math.floor((c.y - hh - PIN_GAP_PX) / CELL), y2 = Math.floor((c.y + hh + PIN_GAP_PX) / CELL);
     for (let gx = x1; gx <= x2; gx++) for (let gy = y1; gy <= y2; gy++) out.push(`${gx},${gy}`);
     return out;
   };
-  const isFree = (c: { x: number; y: number; w: number }): boolean => {
+  const isFree = (c: { x: number; y: number; w: number; h?: number }): boolean => {
     for (const k of cellsOf(c)) for (const h of grid.get(k) ?? []) if (headsTouch(c, h)) return false;
     return true;
   };
   const all = new Set<Head>();
   const put = (h: Head) => { h.cells = cellsOf(h); for (const k of h.cells) { const g = grid.get(k); if (g) g.push(h); else grid.set(k, [h]); } all.add(h); };
   const take = (h: Head) => { for (const k of h.cells) { const g = grid.get(k); if (g) g.splice(g.indexOf(h), 1); } all.delete(h); };
-  const start = (row: PinRow): Head => { const [x0, y0] = at(row.lat, row.lng); return { row, x: x0, y: y0, x0, y0, w: widthOf(row), cells: [] }; };
+  const start = (row: PinRow): Head => { const [x0, y0] = at(row.lat, row.lng); return { row, x: x0, y: y0, x0, y0, w: widthOf(row), h: headHeight(row), cells: [] }; };
 
   const order = [...rows].sort((a, b) => b.n - a.n || b.lat - a.lat || a.lng - b.lng);
   for (const row of order) {
