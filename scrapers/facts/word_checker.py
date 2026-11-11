@@ -949,7 +949,9 @@ def _negated_before(prev: list[str]) -> Optional[int]:
             return len(prev) - (j - 2)
         if affirmed:
             return None
-        if j >= 1 and _strip_wa(prev[j - 1]) in _LIST_WORDS | {"اي", "وجود", "يوجد"}:
+        # «او» joins a denied list like «و» does: «لا يوجد مطبخ أو مكيفات راكبة» denies the ACs too (reinvest 19994388,
+        # 🔬 2026-11-11 — read when a trailing «لا يوجد» after «راكبة» stopped answering for them)
+        if j >= 1 and _strip_wa(prev[j - 1]) in _LIST_WORDS | {"اي", "وجود", "يوجد", "او"}:
             affirmed = _strip_wa(prev[j - 1]) in _AFFIRM
             j -= 1
             continue
@@ -991,6 +993,24 @@ def _billing_not_supply(fact: str, prev: list[str], nxt: list[str]) -> bool:
     return False
 
 
+# «مطبخ راكب لا يوجد مكيفات», «مطبخ راكب لا يتوفر مصعد», «مكيفات ومطبخ راكب لا يوجد أي تعاملات» (🔬 2026-11-11 kitchen
+# recall sample, aqar 23092840 / 22064297 / 14846870 / 9242120 / 14860625): the «لا يوجد» opens the NEXT item — the
+# ACs, the lift, the payments — so it is not this token's no. «مطبخ لا يوجد», «المطبخ: لا يوجد», «مطبخ لا يوجد حاليا»
+# and «… لا يوجد فيها» stay a no.
+_NEG_TAIL = frozenset(_n(w) for w in ("فيه", "فيها", "به", "بها", "له", "لها", "معه", "معها", "حاليا", "حالياً", "ابدا",
+                                      "اطلاقا", "نهائيا", "للاسف", "بالشقه", "بالعقار", "بالفيلا", "بالدور"))
+
+
+def _affirmed(descriptor: str, fact: str) -> bool:
+    """The word between the token and a trailing «لا يوجد» already says it is there: «مطبخ راكب», «مصعد متوفر»."""
+    return _starts(_strip_wa(descriptor), _POST_NOT + tuple(_n(x) for x in _POST_NOT_FACT.get(fact, ())))
+
+
+def _negates_next_item(rest: list[str]) -> bool:
+    """True when words follow a «لا يوجد» that are another item, not this token's tail."""
+    return bool(rest) and not rest[0].isdigit() and _strip_wa(rest[0]) not in _NEG_TAIL and rest[0] not in _NEG_TAIL
+
+
 def _negated_after(nxt: list[str], fact: str) -> int:
     """How many words after the token belong to a post-negation («غير راكب», «لا», «لا يوجد», «0»), else 0."""
     for skip in (0, 1):                      # one descriptor may sit between: «مطبخ عربي غير راكب», «الضمانات ومدتها لا يوجد»
@@ -1008,12 +1028,12 @@ def _negated_after(nxt: list[str], fact: str) -> int:
         if len(w) >= 2 and w[0] == "غير" and _starts(w[1], _POST_NOT + tuple(_n(x) for x in _POST_NOT_FACT.get(fact, ()))):
             return skip + 2
         if len(w) >= 1 and w[0] in ("لايوجد", "لاتوجد"):
-            return skip + 1
+            return 0 if skip and _affirmed(nxt[0], fact) and _negates_next_item(w[1:]) else skip + 1
         # «مطبخ: (لم يُركب وقيمته على المستأجر …)» (dealapp 22700725, 2026-11-05 two-way sample): «not fitted» is a no
         if len(w) >= 2 and w[0] == "لم" and _starts(w[1], ("يركب", "تركب", "يتم", "يتوفر", "تتوفر", "يوجد", "توجد")):
             return skip + 2
         if len(w) >= 2 and w[0] == "لا" and w[1] in ("يوجد", "توجد", "يتوفر", "تتوفر"):
-            return skip + 2
+            return 0 if skip and _affirmed(nxt[0], fact) and _negates_next_item(w[2:]) else skip + 2
         if len(w) >= 1 and w[0] == "لا" and (len(w) == 1 or w[1] == "غير"):
             return skip + 1
         if not skip and w and (w[0] in ("0", "no", "none") or (fact == "furnished" and w[0] == "unfurnished")):
@@ -2901,6 +2921,14 @@ def selftest() -> None:
         ("موقع مميز بالقرب من المسجد، المدارس، الخدمات، والحديقة. تفاصيل العقار", {}, ("garden",)),        # aqar 14865940
         ("* حوش واسع. * مدخل سيارة. * حديقة خلفية. * مكيفات راكبة.", {"garden": True}, ()),                # aqar 14870810
         ("مخازن وحديقة خاصة. ☀️ الدور الأول: صالة عائلية", {"garden": True}, ()),                          # aqar 18338000
+        # 🔬 2026-11-11 kitchen recall sample: a «لا يوجد» that opens the NEXT item is not this one's no
+        ("٣ غرف وصاله ٢ دورتين مياه مطبخ راكب لا يوجد مكيفات الشق الدور الاول", {"kitchen": True, "air_conditioner": False}, ()),  # aqar 23092840
+        ("3 غرف + 2 دورة مياه + صالة + مطبخ راكب لا يتوفر مصعد .", {"kitchen": True, "elevator": False}, ()),   # aqar 9242120
+        ("غرفتين نوم وصاله مكيفات ومطبخ راكب لا يوجد أي تعاملات ماليه خارج المكتب", {"kitchen": True}, ()),    # aqar 14860625
+        ("المطبخ: لا يوجد", {"kitchen": False}, ()),
+        ("مطبخ لا يوجد حاليا", {"kitchen": False}, ()),
+        ("* لا يوجد مطبخ أو مكيفات راكبة لا يوجد حوش", {"kitchen": False, "air_conditioner": False}, ()),   # reinvest 19994388
+        ("مطبخ أمريكي راكب 4 مكيفات راكبة لا توجد منطقة خارجية موقف خاص", {"kitchen": True, "air_conditioner": True}, ()),  # muhaysini 25533105
     ]
     bad = []
     for text, want, absent in cases:
