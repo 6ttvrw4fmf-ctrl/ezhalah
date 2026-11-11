@@ -1160,6 +1160,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if fact == "corner_plot" and _n(t[ws:we]).lstrip("و").startswith("للزاوي"):
         return None, s, e                            # «مليون و٣٥٠ للزاوية», «سعر موحد للزاوية والشارع»: the price of a
                                                      # project's corner unit, not this ad's plot (P2 13085, 2026-11-06)
+    if fact == "corner_plot" and p2 and _strip_wa(p2[-1]) in (_n("سعر"), _n("السعر"), _n("سوم"), _n("السوم")):
+        return None, s, e                            # «سعر الزاوية/مليون و 50 الف … سعر البطن/مليون» (hajer 10674101,
+                                                     # 🔬 2026-11-11): the corner UNIT's price among several units
     if fact == "laundry_room" and p2 and p2[-1] in ("حي", "بحي", "العدل"):
         return None, s, e                            # «حي العدل الغسالة»: a Makkah district, not a washing machine
     if fact in ("kitchen", "laundry_room") and p2 and _starts(_strip_wa(p2[-1]), (_n("مجهز"), _n("مهيا"), _n("مهيأ"))) \
@@ -2852,6 +2855,7 @@ def selftest() -> None:
         ("عمارة 4 أدوار", {"floors": 4.0}, ("building_rules",)),
         ("عدد الشقق 12", {"apartments_count": 12.0}, ()),
         ("عمارة فيها محلين", {"shops_count": 2.0}, ()),
+        ("سعر الزاوية/مليون و 50 الف شامل السعي سعر البطن/مليون", {}, ("corner_plot",)),   # hajer 10674101, 2026-11-11
     ]
     bad = []
     for text, want, absent in cases:
