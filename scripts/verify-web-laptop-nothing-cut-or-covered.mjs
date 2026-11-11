@@ -484,21 +484,23 @@ async function openDealsSheet(page) {
   const up = (sel) => page.locator(sel).first().isVisible().catch(() => false);
   if (await up(DEALS_SHEET)) return true;
   if (!(await up('[data-testid="listing-preview"]'))) {
-    let tried = 0;
+    // The candidates first (a card whose own link, else whose painted label, is an own-page site), then at most six
+    // tries — a click budget, never a count of results.
+    const own = [];
     for (const card of (await page.$$('[data-testid^="card-listing-"]')).slice(0, 60)) {
       const id = ((await card.getAttribute('data-testid').catch(() => '')) || '').replace('card-listing-', '');
       const link = cardLink.get(id);
       const label = (await card.innerText().catch(() => '')).toLowerCase();
-      if (!(link ? opensOwnPage(link) : PREVIEW_HOSTS.some((h) => label.includes(h)))) continue;
+      if (link ? opensOwnPage(link) : PREVIEW_HOSTS.some((h) => label.includes(h))) own.push(card);
+    }
+    for (const card of own.slice(0, 6)) {
       const gold = await card.$('[data-testid="card-open-gold"]');
       if (!gold) continue;
-      tried++;
       await gold.scrollIntoViewIfNeeded().catch(() => {});
       await gold.click({ timeout: 4000 }).catch(() => {});
       if (await page.waitForSelector('[data-testid="listing-preview"]', { state: 'visible', timeout: 3000 }).catch(() => null)) break;
-      if (tried >= 6) break;
     }
-    if (!tried) ministryLog.push(`no result card from a site that opens as Ezhalah's own ad page (marked card: ${ownPageCard ?? 'none'}) (links known for ${cardLink.size} card(s): ${[...new Set([...cardLink.values()].map((u) => { try { return new URL(u).hostname; } catch { return '?'; } }))].slice(0, 10).join(', ')})`);
+    if (!own[0]) ministryLog.push(`no result card from a site that opens as Ezhalah's own ad page (marked card: ${ownPageCard ?? 'none'}) (links known for ${cardLink.size} card(s): ${[...new Set([...cardLink.values()].map((u) => { try { return new URL(u).hostname; } catch { return '?'; } }))].slice(0, 10).join(', ')})`);
   }
   const button = page.locator('[data-testid="listing-preview-moj-deals"]').first();
   if (!(await button.waitFor({ state: 'visible', timeout: 20000 }).then(() => true, () => false))) return false;
@@ -523,9 +525,9 @@ async function markOneOwnPageCard(ctx) {
       const headers = robotPassHeaders(req.url(), req.headers(), secret) ?? { ...req.headers(), ...(gateHeaders(req.url(), secret) || {}) };
       const response = await route.fetch({ headers });
       const rows = await response.json();
-      const out = Array.isArray(rows) ? rows.map((r) => (r && r.id != null ? { ...r, listing_url: `https://sa.aqar.fm/robot-own-page-${r.id}` } : r)) : rows;
-      if (Array.isArray(out) && out.length) ownPageCard = String(out[0].id);
-      await route.fulfill({ response, json: out });
+      const relinked = Array.isArray(rows) ? rows.map((r) => (r && r.id != null ? { ...r, listing_url: `https://sa.aqar.fm/robot-own-page-${r.id}` } : r)) : rows;
+      if (Array.isArray(relinked) && relinked[0]) ownPageCard = String(relinked[0].id);
+      await route.fulfill({ response, json: relinked });
     } catch { await route.fallback().catch(() => {}); }
   });
 }
