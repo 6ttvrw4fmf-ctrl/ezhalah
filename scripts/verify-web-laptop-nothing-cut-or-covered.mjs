@@ -40,7 +40,7 @@ import './lib/robotPass.mjs'; // robot pass for our own browser robots (docs/ops
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 // The cookie card's name and the one way a robot answers it are SHARED (scripts/lib/liveConsent.ts) — never a private copy.
 import { dismissCookieConsent, CONSENT_CARD } from './lib/liveConsent.ts';
@@ -455,15 +455,32 @@ async function answerMinistryReads(ctx) {
 }
 // Open the past-sales table inside the open ad. Crossing the side-by-side width re-mounts the ad page, which closes the
 // table — so every size asks again, and re-opens an ad first if none is up.
+// Only some sites open as Ezhalah's own ad page in the viewer (src/lib/inAppViewer.ts IN_APP_PREVIEW_HOSTS); the rest
+// show the site itself, with no ministry table. The results rotate, so the FIRST card is a different site every run:
+// PR #11751's CI clicked twelve cards of framed sites and never saw an ad page («reads seen: none»). Read the list from
+// the app's own source and click a card whose site label is on it.
+export const PREVIEW_HOSTS = (() => {
+  const m = readFileSync(join(import.meta.dirname, '..', 'src', 'lib', 'inAppViewer.ts'), 'utf8').match(/IN_APP_PREVIEW_HOSTS = \[([\s\S]*?)\]/);
+  return m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1].replace(/^sa\./, '')) : [];
+})();
+check("the robot knows which sites open as Ezhalah's own ad page (read from src/lib/inAppViewer.ts)", PREVIEW_HOSTS.includes('aqar.fm') && PREVIEW_HOSTS.length >= 10, `read ${PREVIEW_HOSTS.length}`);
 async function openDealsSheet(page) {
   const up = (sel) => page.locator(sel).first().isVisible().catch(() => false);
   if (await up(DEALS_SHEET)) return true;
   if (!(await up('[data-testid="listing-preview"]'))) {
-    for (const gold of (await page.$$('[data-testid="card-open-gold"]')).slice(0, 12)) {
+    let tried = 0;
+    for (const card of (await page.$$('[data-testid^="card-listing-"]')).slice(0, 60)) {
+      const label = (await card.innerText().catch(() => '')).toLowerCase();
+      if (!PREVIEW_HOSTS.some((h) => label.includes(h))) continue;
+      const gold = await card.$('[data-testid="card-open-gold"]');
+      if (!gold) continue;
+      tried++;
       await gold.scrollIntoViewIfNeeded().catch(() => {});
       await gold.click({ timeout: 4000 }).catch(() => {});
-      if (await page.waitForSelector('[data-testid="listing-preview"]', { state: 'visible', timeout: 2500 }).catch(() => null)) break;
+      if (await page.waitForSelector('[data-testid="listing-preview"]', { state: 'visible', timeout: 3000 }).catch(() => null)) break;
+      if (tried >= 6) break;
     }
+    if (!tried) ministryLog.push("no result card from a site that opens as Ezhalah's own ad page");
   }
   const button = page.locator('[data-testid="listing-preview-moj-deals"]').first();
   if (!(await button.waitFor({ state: 'visible', timeout: 20000 }).then(() => true, () => false))) return false;
