@@ -809,9 +809,14 @@ _LAND_USE = re.compile(
     r"(?<!\w)(?:"
     r"(?:و|ب|ل|ال|وال|بال)?(?:ارض|ارضين|اراضي|ارضيه|قطعه|قطعتين|قطع)(?:[ _](?:ال)?(?:زاويه|مميزه|مميز|فضاء))?(?: (?:للبيع|للايجار))?"
     r"|(?:و|ب)?صك(?: (?:ال)?(?:الكتروني|الكترونى))?"
-    r"|استخدام (?:ال)?(?:عقار|ارض)|(?:ال)?استخدام|نوع (?:ال)?ارض|تصريح بناء|رخصه بناء"
-    r")[ _]+(?P<u>" + _LAND_USE_WORD + r")(?:[ _]+و?(?P<u2>" + _LAND_USE_WORD + r"))?(?!\w)")
-_LAND_CONVERT = re.compile(r"(?<!\w)(?:قابل|قابله|يمكن|امكانيه)?\s?(?:لل)?(?:تحويل|تحول|تحويلها|تحويله)(?!\w)")
+    r"|(?:استخدام|استخدامات) (?:ال)?(?:عقار|ارض)|(?:ال)?(?:استخدام|استخدامات)|نوع (?:ال)?ارض|تصريح بناء|رخصه بناء"
+    r")[ _]+(?P<u>" + _LAND_USE_WORD + r")(?:[ _]+(?:او |و)?(?P<u2>" + _LAND_USE_WORD + r"))?(?!\w)")
+_LAND_CONVERT = re.compile(r"(?<!\w)(?:لل|ل|ب)?(?:تحويل|تحول|تحويلها|تحويله|تغيير|تغييرها|تغييره|تغير)(?:\s+\S+){0,3}?\s+(?:الي\s+|لل|ل)?"
+                           + _LAND_USE_WORD + r"(?!\w)")
+# a use the ad DENIES or only calls POSSIBLE is not its use (CodeRabbit on #11819: «ليست أرض سكنية», «يمكن استخدام
+# العقار تجاري», «تصلح ارض تجارية»)
+_LAND_NOT_STATED = frozenset(_n(w) for w in ("ليست", "ليس", "غير", "مو", "مش", "لا", "يمكن", "ممكن", "بالامكان", "تصلح",
+                                             "يصلح", "مناسب", "مناسبه", "قابل", "قابله", "امكانيه"))
 _SENTENCE_END = re.compile(r"[.!?؟\n]")
 
 
@@ -1760,7 +1765,9 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             continue
         for m in _LAND_USE.finditer(t):
             before = t[:m.start()].split()[-3:]
-            if any(w in _NEAR_WORDS or w in _LAND_WANTED for w in before):
+            # a wanted request runs to the end of its clause: «مطلوب من مالك الأرض قطعة أرض تجارية» (CodeRabbit on #11819)
+            if any(w in _NEAR_WORDS or w in _LAND_NOT_STATED for w in before) \
+                    or any(_strip_wa(w) in _LAND_WANTED for w in t[:m.start()].split()):
                 continue           # «قريبه من ارض تجاريه», a broker's «مطلوب اراضي تجاريه»: not this ad's land
             nxt = clauses[ci + 1][2].split()[:1] if ci + 1 < len(clauses) and not t[m.end():].strip() else []
             more = _LAND_USE_WORD_RE.fullmatch(nxt[0]).group(0) if nxt and _LAND_USE_WORD_RE.fullmatch(nxt[0]) else None
@@ -2911,6 +2918,14 @@ def selftest() -> None:
         ("الارض للبيع تجاري سكني من المالك مباشرة", {}, ("land_use_ar",)),                # aqar 8017472
         ("مطلوب أراضي تجارية على شارع الملك عبدالعزيز", {}, ("land_use_ar",)),
         ("قطعتي ارض للبيع الاستخدام ( تجاري / سكني ) الارض على صكين", {}, ("land_use_ar",)),   # aqar 11518885
+        # CodeRabbit on #11819 (6 findings, each a real sentence shape)
+        ("استخدامات العقار: سكني", {"land_use_ar": "سكني"}, ()),
+        ("أرض سكنية، الدفع عن طريق تحويل بنكي", {"land_use_ar": "سكني"}, ()),
+        ("ليست أرض سكنية", {}, ("land_use_ar",)),
+        ("يمكن استخدام العقار تجاري", {}, ("land_use_ar",)),
+        ("أرض سكنية أو تجارية", {}, ("land_use_ar",)),
+        ("أرض سكنية يمكن تغييرها إلى تجارية", {}, ("land_use_ar",)),
+        ("مطلوب من مالك الأرض قطعة أرض تجارية", {}, ("land_use_ar",)),
     ]
     bad = []
     for text, want, absent in cases:
