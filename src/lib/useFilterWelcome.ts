@@ -324,7 +324,7 @@ export function useFilterWelcome(
     const text = locale === 'ar'
       ? fillName(fillGreeting(shown.ar, shown.greet ?? null, 'ar'), live || shown.nameAr, 'ar')
       : fillName(fillGreeting(shown.en, shown.greet ?? null, 'en'), live || shown.nameEn, 'en');
-    // A market fact (not the sign-in welcome or an older line) can be tapped for «كيف تشتغل؟».
+    // A market fact (not the sign-in welcome or an older line) can be tapped for «كيف نحسبها؟».
     return { line: shown.hold ? null : text, settled: shown.settled, swapKey, isInsight: shown.id != null && isInsightLineId(shown.id) };
   }, [shown, locale, signedIn, name, swapKey]);
   return { ...out, celebrate };
