@@ -42,3 +42,12 @@ def test_box_inside_section_is_kept_and_a_silent_title_never_guesses():
     assert _type_for_section("Apartment", "land", "للبيع في حي الرفاع") == "Apartment"   # title names nothing
     assert _type_for_section("Apartment", "land", "للبيع فيلا") == "Apartment"   # title outside section too
     assert _type_for_section("Apartment", "unknown_section", "للبيع ارض") == "Apartment"
+
+
+def test_agricultural_land_title_in_land_section_is_farm():                  # CodeRabbit #11800
+    assert _type_for_section("Apartment", "land", "للبيع ارض زراعية") == "Farm"
+
+
+def test_a_later_landmark_never_beats_the_ads_own_type_word():               # CodeRabbit #11800
+    assert _type_for_section("Apartment", "land", "للبيع ارض قرب فيلا") == "Residential Land"
+    assert _type_for_section("Apartment", "land", "للبيع قطعة أرض تجارية") == "Commercial Land"

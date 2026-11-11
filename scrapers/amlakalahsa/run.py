@@ -146,7 +146,7 @@ _DEAL_MAP = {"للبيع": "Buy", "للإيجار": "Rent", "للايجار": "R
 # names a type OUTSIDE the section, the office's own title breaks the tie, and only if the title's type is inside
 # the section; otherwise the box stands (never a guess). The raw box value stays in source_capture.
 _SECTION_TYPES = {
-    "land": {"Residential Land", "Commercial Land", "Land", "Agricultural Land"},
+    "land": {"Residential Land", "Commercial Land", "Land", "Agricultural Land", "Farm"},   # «أرض زراعية» → Farm
     "home": {"Villa", "Duplex", "House", "تاون هاوس", "Floor", "Apartment", "Studio", "Building"},
     "farm": {"Farm"},
     "shop": {"Shop", "Showroom"},
@@ -163,7 +163,15 @@ def _type_for_section(box_type: Optional[str], section: Optional[str], title: Op
     if not box_type or not family or box_type in family:
         return box_type
     title_type = canonical_type_from_title(title)
-    return title_type if title_type in family else box_type
+    if title_type in family:
+        return title_type
+    # The title reader prefers the longest type word, so a later landmark wins («للبيع ارض قرب فيلا» → Villa).
+    # The first word of the title that is itself a type inside the section is the ad's own type.
+    for word in re.findall(r"[\u0621-\u064A]+", title or ""):
+        word_type = normalize.map_type_exact(word)
+        if word_type in family:
+            return word_type
+    return box_type
 
 
 def _canonical_deal(deal: str) -> str:
