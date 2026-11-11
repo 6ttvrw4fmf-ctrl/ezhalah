@@ -814,7 +814,9 @@ _LAND_USE = re.compile(
 _LAND_CONVERT = re.compile(r"(?<!\w)(?:لل|ل|ب)?(?:تحويل|تحول|تحويلها|تحويله|تغيير|تغييرها|تغييره|تغير)(?:\s+\S+){0,3}?\s+(?:الي\s+|لل|ل)?"
                            + _LAND_USE_WORD + r"(?!\w)")
 # «أرض سكنية قابلة للتحويل» names no destination but still says the use may change (CodeRabbit on #11819)
-_LAND_CONVERTIBLE = re.compile(r"(?<!\w)(?:قابل|قابله|يمكن|ممكن|امكانيه)\s+(?:لل|ل)?(?:تحويل|تحويلها|تحويله|تغيير|تغييرها|تغييره)(?!\w)")
+_LAND_CONVERTIBLE = re.compile(r"(?<!\w)و?(?:قابل|قابله|يمكن|ممكن|امكانيه)\s+(?:لل|ل)?(?:تحويل|تحويلها|تحويله|تغيير|تغييرها|تغييره)(?!\w)"
+                               # «يمكن تحويل ثمن العقار إلى حساب بنكي» is a payment, not the use (CodeRabbit on #11819)
+                               r"(?!\s+(?:ال)?(?:ثمن|مبلغ|المبلغ|الدفع|دفعه|العربون|الي حساب|لحساب))")
 # a use the ad DENIES or only calls POSSIBLE is not its use (CodeRabbit on #11819: «ليست أرض سكنية», «يمكن استخدام
 # العقار تجاري», «تصلح ارض تجارية»)
 _LAND_NOT_STATED = frozenset(_n(w) for w in ("ليست", "ليس", "غير", "مو", "مش", "لا", "يمكن", "ممكن", "بالامكان", "تصلح",
@@ -1771,7 +1773,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             # «السعر قابل للتفاوض أرض سكنية»: the price is negotiable, not the use (CodeRabbit on #11819)
             hedges = [w for k, w in enumerate(before) if w in _LAND_NOT_STATED
                       and not (k + 1 < len(before) and before[k + 1].startswith(_n("للتفاوض")[:5]))]
-            if any(w in _NEAR_WORDS for w in before) or hedges \
+            if any(w in _NEAR_WORDS or (w.startswith("و") and w[1:] in _NEAR_WORDS) for w in before) or hedges \
                     or any(_strip_wa(w) in _LAND_WANTED for w in t[:m.start()].split()):
                 continue           # «قريبه من ارض تجاريه», a broker's «مطلوب اراضي تجاريه»: not this ad's land
             nxt = clauses[ci + 1][2].split()[:1] if ci + 1 < len(clauses) and not t[m.end():].strip() else []
@@ -2933,6 +2935,10 @@ def selftest() -> None:
         ("مطلوب من مالك الأرض قطعة أرض تجارية", {}, ("land_use_ar",)),
         ("أرض سكنية قابلة للتحويل", {}, ("land_use_ar",)),
         ("السعر قابل للتفاوض أرض سكنية", {"land_use_ar": "سكني"}, ()),
+        ("أرض سكنية ويمكن تحويلها", {}, ("land_use_ar",)),                                # CodeRabbit on #11819
+        ("أرض سكنية يمكن تحويل ثمن العقار إلى حساب بنكي", {"land_use_ar": "سكني"}, ()),
+        ("أرض للبيع وقريبة من أرض تجارية", {}, ("land_use_ar",)),
+        ("أرض سكنية وقريبة من أرض تجارية", {"land_use_ar": "سكني"}, ()),
     ]
     bad = []
     for text, want, absent in cases:
