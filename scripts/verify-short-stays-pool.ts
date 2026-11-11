@@ -9,7 +9,7 @@
 // The production side is watched twice an hour by mon_detect_short_stays_pool_drift().
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { rentPool, advertisedMonthly, cardFetchPeriodOr, isShortStayTable, SHORT_STAY_PLATFORMS, judgeSilentRentPeriod, SILENT_YEARLY_FROM } from '../src/lib/rentPool.ts';
+import { rentPool, advertisedMonthly, cardFetchPeriodOr, isShortStayTable, SHORT_STAY_PLATFORMS, SHORT_STAY_PERIODS, judgeSilentRentPeriod, SILENT_YEARLY_FROM } from '../src/lib/rentPool.ts';
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 let failed = 0;
@@ -34,6 +34,11 @@ check('silent + 9,000 (borderline) → null; silent + 2,500 on land → null; si
 check('the silent yearly bar is 15,000 inclusive; 14,999 is borderline', judgeSilentRentPeriod(15000, 'Residential Land') === 'annual' && judgeSilentRentPeriod(14999, 'Apartment') === null && SILENT_YEARLY_FROM === 15000);
 check('a stated period still wins over the figure', rentPool('aqar_residential_listings', 'annual', 35, 'Apartment') === 'annual' && rentPool('gathern_residential_listings', null, 180000, 'Apartment') === 'monthly');
 check('«Aqar» alone is not a short-stay site (the prefix must be the whole key)', !isShortStayTable('Aqar') && !isShortStayTable('aqar_residential_listings') && !isShortStayTable('aqarcity'));
+// A short stay the SELLER states (owner 2026-11-10, backlog 1744): Haraj stores 'daily' / 'weekly' — that row joins.
+check("haraj source 'daily' / 'weekly' (the seller's «للإيجار اليومي») → 'monthly' pool, priced or not",
+  rentPool('haraj_residential_listings', 'daily') === 'monthly' && rentPool('Haraj', 'weekly', null, 'Rest House') === 'monthly'
+  && rentPool('haraj_commercial_listings', 'DAILY', 300, 'Chalet') === 'monthly');
+check('the TS short-stay period list is exactly daily + weekly', [...SHORT_STAY_PERIODS].sort().join(',') === 'daily,weekly');
 check('the TS platform list is exactly gathern + aqarmonthly', [...SHORT_STAY_PLATFORMS].sort().join(',') === 'aqarmonthly,gathern');
 
 // ── the card's «السعر المعلن» line ───────────────────────────────────────────────────────────────────────────────
@@ -50,9 +55,9 @@ mutantCaught('the 10-25 yearly card-fetch clause (no rent_period.is.null) drops 
 check('yearly search, short-stay table: still excluded (annual-only clause, which they never carry)',
   cardFetchPeriodOr('annual', 'gathern_residential_listings') === 'rent_period.eq.annual,price_annual.is.null');
 check('short-stays search, short-stay table: no clause; other site: monthly-only (the index never returns them)',
-  cardFetchPeriodOr('monthly', 'aqarmonthly_residential_listings') === null && cardFetchPeriodOr('monthly', 'aqar_residential_listings') === 'rent_period.eq.monthly,price_annual.is.null');
+  cardFetchPeriodOr('monthly', 'aqarmonthly_residential_listings') === null && cardFetchPeriodOr('monthly', 'aqar_residential_listings') === 'rent_period.in.(monthly,daily,weekly),price_annual.is.null');
 check("both: short-stay table no clause; other site in.(monthly,annual)",
-  cardFetchPeriodOr('both', 'gathern_residential_listings') === null && cardFetchPeriodOr('both', 'wasalt_residential_listings') === 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null');
+  cardFetchPeriodOr('both', 'gathern_residential_listings') === null && cardFetchPeriodOr('both', 'wasalt_residential_listings') === 'rent_period.in.(monthly,annual,daily,weekly),rent_period.is.null,price_annual.is.null');
 
 // ── mutation proofs: each guard fails on its own defect ───────────────────────────────────────────────────────
 const oldPool = (_t: string, p: string | null) => (p === 'monthly' ? 'monthly' : p === 'annual' ? 'annual' : null); // PERIOD = SOURCE, the pre-2026-10-25 rule
@@ -71,10 +76,11 @@ type RawShape = { period: string | null; price: number | null; type: string; tab
 // The period words the raw tables hold: NULL (silent), 'annual', 'monthly' (verified 2026-10-31: 0 empty or
 // upper-case words across aqar / haraj / muhaysini / wajaf). The PostgREST clause is case-sensitive, so a scraper that
 // ever wrote another spelling would be a scraper bug, not a pool rule — field_integrity owns that.
-const PERIODS: (string | null)[] = [null, 'annual', 'monthly'];
+// Since 2026-11-10 Haraj also writes the seller's 'daily' / 'weekly' (backlog 1744).
+const PERIODS: (string | null)[] = [null, 'annual', 'monthly', 'daily', 'weekly'];
 const PRICES: (number | null)[] = [null, 1, 299, 300, 2500, 7999, 8000, 14999, 15000, 180000];
 const TYPES = ['Apartment', 'Warehouse', 'Residential Land', 'Room'];
-const TABLES = ['aqar_residential_listings', 'haraj_commercial_listings', 'gathern_residential_listings', 'aqarmonthly_residential_listings'];
+const TABLES = ['aqar_residential_listings', 'haraj_commercial_listings', 'haraj_residential_listings', 'gathern_residential_listings', 'aqarmonthly_residential_listings'];
 // A tiny evaluator for the PostgREST `.or()` grammar the clause uses: `col.eq.v`, `col.in.(a,b)`, `col.is.null`.
 const clauseAccepts = (clause: string | null, row: RawShape): boolean => {
   if (clause === null) return true;
@@ -133,6 +139,11 @@ check('public.rent_pool_ar (SQL) lists exactly the TS platforms', poolMigs.lengt
   && sqlPlatforms.replace(/['\s]/g, '').split(',').sort().join(',') === [...SHORT_STAY_PLATFORMS].sort().join(','), `sql: [${sqlPlatforms}]`);
 check('the SQL pool maps monthly AND annual to «سنوي» for other sites, and null stays null, behind the short_stays_pool flag',
   /when 'annual' then 'سنوي' when 'monthly' then 'سنوي' else null::text end/.test(poolSql) && /ops_feature_flags k where k\.name = 'short_stays_pool' and k\.enabled/.test(poolSql));
+check("the SQL pool puts a stated 'daily' / 'weekly' row in «شهري» on any platform, as the TS does (backlog 1744)",
+  /when p_rent_period in \('daily','weekly'\) then 'شهري'/.test(poolSql));
+mutantCaught("a short-stays card clause without daily/weekly drops a priced Haraj daily row the index pooled",
+  !clauseAccepts('rent_period.eq.monthly,price_annual.is.null', { period: 'daily', price: 300, type: 'Chalet', table: 'haraj_residential_listings' })
+  && rentPool('haraj_residential_listings', 'daily', 300, 'Chalet') === 'monthly');
 check('the migration rosters mon_detect_short_stays_pool_drift (a detector outside the roster is decoration)',
   /mon_detect_short_stays_pool_drift/.test(poolSql) && /mon_run_all_detectors/.test(poolSql));
 
