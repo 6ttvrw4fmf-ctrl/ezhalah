@@ -236,11 +236,25 @@ def seller_text(obj: Optional[dict[str, Any]], html: str) -> Optional[str]:
     ref = _FLIGHT_REF.fullmatch(c.strip())
     if not ref:
         return c
-    blob = _flight_blob(html)
-    row = re.search(rf"(?:^|\n){ref.group(1)}:T([0-9a-f]+),", blob)
+    blob = _flight_text_blob(html)
+    row = re.search(r"(?:^|\n)" + re.escape(ref.group(1)) + r":T([0-9a-f]+),", blob)
     if not row:
         return None
     return blob[row.end():].encode("utf-8")[:int(row.group(1), 16)].decode("utf-8", "ignore") or None
+
+
+def _flight_text_blob(html: str) -> str:
+    """The flight payload decoded LOSSLESSLY, for byte-counted text rows (CodeRabbit on #11753). Each push chunk is a
+    JSON string literal, so json.loads restores every character — an emoji written as «\\ud83d\\udd25» included —
+    where _flight_blob's latin-1 round trip drops what it cannot map and the «T<bytes>» length then cuts the seller's
+    text short or runs into the next row. A chunk json cannot read falls back to _flight_blob's reading."""
+    chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html, re.S)
+    if not chunks:
+        return _flight_blob(html)
+    try:
+        return "".join(_json.loads('"' + c + '"') for c in chunks)
+    except ValueError:
+        return _flight_blob(html)
 
 
 def _listing_json(html: str) -> Optional[dict[str, Any]]:

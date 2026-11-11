@@ -198,6 +198,15 @@ def test_page_seller_text_behind_a_flight_reference_is_read(monkeypatch):
     assert row["source_capture"]["rent_period_from"] == "seller_text"
 
 
+def test_seller_text_is_decoded_losslessly_and_stops_at_its_byte_length():
+    """CodeRabbit on #11753: an emoji written as a JSON escape, then the next flight row, must neither be lost nor leak."""
+    text = "🔥 للإيجار الشهري\n💰 السعر الشهري: 9499 ريال"
+    rows = "\n8a:T%x,%s\n8b:T5,OTHER" % (len(text.encode("utf-8")), text)
+    html = ('<script>self.__next_f.push([1,%s])</script>' % json.dumps('{"listing":{"id":1,"content":"$8a"}}')
+            + '<script>self.__next_f.push([1,%s])</script>' % json.dumps(rows, ensure_ascii=True))   # \ud83d\udd25 escapes
+    assert E.seller_text({"content": "$8a"}, html) == text
+
+
 def test_an_unresolvable_reference_is_unknown_text(monkeypatch):
     row = _read(monkeypatch, content="$8b")
     assert (row["rent_period"], row["price_annual"]) == ("annual", 9499)
