@@ -305,6 +305,7 @@ const AR: Record<string, string> = {
   'Station': 'محطة',
   'Place': 'مكان',
   'Full screen': 'ملء الشاشة',
+  'Tap to open the full map': 'اضغط لتكبير الخريطة',
   'Route': 'مسار',
   'Swap': 'تبديل',
   'Remove route': 'إزالة المسار',

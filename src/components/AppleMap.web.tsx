@@ -416,6 +416,9 @@ const regionView = (mk: MapKit, r: Region) => {
 /** `onExpand` (compact box): the ⤢ button top-right opens the map full screen; the box itself pans and zooms in place
  *  (owner 2026-10-31: «zoom in within his screen without leaving»). `full` + `onClose`: the full-screen map, with its
  *  close button top-left. */
+/** This device has opened the big map once → the «tap to open» hint beside ⤢ stops showing. */
+const EXPAND_HINT_KEY = 'ezhalah.mapExpandHintSeen';
+
 export default function AppleMap({ full = false, onExpand, onClose, onRoute, pins, onPinSelect }: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void; pins?: PinFilter; onPinSelect?: (row: PinRow) => void }) {
   const { t, locale } = useI18n();
   const hostRef = useRef<View>(null);
@@ -426,6 +429,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const shapeRef = useRef<Shape | null>(null);
   const ptsRef = useRef<Coord[]>([]);
   const [drawing, setDrawing] = useState(false);
+  // «اضغط لتكبير الخريطة ←» beside ⤢ (owner 2026-11-11: «an arrow … point at the zoom … so user knows to click»), until
+  // this device has opened the big map once. Device storage is a convenience only: unreadable → the hint shows.
+  const [expandHint, setExpandHint] = useState<boolean>(() => { try { return globalThis.localStorage?.getItem(EXPAND_HINT_KEY) !== '1'; } catch { return true; } });
+  const openFull = () => { try { globalThis.localStorage?.setItem(EXPAND_HINT_KEY, '1'); } catch { /* private mode: fine */ } setExpandHint(false); };
   const [sketch, setSketch] = useState<Shape | null>(null);
   const [poly, setPoly] = useState<PinFilter['poly']>(null);  // the applied drawn boundary, as the pin query's polygon
   const [hasShape, setHasShape] = useState(false);
@@ -1170,8 +1177,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {onExpand && !failed && !drawing ? (
-        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={() => { openFull(); closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
+        </Pressable>
+      ) : null}
+      {onExpand && expandHint && !failed && !drawing && roomy ? (
+        <Pressable style={s.expandHint} onPress={() => { openFull(); closePanels(); onExpand(); }} accessibilityRole="button" accessibilityLabel={t('Tap to open the full map')} testID="map-expand-hint">
+          <Text style={s.expandHintT}>{t('Tap to open the full map')}</Text>
+          <Ionicons name="arrow-forward" size={16} color={colors.surface} />
         </Pressable>
       ) : null}
       {/* Drawing: this layer takes the pointer instead of the map. */}
@@ -1308,6 +1321,11 @@ const s = StyleSheet.create({
     position: 'absolute', top: 56, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
+  expandHint: {
+    position: 'absolute', top: 12, right: 56, height: 36, flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, borderRadius: 18, backgroundColor: colors.primary,
+  },
+  expandHintT: { fontFamily: font.family.bold, fontSize: 13, color: colors.surface },
   closeBtn: {
     position: 'absolute', top: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
