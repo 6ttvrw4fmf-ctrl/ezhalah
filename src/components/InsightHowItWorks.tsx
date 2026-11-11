@@ -11,7 +11,8 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { Image as XImage } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
-import { colors } from '@/theme/tokens';
+import { colors, radius, space } from '@/theme/tokens';
+import { reportError } from '@/lib/observability';
 import { HOW_IT_WORKS } from '@/lib/insightHowItWorks';
 import { loadSiteCount, siteCountNow } from '@/data/siteCount';
 
@@ -31,7 +32,11 @@ let eagleLoading: Promise<void> | null = null;
 export function preloadHowEagle(): Promise<void> {
   const uri = uriOf(EAGLE);
   if (eagleBlob || !uri || typeof fetch !== 'function' || typeof URL === 'undefined' || !URL.createObjectURL) return Promise.resolve();
-  eagleLoading ??= fetch(uri).then((r) => (r.ok ? r.blob() : null)).then((b) => { if (b) eagleBlob = b; }).catch(() => { eagleLoading = null; });
+  // A failed preload is REPORTED (never swallowed) and cleared so the next open can retry; the ?play= URL stays the fallback.
+  eagleLoading ??= fetch(uri)
+    .then((r) => { if (!r.ok) throw new Error(`eagle preload HTTP ${r.status}`); return r.blob(); })
+    .then((b) => { eagleBlob = b; })
+    .catch((e: unknown) => { eagleLoading = null; reportError(e, { source: 'InsightHowItWorks.preloadHowEagle' }); });
   return eagleLoading;
 }
 const freshSource = (play: number) => {
@@ -64,7 +69,8 @@ export function InsightHowItWorks({ visible, locale, onClose }: { visible: boole
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={s.screen}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={c.close} testID="insight-how-backdrop" />
+        {/* pointer-only dismissal: not in the keyboard order and hidden from screen readers — the ✕ is the accessible close */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} focusable={false} accessible={false} importantForAccessibility="no-hide-descendants" aria-hidden testID="insight-how-backdrop" />
         <View style={s.card} testID="insight-how-it-works">
           <Pressable style={s.close} onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={c.close} testID="insight-how-close">
             <Ionicons name="close" size={24} color={colors.ink} />
@@ -101,16 +107,16 @@ export function InsightHowItWorks({ visible, locale, onClose }: { visible: boole
 }
 
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 16 },
-  card: { width: '100%', maxWidth: 460, maxHeight: '88%', backgroundColor: colors.surface, borderRadius: 20, overflow: 'hidden' },
+  screen: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: space.card },
+  card: { width: '100%', maxWidth: 460, maxHeight: '88%', backgroundColor: colors.surface, borderRadius: radius.sheet, overflow: 'hidden' },
   // physical right in BOTH languages — never flipped by RTL
-  close: { position: 'absolute', top: 14, right: 14, zIndex: 2, padding: 2 },
-  body: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 18 },
+  close: { position: 'absolute', top: space.card, right: space.card, zIndex: 2, padding: 2 },
+  body: { paddingHorizontal: space.screenSide, paddingTop: space.card, paddingBottom: space.screenSide },
   title: { fontSize: 19, fontWeight: '700', color: colors.ink, textAlign: 'center', marginHorizontal: 30 },
   eagleBox: { alignItems: 'center', justifyContent: 'center', height: 132, overflow: 'hidden', marginTop: 2 },
   eagle: { width: ART_W, height: ART_H },
   flip: { transform: [{ scaleX: -1 }] },
-  falconerRow: { alignItems: 'center', gap: 8, marginBottom: 4 },
+  falconerRow: { alignItems: 'center', gap: space.base, marginBottom: space.base / 2 },
   mark: { width: 30, height: 30 },
   falconer: { fontSize: 18, fontWeight: '700', color: colors.ink },
   story: { fontSize: 14.5, lineHeight: 23, color: colors.body, marginBottom: 12 },
