@@ -236,3 +236,15 @@ def test_json_ld_seller_block_is_dropped_whole():
     dumped = _json.dumps(p["jsonld"], ensure_ascii=False)
     assert "محمد" not in dumped and "seller" not in dumped
     assert '"value": 150' in dumped and "شمالية" in dumped
+
+
+def test_a_name_joined_to_a_bearing_by_punctuation_is_not_a_facade():
+    # CodeRabbit on #11465: «شمالية/محمد» passed a bearing token that accepted any suffix
+    blk = ''.join(f'<div class="feature-block"><h2>واجهة العقار</h2><span>{v}</span></div>'
+                  for v in ("شمالية/محمد", "شرقية،سالم", "غربي_فهد"))
+    blk += '<div class="newest-title">الواجهة :</div><div class="newest-value">South west</div>'
+    p = page_evidence(f"<html><body>{blk}</body></html>")
+    pairs = [x for x in p["evidence_lines"] if "واجهة" in x or "الواجهة" in x]
+    assert not any(n in x for x in pairs for n in ("محمد", "سالم", "فهد"))
+    assert "الواجهة: South west" in p["evidence_lines"]
+    assert compare_listing({"direction_ar": "جنوب شرق"}, page("جنوبية شرقية"))["direction_ar"] == MATCH

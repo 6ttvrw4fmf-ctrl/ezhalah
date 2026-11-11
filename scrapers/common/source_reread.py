@@ -248,7 +248,7 @@ _FEATURE_LABEL = re.compile(r"واجهة|الواجهة|عرض الشارع")
 _FACADE_VALUE = re.compile(r"شمال|جنوب|شرق|غرب|north|south|east|west|لا يوجد|لايوجد|^\s*-\s*$", re.I)
 
 
-_BEARING_TOKEN = re.compile(r"^(?:ال)?(?:شمال|جنوب|شرق|غرب)\S*$|^(?:north|south|east|west)\S*$", re.I)
+_BEARING_TOKEN = re.compile(r"^(?:ال)?(?:شمال|جنوب|شرق|غرب)(?:ي|يه|ية|يا)?$|^(?:north|south|east|west)(?:ern)?$", re.I)   # whole word forms only: «شمالية/محمد» is not a bearing
 _SAFE_TOKEN = re.compile(r"^(?:[0-9٠-٩][0-9٠-٩.,٬]*|م|م²|م2|متر|مربع|ريال|ر\.س|SAR|سنة|سنه|سنوات|عام|شهري|سنوي|"
                          r"نعم|لا|يوجد|لايوجد|جديد|[-+:])$", re.I)
 
