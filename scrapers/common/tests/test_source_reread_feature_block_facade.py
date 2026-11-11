@@ -173,3 +173,41 @@ def test_a_phone_under_any_label_never_reaches_either_output():
     assert "عرض الشارع | 20" in p["text_head"] and "شمالية" in p["text_head"]   # the facts survive
     assert "850,000 ريال" in p["evidence_lines"]
     assert page_evidence(body)["evidence_lines"] == p["evidence_lines"]   # idempotent
+
+
+def test_a_name_or_phone_under_a_facade_or_street_label_never_reaches_the_evidence():
+    # CodeRabbit on #11465: a value that is not a bearing / a width is not the fact
+    blk = ('<div class="feature-block"><h2>واجهة العقار</h2><span>محمد أحمد</span></div>'
+           '<div class="feature-block"><h2>عرض الشارع</h2><span>للتواصل ابو فهد</span></div>'
+           '<div class="newest-title">الواجهة :</div><div class="newest-value">شرقية</div>')
+    lines = page_evidence(f"<html><body>{blk}</body></html>")["evidence_lines"]
+    assert not any("محمد" in x or "فهد" in x for x in lines if x.startswith(("واجهة العقار ", "عرض الشارع ")))
+    assert "الواجهة: شرقية" in lines
+
+
+def test_json_ld_and_meta_contacts_never_reach_the_artifact():
+    import json as _json
+    ld = {"@type": "Product", "name": "شقة للبيع", "seller": {"telephone": "0551234567", "name": "x"},
+          "description": "للتواصل 0551234567", "floorSize": {"value": 150}}
+    body = (f'<html><head><title>شقة جوال 0551234567</title><meta name="description" content="اتصل 0559876543">'
+            f'<script type="application/ld+json">{_json.dumps(ld, ensure_ascii=False)}</script></head><body></body></html>')
+    p = page_evidence(body)
+    dumped = _json.dumps({k: p[k] for k in ("title", "meta", "jsonld")}, ensure_ascii=False)
+    assert "0551234567" not in dumped and "0559876543" not in dumped
+    assert '"value": 150' in dumped   # property facts survive
+
+
+def test_a_phone_across_the_text_head_cut_leaves_no_digits():
+    # CodeRabbit on #11465: truncating before redaction could keep the first digits of a phone at character 1,500
+    for pad in range(1490, 1502):
+        p = page_evidence(f"<html><body><p>{'ا' * pad} 0551234567</p></body></html>")
+        assert "055123" not in p["text_head"] and "551234" not in p["text_head"]
+
+
+def test_redaction_is_idempotent_on_every_output():
+    from scrapers.common.pii import redact_pii
+    body = ("<html><body><div>مساحة الأرض</div><div>0551234567</div><div>السعر</div><div>850,000 ريال</div>"
+            "<div>واتس 966551234567</div></body></html>")
+    p = page_evidence(body)
+    for x in p["evidence_lines"] + [p["text_head"]]:
+        assert redact_pii(x) == x

@@ -26,7 +26,7 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from scrapers.common.pii import redact_pii
+from scrapers.common.pii import redact_capture, redact_pii
 from urllib.parse import urlsplit
 
 from scrapers.common.cleanup import PLATFORMS, _probe
@@ -244,12 +244,25 @@ _FEATURE_LABEL = re.compile(r"واجهة|الواجهة|عرض الشارع")
 _PHONE = re.compile(r"(?:\+?966|0)?5\d{8}|\d{9,}")
 
 
+# A facade value is a bearing (or «لا يوجد»), a street width is a figure: anything else under those labels — a name, a
+# phone, a note — is not the fact and never enters the evidence (PDPL, CodeRabbit on #11465).
+_FACADE_VALUE = re.compile(r"شمال|جنوب|شرق|غرب|north|south|east|west|لا يوجد|لايوجد|^\s*-\s*$", re.I)
+
+
+def _value_fits(label: str, value: str) -> bool:
+    if re.search(r"واجهة|الواجهة", label):
+        return bool(_FACADE_VALUE.search(value))
+    if "عرض الشارع" in label:
+        return bool(re.search(r"[0-9٠-٩]", value))
+    return True
+
+
 def _feature_block_lines(body: str) -> list[str]:
     out = []
     for m in _FEATURE_PAIR.finditer(body or ""):
         label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()
         value = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
-        if label and value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)):
+        if label and value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)) and _value_fits(label, value):
             out.append(f"{label} {_PHONE.sub('<num>', value)}")   # PDPL: a phone in a feature value never reaches the log
     return out
 
@@ -286,7 +299,7 @@ def _title_value_lines(body: str) -> list[str]:
     for m in _TITLE_VALUE_PAIR.finditer(body or ""):
         label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip().rstrip(":：").strip()
         value = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
-        if label and value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)):
+        if label and value and (EVIDENCE.search(label) or _FEATURE_LABEL.search(label)) and _value_fits(label, value):
             out.append(f"{label}: {_PHONE.sub('<num>', value)}")   # the colon keeps «مفروشة: لا» a no; PDPL: no phone in the log
     return out
 
@@ -320,9 +333,9 @@ def page_evidence(body: str) -> dict:
     lines = [re.sub(r"\s+", " ", html.unescape(x)).strip() for x in text.split("\n")]
     lines = [x for x in lines if x]
     return {
-        "title": html.unescape(title.group(1).strip()) if title else None,
-        "meta": meta,
-        "jsonld": jsonld[:5],
+        "title": redact_pii(html.unescape(title.group(1).strip())) if title else None,
+        "meta": redact_capture(meta),       # PDPL: reread.json carries these too — contact keys dropped, free text scrubbed
+        "jsonld": redact_capture(jsonld[:5]),
         # 400, not 60: a rakez project page lists every unit (price · rooms · area), and unit #C22 of
         # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
@@ -332,7 +345,7 @@ def page_evidence(body: str) -> dict:
         "evidence_lines": _redacted_lines(_payload_area_lines(body) + _payload_place_lines(body) + _houzez_place_lines(body) + _label_value_lines(body)
                            + _number_first_lines(body) + _feature_block_lines(shown) + _title_value_lines(shown)
                            + _with_values(lines))[:400],   # once each: duplicates never push a later field past the cap
-        "text_head": redact_pii(" | ".join(lines)[:1500]) or "",
+        "text_head": (redact_pii(" | ".join(lines)) or "")[:1500],   # redact BEFORE the cut: a phone across it leaves no digits
     }
 
 
