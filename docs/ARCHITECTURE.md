@@ -1674,6 +1674,16 @@ new detector needing a longer history must raise the retention in the same chang
   bisht or beard (`assets/icons/insight-falconer-original.png`). Neither has a face circle.
   These replace the magnifying-glass emoji; explanatory copy and dismissal stay the same.
   Guards: `scripts/verify-insight-welcome.ts`, `scripts/verify-filter-welcome.ts`.
+  **Superseded 2026-11-11 (owner): the «كيف نحسبها؟» popup.** A small underlined «كيف نحسبها؟» / "How we calculate it"
+  sits under a market fact (13 px, like «الشروط والخصوصية»). It and the fact open a centred popup laid out like «نماذج
+  إزهله»: ✕ ALWAYS on the physical right; in the centre the sign-in eagle story played 2× slower
+  (`assets/images/falconer-howto.svg`, built by `scripts/build-howto-falconer.mjs`), mirrored in Arabic, replayed each
+  open; «صقارنا» with Shaheen's purple mark; the owner-approved falconer story (Ezhalah's falconer collects every site's
+  listings and gives them to his falcon Shaheen; the fact comes from the same data) and five rules (only real listings;
+  the site's own posting date, undated = not counted; asking prices, duplicates once, checked twice; a new fact every
+  hour about your city/district; information only, not financial advice). Formal Arabic, no diacritics. No «تمام»
+  button — ✕ or a tap outside closes it. The site count is the LIVE `siteCount.ts` number the share card uses; unknown →
+  the clause is left out. Words: `src/lib/insightHowItWorks.ts`.
 
 - **The Apartments & Co-living group of «🎯 Refine with AI» has owner-LOCKED chip lists (2026-10-31)** — one list
   per type × deal (Apartment / Floor / Room / Studio / Residential building × short stays / annual rent / buy),

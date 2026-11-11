@@ -244,7 +244,7 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
   check('a user who searches Jeddah: their city in roughly two lines of three (40%–80% here, with only 4 Jeddah facts)', share >= 0.4 && share <= 0.8, `${Math.round(share * 100)}% ${JSON.stringify(jeddah.by)}`);
 }
 
-// ── 8. «كيف تشتغل؟» says how duplicates are counted and that it is not advice (owner 2026-10-22) ──
+// ── 8. «كيف نحسبها؟»: the falconer story, the rules, live site count, ✕ on the right (owner 2026-11-11) ──
 {
   const ar = JSON.stringify(HOW_IT_WORKS.ar); const enS = JSON.stringify(HOW_IT_WORKS.en);
   check('the sheet is titled «كيف نحسبها؟» / "How we calculate it" (owner 2026-11-11)', HOW_IT_WORKS.ar.title === 'كيف نحسبها؟' && HOW_IT_WORKS.en.title === 'How we calculate it');
@@ -255,11 +255,27 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
     const style = home.match(/heroHowLink: \{ fontSize: (\d+),[^}]*textDecorationLine: 'underline'/);
     check('the link stays small and underlined (≤ 14 px, like «الشروط والخصوصية»)', !!style && Number(style[1]) <= 14);
   }
-  check('it explains duplicates: same district, type, price and area count once, in counts and prices',
-    ar.includes('نحسبه مرة وحدة بس') && ar.includes('نفس الحي') && ar.includes('في الأعداد وفي الأسعار') && enS.includes('we count it only once'));
-  check('it says asking prices, not deals, and not investment advice', ar.includes('الأسعار المعروضة') && ar.includes('وليست نصيحة استثمارية') && enS.includes('not investment advice'));
-  check('it says the fact changes every hour', ar.includes('كل ساعة') && enS.includes('every hour'));
-  check('both languages carry the same sections', HOW_IT_WORKS.ar.sections.length === HOW_IT_WORKS.en.sections.length);
+  const arS = HOW_IT_WORKS.ar.story(155), enStory = HOW_IT_WORKS.en.story(155);
+  check('the falconer story: our falconer collects every site\'s listings and gives them to Shaheen (owner 2026-11-11)',
+    HOW_IT_WORKS.ar.falconer === 'صقارنا' && arS.includes('لصقره شاهين') && enStory.includes('his falcon Shaheen'));
+  check('the site count is the LIVE number when known, and the clause is LEFT OUT when unknown — never a guessed number',
+    arS.includes('وعددها 155') && enStory.includes('there are 155 of them') && !/\d/.test(HOW_IT_WORKS.ar.story(null)) && !/\d/.test(HOW_IT_WORKS.en.story(null)));
+  check('the date rule: the site\'s own posting date, and an undated ad is not counted', ar.includes('تاريخ نشر الإعلان في موقعه') && ar.includes('لا يحتسب') && enS.includes("isn't counted"));
+  check('it says asking prices, duplicates once, checked twice', ar.includes('وليست أسعار صفقات منفذة') && ar.includes('مرة واحدة') && ar.includes('مرتين') && enS.includes('counted once'));
+  check('it says information only, not financial or investment advice', ar.includes('ليست نصيحة مالية أو استثمارية') && enS.includes('Not financial or investment advice'));
+  check('it says a new fact every hour', ar.includes('كل ساعة') && enS.includes('every hour'));
+  check('no diacritics in the Arabic (owner: «no 7arakat»)', !/[\u064B-\u0652]/.test(ar + arS));
+  check('both languages carry the same five rules', HOW_IT_WORKS.ar.rules.length === 5 && HOW_IT_WORKS.en.rules.length === 5);
+  {
+    const pop = readFileSync(new URL('../src/components/InsightHowItWorks.tsx', import.meta.url), 'utf8');
+    check('the ✕ sits on the PHYSICAL right in both languages (owner: «the x is always on the right»)', /close: \{ position: 'absolute', top: \d+, right: \d+/.test(pop) && !/close: \{[^}]*left:/.test(pop));
+    check('no «تمام» button: the ✕ or a tap outside closes it', !/insight-how-ok/.test(pop) && /testID="insight-how-backdrop"/.test(pop) && /onPress=\{onClose\}[^>]*testID="insight-how-close"/.test(pop));
+    check('the slow eagle animation and Shaheen\'s mark are shown', pop.includes("falconer-howto.svg") && pop.includes("models/shaheen.png"));
+    check('the site count comes from siteCount.ts — the same number as the share card', /from '@\/data\/siteCount'/.test(pop) && /c\.story\(sites\)/.test(pop));
+    const svg = readFileSync(new URL('../assets/images/falconer-howto.svg', import.meta.url), 'utf8');
+    const longest = Math.max(...[...svg.matchAll(/\b(?:dur|begin)="(\d*\.?\d+)s"/g)].map((m) => Number(m[1])));
+    check('the popup eagle is the slow cut (story ≥ 7 s; the sign-in cut is ~4 s)', longest >= 7, `${longest}s`);
+  }
 }
 
 if (failed) { console.error(`\n❌ verify-insight-welcome: ${failed} check(s) failed.`); process.exit(1); }
