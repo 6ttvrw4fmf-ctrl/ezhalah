@@ -12,7 +12,7 @@
 // committed migration that production runs.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { foldSameProperty, sameKindSummary, UNIT_TYPES_AR, type FoldFacts } from '../src/lib/mapPins.ts';
+import { adsCount, foldSameProperty, sameKindSummary, UNIT_TYPES_AR, type FoldFacts } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
 let failed = 0;
@@ -91,6 +91,18 @@ const licPass = (q: string) => /x\.license_number ~ '\^\[0-9\]\{6,\}\$' and x\.c
 check('the same licence a few metres apart shares one pin (same city and deal, 2–40 ads, within ~150 m)', licPass(sql));
 mustCatch('licence twins pulled together from across a city (the distance limit removed)', !licPass(sql.replace(/\s+and max\(la\) - min\(la\) <= 0\.0015 and max\(lo\) - min\(lo\) <= 0\.0015/, '')));
 mustCatch('a licence pass that accepts any text as a licence', !licPass(sql.replace("x.license_number ~ '^[0-9]{6,}$'", 'x.license_number is not null')));
+
+// The title names the ad count too when properties are fewer than ads (owner 2026-11-10: «It says 8 but there is 3» —
+// the pin said 7 ads, the pill 8, the title «3 فيلا» with nothing to say those were villas and these were ads).
+// Measured: حي الملك عبدالله, المجمعة — 7 ads at 750,000 under 3 government licences = 3 villas.
+const villas = [1, 2, 3].map((i) => c(i, ['aqar', 'haraj', 'dealapp'][i - 1], { typeAr: 'فيلا', area: 350, price: 750000, beds: null, floor: null, lic: '7100331008' }))
+  .concat([4, 5, 6].map((i) => c(i, ['aqar', 'haraj', 'dealapp'][i - 4], { typeAr: 'فيلا', area: 350, price: 750000, beds: null, floor: null, lic: '7201175600' })))
+  .concat([c(7, 'aqar', { typeAr: 'فيلا', area: 350, price: 750000, beds: null, floor: null, lic: '7201146708' })]);
+check('7 ads under 3 licences fold into 3 villa cards', fold(villas).length === 3 && everyAdKept(villas));
+check('the ad count reads like the pin: «7 إعلانات», «2 إعلانان»→«إعلانان», «12 إعلان»', adsCount(7, 'ar') === '7 إعلانات' && adsCount(2, 'ar') === '2 إعلانان' && adsCount(12, 'ar') === '12 إعلان' && adsCount(7, 'en') === '7 listings');
+const TITLE_ADS = /groups\.length > 1 && groups\.length < row\.n \? ` · \$\{adsCount\(row\.n, locale\)\}` : ''/;
+check('the sheet title adds « · N إعلانات» when the properties are fewer than the ads', TITLE_ADS.test(sheet));
+mustCatch('a title that shows the property count alone (the old «3 فيلا» with no ad count)', !TITLE_ADS.test(sheet.replace(/\$\{groups\.length > 1 && groups\.length < row\.n \? [^}]*\}` : ''\}/, '')));
 
 console.log(`\nverify-map-same-property-is-one-card: ${failed ? `${failed} FAILED` : 'the same property is one card that names every site; stray points sit under their district'}`);
 process.exit(failed ? 1 : 0);

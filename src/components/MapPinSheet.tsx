@@ -16,7 +16,7 @@ import { openListing } from '@/lib/openListing';
 import { useI18n, englishCatalogText } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
-import { foldSameProperty, idsByTable, orderLike, pinHead, sameKindSummary, type FoldFacts, type PinRow } from '@/lib/mapPins';
+import { adsCount, foldSameProperty, idsByTable, orderLike, pinHead, sameKindSummary, type FoldFacts, type PinRow } from '@/lib/mapPins';
 import { listingPrice, sourceName } from '@/lib/listingDisplay';
 import { translitPlace } from '@/lib/translitPlace';
 
@@ -55,10 +55,12 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
   // and they are all one type and one deal. Until then, and for a mixed pin, the plain count stays.
   const kind = !row.noPin && cards ? sameKindSummary(row.n, cards.map((l) => ({ ...factsOf(l), showsPrice: listingPrice(l, locale) !== '' }))) : null;
   // THE TITLE COUNTS PROPERTIES, NOT ADS (measured live 2026-11-10: «4 دور للبيع» over two cards — two floors, each
-  // advertised on two sites). One property left → no number at all.
+  // advertised on two sites). One property left → no number at all. When the properties are fewer than the ads, the
+  // ad count follows («3 فيلا للبيع من 750,000 · 7 إعلانات»), so it agrees with the pin and the pill (owner 2026-11-10:
+  // «It says 8 but there is 3»).
   const groups = cards ? foldSameProperty(cards, factsOf) : [];
   const kindTitle = kind
-    ? `${groups.length > 1 ? `${groups.length} ` : ''}${locale === 'en' ? englishCatalogText(kind.typeAr) : kind.typeAr} ${t(kind.dealAr === 'بيع' ? 'for sale' : 'for rent')}${kind.from !== null ? ` ${t('from {price}', { price: kind.from.toLocaleString('en-US') })}` : ''}`
+    ? `${groups.length > 1 ? `${groups.length} ` : ''}${locale === 'en' ? englishCatalogText(kind.typeAr) : kind.typeAr} ${t(kind.dealAr === 'بيع' ? 'for sale' : 'for rent')}${kind.from !== null ? ` ${t('from {price}', { price: kind.from.toLocaleString('en-US') })}` : ''}${groups.length > 1 && groups.length < row.n ? ` · ${adsCount(row.n, locale)}` : ''}`
     : '';
   const title = row.noPin
     ? t('{n} listings in {district}', { n: row.n, district: isRTL ? place : translitPlace(place) })

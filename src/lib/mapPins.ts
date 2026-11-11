@@ -412,3 +412,9 @@ export function viewCountText(n: number, place: string | null, loc: 'ar' | 'en',
   const noun = n === 2 ? 'إعلانان' : n >= 3 && n <= 10 ? 'إعلانات' : 'إعلان';
   return `${num} ${noun}${dealWord} في ${place ?? 'هذه المنطقة'}`;
 }
+
+/** «7 إعلانات» / «7 listings»: an ad count in the words the map's pill and bubbles use (Arabic number agreement). */
+export function adsCount(n: number, loc: string): string {
+  if (loc === 'en') return `${n} ${n === 1 ? 'listing' : 'listings'}`;
+  return `${n} ${n === 2 ? 'إعلانان' : n >= 3 && n <= 10 ? 'إعلانات' : 'إعلان'}`;
+}
