@@ -379,7 +379,7 @@ export async function suggestPlacesResult(q: string, uiLanguage: string): Promis
   const query = q.trim();
   if (query.length < 2) return { rows: [], failed: false };
   let mk: MapKit;
-  try { mk = await loadMapKit(); } catch { return { rows: [], failed: true }; }
+  try { mk = await loadMapKit(); } catch (e) { reportError(e, { where: 'map search: MapKit did not load' }); return { rows: [], failed: true }; }
   initOnce(mk, uiLanguage);
   // THE MAP SPEAKS THE LANGUAGE THE USER TYPES (owner 2026-10-31: «if the user types English or Arabic make sure the
   // map turns that language»): Arabic letters → Arabic labels and suggestions, Latin letters → English. A query with
@@ -404,7 +404,7 @@ export async function suggestPlacesResult(q: string, uiLanguage: string): Promis
     // Only real PLACES: Apple also returns query completions («adidas · Search Nearby») that carry no coordinate and
     // land nowhere (owner 2026-11-01 saw one in the route fields).
     search.autocomplete(query, (err, data) => {
-      if (err || !data) { lookupFailed = true; resolve([]); return; }
+      if (err || !data) { lookupFailed = true; reportError(err ?? new Error('autocomplete returned no data'), { where: 'map search: autocomplete' }); resolve([]); return; }
       resolve(data.results.filter((r) => r.displayLines?.length && r.coordinate));
     });
   });

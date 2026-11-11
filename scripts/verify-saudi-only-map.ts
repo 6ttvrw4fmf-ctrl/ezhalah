@@ -109,15 +109,16 @@ const search = (src: string) => ({
   // The list scrolls on the phone page only (a scroll box would clip the desktop dropdown's absolute position).
   scrolls: /\{full && list \? \(\s*<ScrollView style=\{s\.fullScroll\}/.test(src) && /\) : list\}/.test(src),
 });
-const lookup = (src: string) => /if \(err \|\| !data\) \{ lookupFailed = true; resolve\(\[\]\); return; \}/.test(src) && /if \(lookupFailed\) return \{ rows: \[\], failed: true \};/.test(src)
-  && /try \{ mk = await loadMapKit\(\); \} catch \{ return \{ rows: \[\], failed: true \}; \}/.test(src);
+const lookup = (src: string) => /if \(err \|\| !data\) \{ lookupFailed = true; reportError\(err \?\? new Error\('autocomplete returned no data'\), \{ where: 'map search: autocomplete' \}\); resolve\(\[\]\); return; \}/.test(src) && /if \(lookupFailed\) return \{ rows: \[\], failed: true \};/.test(src)
+  && /try \{ mk = await loadMapKit\(\); \} catch \(e\) \{ reportError\(e, \{ where: 'map search: MapKit did not load' \}\); return \{ rows: \[\], failed: true \}; \}/.test(src);
 const r0 = search(row);
 check('phone search: the map\'s search field opts in to the full-screen page', r0.opts);
 check('phone search: a tap opens it; a pick and «إلغاء» close it', r0.opens && r0.cancel && r0.pickCloses);
 check('phone search: the list stays while the page is open even with the keyboard hidden', r0.stays);
 check('phone search: a failed lookup says so, with «حاول مرة أخرى» (never «no places»)', r0.failedShown && lookup(map));
 check('phone search: the list scrolls on the phone page, the desktop dropdown is untouched', r0.scrolls);
-mustCatch('an autocomplete error read as an empty answer again', !lookup(map.replace('if (err || !data) { lookupFailed = true; resolve([]); return; }', 'if (err || !data) { resolve([]); return; }')));
+mustCatch('an autocomplete error read as an empty answer again', !lookup(map.replace("if (err || !data) { lookupFailed = true; reportError(", "if (err || !data) { reportError(")));
+mustCatch('an autocomplete error not reported to Sentry', !lookup(map.replace("lookupFailed = true; reportError(err ?? new Error('autocomplete returned no data'), { where: 'map search: autocomplete' }); ", 'lookupFailed = true; ')));
 mustCatch('a failed lookup shown as «nothing found»', !search(row.replace("setStatus(r.failed ? 'failed' : 'done')", "setStatus('done')")).failedShown);
 mustCatch('the list closing on blur again', !search(row.replace('const open = (focused || full) && hits.length > 0;', 'const open = focused && hits.length > 0;')).stays);
 mustCatch('the map search no longer opting in', !search(row.replace(/testID="map-search"\s*fullOnPhone/, 'testID="map-search"')).opts);
