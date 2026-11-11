@@ -914,6 +914,12 @@ used to end on.
   half-hourly roster — repairs first, P1 only for rows the trigger could not label, borderline count in
   its payload. The «never "no period filter"» rules below are unchanged: a NULL that survives is the
   borderline or a price-on-request row, and those still enter no single-period pool.
+  **The MAP keeps those borderline rows under «إيجار» (owner 2026-11-10, «keep it for rent … why not»).** The map's
+  rent pins (`map_pins_ar` / `map_nopin_markers_ar`, deal `'rent'`) take every rent row outside the short-stays pool,
+  so the ~340 priced rows whose site printed no period and whose figure is borderline (8,000–14,999; haraj, muhaysini,
+  nofodh, aqar … 22 sites, measured that day) show on the map though the Filter's «سنوي» does not reach them. This
+  is the one deliberate map ≠ Filter gap — do not «fix» it by hiding them from the map; every other choice was
+  measured equal (38 choices × buy/rent, PR #11738).
   **The flag follows the source on every sync (2026-11-03, `20261103204042`):** the sync's ON CONFLICT hands
   over `rent_period_judged=excluded.rent_period_judged` (its INSERT pass's verdict) and the trigger keeps a
   handed-over TRUE only when `rent_period_judgment_holds()` backs it — before that, 1,939 stated rows kept
