@@ -88,6 +88,15 @@ figure misstates them. They are the whole of the «إقامات قصيرة» poo
   owner's approval.
 - Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
 
+# EVERY AD'S PRICES AND DATES ARE KEPT FOREVER (owner, 2026-11-11 — permanent; full text `docs/ARCHITECTURE.md` §20)
+
+**`listing_price_history` (every price change, gone, back, removed — with its date) and `listing_comparables` (one slim
+card per ad: what, where, size, rooms, first/last price, the site's posting date, first seen, gone, removed) are written by
+`tg_listing_price_diary()` on every listing table and outlive the ad, including ads the retention engine deletes.** Never
+delete or update them, never drop the triggers. «gone/removed» means the ad disappeared, never that it sold. Later the AI
+agent answers comparables («prices in this district in this time frame») FROM these tables and their dates, never from
+the model's own knowledge. Guard: `scripts/verify-price-diary.ts`; alarm `price_diary_unhealthy`.
+
 # RENT POOLS AND THE CHEAP-«YEARLY» RULE (owner, 2026-10-25/26 — permanent; full text `docs/ARCHITECTURE.md` §20)
 
 **«إقامات قصيرة» (the old «شهري» pool) is Gathern + Aqar Monthly ONLY. Every other site's rent listing is

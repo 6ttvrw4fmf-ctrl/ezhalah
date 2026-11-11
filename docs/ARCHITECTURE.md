@@ -1748,6 +1748,31 @@ new detector needing a longer history must raise the retention in the same chang
   for its result (an Advanced Filter round's receipt comes off when its search threw or was stopped, so the buttons
   return); and a failure line in the chat is written in THAT TURN's language, not the interface's.
 
+
+**PRICE DIARY + COMPARABLES CARDS — every ad's prices and dates are kept forever, also after it is hidden or removed (owner, 2026-11-11 — permanent).**
+Owner: «let's start saving … the price before and after … the dates are important … the hidden ones, cuz they got deleted,
+would be useful if someone uses the AI agent to do comparables»; «your job is just saving it, later we will focus on the AI agent».
+- **What is saved.** `listing_price_history` (the diary): one line per event of every ad — `start` (what we knew when the
+  diary began, dated `scraped_at`), `first` (a new ad), `price` (old → new, `price_total` and `price_annual` both), `gone`
+  (hidden), `back` (shown again), `removed` (deleted by the retention engine). `listing_comparables` (the card): one slim row
+  per ad — site, buy/rent, rent period, type, region, city, district, m², bedrooms, bathrooms, age, link, the SITE'S posting
+  date (`site_date_added`, raw `date_added`), first seen, first and last price, number of price changes, last seen, gone,
+  removed. No photos, descriptions or contact details.
+- **How.** ONE trigger function `tg_listing_price_diary()` on every `_(residential|commercial)_listings` table (insert;
+  update only when a price or `active` changed; delete). It never raises — errors go to `listing_price_diary_errors`.
+  `mon_detect_price_diary_health()` (in the detector roster) re-attaches it to any listing table without it (a new
+  platform) and raises P2 `price_diary_unhealthy` if one still lacks it or the trigger swallowed errors in the last day.
+  Migrations `20261111035037` + `20261111035153`; guard `scripts/verify-price-diary.ts`.
+- **Filled from the past on 2026-11-11:** 699,465 cards (471,066 live, 111,293 hidden, 117,106 already removed — from
+  `purged_listings_archive`), 927,866 diary lines. Price changes BEFORE that day were never recorded and are gone.
+- **Rules.** Never delete or update diary lines; never drop the triggers to clear the alarm. PRICE = SOURCE: prices are the
+  site's own as stored (the rent pool ×12 rule is applied when READING, as everywhere). `gone_at` / `removed_at` mean the ad
+  DISAPPEARED from the site, never proof it SOLD — say «disappeared», not «sold». The retention engine may remove an ad's
+  row; its card and diary stay.
+- **Later (AI agent, not built yet):** a question like «asking prices in حي الملقا over the last 6 months» is answered FROM
+  these two tables, filtered by their real dates (`site_date_added` / `first_seen_at` / diary `at`) — never from the model's
+  own knowledge. Building that is a separate, owner-led step.
+
 ---
 
 ## 21. Open questions / decisions still pending
