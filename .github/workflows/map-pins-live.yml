@@ -35,7 +35,8 @@ jobs:
       - name: Install Playwright + browser
         run: |
           npm i -D @playwright/test@^1.49
-          npx playwright install --with-deps chromium
+          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
+          for i in 1 2 3; do npx playwright install --with-deps chromium && break; echo "playwright install failed (try $i)"; [ "$i" = 3 ] && exit 1; sleep 20; done
       - name: Check the map's pins like a phone user
         env:
           BASE_URL: https://ezhalah.com

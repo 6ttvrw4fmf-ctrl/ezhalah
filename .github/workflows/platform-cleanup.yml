@@ -58,7 +58,9 @@ jobs:
       # Adds no capability and moves no guard: identical code, identical policy row, identical
       # age/strike/anomaly/fraction gates and the same fresh per-row DIRECT re-check.
       - name: Install Chromium for the Cloudflare path
-        run: python -m playwright install --with-deps chromium
+        run: |
+          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
+          for i in 1 2 3; do python -m playwright install --with-deps chromium && break; echo "playwright install failed (try $i)"; [ "$i" = 3 ] && exit 1; sleep 20; done
       - name: Run cleanup
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

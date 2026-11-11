@@ -54,7 +54,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Install Chromium for Playwright
-        run: npx playwright install --with-deps chromium
+        run: |
+          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
+          for i in 1 2 3; do npx playwright install --with-deps chromium && break; echo "playwright install failed (try $i)"; [ "$i" = 3 ] && exit 1; sleep 20; done
       # No retry loop here, unlike af-oracle-pr-check.yml. That job is a PR gate, where a production
       # hiccup must not fail someone's unrelated work. This one is a PROOF someone asked for: a
       # flaky-looking failure is information the operator needs to see, not noise to be smoothed

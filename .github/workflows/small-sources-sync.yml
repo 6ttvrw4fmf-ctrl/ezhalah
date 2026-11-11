@@ -505,7 +505,9 @@ jobs:
         # address with a script page, not the redirect. A headless Chromium runs that script
         # (scrapers/common/page_pin.py _browser_hop). Only the `browser: true` sources pay for it.
         if: ${{ matrix.browser }}
-        run: python -m playwright install --with-deps chromium
+        run: |
+          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
+          for i in 1 2 3; do python -m playwright install --with-deps chromium && break; echo "playwright install failed (try $i)"; [ "$i" = 3 ] && exit 1; sleep 20; done
       - name: Sync ${{ matrix.source }}
         # No per-source `if:` here any more: `plan` already put only the requested sources in the matrix.
         # A comma-separated list still runs exactly those sources in ONE run (one per-list concurrency lane).

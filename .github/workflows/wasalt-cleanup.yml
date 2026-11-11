@@ -62,7 +62,9 @@ jobs:
       # inconclusive freeze trips. cleanup.py routes wasalt through scrapers/wasalt/browser.py when
       # WASALT_BROWSER=1, exactly as run.py (#3129), enrich_ar (#3140) and liveness (#3166) do.
       - name: Install Chromium for the Cloudflare path
-        run: python -m playwright install --with-deps chromium
+        run: |
+          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
+          for i in 1 2 3; do python -m playwright install --with-deps chromium && break; echo "playwright install failed (try $i)"; [ "$i" = 3 ] && exit 1; sleep 20; done
       - name: Run wasalt cleanup
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

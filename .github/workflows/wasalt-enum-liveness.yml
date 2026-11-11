@@ -165,7 +165,9 @@ jobs:
       # and 09-19. So enumeration has been dead since 2026-09-12, which is why the strike step's
       # coverage guard has (correctly) refused ever since and no wasalt listing has been retired.
       - name: Install Chromium for the Cloudflare path
-        run: python -m playwright install --with-deps chromium
+        run: |
+          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
+          for i in 1 2 3; do python -m playwright install --with-deps chromium && break; echo "playwright install failed (try $i)"; [ "$i" = 3 ] && exit 1; sleep 20; done
       - name: Enumerate every slice to exhaustion
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -243,7 +245,9 @@ jobs:
       # Cloudflare path (issue #1019): the DIRECT confirm below reads listing pages on wasalt.sa,
       # which no http client has reached since 2026-08-17. --with-deps pulls Chromium's libs.
       - name: Install Chromium for the Cloudflare path
-        run: python -m playwright install --with-deps chromium
+        run: |
+          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
+          for i in 1 2 3; do python -m playwright install --with-deps chromium && break; echo "playwright install failed (try $i)"; [ "$i" = 3 ] && exit 1; sleep 20; done
       - name: Enum-strike (guarded)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -288,7 +292,9 @@ jobs:
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
       - name: Install Chromium for the Cloudflare path
-        run: python -m playwright install --with-deps chromium
+        run: |
+          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
+          for i in 1 2 3; do python -m playwright install --with-deps chromium && break; echo "playwright install failed (try $i)"; [ "$i" = 3 ] && exit 1; sleep 20; done
       - name: Repair (direct-check every row at grace — can only write missing_count 0 or 1)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
