@@ -95,7 +95,9 @@ card per ad: what, where, size, rooms, first/last price, the site's posting date
 `tg_listing_price_diary()` on every listing table and outlive the ad, including ads the retention engine deletes.** Never
 delete or update them, never drop the triggers. «gone/removed» means the ad disappeared, never that it sold. Later the AI
 agent answers comparables («prices in this district in this time frame») FROM these tables and their dates, never from
-the model's own knowledge. Guard: `scripts/verify-price-diary.ts`; alarm `price_diary_unhealthy`.
+the model's own knowledge. **Every NEW site joins automatically** (the watcher attaches the diary to any new listing
+table within 30 minutes, and rings `price_diary_unhealthy` if it can't); all sites share ONE diary and ONE card table —
+never a separate store per site. Guard: `scripts/verify-price-diary.ts`.
 
 # RENT POOLS AND THE CHEAP-«YEARLY» RULE (owner, 2026-10-25/26 — permanent; full text `docs/ARCHITECTURE.md` §20)
 
