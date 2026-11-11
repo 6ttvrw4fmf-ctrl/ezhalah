@@ -62,3 +62,27 @@ def test_a_bare_singular_year_after_the_age_label_is_one_year():
     assert _cmp_number(5, [line], line, AGE_KW) == MISMATCH
     other = norm("المساحة :109 متر مربع. عمر العقار: سنتين.")
     assert _cmp_number(1, [other], other, AGE_KW) != MATCH       # «سنتين» is two, never one
+
+
+def test_a_singular_year_on_its_own_value_line_is_one_year():
+    # CodeRabbit on #11465: a label/value page prints «عمر العقار» / «سنة» on two lines
+    from scrapers.common.new_listings_score import AGE_KW, PAGE_SILENT, WE_MISS, _cmp_number, norm
+    lines = [norm("المساحة 109"), norm("عمر العقار"), norm("سنة"), norm("غرف النوم")]
+    whole = " | ".join(lines)
+    assert _cmp_number(1, lines, whole, AGE_KW) == MATCH
+    assert _cmp_number(5, lines, whole, AGE_KW) == MISMATCH
+    # a stored age we LOST on a page that states one year is our miss, never «page silent»
+    one = norm("عمر العقار: سنة.")
+    assert _cmp_number(None, [one], one, AGE_KW) == WE_MISS
+    assert _cmp_number(None, lines, whole, AGE_KW) == WE_MISS
+    blank = norm("عمر العقار: غير محدد")
+    assert _cmp_number(None, [blank], blank, AGE_KW) == PAGE_SILENT
+
+
+def test_a_hidden_feature_block_supplies_no_facade():
+    # CodeRabbit on #11465: a feature block inside a not_present section is not shown, so it states nothing
+    hidden = ('<div class="not_present"><div class="feature-block"><i class="las la-building"></i>'
+              '<h2>واجهة العقار </h2><span>غربية</span></div></div>')
+    ev = page_evidence(f"<html><body>{SEARCH_FORM}{FILLER}{hidden}</body></html>")
+    assert "واجهة العقار غربية" not in ev["evidence_lines"]
+    assert compare_listing({"direction_ar": "غرب"}, ev)["direction_ar"] != MATCH

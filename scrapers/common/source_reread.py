@@ -281,7 +281,8 @@ def page_evidence(body: str) -> dict:
     meta = {k: html.unescape(v) for k, v in META.findall(body or "")
             if k.startswith(("og:", "twitter:", "description", "product:"))}
     title = TITLE.search(body or "")
-    text = TAG.sub("\n", DROP.sub(" ", RELATED_CARD.sub(" ", NOT_PRESENT.sub(" ", body or ""))))
+    shown = DROP.sub(" ", RELATED_CARD.sub(" ", NOT_PRESENT.sub(" ", body or "")))   # what the page DISPLAYS
+    text = TAG.sub("\n", shown)
     lines = [re.sub(r"\s+", " ", html.unescape(x)).strip() for x in text.split("\n")]
     lines = [x for x in lines if x]
     return {
@@ -293,7 +294,7 @@ def page_evidence(body: str) -> dict:
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
         "evidence_lines": (_payload_area_lines(body) + _payload_place_lines(body) + _houzez_place_lines(body) + _label_value_lines(body)
-                           + _number_first_lines(body) + _feature_block_lines(body) + _with_values(lines))[:400],
+                           + _number_first_lines(body) + _feature_block_lines(shown) + _with_values(lines))[:400],
         "text_head": " | ".join(lines)[:1500],
     }
 

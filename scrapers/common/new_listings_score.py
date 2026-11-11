@@ -663,6 +663,17 @@ def _structured_age(stored, lines: list[str], jsonld: str, now_year: Optional[in
     return MATCH if any(abs(float(stored) - (now_year - y)) <= 1 for y in years) else MISMATCH
 
 
+# A bare singular year states ONE year, on the label's own line («عمر العقار: سنة») or as the label's value line
+# («عمر العقار» / «سنة») — CodeRabbit on #11465. «\uFF1A» is the full-width colon some pages print.
+_ONE_YEAR_ON_LABEL = re.compile("عمر العقار\\s*[:\uFF1A]?\\s*(?:سنه|سنة|عام)(?![\u0621-\u064A])")
+_ONE_YEAR_LINE = re.compile(r"^\s*(?:سنه|سنة|عام)\s*[.،,]?\s*$")
+
+
+def _states_one_year(lines: list[str], kw_hits: list[int]) -> bool:
+    return any(_ONE_YEAR_ON_LABEL.search(lines[i]) or (i + 1 < len(lines) and _ONE_YEAR_LINE.match(lines[i + 1]))
+               for i in kw_hits)
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
     if "مساحه" in kw:
@@ -679,6 +690,8 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # a th/td area («المساحه» / «587م») states the figure on the line under its label
         page_states = any(AREA_LABEL_LINE.match(lines[i]) and i + 1 < len(lines)
                           and re.match(r"^\s*[\d٠-٩][\d٠-٩.,]*\s*م\s*$", lines[i + 1]) for i in kw_hits)
+    if kw == AGE_KW and not page_states:
+        page_states = _states_one_year(lines, kw_hits)   # «عمر العقار: سنة» states 1 with no digit (CodeRabbit on #11465)
     if stored is None:
         return WE_MISS if page_states else PAGE_SILENT
     pat = _num_pattern(stored)
@@ -747,7 +760,7 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # A bare singular year right after the age label is ONE year: aqarcity 30135 (aqarcity_residential_listings:
         # 2292614, 2026-11-09 score) prints «… المساحة :109 متر مربع … عمر العقار: سنة. …» on one line; stored 1, and
         # the line's 109 made «page states» true, so the night scored it a MISMATCH.
-        if kw == AGE_KW and any(re.search(r"عمر العقار\s*[:：]?\s*(?:سنه|سنة|عام)(?![\u0621-\u064A])", lines[i]) for i in kw_hits):
+        if kw == AGE_KW and _states_one_year(lines, kw_hits):
             worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
             worded.add(2)
