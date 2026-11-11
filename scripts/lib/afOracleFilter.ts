@@ -214,6 +214,8 @@ export const AMENITY_TOKEN_DERIVED: Record<string, DerivedAmenity> = {
 };
 
 export type OracleOpts = {
+  /** «now» for the p_posted_within_days cut (ms since epoch); defaults to Date.now(). */
+  nowMs?: number;
   /** type_ar → macro ('Residential' | 'Commercial' | 'both'), read from the same `known_type_ar`
    *  reference table the RPC's category-purity clause reads. Required whenever p_category is set. */
   typeMacros?: Record<string, string>;
@@ -858,6 +860,14 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
           if (derived.orGroup) orGroups.push(derived.filter); else parts.push(derived.filter);
         }
         break;
+      // «نُشر خلال» (owner 2026-11-11): the clause keeps `s.posted_at is not null and s.posted_at >= now() - N days`. The
+      // oracle reads the same column with the same cut, computed at query time (opts.nowMs pins it for a test).
+      case 'p_posted_within_days': {
+        const days = Number(v);
+        if (!Number.isFinite(days) || days <= 0) { unhandled.push(`p_posted_within_days=${JSON.stringify(v)}`); break; }
+        parts.push(`posted_at=gte.${enc(new Date((opts?.nowMs ?? Date.now()) - days * 86_400_000).toISOString())}`);
+        break;
+      }
       // genuinely irrelevant to the WHERE clause (paging/sorting/informational), always safe:
       case 'p_platforms': case 'p_per_platform': case 'p_limit': case 'p_offset':
       case 'p_sort_by':

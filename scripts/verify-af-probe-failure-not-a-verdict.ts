@@ -244,8 +244,10 @@ check(`WIRING both probe-guarded option builders report the failure honestly (${
 
   const mut2 = one(remote, /if \(error\) return PROBE_FAILED;/, 'if (error) return null;');
   check('WIRING-MUT anchor: one transport-error handler could be collapsed', mut2 !== remote);
-  mustCatch('WIRING ONE of three transport-error handlers reading an error as "nothing"',
-    countOf(mut2, ERROR_HONEST) < 3);
+  // Measured against the tree's OWN count (it said «< 3» until 2026-11-11, when fetchPostedWindowCounts added a fourth
+  // honest handler and the hardcoded number made the mutation look uncaught).
+  mustCatch('WIRING ONE of the transport-error handlers reading an error as "nothing"',
+    countOf(mut2, ERROR_HONEST) < countOf(remote, ERROR_HONEST));
 
   const mut3 = one(af,
     'isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true }',

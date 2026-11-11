@@ -17,8 +17,9 @@ import { OptionBox, FieldLabel } from '@/components/ui';
 import { CATEGORIES } from '@/data/taxonomy';
 import { groupsFor, groupMembers, typeArForTypes, type Macro } from '@/data/propertyTypes';
 import { EMPTY_MAP_FILTER, digits, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
-import { pinFilterOf as pinFilterOfWith, furnitureOffered, bedsOffered } from '@/lib/mapFilter';
-import { mapTypeScope } from '@/data/remote';
+import { pinFilterOf as pinFilterOfWith, furnitureOffered, bedsOffered, postedOffered, typeSelection } from '@/lib/mapFilter';
+import { mapTypeScope, fetchPostedWindowCounts, fetchPostedWindowCountsArgs, mapFilterSearchQuery, type PostedWindowCounts } from '@/data/remote';
+import PostedWindowMenu from '@/components/PostedWindowMenu';
 export { EMPTY_MAP_FILTER, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
 /** The popup's state → the pin query, with the site's own group → type labels mapping. */
 export const pinFilterOf = (f: MapFilterState, deals: readonly string[] = []) => pinFilterOfWith(f, typeArForTypes, groupMembers, deals, mapTypeScope);
@@ -42,6 +43,7 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
   const key = JSON.stringify(f);
   useEffect(() => {
     const my = ++seq.current;
+    setCount(null);   // a number on the button is always for what is picked now (CodeRabbit #11828; live 2026-11-10: 59,686 lingered)
     const h = setTimeout(() => { countPins(f).then((n) => { if (my === seq.current) setCount(n); }); }, 250);
     return () => clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -60,7 +62,33 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
   // group»): the picked groups' types, as on the Filter home.
   const typeChoices = useMemo(() => [...new Set(f.groups.flatMap((g) => groupMembers(g)))], [f.groups]);
   // What «تطبيق» hands the map: a furniture choice the row no longer offers is dropped (no hidden filter left behind).
-  const applied: MapFilterState = f.furnished != null && !furnitureOffered(deals, f.category) ? { ...f, furnished: null } : f;
+  const applied0: MapFilterState = f.furnished != null && !furnitureOffered(deals, f.category) ? { ...f, furnished: null } : f;
+  const applied: MapFilterState = applied0.postedWithinDays != null && !postedOffered(deals) ? { ...applied0, postedWithinDays: null } : applied0;
+  // «نُشر خلال» numbers (owner 2026-11-11): the Filter's own nationwide count for these choices, each window left open —
+  // one read per picked deal, added up (buy and yearly rent never share an ad). Cleared the moment the choices change, so
+  // a number on the menu is always for what is picked now; a failed read leaves the numbers blank, never zeros.
+  const [postedCounts, setPostedCounts] = useState<PostedWindowCounts | null>(null);
+  const postedFacts = { ...f, types: typeSelection(f, groupMembers).flatMap((x) => (f.groups.includes(x) && groupMembers(x).length ? groupMembers(x) : [x])), furnished: furnitureOffered(deals, f.category) ? f.furnished : null };
+  const postedDeals = deals.filter((d): d is 'buy' | 'rent' => d === 'buy' || d === 'rent');
+  const postedKey = JSON.stringify([postedFacts, postedDeals]);
+  useEffect(() => {
+    setPostedCounts(null);
+    if (!postedOffered(deals) || !postedDeals.length) return;
+    let live = true;
+    const h = setTimeout(() => {
+      Promise.all(postedDeals.map((d) => { const r = mapFilterSearchQuery(postedFacts, d); return 'q' in r ? fetchPostedWindowCounts(r.q) : fetchPostedWindowCountsArgs(r.args); }))
+        .then((all) => {
+          if (!live) return;
+          if (all.some((c) => !c || typeof c !== 'object' || !('any' in c))) { setPostedCounts(null); return; }
+          const sum = {} as PostedWindowCounts;
+          for (const c of all as PostedWindowCounts[]) for (const [k, v] of Object.entries(c)) (sum as Record<string, number>)[k] = ((sum as Record<string, number>)[k] ?? 0) + Number(v);
+          setPostedCounts(sum);
+        })
+        .catch(() => { if (live) setPostedCounts(null); });
+    }, 300);
+    return () => { live = false; clearTimeout(h); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postedKey]);
   const toggleBed = (b: '1' | '2' | '3' | '4' | '5+') => setF((x) => ({ ...x, beds: x.beds.includes(b) ? x.beds.filter((y) => y !== b) : [...x.beds, b] }));
 
   return (
@@ -126,6 +154,14 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
                       onPress={() => setF((x) => ({ ...x, furnished: pref }))} style={s.cell} />
                   ))}
                 </View>
+              </>
+            ) : null}
+            {/* «نُشر خلال» — the Filter home's row, copied (owner 2026-11-11): a floating menu, each period with its number. */}
+            {postedOffered(deals) ? (
+              <>
+                <FieldLabel>{t('Published within')}</FieldLabel>
+                <PostedWindowMenu value={f.postedWithinDays ?? null} counts={postedCounts}
+                  onChange={(days) => setF((x) => ({ ...x, postedWithinDays: days }))} testID="map-filter-posted" />
               </>
             ) : null}
             <View style={[s.rangeHead, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}><Image source={RANGE_ICON.areaHead} style={s.icon} /><Text style={s.rangeLabel}>{t('Area (m²)')}</Text></View>
