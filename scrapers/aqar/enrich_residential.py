@@ -1028,8 +1028,11 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
                 or _period_beside(s_price, text, is_rnpl_page)
             # aqar did not call it monthly, but the SELLER'S own text does, about this very figure, in the
             # 8,000–10,000 band on a home or business unit (owner 2026-11-10) — see seller_says_monthly.
-            # A financing page is skipped: every «شهري» there is an instalment, never the rent.
-            if rent_period != "monthly" and not is_rnpl_page \
+            # A financing (pay-later) page is NOT skipped. Its «ابتداءً من 981 ريال شهريا» line is an instalment, and
+            # the rule only fires on the PUBLISHED figure tied to the seller's word — an instalment never equals it.
+            # Skipping those pages left the very ad of the owner's audit (aqar 6560368, a pay-later page) at 9,499
+            # «a year» and 12 of the 21 known cases unfixed (dry run 2026-11-11, Actions run 42931691834).
+            if rent_period != "monthly" \
                     and seller_says_monthly(s_price, (obj or {}).get("content"), property_type):
                 rent_period = "monthly"
                 rent_period_from = "seller_text"
