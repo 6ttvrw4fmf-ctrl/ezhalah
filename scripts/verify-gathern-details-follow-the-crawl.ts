@@ -27,12 +27,15 @@ export function problems(backfill: string, sync: string): string[] {
     if (!/types:\s*\[\s*completed\s*\]/.test(wr)) p.push('the backfill must run when the crawl has COMPLETED');
   }
   if (!/^\s{2}schedule:/m.test(on)) p.push('the 02:00 backfill schedule is gone (units the crawl never revisits would stay unread)');
-  // Any job-level `if:` that names the event must still let workflow_run through (CodeRabbit #11809: an
-  // «event_name != 'workflow_run'» condition would switch off every after-crawl run while the trigger stays).
+  // The backfill job carries NO job-level `if:` at all (CodeRabbit #11809): any condition can switch off the
+  // after-crawl run, the 02:00 run or a hand dispatch while every trigger stays in place — «!= 'workflow_run'»,
+  // «== 'workflow_run'» (skips the schedule) and «== 'workflow_run' && == 'schedule'» (never true) alike.
   const job = /^\s{2}backfill:\n([\s\S]*?)(?=^\s{2}\S|(?![\s\S]))/m.exec(backfill)?.[1] ?? '';
-  const cond = /^\s{4}if:\s*(.+)$/m.exec(job)?.[1] ?? '';
-  if (/event_name/.test(cond) && !/event_name\s*==\s*'workflow_run'/.test(cond.replace(/\$\{\{|\}\}/g, '')))
-    p.push(`the backfill job's condition «${cond.trim()}» can skip the after-crawl run`);
+  const cond = /^\s{4}if:\s*(.+)$/m.exec(job)?.[1];
+  if (cond !== undefined) p.push(`the backfill job has a condition «${cond.trim()}» — it can skip the after-crawl or the 02:00 run`);
+  // …and the after-crawl trigger carries no branch filter: GitHub applies it to the CRAWL's branch, so
+  // «branches-ignore: ['**']» would switch the trigger off silently.
+  if (/^\s{4}branches(-ignore)?:/m.test(wr)) p.push('the after-crawl trigger carries a branch filter — it can exclude the crawl\'s own branch');
   return p;
 }
 
@@ -50,6 +53,9 @@ mustCatch('the crawl renamed without the trigger', problems(BACKFILL, SYNC.repla
 mustCatch('the trigger firing on request instead of completion', problems(swap('types: [completed]', 'types: [requested]'), SYNC).length > 0);
 mustCatch('a job condition that skips the after-crawl run', problems(swap('  backfill:\n', "  backfill:\n    if: ${{ github.event_name != 'workflow_run' }}\n"), SYNC).length > 0);
 mustCatch('a job condition that keeps only the schedule', problems(swap('  backfill:\n', "  backfill:\n    if: github.event_name == 'schedule'\n"), SYNC).length > 0);
+mustCatch('a job condition that keeps only the after-crawl run', problems(swap('  backfill:\n', "  backfill:\n    if: github.event_name == 'workflow_run'\n"), SYNC).length > 0);
+mustCatch('a job condition that can never be true', problems(swap('  backfill:\n', "  backfill:\n    if: ${{ github.event_name == 'workflow_run' && github.event_name == 'schedule' }}\n"), SYNC).length > 0);
+mustCatch('a branch filter that excludes the crawl', problems(swap('    types: [completed]\n', "    types: [completed]\n    branches-ignore: ['**']\n"), SYNC).length > 0);
 mustCatch('the 02:00 schedule dropped', problems(swap('  schedule:\n    - cron: "0 2 * * *"\n', ''), SYNC).length > 0);
 
 if (failed) { console.error(`\n❌ verify-gathern-details-follow-the-crawl: ${failed} check(s) failed.`); process.exit(1); }
