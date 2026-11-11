@@ -1,10 +1,11 @@
-// The «كيف تشتغل؟» sheet's words (owner-approved 2026-10-22), kept pure so tests can read them.
+// The «كيف نحسبها؟» sheet's words (owner-approved 2026-10-22; renamed from «كيف تشتغل؟» 2026-11-11), kept pure so tests
+// can read them. The same title is the small underlined link under the home headline's market fact (owner 2026-11-11).
 export type Section = { icon: string; title: string; body: string };
 export type Copy = { title: string; sections: Section[]; note: string; ok: string };
 
 export const HOW_IT_WORKS: Record<'ar' | 'en', Copy> = {
   ar: {
-    title: 'كيف تشتغل؟',
+    title: 'كيف نحسبها؟',
     sections: [
       { icon: '📊', title: 'من وين الرقم؟', body: 'نحسبه كل ليلة من الإعلانات المعروضة على المواقع العقارية في إزهله.' },
       { icon: '🔁', title: 'الإعلانات المكررة', body: 'نفس العقار ممكن يكون معروض في أكثر من موقع (مثلاً عقار ووصلت وحراج). إذا الإعلان نفس الحي، نفس النوع، نفس السعر، ونفس المساحة، نحسبه مرة وحدة بس، في الأعداد وفي الأسعار.' },
@@ -16,7 +17,7 @@ export const HOW_IT_WORKS: Record<'ar' | 'en', Copy> = {
     ok: 'تمام',
   },
   en: {
-    title: 'How it works',
+    title: 'How we calculate it',
     sections: [
       { icon: '📊', title: 'Where the number comes from', body: 'We calculate it every night from the listings on the real-estate sites in Ezhalah.' },
       { icon: '🔁', title: 'Duplicate listings', body: 'The same property can be listed on more than one site (e.g. Aqar, Wasalt and Haraj). If a listing has the same district, type, price and area, we count it only once, in counts and in prices.' },
