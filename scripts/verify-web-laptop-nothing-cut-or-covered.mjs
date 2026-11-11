@@ -507,27 +507,25 @@ async function openDealsSheet(page) {
   return !!(await page.waitForSelector(DEALS_SHEET, { state: 'visible', timeout: 6000 }).catch(() => null));
 }
 // One real search, the way a visitor does it: type the city, pick it, press «بحث».
-// ONE CARD THAT OPENS AS EZHALAH'S OWN AD PAGE, EVERY RUN. Which sites the first result cards come from rotates, so a
-// robot that waits for one by chance is flaky (PRs #11751/#11753/#11754, 2026-11-11: «no result card from a site that
-// opens as Ezhalah's own ad page» on some CI runs, a pass on others). The first row of the first card read keeps its
-// real data and only its link is pointed at sa.aqar.fm — an IN_APP_PREVIEW_HOSTS site — the same kind of stand-in as
-// the ad row relabelled above. The read itself is sent with the robot pass (route.fetch skips the pass's own route).
+// EVERY CARD OPENS AS EZHALAH'S OWN AD PAGE. Which sites the cards come from rotates, so a robot that waits for one by
+// chance is flaky (PRs #11751/#11753/#11754, 2026-11-11: «no result card from a site that opens as Ezhalah's own ad
+// page» on CI, a pass locally; marking only the first card read missed the ~12 cards CI actually painted). Every card
+// row keeps its real data and only its link is pointed at sa.aqar.fm — an IN_APP_PREVIEW_HOSTS site — the same kind of
+// stand-in as the ad row relabelled above. The read is sent with the robot pass (route.fetch skips the pass's route).
 let ownPageCard = null;
 async function markOneOwnPageCard(ctx) {
   await ctx.route((url) => /\/rest\/v1\/[a-z0-9_]+_listings$/.test(url.pathname), async (route) => {
     const req = route.request();
     const sel = new URL(req.url()).searchParams.get('select') || '';
-    if (ownPageCard || req.method() !== 'GET' || !sel.startsWith('id,ad_number,listing_url')) return route.fallback();
+    if (req.method() !== 'GET' || !sel.startsWith('id,ad_number,listing_url')) return route.fallback();
     try {
       const secret = process.env.EZ_GATE_SECRET || '';
       const headers = robotPassHeaders(req.url(), req.headers(), secret) ?? { ...req.headers(), ...(gateHeaders(req.url(), secret) || {}) };
       const response = await route.fetch({ headers });
       const rows = await response.json();
-      if (Array.isArray(rows) && rows.length && rows[0]?.id != null) {
-        ownPageCard = String(rows[0].id);
-        rows[0] = { ...rows[0], listing_url: `https://sa.aqar.fm/robot-own-page-${rows[0].id}` };
-      }
-      await route.fulfill({ response, json: rows });
+      const out = Array.isArray(rows) ? rows.map((r) => (r && r.id != null ? { ...r, listing_url: `https://sa.aqar.fm/robot-own-page-${r.id}` } : r)) : rows;
+      if (Array.isArray(out) && out.length) ownPageCard = String(out[0].id);
+      await route.fulfill({ response, json: out });
     } catch { await route.fallback().catch(() => {}); }
   });
 }
