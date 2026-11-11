@@ -1190,12 +1190,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {onExpand && !failed && !drawing ? (
-        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={() => { openFull(); closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={() => { closePanels(); onExpand(); openFull(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
       {onExpand && expandHint && !failed && !drawing && roomy ? (
-        <Pressable style={s.expandHint} onPress={() => { openFull(); closePanels(); onExpand(); }} accessibilityRole="button" accessibilityLabel={t('Tap to open the full map')} testID="map-expand-hint">
+        <Pressable style={s.expandHint} onPress={() => { closePanels(); onExpand(); openFull(); }} accessibilityRole="button" accessibilityLabel={t('Tap to open the full map')} testID="map-expand-hint">
           <Text style={s.expandHintT}>{t('Tap to open the full map')}</Text>
           <Ionicons name="arrow-forward" size={16} color={colors.surface} />
         </Pressable>
