@@ -35,6 +35,7 @@ import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelF
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { keepSaudiPlaces } from '@/lib/saudiOutline';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
@@ -75,14 +76,6 @@ const SAUDI_CENTRE_BOX = { latitudeDelta: 17, longitudeDelta: 22.4 };
 // How far out the user may zoom: this many times the home view's camera distance.
 const MAX_ZOOM_OUT = 1.3;
 // The fade over the countries around: a rectangle well past every neighbour, with the Kingdom cut out ([lat, lng]).
-const MASK_BOX: [number, number][] = [[0, 20], [0, 75], [45, 75], [45, 20]];
-const MASK_COLOR = '#eef3f8';
-const MASK_FADE = 0.82;
-// The fade is full at the home view and down to nothing by MASK_GONE of its span (a region's size, ~4°).
-const MASK_FULL = 0.45;
-const MASK_GONE = 0.2;
-/** 1 = full fade, 0 = none, for a view `ratio` times the home view's span. */
-export const maskStrength = (ratio: number) => Math.max(0, Math.min(1, (ratio - MASK_GONE) / (MASK_FULL - MASK_GONE)));
 
 type Region = {
   id: number; iso: string; en: string; ar: string;
@@ -235,38 +228,6 @@ function loadOutline(): Promise<[number, number][][]> {
     })
     .catch((e) => { outlineLoad = null; reportError(e, { where: 'map: Saudi outline' }); throw e; });
   return outlineLoad;
-}
-
-/** Each map's home-view span (set when the map is made): the fade's 100% point. */
-const homeSpanOf = new WeakMap<object, number>();
-/** Maps that have their fade, or are getting it now. A failed outline takes the map back out, so the next visit retries. */
-const saudiMasked = new WeakSet<object>();
-/** THE FADE OVER EVERY COUNTRY AROUND SAUDI ARABIA (owner 2026-11-11): one polygon over the region with the Kingdom cut
- *  out. Tied to the MAP, not to the screen that made it: a map parked before the outline arrived still gets it. It
- *  fades away as the user zooms in (maskStrength): the outline is simplified, so close up it must never fog an ad on the
- *  coast or the border — and close up there is no neighbour on screen anyway. */
-function ensureSaudiMask(mk: MapKit, m: MKMap): void {
-  if (saudiMasked.has(m)) return;
-  saudiMasked.add(m);
-  loadOutline().then((rings) => {
-    const home = homeSpanOf.get(m) ?? m.region.span.latitudeDelta;
-    const world = MASK_BOX.map(([lat, lng]) => new mk.Coordinate(lat, lng));
-    const holes = rings.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng)));
-    const mask = new mk.PolygonOverlay([world, ...holes], {
-      enabled: false,
-      style: new mk.Style({ fillColor: MASK_COLOR, fillOpacity: MASK_FADE, strokeColor: lightColors.primary, strokeOpacity: 0.9, lineWidth: 1.6 }),
-    });
-    const onView = () => {
-      const k = maskStrength(m.region.span.latitudeDelta / home);
-      mask.style.fillOpacity = MASK_FADE * k;
-      mask.style.strokeOpacity = 0.9 * k;
-    };
-    try {
-      m.addOverlay(mask);
-      m.addEventListener('region-change-end', onView);
-      onView();
-    } catch (e) { saudiMasked.delete(m); reportError(e, { where: 'map: Saudi fade' }); }   // a map destroyed meanwhile
-  }).catch(() => { saudiMasked.delete(m); });   // loadOutline() already reported it; the next visit retries
 }
 
 /** INSTANT FIRST MAP (owner 2026-11-04: «why does it feel slow moving between tabs»). Measured on ezhalah.com: the first
@@ -435,7 +396,9 @@ export async function suggestPlacesResult(q: string, uiLanguage: string): Promis
   const named = resolved.map((r) => ({ ...r, apple: r.apple ?? r, name: r.name ?? r.displayLines[0] }));
   // A user-written description («طريق الملك فهد اللي دايم زحمه») is not a place; what was typed sorts first.
   const places = named.filter((r) => !isNoiseName(r.name));
-  const out = sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
+  // SAUDI ONLY (owner 2026-11-11): a place outside the Kingdom's outline is never suggested, whatever Apple returns.
+  const rings = await loadOutline().catch(() => null);
+  const out = keepSaudiPlaces(sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query), rings).slice(0, 6);
   if (rows.length) suggestCache.set(key, out);   // an empty answer may be a failed call: never remembered
   return { rows: out, failed: false };
 }
@@ -566,7 +529,6 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       parked = null;
       hostEl.appendChild(kept.box);
       mkKept.addEventListener('error', onError);
-      ensureSaudiMask(mkKept, kept.map);   // a fade whose outline failed (or was still loading) on the last visit
       mapRef.current = kept.map;
       live.map = kept.map;
       const lat = kept.map.region.span.latitudeDelta;
@@ -616,11 +578,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // SAUDI ARABIA ONLY (owner 2026-11-11: «just Saudi Arabia focus … not everything shows»): the centre stays inside
       // SAUDI_CENTRE_BOX and zooming out stops at MAX_ZOOM_OUT × the home view — both set NOW, from the view MapKit
       // settled on (read synchronously, measured live), never from a view the user zoomed to while a file loaded.
-      // Then the fade over the neighbours (ensureSaudiMask, also re-tried on a return visit).
+      // NO FADE over the neighbours (owner 2026-11-11: «I don't like how it shows highlighted in Saudi … what I meant
+      // was the search on top should only get Saudi»): the map looks like Apple's; the SEARCH is what keeps to Saudi.
       map.cameraBoundary = new mk.CoordinateRegion(new mk.Coordinate(SAUDI_BOX_CENTER.latitude, SAUDI_BOX_CENTER.longitude), new mk.CoordinateSpan(SAUDI_CENTRE_BOX.latitudeDelta, SAUDI_CENTRE_BOX.longitudeDelta));
       map.cameraZoomRange = new mk.CameraZoomRange(0, map.cameraDistance * MAX_ZOOM_OUT);
-      homeSpanOf.set(map, map.region.span.latitudeDelta);
-      ensureSaudiMask(mk, map);
 
       // The 13 regions: boundaries + names, and click-to-zoom. Drawn QUIETLY so they blend into Apple's map rather
       // than sit on top of it (owner 2026-10-30: «blending in with Apple Maps, I don't want it very bright»): thin,
