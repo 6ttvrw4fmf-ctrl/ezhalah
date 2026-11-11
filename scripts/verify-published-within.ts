@@ -69,7 +69,7 @@ const mq = m.mapFilterSearchQuery as (f: unknown, d: 'buy' | 'rent') => { q?: Re
 const facts = (cat: string | null) => ({ category: cat, types: cat ? ['Villa'] : [], beds: [], furnished: null, areaMin: '', areaMax: '', priceMin: '500000', priceMax: '' });
 check('the map menu numbers: a category → the Filter\'s own nationwide search; no category → every type for the deal', mq(facts('Residential'), 'buy').q?.deal === 'Buy' && mq(facts(null), 'rent').args?.p_deal === 'إيجار' && mq(facts(null), 'rent').args?.p_rent_period === 'سنوي' && mq(facts(null), 'buy').args?.p_price_min === 500000 && !('p_tables' in (mq(facts(null), 'buy').args ?? {})));
 const card = readFileSync(join(ROOT, 'src/components/MapFilterCard.tsx'), 'utf8');
-check('…buy and rent picked together are added up, and old numbers clear the moment the choices change', /Promise\.all\(postedDeals\.map\(/.test(card) && /useEffect\(\(\) => \{\n    setPostedCounts\(null\);/.test(card) && /setCount\(null\);   \/\/ a number on the button/.test(card));
+check('…buy and rent picked together are added up, and old numbers clear the moment the choices change', /Promise\.all\(postedDeals\.map\(/.test(card) && /useEffect\(\(\) => \{\n    setPostedCounts\(null\);/.test(card) && /const my = \+\+seq\.current;\n\s*setCount\(null\);/.test(card));
 check('a short-stay-capable rent side («شهري» or «كلاهما») never gets a window', !postedWindowOffered({ deal: 'Rent', rentPeriod: 'both', dealCombined: false }) && !postedWindowOffered({ deal: 'Buy', rentPeriod: 'monthly', dealCombined: true }) && postedWindowOffered({ deal: 'Buy', rentPeriod: 'annual', dealCombined: true }));
 
 // 7. «إعلان جديد» on a pin: by the site's date (map_pins_ar `fresh`), never on short stays, never the word «جديد» alone.
