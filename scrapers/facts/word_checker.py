@@ -962,7 +962,10 @@ def _negated_before(prev: list[str]) -> Optional[int]:
 # The NEXT label of a REGA licence block is not a descriptor of this word: «… ماء، كهرباء النزاعات: لا يوجد» says the
 # ad has no DISPUTES, not no electricity (🔬 2026-11-01: 12 dealapp/aqar ads, ops_text_facts_conflicts).
 _FORM_LABELS = frozenset(_n(w) for w in ("النزاعات", "نزاعات", "الالتزامات", "التزامات", "الحقوق", "القيود", "الرهن",
-                                          "الرهون", "الضمانات"))
+                                          "الرهون", "الضمانات",
+                                          # «عداد كهرب مستقل ملاحظات: * لا يوجد حوش» (reinvest 19994388, 🔬 2026-11-11):
+                                          # a NOTES heading opens the next list, its «لا يوجد» is the yard's
+                                          "ملاحظات", "الملاحظات", "ملاحظه", "الملاحظه", "تنبيه", "تنبيهات"))
 # Whether a RENT includes the bill is not whether the unit has the supply: «لا يشمل الكهرباء», «الماء: غير شامل»,
 # «المياه متوفرة (غير مشمولة)» (🔬 2026-11-01: ~35 ads served electricity / water unknown against a yes box).
 _BILLING = tuple(_n(w) for w in ("شامل", "مشمول", "يشمل", "تشمل"))
@@ -2928,6 +2931,8 @@ def selftest() -> None:
         ("المطبخ: لا يوجد", {"kitchen": False}, ()),
         ("مطبخ لا يوجد حاليا", {"kitchen": False}, ()),
         ("* لا يوجد مطبخ أو مكيفات راكبة لا يوجد حوش", {"kitchen": False, "air_conditioner": False}, ()),   # reinvest 19994388
+        ("* 3 دورات مياه * عداد كهرب مستقل ملاحظات: * لا يوجد حوش أو ارتداد * الماء مشترك",
+         {"separate_electricity_meter": True, "yard": False}, ()),                                          # reinvest 19994388
         ("مطبخ أمريكي راكب 4 مكيفات راكبة لا توجد منطقة خارجية موقف خاص", {"kitchen": True, "air_conditioner": True}, ()),  # muhaysini 25533105
     ]
     bad = []
