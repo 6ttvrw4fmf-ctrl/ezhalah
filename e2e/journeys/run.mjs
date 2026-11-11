@@ -2471,24 +2471,35 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
     }
   };
 
+  const AT_REST_MS = 4_000;   // past the app's last re-measure (3,000 ms) with a margin
   const seen = {};
   let sawOverlay = false;
   for (const [where, path] of [['Filter home', '/'], ['AI Agent', '/agent']]) {
     await gotoOrRetryTransport(page, BASE + path);
     await settle(page);
-    const state = await waitForOverlay(20_000);
+    // TWO READINGS: the instant the card is first seen, and again once it has come to rest. The app
+    // makes room by re-measuring the card (src/lib/bottomPromptInset.ts: on every change, then again at
+    // PROMPT_SETTLE_MS = 300/800/1600/3000 ms). A single reading taken in the first frame the card is
+    // visible judges the app before it has had its turn — run 42977046098 (WebKit desktop) read the
+    // sidebar CTA under the card in 2 of 4 runs and could not say whether it ever moved. The verdict is
+    // the AT-REST reading; the first one is kept in the message so a slow make-room is still visible.
+    const first = await waitForOverlay(20_000);
+    const firstSeen = first.frames.some((f) => !f.hidden && f.box[3] > 0);
+    if (firstSeen) await sleep(AT_REST_MS);
+    const state = firstSeen ? await page.evaluate(READ) : first;
+    const atFirst = firstSeen ? ` (first sight: ${first.blockedCount} blocked; after ${AT_REST_MS} ms: ${state.blockedCount})` : '';
     seen[where] = state;
     if (!state.frames.length) continue;
     sawOverlay = true;
     if (state.blockedCount) {
       defect(name, 'an auth overlay is sitting on top of an Ezhalah control',
-        `${where}: ${state.blockedCount} control(s) blocked — `
+        `${where}${atFirst}: ${state.blockedCount} control(s) blocked — `
         + state.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')
         + `. APP RESERVED top=${state.reservedTop} bottom=${state.reservedBottom}`
         + ` appSees=${JSON.stringify(state.appSees)}`
         + `. overlay=${JSON.stringify(state.frames)} viewport=${JSON.stringify(state.vp)}`);
     } else {
-      pass(name, `${where}: auth overlay present (${JSON.stringify(state.frames.map((f) => f.box))}) and 0 controls blocked`);
+      pass(name, `${where}${atFirst}: auth overlay present (${JSON.stringify(state.frames.map((f) => f.box))}) and 0 controls blocked`);
     }
   }
 
