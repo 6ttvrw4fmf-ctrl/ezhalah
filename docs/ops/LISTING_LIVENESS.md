@@ -70,7 +70,8 @@ by `scripts/verify-liveness-contract.ts`.
 - **`DIRECT`** — we fetched *this listing's own URL* and read an answer. The only kind that can
   deactivate.
 - **`ABSENCE`** — the listing is missing from a feed, sitemap, or enumeration. Candidate signal
-  only; `decide()` returns `action="none"` for it, always.
+  only; `decide()` returns `action="none"` for it, always. **One named site is the exception — propertyfinder, owner
+  decision 2026-11-10, §7.3.** Nothing else.
 - **`ADJUDICATED`** — a human or a recorded adjudication decided. Never auto-reactivates.
 
 A `DEAD` verdict on DIRECT evidence adds **one strike**. Deactivation happens only when strikes
@@ -492,6 +493,47 @@ The owner answered «Yes, use your picks» to both recommendations:
 - **Wasalt liveness keeps its declared 48 h SLA; it is NOT moved to daily** (daily would roughly double metered
   proxy use). §7 still forbids changing the SLA to clear an alarm, so `liveness_checking_stalled:wasalt` is cleared
   only by the checker meeting 48 h, never by redeclaring it.
+
+### 7.3 The ONE site whose complete-list absence hides: propertyfinder (owner, 2026-11-10 — permanent)
+
+**What the owner was told:** «for propertyfinder only, when an ad is missing from their complete list 3 times in a
+row, we hide it. If it ever shows up on their list again, it comes back by itself … This changes a safety rule for
+one site.» **The owner's answer, verbatim:** «Ok do whatever u find good ok». That approves exactly this and
+nothing wider.
+
+**Why this site.** Property Finder's single-ad `/plp/` pages are robots-disallowed and are NEVER fetched
+(`scrapers/propertyfinder/crawl.py`, HONEST ACCESS — unchanged, no browser, no impersonation). So no own-page
+reading can ever exist for it, and under §2 a removed ad stayed shown forever: on 2026-11-10 78 residential ads
+that had left the site's own complete list 3–6 walks earlier were still served
+(`served_after_source_gone:propertyfinder_residential_listings`). The complete category list is the only reading
+there is.
+
+**The rule, exactly:**
+
+- **Scope: propertyfinder ONLY.** The exception is admitted by name:
+  `liveness_policies.COMPLETE_LIST_ABSENCE_HIDES = {"propertyfinder"}`. `db.prune_unseen()` honours a `verify_gone`
+  answer of **«absent»** only for a platform named there; the same answer from any other platform is held as
+  UNKNOWN. «gone» without a read stays forbidden for everyone, propertyfinder included
+  (`test_verify_gone_never_kills_on_absence.py`, unchanged). §7.2's maqrat decision is untouched.
+- **Only a COMPLETE list counts.** `run.py::main()` prunes a table only when BOTH sides feeding it were walked
+  completely (every page read, ≥ 98% of the site's own count). A partial walk, a wall or an exception prunes
+  nothing and adds no strike.
+- **3 in a row.** The ad must be missing from 3 consecutive complete walks (`grace = 3`); one sighting resets it.
+- **HIDE, never delete.** The row keeps everything and is only switched off. `cleanup.run()` refuses a platform
+  named in the set even when forced and enabled, and propertyfinder has no `platform_retention_policy` row and no
+  `cleanup.PLATFORMS` entry — §2.1's deletion clock stays closed for it. Do not add either.
+- **It comes back by itself.** The next walk that lists the ad again re-activates it through the normal upsert
+  (`active = true, missing_count = 0`). For this site `db._page_gone_holds_for()` holds nothing: a ledger row of
+  its is never an own-page «gone», so nothing outranks the list.
+- **`auto_recover_false_inactive()` leaves it hidden**: that job only touches `missing_count = 0`, and these rows
+  carry `missing_count >= 3`.
+- **The record says what happened.** Each hide writes `ops_stale_inactivation_probe` with verdict `GONE` under the
+  oracle name **`complete_list_absence.owner_2026-11-10`** — never `prune_unseen.verify_gone` — so SQL can always
+  tell «hidden on complete-list absence by owner decision» from «its own page read gone».
+
+**A second platform joins only with a new owner decision recorded HERE.** Adding a name to the set without one is
+a rule violation, and `scrapers/common/tests/test_complete_list_absence_is_propertyfinder_only.py` goes red on it,
+on any other crawler answering «absent», and on `prune_unseen` honouring «absent» for an unnamed platform.
 
 ## 8. Where the pieces live
 

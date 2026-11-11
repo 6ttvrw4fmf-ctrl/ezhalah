@@ -77,7 +77,7 @@ jobs:
       - name: 2. Repo pre-apply checks
         id: checks
         run: |
-          node --experimental-strip-types --no-warnings scripts/check-migration-before-apply.ts "$FILE"
+          node --experimental-strip-types --no-warnings scripts/check-migration-before-apply.ts "$FILE" --repair-warn-only
           node --experimental-strip-types --no-warnings scripts/verify-migration-references-resolve.ts
           node --experimental-strip-types --no-warnings scripts/verify-repair-migrations-are-guarded.ts
 

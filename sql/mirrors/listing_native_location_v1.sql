@@ -1,6 +1,16 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-11-11 after 20261111072051 (retired_district_town_moves_across_sibling_city_by_pin only READS this
+--   matview: retired_place_remap_rows() joins it): UNCHANGED, 155,497 chars. md5 of everything below this header block:
+--   2af9ead54b06f713aa85e08b0e9eaf00 == live (md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true))
+--   read from production 2026-11-11 07:36 UTC).
+--
+-- Re-verified 2026-11-11 after 20261111025221 (pin cities 20261111021620 / 20261111025049 / 20261111025221 only READ this
+--   matview: the pin picker and the site-wins delete test v1.city_id / city_ar / region_id): UNCHANGED, 155,497 chars.
+--   md5 of everything below this header block: 2af9ead54b06f713aa85e08b0e9eaf00 == live
+--   (md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) read from production 2026-11-11 04:20 UTC).
+--
 -- Re-verified 2026-11-10 after 20261110033609 (legacy_branch_detector_tells_stale_snapshot_from_view_defect only READS this view):
 --   UNCHANGED, 155,497 chars. md5 of everything below this header block: 2af9ead54b06f713aa85e08b0e9eaf00 == live
 --   (md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) read from production 2026-11-10 04:41 UTC).

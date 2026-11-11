@@ -216,6 +216,13 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'شركة مقام للتطوير العقاري', i18nKey: 'Maqam Development', logo: require('../../assets/images/platform-logos/maqam.png') },
   { name: 'تطبيق أرض', i18nKey: 'Earth App', logo: require('../../assets/images/platform-logos/earthapp.png') },
   { name: 'نوافذ الوطن', i18nKey: 'Nawafeth Alwatan', logo: require('../../assets/images/platform-logos/nawafeth.png') },
+  // Official logos of the 6 sources launched 2026-11-04..06 (icons/logos from each site's own header or manifest).
+  { name: 'بروبرتي فايندر', i18nKey: 'Property Finder', logo: require('../../assets/images/platform-logos/propertyfinder-sa.png') },
+  { name: 'كيلر وليامز', i18nKey: 'Keller Williams', logo: require('../../assets/images/platform-logos/kwsaudiarabia-com.png') },
+  { name: 'الماجدية', i18nKey: 'Almajdiah', logo: require('../../assets/images/platform-logos/almajdiah-com.png') },
+  { name: 'أساس مكين', i18nKey: 'Asas Makeen', logo: require('../../assets/images/platform-logos/asasmakeen-com.png') },
+  { name: 'الراجحي للتنمية', i18nKey: 'Al Rajhi Development', logo: require('../../assets/images/platform-logos/mrajhi-com-sa.png') },
+  { name: 'ستيم العربية', i18nKey: 'STeam Residence', logo: require('../../assets/images/platform-logos/steam-realestate-com.png') },
   // LOGO-ONLY (owner decision 2026-09-24): brand shown in the strip, no scraper, no tables, never searchable.
   { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-logos/maskanre.png'), logoOnly: true },
   { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-logos/wetheaddress.png'), logoOnly: true },
@@ -471,6 +478,13 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['تطبيق أرض', 'تطبيق أرض'],
   ['nawafeth', 'نوافذ الوطن'],
   ['نوافذ الوطن', 'نوافذ الوطن'],
+  // The 6 sources of 2026-11-04..06 (slugs as served by loader_strip_platforms_ar, 2026-11-10).
+  ['propertyfinder', 'بروبرتي فايندر'], ['بروبرتي فايندر', 'بروبرتي فايندر'],
+  ['kellerwilliams', 'كيلر وليامز'], ['كيلر وليامز', 'كيلر وليامز'],
+  ['almajdiah', 'الماجدية'], ['الماجدية', 'الماجدية'],
+  ['asasmakeen', 'أساس مكين'], ['أساس مكين', 'أساس مكين'],
+  ['mrajhi', 'الراجحي للتنمية'], ['الراجحي للتنمية', 'الراجحي للتنمية'],
+  ['steam', 'ستيم العربية'], ['ستيم العربية', 'ستيم العربية'],
   ['aqar', 'Aqar'],
 ];
 

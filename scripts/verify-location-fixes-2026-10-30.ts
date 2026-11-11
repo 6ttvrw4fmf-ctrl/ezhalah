@@ -39,6 +39,10 @@ export function problems(ms: Mig[]): string[] {
     if (!/n\.region_id\s*=\s*tc2\.src_region\s+or\s+tc2\.dup/.test(rows.b)) p.push(`${rows.f}: a city move may cross a region without being the same town`);
     if (!/n\.retired_at\s+is\s+null\s+and\s+n\.region_id\s*=\s*o\.region_id/.test(rows.b)) p.push(`${rows.f}: a district→town move may go to a retired town or cross a region`);
     if (!/case\s+when\s+t\.retired_at\s+is\s+null\s+then\s+tc\.t1\s+end/.test(rows.b)) p.push(`${rows.f}: a move may land on a retired city`);
+    // 🆕 2026-11-11: a retired town named under a NEIGHBOURING city moves only on the home's OWN pin, within 15 km.
+    if (/g2d\.city_id\s*<>\s*v1\.city_id/.test(rows.b)
+        && !(/s\.latitude\s+is\s+not\s+null/.test(rows.b) && /cos\(radians\(cc\.lat\)\)[\s\S]{0,40}\)\s*<=\s*15\b/.test(rows.b)))
+      p.push(`${rows.f}: a home under a neighbouring city may move to a retired town without its own pin within 15 km`);
   }
   const v = viewBody(ms, 'mon_district_contradicts_source');
   if (!v) p.push('mon_district_contradicts_source is never defined');
@@ -60,14 +64,19 @@ const real = problems(migs);
 check('retired-place homes move region-safely; the district alarms read spelling, Aqar address and own-name towns as correct', real.length === 0, real.join('; '));
 
 const later = (s: string) => [...migs, { f: '29990101000000_x.sql', s }];
-const lastWith = (needle: string) => migs.filter((m) => m.s.includes(needle)).at(-1)!;
+const lastWith = (needle: string) => migs.filter((m) => m.s.toLowerCase().includes(needle.toLowerCase())).at(-1)!;
 const swap = (needle: string, from: string, to: string) => {
   const m = lastWith(needle); const s = m.s.replace(from, to);
   if (s === m.s) throw new Error(`mutation was a no-op: ${from}`);
   return migs.map((x) => (x.f === m.f ? { f: x.f, s } : x));
 };
-mustCatch('the hourly refresh dropping the remap', problems(swap('n := n + public.refresh_retired_place_remap()', '  n := n + public.refresh_retired_place_remap();\n', '')).length > 0);
+// The needle names the DEFINITION, not the line: 20261111025049 splices a hook next to that line inside a DO block
+// (live-body splice, no `create or replace function` text), so «last file containing the line» stopped being the file
+// problems() reads, and the mutation hit a file the check never looks at.
+mustCatch('the hourly refresh dropping the remap', problems(swap('create or replace function public.refresh_listing_city_correction', '  n := n + public.refresh_retired_place_remap();\n', '')).length > 0);
 mustCatch('a city move allowed across regions', problems(swap('create or replace function public.retired_place_remap_rows', 'n.region_id = tc2.src_region or tc2.dup', 'true')).length > 0);
+mustCatch('a neighbouring-city move without the pin gate', problems(swap('create or replace function public.retired_place_remap_rows', 'and s.latitude is not null and s.longitude is not null', '')).length > 0);
+mustCatch('a neighbouring-city move with the 15 km gate widened away', problems(swap('create or replace function public.retired_place_remap_rows', ' <= 15\n', ' <= 15000\n')).length > 0);
 mustCatch('a move landing on a retired city', problems(swap('create or replace function public.retired_place_remap_rows', 'case when t.retired_at is null then tc.t1 end', 'tc.t1')).length > 0);
 mustCatch('the contradiction view losing its MATERIALIZED fence', problems(swap('text_disagrees AS MATERIALIZED', 'text_disagrees AS MATERIALIZED', 'text_disagrees AS')).length > 0);
 mustCatch('a later view that drops the spelling excusal', problems(later("create or replace view public.mon_district_contradicts_source as\n select 1 from search_listings_ar s;\n\n")).length > 0);

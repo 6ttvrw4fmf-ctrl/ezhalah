@@ -88,11 +88,25 @@ figure misstates them. They are the whole of the «إقامات قصيرة» poo
   owner's approval.
 - Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
 
+# EVERY AD'S PRICES AND DATES ARE KEPT FOREVER (owner, 2026-11-11 — permanent; full text `docs/ARCHITECTURE.md` §20)
+
+**`listing_price_history` (every price change, gone, back, removed — with its date) and `listing_comparables` (one slim
+card per ad: what, where, size, rooms, first/last price, the site's posting date, first seen, gone, removed) are written by
+`tg_listing_price_diary()` on every listing table and outlive the ad, including ads the retention engine deletes.** Never
+delete or update them, never drop the triggers. «gone/removed» means the ad disappeared, never that it sold. Later the AI
+agent answers comparables («prices in this district in this time frame») FROM these tables and their dates, never from
+the model's own knowledge. **Every NEW site joins automatically**: the event trigger `listing_price_diary_born_attached` attaches the diary to
+any new listing table the moment it is created — and REFUSES the CREATE if it cannot — while the hourly watcher is only
+the safety net that rings `price_diary_unhealthy` if one is still missing; all sites share ONE diary and ONE card table —
+never a separate store per site. Guard: `scripts/verify-price-diary.ts`.
+
 # RENT POOLS AND THE CHEAP-«YEARLY» RULE (owner, 2026-10-25/26 — permanent; full text `docs/ARCHITECTURE.md` §20)
 
 **«إقامات قصيرة» (the old «شهري» pool) is Gathern + Aqar Monthly ONLY. Every other site's rent listing is
 YEARLY: a per-month figure pools under «سنوي» at ×12 and the card keeps the site's word — «السعر المعلن
-3,000 شهرياً». A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
+3,000 شهرياً». ONE per-listing exception (owner 2026-11-10, backlog 1744): a rent whose SELLER states a daily or
+weekly stay (Haraj «للإيجار اليومي» → source rent_period 'daily' / 'weekly', price never ×12, no price on the card)
+joins «إقامات قصيرة» — `SHORT_STAY_PERIODS` / `rent_pool_ar()`, migration 20261111070829. A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
 Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom, Commercial Building) is a
 per-month price and is SERVED ×12; rooms, land, rest houses, chalets, camps and farms are out.** The
 SOURCE TABLES ARE UNTOUCHED (PRICE = SOURCE, PERIOD = SOURCE still hold there) — the index serves through
@@ -438,6 +452,11 @@ runs on push to `main` — and the owner directed that it not be reverted, since
 green, production-aligned and drift-free. The lesson is recorded here rather than in any one agent's
 memory so the next session cannot repeat it.
 
+**CodeRabbit out of money is skipped (owner, 2026-11-11 — «Skip code rabbit»).** The CodeRabbit account sits at its
+$50 spending cap and answers «Review rate limited»; the owner chose not to raise it again. `scripts/lib/mergeGate.ts`
+rule 0b⁗ passes a rate-limited CodeRabbit on ANY PR, while every other check must still be SUCCESS and no CodeRabbit
+Major may be open. Any other CodeRabbit NEUTRAL, FAILURE or pending still blocks. Guard: `scripts/verify-merge-gate.ts`.
+
 **Merge gate — use `scripts/safe-pr-merge.ts`, never a bare `gh pr merge` (permanent, 2026-08-24):**
 `gh pr checks --watch` returning means "nothing is still running" — NOT "safe to merge." PR #1046
 merged on 2026-08-24 while its required checks had been CANCELLED by a rebase/force-push race; the
@@ -708,6 +727,12 @@ predicate `verify-migration-references-resolve.ts` runs in `npm test`
 after the point of no return is not a guard. Knowing about this class is demonstrably not enough to
 avoid it — on 2026-09-27 one session did it twice four hours apart, the second time after being
 caught by the first and writing the rule down.
+
+**The same run asks a REPAIR for its registry row (2026-11-10).** A migration that UPDATEs listing rows is
+refused by that check until you pass `--repair-will-be-enrolled`, and it prints the exact
+`insert into ops_repair_guarantee_registry …` to run right after the apply (or the waiver line to add to
+`scripts/repair-enrollment-waivers.txt`). Skipping it pages `seam_check_failed` within 30 minutes — seven times in
+seven days before the check asked. Guard: `scripts/verify-repair-is-asked-for-before-apply.ts`.
 
 **The guard checks all FOUR drift conditions (owner extended it 2026-08-21), in both directions:**
 1. **applied-but-not-committed** — a migration live in prod with no git file (the classic drift).

@@ -98,6 +98,7 @@ const PROTECTED = [
   'af_eligible_count',
   'district_options_ar',
   'top_cities_by_deal_ar',
+  'posted_window_counts_ar',
 ] as const;
 
 // The template machinery landed 2026-08-11 (parts A/B/C: clause+tables, templates-from-live-defs,
@@ -410,12 +411,13 @@ for (const file of files) {
 
 // ── §4 — the protected set still matches the rail ───────────────────────────────────────────────
 {
-  // The number is SIX, and it is the number af_rpc_templates/af_rpc_build_state actually hold. This
+  // The number is SEVEN since 2026-11-11 (posted_window_counts_ar, the «نُشر خلال» menu numbers, joined the rail in
+  // 20261111103754); it was SIX, the number af_rpc_templates/af_rpc_build_state held until then. This
   // assertion said four for three weeks after the rail grew to six, which is how Trending Cities and
   // Trending Districts went unprotected while a green check reported the set was complete.
-  check('§4 exactly six AF shared-eligibility RPCs are protected',
-    PROTECTED.length === 6 && new Set(PROTECTED).size === 6,
-    `PROTECTED = [${PROTECTED.join(', ')}] — the rail renders six; shrinking it silently unprotects a surface`);
+  check('§4 exactly seven AF shared-eligibility RPCs are protected',
+    PROTECTED.length === 7 && new Set(PROTECTED).size === 7,
+    `PROTECTED = [${PROTECTED.join(', ')}] — the rail renders seven; shrinking it silently unprotects a surface`);
   check('§4 both Trending count surfaces are protected',
     PROTECTED.includes('district_options_ar') && PROTECTED.includes('top_cities_by_deal_ar'));
   check('§4 the results RPC and the referee are both protected',

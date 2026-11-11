@@ -57,7 +57,8 @@ THE TRAPS, EACH MEASURED:
 4. THE TYPE TOKEN IS ENGLISH; the site's own Arabic label for it lives in the page's i18n block and
    is copied into TYPE_AR (type_ar + the title fallback). Mapping goes through the shared
    normalize.map_type_en with exact overrides for the four tokens it lacks (building_studio, kiosk,
-   workshop, istraha). `land` under the source's own category=commercial is Commercial Land.
+   workshop, istraha). `land` is Commercial Land when the page's own «الاستخدام» says
+   commercial and not residential (nuzul_usage.land_category; the office's category decides a tie).
    category_for_type() then decides the table — it files Duplex/Studio/Compound as commercial.
 5. A ZERO IS NEVER PRINTED. Every count/flag is published on 100% of items, yet the page renders a
    labelled row ONLY for a positive value (measured on the visible DOM 2026-09-23): 53959
@@ -146,7 +147,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.common import db, normalize as N, nuzul_usage  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.honest_fetch import WALL_WORDS  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
@@ -431,7 +432,8 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
     tok = (L.get("type") or "").strip().lower()
     src_category = (L.get("category") or "").strip().lower()
     property_type = N.map_type_en(tok, TYPE_OVERRIDES_EN)
-    if tok == "land" and src_category == "commercial":
+    # land: the page's own «الاستخدام» decides; the office's category only when the page does not settle it
+    if tok == "land" and nuzul_usage.land_category(L) == "commercial":
         property_type = "Commercial Land"
     if not property_type:
         return None, "residential", "type_unmapped"
@@ -520,6 +522,7 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
             "type_token": tok,
             "type_ar": TYPE_AR.get(tok),
             "source_category": src_category or None,
+            "usage": nuzul_usage.usage_shown_ar(L),          # the page's «الاستخدام» words, shown on the card
             "usages": L.get("usages") or None,
             "availability_status": status,
             "area_exact": (str(area_raw) if isinstance(area_raw, float)

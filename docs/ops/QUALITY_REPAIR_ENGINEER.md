@@ -19,6 +19,18 @@
 >    `select count(*) from alert_event where resolved_at is null and owner_routine = '<your routine>'` and write both numbers in :end.
 >    A night is GOOD only if end < start, with every closed alert closed by a proven fix (rule 1), not by hiding or resolving by hand.
 >    Equal or higher = a bad night whatever else you did: write why, and the ONE root cause you will hit first next run.
+>
+> 7. **Use CodeRabbit on every PR it reviews (owner 2026-11-10, paid usage budget is ON).** Wait for its review before merging.
+>    Fix every real finding: Major/Critical always, and any minor one that is a real bug. Add the test it suggests when it names one.
+>    On each thread, reply with the fix commit (or the proof that it is wrong), then resolve it. Never resolve a thread without one of the two.
+>    Rate-limited, «Skipped» or «Reviews paused» on a PR it should review → comment `@coderabbitai review` (or push ONE fresh commit);
+>    never merge around a review it owes. «Reviews paused» means too many commits, NOT the budget (usage billing is on).
+>    In :end write `CodeRabbit: <found> found, <fixed> fixed, <refuted> refuted` and name the best catch.
+>
+> 8. **Owner orders in your backlog are JOB 0 (owner 2026-11-11).** At :start run
+>    `select id, item from ops_engineer_backlog where status = 'open' and item ilike 'OWNER %' and engineer ilike '<your lane>%'`.
+>    Every row is the owner's decision: do it first, never re-ask it in LINE 1, and close it (status 'done') only with customer proof.
+>    The scraping lane missed backlog 1744 (Haraj daily rents → short stays) on 11-11 and asked the owner again.
 
 
 > **🔒 MERGE LOCK 2026-11-08 (owner: «fully automate with the engineers and CodeRabbit»).** `safe-pr-merge.ts` (and so the robot) REFUSES a PR
@@ -560,6 +572,16 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   the per-call cost of each suspect. Same body as plpgsql (plans cached) = 0.23 ms, proven identical over every distinct
   (city, district) pair inside the migration. Measure functions one at a time before touching the query that calls them.
 
+- **2026-11-10:** the drift of the night was five byte-exact mirrors the robot could not land: red on a citation their
+  stale base could not resolve (lesson ③ above), then red again because the migration CLAIMS a barrier
+  (`verify-ops-remediation-scripts-exist`) that lives only in the unmerged feature PR #11606 — a mirror of a migration
+  that names a script must carry that script (hermetic, copied byte-for-byte) or it can never pass `npm test`. Read
+  the migration's own comments for `scripts/verify-…` before opening its mirror. Second: the auto-mirror robot read its
+  OWN open PR as a person's expiring claim and opened five duplicates on `-auto` (PR #11673) — a robot that files work
+  must recognise its own filings (the body mark), or it races itself. Third, kept because it held again: the container
+  cannot open ezhalah.com; the two customer proofs of the morning (3 sites, 8 Gathern units) came from
+  `customer-journey.yml` in 4 and 7 minutes — dispatch them at minute 10, not after the review.
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -724,3 +746,22 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   DELETE inside a function body), 🆕 11-01 (#9761 met the prompt at minute 70). Rule: prove the other direction with a
   plain SELECT over a hand-made row of the real shape, or an INSERT inside a rolled-back sub-block; read the row state
   after any timeout before retrying ("a timeout is not a rollback").
+
+## 📚 FLEET LESSONS 2026-11-10 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A live proof is a `customer-journey.yml` dispatch from minute 1 — the cloud container's proxy refuses ezhalah.com.**
+  🔧 11-09 lost ~15 min planning a container browser proof (policy denial, tunnel failed); 🔬 11-10 measured the same
+  refusal and hosted runners queued 40–60 min per proof. Rule: never try the container browser; dispatch the journey
+  (or an RPC replay on existing rows) before minute 30, and date anything that lands later. Second night → 🔬's and
+  🔧's rulebooks carry it as a rule.
+- **② Before redefining a detector or a function, grep `scripts/verify-*` for its name.** 🆕 11-10: a check that read
+  «the latest migration that defines X» failed every later body fix, and mirror #11615 sat red until the check was
+  fixed (#11624) and the branch re-pushed; 🔧 11-09 (backlog 1683): the welcome-facts guard had to learn the latest
+  `welcome_unique_district_counts` definition. Rule: find the pinning check first and ship its change FIRST as a
+  scripts-only PR, then the migration.
+- **③ A sibling landing on main after your branch was cut turns your green PR red or strands it — and the robot
+  never refreshes a RED PR (it updates only a BEHIND one).** 🔧 11-10: five robot mirrors failed
+  `verify-migration-references-resolve` because 20261110083000's mirror (#11634) reached main after they were cut,
+  and `migration_drift` stayed open 1 h+ while every frontend deploy was refused; 🔬 11-02 #9949; 🆕 11-10 #11615.
+  Rule: before judging a red check, `git fetch origin main && git merge origin/main && git push`; cut a mirror from
+  CURRENT main; a PR «red» for more than one CI round is first a question about its base.

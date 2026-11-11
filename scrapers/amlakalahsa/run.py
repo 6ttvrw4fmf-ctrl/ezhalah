@@ -202,15 +202,12 @@ def _first_street_width(v: Any) -> Optional[int]:
     return int(m.group()) if m else None
 
 
-def posted_at(post: dict) -> Optional[str]:
-    """The post's WordPress publish instant → date_added. THIS SITE'S WORDPRESS CLOCK IS UTC: `date` equals
-    `date_gmt` (land 20186: both «2026-11-07T15:15:07»), so the zone-less `date` is NOT Saudi time — date_gmt
-    is read as UTC and lands as 18:15 +03:00. The ad page agrees: «إعلان 483 - منذ يومين» on 2026-11-09.
-    `modified` is an edit and is never read. First seen by us 2026-11-08."""
-    g = post.get("date_gmt")
-    return site_posting_date(g.strip() + "Z") if isinstance(g, str) and g.strip() else None
-
-
+# NO POSTING DATE (2026-11-10). WordPress `date_gmt` on this site moves FORWARD when an ad is re-published: land
+# 19748 reads «2026-11-03T16:40:38» (modified 46 s later) though we first stored it on 2026-09-12, and 45 of the 302
+# live ads dated on 2026-11-10 carried a date after our own first sight (median 21 days). A date that moves on
+# re-publish is a bump, not when the ad was posted (docs/ARCHITECTURE.md §20 rule 1 — nowaisiry's WordPress `date`,
+# same shape). date_added stays NULL; the verbatim value is kept as additional_info["date_gmt"]. The record carries
+# no other date (no ACF date field, no article_published_time).
 def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict], str]:
     """Return (row, category) or (None, ...) to skip. category in {'residential','commercial'}."""
     pid = post.get("id")
@@ -385,7 +382,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
 
     row = {
         "ad_number": f"AMH{pid}",
-        "date_added": posted_at(post),          # WordPress date_gmt (UTC) — see posted_at()
+        "date_added": None,                     # WordPress date_gmt is a re-publish date here — see the note above
         "listing_url": post.get("link") or f"{SITE}/?p={pid}",
         "source": "AmlakAlAhsa",
         "active": True,
@@ -416,6 +413,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
             "street_width": street_width,
             "parcel_number": land_number,
             "price_type": price_type,           # the price box's own label for the figure (pw-prc-typ)
+            "date_gmt": post.get("date_gmt"),   # verbatim; a re-publish date on this site, never date_added
         }.items() if v not in (None, "", [], {})} or None,
     }
     return row, category.lower()

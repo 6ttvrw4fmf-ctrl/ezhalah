@@ -457,6 +457,11 @@ def _json_ld(body: str) -> dict:
     return {}
 
 
+def _ad_licence(v: Optional[str]) -> Optional[str]:
+    v = re.sub(r"\s+", "", v or "")
+    return v if re.fullmatch(r"7[12]\d{8}", v) else None
+
+
 def _detail_items(body: str) -> dict[str, str]:
     """The Houzez label/value list (Property ID, Price, area, Bedrooms, …)."""
     m = DETAIL_WRAP_RE.search(body)
@@ -751,6 +756,10 @@ def map_listing(body: str, url: str,
         "longitude": lng,
         "house_type_raw": items.get("Property Type") or None,
         "status_raw": items.get("Property Status") or None,
+        # The page's own «Advertisement License» row (li.advertisement-license) — the REGA ad licence, read
+        # verbatim; only the 10-digit 71/72 shape counts (🔧 2026-11-09: ABRE279 printed 7201121827 and the
+        # card showed none). The card reads this key (src/data/remote.ts ADDL_FIELDS).
+        "rega_ad_license_number": _ad_licence(items.get("Advertisement License")),
     }
     info = {k: v for k, v in info.items() if v not in (None, "", [], "—")}
 

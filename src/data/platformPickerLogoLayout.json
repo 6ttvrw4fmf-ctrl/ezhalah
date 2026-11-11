@@ -148,5 +148,11 @@
   "دلّالي": {"width":40.0,"height":40.0,"left":28.0,"top":4.0,"visibleWidth":40.0,"visibleHeight":40.0,"monochrome":false},
   "شركة مقام للتطوير العقاري": {"width":32.27,"height":40.0,"left":31.87,"top":4.0,"visibleWidth":32.27,"visibleHeight":40.0,"monochrome":false},
   "تطبيق أرض": {"width":44.33,"height":40.0,"left":25.79,"top":4.0,"visibleWidth":42.16,"visibleHeight":40.0,"monochrome":false},
-  "نوافذ الوطن": {"width":73.14,"height":40.29,"left":11.36,"top":3.86,"visibleWidth":73.0,"visibleHeight":40.0,"monochrome":false}
+  "نوافذ الوطن": {"width":73.14,"height":40.29,"left":11.36,"top":3.86,"visibleWidth":73.0,"visibleHeight":40.0,"monochrome":false},
+  "بروبرتي فايندر": {"width":87.07,"height":40.0,"left":4.46,"top":4.0,"visibleWidth":87.07,"visibleHeight":40.0,"monochrome":false},
+  "كيلر وليامز": {"width":72.11,"height":72.11,"left":13.07,"top":-10.37,"visibleWidth":60.28,"visibleHeight":40.0,"monochrome":false},
+  "الماجدية": {"width":89.04,"height":89.04,"left":3.3,"top":-20.7,"visibleWidth":88.0,"visibleHeight":28.87,"monochrome":false},
+  "أساس مكين": {"width":88.0,"height":36.08,"left":4.0,"top":5.96,"visibleWidth":88.0,"visibleHeight":36.08,"monochrome":false},
+  "الراجحي للتنمية": {"width":32.85,"height":40.65,"left":31.74,"top":3.67,"visibleWidth":32.52,"visibleHeight":40.0,"monochrome":false},
+  "ستيم العربية": {"width":40.63,"height":40.63,"left":27.84,"top":3.84,"visibleWidth":40.0,"visibleHeight":40.0,"monochrome":false}
 }

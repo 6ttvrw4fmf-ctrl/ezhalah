@@ -126,6 +126,16 @@ BUDGET_S = 320 * 60
 # what it does not reach waits for the next daily run, which has a runner per site. Sites are also
 # read smallest struck backlog first (recheck_order), so a small site is never queued behind a big one.
 RECHECK_BUDGET_S = 12 * 60
+# ...but 12 minutes is a FLOOR, not a ceiling (♻️ 2026-11-11). Most sites finish their struck rows in
+# seconds, and the time they leave was simply thrown away: nofodh (≈6.7 s a read, its oracle re-reads a
+# live control on every «gone») had 873 rows struck at the 11-10 daily run and each recheck read only
+# 96-99 of them in its 12 minutes while the 120-minute job had ~60 minutes unused, so 777 dead nofodh
+# ads stayed on screen at one strike. Each site now gets an equal share of what is LEFT of the job's
+# own reading time (recheck_budget_s), never less than the floor; read smallest backlog first, the
+# biggest backlog comes last and inherits everything the small sites did not use. The job's ceiling
+# (fleet-liveness-recheck.yml timeout-minutes: 120) keeps RECHECK_JOB_S + setup + the closing controls
+# under it.
+RECHECK_JOB_S = 95 * 60
 FLUSH = 200             # reads between writes of what is already known (live stamps, "we looked")
 CONTROL_HOURS = 48
 # A row its own crawl already read DIRECTLY within FRESH_HOURS (last_verified_alive_at — only the
@@ -307,7 +317,7 @@ def run_label(site: str, struck_only: bool = False) -> str:
     return f"fleet_liveness:{site}:recheck" if struck_only else f"fleet_liveness:{site}"
 
 
-def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
+def run_site(site: str, *, shadow: bool, struck_only: bool = False, budget_s: float | None = None) -> dict:
     spec = SITES[site]
     shadow = shadow or site not in APPLY
     client = sb()
@@ -372,7 +382,7 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
                 alive.clear()
                 looked.clear()
 
-            budget = RECHECK_BUDGET_S if struck_only else BUDGET_S
+            budget = budget_s if budget_s is not None else (RECHECK_BUDGET_S if struck_only else BUDGET_S)
             for r in work:
                 if time.monotonic() - started > budget:
                     break
@@ -471,6 +481,14 @@ def recheck_order(client, sites: list[str]) -> list[str]:
     return sorted(sites, key=n)
 
 
+def recheck_budget_s(elapsed_s: float, sites_left: int) -> float:
+    """One site's reading time in the recheck: an equal share of what is left of RECHECK_JOB_S after
+    `elapsed_s`, split over the `sites_left` sites still to read (this one included), never below the
+    RECHECK_BUDGET_S floor. Read smallest backlog first, so the leftover flows to the biggest."""
+    left = max(0.0, RECHECK_JOB_S - elapsed_s)
+    return max(float(RECHECK_BUDGET_S), left / max(1, sites_left))
+
+
 def plan_sites(spec: str) -> list[str]:
     """'' → every site; 'a,b' → exactly those, in order, each a registered site, else SystemExit."""
     if not spec.strip():
@@ -533,10 +551,12 @@ def main() -> int:
     sites = a.site or sorted(SITES)
     if a.struck_only:
         sites = recheck_order(sb(), sites)
-    for site in sites:
+    t0 = time.monotonic()
+    for i, site in enumerate(sites):
         try:
             with site_proxy_env(site):
-                run_site(site, shadow=a.shadow, struck_only=a.struck_only)
+                budget = recheck_budget_s(time.monotonic() - t0, len(sites) - i) if a.struck_only else None
+                run_site(site, shadow=a.shadow, struck_only=a.struck_only, budget_s=budget)
         except Exception as e:  # noqa: BLE001 — one site failing never stops the rest
             print(f"✗ {site}: {e}", flush=True)
             failed += 1

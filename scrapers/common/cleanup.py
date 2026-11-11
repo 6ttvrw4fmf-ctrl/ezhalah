@@ -36,6 +36,7 @@ from urllib.parse import urlsplit
 
 from scrapers.common import http
 from scrapers.common.db import begin_run, end_run, sb
+from scrapers.common.liveness_policies import complete_list_absence_hides
 from scrapers.common.liveness_trust import MIN_CANARIES, canary_environment_ok
 from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS, looks_closed as _aqar_looks_closed
 
@@ -145,9 +146,44 @@ PLATFORMS: dict[str, dict] = {
     # eastabha, erapulse. sanadak and dealapp serve a 200 shell for a removed ad.
     "jazwtn":    {"tables": ["jazwtn_residential_listings", "jazwtn_commercial_listings"], "dead_marker": _never, "controls": True},
     "mizlaj":    {"tables": ["mizlaj_residential_listings", "mizlaj_commercial_listings"], "dead_marker": _never, "controls": True},
-    "nowaisiry": {"tables": ["nowaisiry_residential_listings", "nowaisiry_commercial_listings"], "dead_marker": _never, "controls": True},
+    "nowaisiry": {"tables": ["nowaisiry_residential_listings", "nowaisiry_commercial_listings"], "dead_marker": _never, "controls": True,
+                  "own_id": lambda row: _nowaisiry_own_id(row)},
     "raghdan":   {"tables": ["raghdan_residential_listings", "raghdan_commercial_listings"], "dead_marker": _never, "controls": True},
 }
+
+# ── A re-used slug is not the ad's address: read nowaisiry by its OWN post id (2026-11-10) ───────
+# The office re-uses slugs: NW4349's stored URL answers 200 for post 4513 (another farm we hold as
+# NW4513). Prune reads /?p=4349 → 404 and hides it (11-04, 11-07); this cleanup re-read the stored
+# slug 3 days later → «200, no dead marker» → revived it (11-06 spot check, 11-10 06:14 cleanup), so
+# the dead ad went back on screen every few days and its card opened someone else's land (alert
+# false_resurrection; score 11-10 drew it as gone). Every reader of one site shares its rules:
+# `own_id(row)` gives (url, live_check) — the same /?p=<id> read and `postid-<id>` live limb
+# scrapers/nowaisiry/run.py::_own_id_signal_for uses. A 200 that does not name THIS post is no
+# answer (UNKNOWN: neither revived nor deleted); GONE is still only a 404/410.
+def _nowaisiry_own_id(row: dict):
+    ad = str(row.get("ad_number") or "")
+    pid = ad[2:]
+    if not ad.startswith("NW") or not pid.isdigit():
+        return None
+    marker = re.compile(rf"\bpostid-{pid}\b")
+    return f"https://alnowaisiry.com/?p={pid}", (lambda body: bool(marker.search(body or "")))
+
+
+def own_page_verdict(reg: dict | None, row: dict, url: str, probe=None) -> tuple[str, str, int | None, str, str]:
+    """(verdict, why, status, body, url_read) for one candidate, read the way the site's own prune reads it.
+    Sites without `own_id` read the stored URL exactly as before."""
+    probe = probe or _probe
+    dead_marker = (reg or {}).get("dead_marker")
+    ident = (reg or {}).get("own_id", lambda _r: None)(row) if reg else None
+    read = ident[0] if ident else url
+    status, body = probe(read)
+    v, why = verdict_detail(status, body, dead_marker)
+    if v == "live" and ident and not ident[1](body):
+        v, why = "unknown", f"HTTP 200 at {read} does not name this ad's own post id — no answer about it"
+    elif ident:
+        why = f"{why} (read by own id: {read})"
+    return v, why, status, body, read
+
 
 # Sites whose cleanup has its own daily workflow (aqar-/gathern-/wasalt-cleanup.yml). Every OTHER
 # enabled site runs in the one daily fleet run (fleet-cleanup.yml → run_fleet()).
@@ -822,7 +858,13 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
 
     try:
         health_ok, health_reason = (True, None)
-        if not force and not pol["enabled"]:
+        if complete_list_absence_hides(platform):
+            # NOT bypassed by --force or by an enabled policy. Owner decision 2026-11-10
+            # (LISTING_LIVENESS.md §7.3 + §2.1): this site's ads are hidden on complete-list absence,
+            # which is not a DIRECT verdict — they are hidden and KEPT, never deleted.
+            _abort("hidden on complete-list absence, never deleted (owner decision 2026-11-10, "
+                   "LISTING_LIVENESS.md §7.3): no direct verdict exists for this site's rows")
+        elif not force and not pol["enabled"]:
             _abort("policy disabled (enabled=false)")
         elif not tables:
             _abort("no tables registered for platform (default-deny)")
@@ -976,9 +1018,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         if not url:
                             stats["skipped"] += 1
                             continue
-                        status, body = _probe(url)
+                        v, why, status, body, _read = own_page_verdict(reg, r, url)
                         stats["rechecked"] += 1
-                        v, why = verdict_detail(status, body, dead_marker)
                         if v == "unknown":
                             inconclusive += 1
                     else:

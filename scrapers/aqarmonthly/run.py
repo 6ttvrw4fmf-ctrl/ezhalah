@@ -645,6 +645,31 @@ def _placed(cid: int, rid, district_ar) -> dict:
             "district_ar": district_ar, "confidence": "address"}
 
 
+def _slug_named_region(uri: str) -> int | None:
+    """The region the slug itself NAMES («…-منطقة-الرياض-…») and the region catalogue validates, else None — the same
+    «منطقة X» read resolve_slug() makes, so a dropped street town never lends its region through an unrecognised
+    «منطقة» phrase (CodeRabbit on #11715)."""
+    AL._load()
+    mr = re.search(r"منطقه\s+([؀-ۿ]+(?:\s+[؀-ۿ]+)?)", AL.norm_ar(uri.replace("-", " ")))
+    if not mr:
+        return None
+    cand = mr.group(1)
+    for k in (cand, cand.split()[0]):
+        rid = AL._REGION_NORM.get("منطقه " + k) or AL._REGION_NORM.get(k)
+        if rid:
+            return rid
+    return None
+
+
+def _served_region(loc: dict):
+    """The region to WRITE. A region we proved came from a street-named town is cleared, not kept: a plain None
+    means «unknown this fetch» and would leave the stored wrong region in place (aqarmonthly 1097380 kept بدر's
+    region 3, 🔧 2026-11-10) — the same rule the city columns follow below."""
+    if loc.get("region_id") or not loc.get("street_city_dropped"):
+        return loc.get("region_id")
+    return db.AUTHORITATIVE_NULL
+
+
 def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) -> dict:
     """The ad's city, from the strongest evidence the source gives, in this order:
       1. the slug (resolve_slug) — unless that city appears only as a street name in the address;
@@ -657,7 +682,15 @@ def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) 
     if loc.get("city_id") and not _city_only_in_street(loc.get("city_ar"), address):
         return loc
     if loc.get("city_id"):
-        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved", "street_city_dropped": True}
+        # Dropping the street's town must drop EVERYTHING resolve_slug() derived from it (🔧 2026-11-10,
+        # aqarmonthly_district_city_suffix). Real ad 5708581 «شارع-بدر-حي-الملك-فهد-المجمعة-المجمعة»: the slug
+        # picked بدر (a catalog town, Madinah region), so the district was cleaned against «بدر» and kept the
+        # glued «المجمعة», and the row took بدر's region 3. Re-clean the district by NAME exactly as the
+        # unresolved branch of resolve_slug() does, and keep a region only when the slug itself said «منطقة».
+        d = loc.get("district_ar")
+        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved", "street_city_dropped": True,
+               "region_id": _slug_named_region(uri),
+               "district_ar": AL.strip_city_suffix(d, AL.trailing_catalog_city_norm(d)) if d else d}
     try:
         hint = AQAR_CITY_REGION.get(int(aqar_city_id or 0))
     except (TypeError, ValueError):
@@ -811,7 +844,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "city_ar":          loc["city_ar"] if loc["city_ar"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
         "district_ar":      district_ar_val,
         "city_id":          loc["city_id"] if loc["city_id"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
-        "region_id":        loc["region_id"],
+        "region_id":        _served_region(loc),
         "source_capture":   capture,
         # Aqar's own pin for this unit (Listing.location), through the one KSA gate; {} → the district
         # border, never a guess. listing_rich_attrs reads additional_info.latitude/longitude.

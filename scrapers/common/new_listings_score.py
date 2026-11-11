@@ -208,6 +208,14 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 if stored_v == int(stored_v):
                     stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
+            # The card prints the monthly line as Math.round(annual / 12) (src/lib/listingDisplay.ts monthlyLineText),
+            # so a ÷12 with a fraction is never what a customer reads. superoffice 25881144 (11-10 score, job
+            # 129653650048): page «1225.12 ريال شهري» shown as «1,225», price_annual 14701 (bigint, law conflict #60),
+            # served 1225.083 → scored MISMATCH on a card that reads «1,225». Compare the figure the card prints too;
+            # a different figure still scores wrong.
+            if out[name] != MATCH and isinstance(stored_v, float) and stored_v != int(stored_v):
+                if _cmp_number(int(stored_v + 0.5), lines, whole, kw) == MATCH:
+                    out[name] = MATCH
             # Rule 5: a per-m² rate × size is the total the card SHOWS. A page that prints only that total
             # states our price, not another one. muktamel 17584328 (2026-10-14, re-read run 38530789154):
             # land rate 420 (the API's offer.price) × 690 m² = «289,800», the only figure on the page.
@@ -250,6 +258,10 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 out[name] = _cmp_bedrooms_beside_total_rooms(stored.get(col), lines, whole, kw)
                 continue
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
+            if name == "property_age":
+                built = _structured_age(stored.get(col), lines, jsonld if page.get("jsonld") else "")
+                if built is not None:
+                    out[name] = built
             # An OPEN bucket «+7 غرف نوم» / «7+ حمامات» is a floor, not a count: Property Finder 24671162 (score run
             # 42343488034, 2026-11-07) prints «+7» while its own payload's bedrooms_value is 20 (bathrooms 9), and the
             # score read our 20 as a MISMATCH. A stored count AT OR ABOVE the bucket's floor, on the keyword's own line.
@@ -304,7 +316,17 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 # (normalised: «"name": "الواجهه", "value": "جنوبيه شرقيه"») — never a bearing in another property's value.
                 if out[name] == MISMATCH and ar and re.search(r"(?:" + kw + r")[\"' \t,:]*(?:value[\"' \t,:]*)?" + ar, norm(whole)):
                     out[name] = MATCH
+            # A single bearing is not a diagonal: stored «شرق» sits inside vmksa's «واجهة العقار جنوبية شرقية», and
+            # _cmp_word's substring test called it a MATCH (CodeRabbit on #11465). When every facade line that states a
+            # bearing states a diagonal, a one-word facade disagrees with it.
+            if name == "direction_ar" and out[name] == MATCH and stored.get(col) and len(re.findall(r"شمال|جنوب|شرق|غرب", norm(str(stored.get(col))))) == 1:
+                stated = [norm(x) for x in lines if re.search(kw, norm(x)) and re.search(r"شمال|جنوب|شرق|غرب", norm(x))]
+                if stated and all(_DIAGONAL.search(x) for x in stated):
+                    out[name] = MISMATCH
     return out
+
+
+_DIAGONAL = re.compile(r"(?:شمال|جنوب)\S*\s*[-–/]?\s*(?:ال)?(?:شرق|غرب)")
 
 
 def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = "") -> bool:
@@ -612,16 +634,76 @@ def _age_floor(line: str, own: bool) -> Optional[float]:
     return float(WORD_NUMBERS[v]) if v in WORD_NUMBERS else float(v.translate(_DIGITS))
 
 
+# A per-metre PRICE line is not an area statement: alshawaf's own node table prints «سعر المتر» / «1,800» (and its index
+# «المتر 1,800»), and the area keyword «متر» read it as a stated area, so our 587 (the node's «المساحة» / «587م») scored
+# MISMATCH and capped the 2026-11-09 night at 85 % (re-read run 42578333590: 25868220 / 25868063 / 25868148). An area
+# says «587 متر» — the figure BEFORE the word; «(سعر) المتر N» — the definite word before the figure — is a price.
+PER_METRE_PRICE = re.compile(r"سعر\s+(?:ال)?متر|(?<![ء-ي])المتر\s*[:：]?\s*[\d٠-٩]")
+# The bare area label of a th/td table («<th>المساحة</th><td>587م</td>» → lines «المساحه» / «587م»).
+AREA_LABEL_LINE = re.compile(r"^\s*(?:ال)?مساحه(?:\s+(?:ال)?(?:ارض|الارض|العقار))?\s*[:：]?\s*$")
+
+
+# A BUILD YEAR the page publishes as a structured field is the age's statement, and it wins over prose (law: prose is
+# never consulted for a field the site publishes structurally). 🔬 2026-11-10, backlog 1615, pages re-read via
+# net.http_get: squares 13602726 prints the spec row «سنة البناء» / «2022» (stored 4) while its 2024 prose still says
+# «عمر العقار : سنتين»; erapulse 648075's JSON-LD says «"yearBuilt":1993» (stored 33) while the page's OTHER ad's
+# prose «عمر العقار: 3 سنوات» read as its age. Both scored MISMATCH on correct values. One year either way is the
+# same building (the age turns on the month we cannot see).
+BUILD_YEAR_LABEL = re.compile(r"^\s*(?:سنه|عام)\s+(?:ال)?(?:بناء|انشاء|إنشاء)\s*[:：]?\s*((?:19|20)\d\d)?\s*$")
+JSONLD_YEAR_BUILT = re.compile(r'"yearBuilt"\s*:\s*"?((?:19|20)\d\d)"?')
+
+
+def _structured_age(stored, lines: list[str], jsonld: str, now_year: Optional[int] = None) -> Optional[str]:
+    """MATCH / MISMATCH / WE_MISS from the page's own build year, or None when the page publishes none."""
+    now_year = now_year or datetime.now(timezone.utc).year
+    years: list[int] = [int(m.group(1)) for m in JSONLD_YEAR_BUILT.finditer(jsonld or "")]
+    for i, x in enumerate(lines):
+        m = BUILD_YEAR_LABEL.match(x or "")
+        if not m:
+            continue
+        if m.group(1):
+            years.append(int(m.group(1)))
+        elif i + 1 < len(lines) and re.match(r"^\s*(?:19|20)\d\d\s*$", lines[i + 1] or ""):
+            years.append(int(lines[i + 1].strip()))
+    years = [y for y in years if 1900 <= y <= now_year]
+    if not years:
+        return None
+    if stored is None:
+        return WE_MISS
+    return MATCH if any(abs(float(stored) - (now_year - y)) <= 1 for y in years) else MISMATCH
+
+
+# A bare singular year states ONE year, on the label's own line («عمر العقار: سنة») or as the label's value line
+# («عمر العقار» / «سنة») — CodeRabbit on #11465. A calendar year after it («عمر العقار: عام 2020») is a date, not age 1. «\uFF1A» is the full-width colon some pages print.
+_ONE_YEAR_ON_LABEL = re.compile("عمر العقار\\s*[:\uFF1A]?\\s*(?:سنه|سنة|عام)(?![\u0621-\u064A])(?!\\s*[\\d\u0660-\u0669])")
+_BARE_AGE_LABEL = re.compile("^\\s*عمر العقار\\s*[:\uFF1A]?\\s*$")   # «عمر العقار: 5» / «سنة» is five, not one
+_ONE_YEAR_LINE = re.compile(r"^\s*(?:سنه|سنة|عام)\s*[.،,]?\s*$")
+
+
+def _states_one_year(lines: list[str], kw_hits: list[int]) -> bool:
+    return any(_ONE_YEAR_ON_LABEL.search(lines[i]) or (i + 1 < len(lines) and _BARE_AGE_LABEL.match(lines[i]) and _ONE_YEAR_LINE.match(lines[i + 1]))
+               for i in kw_hits)
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
+    if "مساحه" in kw:
+        kw_hits = [i for i in kw_hits if not (PER_METRE_PRICE.search(lines[i]) and not re.search(r"مساحه|م²|م2", lines[i]))]
     # A LABEL («keyword:») that ENDS its line, its value cut off, states nothing ON that line: haraj's meta
     # description is cut off at «…نوع العقار: Apartment سعر الوحدة: 27000 عمر العقار:» (21839193, re-read run
     # 41288305920, 2026-11-01), and the other field's 27000 before it read as a stated age, scoring our 9 a
     # MISMATCH. That line is emptied; a label/value neighbour («عمر العقار» / «جديد») still counts.
+    one_year = kw == AGE_KW and _states_one_year(lines, kw_hits)   # before a bare «عمر العقار:» line is emptied below
     lines = ["" if i in kw_hits and re.search("(?:" + kw + r")\s*[:：]\s*$", x) else x for i, x in enumerate(lines)]
     if not AREA_UNIT.search(kw):
         lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
     page_states = any(re.search(r"\d", lines[i]) for i in kw_hits)
+    if "مساحه" in kw and not page_states:
+        # a th/td area («المساحه» / «587م») states the figure on the line under its label
+        page_states = any(AREA_LABEL_LINE.match(lines[i]) and i + 1 < len(lines)
+                          and re.match(r"^\s*[\d٠-٩][\d٠-٩.,]*\s*م\s*$", lines[i + 1]) for i in kw_hits)
+    if kw == AGE_KW and not page_states:
+        page_states = one_year   # «عمر العقار: سنة» states 1 with no digit (CodeRabbit on #11465)
     if stored is None:
         return WE_MISS if page_states else PAGE_SILENT
     pat = _num_pattern(stored)
@@ -652,6 +734,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
                 return MATCH
             if any(0 <= j < len(lines) and bare.match(lines[j]) for j in (i - 1, i + 1)):
                 return MATCH
+            # The value line right under a BARE area label may glue its «م» (alshawaf «المساحة» / «587م», 2026-11-09).
+            # Only under the label itself — a glued «422.22م» elsewhere (the related table) keeps meaning nothing.
+            if ("مساحه" in kw and AREA_LABEL_LINE.match(lines[i]) and i + 1 < len(lines)
+                    and re.match(r"^\s*" + pat.pattern + r"\s*م\s*$", lines[i + 1])):
+                return MATCH
         # area_m2 is an integer column (backlog #123), so a page «232.8 م²» is stored as its nearest whole
         # number, 233. tuba 18258569 (2026-10-17): «المساحة:» / «232.8 م²» read as a contradiction of any
         # whole number. Half rounds up; a truncated 232 still scores wrong.
@@ -681,6 +768,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # re-score 41284494062, 2026-11-01). An English number word on the keyword's own line states that figure too.
         worded |= {EN_NUMBERS[m.group(1).lower()] for i in kw_hits for m in EN_NUMBER.finditer(lines[i])}
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
+            worded.add(1)
+        # A bare singular year right after the age label is ONE year: aqarcity 30135 (aqarcity_residential_listings:
+        # 2292614, 2026-11-09 score) prints «… المساحة :109 متر مربع … عمر العقار: سنة. …» on one line; stored 1, and
+        # the line's 109 made «page states» true, so the night scored it a MISMATCH.
+        if one_year:
             worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
             worded.add(2)
@@ -778,10 +870,15 @@ def _cmp_bool(stored, lines: list[str], kw: str) -> str:
     hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
     if not hit:
         return PAGE_SILENT
-    page_yes = not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
+    page_yes = not all(re.search(NEG + "(?:" + kw + ")", x) or re.search("(?:" + kw + ")" + LABEL_NO, x) for x in hit)
     if stored is None:
         return WE_MISS
     return MATCH if bool(stored) == page_yes else MISMATCH
+
+
+# A LABELLED «no» after the field (🔬 2026-11-11, af-score 11-10 tuba 13261393): tuba's description lists «- مفروشة: لا»,
+# we store false, and only a «no» BEFORE the word was known, so a correct false scored MISMATCH (and a wrong true MATCH).
+LABEL_NO = r"[\u0621-\u064A]*\s*[:：]\s*(?:لا|لايوجد|لا يوجد|no)(?![\u0621-\u064Aa-z])"
 
 
 # Hofuf's ضاحية هجر sub-districts are written three ways for ONE place: the catalog's «الضاحية الرابع», and
@@ -1509,6 +1606,69 @@ def rakez_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
             "text_head": " | ".join(lines)}
 
 
+_MOBASHER_RECORDS: "dict | None" = None
+
+
+def mobasher_page(url: str, fetch=None) -> dict | None:
+    """A mobasher ad read from the platform's OWN discovery record (🆕 2026-11-10). mobasher.sa/direct/realestate/<slug>
+    is a JS shell to the independent reader (re-read run 42773173060: title only), so the score compared our structured
+    values with the seller's one-line prose: 26222806 stores propertySpace 300 / bathrooms 5 (the record's own fields)
+    and the prose says «مساحة الأرض: 250 م²»; 25881325 stores askingPrice 3,100,000 and the prose names no price —
+    both scored MISMATCH and capped the 11-10 night at 5 (mobasher 83.3 %). The scraper writes the box (Rule B), so
+    the comparison reads the box. Keyed by the record's slugAr (listing_url = SITE + quote(slugAr)); the list is
+    walked once per run; None when it cannot be read or lacks the ad (unknown, never wrong)."""
+    global _MOBASHER_RECORDS
+    m = re.search(r"mobasher\.sa/direct/realestate/([^?#]+)", url or "")
+    if not m:
+        return None
+    from urllib.parse import unquote
+    try:
+        if _MOBASHER_RECORDS is None:
+            if fetch is not None:
+                items = fetch()
+            else:
+                from scrapers.mobasher import run as mb
+                s, _ = mb.retry_smarter_session(mb.API, timeout=40)
+                items = mb.walk(s)[0]
+            _MOBASHER_RECORDS = {unquote(str((x.get("searchableAttributes") or {}).get("slugAr") or x.get("slugAr") or "")): x
+                                 for x in items if isinstance(x, dict)}
+        x = _MOBASHER_RECORDS.get(unquote(m.group(1)).rstrip("/"))
+    except Exception:  # noqa: BLE001 — a failed read is unknown, never wrong
+        return None
+    if not isinstance(x, dict):
+        return None
+    a = x.get("searchableAttributes") if isinstance(x.get("searchableAttributes"), dict) else {}
+
+    def g(k):
+        return x.get(k) if x.get(k) not in (None, "") else a.get(k)
+    lines: list[str] = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0, "0"):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", "للبيع" if x.get("listingType") == "DIRECT_SALE" else None)
+    put("المنطقة", g("regionNameAr"))
+    put("المدينة", g("cityNameAr"))
+    put("الحي", g("neighborhoodNameAr"))
+    put("نوع العقار", g("propertyTypeAr"))
+    put("المساحة", g("propertySpace"), " م²")
+    put("عدد الغرف", g("rooms"))
+    put("دورات المياه", g("bathrooms"))
+    put("السعر", g("askingPrice"), " ريال")
+    put("عرض الشارع", g("streetWidth"))
+    title = str(g("titleAr") or "")
+    summary = re.sub(r"<[^>]+>", " ", str(g("summaryAr") or ""))
+    lines += [title] if title else []
+    # mobasher's summaryAr is ONE line («… * مساحة الأرض: 250 م². * مسطح البناء: أكثر من 500 م². * الواجهة: جنوبية.
+    # …»), so every keyword matched it and read every number in it (11-10 branch score, 26222810: «واجهه 330 15 2009 4
+    # 3 6.» scored direction MISMATCH). A keyword sees only its own sentence: split on the seller's bullets / full
+    # stops / bars, never inside a number («6,228.25»).
+    lines += [y.strip() for y in re.split(r"\n|\s\*\s|\|| [-–] |(?<!\d)\.(?!\d)|،", summary) if y and y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _TUBA_RECORDS: "dict | None" = None
 
 
@@ -1587,6 +1747,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
         if "aqaralmuhaysini.com/propertydetails/" in url:
             own = muhaysini_page
+        if "mobasher.sa/direct/realestate/" in url:
+            own = mobasher_page
         if "dallali.com/advertisements/" in url:
             own = dallali or dallali_page
         if "safainv.sa" in url:

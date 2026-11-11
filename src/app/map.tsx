@@ -16,6 +16,7 @@ import ModeSwitch from '@/components/ModeSwitch';
 import type { MapDeal } from '@/components/MapDealRow';
 import MapPinSheet from '@/components/MapPinSheet';
 import MapFilterCard, { EMPTY_MAP_FILTER, pinFilterOf, isNarrowed, type MapFilterState } from '@/components/MapFilterCard';
+import { filterCount, furnitureOffered, postedOffered } from '@/lib/mapFilter';
 // ALWAYS FAST (owner 2026-10-27): the MapKit glue and the deal row load on the first visit to the map screen, as their own
 // chunk — they are not part of the first download the home page pays for (scripts/web-bundle-budget.mjs).
 type MapModules = {
@@ -159,18 +160,18 @@ export default function MapRoute() {
         <ModeSwitch active="map" onSwitch={(to) => router.replace(to === 'filter' ? '/' : '/agent')} t={t} />
       </View>
       {/* Transaction + filter row above the map (owner 2026-10-31, Zillow's «For sale ▾ | Filters», Ezhalah-themed). */}
-      {M && <View style={s.dealWrap}>{routeMode ? <M.MapRouteFields onClose={() => setRouteMode(false)} onRouted={() => setFull(true)} /> : <M.MapSearchBar onPick={() => setFull(true)} />}<M.MapDealRow deals={deals} onDeals={(d) => { setDeals(d); setPinRow(null); }} onFilter={() => setFilterOpen(true)} filterOn={isNarrowed(mapFilter)} /></View>}
+      {M && <View style={s.dealWrap}>{routeMode ? <M.MapRouteFields onClose={() => setRouteMode(false)} onRouted={() => setFull(true)} /> : <M.MapSearchBar onPick={() => setFull(true)} />}<M.MapDealRow deals={deals} onDeals={(d) => { setDeals(d); setPinRow(null); setMapFilter((f) => { const g = f.furnished != null && !furnitureOffered(d, f.category) ? { ...f, furnished: null } : f; return g.postedWithinDays != null && !postedOffered(d) ? { ...g, postedWithinDays: null } : g; }); }} onFilter={() => setFilterOpen(true)} filterOn={isNarrowed(mapFilter)} filterCount={filterCount(mapFilter)} /></View>}
       <View style={full ? [s.bodyFull, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 8) }] : [s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         {/* «مسار» is built but HIDDEN (2026-11-01): Apple's directions return ZERO routes anywhere in Saudi Arabia on MapKit JS
           (measured live: Jeddah→Riyadh, inside Riyadh, walking — all 0; the same call routes in the UAE, the UK, the US).
           Pass `onRoute` again once a routing provider that covers the Kingdom is chosen (ROUTE_PROVIDER_READY). */}
       {/* The deal button stays in full screen (owner 2026-11-05: a full-screen «0 listings» over Umluj — the map was on Buy
           and nothing on screen said so). */}
-      {full && M ? <View style={s.fullDeals}><M.MapDealRow deals={deals} onDeals={(d) => { setDeals(d); setPinRow(null); }} onFilter={() => setFilterOpen(true)} filterOn={isNarrowed(mapFilter)} /></View> : null}
-      {M && <M.AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals, ...pinFilterOf(mapFilter) }} onPinSelect={(row) => { setPinRow(row); }} />}
+      {full && M ? <View style={s.fullDeals}><M.MapDealRow deals={deals} onDeals={(d) => { setDeals(d); setPinRow(null); setMapFilter((f) => { const g = f.furnished != null && !furnitureOffered(d, f.category) ? { ...f, furnished: null } : f; return g.postedWithinDays != null && !postedOffered(d) ? { ...g, postedWithinDays: null } : g; }); }} onFilter={() => setFilterOpen(true)} filterOn={isNarrowed(mapFilter)} filterCount={filterCount(mapFilter)} /></View> : null}
+      {M && <M.AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals, ...pinFilterOf(mapFilter, deals) }} onPinSelect={(row) => { setPinRow(row); }} />}
       {pinRow ? <MapPinSheet row={pinRow} onClose={() => setPinRow(null)} /> : null}
       </View>
-      {filterOpen && M ? <MapFilterCard value={mapFilter} onClose={() => setFilterOpen(false)} onApply={(f) => { setMapFilter(f); setFilterOpen(false); setPinRow(null); }} countPins={(f) => M.countPinsInView({ deals, ...pinFilterOf(f) })} /> : null}
+      {filterOpen && M ? <MapFilterCard value={mapFilter} deals={deals} onClose={() => setFilterOpen(false)} onClear={() => { setMapFilter(EMPTY_MAP_FILTER); setPinRow(null); }} onApply={(f) => { setMapFilter(f); setFilterOpen(false); setPinRow(null); }} countPins={(f) => M.countPinsInView({ deals, ...pinFilterOf(f, deals) })} /> : null}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
     </View>

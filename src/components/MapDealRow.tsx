@@ -7,11 +7,12 @@
 // takes effect at once; the popup stays open for more ticks and closes with the X or a tap outside. Design only for now: the choice is kept here and nothing on the map reads
 // it yet; the filter button opens nothing yet — pins, the list and the filter sheet come one step at a time.
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
-import { suggestPlaces, flyToPlace, clearPlaceMark, routeBetween, type PlaceSuggestion } from '@/components/AppleMap';
+import { hitsToShow } from '@/lib/placeSearch';
+import { suggestPlacesResult, flyToPlace, clearPlaceMark, routeBetween, type PlaceSuggestion } from '@/components/AppleMap';
 import { KIND_LABEL, type PlaceKind } from '@/lib/placeKind';
 
 const KIND_ICON: Record<PlaceKind, keyof typeof Ionicons.glyphMap> = {
@@ -29,68 +30,121 @@ const DEALS: { id: MapDeal; label: string }[] = [
 
 /** One place field with Apple's suggestions under it (Saudi Arabia, UI language). `onPick` gets the chosen place;
  *  `onClear` fires on the ✕. `dot` draws a coloured dot before the text (the route's from / to). */
-function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocus }: {
+function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocus, fullOnPhone = false }: {
   value: string; placeholder: string; onPick: (p: PlaceSuggestion) => void; onClear?: () => void; dot?: string; testID: string; autoFocus?: boolean;
+  /** On a phone, tapping the field turns it into a full-screen search page (see `full` below). */
+  fullOnPhone?: boolean;
 }) {
   const { t, isRTL, locale } = useI18n();
   const [q, setQ] = useState(value);
-  const [hits, setHits] = useState<PlaceSuggestion[]>([]);
+  // The rows AND the words they were found for (src/lib/placeSearch.ts): a list never shows under other words.
+  const [found, setFound] = useState<{ q: string; rows: PlaceSuggestion[] } | null>(null);
+  const hits = hitsToShow(q, found);
+  const setHits = (rows: PlaceSuggestion[], forQ = q) => setFound(rows.length ? { q: forQ, rows } : null);
   const [focused, setFocused] = useState(false);
+  // FULL-SCREEN SEARCH ON A PHONE (owner 2026-11-11, screenshot of the squeezed map under the keyboard: «I don't like
+  // how when you click search it shows like this»). Like Zillow: the tap opens a clean page — the field at the top,
+  // «إلغاء» beside it, the suggestions filling the screen. The SAME input stays mounted (only styles change), so the
+  // keyboard iOS opened for the tap stays up. It closes on a pick or «إلغاء» — not on blur, so hiding the keyboard
+  // to read the list keeps the page.
+  const phone = useWindowDimensions().width < PHONE_MAX;
+  const [fullOpen, setFullOpen] = useState(false);
+  const full = fullOnPhone && phone && fullOpen;
+  // A finger is down on a suggestion: the field's blur must not close the list under it (a 0.35 s tap lost it, live).
+  const pressing = useRef(false);
+  // The pressed row can vanish mid-press (a newer answer replaced the list); RN Web then never calls its onPressOut, so
+  // the flag is cleared whenever the list itself changes (review of #11635).
+  useEffect(() => { pressing.current = false; }, [found]);
   const seq = useRef(0);
   const inputRef = useRef<TextInput>(null);
+  // What the last lookup for these words came to — the phone page tells «searching», «nothing found» and «could not
+  // search» apart (a failed lookup is never shown as «no places»); `retry` re-runs it.
+  const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'failed'>('idle');
+  const [retry, setRetry] = useState(0);
   useEffect(() => { setQ(value); }, [value]);
   useEffect(() => {
     const id = ++seq.current;
-    if (q.trim().length < 2 || q === value) { setHits([]); return; }
-    const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r); }); }, 220);
+    if (q.trim().length < 2 || q === value) { setHits([]); setStatus('idle'); return; }
+    setStatus('loading');
+    const h = setTimeout(() => {
+      suggestPlacesResult(q, locale).then((r) => { if (seq.current === id) { setHits(r.rows, q); setStatus(r.failed ? 'failed' : 'done'); } });
+    }, 180);
     return () => clearTimeout(h);
-  }, [q, locale, value]);
+  }, [q, locale, value, retry]);
   // THE KEYBOARD CLOSES ON A PICK (owner 2026-11-02, phone: «doesn't look nice on a phone» — the keyboard stayed up
   // over a squeezed map). Blurring the field is what dismisses iOS's keyboard; the state flag alone does not.
-  const pick = (p: PlaceSuggestion) => { setQ(p.name ?? p.displayLines[0]); setHits([]); setFocused(false); inputRef.current?.blur(); onPick(p); };
-  const open = focused && hits.length > 0;
+  const pick = (p: PlaceSuggestion) => { setQ(p.name ?? p.displayLines[0]); setHits([]); setFocused(false); setFullOpen(false); inputRef.current?.blur(); onPick(p); };
+  const cancel = () => { setFullOpen(false); setFocused(false); inputRef.current?.blur(); };
+  const open = (focused || full) && hits.length > 0;
+  const list = open ? (
+    <View style={[s.hits, full && s.hitsFull]} testID={`${testID}-hits`}>
+      {hits.slice(0, 6).map((p, i) => (
+        <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPressIn={() => { pressing.current = true; }}
+          onPressOut={() => { setTimeout(() => { pressing.current = false; if (!inputRef.current?.isFocused?.()) setFocused(false); }, 0); }} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
+          <Ionicons name={KIND_ICON[p.kind ?? 'place']} size={16} color={colors.primary} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <View style={s.hitTop}>
+              <Text style={s.hitT} numberOfLines={1}>{p.name ?? p.displayLines[0]}</Text>
+              {/* The kind tag (owner 2026-11-01): «مدينة» / «الحي» / «مسجد» … in the UI language, so six rows named
+                  «الرياض» read as a city, a region, a district and three villages. No tag when Apple did not resolve the row. */}
+              {p.kind ? <Text style={s.hitKind} numberOfLines={1}>{t(KIND_LABEL[p.kind])}</Text> : null}
+            </View>
+            {(p.subtitle ?? p.displayLines[1]) ? <Text style={s.hitSub} numberOfLines={1}>{p.subtitle ?? p.displayLines[1]}</Text> : null}
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  ) : null;
   return (
-    <View style={s.searchWrap}>
-      <View style={s.search}>
-        {dot ? <View style={[s.dot, { backgroundColor: dot }]} /> : <Ionicons name="search" size={16} color={colors.muted} />}
-        <TextInput
-          ref={inputRef}
-          style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
-          value={q}
-          onChangeText={setQ}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 150)}
-          placeholder={placeholder}
-          placeholderTextColor={colors.muted}
-          accessibilityLabel={placeholder}
-          autoCorrect={false}
-          autoFocus={autoFocus}
-          testID={testID}
-        />
-        {q ? (
-          <Pressable onPress={() => { setQ(''); setHits([]); onClear?.(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')}>
-            <Ionicons name="close-circle" size={17} color={colors.muted} />
+    <View style={[s.searchWrap, full && s.fullWrap]} testID={full ? `${testID}-full` : undefined}>
+      <View style={s.searchRow}>
+        <View style={[s.search, s.searchFlex, full && s.searchFull]}>
+          {dot ? <View style={[s.dot, { backgroundColor: dot }]} /> : <Ionicons name="search" size={16} color={colors.muted} />}
+          <TextInput
+            ref={inputRef}
+            style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
+            value={q}
+            onChangeText={setQ}
+            onFocus={() => { setFocused(true); if (fullOnPhone && phone) setFullOpen(true); }}
+            onBlur={() => setTimeout(() => { if (!pressing.current) setFocused(false); }, 150)}
+            placeholder={placeholder}
+            placeholderTextColor={colors.muted}
+            accessibilityLabel={placeholder}
+            autoCorrect={false}
+            autoFocus={autoFocus}
+            testID={testID}
+          />
+          {q ? (
+            <Pressable onPress={() => { setQ(''); setHits([]); onClear?.(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')}>
+              <Ionicons name="close-circle" size={17} color={colors.muted} />
+            </Pressable>
+          ) : null}
+        </View>
+        {full ? (
+          <Pressable onPress={cancel} hitSlop={8} accessibilityRole="button" testID={`${testID}-cancel`} style={s.cancel}>
+            <Text style={s.cancelT}>{t('Cancel')}</Text>
           </Pressable>
         ) : null}
       </View>
-      {open ? (
-        <View style={s.hits} testID={`${testID}-hits`}>
-          {hits.slice(0, 6).map((p, i) => (
-            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
-              <Ionicons name={KIND_ICON[p.kind ?? 'place']} size={16} color={colors.primary} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={s.hitTop}>
-                  <Text style={s.hitT} numberOfLines={1}>{p.name ?? p.displayLines[0]}</Text>
-                  {/* The kind tag (owner 2026-11-01): «مدينة» / «الحي» / «مسجد» … in the UI language, so six rows named
-                      «الرياض» read as a city, a region, a district and three villages. No tag when Apple did not resolve the row. */}
-                  {p.kind ? <Text style={s.hitKind} numberOfLines={1}>{t(KIND_LABEL[p.kind])}</Text> : null}
-                </View>
-                {(p.subtitle ?? p.displayLines[1]) ? <Text style={s.hitSub} numberOfLines={1}>{p.subtitle ?? p.displayLines[1]}</Text> : null}
-              </View>
+      {full && !open ? (
+        status === 'failed' ? (
+          <View style={s.fullState} testID={`${testID}-failed`}>
+            <Text style={s.fullHint}>{t('Search is not available right now')}</Text>
+            <Pressable onPress={() => setRetry((n) => n + 1)} accessibilityRole="button" style={s.retry} testID={`${testID}-retry`}>
+              <Text style={s.cancelT}>{t('Try again')}</Text>
             </Pressable>
-          ))}
-        </View>
+          </View>
+        ) : (
+          <Text style={s.fullHint} testID={`${testID}-state-${status}`}>
+            {status === 'loading' ? t('Searching…') : status === 'done' ? t('No matching places in Saudi Arabia') : t('Type a city, district, street or landmark in Saudi Arabia')}
+          </Text>
+        )
       ) : null}
+      {/* On the phone page the list scrolls, with room under it, so the keyboard never hides the last suggestion. The
+          dropdown elsewhere stays a plain overlay (a scroll box would clip its absolute position). */}
+      {full && list ? (
+        <ScrollView style={s.fullScroll} contentContainerStyle={s.fullScrollIn} keyboardShouldPersistTaps="handled">{list}</ScrollView>
+      ) : list}
     </View>
   );
 }
@@ -106,12 +160,17 @@ export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
     <PlaceField
       value={value}
       placeholder={t('Region, city, landmark, district or street')}
-      onPick={(p) => { setValue(p.displayLines[0]); onPick?.(); flyToPlace(p); }}
+      // The same words the field shows after a pick (p.name), so the text does not jump to Apple's raw first line.
+      onPick={(p) => { setValue(p.name ?? p.displayLines[0]); onPick?.(); flyToPlace(p); }}
       onClear={() => { setValue(''); clearPlaceMark(); }}
       testID="map-search"
+      fullOnPhone
     />
   );
 }
+
+// Phones get the full-screen search page; the same width the map filter uses for its full-screen sheet.
+const PHONE_MAX = 768;
 
 const FROM = '#60466e';
 const TO = '#c84646';
@@ -121,7 +180,7 @@ const TO = '#c84646';
  *  Once both are picked, Apple's driving route draws with a soft band around it and the map fits it; `onRouted`
  *  opens the full-screen map. */
 export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onRouted?: () => void }) {
-  const { t } = useI18n();
+  const { t, isRTL } = useI18n();
   const [from, setFrom] = useState<PlaceSuggestion | null>(null);
   const [to, setTo] = useState<PlaceSuggestion | null>(null);
   const [failed, setFailed] = useState(false);
@@ -134,7 +193,8 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
   const swap = () => { const a = from, b = to; setFrom(b); setTo(a); go(b, a); };
   return (
     <View style={s.routeWrap} testID="map-route-fields">
-      <View style={s.routeHead}>
+      {/* X top right in both languages (owner 2026-11-10: «x for everything must always be on the top right no matter what»). */}
+      <View style={[s.routeHead, isRTL && { flexDirection: 'row-reverse', justifyContent: 'flex-end', gap: 8 }]}>
         <Text style={s.routeTitle}>{t('Route')}</Text>
         <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-route-close">
           <Ionicons name="close" size={20} color={colors.muted} />
@@ -142,19 +202,19 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
       </View>
       {/* The fields SAY what can be typed (owner 2026-11-01: «it doesn't show clearly that the user can type a street,
           landmark, district…»). */}
-      <PlaceField value={from?.displayLines[0] ?? ''} placeholder={`${t('From')}: ${t('Region, city, landmark, district or street')}`} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
+      <PlaceField value={from ? (from.name ?? from.displayLines[0]) : ''} placeholder={`${t('From')}: ${t('Region, city, landmark, district or street')}`} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
       <View style={s.swapRow}>
         <Pressable style={s.swapBtn} onPress={swap} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Swap')} testID="map-route-swap">
           <Ionicons name="swap-vertical" size={18} color={colors.primary} />
         </Pressable>
       </View>
-      <PlaceField value={to?.displayLines[0] ?? ''} placeholder={`${t('To')}: ${t('Region, city, landmark, district or street')}`} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
+      <PlaceField value={to ? (to.name ?? to.displayLines[0]) : ''} placeholder={`${t('To')}: ${t('Region, city, landmark, district or street')}`} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
       {failed ? <Text style={s.routeFail}>{t('No route found between these two places')}</Text> : null}
     </View>
   );
 }
 
-export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filterOn = false }: { deals?: MapDeal[]; onDeals?: (d: MapDeal[]) => void; onFilter?: () => void; filterOn?: boolean } = {}) {
+export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filterOn = false, filterCount = 0 }: { deals?: MapDeal[]; onDeals?: (d: MapDeal[]) => void; onFilter?: () => void; filterOn?: boolean; filterCount?: number } = {}) {
   const { t, isRTL } = useI18n();
   // THE DEAL BUTTON DRIVES THE PINS (owner 2026-11-02: «when the user clicks buy or rent or short stays he sees the
   // option»): the choice lives in the map screen when it passes `deals`, so the pin layer reads the same state.
@@ -197,6 +257,8 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
       >
         <Ionicons name="options-outline" size={17} color={filterOn ? colors.primary : colors.ink} />
         <Text style={[s.btnText, filterOn && s.btnTextActive]}>{t('Filter')}</Text>
+        {/* How many choices are picked (owner 2026-11-11, Zillow's «Filters ①»). */}
+        {filterCount > 0 ? <View style={s.countDot} testID="map-filter-count"><Text style={s.countDotT}>{filterCount}</Text></View> : null}
         <Ionicons name="chevron-down" size={15} color={filterOn ? colors.primary : colors.ink} />
       </Pressable>
 
@@ -250,6 +312,19 @@ const s = StyleSheet.create({
   // BLENDED into the sky, not white (owner 2026-10-31: «I don't like how it's white, blend it more into the
   // background»): a translucent fill the clouds show through, the pill's own hairline border, no drop shadow.
   searchWrap: { zIndex: 3 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  searchFlex: { flex: 1 },
+  // The phone's full-screen search page: pinned to the whole viewport, above the map and the page.
+  fullWrap: { position: (Platform.OS === 'web' ? 'fixed' : 'absolute') as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, backgroundColor: colors.surface, paddingHorizontal: 16, paddingTop: 8 },
+  searchFull: { height: 44 },
+  cancel: { marginTop: 10, paddingVertical: 8 },
+  cancelT: { fontSize: 15, fontWeight: '700', color: colors.primary },
+  fullHint: { fontSize: 14, color: colors.muted, marginTop: 18, paddingHorizontal: 4, textAlign: 'center' },
+  fullState: { alignItems: 'center' },
+  retry: { marginTop: 10, paddingVertical: 8, paddingHorizontal: 16 },
+  fullScroll: { flex: 1 },
+  fullScrollIn: { paddingBottom: 340 },
+  hitsFull: { position: 'relative', top: 0, marginTop: 10, borderWidth: 0, padding: 0, shadowOpacity: 0, elevation: 0, backgroundColor: 'transparent' },
   dot: { width: 12, height: 12, borderRadius: 6 },
   routeWrap: { zIndex: 3 },
   routeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingHorizontal: 4 },
@@ -276,6 +351,8 @@ const s = StyleSheet.create({
   btnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
   btnText: { fontSize: 14, fontWeight: '700', color: colors.ink, includeFontPadding: false },
   btnTextActive: { color: colors.primary },
+  countDot: { minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  countDotT: { fontSize: 12, fontWeight: '700', color: colors.surface, includeFontPadding: false },
   // CENTERED, a normal popup (owner 2026-10-31: «I don't like how it's not in the centre; a small popup, normal»).
   // Pinned to the WHOLE screen, not `flex: 1`: on iPhone Safari the modal wrapper does not stretch, so a flex child
   // collapsed to its content and the card sat at the top (owner 2026-10-31: «on the phone it doesn't pop up in the

@@ -33,10 +33,8 @@ reviews:
       # floor (1 review/hour on every flat plan), so 60 of 97 PRs sat «rate limited» and blocked merges for hours.
       # A «mirror:» PR copies SQL production already ran (checked byte-exact by the database lane) — nothing to judge.
       - "mirror:"
-  # Same reason: scraper-only and docs-only PRs are skipped so the ~24 reviews a day go to the app, the database and the
-  # safety gates. Scraper PRs keep their own barriers (npm test). Re-enable by deleting these two lines after an upgrade.
+  # Docs-only PRs are skipped. Scrapers are reviewed again (owner 2026-11-10: usage budget on, $0.25/file).
   path_filters:
-    - "!scrapers/**"
     - "!docs/**"
   # Paid finishing touches: engineers ask «@coderabbitai generate unit tests» on every bug-fix PR, so each fix ships a test.
   finishing_touches:
@@ -77,7 +75,7 @@ reviews:
         - Long rebuilds must `set local client_min_messages = warning` (the Management API drops at ~120 s).
         - RAISE strings must not contain an unescaped apostrophe.
         - Never GRANT internal/ops tables or views to anon/authenticated.
-    - path: "scrapers/**"   # paused while path_filters skips scrapers/** (owner 2026-11-09)
+    - path: "scrapers/**"
       instructions: |
         - Honest UA, ≤ 1 request/second, obey robots.txt, and stop on any CAPTCHA/challenge (never bypass).
         - Store every field the source gives, including the full description.

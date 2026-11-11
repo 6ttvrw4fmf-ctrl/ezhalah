@@ -121,21 +121,76 @@ def category_of(ptype: str, usage: Optional[str]) -> str:
 _PER_M_WORDS = re.compile(r"(?:سعر\s*(?:ال)?متر|للمتر|المتر\s*(?:ب|=|:)|ريال\s*(?:لل|/)\s*متر|/\s*م2|للم2)")
 _NUMS = re.compile(r"\d[\d,٬.]*")
 
+# A FIGURE THE AD PRINTS AS SOMETHING ELSE IS NOT THE SELLER STATING A PRICE (2026-11-11, owner launch audit «we can
+# get sued»). 24 haraj plots under their city's price floor were served as TOTALS of 2 to 2,800 SAR because the
+# licence figure also appeared in the text as something that is not a price: the AREA («المساحة: 300 متر», «مساحة
+# 2,800 م2» → 300 / 2,800 on a plot of that size), a PLOT or PLAN number («قطعة رقم 341», «قطعة: 1481»), the
+# ownership share («نسبة التملك: 100%»), the post's age («قبل 3 ساعات») or the 2 of «م2». Every one counted as
+# «mentioned» and the ladder answered «total». A mention now counts only when the figure is not printed as one of
+# those — and a price word right before it («السعر 1,400», «السوم 850», «المطلوب: 400,000») always keeps it a price.
+_THE_METRE_AFTER = re.compile(r"\s*المتر(?![\u0621-\u064A])")
+# A price LABEL right before the figure. Not «ريال»: in «السعر 500 ريال 300 م2» it belongs to the 500 (CodeRabbit on #11747).
+_PRICE_BEFORE = re.compile(r"(?:سعر|السعر|سوم|السوم|المطلوب|مطلوب|البيع|بسعر|بمبلغ)\s*[:\uff1a\-/]?\s*$")
+# A currency word right after the figure makes it a price whatever stands before it — «عرض 1400 ريال» is an offer of
+# 1,400, not a street width (CodeRabbit on #11747).
+_PRICE_AFTER = re.compile(r"\s*[-–]?\s*(?:ريال|ر\.?\s?س|SAR|\ufdfc)", re.I)   # «15000-ريال» too (CodeRabbit on #11799)
+# «565 الف» is 565 THOUSAND: the licence figure is then neither the total nor the metre price — unknown, never a guess.
+_THOUSANDS_AFTER = re.compile(r"\s*(?:الف|ألف|آلاف|الاف)(?![\u0621-\u064A])")
+_OTHER_BEFORE = re.compile(r"(?:مساح\S*|قطع\S*|رقم|مخطط|بلك|بطول|طول|عرض|شارع|نسبة|بنسبة|قبل|حد)\s*[:\uff1a\-/|]?\s*(?:رقم\s*)?$")
+_OTHER_AFTER = re.compile(r"^\s*(?:%|٪|م\s*[2²٢]|م(?![\u0621-\u064A])|متر|sqm|ساع|يوم|أيام|ايام|دقيق)")
+# A numbered list item: a 1–2 digit figure followed by «-» / «)» and a word («3-تم»). A big figure there is a price
+# with a qualifier («15000-شامل الضريبة»), never a list marker (CodeRabbit on #11799).
+_LIST_MARK_AFTER = re.compile(r"\s*[-–)]\s*(?!ريال|ر\.?\s?س)[\u0621-\u064A]")
+_AREA_BEFORE = re.compile(r"مساح\S*\s*[:\uff1a\-/|]?\s*$")
+
+
+def _printed_as_something_else(t: str, m: "re.Match[str]") -> bool:
+    """True when this mention of the figure is an area, a plot / plan / street number, a share or an age."""
+    before, after = t[max(0, m.start() - 24): m.start()], t[m.end(): m.end() + 12]
+    # A figure in brackets — «السعر المطلوب (50000) ريال» — reads as if the brackets were not there (CodeRabbit on
+    # #11799): its «)» is the bracket closing, never a numbered list item.
+    small = len(m.group(0)) <= 2                                   # list numbers are small: «3-تم», «(3) تم»
+    if re.search(r"\(\s*$", before) and re.match(r"\s*\)", after):
+        inner_before, inner_after = re.sub(r"\(\s*$", "", before), re.sub(r"^\s*\)", "", after)
+        if _PRICE_BEFORE.search(inner_before) or _PRICE_AFTER.match(inner_after):
+            return False
+        if small:
+            return True                                              # a bare «(3)» is a numbered list item
+        before, after = inner_before, inner_after                    # «قيمة العقار (15000)»: read without brackets
+    elif small and _LIST_MARK_AFTER.match(after):
+        return True                                                  # «3-تم الاتفاق» (CodeRabbit on #11799)
+    if _PRICE_BEFORE.search(before) or _PRICE_AFTER.match(after):
+        return False
+    # «7000 المتر» is the metre price even with no price word before it (CodeRabbit on #11747) — unless the figure is
+    # introduced as the area («المساحة 1000 المتر»). A bare «متر» after a figure stays an area.
+    if _THE_METRE_AFTER.match(t, m.end()) and not (_AREA_BEFORE.search(before) or _OTHER_BEFORE.search(before)):
+        return False      # «بطول 30 المتر» / «عرض 20 المتر» stay measurements (CodeRabbit on #11747)
+    if before.endswith("م") and m.group(0) in ("2", "٢"):        # the 2 of «م2»
+        return True
+    return bool(_OTHER_BEFORE.search(before) or _OTHER_AFTER.search(after))  # (after: brackets already dropped)
+
 
 def land_price_basis(price: int, area: Optional[float], text: str) -> Optional[str]:
     # EVERY mention of the figure is read, not only the first, and the shared reader decides too (2026-10-18:
     # 6 of 20 haraj plots under the city floor stated their rate where the first mention did not —
     # «(المتر 1,650 ريال)», «البيع المتر 1100», «سعر المتر : 1,100 ريال», «1800ريال سعودي للمتر», «3500ريال بالمتر»).
     t = (text or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
-    mentioned = False
+    mentioned = thousands = False
     for m in _NUMS.finditer(t):
-        if N.to_int(m.group(0)) != price:
+        if N.to_int(m.group(0)) != price or _printed_as_something_else(t, m):
+            continue
+        if _THOUSANDS_AFTER.match(t, m.end()):
+            thousands = True          # read every later mention first: an explicit metre price still decides
             continue
         mentioned = True
-        if _PER_M_WORDS.search(t[max(0, m.start() - 30): m.end() + 15]):
+        # «البيع : 7000 المتر» — the figure followed by «المتر» is the metre price (haraj 11188227166, 680 m² in حي
+        # العارض, was served as a 7,000 SAR total). A bare «متر» after a figure is an area and never reaches here.
+        if _PER_M_WORDS.search(t[max(0, m.start() - 30): m.end() + 15]) or _THE_METRE_AFTER.match(t, m.end()):
             return "per_meter"
     if N.stated_per_metre(t, price):
         return "per_meter"
+    if thousands:
+        return None                   # «565 الف» and nothing stating a metre price: unknown, never 565 or 565 × area
     if mentioned:
         return "total"
     if area and area >= 50 and price <= 20_000:
@@ -282,6 +337,12 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         # PERIOD = the ad's own words tied to THIS price, else the repo's «≤ 10,000 looks monthly» rule,
         # else unstated (price stored unconverted, period NULL: it stays out of yearly/monthly searches).
         rent_period, price_annual = N.rent_period_from_ad(price, f"{title}\n{free_text}", None, title)
+    short_stay = X.short_stay_rent(title, free_text) if p["deal"] == "Rent" else None
+    if short_stay:
+        # The seller states a daily/weekly rent (backlog 1674/1744): the row stores the seller's word and joins
+        # «إقامات قصيرة»; the price is never annualised, and an older «monthly ×12» is CLEARED. The seller's
+        # figure stays in additional_info («unit_price_printed») and price_evidence.
+        rent_period, price_annual = short_stay, db.AUTHORITATIVE_NULL
     services = P.services_of(p["services_raw"])
     dwelling = ptype in DWELLING_TYPES
     rooms = N.rooms_from_phrase(f"{title}\n{free_text}") if dwelling else {}
@@ -340,6 +401,7 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         "usage_ar": p["usage_raw"],
         "deal_ar": p["deal_raw"],
         "unit_price_printed": p["price_raw"],
+        "short_stay": short_stay,
         "price_basis": basis,
         "area_printed": p["area_raw"],
         "rooms_count": p["rooms_raw"],
@@ -427,6 +489,12 @@ def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: d
                 price, {"monthly": "شهري", "annual": "سنوي"}[prose_price["period"]])
         else:
             rent_period, price_annual = N.rent_period_from_ad(price, prose_price["phrase"], None, title)
+    short_stay = X.short_stay_rent(title, description) if deal == "Rent" else None
+    if short_stay:
+        # The seller states a daily/weekly rent (backlog 1674/1744), priced or not («اليوم 800 · الشهر 5,000»,
+        # 20945296): the seller's word is stored and the row joins «إقامات قصيرة»; an older «monthly ×12» is
+        # cleared. The seller's figure stays in additional_info («price_phrase») and price_evidence.
+        rent_period, price_annual = short_stay, db.AUTHORITATIVE_NULL
     area = X.area_of(title, description)
     more = X.facts(title, description, ptype)
     if category == "commercial":
@@ -466,6 +534,7 @@ def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: d
     info = {
         "post_id": pid, "licensed": False, "classifier": f"{verdict}: {why}", "type_basis": type_why,
         "price_phrase": prose_price["phrase"], "price_basis": prose_price["why"], "price_period_stated": prose_price["period"],
+        "short_stay": short_stay,
         "area_phrase": area["phrase"], "area_basis": area["why"], "city_raw_ar": city_raw,
         "district_raw_ar": facts["district_raw_ar"],
         "district_source": "post_neighbourhood" if district else None, "photo_count": len(row["photo_urls"]),
