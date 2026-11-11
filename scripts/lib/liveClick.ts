@@ -74,7 +74,9 @@ export async function clickWitnessed(page: any, box: { x: number; y: number }, w
   // and STILL believe only the witness: a locator click that the page does not report on the target is not a landing.
   // Only a witness that ARMED and READ cleanly can say «no event»: when either evaluate failed, the first click may have
   // acted on something already, and a second tap would act again (CodeRabbit on #11821).
-  if (armed && !readFailed && !hit && want.testid && typeof page.locator === 'function') {
+  // …and only an armed witness that read back exactly `null` saw nothing: `undefined` means the document was REPLACED
+  // after the click (the witness itself is gone), so the first click may have acted already (CodeRabbit on #11821).
+  if (armed && !readFailed && hit === null && want.testid && typeof page.locator === 'function') {
     const rearmed = await page.evaluate(ARM_CLICK_WITNESS_SRC, want).then(() => true, () => false);
     if (rearmed) {
       await page.locator(`[data-testid="${want.testid}"]`).first().click({ timeout: 2500 }).catch(() => {});

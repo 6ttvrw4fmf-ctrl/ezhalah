@@ -423,6 +423,17 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
     const rb = await clickWitnessed(p as any, { x: 1, y: 2 }, { testid: 'x' });
     mustCatch(`a failed witness ${broken} spending a second tap (or reading as a landing)`, rb.landed === false && taps === 0);
   }
+  // a document REPLACED by the click reads the witness back as `undefined` — the first click acted; no second tap
+  {
+    let taps = 0;
+    const replaced = {
+      evaluate: async (fn: any) => (fn === READ_CLICK_WITNESS_SRC ? undefined : undefined),
+      mouse: { click: async () => {} },
+      locator: () => ({ first: () => ({ click: async () => { taps++; } }) }),
+    };
+    const rr = await clickWitnessed(replaced as any, { x: 1, y: 2 }, { testid: 'x' });
+    mustCatch('a replaced document (witness read back undefined) spending a second tap', rr.landed === false && taps === 0);
+  }
   const r5 = await clickWitnessed(elsewhere as any, { x: 1, y: 2 }, { testid: 'x' });
   check('a click that landed on something ELSE is a real miss — no second tap is spent on it',
     r5.landed === false && r5.hit === 'card-listing-1' && locatorCalls === 0, `${JSON.stringify(r5)} locatorCalls=${locatorCalls}`);
