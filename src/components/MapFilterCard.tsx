@@ -26,8 +26,11 @@ import { categoryImg, groupImg, typeImg, BED_IMG, RANGE_ICON, FURN_IMG } from '@
 import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 
-export default function MapFilterCard({ value, onApply, onClose, countPins, deals = [] }: {
+export default function MapFilterCard({ value, onApply, onClose, onClear, countPins, deals = [] }: {
   value: MapFilterState; onApply: (f: MapFilterState) => void; onClose: () => void;
+  /** «مسح الكل» resets the MAP at once, not only the boxes here — so closing with X afterwards keeps it cleared
+   *  (owner 2026-11-11: «when I click clear all then x … doesn't get reset»). */
+  onClear: () => void;
   /** The map's deal choice: «الأثاث» shows only on «إيجار» alone (yearly rent), as on the Filter home. */
   deals?: readonly string[];
   /** Pins the choice leaves in the current view; null = could not count (the button then says «عرض الإعلانات»). */
@@ -61,6 +64,7 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
   const typeChoices = useMemo(() => [...new Set(f.groups.flatMap((g) => groupMembers(g)))], [f.groups]);
   // What «تطبيق» hands the map: a furniture choice the row no longer offers is dropped (no hidden filter left behind).
   const applied: MapFilterState = f.furnished != null && !furnitureOffered(deals, f.category) ? { ...f, furnished: null } : f;
+  const clearAll = () => { setF(EMPTY_MAP_FILTER); onClear(); };
   const toggleBed = (b: '1' | '2' | '3' | '4' | '5+') => setF((x) => ({ ...x, beds: x.beds.includes(b) ? x.beds.filter((y) => y !== b) : [...x.beds, b] }));
 
   return (
@@ -139,13 +143,13 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
               <Range icon={RANGE_ICON.priceTo} label={t('To')} unit={t('SAR')} value={f.priceMax} onChange={(v) => setF((x) => ({ ...x, priceMax: digits(v) }))} testID="map-filter-price-max" />
             </View>
             {!phone && isNarrowed(f) ? (
-              <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} accessibilityRole="button" style={s.reset}><Text style={s.resetT}>{t('Clear all')}</Text></Pressable>
+              <Pressable onPress={clearAll} accessibilityRole="button" style={s.reset}><Text style={s.resetT}>{t('Clear all')}</Text></Pressable>
             ) : null}
           </ScrollView>
           {phone ? (
             // Fixed bottom bar (Zillow «Reset all filters» | «Apply»): clear on the start side, the button fills the rest.
             <View style={[s.foot, s.footRow, { flexDirection: isRTL ? 'row-reverse' : 'row', paddingBottom: 12 + insets.bottom }]}>
-              <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} disabled={!isNarrowed(f)} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
+              <Pressable onPress={clearAll} disabled={!isNarrowed(f)} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
                 <Text style={[s.resetT, !isNarrowed(f) && { color: colors.muted }]}>{t('Clear all')}</Text>
               </Pressable>
               <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">

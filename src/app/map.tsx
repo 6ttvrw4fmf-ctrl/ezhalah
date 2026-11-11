@@ -171,7 +171,7 @@ export default function MapRoute() {
       {M && <M.AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals, ...pinFilterOf(mapFilter, deals) }} onPinSelect={(row) => { setPinRow(row); }} />}
       {pinRow ? <MapPinSheet row={pinRow} onClose={() => setPinRow(null)} /> : null}
       </View>
-      {filterOpen && M ? <MapFilterCard value={mapFilter} deals={deals} onClose={() => setFilterOpen(false)} onApply={(f) => { setMapFilter(f); setFilterOpen(false); setPinRow(null); }} countPins={(f) => M.countPinsInView({ deals, ...pinFilterOf(f, deals) })} /> : null}
+      {filterOpen && M ? <MapFilterCard value={mapFilter} deals={deals} onClose={() => setFilterOpen(false)} onClear={() => { setMapFilter(EMPTY_MAP_FILTER); setPinRow(null); }} onApply={(f) => { setMapFilter(f); setFilterOpen(false); setPinRow(null); }} countPins={(f) => M.countPinsInView({ deals, ...pinFilterOf(f, deals) })} /> : null}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
     </View>
