@@ -15,7 +15,7 @@ import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { listingSearchedTypeAr } from '@/lib/listingDisplay';
-import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
+import { isShortStayListing, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
 import { monthlyLineText } from '@/lib/listingDisplay';
 
 // THE MONTHLY LINE UNDER EVERY YEARLY PRICE (owner 2026-10-26): «السعر المعلن 3,000 شهرياً» when the site quoted
@@ -253,7 +253,7 @@ export function ResultCard({
   // nothing is derived, and a value the source did not give renders nothing.
   if (row === 'roomy') {
     const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
-    const stay = isStayLengthPriced(listing.source);
+    const stay = isShortStayListing(listing);
     const typeIcon = typeImg(listing.cleanType ?? '');
     // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
     // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
@@ -470,7 +470,7 @@ export function ResultCard({
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
         {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
-        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
+        {isShortStayListing(listing) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
         {monthlyLine(listing, locale)}
         </View>
         {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
