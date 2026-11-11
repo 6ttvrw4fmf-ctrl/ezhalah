@@ -81,7 +81,7 @@ mustCatch('a hint that never goes away (⤢ forgets to remember it was opened)',
 // 4. The database half (the committed migration production runs).
 const dir = join(root, 'supabase/migrations');
 const file = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().reverse()
-  .find((f) => readFileSync(join(dir, f), 'utf8').includes('price_max numeric, unpriced integer)'));
+  .find((f) => readFileSync(join(dir, f), 'utf8').includes("min(k.price) filter (where k.price >= ' || floor_ || ')"));
 const sql = file ? readFileSync(join(dir, file), 'utf8') : '';
 const floor = "case when k.deal = ''rent'' then 1000 else 10000 end";
 check('map_pins_ar returns the spot\'s lowest and highest real price and its no-price count', !!file && sql.includes("min(k.price) filter (where k.price >= ' || floor_ || ')") && sql.includes("max(k.price) filter (where k.price >= ' || floor_ || ')") && sql.includes("count(*) filter (where k.price is null or k.price < ' || floor_ || ')"));
