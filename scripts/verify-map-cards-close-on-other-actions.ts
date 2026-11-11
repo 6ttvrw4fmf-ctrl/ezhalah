@@ -23,7 +23,7 @@ const hasAll = (src: string) =>
   && /m\.removeEventListener\('region-change-start', closePanels as unknown as \(e: unknown\) => void\)/.test(src)
   && /const zoomBy = \(f: number\) => \{\n\s*closePanels\(\);/.test(src)                                // the zoom buttons
   && /const startDrawing = \(\) => \{ closePanels\(\);/.test(src)                                      // the draw button
-  && /onPress=\{\(\) => \{ closePanels\(\); onExpand\(\); \}\}/.test(src);                              // full screen
+  && /onPress=\{\(\) => \{ closePanels\(\); onExpand\(\);(?: openFull\(\);)? \}\}/.test(src);           // full screen (then the «tap to open» hint is remembered as seen)
 check('every way of doing something else on the map closes both pop-up cards', hasAll(web));
 
 // Mutation proofs: remove each exit in turn; the predicate must reject every one of them.

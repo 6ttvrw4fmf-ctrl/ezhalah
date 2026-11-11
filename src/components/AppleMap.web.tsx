@@ -34,7 +34,7 @@ import { lightColors } from '@/theme/palette';
 import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
-import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
@@ -498,9 +498,12 @@ const regionView = (mk: MapKit, r: Region) => {
   );
 };
 
-/** `onExpand` (compact box): the ⤢ button top-left opens the map full screen; the box itself pans and zooms in place
+/** `onExpand` (compact box): the ⤢ button top-right opens the map full screen; the box itself pans and zooms in place
  *  (owner 2026-10-31: «zoom in within his screen without leaving»). `full` + `onClose`: the full-screen map, with its
  *  close button top-left. */
+/** This device has opened the big map once → the «tap to open» hint beside ⤢ stops showing. */
+const EXPAND_HINT_KEY = 'ezhalah.mapExpandHintSeen';
+
 export default function AppleMap({ full = false, onExpand, onClose, onRoute, pins, onPinSelect }: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void; pins?: PinFilter; onPinSelect?: (row: PinRow) => void }) {
   const { t, locale } = useI18n();
   const hostRef = useRef<View>(null);
@@ -511,6 +514,10 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const shapeRef = useRef<Shape | null>(null);
   const ptsRef = useRef<Coord[]>([]);
   const [drawing, setDrawing] = useState(false);
+  // «اضغط لتكبير الخريطة ←» beside ⤢ (owner 2026-11-11: «an arrow … point at the zoom … so user knows to click»), until
+  // this device has opened the big map once. Device storage is a convenience only: unreadable → the hint shows.
+  const [expandHint, setExpandHint] = useState<boolean>(() => { try { return globalThis.localStorage?.getItem(EXPAND_HINT_KEY) !== '1'; } catch { return true; } });
+  const openFull = () => { try { globalThis.localStorage?.setItem(EXPAND_HINT_KEY, '1'); } catch { /* private mode: fine */ } setExpandHint(false); };
   const [sketch, setSketch] = useState<Shape | null>(null);
   const [poly, setPoly] = useState<PinFilter['poly']>(null);  // the applied drawn boundary, as the pin query's polygon
   const [hasShape, setHasShape] = useState(false);
@@ -735,7 +742,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     // font they are drawn in and placed through MapKit's own projection, so «touching» means touching on this screen.
     const measure = document.createElement('canvas').getContext('2d');
     if (measure) measure.font = '600 11px -apple-system,system-ui,sans-serif';
-    const headWidth = (r: PinRow) => { const tx = pinHead(r, loc); return measure ? Math.ceil(measure.measureText(tx).width) + PIN_PAD_PX : pinWidthGuess(tx); };
+    const headWidth = (r: PinRow) => { const tx = pinHead(r, loc); const w = (x: string) => (measure ? Math.ceil(measure.measureText(x).width) + PIN_PAD_PX : pinWidthGuess(x)); return isFreshHead(r) ? Math.max(w(tx), w(freshTag(loc))) : w(tx); };
     const onScreen = (lat: number, lng: number): [number, number] => {
       const conv = (m as unknown as { convertCoordinateToPointOnPage?: (c: unknown) => { x: number; y: number } }).convertCoordinateToPointOnPage;
       if (conv) { const p = conv.call(m, new mk.Coordinate(lat, lng)); return [p.x, p.y]; }
@@ -778,6 +785,19 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           : 'border-radius:10px;padding:4px 7px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);position:relative');
       el.textContent = cell > 0 ? '' : pinHead(row, loc);
       if (counted && cell > 0 && row.n > 1) el.textContent = areaCount(row.n, loc);
+      // «إعلان جديد» above the price when the site published one of this spot's ads in the last 3 days (owner 2026-11-11).
+      if (cell === 0 && isFreshHead(row)) {
+        el.textContent = '';
+        el.setAttribute('data-fresh', '1');
+        el.style.textAlign = 'center';
+        const tag = document.createElement('div');
+        tag.setAttribute('data-testid', 'map-pin-fresh');
+        tag.textContent = freshTag(loc);
+        tag.style.cssText = 'font-size:10px;font-weight:700;line-height:1.1;margin-bottom:2px;opacity:.95';
+        const price = document.createElement('div');
+        price.textContent = pinHead(row, loc);
+        el.append(tag, price);
+      }
       // A head on its own spot points at it with a tip; a head drawn beside its neighbour gets a line back to its spot
       // instead, drawn under every head by drawStems() below.
       if (cell === 0 && !row.shift) {
@@ -851,7 +871,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:5;opacity:0;transition:opacity .15s';
     host?.appendChild(canvas);
     let shown: MapDot[] = []; let project: ((lat: number, lng: number) => [number, number]) | null = null;
-    const narrowed = !!(pins.category || pins.scope || pins.furnished != null || pins.types?.length || pins.beds?.length || pins.areaMin != null || pins.areaMax != null
+    const narrowed = !!(pins.category || pins.scope || pins.furnished != null || pins.postedWithinDays != null || pins.types?.length || pins.beds?.length || pins.areaMin != null || pins.areaMax != null
       || pins.priceMin != null || pins.priceMax != null || pins.poly);
     const paint = (dots: MapDot[]) => {
       const rect = canvas.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
@@ -1085,7 +1105,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
       // head would change (count, deal, price, cell size) is replaced.
-      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}|${r.shift ? r.shift.join(',') : ''}`;
+      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}|${r.price_max ?? ''}|${r.unpriced ?? ''}|${r.fresh ?? ''}|${r.shift ? r.shift.join(',') : ''}`;
       const next = new Map<string, PinRow>(); for (const row of rows) next.set(keyOf(row), row);
       // The district markers join the same diff. A FAILED marker read keeps the markers already on the map (A FAILED
       // FETCH IS NOT AN EMPTY ANSWER: a marker that vanished after an error would read as «no such listings here»).
@@ -1265,8 +1285,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {onExpand && !failed && !drawing ? (
-        <Pressable style={[s.closeBtn, s.closeBtnLeft]} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={() => { closePanels(); onExpand(); openFull(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
+        </Pressable>
+      ) : null}
+      {onExpand && expandHint && !failed && !drawing && roomy ? (
+        <Pressable style={s.expandHint} onPress={() => { closePanels(); onExpand(); openFull(); }} accessibilityRole="button" accessibilityLabel={t('Tap to open the full map')} testID="map-expand-hint">
+          <Text style={s.expandHintT}>{t('Tap to open the full map')}</Text>
+          <Ionicons name="arrow-forward" size={16} color={colors.surface} />
         </Pressable>
       ) : null}
       {/* Drawing: this layer takes the pointer instead of the map. */}
@@ -1289,7 +1315,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       ) : null}
-      {roomy ? <View style={[s.topRight, onClose && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
+      {/* Corners (owner 2026-11-11): ⤢ / ✕ top-RIGHT, «رسم» top-LEFT — in the small box and full screen alike. */}
+      {roomy ? <View style={[s.topRight, (onClose || onExpand) && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
       {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
           becomes «إزالة المسار ✕». */}
       {onRoute && !failed && !drawing ? (
@@ -1402,6 +1429,11 @@ const s = StyleSheet.create({
     position: 'absolute', top: 56, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
+  expandHint: {
+    position: 'absolute', top: 12, right: 56, height: 36, flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, borderRadius: 18, backgroundColor: colors.primary,
+  },
+  expandHintT: { fontFamily: font.family.bold, fontSize: 13, color: colors.surface },
   closeBtn: {
     position: 'absolute', top: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,

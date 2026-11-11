@@ -1,3 +1,4 @@
+import { postedWindowParam } from '@/lib/postedWindows';
 import { selectSourceTables } from '@/lib/agentSourceSelection';
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
@@ -390,6 +391,9 @@ function rpcFilterParams(q: SearchQuery) {
     p_price_max,
     p_area_min: pnum(q.areaMin),
     p_area_max: pnum(q.areaMax),
+    // «نُشر خلال» (owner 2026-11-11): a NORMAL narrowing like price and area — the site's own posting date, sent only when
+    // picked and never for short stays (postedWindowParam). Every count surface spreads this builder, so they all carry it.
+    ...(postedWindowParam(q) != null ? { p_posted_within_days: postedWindowParam(q) } : {}),
     // Real server-side ordering (2026-07-27 fix) for the sort keys the RPC now understands — it then
     // orders the FULL matching set before LIMIT/OFFSET, not just the recency-capped page. 'newest'/
     // undefined need no param (NULL reproduces the RPC's own default order). ppm_asc/ppm_desc stay
@@ -618,6 +622,39 @@ export function mapTypeScope(category: Macro, types: string[]): { types: string[
   const ts = searchTableScope(q);
   if (!ts) return { types: null, tables: [], tables2: null, types2: null, macro: category };
   return { types: ts.isBroadCommercial ? COMMERCIAL_TYPE_AR_RES : cohortTypesAr(q), tables: ts.p_tables, tables2: ts.p_tables2, types2: ts.p_types2, macro: impliedCategory(q) };
+}
+
+/** The map filter's choices as the Filter's own nationwide search, for ONE deal (owner rule: the map filter is the
+ *  Filter, on a map) — for the «نُشر خلال» menu numbers. With no category the map shows every type, which no Filter
+ *  query expresses (a Filter search always has a category), so that case returns the raw count arguments instead:
+ *  the deal (yearly rent), area and price, every table and type. */
+export function mapFilterSearchQuery(f: { category: Macro | null; types: string[]; beds: string[]; furnished: boolean | null; areaMin: string; areaMax: string; priceMin: string; priceMax: string }, deal: 'buy' | 'rent'): { q: SearchQuery } | { args: Record<string, unknown> } {
+  if (!f.category) {
+    const n = (v: string) => { const x = Number(v); return v && Number.isFinite(x) && x > 0 ? x : null; };
+    return { args: {
+      p_deal: deal === 'buy' ? 'بيع' : 'إيجار', ...(deal === 'rent' ? { p_rent_period: 'سنوي' } : {}),
+      ...(n(f.areaMin) != null ? { p_area_min: n(f.areaMin) } : {}), ...(n(f.areaMax) != null ? { p_area_max: n(f.areaMax) } : {}),
+      ...(n(f.priceMin) != null ? { p_price_min: n(f.priceMin) } : {}), ...(n(f.priceMax) != null ? { p_price_max: n(f.priceMax) } : {}),
+    } };
+  }
+  return { q: {
+    deal: deal === 'buy' ? 'Buy' : 'Rent', location: '', category: f.category, type: null, detail: null,
+    types: f.types.length ? f.types : null, geographicScope: 'NATIONWIDE',
+    ...(deal === 'rent' ? { rentPeriod: 'annual' as const } : {}),
+    contextBedsList: f.beds.length ? f.beds : null,
+    areaMin: f.areaMin || null, areaMax: f.areaMax || null, priceMin: f.priceMin || null, priceMax: f.priceMax || null,
+    furnishedPref: f.furnished,
+  } as SearchQuery };
+}
+
+/** The window counts for raw count arguments (the map's every-type case). Failure is PROBE_FAILED, never zeros. */
+export async function fetchPostedWindowCountsArgs(args: Record<string, unknown>, timeoutMs: number = AGE_COUNT_TIMEOUT_MS): Promise<PostedWindowCounts | null | ProbeFailed> {
+  if (!supabase) return null;
+  const result = await withTimeout(supabase.rpc('posted_window_counts_ar', args), timeoutMs);
+  if ('timedOut' in result) return PROBE_FAILED;
+  const { data, error } = result;
+  if (error) { reportMessage('posted_window_counts_ar failed (map menu numbers left blank)', { error: String((error as { message?: string }).message ?? error) }); return PROBE_FAILED; }
+  return data && typeof data === 'object' ? (data as PostedWindowCounts) : null;
 }
 
 // UNKNOWN IS NOT AN HONEST ZERO (P2, found 2026-09-04). `null` from here means the location genuinely
@@ -1055,6 +1092,47 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 const COUNT_MEMORY_TTL_MS = 120_000;
 const settledScopeCounts = new Map<string, { at: number; n: number }>();
 const inFlightScopeCounts = new Map<string, Promise<number | ProbeFailed>>();
+
+/** «نُشر خلال» — the number in every publish window for the user's exact current search, in one read
+ *  (posted_window_counts_ar, generated from the same eligibility clause as the results). The window itself is left
+ *  open, so each row of the menu shows what picking it would return. A failed read is UNKNOWN (PROBE_FAILED), never
+ *  zeros; the source answering nothing is null. */
+export type PostedWindowCounts = { any: number; d1: number; d7: number; d14: number; d30: number; d90: number; d183: number; d365: number; d730: number; d1095: number };
+const settledPostedCounts = new Map<string, { at: number; c: PostedWindowCounts }>();
+const inFlightPostedCounts = new Map<string, Promise<PostedWindowCounts | null | ProbeFailed>>();
+export async function fetchPostedWindowCounts(
+  q: SearchQuery,
+  timeoutMs: number = AGE_COUNT_TIMEOUT_MS,
+): Promise<PostedWindowCounts | null | ProbeFailed> {
+  if (!supabase) return null;
+  const open: SearchQuery = { ...q, postedWithinDays: null };
+  const ck = JSON.stringify(open);
+  const hit = settledPostedCounts.get(ck);
+  if (hit && Date.now() - hit.at < COUNT_MEMORY_TTL_MS) return hit.c;
+  const scope = await resolveSearchScope(open);
+  if (isProbeFailure(scope)) return PROBE_FAILED;
+  if (!scope) return null;
+  const { isBroadCommercial, ...scopeParams } = scope;
+  return dedupeInFlight(inFlightPostedCounts, ck, async () => {
+    if (!supabase) return null;
+    const result = await withTimeout(
+      supabase.rpc('posted_window_counts_ar', {
+        ...scopeParams,
+        ...rpcCountFilterParams(open),
+        ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
+        ...rpcAdvancedFilterParams(open),
+      }),
+      timeoutMs,
+    );
+    if ('timedOut' in result) return PROBE_FAILED;
+    const { data, error } = result;
+    if (error) return PROBE_FAILED;
+    if (!data || typeof data !== 'object') return null;
+    const c = data as PostedWindowCounts;
+    settledPostedCounts.set(ck, { at: Date.now(), c });
+    return c;
+  });
+}
 
 // BACKGROUND BUDGET (2026-09-21). The 4 s AGE_COUNT_TIMEOUT_MS exists because a user is staring at
 // the Advanced Filter card while it loads. The search-time prep (assessNarrowing) has no one waiting
