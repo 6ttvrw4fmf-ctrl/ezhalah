@@ -316,7 +316,17 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 # (normalised: «"name": "الواجهه", "value": "جنوبيه شرقيه"») — never a bearing in another property's value.
                 if out[name] == MISMATCH and ar and re.search(r"(?:" + kw + r")[\"' \t,:]*(?:value[\"' \t,:]*)?" + ar, norm(whole)):
                     out[name] = MATCH
+            # A single bearing is not a diagonal: stored «شرق» sits inside vmksa's «واجهة العقار جنوبية شرقية», and
+            # _cmp_word's substring test called it a MATCH (CodeRabbit on #11465). When every facade line that states a
+            # bearing states a diagonal, a one-word facade disagrees with it.
+            if name == "direction_ar" and out[name] == MATCH and stored.get(col) and len(re.findall(r"شمال|جنوب|شرق|غرب", norm(str(stored.get(col))))) == 1:
+                stated = [norm(x) for x in lines if re.search(kw, norm(x)) and re.search(r"شمال|جنوب|شرق|غرب", norm(x))]
+                if stated and all(_DIAGONAL.search(x) for x in stated):
+                    out[name] = MISMATCH
     return out
+
+
+_DIAGONAL = re.compile(r"(?:شمال|جنوب)\S*\s*[-–/]?\s*(?:ال)?(?:شرق|غرب)")
 
 
 def bucket_floor_next_to(kw: str, clause: str, stored: float, other_kw: str = "") -> bool:
@@ -663,6 +673,18 @@ def _structured_age(stored, lines: list[str], jsonld: str, now_year: Optional[in
     return MATCH if any(abs(float(stored) - (now_year - y)) <= 1 for y in years) else MISMATCH
 
 
+# A bare singular year states ONE year, on the label's own line («عمر العقار: سنة») or as the label's value line
+# («عمر العقار» / «سنة») — CodeRabbit on #11465. A calendar year after it («عمر العقار: عام 2020») is a date, not age 1. «\uFF1A» is the full-width colon some pages print.
+_ONE_YEAR_ON_LABEL = re.compile("عمر العقار\\s*[:\uFF1A]?\\s*(?:سنه|سنة|عام)(?![\u0621-\u064A])(?!\\s*[\\d\u0660-\u0669])")
+_BARE_AGE_LABEL = re.compile("^\\s*عمر العقار\\s*[:\uFF1A]?\\s*$")   # «عمر العقار: 5» / «سنة» is five, not one
+_ONE_YEAR_LINE = re.compile(r"^\s*(?:سنه|سنة|عام)\s*[.،,]?\s*$")
+
+
+def _states_one_year(lines: list[str], kw_hits: list[int]) -> bool:
+    return any(_ONE_YEAR_ON_LABEL.search(lines[i]) or (i + 1 < len(lines) and _BARE_AGE_LABEL.match(lines[i]) and _ONE_YEAR_LINE.match(lines[i + 1]))
+               for i in kw_hits)
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
     if "مساحه" in kw:
@@ -671,6 +693,7 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     # description is cut off at «…نوع العقار: Apartment سعر الوحدة: 27000 عمر العقار:» (21839193, re-read run
     # 41288305920, 2026-11-01), and the other field's 27000 before it read as a stated age, scoring our 9 a
     # MISMATCH. That line is emptied; a label/value neighbour («عمر العقار» / «جديد») still counts.
+    one_year = kw == AGE_KW and _states_one_year(lines, kw_hits)   # before a bare «عمر العقار:» line is emptied below
     lines = ["" if i in kw_hits and re.search("(?:" + kw + r")\s*[:：]\s*$", x) else x for i, x in enumerate(lines)]
     if not AREA_UNIT.search(kw):
         lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
@@ -679,6 +702,8 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # a th/td area («المساحه» / «587م») states the figure on the line under its label
         page_states = any(AREA_LABEL_LINE.match(lines[i]) and i + 1 < len(lines)
                           and re.match(r"^\s*[\d٠-٩][\d٠-٩.,]*\s*م\s*$", lines[i + 1]) for i in kw_hits)
+    if kw == AGE_KW and not page_states:
+        page_states = one_year   # «عمر العقار: سنة» states 1 with no digit (CodeRabbit on #11465)
     if stored is None:
         return WE_MISS if page_states else PAGE_SILENT
     pat = _num_pattern(stored)
@@ -743,6 +768,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # re-score 41284494062, 2026-11-01). An English number word on the keyword's own line states that figure too.
         worded |= {EN_NUMBERS[m.group(1).lower()] for i in kw_hits for m in EN_NUMBER.finditer(lines[i])}
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
+            worded.add(1)
+        # A bare singular year right after the age label is ONE year: aqarcity 30135 (aqarcity_residential_listings:
+        # 2292614, 2026-11-09 score) prints «… المساحة :109 متر مربع … عمر العقار: سنة. …» on one line; stored 1, and
+        # the line's 109 made «page states» true, so the night scored it a MISMATCH.
+        if one_year:
             worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
             worded.add(2)
@@ -840,10 +870,15 @@ def _cmp_bool(stored, lines: list[str], kw: str) -> str:
     hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
     if not hit:
         return PAGE_SILENT
-    page_yes = not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
+    page_yes = not all(re.search(NEG + "(?:" + kw + ")", x) or re.search("(?:" + kw + ")" + LABEL_NO, x) for x in hit)
     if stored is None:
         return WE_MISS
     return MATCH if bool(stored) == page_yes else MISMATCH
+
+
+# A LABELLED «no» after the field (🔬 2026-11-11, af-score 11-10 tuba 13261393): tuba's description lists «- مفروشة: لا»,
+# we store false, and only a «no» BEFORE the word was known, so a correct false scored MISMATCH (and a wrong true MATCH).
+LABEL_NO = r"[\u0621-\u064A]*\s*[:：]\s*(?:لا|لايوجد|لا يوجد|no)(?![\u0621-\u064Aa-z])"
 
 
 # Hofuf's ضاحية هجر sub-districts are written three ways for ONE place: the catalog's «الضاحية الرابع», and
