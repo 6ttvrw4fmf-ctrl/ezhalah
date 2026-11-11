@@ -248,3 +248,16 @@ def test_a_name_joined_to_a_bearing_by_punctuation_is_not_a_facade():
     assert not any(n in x for x in pairs for n in ("محمد", "سالم", "فهد"))
     assert "الواجهة: South west" in p["evidence_lines"]
     assert compare_listing({"direction_ar": "جنوب شرق"}, page("جنوبية شرقية"))["direction_ar"] == MATCH
+
+
+def test_the_artifact_never_carries_the_raw_page_text():
+    # CodeRabbit on #11465: an unlabelled name («شمالية/محمد» at the top of the page) reached reread.json via text_head
+    import json as _json
+    from scrapers.common.source_reread import artifact, log_lines
+    blk = '<div class="feature-block"><h2>واجهة العقار</h2><span>شمالية</span></div>'
+    page_ = page_evidence(f"<html><body><p>شمالية/محمد ابو سالم</p>{blk}</body></html>")
+    assert "محمد" in page_["text_head"]                       # the scorer still has it in memory…
+    item = {"table": "t", "id": 1, "status": 200, "verdict": "alive", "stored": {}, "page": page_}
+    dumped = _json.dumps(artifact([item]), ensure_ascii=False) + "\n".join(log_lines(item))
+    assert "محمد" not in dumped and "سالم" not in dumped      # …but neither the artifact nor the log carries it
+    assert "واجهة العقار شمالية" in dumped                     # the scoring evidence survives

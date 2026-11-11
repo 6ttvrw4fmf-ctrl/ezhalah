@@ -452,6 +452,14 @@ def page_structured_props(page: dict, limit: int = 40) -> list[str]:
     return out[:limit]
 
 
+def artifact(items: list[dict]) -> list[dict]:
+    """What reread.json keeps: everything except the page's raw visible-text head. text_head is the page's own prose,
+    where an UNLABELLED personal name cannot be told from an ordinary word by any pattern (PDPL, CodeRabbit on #11465,
+    backlog 1781). Nothing reads it back from the file — the scorers build their own in memory — so it never leaves the run."""
+    return [{**it, "page": {k: v for k, v in (it.get("page") or {}).items() if k != "text_head"}} if "page" in it else it
+            for it in items]
+
+
 def log_lines(item: dict, n_evidence: int = 15) -> list[str]:
     """The comparison as plain log lines. The reread.json artifact cannot be downloaded from a cloud
     agent session (its blob host is refused by the egress proxy, measured 2026-10-02), so the
@@ -606,7 +614,7 @@ def main() -> int:
                     print(f"   wasalt key probe failed: {e!r}", flush=True)
         out.append(item)
 
-    text = json.dumps(out, ensure_ascii=False, indent=1, default=str)
+    text = json.dumps(artifact(out), ensure_ascii=False, indent=1, default=str)
     with open("reread.json", "w", encoding="utf-8") as f:
         f.write(text)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
