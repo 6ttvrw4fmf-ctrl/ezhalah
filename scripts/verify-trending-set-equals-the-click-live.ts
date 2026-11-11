@@ -254,21 +254,21 @@ export const isExact = (v: Verdict): boolean =>
 
 async function rpc(fn: string, params: Record<string, unknown>): Promise<any[]> {
   const r = await fetch(`${BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: H, body: JSON.stringify(params) })
-    .catch((e) => die(`${fn} unreachable — ${(e as Error).message}`));
+    .catch((e) => die(`${fn} unreachable — ${(e as Error).message}${(e as any)?.cause?.code ? ` (${(e as any).cause.code})` : ''}`));
   if (!r.ok) die(`${fn} answered ${r.status}: ${(await r.text()).slice(0, 300)}`);
   return (await r.json()) as any[];
 }
 
 async function rest<T = any>(qs: string, table = 'search_listings_ar'): Promise<T[]> {
   const r = await fetch(`${BASE}/rest/v1/${table}?${qs}`, { headers: H })
-    .catch((e) => die(`${table} unreachable — ${(e as Error).message}`));
+    .catch((e) => die(`${table} unreachable — ${(e as Error).message}${(e as any)?.cause?.code ? ` (${(e as any).cause.code})` : ''}`));
   if (!r.ok && r.status !== 206) die(`${table} answered ${r.status} on ${qs.slice(0, 200)}: ${(await r.text()).slice(0, 200)}`);
   return (await r.json()) as T[];
 }
 
 async function restCount(qs: string, table = 'search_listings_ar'): Promise<number> {
   const r = await fetch(`${BASE}/rest/v1/${table}?select=listing_id&${qs}`, { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } })
-    .catch((e) => die(`${table} count unreachable — ${(e as Error).message}`));
+    .catch((e) => die(`${table} count unreachable — ${(e as Error).message}${(e as any)?.cause?.code ? ` (${(e as any).cause.code})` : ''}`));
   if (!r.ok && r.status !== 206 && r.status !== 416) die(`${table} count answered ${r.status}: ${(await r.text()).slice(0, 200)}`);
   const cr = r.headers.get('content-range') ?? '';
   if (!cr.includes('/')) die(`${table} count returned no content-range — the total is unknowable`);
@@ -279,7 +279,7 @@ console.log('\nTrending: the number on the chip is the exact SET the click deliv
 console.log(`  bounds — ${CLICK_PAGE}/page, ≤${CLICK_ROW_CAP} click rows per scope, ≤${ORACLE_ROW_CAP} oracle rows per scope\n`);
 
 // ── the real client code, lifted and EXECUTED (never re-typed) ──────────────────────────────────
-const S = await liftSearchScope(ROOT).catch((e) => die(`could not lift the table scope out of src/data/remote.ts — ${(e as Error).message}`));
+const S = await liftSearchScope(ROOT).catch((e) => die(`could not lift the table scope out of src/data/remote.ts — ${(e as Error).message}${(e as any)?.cause?.code ? ` (${(e as any).cause.code})` : ''}`));
 // applyClusterUnion + collapseClustersForTrending ARE the display layer: for a clustered city the
 // number a human reads is not a number any RPC returned, it is these two functions' arithmetic over
 // several chip rows. Asserting against a re-typed sum would be asserting against a copy.
@@ -288,7 +288,7 @@ const L = (await liftSymbols(
   [{ header: 'export function applyClusterUnion(' }, { header: 'export function collapseClustersForTrending(' }],
   ['applyClusterUnion', 'collapseClustersForTrending'],
   'type CityOption = { cityId: number; cityAr: string; listingCount: number; clusterKey?: string };\n',
-).catch((e) => die(`could not lift the Trending cluster display layer out of src/data/locations.ts — ${(e as Error).message}`))) as {
+).catch((e) => die(`could not lift the Trending cluster display layer out of src/data/locations.ts — ${(e as Error).message}${(e as any)?.cause?.code ? ` (${(e as any).cause.code})` : ''}`))) as {
   applyClusterUnion: (o: any[], m: Map<number, string>) => any[];
   collapseClustersForTrending: (p: any[]) => any[];
 };
