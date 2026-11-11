@@ -813,6 +813,8 @@ _LAND_USE = re.compile(
     r")[ _]+(?P<u>" + _LAND_USE_WORD + r")(?:[ _]+(?:او |و)?(?P<u2>" + _LAND_USE_WORD + r"))?(?!\w)")
 _LAND_CONVERT = re.compile(r"(?<!\w)(?:لل|ل|ب)?(?:تحويل|تحول|تحويلها|تحويله|تغيير|تغييرها|تغييره|تغير)(?:\s+\S+){0,3}?\s+(?:الي\s+|لل|ل)?"
                            + _LAND_USE_WORD + r"(?!\w)")
+# «أرض سكنية قابلة للتحويل» names no destination but still says the use may change (CodeRabbit on #11819)
+_LAND_CONVERTIBLE = re.compile(r"(?<!\w)(?:قابل|قابله|يمكن|ممكن|امكانيه)\s+(?:لل|ل)?(?:تحويل|تحويلها|تحويله|تغيير|تغييرها|تغييره)(?!\w)")
 # a use the ad DENIES or only calls POSSIBLE is not its use (CodeRabbit on #11819: «ليست أرض سكنية», «يمكن استخدام
 # العقار تجاري», «تصلح ارض تجارية»)
 _LAND_NOT_STATED = frozenset(_n(w) for w in ("ليست", "ليس", "غير", "مو", "مش", "لا", "يمكن", "ممكن", "بالامكان", "تصلح",
@@ -1760,13 +1762,16 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     # head («قريبه من ارض تجاريه») → none: silence is unknown, never a pick.
     land_uses: dict[str, tuple[int, int, int]] = {}
     for ci, (_o, _c, t, _i) in enumerate(clauses):
-        if _LAND_CONVERT.search(t):
+        if _LAND_CONVERT.search(t) or _LAND_CONVERTIBLE.search(t):
             land_uses["?"] = (ci, 0, 0)
             continue
         for m in _LAND_USE.finditer(t):
             before = t[:m.start()].split()[-3:]
             # a wanted request runs to the end of its clause: «مطلوب من مالك الأرض قطعة أرض تجارية» (CodeRabbit on #11819)
-            if any(w in _NEAR_WORDS or w in _LAND_NOT_STATED for w in before) \
+            # «السعر قابل للتفاوض أرض سكنية»: the price is negotiable, not the use (CodeRabbit on #11819)
+            hedges = [w for k, w in enumerate(before) if w in _LAND_NOT_STATED
+                      and not (k + 1 < len(before) and before[k + 1].startswith(_n("للتفاوض")[:5]))]
+            if any(w in _NEAR_WORDS for w in before) or hedges \
                     or any(_strip_wa(w) in _LAND_WANTED for w in t[:m.start()].split()):
                 continue           # «قريبه من ارض تجاريه», a broker's «مطلوب اراضي تجاريه»: not this ad's land
             nxt = clauses[ci + 1][2].split()[:1] if ci + 1 < len(clauses) and not t[m.end():].strip() else []
@@ -2926,6 +2931,8 @@ def selftest() -> None:
         ("أرض سكنية أو تجارية", {}, ("land_use_ar",)),
         ("أرض سكنية يمكن تغييرها إلى تجارية", {}, ("land_use_ar",)),
         ("مطلوب من مالك الأرض قطعة أرض تجارية", {}, ("land_use_ar",)),
+        ("أرض سكنية قابلة للتحويل", {}, ("land_use_ar",)),
+        ("السعر قابل للتفاوض أرض سكنية", {"land_use_ar": "سكني"}, ()),
     ]
     bad = []
     for text, want, absent in cases:
