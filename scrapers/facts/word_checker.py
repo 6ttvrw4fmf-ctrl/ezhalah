@@ -552,7 +552,7 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "storage": (("خلف", "بجوار", "مقابل", "صناعي", "صناعيه", "يصلح", "تصلح", "مناسب", "مناسبه", "مثالي", "مثاليه", "ينفع", "تنفع", "لبناء", "لانشاء", "او"),     # «خلف مخازن …» is an address, «أرض صناعية ومستودعات» the type
                 ("للايجار", "للبيع", "تجاري", "صناعي", "تجاريه", "صناعيه", "مبرد", "مبرده", "للتاجير")),
     # «أرض سكنية شارع وحديقة»: the plot's neighbours, not its garden (🔬 2026-11-11 garden sample, aqar 3543112)
-    "garden": (_BEARINGS + ("مناسب", "مثالي", "خلف", "مقابل", "شارع", "شارعين"),   # «الوجهة: غرب حديقة» is a boundary
+    "garden": (_BEARINGS + ("مناسب", "مثالي", "خلف", "مقابل"),   # «الوجهة: غرب حديقة» is a boundary
                # «حديقة الإمام وبجانبها ملعب», «حديقة الملك عبدالله»: a named public park (aqar 10513608, 2026-11-11)
                ("عامه", "عام", "الحي", "العامه", "الملك", "الامير", "الامام", "الشيخ", "الملكه", "الاميره")),
     "parking": (_BEARINGS, ()),
@@ -598,7 +598,7 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "raised_plot": (("سعر", "اسعار", "قيمه", "ايجار", "اسقف", "سقف", "ارتفاع", "نسبه", "طلب"), ()),   # a high price / ceiling
     "all_services": (("حولها", "حوله", "حواليها", "حواليه", "جنبها", "جنبه"),                       # «حولها كل خدمات»: around it
                      ("قريبه", "قريب", "بالقرب", "المجاوره", "مجاوره", "حولها", "حوله",            # «جميع الخدمات قريبة»
-                      "مستقل", "مستقله")),      # «كل خدمات الشقه مستقله»: separate utilities (P2 13085, 🔬 2026-11-11);
+                      "مستقل", "مستقله", "منفصل", "منفصله")),      # «كل خدمات الشقه مستقله»: separate utilities (P2 13085, 🔬 2026-11-11);
                                                   # «جميع خدمات الشقة متوفرة» stays a yes (CodeRabbit on #11820)
     "street_lights": (("جوهره"), ("تحميل", "للتحميل", "تنزيل", "للتنزيل", "والتحميل")),                                        # «رصيف تحميل» is a dock
     "approved_plan": (("مكتب", "مسوق", "وسيط", "مقاول", "مهندس", "مقيم", "مثمن", "وكيل"), ()),
@@ -1214,6 +1214,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «بلكونه (شرفه) مطلة على الطريق», «شقه … مطله على الطريق»: a view of
                                                      # «the road», not a plot on a main road (P2 13085, 5 of 5 aqar,
                                                      # 🔬 2026-11-11). «مطلة على الطريق الدائري» and «على طريق الملك فهد» stay.
+    if fact == "garden" and p2 and _strip_wa(p2[-1]) in ("شارع", "شارعين") and t[ws:we].startswith("و") \
+            and not (gn[:1] and _strip_wa(gn[0]) in _OWN_AFTER):
+        return None, s, e                            # «أرض سكنية شارع وحديقة»: the plot's neighbours (aqar 3543112);
+                                                     # «على شارع وبها حديقة خاصة» keeps its own (CodeRabbit on #11820)
     if fact == "reception" and re.match(r"^(?:ل|لل)استقبال(?:ك|كم|كن|كي)$", _n(t[ws:we]).lstrip("و")):
         return None, s, e                            # «جاهزة لاستقبالك», «بيتك جاهز لاستقبالك»: «ready to welcome YOU»,
                                                      # marketing, never a reception desk (P2 13085, 5 of 5 aqar, 🔬 2026-11-09)
@@ -1600,7 +1604,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             and any(_starts(_strip_wa(w), _PLACE_WORDS) or _strip_wa(w) in _SERVICES_OBJECT for w in words)
         # «بالقرب من المسجد، المدارس، الخدمات، والحديقة» (aqar 14865940, 🔬 2026-11-11): «الخدمات» is an ITEM of the list,
         # so the park after it is still the area's
-        list_in = list_base and not _owns_item(words)
+        list_in = list_base and not _owns_item(words) and not any(_strip_wa(w) in _SVC_STOP or w in _SVC_STOP for w in words)   # «خدمات المبنى»: the building's own
         # …but only the ITEM continues the list: a spaced «*» bullet starts the next one (🔬 2026-11-07, P1 13301). aqar
         # 15128626 «إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس … * اتحاد ملاك مجاناً مميزات
         # المشروع» — «مميزات» 60 words and eight bullets later is the project's heading, not the gym's owner. The item's
@@ -2924,6 +2928,10 @@ def selftest() -> None:
         ("موقع مميز بالقرب من المسجد، المدارس، الخدمات، والحديقة. تفاصيل العقار", {}, ("garden",)),        # aqar 14865940
         ("* حوش واسع. * مدخل سيارة. * حديقة خلفية. * مكيفات راكبة.", {"garden": True}, ()),                # aqar 14870810
         ("مخازن وحديقة خاصة. ☀️ الدور الأول: صالة عائلية", {"garden": True}, ()),                          # aqar 18338000
+        ("فيلا على شارع وبها حديقة خاصة", {"garden": True}, ()),                                           # CodeRabbit on #11820
+        ("فيلا على شارع وحديقة خاصة", {"garden": True}, ()),
+        ("كل خدمات الشقة منفصلة", {}, ("all_services",)),
+        ("قريب من المسجد، خدمات المبنى، نادي رياضي، حضانة", {"gym": True}, ()),
         # 🔬 2026-11-11 kitchen recall sample: a «لا يوجد» that opens the NEXT item is not this one's no
         ("٣ غرف وصاله ٢ دورتين مياه مطبخ راكب لا يوجد مكيفات الشق الدور الاول", {"kitchen": True, "air_conditioner": False}, ()),  # aqar 23092840
         ("3 غرف + 2 دورة مياه + صالة + مطبخ راكب لا يتوفر مصعد .", {"kitchen": True, "elevator": False}, ()),   # aqar 9242120
