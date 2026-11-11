@@ -64,6 +64,11 @@ def test_a_figure_in_thousands_is_neither_a_total_nor_a_metre_price():
     assert R.land_price_basis(565, 800, "مساحة 800 م شارع 30 المطلوب 565 ألف ريال") is None
 
 
+def test_a_later_metre_price_wins_over_an_earlier_thousands_mention():
+    # CodeRabbit on #11747: «السوم 565 الف؛ سعر المتر 565 ريال» states the metre price; reading stops at neither mention
+    assert R.land_price_basis(565, 800, "السوم 565 الف؛ سعر المتر 565 ريال") == "per_meter"
+
+
 @pytest.mark.parametrize("price,area,text", STAYS_A_TOTAL, ids=lambda x: str(x)[:24])
 def test_a_figure_the_seller_writes_beside_a_price_word_stays_a_total(price, area, text):
     assert R.land_price_basis(price, area, text) == "total"
@@ -72,6 +77,16 @@ def test_a_figure_the_seller_writes_beside_a_price_word_stays_a_total(price, are
 def test_the_metre_word_after_a_price_is_the_metre_price():
     assert R.land_price_basis(7000, 680, "البيع : 7000 المتر") == "per_meter"
     assert R.land_price_basis(1100, 900, "المطلوب 1100 المتر") == "per_meter"
+
+
+@pytest.mark.parametrize("area", [None, 0, 40])
+def test_the_metre_word_needs_no_price_word_and_no_area(area):
+    # CodeRabbit on #11747: with no usable area the magnitude rule cannot decide, so the wording itself must
+    assert R.land_price_basis(7000, area, "أرض للبيع في حي العارض 7000 المتر على شارعين") == "per_meter"
+
+
+def test_an_area_written_with_the_metre_word_is_still_an_area():
+    assert R._printed_as_something_else("المساحة 1000 المتر", next(R._NUMS.finditer("المساحة 1000 المتر")))
 
 
 @pytest.mark.parametrize("text", ["المساحة 300 متر", "مساحة 300م", "300 م2", "قطعة رقم 300", "نسبة 300%", "قبل 300 ساعة",

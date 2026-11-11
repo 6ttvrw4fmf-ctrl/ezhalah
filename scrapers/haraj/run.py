@@ -136,13 +136,18 @@ _PRICE_AFTER = re.compile(r"\s*(?:ريال|ر\.?\s?س|SAR|\ufdfc)", re.I)
 # «565 الف» is 565 THOUSAND: the licence figure is then neither the total nor the metre price — unknown, never a guess.
 _THOUSANDS_AFTER = re.compile(r"\s*(?:الف|ألف|آلاف|الاف)(?![\u0621-\u064A])")
 _OTHER_BEFORE = re.compile(r"(?:مساح\S*|قطع\S*|رقم|مخطط|بلك|بطول|طول|عرض|شارع|نسبة|بنسبة|قبل|حد)\s*[:\uff1a\-/|]?\s*(?:رقم\s*)?$")
-_OTHER_AFTER = re.compile(r"^\s*(?:%|٪|م\s*[2²٢]|م(?![\u0621-\u064A])|(?:ال)?متر|sqm|ساع|يوم|أيام|ايام|دقيق)")
+_OTHER_AFTER = re.compile(r"^\s*(?:%|٪|م\s*[2²٢]|م(?![\u0621-\u064A])|متر|sqm|ساع|يوم|أيام|ايام|دقيق)")
+_AREA_BEFORE = re.compile(r"مساح\S*\s*[:\uff1a\-/|]?\s*$")
 
 
 def _printed_as_something_else(t: str, m: "re.Match[str]") -> bool:
     """True when this mention of the figure is an area, a plot / plan / street number, a share or an age."""
     before, after = t[max(0, m.start() - 24): m.start()], t[m.end(): m.end() + 12]
     if _PRICE_BEFORE.search(before) or _PRICE_AFTER.match(t, m.end()):
+        return False
+    # «7000 المتر» is the metre price even with no price word before it (CodeRabbit on #11747) — unless the figure is
+    # introduced as the area («المساحة 1000 المتر»). A bare «متر» after a figure stays an area.
+    if _THE_METRE_AFTER.match(t, m.end()) and not _AREA_BEFORE.search(before):
         return False
     if before.endswith("م") and m.group(0) in ("2", "٢"):        # the 2 of «م2»
         return True
@@ -154,12 +159,13 @@ def land_price_basis(price: int, area: Optional[float], text: str) -> Optional[s
     # 6 of 20 haraj plots under the city floor stated their rate where the first mention did not —
     # «(المتر 1,650 ريال)», «البيع المتر 1100», «سعر المتر : 1,100 ريال», «1800ريال سعودي للمتر», «3500ريال بالمتر»).
     t = (text or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
-    mentioned = False
+    mentioned = thousands = False
     for m in _NUMS.finditer(t):
         if N.to_int(m.group(0)) != price or _printed_as_something_else(t, m):
             continue
         if _THOUSANDS_AFTER.match(t, m.end()):
-            return None
+            thousands = True          # read every later mention first: an explicit metre price still decides
+            continue
         mentioned = True
         # «البيع : 7000 المتر» — the figure followed by «المتر» is the metre price (haraj 11188227166, 680 m² in حي
         # العارض, was served as a 7,000 SAR total). A bare «متر» after a figure is an area and never reaches here.
@@ -167,6 +173,8 @@ def land_price_basis(price: int, area: Optional[float], text: str) -> Optional[s
             return "per_meter"
     if N.stated_per_metre(t, price):
         return "per_meter"
+    if thousands:
+        return None                   # «565 الف» and nothing stating a metre price: unknown, never 565 or 565 × area
     if mentioned:
         return "total"
     if area and area >= 50 and price <= 20_000:
