@@ -108,3 +108,30 @@ def test_a_singular_year_value_line_past_text_head_reaches_the_score():
     p = page_evidence(f"<html><body>{FILLER}<div>عمر العقار</div><div>سنة</div></body></html>")
     assert "عمر العقار سنة" in p["evidence_lines"]
     assert compare_listing({"property_age": 1}, p)["property_age"] == MATCH
+
+
+def test_a_hyphenated_stored_diagonal_still_matches():
+    # CodeRabbit on #11465: «جنوب-شرق» is two bearings, not one word
+    assert compare_listing({"direction_ar": "جنوب-شرق"}, page("جنوبية شرقية"))["direction_ar"] != MISMATCH
+
+
+def test_a_unit_line_after_a_stated_age_is_not_one_year():
+    # CodeRabbit on #11465: «عمر العقار: 5» / «سنة» is five years
+    from scrapers.common.new_listings_score import AGE_KW, _cmp_number, norm
+    lines = [norm("عمر العقار: 5"), norm("سنة")]
+    assert _cmp_number(1, lines, " | ".join(lines), AGE_KW) != MATCH
+    assert _cmp_number(5, lines, " | ".join(lines), AGE_KW) == MATCH
+
+
+def test_repeated_feature_pairs_do_not_push_a_later_field_past_the_cap():
+    rep = '<div class="feature-block"><h2>غرف النوم</h2><span>3</span></div>' * 300
+    p = page_evidence(f"<html><body>{rep}<div>عمر العقار</div><div>سنة</div></body></html>")
+    assert p["evidence_lines"].count("غرف النوم 3") == 1
+    assert "عمر العقار سنة" in p["evidence_lines"]
+
+
+def test_a_phone_in_a_feature_value_never_reaches_the_evidence():
+    blk = '<div class="feature-block"><h2>عرض الشارع</h2><span>20 للتواصل 0551234567</span></div>'
+    lines = page_evidence(f"<html><body>{blk}</body></html>")["evidence_lines"]
+    assert not any("0551234567" in x for x in lines)
+    assert "عرض الشارع 20 للتواصل <num>" in lines

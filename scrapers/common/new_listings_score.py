@@ -319,7 +319,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             # A single bearing is not a diagonal: stored «شرق» sits inside vmksa's «واجهة العقار جنوبية شرقية», and
             # _cmp_word's substring test called it a MATCH (CodeRabbit on #11465). When every facade line that states a
             # bearing states a diagonal, a one-word facade disagrees with it.
-            if name == "direction_ar" and out[name] == MATCH and stored.get(col) and len(norm(str(stored.get(col))).split()) == 1:
+            if name == "direction_ar" and out[name] == MATCH and stored.get(col) and len(re.findall(r"شمال|جنوب|شرق|غرب", norm(str(stored.get(col))))) == 1:
                 stated = [norm(x) for x in lines if re.search(kw, norm(x)) and re.search(r"شمال|جنوب|شرق|غرب", norm(x))]
                 if stated and all(_DIAGONAL.search(x) for x in stated):
                     out[name] = MISMATCH
@@ -676,11 +676,12 @@ def _structured_age(stored, lines: list[str], jsonld: str, now_year: Optional[in
 # A bare singular year states ONE year, on the label's own line («عمر العقار: سنة») or as the label's value line
 # («عمر العقار» / «سنة») — CodeRabbit on #11465. A calendar year after it («عمر العقار: عام 2020») is a date, not age 1. «\uFF1A» is the full-width colon some pages print.
 _ONE_YEAR_ON_LABEL = re.compile("عمر العقار\\s*[:\uFF1A]?\\s*(?:سنه|سنة|عام)(?![\u0621-\u064A])(?!\\s*[\\d\u0660-\u0669])")
+_BARE_AGE_LABEL = re.compile("^\\s*عمر العقار\\s*[:\uFF1A]?\\s*$")   # «عمر العقار: 5» / «سنة» is five, not one
 _ONE_YEAR_LINE = re.compile(r"^\s*(?:سنه|سنة|عام)\s*[.،,]?\s*$")
 
 
 def _states_one_year(lines: list[str], kw_hits: list[int]) -> bool:
-    return any(_ONE_YEAR_ON_LABEL.search(lines[i]) or (i + 1 < len(lines) and _ONE_YEAR_LINE.match(lines[i + 1]))
+    return any(_ONE_YEAR_ON_LABEL.search(lines[i]) or (i + 1 < len(lines) and _BARE_AGE_LABEL.match(lines[i]) and _ONE_YEAR_LINE.match(lines[i + 1]))
                for i in kw_hits)
 
 
