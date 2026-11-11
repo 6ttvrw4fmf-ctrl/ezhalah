@@ -42,13 +42,13 @@ SOURCE SHAPE — measured live 2026-09-24, every number below from a real reques
   · OFF-PLAN: `is_wafi_ad` = «البيع على الخارطة (وافي)» → skipped `off_plan_wafi` (1/145).
   · TYPE: `type` is an English key; the platform's own Arabic dictionary (in every page's RSC
     payload) gives the label, which goes through normalize.map_type_exact with the overrides below.
-    The record's own `category` («نوع العقار»: residential/commercial, the office's pick and the
-    site's own filter facet) qualifies a land/building to «أرض تجارية»/«عمارة تجارية»; the
-    `is_for_*` land-USE flags are a different question (sakan precedent) and stay in
-    additional_info. Category = category_for_type(). OWNER-AWARENESS: 51496's office title says
-    «أرض تجارية للبيع» and its use flag is commercial-only, but the office filed category
-    residential → Residential Land (structured facet over prose; title stored verbatim). Whether
-    an office title stating «تجارية» should override the platform's facet is an owner decision.
+    LAND follows the ad page's own «الاستخدام» (the `is_for_*` flags): commercial-only → «أرض تجارية»,
+    residential-only → «أرض»; both or neither → the office's `category` pick decides, as it always
+    does for a building («عمارة تجارية»). Category = category_for_type(). OWNER DECISION 2026-11-10
+    («Fix all bro these issues can't happen»): 51496's page says «الاستخدام: تجاري» and its title
+    «أرض تجارية للبيع», yet the office's hidden `category` is residential — it was stored as
+    Residential Land (13 such ads on jawher + m3tmd). One rule for every Nuzul tenant:
+    scrapers/common/nuzul_usage.py.
   · LOCATION: city.name_ar / district.name_ar are structured; 14/145 records carry NO city →
     skipped `no_city` (never defaulted; senan's city TAG is noted as a possible recovery, open issue).
     district_ar = find_district_in_text(district.name_ar, city_id); neighborhood = the raw label.
@@ -115,7 +115,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, nuzul_usage  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
@@ -183,15 +183,17 @@ def _count(v: Any) -> Optional[int]:
 
 
 def type_ar_for(d: dict[str, Any]) -> Optional[str]:
-    """The platform's Arabic label for `type`. A land or building the office itself filed under
-    the platform's «نوع العقار: تجاري» (`category`) is «أرض تجارية» / «عمارة تجارية» — the source
-    answering our own residential/commercial question directly. The `is_for_*` land-USE flags are
-    a different question (measured: m3tmd files 11 commercial-use-only plots as residential) and
-    only ever reach additional_info."""
+    """The platform's Arabic label for `type`. A LAND is «أرض تجارية» when the ad page's own
+    «الاستخدام» says commercial and not residential (nuzul_usage.land_category — the office's
+    hidden `category` decides only when the page does not settle it; measured 2026-11-10: m3tmd
+    showed «الاستخدام: تجاري» on 11 plots we stored as Residential Land). A BUILDING the office
+    filed under `category` commercial is «عمارة تجارية», unchanged."""
     label = _TYPE_KEY_AR.get(str(d.get("type") or "").strip().lower())
     if not label:
         return None
-    if str(d.get("category") or "") == "commercial" and label in ("أرض", "عمارة"):
+    if label == "أرض":
+        return "أرض تجارية" if nuzul_usage.land_category(d) == "commercial" else label
+    if label == "عمارة" and str(d.get("category") or "") == "commercial":
         return label + " تجارية"
     return label
 
@@ -353,12 +355,8 @@ def nuzul_fields(d: dict[str, Any], type_overrides: Optional[dict[str, str]] = N
         "longitude": d.get("longitude") if d.get("longitude") not in (None, "") else None,
         "type_key": d.get("type"), "type_ar": type_ar, "purpose": purpose,
         "source_category": d.get("category"),
-        "usages": [u for u, on in (("residential", d.get("is_for_residential")),
-                                   ("commercial", d.get("is_for_commercial")),
-                                   ("farming", d.get("is_for_farming")),
-                                   ("education", d.get("is_for_education")),
-                                   ("health", d.get("is_for_health")),
-                                   ("factory", d.get("is_for_factory"))) if on] or None,
+        "usage": nuzul_usage.usage_shown_ar(d),              # the page's «الاستخدام» words, shown on the card
+        "usages": nuzul_usage.uses_on(d) or None,            # same flags, same yes-rule as the row above
         "availability_status": status,
         "price_label": d.get("price_label"),
         "rent_prices_raw": {k: d.get(k) for k in ("rent_price_annually", "rent_price_monthly",
