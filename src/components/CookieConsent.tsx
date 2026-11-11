@@ -24,7 +24,7 @@ import { Image } from 'expo-image';
 import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
 import { useAtLeast } from '@/lib/useAtLeast';
-import { DOCK_BREAKPOINT } from '@/lib/responsive';
+import { COOKIE_CORNER_BREAKPOINT } from '@/lib/responsive';
 import { colors, radius, font } from '@/theme/tokens';
 import {
   shouldShowCookieBanner,
@@ -72,16 +72,17 @@ const COPY = {
 export default function CookieConsent() {
   const { user, authChecked, searchCount } = useApp();
   const { isRTL } = useI18n();
-  // IS THERE ROOM BESIDE THE APP, OR ARE WE ON TOP OF IT? (owner decision 2026-09-11, #152)
-  // The same question — and the same breakpoint — SignInCard already asks to decide whether its
-  // floating card may exist at all. At/above it the app docks a sidebar and the filter card sits
-  // centred with a free right margin, which is the layout this card's 280 px corner form was
-  // measured against (1440/1512, gap > 0). Below it there is no free margin, so a corner card is
-  // simply a card ON the app: it becomes a full-width bottom SHEET instead, and the root reserves
-  // its height (lib/bottomPromptInset.ts) so «بحث», the composer and every other control lay out
-  // ABOVE it rather than under it. Routed through useAtLeast() like every width-gated flag, so the
-  // first client render still reproduces the server's (React #418 — see lib/responsive.ts).
-  const beside = useAtLeast(DOCK_BREAKPOINT);
+  // IS THERE ROOM BESIDE THE APP, OR ARE WE ON TOP OF IT? (owner decision 2026-09-11, #152; the width was
+  // corrected 2026-11-10 — «make sure never ever get this mistake ever. Ever again».)
+  // This used to ask the SIDEBAR's question (DOCK_BREAKPOINT): the sidebar docks at 900, but the free margin a
+  // 280 px corner card needs beside the search form only exists from 1434. Measured on the built app: from 900 to
+  // 1433 the corner card lay on «بحث» and the fields above it. So the corner card now starts at
+  // COOKIE_CORNER_BREAKPOINT — the 1440/1512 layout its corner form was designed against. Below it there is no free
+  // margin, so a corner card is simply a card ON the app: it becomes a full-width bottom SHEET instead, and the
+  // root reserves its height (lib/bottomPromptInset.ts) so «بحث», the composer and every other control lay out
+  // ABOVE it rather than under it. Routed through useAtLeast() like every width-gated flag, so the first client
+  // render still reproduces the server's (React #418 — see lib/responsive.ts).
+  const beside = useAtLeast(COOKIE_CORNER_BREAKPOINT);
   // SESSION-ONLY, deliberately not seeded from getCookieConsent() (owner 2026-09-13, permanent):
   // the cookie card must appear on EVERY signed-out visit and disappear only when the visitor signs
   // in, mirroring SignInCard's own dismissal (which is also meant to return). Reading the persisted
