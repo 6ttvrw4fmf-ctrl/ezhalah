@@ -278,6 +278,7 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
     check('the «نماذج إزهله» card has no diacritics either (owner 2026-11-11: «we can never have 7arakat»)', !/[\u064B-\u0652]/.test(models), (models.match(/[\u064B-\u0652]/g) ?? []).length + ' found');
     check('the backdrop is pointer-only — not focusable, hidden from screen readers (CodeRabbit)', /focusable=\{false\} accessible=\{false\}[^>]*testID="insight-how-backdrop"/.test(pop));
     check('a failed eagle preload is reported, not swallowed (CodeRabbit)', /reportError\(e, \{ source: 'InsightHowItWorks\.preloadHowEagle' \}\)/.test(pop));
+    check('a failed preload is retried on the next open, and the dialog is named by its title (CodeRabbit)', /if \(!eagleBlob\) void preloadHowEagle\(\);/.test(pop) && /<Modal [^>]*accessibilityLabel=\{c\.title\}/.test(pop));
     check('the popup stays compact: eagle box ≤ 140 px and crops the spare sky', /eagleBox: \{[^}]*height: (\d+)[^}]*overflow: 'hidden'/.test(pop) && Number(pop.match(/eagleBox: \{[^}]*height: (\d+)/)![1]) <= 140);
     check('the site count comes from siteCount.ts — the same number as the share card', /from '@\/data\/siteCount'/.test(pop) && /c\.story\(sites\)/.test(pop));
     const svg = readFileSync(new URL('../assets/images/falconer-howto.svg', import.meta.url), 'utf8');

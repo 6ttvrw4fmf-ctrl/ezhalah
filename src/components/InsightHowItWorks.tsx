@@ -57,6 +57,7 @@ export function InsightHowItWorks({ visible, locale, onClose }: { visible: boole
   useEffect(() => {
     if (!visible) return;
     plays.current += 1;
+    if (!eagleBlob) void preloadHowEagle(); // a failed preload is retried on the next open
     const next = freshSource(plays.current) as { uri?: string };
     setSrc(next);
     let alive = true;
@@ -67,7 +68,7 @@ export function InsightHowItWorks({ visible, locale, onClose }: { visible: boole
     };
   }, [visible]);
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} accessibilityLabel={c.title}>
       <View style={s.screen}>
         {/* pointer-only dismissal: not in the keyboard order and hidden from screen readers — the ✕ is the accessible close */}
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} focusable={false} accessible={false} importantForAccessibility="no-hide-descendants" aria-hidden testID="insight-how-backdrop" />
