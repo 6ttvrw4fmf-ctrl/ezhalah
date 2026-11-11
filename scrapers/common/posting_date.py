@@ -71,3 +71,57 @@ def site_posting_date(raw: Any) -> Optional[str]:
     except (ValueError, OverflowError):
         return None                       # 31/02/2026, hour 25: unreadable, never a guess
     return None
+
+
+# ── «منذ 23 يوم»: a site that prints only HOW LONG AGO, never the day (owner 2026-11-11) ──────────────────
+# Such a count is not a date, so it never goes into `date_added` (the card prints that as a day, the welcome facts
+# count it as one). What it does prove is a FLOOR: read at time T, «23 يوم» means the ad is younger than 24 days, so
+# it was posted no earlier than T − 24 days. That floor is stored in `posted_earliest_at` and the «نُشر خلال» window
+# reads it, so an ad counts under «30 يوماً» only when even its OLDEST possible day is inside 30 days — we never call
+# an ad newer than the site proves it is.
+#
+# The largest age each unit can stand for, per 1 of its count, with room for any way a site counts: a month as 31
+# days (30-day or calendar months, floored or rounded), a year as 366. Then +1 hour for the gap between reading the
+# page and writing the row, and for the site's clock.
+_AGO_UNIT_DAYS = {"minute": 1 / 1440, "hour": 1 / 24, "day": 1, "week": 7, "month": 31, "year": 366}
+_AGO_MARGIN = timedelta(hours=1)
+_AGO_WORDS = [  # (word, unit, count it means on its own: 1, or 2 for the Arabic dual)
+    *[(w, "minute", 1) for w in ("دقيقة", "دقيقه", "دقائق")], ("دقيقتين", "minute", 2),
+    *[(w, "hour", 1) for w in ("ساعة", "ساعه", "ساعات")], ("ساعتين", "hour", 2),
+    *[(w, "day", 1) for w in ("يوم", "يوما", "يومًا", "يوماً", "أيام", "ايام")], ("يومين", "day", 2),
+    *[(w, "week", 1) for w in ("أسبوع", "اسبوع", "أسابيع", "اسابيع")], *[(w, "week", 2) for w in ("أسبوعين", "اسبوعين")],
+    *[(w, "month", 1) for w in ("شهر", "شهرا", "شهراً", "أشهر", "اشهر", "شهور")], ("شهرين", "month", 2),
+    *[(w, "year", 1) for w in ("سنة", "سنه", "سنوات", "سنين", "عام", "عاما", "عاماً", "أعوام", "اعوام")],
+    *[(w, "year", 2) for w in ("سنتين", "عامين")],
+]
+_AGO_WORD = {w: (u, c) for w, u, c in _AGO_WORDS}
+_AGO_PREFIX = re.compile(r"^(?:(?:مضاف|أضيف|اضيف|منذ|قبل)\s+)*")
+_AGO_TEXT = re.compile(r"(?:(\d{1,3})\s+)?(\S+)", re.ASCII)
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def ago_age_range(raw: Any) -> Optional[tuple[timedelta, timedelta]]:
+    """«23 يوم» → (shortest, longest) age the text can mean, or None when it is not a plain «N unit» count.
+    The longest end is open: the ad is YOUNGER than it."""
+    if not isinstance(raw, str):
+        return None
+    r = _AGO_PREFIX.sub("", " ".join(raw.translate(_AR_DIGITS).split()))
+    m = _AGO_TEXT.fullmatch(r)
+    if not m or m.group(2) not in _AGO_WORD:
+        return None
+    unit, alone = _AGO_WORD[m.group(2)]
+    if m.group(1) is not None and alone == 2:
+        return None                       # «3 يومين» is not a count anyone writes: unreadable, never a guess
+    n = int(m.group(1)) if m.group(1) is not None else alone
+    day = _AGO_UNIT_DAYS[unit]
+    shortest = {"month": 28, "year": 365}.get(unit, day) * n
+    return timedelta(days=shortest), timedelta(days=day * (n + 1)) + _AGO_MARGIN
+
+
+def posted_no_earlier_than(raw: Any, read_at: datetime) -> Optional[str]:
+    """«23 يوم» read at `read_at` (aware) → the EARLIEST instant the ad can have been posted, as ISO-8601 UTC for
+    `posted_earliest_at`; None when the text is not a plain count."""
+    span = ago_age_range(raw)
+    if span is None or read_at.tzinfo is None:
+        return None
+    return (read_at - span[1]).astimezone(timezone.utc).isoformat(timespec="seconds")
