@@ -216,9 +216,8 @@ jobs:
         # scripts/canary-gate.sh (called inside safe-deploy.sh) runs the guardian journeys against the
         # 10% canary of a rolling release; it needs Chromium on the runner BEFORE the deploy step.
         if: ${{ !inputs.dry_run }}
-        run: |
-          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
-          for i in 1 2 3; do npx playwright install --with-deps chromium && break; echo "playwright install failed (try $i)"; [ "$i" = 3 ] && exit 1; sleep 20; done
+        run: npx playwright install --with-deps chromium
+
       - name: Deploy via the sanctioned guarded entrypoint
         id: deploy
         if: ${{ !inputs.dry_run }}
