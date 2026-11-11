@@ -17,6 +17,7 @@ const ROOT = join(import.meta.dirname, '..');
 const read = (f: string) => readFileSync(join(ROOT, f), 'utf8');
 let failed = 0;
 const check = (name: string, ok: boolean, extra = '') => { console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !extra ? '' : `  — ${extra}`}`); if (!ok) failed++; };
+const mustCatch = (name: string, caught: boolean) => check(`(mutation) catches ${name}`, caught);
 
 type Ring = [number, number][];   // [lng, lat]
 const outline = JSON.parse(read('public/ksa-outline.json')) as Ring[];
@@ -71,9 +72,9 @@ check('map: centre kept near the Kingdom (cameraBoundary)', w.boundary);
 check('map: zoom-out stops past the home view (cameraZoomRange)', w.zoom);
 check('map: the fade polygon is drawn, and never takes a tap (enabled: false)', w.mask);
 check('map: the fade follows the zoom through maskStrength()', w.fades);
-check('(mutation) catches the fade polygon taking taps', !wired(map.replace('enabled: false,\n          style: new mk.Style({ fillColor: MASK_COLOR', 'enabled: true,\n          style: new mk.Style({ fillColor: MASK_COLOR')).mask);
-check('(mutation) catches the fade not following the zoom', !wired(map.replace('mask.style.fillOpacity = MASK_FADE * k;', 'mask.style.fillOpacity = MASK_FADE;')).fades);
-check('(mutation) catches the boundary removed', !wired(map.replace(/map\.cameraBoundary = /, 'void ')).boundary);
+mustCatch('the fade polygon taking taps', !wired(map.replace('enabled: false,\n          style: new mk.Style({ fillColor: MASK_COLOR', 'enabled: true,\n          style: new mk.Style({ fillColor: MASK_COLOR')).mask);
+mustCatch('the fade not following the zoom', !wired(map.replace('mask.style.fillOpacity = MASK_FADE * k;', 'mask.style.fillOpacity = MASK_FADE;')).fades);
+mustCatch('the boundary removed', !wired(map.replace(/map\.cameraBoundary = /, 'void ')).boundary);
 
 // 4. The phone's full-screen search.
 const row = read('src/components/MapDealRow.tsx');
@@ -88,8 +89,8 @@ const r0 = search(row);
 check('phone search: the map\'s search field opts in to the full-screen page', r0.opts);
 check('phone search: a tap opens it; a pick and «إلغاء» close it', r0.opens && r0.cancel && r0.pickCloses);
 check('phone search: the list stays while the page is open even with the keyboard hidden', r0.stays);
-check('(mutation) catches the list closing on blur again', !search(row.replace('const open = (focused || full) && hits.length > 0;', 'const open = focused && hits.length > 0;')).stays);
-check('(mutation) catches the map search no longer opting in', !search(row.replace(/testID="map-search"\s*fullOnPhone/, 'testID="map-search"')).opts);
+mustCatch('the list closing on blur again', !search(row.replace('const open = (focused || full) && hits.length > 0;', 'const open = focused && hits.length > 0;')).stays);
+mustCatch('the map search no longer opting in', !search(row.replace(/testID="map-search"\s*fullOnPhone/, 'testID="map-search"')).opts);
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log('\nSaudi-only map + phone search page: OK');

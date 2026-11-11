@@ -14,6 +14,7 @@ const cardSrc = readFileSync(join(root, 'src/components/MapFilterCard.tsx'), 'ut
 const mapSrc = readFileSync(join(root, 'src/app/map.tsx'), 'utf8');
 let failed = 0;
 const check = (name: string, ok: boolean) => { console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}`); if (!ok) failed++; };
+const mustCatch = (name: string, caught: boolean) => check(`(mutation) catches ${name}`, caught);
 
 const EMPTY = { __empty: true };
 const NARROWED = { category: 'تجاري' };
@@ -50,7 +51,7 @@ const mutants: [string, string, string][] = [
 ];
 for (const [name, card, map] of mutants) {
   const moved = card !== cardSrc || map !== mapSrc;
-  check(`(mutation) catches ${name}`, moved && journey(card, map) !== EMPTY);
+  mustCatch(name, moved && journey(card, map) !== EMPTY);
 }
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
