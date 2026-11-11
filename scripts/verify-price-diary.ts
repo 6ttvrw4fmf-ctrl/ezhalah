@@ -31,7 +31,7 @@ const REFRESH = 'listing_cards_refresh';
 const BORN = 'listing_price_diary_born_attached';
 
 const codeOnly = (sql: string) =>
-  sql.replace(/^\s*--.*$/gm, '').replace(/\s--.*$/gm, '').replace(/comment on [\s\S]*?;\s*/gi, '');
+  sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*--.*$/gm, '').replace(/\s--.*$/gm, '').replace(/comment on [\s\S]*?;\s*/gi, '');
 
 function latestDefining(files: Record<string, string>, fn: string): string | undefined {
   return Object.keys(files)
@@ -87,6 +87,12 @@ export function diaryProblems(files: Record<string, string>): string[] {
       /raise exception 'listing table public\.% cannot be connected to the price diary/, born.body, born.file);
     const evt = /create event trigger listing_price_diary_born_attached on ddl_command_end\s*when tag in \('CREATE TABLE'/;
     if (!Object.values(files).some((v) => evt.test(codeOnly(v)))) bad.push('no committed migration creates the CREATE TABLE event trigger listing_price_diary_born_attached');
+    // The EFFECTIVE state: the last statement about this event trigger, across migrations in order, must be its CREATE.
+    let last = '';
+    for (const f of Object.keys(files).sort()) {
+      for (const m of codeOnly(files[f]).matchAll(/(drop|create|alter) event trigger (?:if exists )?listing_price_diary_born_attached\b([^;]*)/gi)) last = `${m[1].toLowerCase()}${/disable/i.test(m[2]) ? ':disable' : ''}`;
+    }
+    if (last !== 'create') bad.push(`the CREATE TABLE event trigger's last word across migrations is "${last || 'nothing'}", not create — a later migration removed or disabled it`);
   }
 
   const at = bodyOf(files, ATTACH);
@@ -157,6 +163,15 @@ mustCatch('a removed ad is no longer read from the archive', rfFile, (s) => s.re
 mustCatch('the refresh swallows a timeout', rfFile, (s) => s.replace('exception when query_canceled then\n      raise;\n    when others then', 'exception when others then'));
 mustCatch('the CREATE TABLE hook swallows attach errors again', latestDefining(files, BORN)!, (s) => s.replace('    perform public.listing_price_diary_attach(r.relname);\n  end loop;', '    begin perform public.listing_price_diary_attach(r.relname); exception when others then null; end;\n  end loop;'));
 mustCatch('the CREATE TABLE hook stops refusing', latestDefining(files, BORN)!, (s) => s.replace("raise exception 'listing table public.% cannot be connected", "raise notice 'listing table public.% cannot be connected"));
+{
+  const later = '29991231000001_a_later_migration_drops_the_hook.sql';
+  if (diaryProblems({ ...files, [later]: 'drop event trigger if exists listing_price_diary_born_attached;' }).length > real.length) ok('MUTATION a later migration drops the CREATE TABLE hook — caught');
+  else fail('MUTATION a later migration drops the CREATE TABLE hook — NOT caught');
+  const later2 = '29991231000002_a_later_migration_disables_the_hook.sql';
+  if (diaryProblems({ ...files, [later2]: 'alter event trigger listing_price_diary_born_attached disable;' }).length > real.length) ok('MUTATION a later migration disables the CREATE TABLE hook — caught');
+  else fail('MUTATION a later migration disables the CREATE TABLE hook — NOT caught');
+}
+mustCatch('the attach loop is block-commented out', loopFile, (s) => s.replace(/(for t in\s+select tablename from pg_tables[\s\S]*?end loop;)/, '/* $1 */'));
 mustCatch('the CREATE TABLE hook is dropped', Object.keys(files).sort().find((f) => /create event trigger listing_price_diary_born_attached/.test(files[f]))!, (s) => s.replace("create event trigger listing_price_diary_born_attached on ddl_command_end", "-- removed"));
 mustCatch('the attach loses its lock_timeout', attachFile, (s) => s.replace(/(function public\.listing_price_diary_attach\(p_table text\)[\s\S]*?)set lock_timeout to '5s'\n/, '$1'));
 mustCatch('the update WHEN clause stops watching active', attachFile, (s) => s.replace("'or old.active is distinct from new.active) '", "') '"));
