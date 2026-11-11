@@ -20,7 +20,7 @@
 // The database half (keep the tightest floor, refuse a floor after the day we first stored the ad, feed the search
 // index) is watched live by mon_detect_relative_posting_floor_unsafe(), migration 20261111233249.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -58,13 +58,16 @@ const EXACT: [string, string][] = [
   ['7 شهر', '2026-03-08T08:30:00+00:00'],           // younger than 8 × 31 days
   ['1 سنة', '2024-11-09T08:30:00+00:00'],           // younger than 2 × 366 days
   ['٣ ساعات', '2026-11-11T04:30:00+00:00'],         // Arabic-Indic digits; younger than 4 hours
+  ['أمس', '2026-11-09T08:30:00+00:00'],             // the calendar day before: younger than 2 days
+  ['اليوم', '2026-11-10T08:30:00+00:00'],           // younger than 1 day
+  ['الآن', '2026-11-11T07:30:00+00:00'],            // within the hour
 ];
 const exact = (src?: string) => py('floors', [EXACT.map(([t]) => t)], src) as (string | null)[];
 const got = exact();
 EXACT.forEach(([text, want], i) => check(`«${text}» → posted no earlier than ${want}`, got[i] === want, `got ${got[i]}`));
 
 // ── 3. not a plain count → unknown ──────────────────────────────────────────────────────────────────────────────
-const UNKNOWN = ['آخر تحديث منذ 3 أيام', '2026-11-01', '3 يومين', 'منذ فترة', 'قليل', '', '4 سنة تقريبا'];
+const UNKNOWN = ['آخر تحديث منذ 3 أيام', '2026-11-01', '3 يومين', 'منذ فترة', 'قليل', '', '4 سنة تقريبا', '2 أمس'];
 const unknown = (src?: string) => (py('floors', [UNKNOWN], src) as (string | null)[]);
 const u = unknown();
 UNKNOWN.forEach((text, i) => check(`«${text}» stays unknown (no floor)`, u[i] === null, `got ${u[i]}`));
@@ -80,6 +83,31 @@ check('ialqarawi never writes the floor into date_added (the card prints that as
 const blank = mapped(null);
 check('ialqarawi with no «مضاف منذ» writes no floor', blank.mapped && blank.floor == null, JSON.stringify(blank));
 
+// ── 4b. only a site PROVEN to print its ad's real age may turn «منذ …» into a floor ─────────────────────────────────
+// Discovered by shape: every scraper that calls posted_no_earlier_than(). Enrolled ⇔ calls it; a waived site never does.
+const callers = (src?: string) => readdirSync(join(ROOT, 'scrapers'), { withFileTypes: true })
+  .filter((d) => d.isDirectory() && d.name !== 'common')
+  .filter((d) => {
+    const dir = join(ROOT, 'scrapers', d.name);
+    return readdirSync(dir).filter((f) => f.endsWith('.py')).some((f) =>
+      (d.name === 'ialqarawi' && f === 'run.py' && src !== undefined ? src : readFileSync(join(dir, f), 'utf8'))
+        .includes('posted_no_earlier_than('));
+  }).map((d) => d.name).sort();
+const registryOk = (reg: any, who: string[]) => {
+  const problems: string[] = [];
+  for (const site of who) if (!reg.enrolled.includes(site)) problems.push(`${site} reads «منذ …» but is not proven (AGO_COUNT_IS_REAL_AGE)`);
+  for (const site of reg.enrolled) if (!who.includes(site)) problems.push(`${site} is enrolled but its scraper never writes a floor`);
+  for (const site of reg.waived) if (reg.enrolled.includes(site)) problems.push(`${site} is both proven and waived`);
+  for (const site of reg.enrolled.concat(reg.waived)) if (!existsSync(join(ROOT, 'scrapers', site))) problems.push(`${site} has no scraper`);
+  if (!reg.reasons_present) problems.push('an entry has no reason');
+  return problems;
+};
+const reg = py('registry', []);
+const who = callers();
+const regProblems = registryOk(reg, who);
+check(`every scraper that turns «منذ …» into a floor is a PROVEN site (${who.join(', ')})`, regProblems.length === 0, regProblems.join('; '));
+check('aqaratikom («منذ» is a refresh time there) is waived and writes no floor', reg.waived.includes('aqaratikom') && !who.includes('aqaratikom'));
+
 // ── 5. planted mistakes are caught ──────────────────────────────────────────────────────────────────────────────
 const mustCatch = (name: string, caught: boolean) => check(`(mutation) catches ${name}`, caught);
 const H = (find: string, repl: string) => mutate(HELPER, find, repl);
@@ -91,11 +119,15 @@ mustCatch('the read-to-write margin dropped', exact(H('_AGO_MARGIN = timedelta(h
 mustCatch('a «last updated» phrase read as a posting count',
   unknown(H('(?:مضاف|أضيف|اضيف|منذ|قبل)', '(?:مضاف|أضيف|اضيف|منذ|قبل|آخر|تحديث)'))[0] !== null);
 mustCatch('a number in front of a dual accepted («3 يومين»)',
-  unknown(H('    if m.group(1) is not None and alone == 2:\n        return None', '    if False:\n        return None'))[2] !== null);
+  unknown(H('    if m.group(1) is not None and m.group(2) in _AGO_NO_NUMBER:\n        return None', '    if False:\n        return None'))[2] !== null);
+mustCatch('«أمس» read as within one day', exact(H('*[(w, "day", 1) for w in ("أمس", "امس", "البارحة")]', '*[(w, "day", 0) for w in ("أمس", "امس", "البارحة")]'))[6] !== EXACT[6][1]);
 const M = (find: string, repl: string) => mutate(MAPPER, find, repl);
 const FLOOR_LINE = '        row["posted_earliest_at"] = floor';
 mustCatch('the mapper writing the floor into date_added', mapped('23 يوم', M(FLOOR_LINE, '        row["date_added"] = floor')).date_added != null);
 mustCatch('the mapper dropping the floor', mapped('23 يوم', M(FLOOR_LINE, '        pass')).floor == null);
+
+mustCatch('ialqarawi dropped from the proven list', registryOk(py('registry', [], H('    "ialqarawi": "2026-11-11:', '    "ialqarawi_x": "2026-11-11:')), who).length > 0);
+mustCatch('a waived site enrolled as well', registryOk(py('registry', [], H('AGO_COUNT_IS_REAL_AGE = {\n', 'AGO_COUNT_IS_REAL_AGE = {\n    "aqaratikom": "planted: a refresh time read as a posting age",\n')), who).length > 0);
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log('\n«منذ …» becomes a floor that never makes an ad look newer: OK');

@@ -93,8 +93,26 @@ _AGO_WORDS = [  # (word, unit, count it means on its own: 1, or 2 for the Arabic
     *[(w, "month", 1) for w in ("شهر", "شهرا", "شهراً", "أشهر", "اشهر", "شهور")], ("شهرين", "month", 2),
     *[(w, "year", 1) for w in ("سنة", "سنه", "سنوات", "سنين", "عام", "عاما", "عاماً", "أعوام", "اعوام")],
     *[(w, "year", 2) for w in ("سنتين", "عامين")],
+    # Words that ARE the count. «أمس» is the calendar day before: younger than 2 days. «اليوم»: younger than 1 day.
+    # «الآن» is taken as within the hour — sites say it for anything from seconds to an hour.
+    *[(w, "day", 1) for w in ("أمس", "امس", "البارحة")], ("اليوم", "day", 0),
+    *[(w, "hour", 0) for w in ("الآن", "الان")],
 ]
 _AGO_WORD = {w: (u, c) for w, u, c in _AGO_WORDS}
+# A dual or a word that is itself the count never takes a number in front: «3 يومين», «2 أمس» are unreadable.
+_AGO_NO_NUMBER = {w for w, _u, c in _AGO_WORDS if c != 1} | {"أمس", "امس", "البارحة"}
+
+# SITES WHOSE «منذ …» COUNT IS PROVEN TO BE THE AD'S REAL AGE — the only ones allowed to call posted_no_earlier_than().
+# Proof = the count matched the time we first stored each ad, with no reset when the seller re-posts. A site that
+# prints «منذ …» but fails that proof is named in AGO_TEXT_NOT_A_POSTING_AGE with its reason, and stays undated.
+# scripts/verify-relative-posting-date-is-a-floor.ts fails on a scraper that reads «منذ …» without being in one list.
+AGO_COUNT_IS_REAL_AGE = {
+    "ialqarawi": "2026-11-11: every ad saying «N يوم» was first stored by us exactly N days earlier (2,629 ads), "
+                 "no count ever ran below the days we had known the ad",
+}
+AGO_TEXT_NOT_A_POSTING_AGE = {
+    "aqaratikom": "2026-11-09: API accepted_at «٩ ساعات» on an ad first seen 40 days earlier — a refresh time",
+}
 _AGO_PREFIX = re.compile(r"^(?:(?:مضاف|أضيف|اضيف|منذ|قبل)\s+)*")
 _AGO_TEXT = re.compile(r"(?:(\d{1,3})\s+)?(\S+)", re.ASCII)
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
@@ -110,7 +128,7 @@ def ago_age_range(raw: Any) -> Optional[tuple[timedelta, timedelta]]:
     if not m or m.group(2) not in _AGO_WORD:
         return None
     unit, alone = _AGO_WORD[m.group(2)]
-    if m.group(1) is not None and alone == 2:
+    if m.group(1) is not None and m.group(2) in _AGO_NO_NUMBER:
         return None                       # «3 يومين» is not a count anyone writes: unreadable, never a guess
     n = int(m.group(1)) if m.group(1) is not None else alone
     day = _AGO_UNIT_DAYS[unit]

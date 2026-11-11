@@ -42,8 +42,12 @@ def _site_texts(age):
     d = age / timedelta(days=1)
     h = age / timedelta(hours=1)
     out = []
+    if h < 1:
+        out += ["الآن"]
     if d < 1:
-        out += [f"{int(h)} ساعة", f"منذ {int(h)} ساعات"]
+        out += [f"{int(h)} ساعة", f"منذ {int(h)} ساعات", "اليوم"]
+    if d < 2:
+        out += ["أمس"]   # the calendar day before: anything from a minute (23:59 → 00:00) to just under 2 days
     if d < 30:
         out += [f"{int(d)} يوم", f"مضاف منذ {int(d)} يوم", f"{round(d)} يوم" if round(d) < 30 else None]
     if 30 <= d < 400:
@@ -57,7 +61,8 @@ def _site_texts(age):
 
 def sweep(mutated_source=None):
     pd = _module("scrapers.common.posting_date", mutated_source)
-    ages = ([timedelta(hours=h) for h in range(1, 72)]
+    ages = ([timedelta(minutes=m) for m in range(1, 60, 4)]
+            + [timedelta(hours=h) for h in range(1, 72)]
             + [timedelta(hours=6 * i) for i in range(12, 1700)]
             + [timedelta(days=d) for d in range(420, 3700)])
     bad, read = [], 0
@@ -71,6 +76,13 @@ def sweep(mutated_source=None):
             if datetime.fromisoformat(floor) > posted:
                 bad.append({"text": text, "true_age_days": round(age / timedelta(days=1), 2), "floor": floor})
     return {"read": read, "bad": bad[:5], "bad_count": len(bad)}
+
+
+def registry(mutated_source=None):
+    pd = _module("scrapers.common.posting_date", mutated_source)
+    return {"enrolled": sorted(pd.AGO_COUNT_IS_REAL_AGE), "waived": sorted(pd.AGO_TEXT_NOT_A_POSTING_AGE),
+            "reasons_present": all(isinstance(v, str) and len(v) > 20
+                                   for v in {**pd.AGO_COUNT_IS_REAL_AGE, **pd.AGO_TEXT_NOT_A_POSTING_AGE}.values())}
 
 
 def floors(texts, mutated_source=None):
