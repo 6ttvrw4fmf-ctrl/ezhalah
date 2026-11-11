@@ -1766,6 +1766,8 @@ new detector needing a longer history must raise the retention in the same chang
   for its result (an Advanced Filter round's receipt comes off when its search threw or was stopped, so the buttons
   return); and a failure line in the chat is written in THAT TURN's language, not the interface's.
 
+**No Arabic diacritics (حركات) in what we write (owner, 2026-11-11: «we can never have 7arakat»).** New and edited Arabic UI copy is written without تشكيل (no ً ٌ ٍ َ ُ ِ ّ ْ). Applied first to the «كيف نحسبها؟» popup and the «نماذج إزهله» card (حر, نموذج, قريبا…), both guarded by `scripts/verify-insight-welcome.ts`; older strings elsewhere are cleaned as they are touched.
+
 ---
 
 ## 21. Open questions / decisions still pending
