@@ -56,6 +56,7 @@ from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
 from scrapers.common.http_liveness import LivenessProbe
 from scrapers.common.posting_date import site_posting_date
+from scrapers.common.type_from_title import canonical_type_from_title
 
 REST = "https://amlakalahsa.com/wp-json/wp/v2"
 SITE = "https://amlakalahsa.com"
@@ -138,6 +139,32 @@ def fetch_images(s: cc.Session, posts: list[dict]) -> dict[int, list[str]]:
 
 _DEAL_MAP = {"للبيع": "Buy", "للإيجار": "Rent", "للايجار": "Rent"}
 
+# THE TYPE BOX CAN DISAGREE WITH THE AD'S OWN SECTION (2026-11-11, 🦅 followup 3537). The office picks «pw-typ»
+# from a dropdown; the WordPress post TYPE is the section the ad is filed under (/land/, /home/ …). Measured live:
+# 4 of 4 rows we stored as Apartment were /land/ posts with pw-typ «شقة» whose own titles say «للبيع ارض …»
+# (AMH19924 parcel 92, street 15 m), and /home/ AMH19584 «للبيع دبلكس مودرن …» carried pw-typ «ارض». When the box
+# names a type OUTSIDE the section, the office's own title breaks the tie, and only if the title's type is inside
+# the section; otherwise the box stands (never a guess). The raw box value stays in source_capture.
+_SECTION_TYPES = {
+    "land": {"Residential Land", "Commercial Land", "Land", "Agricultural Land"},
+    "home": {"Villa", "Duplex", "House", "تاون هاوس", "Floor", "Apartment", "Studio", "Building"},
+    "farm": {"Farm"},
+    "shop": {"Shop", "Showroom"},
+    "building": {"Building", "Residential Building", "Commercial Building"},
+    "apartment": {"Apartment", "Studio"},
+}
+# category_for_type() predates Duplex/Studio/House as clean types and files them Commercial; they are homes.
+_HOMES = {"Duplex", "Studio", "House"}
+
+
+def _type_for_section(box_type: Optional[str], section: Optional[str], title: Optional[str]) -> Optional[str]:
+    """pw-typ's type, unless it falls outside the post's own section and the title names one inside it."""
+    family = _SECTION_TYPES.get(section or "")
+    if not box_type or not family or box_type in family:
+        return box_type
+    title_type = canonical_type_from_title(title)
+    return title_type if title_type in family else box_type
+
 
 def _canonical_deal(deal: str) -> str:
     """Pass-through for the `deal` computed via `_DEAL_MAP.get()` above. map_listing() already
@@ -218,6 +245,8 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     property_type = normalize.map_type_exact(acf.get("pw-typ"))
     if not property_type:
         return None, "residential"  # an unmapped raw type is never guessed at
+    property_type = _type_for_section(property_type, post.get("type"),
+                                      ihtml.unescape((post.get("title") or {}).get("rendered") or ""))
 
     deal = _DEAL_MAP.get((acf.get("pw-cnt") or "").strip())
     if not deal:
@@ -378,7 +407,8 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # ACF, so parsing this free text for the same facts would only add fabrication risk, not new data.
     description = _redact(_clean((post.get("content") or {}).get("rendered", ""))) or None
 
-    category = "Residential" if normalize.category_for_type(property_type) == "Residential" else "Commercial"
+    category = ("Residential" if property_type in _HOMES or normalize.category_for_type(property_type) == "Residential"
+                else "Commercial")
 
     row = {
         "ad_number": f"AMH{pid}",
