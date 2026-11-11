@@ -36,7 +36,8 @@
 //       LAPTOP_ROBOT_DIST=/path/to/dist node scripts/verify-web-laptop-nothing-cut-or-covered.mjs
 //       LAPTOP_ROBOT_ONLY=cover|money   one part only (local use)      LAPTOP_ROBOT_SHOTS=/dir   save a picture per state
 // Kept out of `npm test` (a real browser): it runs in .github/workflows/web-runtime-smoke.yml on every PR.
-import './lib/robotPass.mjs'; // robot pass for our own browser robots (docs/ops/SCRAPE_GUARD.md)
+import { robotPassHeaders } from './lib/robotPass.mjs'; // robot pass for our own browser robots (docs/ops/SCRAPE_GUARD.md)
+import { gateHeaders } from './lib/gateFetch.mjs';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -459,10 +460,25 @@ async function answerMinistryReads(ctx) {
 // show the site itself, with no ministry table. The results rotate, so the FIRST card is a different site every run:
 // PR #11751's CI clicked twelve cards of framed sites and never saw an ad page («reads seen: none»). Read the list from
 // the app's own source and click a card whose site label is on it.
-export const PREVIEW_HOSTS = (() => {
+const PREVIEW_HOSTS_EXACT = (() => {
   const m = readFileSync(join(import.meta.dirname, '..', 'src', 'lib', 'inAppViewer.ts'), 'utf8').match(/IN_APP_PREVIEW_HOSTS = \[([\s\S]*?)\]/);
-  return m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1].replace(/^sa\./, '')) : [];
+  return m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : [];
 })();
+export const PREVIEW_HOSTS = PREVIEW_HOSTS_EXACT.map((h) => h.replace(/^sa\./, ''));
+// A card's own link, learned from the rows the app downloads to build the cards (id + listing_url, src/data/remote.ts
+// LIST_SELECT) — the card's painted site label is not always there (PR #11754's CI: «no result card from a site that
+// opens as Ezhalah's own ad page» while the live site shows nofodh.sa / sa.sakan.co in the top four).
+const cardLink = new Map();
+function learnCardLinks(page) {
+  page.on('response', async (res) => {
+    if (!/\/rest\/v1\//.test(res.url()) || res.request().method() !== 'GET') return;
+    try {
+      const rows = await res.json();
+      if (Array.isArray(rows)) for (const r of rows) if (r && r.id != null && typeof r.listing_url === 'string') cardLink.set(String(r.id), r.listing_url);
+    } catch { /* not JSON, or the body is gone: nothing learned */ }
+  });
+}
+const opensOwnPage = (url) => { try { return PREVIEW_HOSTS_EXACT.includes(new URL(url).hostname.toLowerCase().replace(/^www\./, '')); } catch { return false; } };
 check("the robot knows which sites open as Ezhalah's own ad page (read from src/lib/inAppViewer.ts)", PREVIEW_HOSTS.includes('aqar.fm') && PREVIEW_HOSTS.length >= 10, `read ${PREVIEW_HOSTS.length}`);
 async function openDealsSheet(page) {
   const up = (sel) => page.locator(sel).first().isVisible().catch(() => false);
@@ -470,8 +486,10 @@ async function openDealsSheet(page) {
   if (!(await up('[data-testid="listing-preview"]'))) {
     let tried = 0;
     for (const card of (await page.$$('[data-testid^="card-listing-"]')).slice(0, 60)) {
+      const id = ((await card.getAttribute('data-testid').catch(() => '')) || '').replace('card-listing-', '');
+      const link = cardLink.get(id);
       const label = (await card.innerText().catch(() => '')).toLowerCase();
-      if (!PREVIEW_HOSTS.some((h) => label.includes(h))) continue;
+      if (!(link ? opensOwnPage(link) : PREVIEW_HOSTS.some((h) => label.includes(h)))) continue;
       const gold = await card.$('[data-testid="card-open-gold"]');
       if (!gold) continue;
       tried++;
@@ -480,7 +498,7 @@ async function openDealsSheet(page) {
       if (await page.waitForSelector('[data-testid="listing-preview"]', { state: 'visible', timeout: 3000 }).catch(() => null)) break;
       if (tried >= 6) break;
     }
-    if (!tried) ministryLog.push("no result card from a site that opens as Ezhalah's own ad page");
+    if (!tried) ministryLog.push(`no result card from a site that opens as Ezhalah's own ad page (marked card: ${ownPageCard ?? 'none'}) (links known for ${cardLink.size} card(s): ${[...new Set([...cardLink.values()].map((u) => { try { return new URL(u).hostname; } catch { return '?'; } }))].slice(0, 10).join(', ')})`);
   }
   const button = page.locator('[data-testid="listing-preview-moj-deals"]').first();
   if (!(await button.waitFor({ state: 'visible', timeout: 20000 }).then(() => true, () => false))) return false;
@@ -489,8 +507,34 @@ async function openDealsSheet(page) {
   return !!(await page.waitForSelector(DEALS_SHEET, { state: 'visible', timeout: 6000 }).catch(() => null));
 }
 // One real search, the way a visitor does it: type the city, pick it, press «بحث».
+// ONE CARD THAT OPENS AS EZHALAH'S OWN AD PAGE, EVERY RUN. Which sites the first result cards come from rotates, so a
+// robot that waits for one by chance is flaky (PRs #11751/#11753/#11754, 2026-11-11: «no result card from a site that
+// opens as Ezhalah's own ad page» on some CI runs, a pass on others). The first row of the first card read keeps its
+// real data and only its link is pointed at sa.aqar.fm — an IN_APP_PREVIEW_HOSTS site — the same kind of stand-in as
+// the ad row relabelled above. The read itself is sent with the robot pass (route.fetch skips the pass's own route).
+let ownPageCard = null;
+async function markOneOwnPageCard(ctx) {
+  await ctx.route((url) => /\/rest\/v1\/[a-z0-9_]+_listings$/.test(url.pathname), async (route) => {
+    const req = route.request();
+    const sel = new URL(req.url()).searchParams.get('select') || '';
+    if (ownPageCard || req.method() !== 'GET' || !sel.startsWith('id,ad_number,listing_url')) return route.fallback();
+    try {
+      const secret = process.env.EZ_GATE_SECRET || '';
+      const headers = robotPassHeaders(req.url(), req.headers(), secret) ?? { ...req.headers(), ...(gateHeaders(req.url(), secret) || {}) };
+      const response = await route.fetch({ headers });
+      const rows = await response.json();
+      if (Array.isArray(rows) && rows.length && rows[0]?.id != null) {
+        ownPageCard = String(rows[0].id);
+        rows[0] = { ...rows[0], listing_url: `https://sa.aqar.fm/robot-own-page-${rows[0].id}` };
+      }
+      await route.fulfill({ response, json: rows });
+    } catch { await route.fallback().catch(() => {}); }
+  });
+}
 async function searchRiyadh() {
   const { ctx, page } = await visitor(1366, 700);
+  learnCardLinks(page);
+  await markOneOwnPageCard(ctx);
   try {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForSelector('[data-testid="city-input"]', { timeout: 30000 });
