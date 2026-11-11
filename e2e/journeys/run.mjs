@@ -2496,22 +2496,47 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   // intercepted target, so a tab that actually switches is proof the control was reachable — the
   // half a rect comparison can never give. Run whether or not an overlay showed: it is the same
   // journey a person makes, and it costs two clicks.
+  //
+  // MEASURED, NOT SLEPT (2026-11-10, WebKit sweeps 42789448147 / 42815563644). The tab press used to look for the label
+  // the instant settle() returned and to read the URL after a fixed 1.5 s. On WebKit it failed in 3-4 of 8 runs as
+  // «الوسيط الذكي is not present» or «landed=true, url=/» with no click ever intercepted — and nothing recorded whether the
+  // tab was slow, missing, or covered, so the finding could not be acted on. This journey asks REACHABLE (speed has its
+  // own robot, scripts/verify-web-tab-switch-speed.mjs, on every PR): each tab gets TAB_WAIT_MS to appear and its tap
+  // TAB_WAIT_MS to switch the screen, both times are printed, and a failure carries what the screen showed — so «slow»,
+  // «never there» and «a Cloudflare check on screen» read differently.
+  const TAB_WAIT_MS = 15_000;
+  const screenNow = () => page.evaluate(() => ({
+    path: location.pathname,
+    text: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 120),
+    challenge: !!document.querySelector('iframe[src*="challenges.cloudflare.com"]'),
+  })).catch((e) => ({ path: '?', text: `unreadable: ${String(e).slice(0, 60)}`, challenge: null }));
+  const pressTab = async (label, toAgentScreen) => {
+    const t0 = Date.now();
+    const shown = await page.getByText(label, { exact: true }).first()
+      .waitFor({ state: 'visible', timeout: TAB_WAIT_MS }).then(() => true, () => false);
+    const appearMs = Date.now() - t0;
+    if (!shown) return { ok: false, appearMs, switchMs: null, why: `«${label}» never appeared in ${TAB_WAIT_MS} ms`, screen: await screenNow() };
+    const landed = await clickText(page, label);
+    if (!landed) return { ok: false, appearMs, switchMs: null, why: clickReason() || 'the tap did not land', screen: await screenNow() };
+    const t1 = Date.now();
+    const switched = await page.waitForFunction((agent) => location.pathname.startsWith('/agent') === agent,
+      toAgentScreen, { timeout: TAB_WAIT_MS }).then(() => true, () => false);
+    const switchMs = Date.now() - t1;
+    return { ok: switched, appearMs, switchMs: switched ? switchMs : null,
+      why: switched ? '' : `the tap landed but the screen did not change in ${TAB_WAIT_MS} ms`, screen: await screenNow() };
+  };
+  const told = (r) => `appeared ${r.appearMs} ms, switched ${r.switchMs ?? '—'} ms`
+    + (r.ok ? '' : `; ${r.why}; screen ${JSON.stringify(r.screen)}`);
   await gotoOrRetryTransport(page, BASE + '/');
   await settle(page);
-  const toAgent = await clickText(page, 'الوسيط الذكي');
-  await sleep(1500);
-  const onAgent = page.url().includes('/agent');
-  const back = onAgent ? await clickText(page, 'تصفية') : false;
-  await sleep(1500);
-  const home = page.url();
-  if (!toAgent || !onAgent) {
-    defect(name, 'a primary tab could not be pressed while the auth surface was live',
-      `«الوسيط الذكي» click landed=${toAgent}, url=${page.url()} (${clickReason() || 'no reason recorded'})`);
-  } else if (!back || home.includes('/agent')) {
-    defect(name, 'the return tab could not be pressed while the auth surface was live',
-      `«تصفية» click landed=${back}, url=${home} (${clickReason() || 'no reason recorded'})`);
+  const go = await pressTab('الوسيط الذكي', true);
+  const ret = go.ok ? await pressTab('تصفية', false) : null;
+  if (!go.ok) {
+    defect(name, 'a primary tab could not be pressed while the auth surface was live', `«الوسيط الذكي» ${told(go)}`);
+  } else if (!ret.ok) {
+    defect(name, 'the return tab could not be pressed while the auth surface was live', `«تصفية» ${told(ret)}`);
   } else {
-    pass(name, 'both primary tabs were pressed and both navigated — the controls are genuinely reachable');
+    pass(name, `both primary tabs were pressed and both navigated — the controls are genuinely reachable («الوسيط الذكي» ${told(go)}; «تصفية» ${told(ret)})`);
   }
 
   if (!sawOverlay) {
