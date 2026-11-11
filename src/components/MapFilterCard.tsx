@@ -72,7 +72,7 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
           {/* Physical order: in Arabic the page is RTL and a plain row would put the X on the LEFT (measured live
               2026-11-10: 16 px from the left edge). row-reverse under RTL keeps it top RIGHT (owner 2026-11-10). */}
           <View style={[s.head, { flexDirection: isRTL ? 'row-reverse' : 'row' }, phone && { paddingTop: 12 + insets.top }]}>
-            <Text style={s.title} testID="map-filter-title">{phone && count !== null ? t('{n} results', { n: count.toLocaleString('en-US') }) : t('Filter')}</Text>
+            <Text style={s.title} testID="map-filter-title">{t('Filter')}</Text>
             <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-filter-close" style={s.close}>
               <Ionicons name="close" size={22} color={colors.ink} />
             </Pressable>
@@ -149,7 +149,8 @@ export default function MapFilterCard({ value, onApply, onClose, countPins, deal
                 <Text style={[s.resetT, !isNarrowed(f) && { color: colors.muted }]}>{t('Clear all')}</Text>
               </Pressable>
               <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
-                <Text style={s.applyT}>{t('Show listings')}</Text>
+                {/* The count lives in the button (owner 2026-11-11, Zillow's «See 201 rentals»), the title says «تصفية». */}
+                <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
               </Pressable>
             </View>
           ) : (

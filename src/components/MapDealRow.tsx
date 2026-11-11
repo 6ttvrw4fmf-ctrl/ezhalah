@@ -166,7 +166,7 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
   );
 }
 
-export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filterOn = false }: { deals?: MapDeal[]; onDeals?: (d: MapDeal[]) => void; onFilter?: () => void; filterOn?: boolean } = {}) {
+export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filterOn = false, filterCount = 0 }: { deals?: MapDeal[]; onDeals?: (d: MapDeal[]) => void; onFilter?: () => void; filterOn?: boolean; filterCount?: number } = {}) {
   const { t, isRTL } = useI18n();
   // THE DEAL BUTTON DRIVES THE PINS (owner 2026-11-02: «when the user clicks buy or rent or short stays he sees the
   // option»): the choice lives in the map screen when it passes `deals`, so the pin layer reads the same state.
@@ -209,6 +209,8 @@ export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filter
       >
         <Ionicons name="options-outline" size={17} color={filterOn ? colors.primary : colors.ink} />
         <Text style={[s.btnText, filterOn && s.btnTextActive]}>{t('Filter')}</Text>
+        {/* How many choices are picked (owner 2026-11-11, Zillow's «Filters ①»). */}
+        {filterCount > 0 ? <View style={s.countDot} testID="map-filter-count"><Text style={s.countDotT}>{filterCount}</Text></View> : null}
         <Ionicons name="chevron-down" size={15} color={filterOn ? colors.primary : colors.ink} />
       </Pressable>
 
@@ -288,6 +290,8 @@ const s = StyleSheet.create({
   btnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
   btnText: { fontSize: 14, fontWeight: '700', color: colors.ink, includeFontPadding: false },
   btnTextActive: { color: colors.primary },
+  countDot: { minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  countDotT: { fontSize: 12, fontWeight: '700', color: colors.surface, includeFontPadding: false },
   // CENTERED, a normal popup (owner 2026-10-31: «I don't like how it's not in the centre; a small popup, normal»).
   // Pinned to the WHOLE screen, not `flex: 1`: on iPhone Safari the modal wrapper does not stretch, so a flex child
   // collapsed to its content and the card sat at the top (owner 2026-10-31: «on the phone it doesn't pop up in the

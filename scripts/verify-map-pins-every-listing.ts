@@ -206,9 +206,15 @@ mustCatch('groups shown before a category (both lists mixed)', !groupsRx.test(ca
 // Owner 2026-11-09 (Zillow's mobile filter): on a phone the filter is FULL SCREEN, the live count is the title, and a
 // fixed bottom bar carries «مسح الكل» + «عرض الإعلانات». A wider screen keeps the centered card.
 const fullRx = /const phone = useWindowDimensions\(\)\.width < PHONE_MAX;/;
-check('on a phone the map filter is full screen with the live count on top and a Clear / Show bar at the bottom',
-  fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /phone && count !== null \? t\('\{n\} results'/.test(cardSrc)
+check('on a phone the map filter is full screen, titled «تصفية», with a Clear / «Show N listings» bar at the bottom (owner 2026-11-11: the count lives in the button, like Zillow)',
+  fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /testID=\"map-filter-title\">\{t\('Filter'\)\}/.test(cardSrc) && (cardSrc.match(/count === null \? t\('Show listings'\) : t\('Show \{n\} listings'/g) ?? []).length === 2
   && /testID="map-filter-clear"/.test(cardSrc) && /export const PHONE_MAX = 768;/.test(cardSrc));
+const filterCountSrc = readFileSync(join(root, 'src/lib/mapFilter.ts'), 'utf8');
+const mf = await import('../src/lib/mapFilter.ts');
+check('the map Filter button shows how many choices are picked', mf.filterCount({ category: 'Residential', groups: ['Villas & Houses'], types: ['Villa'], beds: ['3', '4'], furnished: null, areaMin: '200', areaMax: '', priceMin: '', priceMax: '900000' }) === 7
+  && mf.filterCount({ category: null, groups: [], types: [], beds: [], furnished: null, areaMin: '', areaMax: '', priceMin: '', priceMax: '' }) === 0
+  && /testID="map-filter-count"/.test(readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8')) && /filterCount=\{filterCount\(mapFilter\)\}/.test(readFileSync(join(root, 'src/app/map.tsx'), 'utf8')) && /export const filterCount/.test(filterCountSrc));
+mustCatch('a phone filter button with no count (the old «Show listings» only)', !(cardSrc.replace(/count === null \? t\('Show listings'\) : t\('Show \{n\} listings', \{ n: count\.toLocaleString\('en-US'\) \}\)/, "t('Show listings')").match(/count === null \? t\('Show listings'\) : t\('Show \{n\} listings'/g)?.length === 2));
 mustCatch('a phone filter that is still the small centered card', !/phone && s\.cardFull/.test(cardSrc.replace('phone && s.cardFull', 'false && s.cardFull')));
 // Owner 2026-11-09: the «نوع الصفقة» popup is bigger, with «تطبيق» at the bottom. Ticks edit a DRAFT; only Apply
 // hands them to the map (so the pins show exactly what was applied); X / a tap outside leaves the map as it was.
