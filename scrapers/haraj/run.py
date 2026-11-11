@@ -121,6 +121,28 @@ def category_of(ptype: str, usage: Optional[str]) -> str:
 _PER_M_WORDS = re.compile(r"(?:سعر\s*(?:ال)?متر|للمتر|المتر\s*(?:ب|=|:)|ريال\s*(?:لل|/)\s*متر|/\s*م2|للم2)")
 _NUMS = re.compile(r"\d[\d,٬.]*")
 
+# A FIGURE THE AD PRINTS AS SOMETHING ELSE IS NOT THE SELLER STATING A PRICE (2026-11-11, owner launch audit «we can
+# get sued»). 24 haraj plots under their city's price floor were served as TOTALS of 2 to 2,800 SAR because the
+# licence figure also appeared in the text as something that is not a price: the AREA («المساحة: 300 متر», «مساحة
+# 2,800 م2» → 300 / 2,800 on a plot of that size), a PLOT or PLAN number («قطعة رقم 341», «قطعة: 1481»), the
+# ownership share («نسبة التملك: 100%»), the post's age («قبل 3 ساعات») or the 2 of «م2». Every one counted as
+# «mentioned» and the ladder answered «total». A mention now counts only when the figure is not printed as one of
+# those — and a price word right before it («السعر 1,400», «السوم 850», «المطلوب: 400,000») always keeps it a price.
+_THE_METRE_AFTER = re.compile(r"\s*المتر(?![\u0621-\u064A])")
+_PRICE_BEFORE = re.compile(r"(?:سعر|السعر|سوم|السوم|المطلوب|مطلوب|البيع|بسعر|بمبلغ|ريال)\s*[:：\-/]?\s*$")
+_OTHER_BEFORE = re.compile(r"(?:مساح\S*|قطع\S*|رقم|مخطط|بلك|بطول|طول|عرض|شارع|نسبة|بنسبة|قبل|حد)\s*[:：\-/|]?\s*(?:رقم\s*)?$")
+_OTHER_AFTER = re.compile(r"^\s*(?:%|٪|م\s*[2²٢]|م(?![\u0621-\u064A])|(?:ال)?متر|sqm|ساع|يوم|أيام|ايام|دقيق)")
+
+
+def _printed_as_something_else(t: str, m: "re.Match[str]") -> bool:
+    """True when this mention of the figure is an area, a plot / plan / street number, a share or an age."""
+    before, after = t[max(0, m.start() - 24): m.start()], t[m.end(): m.end() + 12]
+    if _PRICE_BEFORE.search(before):
+        return False
+    if before.endswith("م") and m.group(0) in ("2", "٢"):        # the 2 of «م2»
+        return True
+    return bool(_OTHER_BEFORE.search(before) or _OTHER_AFTER.search(after))
+
 
 def land_price_basis(price: int, area: Optional[float], text: str) -> Optional[str]:
     # EVERY mention of the figure is read, not only the first, and the shared reader decides too (2026-10-18:
@@ -129,10 +151,12 @@ def land_price_basis(price: int, area: Optional[float], text: str) -> Optional[s
     t = (text or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
     mentioned = False
     for m in _NUMS.finditer(t):
-        if N.to_int(m.group(0)) != price:
+        if N.to_int(m.group(0)) != price or _printed_as_something_else(t, m):
             continue
         mentioned = True
-        if _PER_M_WORDS.search(t[max(0, m.start() - 30): m.end() + 15]):
+        # «البيع : 7000 المتر» — the figure followed by «المتر» is the metre price (haraj 11188227166, 680 m² in حي
+        # العارض, was served as a 7,000 SAR total). A bare «متر» after a figure is an area and never reaches here.
+        if _PER_M_WORDS.search(t[max(0, m.start() - 30): m.end() + 15]) or _THE_METRE_AFTER.match(t, m.end()):
             return "per_meter"
     if N.stated_per_metre(t, price):
         return "per_meter"
