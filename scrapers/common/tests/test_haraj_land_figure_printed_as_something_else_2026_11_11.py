@@ -53,7 +53,15 @@ STAYS_A_TOTAL = [
     (1600, 300, "رقم القطعة 3215 رقم مخطط 3930 مساحة 300 الواجهة جنوبية شارع 20 البيع 1600"),   # 22868665: «البيع 1600»
     (2150, 700, "📐 المساحة 700م2 💰 السعر 2,150 ريال/ فقط"),                         # 18777649: «السعر 2,150»
     (1400, 800, "▪ المساحة 800 م ▪ شارع عرض 40 💵 السعر 1,400 ▪ مع المباشر"),         # a price word wins over a near area
+    (1400, 800, "أرض للبيع المساحة 800 م عرض 1400 ريال"),                            # «عرض» = an offer when riyals follow
+    (1400, 800, "أرض للبيع المساحة 800 م حد 1400 ريال"),                             # (CodeRabbit on #11747)
 ]
+
+
+def test_a_figure_in_thousands_is_neither_a_total_nor_a_metre_price():
+    # «السوم 565 الف» = 565,000: storing 565 as the total, or 565 × the area, would both invent a price
+    assert R.land_price_basis(565, 800, "مساحة 800 م شارع 30 السوم 565 الف") is None
+    assert R.land_price_basis(565, 800, "مساحة 800 م شارع 30 المطلوب 565 ألف ريال") is None
 
 
 @pytest.mark.parametrize("price,area,text", STAYS_A_TOTAL, ids=lambda x: str(x)[:24])
@@ -66,7 +74,8 @@ def test_the_metre_word_after_a_price_is_the_metre_price():
     assert R.land_price_basis(1100, 900, "المطلوب 1100 المتر") == "per_meter"
 
 
-@pytest.mark.parametrize("text", ["المساحة 300 متر", "مساحة 300م", "300 م2", "قطعة رقم 300", "نسبة 300%", "قبل 300 ساعة"])
+@pytest.mark.parametrize("text", ["المساحة 300 متر", "مساحة 300م", "300 م2", "قطعة رقم 300", "نسبة 300%", "قبل 300 ساعة",
+                                  "شارع عرض 300 متر", "حد 300 م"])
 def test_each_non_price_shape_alone_is_not_a_mention(text):
     # alone, a 300 on 300 m² has no stated basis: the ladder's magnitude rule decides (a figure no plot sells for)
     assert R.land_price_basis(300, 300, text) == "per_meter"

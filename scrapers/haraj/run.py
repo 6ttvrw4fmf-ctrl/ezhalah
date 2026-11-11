@@ -129,15 +129,20 @@ _NUMS = re.compile(r"\d[\d,٬.]*")
 # «mentioned» and the ladder answered «total». A mention now counts only when the figure is not printed as one of
 # those — and a price word right before it («السعر 1,400», «السوم 850», «المطلوب: 400,000») always keeps it a price.
 _THE_METRE_AFTER = re.compile(r"\s*المتر(?![\u0621-\u064A])")
-_PRICE_BEFORE = re.compile(r"(?:سعر|السعر|سوم|السوم|المطلوب|مطلوب|البيع|بسعر|بمبلغ|ريال)\s*[:：\-/]?\s*$")
-_OTHER_BEFORE = re.compile(r"(?:مساح\S*|قطع\S*|رقم|مخطط|بلك|بطول|طول|عرض|شارع|نسبة|بنسبة|قبل|حد)\s*[:：\-/|]?\s*(?:رقم\s*)?$")
+_PRICE_BEFORE = re.compile(r"(?:سعر|السعر|سوم|السوم|المطلوب|مطلوب|البيع|بسعر|بمبلغ|ريال)\s*[:\uff1a\-/]?\s*$")
+# A currency word right after the figure makes it a price whatever stands before it — «عرض 1400 ريال» is an offer of
+# 1,400, not a street width (CodeRabbit on #11747).
+_PRICE_AFTER = re.compile(r"\s*(?:ريال|ر\.?\s?س|SAR|\ufdfc)", re.I)
+# «565 الف» is 565 THOUSAND: the licence figure is then neither the total nor the metre price — unknown, never a guess.
+_THOUSANDS_AFTER = re.compile(r"\s*(?:الف|ألف|آلاف|الاف)(?![\u0621-\u064A])")
+_OTHER_BEFORE = re.compile(r"(?:مساح\S*|قطع\S*|رقم|مخطط|بلك|بطول|طول|عرض|شارع|نسبة|بنسبة|قبل|حد)\s*[:\uff1a\-/|]?\s*(?:رقم\s*)?$")
 _OTHER_AFTER = re.compile(r"^\s*(?:%|٪|م\s*[2²٢]|م(?![\u0621-\u064A])|(?:ال)?متر|sqm|ساع|يوم|أيام|ايام|دقيق)")
 
 
 def _printed_as_something_else(t: str, m: "re.Match[str]") -> bool:
     """True when this mention of the figure is an area, a plot / plan / street number, a share or an age."""
     before, after = t[max(0, m.start() - 24): m.start()], t[m.end(): m.end() + 12]
-    if _PRICE_BEFORE.search(before):
+    if _PRICE_BEFORE.search(before) or _PRICE_AFTER.match(t, m.end()):
         return False
     if before.endswith("م") and m.group(0) in ("2", "٢"):        # the 2 of «م2»
         return True
@@ -153,6 +158,8 @@ def land_price_basis(price: int, area: Optional[float], text: str) -> Optional[s
     for m in _NUMS.finditer(t):
         if N.to_int(m.group(0)) != price or _printed_as_something_else(t, m):
             continue
+        if _THOUSANDS_AFTER.match(t, m.end()):
+            return None
         mentioned = True
         # «البيع : 7000 المتر» — the figure followed by «المتر» is the metre price (haraj 11188227166, 680 m² in حي
         # العارض, was served as a 7,000 SAR total). A bare «متر» after a figure is an area and never reaches here.
