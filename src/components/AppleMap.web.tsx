@@ -990,7 +990,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
       // head would change (count, deal, price, cell size) is replaced.
-      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}|${r.shift ? r.shift.join(',') : ''}`;
+      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}|${r.price_max ?? ''}|${r.unpriced ?? ''}|${r.shift ? r.shift.join(',') : ''}`;
       const next = new Map<string, PinRow>(); for (const row of rows) next.set(keyOf(row), row);
       // The district markers join the same diff. A FAILED marker read keeps the markers already on the map (A FAILED
       // FETCH IS NOT AN EMPTY ANSWER: a marker that vanished after an error would read as «no such listings here»).

@@ -8,6 +8,8 @@ export type PinDeal = 'buy' | 'rent' | 'short' | 'mixed';
 export type PinRow = {
   lat: number; lng: number; n: number; deal: PinDeal; type_ar: string | null; platforms: number;
   ids: { t: string; i: number }[] | null; price: number | string | null; platform: string | null;
+  /** The spot's highest real price and how many of its ads show none (map_pins_ar, owner 2026-11-10). */
+  price_max?: number | string | null; unpriced?: number | null;
   /** Set on a DISTRICT MARKER (src/lib/mapNoPin.ts): these listings have no exact location and sit at the district's
    *  centre — the sheet titles them by district and prints no head price. */
   noPin?: { city: string; district: string };
@@ -62,16 +64,39 @@ export function shortMoney(value: number, loc: 'ar' | 'en'): string {
   return Math.round(v).toLocaleString('en-US');
 }
 
-/** THE HEAD OF THE PIN (owner: «always show the price … if it's merged … the number»): a shared spot shows its count;
- *  a Short-stays listing shows the pool's name (no price by rule); a priced listing its price, a rent per year;
- *  an unpriced listing «السعر عند الطلب», never a blank head. */
-export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform'>, loc: 'ar' | 'en'): string {
-  if (row.n > 1) return loc === 'ar' ? `${row.n} ${row.n === 2 ? 'إعلانان' : row.n <= 10 ? 'إعلانات' : 'إعلان'}` : `${row.n} listings`;
+/** A FIGURE THIS LOW IS A PLACEHOLDER, NOT A PRICE (owner 2026-11-10: «yeah ok do that»): on the pin a sale under
+ *  10,000 or a yearly rent under 1,000 reads as «السعر عند الطلب» — sites print 1 or 100 for «call me». Display only:
+ *  the card still shows the site's own figure. map_pins_ar applies the same floor. */
+export const PIN_PRICE_FLOOR = { buy: 10_000, rent: 1_000 } as const;
+export function pinPrice(v: number | string | null | undefined, deal: string | null | undefined): number | null {
+  const p = typeof v === 'string' ? Number(v) : v;
+  if (typeof p !== 'number' || !Number.isFinite(p) || p <= 0) return null;
+  return p >= (deal === 'rent' ? PIN_PRICE_FLOOR.rent : PIN_PRICE_FLOOR.buy) ? p : null;
+}
+
+/** THE PRICE RULE OF A PIN (owner 2026-11-10: «we don't say 2 instead we just put the price … lowest price wins …
+ *  price on request = price listed if there is»). Never a count:
+ *    · one price and nothing else at the spot          → «750 ألف»
+ *    · anything else there (another price, or an ad with no price) → «من 750 ألف» — the lowest real price
+ *    · no real price at all                            → «السعر عند الطلب»
+ *  A rent is per year («/سنة»). Every ad stays in the sheet, priced or not. */
+export function priceHead(min: number | null, max: number | null, unpriced: number, deal: string | null | undefined, loc: 'ar' | 'en'): string {
+  if (min === null) return loc === 'ar' ? 'السعر عند الطلب' : 'Price on request';
+  const money = shortMoney(min, loc) + (deal === 'rent' ? (loc === 'ar' ? '/سنة' : '/yr') : '');
+  const from = unpriced > 0 || (max !== null && max > min);
+  return from ? (loc === 'ar' ? `من ${money}` : `from ${money}`) : money;
+}
+
+/** THE HEAD OF THE PIN: a Short-stays spot shows the pool's name (no price by rule); every other spot its price by
+ *  priceHead(). Only a zoomed-out bubble mixing buy and rent (never an exact spot — map_pins_ar splits those by deal)
+ *  falls back to its count. */
+export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform' | 'price_max' | 'unpriced'>, loc: 'ar' | 'en'): string {
   if (row.deal === 'short' || isStayLengthPlatform(row.platform)) return loc === 'ar' ? 'إقامة قصيرة' : 'Short stay';
-  const p = typeof row.price === 'string' ? Number(row.price) : row.price;
-  if (typeof p !== 'number' || !Number.isFinite(p) || p <= 0) return loc === 'ar' ? 'السعر عند الطلب' : 'Price on request';
-  const money = shortMoney(p, loc);
-  return row.deal === 'rent' ? (loc === 'ar' ? `${money}/سنة` : `${money}/yr`) : money;
+  if (row.deal === 'mixed' && row.n > 1) return loc === 'ar' ? `${row.n} ${row.n === 2 ? 'إعلانان' : row.n <= 10 ? 'إعلانات' : 'إعلان'}` : `${row.n} listings`;
+  const min = pinPrice(row.price, row.deal);
+  const max = row.n > 1 ? pinPrice(row.price_max, row.deal) : min;
+  const unpriced = row.n > 1 ? Number(row.unpriced ?? 0) : 0;
+  return priceHead(min, max, unpriced, row.deal, loc);
 }
 
 /** ZOOM → WHAT TO ASK FOR. From about city zoom inward (a view under ~0.12° ≈ 13 km tall) the map asks for exact
@@ -413,8 +438,3 @@ export function viewCountText(n: number, place: string | null, loc: 'ar' | 'en',
   return `${num} ${noun}${dealWord} في ${place ?? 'هذه المنطقة'}`;
 }
 
-/** «7 إعلانات» / «7 listings»: an ad count in the words the map's pill and bubbles use (Arabic number agreement). */
-export function adsCount(n: number, loc: string): string {
-  if (loc === 'en') return `${n} ${n === 1 ? 'listing' : 'listings'}`;
-  return `${n} ${n === 2 ? 'إعلانان' : n >= 3 && n <= 10 ? 'إعلانات' : 'إعلان'}`;
-}

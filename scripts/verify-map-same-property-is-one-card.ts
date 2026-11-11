@@ -12,7 +12,7 @@
 // committed migration that production runs.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { adsCount, foldSameProperty, sameKindSummary, UNIT_TYPES_AR, type FoldFacts } from '../src/lib/mapPins.ts';
+import { foldSameProperty, sameKindSummary, UNIT_TYPES_AR, type FoldFacts } from '../src/lib/mapPins.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
 let failed = 0;
@@ -68,7 +68,7 @@ check('a single ad and an unknown type get no building title', sameKindSummary(1
 // 5. The sheet renders the groups and every folded ad as a link; the cards carry the index's own facts.
 const sheet = readFileSync(join(root, 'src/components/MapPinSheet.tsx'), 'utf8');
 const remote = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
-check('the sheet renders one card per group and a link for every other ad of it', /const groups = cards \? foldSameProperty\(cards, factsOf\) : \[\]/.test(sheet) && /\{groups\.map\(/.test(sheet) && /groups\.length > 1 \? `\$\{groups\.length\} `/.test(sheet) && /testID="map-pin-sheet-also-chip"/.test(sheet) && /onPress=\{\(\) => \{ void openListing\(o\); \}\}/.test(sheet));
+check('the sheet renders one card per group and a link for every other ad of it', /const groups = cards \? foldSameProperty\(cards, factsOf\) : \[\]/.test(sheet) && /\{groups\.map\(/.test(sheet) && /testID="map-pin-sheet-also-chip"/.test(sheet) && /onPress=\{\(\) => \{ void openListing\(o\); \}\}/.test(sheet));
 check('a folded ad\'s price goes through listingPrice() (stay-length sites print none)', /\[siteOf\(o\), listingPrice\(o, locale\)\]/.test(sheet));
 check('a card without index facts has no site to match on', /site: l\.fold \? l\.source : ''/.test(sheet));
 check('the cards read the licence, deal, type, size, price and floor from the index', /license_number,deal_ar,type_ar,area_m2,price_total,price_annual,floor_number/.test(remote) && /r\.fold = foldById\.get\(Number\(r\.id\)\);/.test(remote));
@@ -91,18 +91,6 @@ const licPass = (q: string) => /x\.license_number ~ '\^\[0-9\]\{6,\}\$' and x\.c
 check('the same licence a few metres apart shares one pin (same city and deal, 2–40 ads, within ~150 m)', licPass(sql));
 mustCatch('licence twins pulled together from across a city (the distance limit removed)', !licPass(sql.replace(/\s+and max\(la\) - min\(la\) <= 0\.0015 and max\(lo\) - min\(lo\) <= 0\.0015/, '')));
 mustCatch('a licence pass that accepts any text as a licence', !licPass(sql.replace("x.license_number ~ '^[0-9]{6,}$'", 'x.license_number is not null')));
-
-// The title names the ad count too when properties are fewer than ads (owner 2026-11-10: «It says 8 but there is 3» —
-// the pin said 7 ads, the pill 8, the title «3 فيلا» with nothing to say those were villas and these were ads).
-// Measured: حي الملك عبدالله, المجمعة — 7 ads at 750,000 under 3 government licences = 3 villas.
-const villas = [1, 2, 3].map((i) => c(i, ['aqar', 'haraj', 'dealapp'][i - 1], { typeAr: 'فيلا', area: 350, price: 750000, beds: null, floor: null, lic: '7100331008' }))
-  .concat([4, 5, 6].map((i) => c(i, ['aqar', 'haraj', 'dealapp'][i - 4], { typeAr: 'فيلا', area: 350, price: 750000, beds: null, floor: null, lic: '7201175600' })))
-  .concat([c(7, 'aqar', { typeAr: 'فيلا', area: 350, price: 750000, beds: null, floor: null, lic: '7201146708' })]);
-check('7 ads under 3 licences fold into 3 villa cards', fold(villas).length === 3 && everyAdKept(villas));
-check('the ad count reads like the pin: «7 إعلانات», «2 إعلانان»→«إعلانان», «12 إعلان»', adsCount(7, 'ar') === '7 إعلانات' && adsCount(2, 'ar') === '2 إعلانان' && adsCount(12, 'ar') === '12 إعلان' && adsCount(7, 'en') === '7 listings');
-const TITLE_ADS = /groups\.length > 1 && groups\.length < row\.n \? ` · \$\{adsCount\(row\.n, locale\)\}` : ''/;
-check('the sheet title adds « · N إعلانات» when the properties are fewer than the ads', TITLE_ADS.test(sheet));
-mustCatch('a title that shows the property count alone (the old «3 فيلا» with no ad count)', !TITLE_ADS.test(sheet.replace(/\$\{groups\.length > 1 && groups\.length < row\.n \? [^}]*\}` : ''\}/, '')));
 
 console.log(`\nverify-map-same-property-is-one-card: ${failed ? `${failed} FAILED` : 'the same property is one card that names every site; stray points sit under their district'}`);
 process.exit(failed ? 1 : 0);

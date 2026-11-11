@@ -16,7 +16,7 @@ import { openListing } from '@/lib/openListing';
 import { useI18n, englishCatalogText } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
-import { adsCount, foldSameProperty, idsByTable, orderLike, pinHead, sameKindSummary, type FoldFacts, type PinRow } from '@/lib/mapPins';
+import { foldSameProperty, idsByTable, orderLike, pinHead, sameKindSummary, type FoldFacts, type PinRow } from '@/lib/mapPins';
 import { listingPrice, sourceName } from '@/lib/listingDisplay';
 import { translitPlace } from '@/lib/translitPlace';
 
@@ -54,19 +54,16 @@ export default function MapPinSheet({ row, onClose }: { row: PinRow; onClose: ()
   // A BUILDING SAYS WHAT IT HOLDS (owner 2026-11-10: «12 شقة للإيجار من 40,000»): once every ad of the pin is loaded
   // and they are all one type and one deal. Until then, and for a mixed pin, the plain count stays.
   const kind = !row.noPin && cards ? sameKindSummary(row.n, cards.map((l) => ({ ...factsOf(l), showsPrice: listingPrice(l, locale) !== '' }))) : null;
-  // THE TITLE COUNTS PROPERTIES, NOT ADS (measured live 2026-11-10: «4 دور للبيع» over two cards — two floors, each
-  // advertised on two sites). One property left → no number at all. When the properties are fewer than the ads, the
-  // ad count follows («3 فيلا للبيع من 750,000 · 7 إعلانات»), so it agrees with the pin and the pill (owner 2026-11-10:
-  // «It says 8 but there is 3»).
+  // THE TITLE CARRIES NO COUNT, ONLY THE PRICE (owner 2026-11-10: «It says 8 but there is 3» → «we don't say 2 instead
+  // we just put the price»): the same price rule as the pin head (pinHead/priceHead in src/lib/mapPins.ts), after the
+  // type and deal when every ad is one kind («فيلا للبيع · من 750 ألف»).
   const groups = cards ? foldSameProperty(cards, factsOf) : [];
-  const kindTitle = kind
-    ? `${groups.length > 1 ? `${groups.length} ` : ''}${locale === 'en' ? englishCatalogText(kind.typeAr) : kind.typeAr} ${t(kind.dealAr === 'بيع' ? 'for sale' : 'for rent')}${kind.from !== null ? ` ${t('from {price}', { price: kind.from.toLocaleString('en-US') })}` : ''}${groups.length > 1 && groups.length < row.n ? ` · ${adsCount(row.n, locale)}` : ''}`
-    : '';
+  const head = pinHead(row, isRTL ? 'ar' : 'en');
   const title = row.noPin
     ? t('{n} listings in {district}', { n: row.n, district: isRTL ? place : translitPlace(place) })
     : row.n > 1
-      ? (kindTitle || t('{n} listings at this spot', { n: row.n }))
-      : `${t('Listing')} · ${pinHead(row, isRTL ? 'ar' : 'en')}`;
+      ? (kind ? `${locale === 'en' ? englishCatalogText(kind.typeAr) : kind.typeAr} ${t(kind.dealAr === 'بيع' ? 'for sale' : 'for rent')} · ${head}` : head)
+      : `${t('Listing')} · ${head}`;
   const siteOf = (l: Listing) => (locale === 'en' ? englishCatalogText(sourceName(l.source)) : t(sourceName(l.source)));
   const shown = row.ids?.length ?? 0;
   return (
