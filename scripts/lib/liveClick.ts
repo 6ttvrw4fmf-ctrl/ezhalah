@@ -60,7 +60,9 @@ export const READ_CLICK_WITNESS_SRC = () => {
   return hit;
 };
 
-export type WitnessedClick = { landed: boolean; hit: string };
+/** `unknown`: the document was replaced or the witness could not be read — the click may have acted, so a caller
+ *  must not spend another tap on it (CodeRabbit on #11821). */
+export type WitnessedClick = { landed: boolean; hit: string; unknown?: boolean };
 
 /** Click a measured point and report what the page says took it. Never assumes. */
 export async function clickWitnessed(page: any, box: { x: number; y: number }, want: ClickTarget): Promise<WitnessedClick> {
@@ -84,6 +86,7 @@ export async function clickWitnessed(page: any, box: { x: number; y: number }, w
     }
   }
   if (hit?.onTarget) return { landed: true, hit: want.testid || want.text || '(target)' };
+  if (!armed || readFailed || hit === undefined) return { landed: false, hit: '(witness lost — the page changed)', unknown: true };
   return { landed: false, hit: hit ? (hit.tid || hit.txt || '(unlabelled)') : '(no click event seen)' };
 }
 

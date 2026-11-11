@@ -433,6 +433,7 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
     };
     const rr = await clickWitnessed(replaced as any, { x: 1, y: 2 }, { testid: 'x' });
     mustCatch('a replaced document (witness read back undefined) spending a second tap', rr.landed === false && taps === 0);
+    check('…and it is reported as UNKNOWN, so the caller spends no further tap either', rr.unknown === true, JSON.stringify(rr));
   }
   const r5 = await clickWitnessed(elsewhere as any, { x: 1, y: 2 }, { testid: 'x' });
   check('a click that landed on something ELSE is a real miss — no second tap is spent on it',
