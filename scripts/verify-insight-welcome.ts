@@ -257,7 +257,7 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
   }
   const arS = HOW_IT_WORKS.ar.story(155), enStory = HOW_IT_WORKS.en.story(155);
   check('the falconer story: our falconer collects every site\'s listings and gives them to Shaheen (owner 2026-11-11)',
-    HOW_IT_WORKS.ar.falconer === 'صقارنا' && arS.includes('لصقره شاهين') && enStory.includes('his falcon Shaheen'));
+    HOW_IT_WORKS.ar.falconer === 'من هو الصقار؟' && arS.includes('لصقره شاهين') && enStory.includes('his falcon Shaheen'));
   check('the site count is the LIVE number when known, and the clause is LEFT OUT when unknown — never a guessed number',
     arS.includes('وعددها 155') && enStory.includes('there are 155 of them') && !/\d/.test(HOW_IT_WORKS.ar.story(null)) && !/\d/.test(HOW_IT_WORKS.en.story(null)));
   check('it says Shaheen is AI and can make mistakes — check the original listing (owner 2026-11-11)', arS.includes('نموذج ذكاء اصطناعي، وقد يخطئ أحيانا') && enStory.includes('AI model and can sometimes make mistakes'));
