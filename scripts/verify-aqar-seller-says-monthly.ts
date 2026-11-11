@@ -130,17 +130,20 @@ def get(url, *a, **k):
     import types
     return types.SimpleNamespace(text=_BARRIER_HTML)
 
-def _barrier_page(listing, slot, rnpl):
+def _barrier_page(listing, slot, rnpl, flight=None):
     import json as _json
     inner = _json.dumps({"listing": listing}, ensure_ascii=False)
     blob = "<script>self.__next_f.push([1,%s])</script>" % _json.dumps(inner, ensure_ascii=False)
+    if flight:   # the seller's text as aqar sends a long one: listing.content = "$8a", text in its own flight row
+        row = "\\n8a:T%x,%s" % (len(flight.encode("utf-8")), flight)
+        blob += "<script>self.__next_f.push([1,%s])</script>" % _json.dumps(row, ensure_ascii=False)
     extra = '<a href="/rnpl/apply">x</a><p>استأجر الآن وأدفع لاحقًا ابتداءً من981 § ريال شهريا</p>' if rnpl else ""
     return ("<html><body><h1>شقة للإيجار</h1><div><h3><span>%s</span></h3></div><div>تفاصيل الإعلان المساحة 120 م²</div>"
             "<p>%s</p>%s%s</body></html>") % (slot, listing.get("content") or "", extra, blob)
 
-def _barrier_e2e(listing, slot, slug, deal, rnpl):
+def _barrier_e2e(listing, slot, slug, deal, rnpl, flight=None):
     global _BARRIER_HTML
-    _BARRIER_HTML = _barrier_page(listing, slot, rnpl)
+    _BARRIER_HTML = _barrier_page(listing, slot, rnpl, flight)
     import contextlib, io
     with contextlib.redirect_stdout(io.StringIO()):
         row = enrich_residential("https://sa.aqar.fm/شقق-للإيجار/جدة/حي-الشاطئ/x-6560368", type_slug=slug, deal_slug=deal)
@@ -176,6 +179,11 @@ const PAGES: { say: string; args: unknown[]; want: Out }[] = [
     args: [ad({}), YEARLY_SLOT, 'apartment', 'rent', true], want: ['monthly', 113988, null, 'seller_text', 'structured'] },
   { say: "a pay-later page where only aqar's instalment line says «شهريا» → untouched (981 is never the published figure)",
     args: [ad({ content: 'شقة مفروشة راقية 3 غرف نوم' }), YEARLY_SLOT, 'apartment', 'rent', true], want: ['annual', 9499, null, null, 'structured'] },
+  { say: "the seller's text behind a flight reference («$8a» → its own row) is read → monthly (the audit ad 6560368 is one)",
+    args: [ad({ content: '$8a' }), YEARLY_SLOT, 'apartment', 'rent', true, '🔥 للإيجار الشهري\n💰 السعر الشهري: 9499  ريال فقط\n✨ شامل الكهرباء'],
+    want: ['monthly', 113988, null, 'seller_text', 'structured'] },
+  { say: 'a flight reference that points nowhere is unknown text → untouched',
+    args: [ad({ content: '$8b' }), YEARLY_SLOT, 'apartment', 'rent', false], want: ['annual', 9499, null, null, 'structured'] },
   { say: 'a sale ad → no rent period at all, the price is the sale price',
     args: [ad({}), '9,499 <span>§</span> ريال', 'apartment', 'sale', false], want: [null, null, 9499, null, 'structured'] },
 ];
@@ -185,12 +193,16 @@ const same = (a: Out, b: Out) => JSON.stringify(a) === JSON.stringify(b);
   const out = pages(real);
   PAGES.forEach((p, i) => check(`whole page: ${p.say}`, same(out[i], p.want), `got ${JSON.stringify(out[i])}`));
   // The call site, not only the rule: a reader that never asks the rule, and one that skips pay-later pages.
-  const CALL = '            if rent_period != "monthly" \\\n                    and seller_says_monthly(s_price, (obj or {}).get("content"), property_type):';
+  const CALL = '            if rent_period != "monthly" \\\n                    and seller_says_monthly(s_price, seller_text(obj, html), property_type):';
   const off = real.split(CALL).length === 2 ? pages(real.replace(CALL, '            if False:')) : null;
   mustCatch('a reader that has the rule but never asks it', !!off && !same(off[0], PAGES[0].want) && !same(off[1], PAGES[1].want));
   const ASKS = '            if rent_period != "monthly" \\\n';
   const rnpl = real.split(ASKS).length === 2 ? pages(real.replace(ASKS, '            if rent_period != "monthly" and not is_rnpl_page \\\n')) : null;
   mustCatch('a reader that skips pay-later (RNPL) pages — the audit ad 6560368 stays «yearly»', !!rnpl && !same(rnpl[7], PAGES[7].want));
+  const RESOLVED = 'seller_says_monthly(s_price, seller_text(obj, html), property_type)';
+  const rawRef = real.split(RESOLVED).length === 2 ? pages(real.replace(RESOLVED, 'seller_says_monthly(s_price, (obj or {}).get("content"), property_type)')) : null;
+  const REF = PAGES.findIndex((p) => p.say.startsWith("the seller's text behind a flight reference"));
+  mustCatch('a reader that hands the rule the raw reference «$8a» instead of the seller\'s text', !!rawRef && REF >= 0 && !same(rawRef[REF], PAGES[REF].want));
   const MARK = '                rent_period_from = "seller_text"\n';
   const unmarked = real.split(MARK).length === 2 ? pages(real.replace(MARK, '')) : null;
   mustCatch("a corrected ad that does not record it was the seller's word", !!unmarked && !same(unmarked[0], PAGES[0].want));

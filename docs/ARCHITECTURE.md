@@ -1768,6 +1768,38 @@ new detector needing a longer history must raise the retention in the same chang
 
 **No Arabic diacritics (حركات) in what we write (owner, 2026-11-11: «we can never have 7arakat»).** New and edited Arabic UI copy is written without تشكيل (no ً ٌ ٍ َ ُ ِ ّ ْ). Applied first to the «كيف نحسبها؟» popup and the «نماذج إزهله» card (حر, نموذج, قريبا…), both guarded by `scripts/verify-insight-welcome.ts`; older strings elsewhere are cleaned as they are touched.
 
+**PRICE DIARY + COMPARABLES CARDS — every ad's prices and dates are kept forever, also after it is hidden or removed (owner, 2026-11-11 — permanent).**
+Owner: «let's start saving … the price before and after … the dates are important … the hidden ones, cuz they got deleted,
+would be useful if someone uses the AI agent to do comparables»; «your job is just saving it, later we will focus on the AI agent».
+- **What is saved.** `listing_price_history` (the diary): one line per event of every ad — `start` (what we knew when the
+  diary began, dated `scraped_at`), `first` (a new ad), `price` (old → new, `price_total` and `price_annual` both), `gone`
+  (hidden), `back` (shown again), `removed` (deleted by the retention engine). `listing_comparables` (the card): one slim row
+  per ad — site, buy/rent, rent period, type, region, city, district, m², bedrooms, bathrooms, age, link, the SITE'S posting
+  date (`site_date_added`, raw `date_added`), first seen, first and last price, number of price changes, last seen, gone,
+  removed. No photos, descriptions or contact details.
+- **How.** ONE trigger function `tg_listing_price_diary()` on every `_(residential|commercial)_listings` table (insert;
+  update only when a price or `active` changed; delete) does TWO PLAIN INSERTS per event — the diary line and a
+  `listing_card_queue` row — and nothing else: no exception block, because a per-row subtransaction overflows
+  Postgres's 64-entry cache on a scraper batch (CodeRabbit, PR #11776). The diary line is written in the same
+  transaction as the change. The CARD is rebuilt out of the write path by `listing_cards_refresh()` (set-based, one
+  table at a time; a removed ad's card from `purged_listings_archive`), run by `mon_detect_price_diary_health()` in the
+  hourly detector sweep — so a card can lag up to an hour. A NEW listing table is connected at CREATE TABLE by the event
+  trigger `listing_price_diary_born_attached`, which REFUSES the CREATE when the table cannot be connected (missing
+  `id`/`price_total`/`price_annual`/`active`, migration `20261111063137`); the detector also re-attaches any table without the diary, and raises
+  P2 `price_diary_unhealthy` on a missing table, refresh errors (`listing_price_diary_errors`) or a queue row older than
+  6 hours. All four diary tables are private (REVOKE ALL from public/anon/authenticated). Guard `scripts/verify-price-diary.ts`.
+- **Filled from the past on 2026-11-11:** 699,465 cards (471,066 live, 111,293 hidden, 117,106 already removed — from
+  `purged_listings_archive`), 927,866 diary lines. Price changes BEFORE that day were never recorded and are gone.
+- **Rules.** Never delete or update diary lines; never drop the triggers to clear the alarm. PRICE = SOURCE: prices are the
+  site's own as stored (the rent pool ×12 rule is applied when READING, as everywhere). `gone_at` / `removed_at` mean the ad
+  DISAPPEARED from the site, never proof it SOLD — say «disappeared», not «sold». The retention engine may remove an ad's
+  row; its card and diary stay. The diary records every WRITE of a new price, so a ±1 riyal line is our own rounding
+  (seen live 2026-11-11: aqar 6601546 shows 310,024.83, stored 310,024 → 310,025) — not a market move; comparables
+  should ignore changes that small.
+- **Later (AI agent, not built yet):** a question like «asking prices in حي الملقا over the last 6 months» is answered FROM
+  these two tables, filtered by their real dates (`site_date_added` / `first_seen_at` / diary `at`) — never from the model's
+  own knowledge. Building that is a separate, owner-led step.
+
 ---
 
 ## 21. Open questions / decisions still pending
