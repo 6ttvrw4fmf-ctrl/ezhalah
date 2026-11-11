@@ -82,7 +82,11 @@ export function diaryProblems(files: Record<string, string>): string[] {
   if (!born.file) bad.push(`no committed migration defines public.${BORN}()`);
   else {
     need('the CREATE TABLE hook does not attach the diary', new RegExp(`perform public\\.${ATTACH}\\(r\\.relname\\)`), born.body, born.file);
-    need('the CREATE TABLE event trigger is not created', /create event trigger listing_price_diary_born_attached on ddl_command_end\s*when tag in \('CREATE TABLE'/, born.sql, born.file);
+    if (/exception\s+when/i.test(born.body)) bad.push(`${born.file}: the CREATE TABLE hook swallows an attach error — a table the diary cannot read would be created and take writes unrecorded`);
+    need('the CREATE TABLE hook does not refuse a table without id / price_total / price_annual / active',
+      /raise exception 'listing table public\.% cannot be connected to the price diary/, born.body, born.file);
+    const evt = /create event trigger listing_price_diary_born_attached on ddl_command_end\s*when tag in \('CREATE TABLE'/;
+    if (!Object.values(files).some((v) => evt.test(codeOnly(v)))) bad.push('no committed migration creates the CREATE TABLE event trigger listing_price_diary_born_attached');
   }
 
   const at = bodyOf(files, ATTACH);
@@ -95,8 +99,8 @@ export function diaryProblems(files: Record<string, string>): string[] {
       /old\.price_total is distinct from new\.price_total '\s*'or old\.price_annual is distinct from new\.price_annual '\s*'or old\.active is distinct from new\.active\)/, at.body, at.file);
     need('the attach function has no lock_timeout of its own (from the sweep it could queue scraper writes)',
       /set lock_timeout to '\d+s'\s*as \$\$/, at.body + '$$', at.file);
-    const loop = latestDefining(Object.fromEntries(Object.entries(files).filter(([, v]) => /loop\s*perform public\.listing_price_diary_attach\(t\)/.test(v))), ATTACH);
-    if (!loop || !/tablename ~ '_\(residential\|commercial\)_listings\$'\s*loop\s*perform public\.listing_price_diary_attach\(t\)/.test(files[loop]))
+    const loop = latestDefining(Object.fromEntries(Object.entries(files).filter(([, v]) => /loop\s*perform public\.listing_price_diary_attach\(t\)/.test(codeOnly(v)))), ATTACH);
+    if (!loop || !/tablename ~ '_\(residential\|commercial\)_listings\$'\s*loop\s*perform public\.listing_price_diary_attach\(t\)/.test(codeOnly(files[loop])))
       bad.push('no committed attach loop covers every _(residential|commercial)_listings$ table');
   }
 
@@ -151,7 +155,9 @@ mustCatch('the card moves back into the trigger', tgFile, (s) => s.replace("inse
 mustCatch("the card's first price becomes the NEW price", rfFile, (s) => s.replace("case when h.event = 'price' then h.old_price_total else h.price_total end", 'h.price_total'));
 mustCatch('a removed ad is no longer read from the archive', rfFile, (s) => s.replace('removed_at = excluded.removed_at, updated_at = now()', 'updated_at = now()'));
 mustCatch('the refresh swallows a timeout', rfFile, (s) => s.replace('exception when query_canceled then\n      raise;\n    when others then', 'exception when others then'));
-mustCatch('the CREATE TABLE hook is dropped', latestDefining(files, BORN)!, (s) => s.replace("create event trigger listing_price_diary_born_attached on ddl_command_end", "-- removed"));
+mustCatch('the CREATE TABLE hook swallows attach errors again', latestDefining(files, BORN)!, (s) => s.replace('    perform public.listing_price_diary_attach(r.relname);\n  end loop;', '    begin perform public.listing_price_diary_attach(r.relname); exception when others then null; end;\n  end loop;'));
+mustCatch('the CREATE TABLE hook stops refusing', latestDefining(files, BORN)!, (s) => s.replace("raise exception 'listing table public.% cannot be connected", "raise notice 'listing table public.% cannot be connected"));
+mustCatch('the CREATE TABLE hook is dropped', Object.keys(files).sort().find((f) => /create event trigger listing_price_diary_born_attached/.test(files[f]))!, (s) => s.replace("create event trigger listing_price_diary_born_attached on ddl_command_end", "-- removed"));
 mustCatch('the attach loses its lock_timeout', attachFile, (s) => s.replace(/(function public\.listing_price_diary_attach\(p_table text\)[\s\S]*?)set lock_timeout to '5s'\n/, '$1'));
 mustCatch('the update WHEN clause stops watching active', attachFile, (s) => s.replace("'or old.active is distinct from new.active) '", "') '"));
 mustCatch('the detector stops running the refresh', detFile, (s) => s.replace('perform public.listing_cards_refresh();', 'perform 1;'));

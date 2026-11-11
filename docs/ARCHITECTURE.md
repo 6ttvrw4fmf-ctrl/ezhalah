@@ -1765,7 +1765,8 @@ would be useful if someone uses the AI agent to do comparables»; «your job is 
   transaction as the change. The CARD is rebuilt out of the write path by `listing_cards_refresh()` (set-based, one
   table at a time; a removed ad's card from `purged_listings_archive`), run by `mon_detect_price_diary_health()` in the
   hourly detector sweep — so a card can lag up to an hour. A NEW listing table is connected at CREATE TABLE by the event
-  trigger `listing_price_diary_born_attached`; the detector also re-attaches any table without the diary, and raises
+  trigger `listing_price_diary_born_attached`, which REFUSES the CREATE when the table cannot be connected (missing
+  `id`/`price_total`/`price_annual`/`active`, migration `20261111063137`); the detector also re-attaches any table without the diary, and raises
   P2 `price_diary_unhealthy` on a missing table, refresh errors (`listing_price_diary_errors`) or a queue row older than
   6 hours. All four diary tables are private (REVOKE ALL from public/anon/authenticated). Guard `scripts/verify-price-diary.ts`.
 - **Filled from the past on 2026-11-11:** 699,465 cards (471,066 live, 111,293 hidden, 117,106 already removed — from
