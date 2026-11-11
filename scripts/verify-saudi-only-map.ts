@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const read = (f: string) => readFileSync(join(ROOT, f), 'utf8');
@@ -70,8 +71,10 @@ check('camera box: read from the map source', Object.values(box).every((v) => Nu
 check('camera box: all 15 cities can be centred (Haql, Tabuk, Jazan, Arar, Al Khafji included)', shutOut(box).length === 0, shutOut(box).join(', '));
 mustCatch('the first, too-small box (±6° × ±7° around 23.5, 45.5)', shutOut({ lat: 23.5, lng: 45.5, dLat: 12, dLng: 14 }).length > 0);
 
-const setup = (src: string) => src.slice(src.indexOf('map.cameraBoundary = '), src.indexOf('ensureSaudiMask(mk, map);'));
-const helper = (src: string) => src.slice(src.indexOf('function ensureSaudiMask('), src.indexOf('/** INSTANT FIRST MAP'));
+// A missing marker reads as «not wired» (windowBetween throws), never as the rest of the file.
+const win = (src: string, start: string, end: string) => { try { return windowBetween(src, start, end, 'AppleMap.web.tsx'); } catch { return ''; } };
+const setup = (src: string) => win(src, 'map.cameraBoundary = ', 'ensureSaudiMask(mk, map);');
+const helper = (src: string) => win(src, 'function ensureSaudiMask(', '/** INSTANT FIRST MAP');
 const wired = (src: string) => ({
   boundary: /map\.cameraBoundary = new mk\.CoordinateRegion\(new mk\.Coordinate\(SAUDI_BOX_CENTER\.latitude, SAUDI_BOX_CENTER\.longitude\)/.test(src),
   // Set as the map is made, from the view it settled on — never inside the outline's .then (a zoom meanwhile would
