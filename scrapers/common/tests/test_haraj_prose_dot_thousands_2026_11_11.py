@@ -29,6 +29,19 @@ def test_dotted_prices_are_read_whole_through_asking_price(text, want):
     assert P.asking_price("", text)["price"] == want
 
 
+def test_a_whole_dotted_area_is_read_and_still_guards_the_price():
+    # CodeRabbit on #11799: «1.250.000» as the area must not raise, or the area-equality guard is lost
+    text = "للبيع 1.250.000\nالمساحة 1.250.000 متر مربع"
+    assert P.area_of("", text)["area"] == 1_250_000
+    assert P.asking_price("", text)["price"] is None
+
+
+def test_the_arabic_decimal_mark_keeps_its_meaning():
+    # CodeRabbit on #11799: «٢٥٠٫٠٠٠» is written with the DECIMAL mark — 250, not 250,000
+    assert P.asking_price("", "السعر ٢٥٠٫٠٠٠ ريال")["price"] == 250
+    assert P.asking_price("", "السعر 250.000 ريال")["price"] == 250_000
+
+
 def test_the_audit_post_reads_300_thousand():
     out = P.asking_price("", "أرض بضاحية اسكان جليل للبيع مساحــة 450 م المطلـوب:300.000💸 التواصل")
     assert out["price"] == 300_000

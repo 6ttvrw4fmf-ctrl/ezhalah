@@ -127,11 +127,16 @@ _SCALE = r"(?:\s*(الف|الاف|آلاف|ألف|k|K|مليون|ملايين|م
 _PHONE = re.compile(r"(?<!\d)(?:\+?966|00966|0)?5\d{8}(?!\d)")
 
 
-def _value(num: str, scale: Optional[str]) -> Optional[int]:
+def _arabic_decimal_figures(raw: str) -> set[str]:
+    """The figures the seller wrote with the Arabic DECIMAL mark «٫» («٢٥٠٫٠٠٠» = 250), as norm() spells them."""
+    return {x.translate(_DIG) for x in re.findall(r"[0-9٠-٩]+(?:٫[0-9٠-٩]+)+", raw or "")}
+
+
+def _value(num: str, scale: Optional[str], decimal_mark: bool = False) -> Optional[int]:
     # «المطلوب:300.000» is 300,000: a dot followed by groups of exactly three digits is the thousands mark sellers type
     # (HRJ 11188704307 was stored as a 300 SAR plot, 2026-11-11 launch audit; «1.500» read as 2). With a scale word the
     # dot stays a decimal point — «1.500 مليون» is 1.5 million.
-    if not scale and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", num):
+    if not scale and not decimal_mark and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", num):
         num = num.replace(".", "")
     try:
         v = float(num.replace(",", ""))
@@ -173,6 +178,7 @@ def asking_price(title: str, body: str) -> dict:
     """{'price', 'period', 'per_meter', 'phrase', 'why'} from the seller's own words. price None = not stated
     (or a bid, or ambiguous) — the card then reads «السعر عند الطلب»."""
     t = norm(f"{title}\n{body}")
+    ar_decimal = _arabic_decimal_figures(f"{title}\n{body}")
     out = {"price": None, "period": None, "per_meter": False, "phrase": None, "why": "no price phrase"}
     if _BID.search(t):
         out["why"] = "bid («السوم»): no price"
@@ -191,7 +197,7 @@ def asking_price(title: str, body: str) -> dict:
             num_txt, scale = m.group(1), m.group(2)
             if _PHONE.fullmatch(num_txt.replace(",", "")) or len(num_txt.replace(",", "").split(".")[0]) > 9:
                 continue                                         # a phone number, never a price
-            v = _value(num_txt, scale)
+            v = _value(num_txt, scale, decimal_mark=num_txt in ar_decimal)
             num_end = m.end()
             if v is None:
                 continue
@@ -256,6 +262,8 @@ def area_of(title: str, body: str) -> dict:
             num = m.group(1)
             if _DIMS_AFTER.match(t, m.end(1)):
                 continue                                         # «10 في 8» (Haraj 18263149, 2026-10-17)
+            if re.fullmatch(r"\d{1,3}(?:\.\d{3}){2,}", num):
+                num = num.replace(".", "")                       # «1.250.000» = 1,250,000 (CodeRabbit on #11799)
             try:
                 v = float(num.replace(",", ""))
             except ValueError:

@@ -103,6 +103,16 @@ def test_a_price_in_brackets_stays_a_stated_total(text):
     assert R.land_price_basis(50000, 600, text) == "total"
 
 
+def test_a_currency_after_a_dash_is_still_a_price():
+    # CodeRabbit on #11799: «15000-ريال» is not a numbered list item
+    assert R.land_price_basis(15000, 600, "قيمة العقار 15000-ريال") == "total"
+
+
+def test_a_bare_bracketed_number_is_a_list_item():
+    # CodeRabbit on #11799: «(3) تم الاتفاق» stays excluded; «السعر (50000)» stays a price (tested above)
+    assert R.land_price_basis(3, 308, "مميزات الارض (3) تم الاتفاق مع مكتب هندسي") == "per_meter"
+
+
 def test_a_currency_word_belongs_to_the_figure_before_it():
     # «السعر 500 ريال 300 م2»: the riyal is 500's; 300 is the area, never a stated total (the ladder decides)
     assert R._printed_as_something_else("السعر 500 ريال 300 م2", list(R._NUMS.finditer("السعر 500 ريال 300 م2"))[1])
