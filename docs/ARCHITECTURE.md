@@ -483,6 +483,17 @@ most-shared spot (`map_pin_snap`, refreshed hourly by `map_pin_snap_refresh_ar()
 tapping it lists every ad. Two DIFFERENT sites keep their own spot (owner 2026-11-03: same-site copies stay, cross-site
 is normal) — but see the next rule: their heads never overlap on screen. Guard: `scripts/verify-map-twins-share-one-pin.ts` (migrations `20261105060207`, `20261105063813`, `20261105070224`, `20261105071552`).
 
+**Map tab: THE PIN SHOWS THE PRICE, NEVER A COUNT (owner 2026-11-10, final rule — «we don't say 2 instead we just put
+the price … lowest price wins … price on request = price listed if there is»).** Every exact spot's head is a price:
+one real price and nothing else → «750 ألف»; anything else there (another price, or an ad with no price) → «من 750 ألف»,
+the LOWEST real price; no real price → «السعر عند الطلب». A rent reads per year («/سنة»); a short stay «إقامة قصيرة».
+On the pin only, a sale under 10,000 or a yearly rent under 1,000 is a placeholder, not a price (the card keeps the
+site's figure). A spot holding buy and rent ads is two pins, one per deal. The sheet title carries no count either
+(«فيلا للبيع · من 750 ألف»), and every ad — priced or not — stays in the sheet as its OWN FULL CARD (the same property's other sites right under
+it, never a small link button: owner «show all options»), never hidden or demoted. Counts remain
+only on zoomed-out bubbles and district markers. Code: `pinHead`/`priceHead`/`pinPrice` in `src/lib/mapPins.ts`;
+SQL: migration `20261111042620`; guard `scripts/verify-map-pin-shows-the-price-never-a-count.ts`.
+
 **Map tab: THE FINAL PIN RULE — one pin is one place, the same property is one card that names every site (owner
 2026-11-10, permanent; it replaces «two different sites are always two ads» above).**
 1. One pin = one place; different places sit side by side, never on top of each other.

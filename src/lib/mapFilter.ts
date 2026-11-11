@@ -65,4 +65,9 @@ export function pinFilterOf(f: MapFilterState, typeAr: (groups: string[]) => str
     ...(sc ? { scope: { tables: sc.tables, tables2: sc.tables2, types2: sc.types2, macro: sc.macro } } : {}),
   };
 }
+/** How many choices are picked (owner 2026-11-11, Zillow's «Filters ①»): the category, each group, each type, each
+ *  bedroom count, the furniture choice, and the area and the price as one each. Shown on the map's Filter button. */
+export const filterCount = (f: MapFilterState): number =>
+  (f.category ? 1 : 0) + f.groups.length + (f.types ?? []).length + f.beds.length + (f.furnished != null ? 1 : 0)
+  + (num(f.areaMin) || num(f.areaMax) ? 1 : 0) + (num(f.priceMin) || num(f.priceMax) ? 1 : 0);
 export const isNarrowed = (f: MapFilterState): boolean => !!(f.category || f.groups.length || (f.types ?? []).length || f.furnished != null || f.beds.length || num(f.areaMin) || num(f.areaMax) || num(f.priceMin) || num(f.priceMax));

@@ -59,7 +59,20 @@ function verdict(lib: Lib, input: Row[]) {
   const idsOut = out.flatMap((r) => r.ids ?? []).map((x) => `${x.t}:${x.i}`).sort();
   const sameIds = idsIn.length === idsOut.length && idsIn.every((v, k) => v === idsOut[k]);
   const sameCount = input.reduce((s, r) => s + r.n, 0) === out.reduce((s, r) => s + r.n, 0);
-  const goldMerged = out.every((r) => r.n === 1 || (r.price == null && r.platform == null));
+  // A joined head carries the LOWEST real price of the ads it joins (owner 2026-11-10 price rule), never one site's name.
+  // A joined head carries the LOWEST real price of exactly the ads it joins (owner 2026-11-10 price rule), never one
+  // site's name: each output row is matched to its own input rows by id.
+  const realPrice = (r: Row) => { const p = Number(r.price); return Number.isFinite(p) && p >= 10_000 ? p : null; };
+  const goldMerged = out.every((r) => {
+    if (r.n === 1) return true;
+    const mine = new Set((r.ids ?? []).map((x) => `${x.t}:${x.i}`));
+    const from = input.filter((x) => (x.ids ?? []).some((k) => mine.has(`${k.t}:${k.i}`)));
+    if (from.length < 2) return true;                       // not a join: the row is an input head as it came
+    if (r.platform != null) return false;                    // a joined head never names one site
+    if (new Set(from.map((x) => x.deal)).size > 1) return r.price == null;   // buy + rent: no single price
+    const prices = from.map(realPrice).filter((p): p is number => p !== null);
+    return prices.length ? realPrice(r) === Math.min(...prices) : r.price == null;
+  });
   return { out, touching, sameIds, sameCount, goldMerged, tooFar };
 }
 const verdictWith = (l: Lib, input: Row[]) => verdict(l, input);
@@ -100,7 +113,7 @@ const s = await sweep(real);
 check(`120 random street views (piles of up to 400 heads): no two heads touch (${s.inputHeads} → ${s.heads} heads)`, s.touching === 0, `${s.touching} touching pairs`);
 check('…every listing id is still there exactly once (nothing dropped, nothing added — MATCH FIRST)', s.lost === 0, `${s.lost} views lost ids`);
 check('…the counts add up', s.miscount === 0);
-check('…a joined head shows its count, never one ad\'s price', s.priced === 0);
+check('…a joined head shows the lowest price of what it joins, never one site\'s name', s.priced === 0);
 check(`…no head is drawn more than ${lib.PIN_MAX_SHIFT_PX} px from its own spot`, s.tooFar === 0, `${s.tooFar} heads too far`);
 
 const joinNear = real.replace('export const PIN_MAX_SHIFT_PX = 84;', 'export const PIN_MAX_SHIFT_PX = 0;');
@@ -114,6 +127,10 @@ const anyDistance = real.replace('    if (Math.hypot(dx, dy) <= max) out.push([d
 mustCatch('a head drawn far from its own spot', anyDistance !== real && (await sweep(anyDistance)).tooFar > 0);
 const dropIds = real.replace('ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null,', 'ids: a.ids,');
 mustCatch('a merge that keeps only the first head\'s ads (the others vanish from the card list)', dropIds !== real && (await sweep(dropIds)).lost > 0);
+const dropPrice = real.replace('    price: lo.length ? Math.min(...lo) : null, platform: null,', '    price: null, platform: null,');
+mustCatch('a joined head that drops its price (it would read «السعر عند الطلب» over priced ads)', dropPrice !== real && (await sweep(dropPrice)).priced > 0);
+const highest = real.replace('    price: lo.length ? Math.min(...lo) : null, platform: null,', '    price: hi.length ? Math.max(...hi) : null, platform: null,');
+mustCatch('a joined head that shows the highest price instead of the lowest', highest !== real && (await sweep(highest)).priced > 0);
 const xOnly = real.replace('&& Math.abs(a.y - b.y) < PIN_H_PX + PIN_GAP_PX;', '&& Math.abs(a.y - b.y) < 2;');
 mustCatch('heads stacked on top of each other (a few px apart vertically) not counted as touching', xOnly !== real && (await sweep(xOnly)).touching > 0);
 const noGap = real.replace('export const PIN_GAP_PX = 4;', 'export const PIN_GAP_PX = -12;');
