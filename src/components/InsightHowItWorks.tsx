@@ -1,4 +1,4 @@
-// «كيف نعمل؟» — the popup a signed-in user sees after tapping the home headline's market fact, or the small link under it
+// «كيف نحسبها؟» — the popup a signed-in user sees after tapping the home headline's market fact, or the small link under it
 // (owner 2026-11-11, replacing the 2026-10-22 «كيف تشتغل؟» sheet). Laid out like the «نماذج إزهله» card:
 //   · the ✕ is ALWAYS on the physical right, in both languages (owner: «the x is always on the right, no matter what»);
 //   · in the centre, our eagle glides in and lands on the falconer's glove — the sign-in story, played slowly
