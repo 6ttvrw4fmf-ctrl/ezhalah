@@ -41,7 +41,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import negotiated_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 
 BASE = "https://senanrealestate.sa"
 SOURCE = "سنان العقارية"
@@ -60,6 +62,8 @@ _SPEC = re.compile(r"<div><span>([^<]+)</span><b>([^<]+)</b></div>")
 _LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 _OG_IMAGE = re.compile(r'<meta property="og:image" content="([^"]+)"')
 _PRICE_NOTE = re.compile(r'<div class="specnote">(.*?)</div>', re.S)
+_FEATS = re.compile(r'<ul class="feats">(.*?)</ul>', re.S)
+_AMENITY_COLUMNS = ("elevator", "parking", "kitchen", "maid_room", "driver_room")
 
 
 def _text(fragment: Optional[str]) -> str:
@@ -67,9 +71,8 @@ def _text(fragment: Optional[str]) -> str:
 
 
 def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome")   # impersonate OWNS the User-Agent
-    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
-    return s
+    """The shared fleet path: a TLS profile this host actually answers, chosen by probing it once."""
+    return negotiated_session(f"{BASE}/projects.html", headers={"Accept-Language": "ar,en;q=0.7"})
 
 
 def project_hrefs(page: str) -> list[str]:
@@ -103,8 +106,10 @@ def parse_project(page: str) -> Optional[dict[str, Any]]:
     specs = {_text(k): _text(v) for k, v in _SPEC.findall(main)}
     og = _OG_IMAGE.search(page or "")
     note = _PRICE_NOTE.search(main)
+    feats = _FEATS.search(main)
+    features = [_text(li) for li in re.findall(r"<li>(.*?)</li>", feats.group(1), re.S)] if feats else []
     return {"ld": prop, "specs": specs, "og_image": og.group(1) if og else None,
-            "price_note": _text(note.group(1)) if note else None}
+            "price_note": _text(note.group(1)) if note else None, "features": [f for f in features if f]}
 
 
 def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]:
@@ -148,7 +153,8 @@ def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         "active": True,
         "title": _text(ld.get("name")) or None,
         "description": description,
-        **normalize.amenities_from_text(description),
+        # the ONE word reader over the page's own «مميزات المشروع» list and its description
+        **amenity_answers("\n".join([*(d.get("features") or []), description or ""]), _AMENITY_COLUMNS),
         "property_type": property_type,
         "transaction_type": "Buy",
         "city": normalize.map_city(city_ar),
@@ -172,6 +178,7 @@ def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         "status_ar": status,
         "availability": availability,
         "printed_price_note": d.get("price_note"),
+        "features": d.get("features") or None,
         "advertiser_fal_licence": "1200017563",
     }.items() if v is not None}
     return row, category, ""

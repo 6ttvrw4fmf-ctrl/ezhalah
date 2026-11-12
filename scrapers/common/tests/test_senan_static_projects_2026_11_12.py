@@ -138,3 +138,9 @@ def test_the_more_projects_cards_never_leak_into_this_page():
     page = PAGES["projects/apartments-abha.html"] + '<div><span>الحالة</span><b>حجز مسبق</b></div>'
     d = R.parse_project(page)
     assert d["specs"]["الحالة"] == "متاح"
+
+
+def test_the_projects_own_feature_list_is_read_by_the_one_reader():
+    abha, _, _ = _map("projects/apartments-abha.html")
+    assert abha["additional_info"]["features"] == ["قريبة من الخدمات", "تشطيبات فاخرة", "مصعد", "أمن وحراسة"]
+    assert abha.get("elevator") is True, "«مصعد» in the page's own list"
