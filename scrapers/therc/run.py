@@ -248,11 +248,36 @@ def _gallery(page: str) -> list[str]:
     return [u for u in arr if isinstance(u, str) and u.startswith("http")]
 
 
+_SITEMAP_TRIES = 5
+_SITEMAP_BACKOFF_S = 10.0
+
+
+def _fetch_sitemap(s: cc.Session) -> str:
+    """The sitemap body, or RAISE with what the site answered.
+
+    ⚡ 2026-11-12: this used to go through `_get`, whose None means BOTH «404» and «every try failed»,
+    and `sitemap_urls` turned that None into []. On 2026-11-10 07:02 the crawl logged «0 listing URLs
+    from sitemap.xml» (11-09: 457), RC-B demoted it to a bare «0-row run (blocked/empty source?)» and
+    the P0 silent_scraper_death had no reason to read. A failed fetch is not an empty catalogue: retry
+    with a longer pause, then fail the run naming the answer."""
+    last = "no answer"
+    for attempt in range(_SITEMAP_TRIES):
+        try:
+            r = s.get(SITEMAP)
+            if r.status_code == 200 and r.text:
+                return r.text
+            last = f"HTTP {r.status_code}"
+        except Exception as e:  # noqa: BLE001 — retried, then reported below
+            last = type(e).__name__
+        if attempt + 1 < _SITEMAP_TRIES:
+            time.sleep(_SITEMAP_BACKOFF_S * (attempt + 1))
+    raise RuntimeError(f"sitemap.xml answered {last} after {_SITEMAP_TRIES} tries — the site is failing, not empty")
+
+
 def sitemap_urls(s: cc.Session) -> list[tuple[str, Optional[str]]]:
-    """[(detail_url, lastmod)] for every /properties/ loc. One request for the whole catalog."""
-    xml = _get(s, SITEMAP)
-    if not xml:
-        return []
+    """[(detail_url, lastmod)] for every /properties/ loc. One request for the whole catalog.
+    Raises when the sitemap cannot be read, or is read and lists no /properties/ page (a layout change)."""
+    xml = _fetch_sitemap(s)
     out: list[tuple[str, Optional[str]]] = []
     seen: set[str] = set()
     for block in re.findall(r"<url>(.*?)</url>", xml, re.S):
@@ -265,6 +290,8 @@ def sitemap_urls(s: cc.Session) -> list[tuple[str, Optional[str]]]:
         seen.add(url)
         lm = re.search(r"<lastmod>([^<]+)</lastmod>", block)
         out.append((url, lm.group(1).strip() if lm else None))
+    if not out:
+        raise RuntimeError(f"sitemap.xml read ({len(xml)} bytes) but lists 0 /properties/ pages — layout changed?")
     return out
 
 
