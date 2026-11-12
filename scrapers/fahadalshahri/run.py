@@ -165,6 +165,11 @@ def page_posted(page_html: Optional[str], url: Optional[str]) -> Optional[str]:
     return None
 
 
+def posting_date_for(page_html: Optional[str], url: Optional[str]) -> Optional[str]:
+    """The product page's posting date as date_added stores it — the ONE path for both map_listing() and main()."""
+    return site_posting_date(page_posted(page_html, url))
+
+
 def fetch_page(s: cc.Session, url: Optional[str]) -> Optional[str]:
     """The product's own page through the same bare session the removal check uses; None unless it answered
     200 as a product page (a 403 / wall / error is UNKNOWN, so the date stays NULL)."""
@@ -234,7 +239,7 @@ def map_listing(p: dict, page_html: Optional[str] = None) -> tuple[Optional[dict
         "area_m2": _num(_AREA_RE.search(blob)),
         "street_width_m": _num(_STREET_W_RE.search(blob)),
         "photo_urls": imgs[:20] or None,
-        "date_added": site_posting_date(page_posted(page_html, p.get("permalink"))),
+        "date_added": posting_date_for(page_html, p.get("permalink")),
         # This template has no labelled spec rows at all — every fact lives in the marketing prose
         # («مواقف سيارات، بلكونة ومطبخ أمريكي، مع غرفتي ماستر»), which is why all 5 listings carried
         # NULL for every Advanced-Filter column. Only amenities the text NAMES are written, negations
@@ -394,7 +399,9 @@ def main() -> int:
             if args.type != "all" and cat != args.type:
                 continue
             # Only a product that maps costs a page read (5 of 25 on 2026-11-10); the page adds its posting date.
-            row = map_listing(p, fetch_page(s, p.get("permalink")))[0] or row
+            posted = posting_date_for(fetch_page(s, p.get("permalink")), p.get("permalink"))
+            if posted:
+                row["date_added"] = posted
             if p.get("is_in_stock") is not True:    # unmeasured here: kept as before, and counted
                 k = f"kept_active_is_in_stock={p.get('is_in_stock')}"
                 unmeasured[k] = unmeasured.get(k, 0) + 1
