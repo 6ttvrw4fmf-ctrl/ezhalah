@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.page_pin import pin_from_short_link, resolve_redirect  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://daraa.sa"
@@ -128,6 +129,20 @@ def _plain(s: str) -> str:
     return re.sub(r"\s+", " ", ihtml.unescape(re.sub(r"<[^>]+>", " ", s))).strip()
 
 
+# THE PROJECT'S OWN PIN (⚡ 2026-11-10, backlog 1197; source-reread 42761646737 on 205053/205054/205055/205059).
+# Every page carries TWO kinds of maps.app.goo.gl link: the footer's «الموقع → مكة المكرمة» (the same
+# E9tH7KXbn48rNxrq6 on every page — the company, never a project) and the project's own map button
+# (`"rel":"noopener noreferrer"`, a different link per project: g3H1cVt1cLMCofHm6, CLxZCSSTcFb7Xq4F6, …).
+# Only the button is read; two different buttons on one page are ambiguous → no pin.
+_PROJECT_MAP_BUTTON = re.compile(
+    r'"href":"(https://maps\.app\.goo\.gl/[A-Za-z0-9_-]+)[^"]*","target":"_blank","rel":"noopener noreferrer"')
+
+
+def project_pin_link(blob: str) -> Optional[str]:
+    links = set(_PROJECT_MAP_BUTTON.findall(blob or ""))
+    return links.pop() if len(links) == 1 else None
+
+
 def parse_detail(page: str) -> dict[str, Any]:
     blob = flight(page)
     h1 = re.search(r'\["\$","h1",null,\{"className":"[^"]*","children":"((?:[^"\\]|\\.)*)"', blob)
@@ -141,6 +156,7 @@ def parse_detail(page: str) -> dict[str, Any]:
             r'"children":"([^"]+)"\}\],\["\$","span",null,\{"className":"text-sm font-bold text-accent","children":"([^"]+)"', blob)},
         "images": (lambda m: json.loads(m.group(1)) if m else [])(re.search(r'"images":(\[[^\]]*\])', blob)),
         "description": _plain(_rsc_text(blob, desc_ref.group(1))) if desc_ref else "",
+        "pin_link": project_pin_link(blob),
     }
 
 
@@ -207,7 +223,12 @@ def map_project(card: dict, d: dict[str, Any]) -> tuple[Optional[tuple[dict, str
         field="(none — the site publishes no price)", raw=None, stored=None, kind="total", unit="total",
         origin="structured", authoritative_absent=True)
     info = {"source_id": pid, "status_ar": tags, "type_ar": type_ar, "distance_to_haram_ar": haram,
-            "amenities_ar": d.get("amenities") or None}
+            "amenities_ar": d.get("amenities") or None,
+            # The pin the project's own map button names. The page was read and has no button → the source's
+            # silence (pin_absent); a button whose hop failed says nothing (no pin_absent). NOTE: daraa tables carry no
+            # keep_stored_pin trigger yet (backlog, ⚡ 11-11), so a failed hop can drop a stored pair on rewrite.
+            **(d.get("pin") or ({} if d.get("pin_link") else {"pin_absent": True})),
+            "pin_link": d.get("pin_link")}
     row["additional_info"] = redact_capture(strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [], {})}))
     row["source_capture"] = redact_capture(strip_pii_fields({"schema": "daraa.project.v1", "card": card, "tags": tags,
                                               "specs": specs, "amenities": d.get("amenities")}))
@@ -239,7 +260,10 @@ def main() -> int:
             why = card_verdict(card)
             if not why:
                 try:
-                    got, why = map_project(card, parse_detail(get(s, f"{BASE}/projects/{pid}")))
+                    d = parse_detail(get(s, f"{BASE}/projects/{pid}"))
+                    if d.get("pin_link"):
+                        d["pin"] = pin_from_short_link(d["pin_link"], lambda u: resolve_redirect(s, u))
+                    got, why = map_project(card, d)
                 except Exception:  # noqa: BLE001
                     unreadable += 1
                     continue
