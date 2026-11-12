@@ -32,6 +32,7 @@ import html
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -41,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.honest_fetch import WALL_WORDS  # noqa: E402
 from scrapers.common.http import negotiated_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.facts.one_reader import amenity_answers  # noqa: E402
@@ -64,15 +66,49 @@ _OG_IMAGE = re.compile(r'<meta property="og:image" content="([^"]+)"')
 _PRICE_NOTE = re.compile(r'<div class="specnote">(.*?)</div>', re.S)
 _FEATS = re.compile(r'<ul class="feats">(.*?)</ul>', re.S)
 _AMENITY_COLUMNS = ("elevator", "parking", "kitchen", "maid_room", "driver_room")
+NO_PRICE_WORDS = "مستشار المبيعات"   # the page's own sentence that prices are set with a sales adviser
+MIN_GAP_S = 1.0                      # at most one request per second to this host (crawl and liveness alike)
+_last_request = [0.0]
+
+
+class Walled(RuntimeError):
+    """The host answered a challenge, a block or a rate limit: the run stops, never works around it."""
+
+
+def _space() -> None:
+    wait = MIN_GAP_S - (time.monotonic() - _last_request[0])
+    if wait > 0:
+        time.sleep(wait)
+    _last_request[0] = time.monotonic()
+
+
+def is_wall(status: Optional[int], body: str) -> bool:
+    low = (body or "").lower()
+    return status in (401, 403, 429, 503) or any(w in low for w in WALL_WORDS)
+
+
+class _Spaced:
+    """A session whose every GET waits its turn (one per second to this host)."""
+    def __init__(self, s: cc.Session) -> None:
+        self._s = s
+
+    def get(self, url: str, **kw: Any):
+        _space()
+        return self._s.get(url, **kw)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._s, name)
 
 
 def _text(fragment: Optional[str]) -> str:
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment or ""))).strip()
 
 
-def session() -> cc.Session:
-    """The shared fleet path: a TLS profile this host actually answers, chosen by probing it once."""
-    return negotiated_session(f"{BASE}/projects.html", headers={"Accept-Language": "ar,en;q=0.7"})
+def session() -> Any:
+    """The shared fleet path (a TLS profile this host actually answers, chosen by probing it once), spaced to one
+    request per second for the crawl and the liveness probe alike."""
+    _space()
+    return _Spaced(negotiated_session(f"{BASE}/projects.html", headers={"Accept-Language": "ar,en;q=0.7"}))
 
 
 def project_hrefs(page: str) -> list[str]:
@@ -165,12 +201,14 @@ def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         "neighborhood": district_raw,
         "area_m2": area,
         "photo_urls": photos,
-        # The page states the price is set with a sales adviser — the source's own silence, never a number.
-        "price_total": db.AUTHORITATIVE_NULL,
-        "price_evidence": normalize.price_evidence(
-            field="specnote", raw=d.get("price_note"), stored=None, kind="total", origin="html",
-            authoritative_absent=True),
     }
+    # The page states the price is set with a sales adviser — the source's own settled silence, never a number.
+    # Without that sentence the absence is merely unread: a plain NULL, never the authoritative sentinel.
+    stated = NO_PRICE_WORDS in (d.get("price_note") or "")
+    row["price_total"] = db.AUTHORITATIVE_NULL if stated else None
+    row["price_evidence"] = normalize.price_evidence(
+        field="specnote", raw=d.get("price_note"), stored=None, kind="total", origin="html",
+        authoritative_absent=stated)
     row["additional_info"] = {k: v for k, v in {
         "source_id": slug,
         "grain": "project",
@@ -198,7 +236,10 @@ def _make_signal(url: str):
             return None
         offer = d["ld"].get("offers") if isinstance(d["ld"].get("offers"), dict) else {}
         availability = str(offer.get("availability") or "").rsplit("/", 1)[-1]
-        return "live" if d["specs"].get("الحالة") == LIVE_STATUS and availability == LIVE_AVAILABILITY else "gone"
+        status = d["specs"].get("الحالة")
+        if not status or not availability:
+            return None                 # a page that no longer states its status says nothing about it
+        return "live" if status == LIVE_STATUS and availability == LIVE_AVAILABILITY else "gone"
     return _signal
 
 
@@ -225,12 +266,16 @@ def _stored_url(ad_number: str) -> Optional[str]:
     return stored_listing_url(("senan_residential_listings", "senan_commercial_listings"))(ad_number)
 
 
-def _get(s: cc.Session, url: str) -> tuple[Optional[int], str]:
+def _get(s: Any, url: str) -> tuple[Optional[int], str]:
+    """(status, body); a transport error is printed and returned as (None, ""); a challenge / block stops the run."""
     try:
         r = s.get(url, timeout=30)
-        return r.status_code, r.text
-    except Exception:
+    except Exception as e:  # noqa: BLE001 — reported, never read as an answer
+        print(f"  ⚠ {url}: {type(e).__name__}: {e}"[:300], flush=True)
         return None, ""
+    if is_wall(r.status_code, r.text):
+        raise Walled(f"{url} answered {r.status_code} with a block or challenge — stopping, never working around it")
+    return r.status_code, r.text
 
 
 def main() -> int:
@@ -262,6 +307,9 @@ def main() -> int:
         for href in hrefs:
             st, body = _get(s, f"{BASE}/{href}")
             d = parse_project(body) if st == 200 else None
+            if d is not None and d["ld"].get("url") != f"{BASE}/{href}":
+                d = None                # another project's page under this address: never stored as this one
+                st = "foreign"
             if d is None:
                 complete = False
                 skipped[f"page_{st}"] = skipped.get(f"page_{st}", 0) + 1
@@ -272,8 +320,7 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
-            if d["ld"].get("url") == row["listing_url"]:
-                db.mark_direct_alive(row, oracle=ORACLE)
+            db.mark_direct_alive(row, oracle=ORACLE)   # its own page, read live (url checked above)
             (com if cat == "commercial" else res).append(row)
 
         notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))

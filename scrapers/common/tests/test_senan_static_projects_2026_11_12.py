@@ -9,6 +9,7 @@ the REAL parse_project()/map_listing()/_make_signal(); only to_catalog and find_
 from __future__ import annotations
 
 import json
+import re
 import sys
 import types
 from pathlib import Path
@@ -122,6 +123,9 @@ def test_removal_signal():
     # a 200 for another project, or with no property JSON-LD, says nothing about THIS page
     assert sig(200, PAGES["projects/villas-al-mahala.html"], False) is None
     assert sig(200, "<html><title>سنان العقارية</title></html>", False) is None
+    # a page of THIS project that no longer states its status is unknown, never a death
+    assert sig(200, page.replace("<div><span>الحالة</span><b>متاح</b></div>", ""), False) is None
+    assert sig(404, "", False) is None, "a bare 404 is the law's call, not this host's not-found page"
     assert sig(500, "", False) is None
     assert sig(403, "", False) is None
 
@@ -144,3 +148,28 @@ def test_the_projects_own_feature_list_is_read_by_the_one_reader():
     abha, _, _ = _map("projects/apartments-abha.html")
     assert abha["additional_info"]["features"] == ["قريبة من الخدمات", "تشطيبات فاخرة", "مصعد", "أمن وحراسة"]
     assert abha.get("elevator") is True, "«مصعد» in the page's own list"
+
+
+def test_no_price_sentinel_only_when_the_page_says_so():
+    page = PAGES["projects/apartments-abha.html"]
+    row, _, _ = R.map_listing("projects/apartments-abha.html", R.parse_project(page))
+    assert row["price_total"] is db.AUTHORITATIVE_NULL
+    bare = re.sub(r'<div class="specnote">.*?</div>', "", page, flags=re.S)
+    row, _, _ = R.map_listing("projects/apartments-abha.html", R.parse_project(bare))
+    assert row["price_total"] is None, "an unread price is a plain NULL, never a settled absence"
+
+
+def test_a_challenge_stops_the_run():
+    assert R.is_wall(403, "") and R.is_wall(429, "") and R.is_wall(200, "<title>Attention Required! | Cloudflare</title>")
+    assert not R.is_wall(200, PAGES["projects/apartments-abha.html"]) and not R.is_wall(404, "This Page Does Not Exist")
+
+    class S:
+        def get(self, url, **kw):
+            return type("R", (), {"status_code": 403, "text": "blocked"})()
+    with pytest.raises(R.Walled):
+        R._get(S(), "https://senanrealestate.sa/projects/x.html")
+
+
+def test_the_fixture_carries_no_contact_number():
+    raw = json.dumps(FIX, ensure_ascii=False)
+    assert not re.search(r"05\d{8}|9665\d{8}", raw.replace("0500000000", "").replace("966500000000", ""))
