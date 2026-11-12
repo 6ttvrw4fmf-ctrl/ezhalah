@@ -526,8 +526,9 @@ function HowItWorksBody({ t }: { t: Tr }) {
           six sections are unchanged; each heading now leads its own paragraph on the same line, in a compact type. */}
       <View style={[s.head, s.afHowHead]}>
         <View style={s.legalLockup}>
-          {/* the AI star of the Refine with AI card (owner 2026-11-12: «add the ai star») */}
-          <View style={s.afHowStar} testID="af-how-star"><Ionicons name="sparkles" size={17} color={colors.primary} /></View>
+          {/* THE STAR EZHALAH USES FOR AI SEARCH (owner 2026-11-12: «the star we use in ezhalah for search»): the same
+              sparkles-outline as the «الوسيط الذكي» side of the search switch (ModeSwitch.tsx). */}
+          <Ionicons name="sparkles-outline" size={20} color={colors.ink} testID="af-how-star" />
           <Text style={[s.h, s.legalTitle, s.afHowTitle, !isRTL && s.textLtr]}>{t('How Refine with AI works')}</Text>
         </View>
       </View>
@@ -674,7 +675,6 @@ const s = StyleSheet.create({
   legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
   legalEagle: { width: 44, height: 44 }, // big and sharp enough to read as our logo (owner 2026-10-25; was 20 px)
   afHowHead: { paddingBottom: 6 },
-  afHowStar: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center' },
   afHowBody: { paddingTop: 0 },
   afHowP: { fontSize: 13, lineHeight: 19.5, color: colors.body, textAlign: 'right', marginBottom: 8 },
   afHowHeading: { fontWeight: '700', color: colors.ink },
