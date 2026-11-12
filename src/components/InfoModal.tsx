@@ -514,7 +514,7 @@ function AboutBody({ t, reduced, gripRef, drag }: {
 
 // ————————————————————————————— «كيف يشتغل دقّق مع الذكاء الاصطناعي؟» ————————————————————————————————
 // The Advanced Filter card's note, opened from its «كيف يشتغل؟» link (owner 2026-11-01). Same reading
-// dialog as the Terms: the eagle lockup, then the owner's six sections (src/data/afHowItWorks.ts),
+// dialog as the Terms (no eagle since 2026-11-12, one screen), then the owner's six sections (src/data/afHowItWorks.ts),
 // rendered with the legal reader's own styles so the two popups look like one family. No tabs, no
 // emoji, no contact address.
 function HowItWorksBody({ t }: { t: Tr }) {
@@ -522,20 +522,23 @@ function HowItWorksBody({ t }: { t: Tr }) {
   const docs = getAfHowItWorks(locale);
   return (
     <View testID="af-how-it-works">
-      <View style={s.head}>
+      {/* ONE SCREEN, NO EAGLE, THE AI STAR (owner 2026-11-12: «we want it all in one screen ok remove the eagle photo»). The owner's
+          six sections are unchanged; each heading now leads its own paragraph on the same line, in a compact type. */}
+      <View style={[s.head, s.afHowHead]}>
         <View style={s.legalLockup}>
-          <XImage source={EAGLE} style={s.afHowEagle} contentFit="contain" />
+          {/* the AI star of the Refine with AI card (owner 2026-11-12: «add the ai star») */}
+          <View style={s.afHowStar} testID="af-how-star"><Ionicons name="sparkles" size={17} color={colors.primary} /></View>
           <Text style={[s.h, s.legalTitle, s.afHowTitle, !isRTL && s.textLtr]}>{t('How Refine with AI works')}</Text>
         </View>
       </View>
-      <View style={s.bodyPad}>
+      <View style={[s.bodyPad, s.afHowBody]}>
         {docs.map((p, i) => {
           const [heading, ...paragraphs] = p.split('\n\n');
           return (
-            <View key={i}>
-              <Text accessibilityRole="header" style={[s.legalSectionTitle, !isRTL && s.textLtr]}>{heading}</Text>
-              {paragraphs.map((paragraph, j) => <Text key={j} style={[s.legalP, !isRTL && s.textLtr]}>{paragraph}</Text>)}
-            </View>
+            <Text key={i} style={[s.afHowP, !isRTL && s.textLtr]}>
+              <Text accessibilityRole="header" style={s.afHowHeading}>{`${heading}: `}</Text>
+              {paragraphs.join(' ')}
+            </Text>
           );
         })}
       </View>
@@ -670,7 +673,11 @@ const s = StyleSheet.create({
   // cancelled back to 0 on this specific usage so the clearance is never reserved twice.
   legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
   legalEagle: { width: 44, height: 44 }, // big and sharp enough to read as our logo (owner 2026-10-25; was 20 px)
-  afHowEagle: { width: 34, height: 34 },
+  afHowHead: { paddingBottom: 6 },
+  afHowStar: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center' },
+  afHowBody: { paddingTop: 0 },
+  afHowP: { fontSize: 13, lineHeight: 19.5, color: colors.body, textAlign: 'right', marginBottom: 8 },
+  afHowHeading: { fontWeight: '700', color: colors.ink },
   afHowTitle: { fontSize: 18, lineHeight: 26 }, // the question card's title scale, not the Terms reader's 22
   legalTitle: { paddingRight: 0, flexShrink: 1 },
 
