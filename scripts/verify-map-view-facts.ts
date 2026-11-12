@@ -50,16 +50,28 @@ mustCatch('a line that ignores the pill\'s count', () => { const ignoresPill = (
 // 3. the server keeps its promises (latest committed definition of each function)
 const migDir = join(root, 'supabase/migrations');
 const files = readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort();
+// The newest committed definition of a function, read up to ITS OWN closing dollar tag ('' when there is none — never
+// the rest of the file: scripts/verify-function-body-windows-fail-closed.ts).
 const latestDef = (fn: string): string => {
   for (let i = files.length - 1; i >= 0; i--) {
     const src = readFileSync(join(migDir, files[i]), 'utf8');
     const at = src.search(new RegExp(`create or replace function public\\.${fn}\\(`));
-    if (at >= 0) { const end = src.indexOf('$function$;', at); return src.slice(at, end > 0 ? end : undefined); }
+    if (at < 0) continue;
+    const open = /\bas\s+(\$[A-Za-z_]*\$)/.exec(src.slice(at));
+    if (!open) return '';
+    const bodyAt = at + open.index + open[0].length;
+    const end = src.indexOf(open[1], bodyAt);
+    return end < 0 ? '' : src.slice(at, end);
   }
   return '';
 };
 const core = latestDef('map_view_facts_core');
-const windows = latestDef('map_posted_window_counts_ar');
+// 20261112184000 rewrote this counter's sale price IN PLACE (replace() on its live text, no new definition), so the
+// committed definition is the pre-fix text plus that one substitution — applied here so the comparison is with what runs.
+const PRICE_BARE = "then s.price_total else s.price_annual end as price";
+const PRICE_FILTER = "then coalesce(s.price_total_effective, s.price_total) else s.price_annual end as price";
+const windows = files.includes('20261112184000_map_pin_reads_the_filters_price_and_one_spot_is_one_pin.sql')
+  ? latestDef('map_posted_window_counts_ar').split(PRICE_BARE).join(PRICE_FILTER) : latestDef('map_posted_window_counts_ar');
 const rpc = latestDef('map_view_facts_ar');
 const capture = latestDef('map_fact_capture_removals');
 const ready = latestDef('map_view_facts_gone_ready');
@@ -67,6 +79,8 @@ const audit = latestDef('audit_map_view_facts');
 const filterBlock = (src: string) => { const a = src.indexOf('from public.map_listing_points_ar s'); const b = src.indexOf('), f as (', a); const c = src.indexOf('\n  )', b); return a > 0 && b > a && c > b ? src.slice(a, c).replace(/^\s*select k\.\* from kept k|^\s*select k\.posted_at from kept k/m, '').replace(/\s+/g, ' ').replace(/select k\.(\*|posted_at) from kept k/, 'select K from kept k') : ''; };
 const same = (a: string, b: string) => filterBlock(a) !== '' && filterBlock(a) === filterBlock(b);
 check('the facts filter is the «نشر خلال» counter\'s filter, word for word (so `any` is the pill\'s count)', same(core, windows));
+check('the facts price a sale by the Filter\'s column, like every map read', core.includes(PRICE_FILTER) && !core.includes(PRICE_BARE));
+mustCatch('facts left on the bare sale price', () => { const c2 = core.split(PRICE_FILTER).join(PRICE_BARE); return c2.includes(PRICE_FILTER) && !c2.includes(PRICE_BARE); });
 mustCatch('a facts filter that drifted from the counter', () => same(core.replace("s.area_m2 >= p_area_min", "s.area_m2 > p_area_min"), windows));
 const newsBySiteDate = (src: string) => /'new30', \(select count\(\*\) from fd where fd\.own and fd\.posted_at >= now\(\) - make_interval\(days => 30\)/.test(src) && !/first_seen_at|scraped_at|last_seen_at/.test(src);
 check('«new» counts the SITE\'s posting date, never first-seen', newsBySiteDate(core));
