@@ -48,6 +48,13 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-11-12 (owner: «we remove the old ones»). The 57 old Senan Nuzul units, each 404 on its own page and API record.
+  '20261112091115_senan_retire_57_old_nuzul_units.sql':
+    'watched by the standing detector mon_detect_adjudicated_reactivation: every one of the 57 rows is registered in ' +
+    'ops_adjudicated_retraction by this same migration, so any of them served active again re-raises it, and ' +
+    'trg_keep_adjudicated_hidden refuses a crawl upsert that would flip one back on. Also enrolled in ' +
+    'ops_repair_guarantee_registry (senan_retire_57_old_nuzul_units). The applied file cannot be edited to name the ' +
+    'detector (content parity: byte-exact mirror).',
   // 🔧 2026-11-06. One aqarmonthly row («بحرة», pin 21.4669 N) left under Jazan city 3504 after the owner's 10-22 Bahrah twin
   // repair (20261022004255 ran before that row was captured); refiled to بحرة المجاهدين (city 1882, منطقة مكة المكرمة).
   '20261106135341_bahrah_leftover_refiled_to_makkah.sql':
