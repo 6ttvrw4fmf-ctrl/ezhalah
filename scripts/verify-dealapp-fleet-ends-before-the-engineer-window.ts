@@ -64,7 +64,7 @@ function mutation(name: string, cron: string | null, t = timeout, w = waves): vo
 mutation('the old 02:33 slot', '33 2 * * *');
 mutation('a timeout raised past the gap', latest?.cron ?? null, 400);
 mutation('no schedule at all', null);
-mutation('max-parallel cut so the fleet needs a third wave', latest?.cron ?? null, timeout, waves + 1);
+mutation('a third wave of 250-minute shards from 20:23 (fixed inputs)', '23 20 * * *', 250, 3);
 mutation('the 00:33 slot read as ONE wave of a two-wave fleet (11-11: ended 10:53 UTC)', '33 0 * * *');
 
 if (problems('23 20 * * *', timeout).length) { failures++; console.error('  ✗ (control) a 20:23 start must be accepted'); }

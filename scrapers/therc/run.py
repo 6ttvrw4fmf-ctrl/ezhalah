@@ -260,8 +260,13 @@ def _fetch_sitemap(s: cc.Session) -> str:
     from sitemap.xml» (11-09: 457), RC-B demoted it to a bare «0-row run (blocked/empty source?)» and
     the P0 silent_scraper_death had no reason to read. A failed fetch is not an empty catalogue: retry
     with a longer pause, then fail the run naming the answer."""
+    global _last_hit
     last = "no answer"
     for attempt in range(_SITEMAP_TRIES):
+        wait = MIN_INTERVAL - (time.time() - _last_hit)   # the same ≤ 1 request/second limiter as _get
+        if wait > 0:
+            time.sleep(wait)
+        _last_hit = time.time()
         try:
             r = s.get(SITEMAP)
             if r.status_code == 200 and r.text:

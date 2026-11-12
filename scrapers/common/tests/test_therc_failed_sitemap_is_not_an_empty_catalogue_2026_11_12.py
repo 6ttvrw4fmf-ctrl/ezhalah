@@ -59,3 +59,17 @@ def test_a_read_sitemap_with_no_property_pages_raises():
     s = _S([_R(200, "<urlset><url><loc>https://therc.aqar.digital/about</loc></url></urlset>")])
     with pytest.raises(RuntimeError, match="0 /properties/ pages"):
         run.sitemap_urls(s)
+
+
+def test_the_sitemap_read_goes_through_the_rate_limiter(monkeypatch):
+    """CodeRabbit #11952: the sitemap request must stamp the shared limiter, so the first detail page
+    after it waits MIN_INTERVAL instead of firing at once."""
+    clock = [1000.0]
+    slept: list[float] = []
+    monkeypatch.setattr(run.time, "time", lambda: clock[0])
+    monkeypatch.setattr(run.time, "sleep", lambda d: slept.append(d))
+    monkeypatch.setattr(run, "_last_hit", 0.0)
+    run.sitemap_urls(_S([_R(200, _XML)]))
+    assert run._last_hit == 1000.0
+    run._get(_S([_R(200, "page")]), "https://therc.aqar.digital/properties/villa-1")
+    assert slept and abs(slept[-1] - run.MIN_INTERVAL) < 1e-9
