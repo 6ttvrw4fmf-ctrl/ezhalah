@@ -80,9 +80,10 @@ const EXACT: { name: string; rpc: Record<string, unknown>; gt: string }[] = [
   { name: `p_directions=>['شمال'] (buy) — canonical family`,
     rpc: { p_deal: BUY, p_directions: ['شمال'] },
     gt: `deal_ar=eq.${enc(BUY)}&direction_ar=in.(${enc('"شمال","شمالية","شمالي"')})` },
-  { name: `p_amenities=>['rnpl'] (rent)`,
+  // ONE instalments chip since 2026-11-12 (owner): the site's box OR the ad's monthly / split-payment words
+  { name: `p_amenities=>['rnpl'] (rent) — box OR words`,
     rpc: { p_deal: RENT, p_amenities: ['rnpl'] },
-    gt: `deal_ar=eq.${enc(RENT)}&rent_now_pay_later=is.true` },
+    gt: `deal_ar=eq.${enc(RENT)}&or=(rent_now_pay_later.is.true,split_payments.is.true)` },
   { name: 'p_furnished=>true (rent) — stays strict (Bug C)',
     rpc: { p_deal: RENT, p_furnished: true },
     gt: `deal_ar=eq.${enc(RENT)}&furnished=is.true` },

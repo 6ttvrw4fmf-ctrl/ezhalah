@@ -1034,12 +1034,14 @@ function dbFilterFromRequest(req, tax, cities) {
       maid_room: 'maid_room', driver_room: 'driver_room', private_entrance: 'private_entrance',
       car_entrance: 'car_entrance', sanitation: 'sanitation', electricity: 'electricity',
       water_supply: 'water_supply', furnished: 'furnished',
-      rnpl: 'rent_now_pay_later', rent_now_pay_later: 'rent_now_pay_later' };
+      // the ONE instalments chip (owner 2026-11-12): the site's box OR the ad's monthly / split-payment words
+      rnpl: 'or(rent_now_pay_later.is.true,split_payments.is.true)',
+      rent_now_pay_later: 'or(rent_now_pay_later.is.true,split_payments.is.true)' };
     const unknown = req.p_amenities.filter((t) => !COL[t]);
     if (unknown.length) {
       return { comparable: false, reason: `amenity token(s) outside the known vocabulary: ${unknown.join(',')}` };
     }
-    for (const t of [...new Set(req.p_amenities.map((t) => COL[t]))]) clauses.push(`${t}.is.true`);
+    for (const t of [...new Set(req.p_amenities.map((t) => COL[t]))]) clauses.push(t.startsWith('or(') ? t : `${t}.is.true`);
   }
   if (req.p_unit_subtypes?.length) clauses.push(`unit_subtype_ar.in.${inList(req.p_unit_subtypes)}`);
 
