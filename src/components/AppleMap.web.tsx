@@ -1006,6 +1006,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     };
     const load = async () => {
       const my = ++seq;
+      setFactsBox(null);   // the pill's second line belongs to one counted box; a new read starts without one
       const { center, span } = m.region;
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
@@ -1021,7 +1022,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (my !== seq || mapRef.current !== m) return;
           const whole = Array.isArray(wholeRead) && wholeRead.length ? wholeRead : null;
           drawAreas(visibleAreas(areas, level), level, whole);
-          setFactsBox(null); setPinCount(whole ? areasTotal(whole) : areasTotal(areas));
+          setPinCount(whole ? areasTotal(whole) : areasTotal(areas));
           return;
         }
         // The labels failed to load: the dots below, never an empty map.
@@ -1032,7 +1033,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (all !== 'unknown') {
           const inView = dotsInView(all, pins.deals, paddedBox(center, span));
           clear();
-          if (paint(inView)) { setFactsBox(null); setPinCount(dotsTotal(inView)); return; }
+          if (paint(inView)) { setPinCount(dotsTotal(inView)); return; }
         }
         // The feed failed (or the projection could not be calibrated): the live grid path below, never an empty map.
       }
@@ -1053,7 +1054,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // The read FAILED for the view on screen (a pan, a zoom or a FILTER change — all of them run this load): its count
       // is unknown, so the pill becomes «couldn't load — try again» (pillCount → 'failed') instead of keeping the
       // previous view's number over this one. The drawn layer is still kept, as before.
-      if (my === seq && mapRef.current === m && rows === 'unknown') { setFactsBox(null); setPinCount(pillCount(rows)); }
+      if (my === seq && mapRef.current === m && rows === 'unknown') setPinCount(pillCount(rows));
       if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
       // DENSE VIEW: the exact-point read hit its cap, so pins would silently show a PART of the listings (downtown
       // Riyadh holds thousands in one city-zoom view). Never a partial set — read the same view again as a fine bubble
@@ -1077,7 +1078,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           if (my !== seq || mapRef.current !== m) return;
           if (areas !== 'unknown' && denseShowsDistricts(areas.filter((a) => inView(a, center, span)).length, span.latitudeDelta)) {
             drawAreas(visibleAreas(areas), 'district');
-            setFactsBox(null); setPinCount(areasTotal(areas));
+            setPinCount(areasTotal(areas));
             return;
           }
         }
@@ -1087,7 +1088,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           rows = bubblesFromDots(dotsInView(dots, pins.deals, paddedBox(center, span))).map((b) => ({ ...b, type_ar: null, platforms: 0, ids: null, price: null, platform: null }) as PinRow);
         } else {
           rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
-          if (my === seq && mapRef.current === m && rows === 'unknown') { setFactsBox(null); setPinCount(pillCount(rows)); }
+          if (my === seq && mapRef.current === m && rows === 'unknown') setPinCount(pillCount(rows));
           if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
         }
       }

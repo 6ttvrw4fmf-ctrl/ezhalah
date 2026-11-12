@@ -50,11 +50,13 @@ mustCatch('a line that ignores the pill\'s count', () => { const ignoresPill = (
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(paddedBox\(center, span\)\);/.test(src)
   && (src.match(/setFactsBox\(paddedBox/g) ?? []).length === 1
+  && /const my = \+\+seq;\s*setFactsBox\(null\);/.test(src)
   && /factLine\(viewFacts, hasShape \? null : placeCount \?\? pinCount,/.test(src)
   && /fetchViewFacts\(box, pinFilter, !!user\)/.test(src);
 check('the map asks for the counted box and shows the line only against the number it shows', wired(web));
 mustCatch('a line compared with a different number than the pill shows', () => wired(web.replace('factLine(viewFacts, hasShape ? null : placeCount ?? pinCount,', 'factLine(viewFacts, viewFacts?.any ?? null,')));
-mustCatch('facts asked for an area total (a box the count was not read over)', () => wired(web.replace('setFactsBox(null); setPinCount(areasTotal(areas));', 'setFactsBox(paddedBox(center, span)); setPinCount(areasTotal(areas));')));
+mustCatch('facts asked for an area total (a box the count was not read over)', () => wired(web.replace('setPinCount(areasTotal(areas));', 'setPinCount(areasTotal(areas)); setFactsBox(paddedBox(center, span));')));
+mustCatch('a new map read that keeps the last box (facts for the previous view)', () => wired(web.replace(/(const my = \+\+seq;)\s*setFactsBox\(null\);[^\n]*/, '$1')));
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-map-view-facts-line: all checks passed');
 process.exit(failed ? 1 : 0);
