@@ -177,6 +177,15 @@ chat, which renders results inline. (Deliberate; single search engine — see §
 
 ## 5. Frontend — the Property Card (`src/components/ResultCard.tsx`) — SOURCE OF TRUTH
 
+**A tap reaches the source site at once, in the visitor's language (owner 2026-11-12: «it takes so long for me to get
+redirected … totally unacceptable … keep a robot to check this»; «if it's Arabic it turns into Arabic … the same
+language»).** No timer stands between a tap and the site: our preview's «اضغط هنا للتواصل» opens the new tab inside the
+tap and the confetti plays beside it (it used to wait 950 ms, measured 1.1 s live — past Safari's activation window).
+The address follows the interface language through `localizeAdUrl()` (`src/lib/adLocale.ts`): Aqar, Deal App, Gathern,
+Rakez, Snam, Gomenassat, Aouj, Abeea, Property Finder, Sakan and Wasalt (Arabic = Wasalt's bare path, English = /en/).
+A site joins only after both pages are proven live on real ads. Guards: `scripts/verify-in-app-viewer-allowlist.ts`;
+live, every 30 minutes: `e2e/speed/site-speed-live.mjs` (new tab ≤ 0.5 s, in-app frame ≤ 3 s, never /en/ for an Arabic visitor).
+
 **A press on a card whose listing opens INSIDE Ezhalah plays the golden buzzer + a screen-level
 confetti party (owner 2026-10-17: «whenever a user clicks on a listing I want this party confetti …
 on everything», then «your job is doing it for the 76 sites … the ones after I'll do it later»; «make

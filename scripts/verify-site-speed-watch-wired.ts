@@ -27,6 +27,20 @@ mustCatch('a journey that swallows its own failure', !loud(js.replace('process.e
 check('it uses the robot pass (never blocked by our own guards) and a phone with a slowed CPU',
   /import '\.\.\/\.\.\/scripts\/lib\/robotPass\.mjs'/.test(js) && /setCPUThrottlingRate', \{ rate: 4 \}/.test(js) && /devices\['iPhone 13'\]/.test(js));
 
+// THE TAP REACHES THE SITE AT ONCE, IN THE VISITOR'S LANGUAGE (owner 2026-11-12: «it takes so long for me to get
+// redirected … we need to keep a robot to check this»; «if it's Arabic it turns into Arabic»). The robot times the
+// golden tap until the source site opens (a new tab ≤ 0.5 s, the in-app frame ≤ 3 s, through our preview's contact
+// button when one shows) and fails an Arabic visitor sent to a site's /en/ page.
+const reachesSite = (s: string) => /siteOpenMs: 500, siteFrameMs: 3_000/.test(s)
+  && /say\(results\.siteOpenMs <= BUDGET\.siteOpenMs/.test(s) && /say\(results\.siteFrameMs <= BUDGET\.siteFrameMs/.test(s)
+  && /getByTestId\('listing-preview-contact'\)/.test(s) && /the golden listing never reached its site[\s\S]{0,80}failed\+\+/.test(s)
+  && s.includes('const english = /^\\/en(\\/|$)/.test(new URL(url).pathname);') && /if \(english\) failed\+\+;/.test(s);
+check('the golden tap is timed until the source site opens, and an Arabic visitor never lands on an /en/ page', reachesSite(js));
+mustCatch('the new-tab budget removed', !reachesSite(js.replace(/say\(results\.siteOpenMs <= BUDGET\.siteOpenMs/, 'void (0')));
+mustCatch('the preview contact step removed', !reachesSite(js.replace("getByTestId('listing-preview-contact')", "getByTestId('nothing')")));
+mustCatch('a wrong-language landing that only logs', !reachesSite(js.replace('if (english) failed++;', 'if (english) void 0;')));
+mustCatch('a tap that never reaches the site passes', !reachesSite(js.replace("(no new tab, no frame, no contact open)'); failed++;", "(no new tab, no frame, no contact open)');")));
+
 // MOVING THE MAP AND AN IMPATIENT TAP (owner 2026-11-05: «so slow changing and moving … gets stuck»): the robot drags
 // the map, times the new area's labels and the longest stutter, and taps «خريطة» at once on a fresh phone (no pause).
 const moves = (s: string) => /panMs: 3_000, panFreezeMs: 500, mapColdTapMs: 5_000/.test(s)
