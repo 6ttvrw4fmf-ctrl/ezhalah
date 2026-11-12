@@ -48,7 +48,7 @@ export function postedWindowParam(q: Pick<SearchQuery, 'deal' | 'rentPeriod' | '
 export function postedPhrase(days: number | null | undefined, loc: 'ar' | 'en'): string {
   const d = validPostedWindow(days);
   if (d == null) return '';
-  const ar: Record<PostedWindow, string> = { 1: '24 ساعة', 7: '7 أيام', 14: '14 يوماً', 30: '30 يوماً', 90: '90 يوماً', 183: '6 أشهر', 365: '12 شهراً', 730: '24 شهراً', 1095: '36 شهراً' };
+  const ar: Record<PostedWindow, string> = { 1: '24 ساعة', 7: '7 أيام', 14: '14 يوما', 30: '30 يوما', 90: '90 يوما', 183: '6 أشهر', 365: '12 شهرا', 730: '24 شهرا', 1095: '36 شهرا' };
   const en: Record<PostedWindow, string> = { 1: '24 hours', 7: '7 days', 14: '14 days', 30: '30 days', 90: '90 days', 183: '6 months', 365: '12 months', 730: '24 months', 1095: '36 months' };
   return loc === 'ar' ? `، منشور خلال آخر ${ar[d]}` : `, published in the last ${en[d]}`;
 }

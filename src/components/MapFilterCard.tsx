@@ -20,6 +20,7 @@ import { EMPTY_MAP_FILTER, digits, isNarrowed, type MapFilterState } from '@/lib
 import { pinFilterOf as pinFilterOfWith, furnitureOffered, bedsOffered, postedOffered } from '@/lib/mapFilter';
 import { mapTypeScope, type PostedWindowCounts } from '@/data/remote';
 import PostedWindowMenu from '@/components/PostedWindowMenu';
+import { showAdsAr } from '@/lib/mapPins';
 export { EMPTY_MAP_FILTER, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
 /** The popup's state → the pin query, with the site's own group → type labels mapping. */
 export const pinFilterOf = (f: MapFilterState, deals: readonly string[] = []) => pinFilterOfWith(f, typeArForTypes, groupMembers, deals, mapTypeScope);
@@ -189,13 +190,13 @@ export default function MapFilterCard({ value, onApply, onClose, onClear, countP
               </Pressable>
               <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
                 {/* The count lives in the button (owner 2026-11-11, Zillow's «See 201 rentals»), the title says «تصفية». */}
-                <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
+                <Text style={s.applyT}>{count === null ? t('Show listings') : isRTL ? showAdsAr(count) : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
               </Pressable>
             </View>
           ) : (
             <View style={s.foot}>
               <Pressable style={s.apply} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
-                <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
+                <Text style={s.applyT}>{count === null ? t('Show listings') : isRTL ? showAdsAr(count) : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
               </Pressable>
             </View>
           )}

@@ -2,8 +2,9 @@
 # One per-IP rule on the database front door (/sb/* and /api/sb*) in the Vercel firewall. It deploys nothing: it upserts
 # the rule through the Vercel API and reads the ACTIVE config back to prove it took. Modes:
 #   log        = watch only: over-limit requests are logged in the Firewall overview, nobody is refused (start here)
-#   rate_limit = refuse over-limit requests with 429 (needs the owner's OK AND a robot bypass first — our own e2e robots
-#                reached 595 front-door calls/min on 2026-11-03)
+#   rate_limit = refuse over-limit requests with 429 (owner OK 2026-11-12). Our own robots reach ~595 front-door calls/min,
+#                so the rule skips a request carrying x-ezhalah-ratepass = sha256(EZ_GATE_SECRET:speed-limit-pass), which
+#                scripts/lib/robotPassCore.mjs sends (scripts/verify-speed-limit-robot-pass.ts pins both sides)
 #   off        = keep the rule but switch it off
 # Threshold (measured 2026-11-02/04 in edge_logs): the busiest real visitor made 128 calls/min, p99 91; 300/min/IP is
 # ~2.3x that. Saudi mobile carriers share addresses (CGNAT), so read the log-mode hits before ever refusing anyone.
@@ -42,6 +43,10 @@ jobs:
           set -euo pipefail
           case "$MODE" in log|rate_limit|off) ;; *) echo "refusing unknown mode"; exit 1 ;; esac
           [ -n "$VERCEL_TOKEN" ] || { echo "VERCEL_TOKEN secret is missing"; exit 1; }
+          # Our robots' speed-limit pass (owner 2026-11-12): a one-way hash of the gate secret, the same value
+          # scripts/lib/robotPassCore.mjs ratePass() sends as x-ezhalah-ratepass. Never the secret itself.
+          [ -n "$EZ_GATE_SECRET" ] || { echo "EZ_GATE_SECRET secret is missing — refusing a speed limit our robots cannot pass"; exit 1; }
+          PASS=$(printf '%s' "$EZ_GATE_SECRET:speed-limit-pass" | sha256sum | cut -d' ' -f1)
           API=https://api.vercel.com/v1/security/firewall/config
           Q="projectId=$PROJECT_ID&teamId=$TEAM_ID"
           NAME=ezhalah-front-door-speed-limit
@@ -60,12 +65,14 @@ jobs:
           }
           current=$(read_active)
           id=$(jq -r --arg n "$NAME" '[.rules[]? | select(.name == $n) | .id][0] // ""' <<<"$current")
-          rule=$(jq -n --arg n "$NAME" --arg a "$ACT" --argjson on "$ON" '{
+          rule=$(jq -n --arg n "$NAME" --arg a "$ACT" --argjson on "$ON" --arg pass "$PASS" '{
             name: $n, active: $on,
             description: "Per-IP speed limit on the database front door. docs/ops/SCRAPE_GUARD.md",
             conditionGroup: [
-              {conditions: [{type: "path", op: "pre", value: "/sb/"}]},
-              {conditions: [{type: "path", op: "pre", value: "/api/sb"}]}
+              {conditions: [{type: "path", op: "pre", value: "/sb/"},
+                            {type: "header", key: "x-ezhalah-ratepass", op: "eq", value: $pass, neg: true}]},
+              {conditions: [{type: "path", op: "pre", value: "/api/sb"},
+                            {type: "header", key: "x-ezhalah-ratepass", op: "eq", value: $pass, neg: true}]}
             ],
             action: {mitigate: {action: "rate_limit", actionDuration: null,
               rateLimit: {algo: "fixed_window", window: 60, limit: 300, keys: ["ip"], action: $a}}}
@@ -75,8 +82,8 @@ jobs:
           code=$(curl -sS -o patch.json -w '%{http_code}' -X PATCH "${AUTH[@]}" "$API?$Q" --data "$body")
           case "$code" in 2??) echo "PATCH accepted (HTTP $code)" ;; *) echo "PATCH refused: HTTP $code — $(head -c 400 patch.json)"; exit 1 ;; esac
           after=$(read_active)
-          if jq -e --arg n "$NAME" --arg a "$ACT" --argjson on "$ON" '.rules[]? | select(.name == $n and .active == $on and .action.mitigate.rateLimit.action == $a)' <<<"$after" >/dev/null; then
-            echo "✓ the ACTIVE firewall config has $NAME with active=$ON, action=$ACT (60 s window, 300 per IP)."
+          if jq -e --arg n "$NAME" --arg a "$ACT" --argjson on "$ON" '.rules[]? | select(.name == $n and .active == $on and .action.mitigate.rateLimit.action == $a and ([.conditionGroup[]?.conditions[]? | select(.type == "header" and .key == "x-ezhalah-ratepass" and .neg == true)] | length) == 2)' <<<"$after" >/dev/null; then
+            echo "✓ the ACTIVE firewall config has $NAME with active=$ON, action=$ACT (60 s window, 300 per IP; our robots' pass skips it)."
           else
             echo "✗ the change did not appear in the ACTIVE config (it may be a draft, or the token lacks firewall scope)."
             echo "  rules now in the active config: $(jq -c '[.rules[]? | {name, active}]' <<<"$after")"

@@ -207,7 +207,7 @@ mustCatch('groups shown before a category (both lists mixed)', !groupsRx.test(ca
 // fixed bottom bar carries «مسح الكل» + «عرض الإعلانات». A wider screen keeps the centered card.
 const fullRx = /const phone = useWindowDimensions\(\)\.width < PHONE_MAX;/;
 check('on a phone the map filter is full screen, titled «تصفية», with a Clear / «Show N listings» bar at the bottom (owner 2026-11-11: the count lives in the button, like Zillow)',
-  fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /testID=\"map-filter-title\">\{t\('Filter'\)\}/.test(cardSrc) && (cardSrc.match(/count === null \? t\('Show listings'\) : t\('Show \{n\} listings'/g) ?? []).length === 2
+  fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /testID=\"map-filter-title\">\{t\('Filter'\)\}/.test(cardSrc) && (cardSrc.match(/count === null \? t\('Show listings'\) : isRTL \? showAdsAr\(count\) : t\('Show \{n\} listings'/g) ?? []).length === 2
   && /testID="map-filter-clear"/.test(cardSrc) && /export const PHONE_MAX = 768;/.test(cardSrc));
 const filterCountSrc = readFileSync(join(root, 'src/lib/mapFilter.ts'), 'utf8');
 const mf = await import('../src/lib/mapFilter.ts');
