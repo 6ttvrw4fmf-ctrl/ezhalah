@@ -36,6 +36,7 @@ import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { keepSaudiPlaces } from '@/lib/saudiOutline';
+import { isRealDrawnArea } from '@/lib/drawnArea';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
@@ -1198,13 +1199,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const m = mapRef.current; const mk = mapkitOf();
     if (!el || !m || !mk) return;
     let down = false; let last: { x: number; y: number } | null = null;
+    let pagePts: { x: number; y: number }[] = [];   // the same stroke in screen pixels, to measure its area
     // The PENCIL LINE while the finger moves (owner 2026-10-31: «like a pencil, like Zillow»): a stroke that follows
     // the finger; the filled shape appears only when the finger lifts.
     let line: Shape | null = null;
     const dropLine = () => { if (line) { m.removeOverlay(line); line = null; } };
     const onDown = (e: PointerEvent) => {
       e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch { /* a pointer the browser no longer tracks */ }
-      down = true; last = { x: e.pageX, y: e.pageY };
+      down = true; last = { x: e.pageX, y: e.pageY }; pagePts = [last];
       if (sketchRef.current) m.removeOverlay(sketchRef.current);
       // MapKit accepts ONLY a real DOMPoint here (a plain {x,y} throws — measured live 2026-10-31: nothing drew).
       ptsRef.current = [m.convertPointOnPageToCoordinate(new DOMPoint(e.pageX, e.pageY))];
@@ -1213,7 +1215,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const onMove = (e: PointerEvent) => {
       if (!down || !last) return;
       if (Math.hypot(e.pageX - last.x, e.pageY - last.y) < 4) return;
-      last = { x: e.pageX, y: e.pageY };
+      last = { x: e.pageX, y: e.pageY }; pagePts.push(last);
       ptsRef.current.push(m.convertPointOnPageToCoordinate(new DOMPoint(last.x, last.y)));
       const coords = ptsRef.current.map((p) => new mk.Coordinate(p.latitude, p.longitude));
       if (line) line.points = coords;
@@ -1226,7 +1228,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (!down) return;
       down = false; dropLine();
       const pts = ptsRef.current;
-      if (pts.length >= 3) {
+      // A straight drag has points but no inside: it stays a sketch-less pad, so «تطبيق» stays off and the
+      // «اسحب على الخريطة لرسم منطقة» hint comes back (src/lib/drawnArea.ts).
+      if (isRealDrawnArea(pagePts)) {
         const coords = pts.map((p) => new mk.Coordinate(p.latitude, p.longitude));
         sketchRef.current = new mk.PolygonOverlay(coords, { style: new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.95, lineWidth: 2.5, fillColor: lightColors.primary, fillOpacity: 0.14 }), enabled: false });
         m.addOverlay(sketchRef.current);
