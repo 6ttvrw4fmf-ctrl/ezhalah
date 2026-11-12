@@ -1294,7 +1294,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       ) : null}
       {/* Corners (owner 2026-11-11): ⤢ / ✕ top-RIGHT, «رسم» top-LEFT — in the small box and full screen alike. */}
       {roomy ? <View style={[s.topRight, (onClose || onExpand) && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
-      {locale === 'ar' ? backEl : null}
+      {locale === 'ar' ? null : backEl}
       {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
           becomes «إزالة المسار ✕». */}
       {onRoute && !failed && !drawing ? (
@@ -1314,7 +1314,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           {hasShape ? <Ionicons name="close" size={17} color={colors.primary} /> : null}
         </Pressable>
       ) : null}
-      {locale === 'ar' ? null : backEl}
+      {locale === 'ar' ? backEl : null}
       </View> : null}
       {/* + / − above the layers button, same column. */}
       {roomy && !failed && !drawing ? (
