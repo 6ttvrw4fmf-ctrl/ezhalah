@@ -68,6 +68,10 @@ English user message → English reply. Arabic → Arabic. Mixed Arabic/English 
 
 The language button changes only the UI, settings and displayed account name. Existing chat replies, summaries and closing notes retain their own language; switching never translates history, reruns a search or adds paid translation calls. Save a signed-in user's UI language choice on the device and restore it on refresh/return. **Signed-in choices follow the ACCOUNT (owner 2026-10-27: «the phone and laptop same account … same things»):** the language is also written to `user_metadata.ui_locale` and the account's value wins on every device; a slow sign-in on refresh is never read as a guest, so nothing a signed-in user set is erased (`languageOnAuth` in src/i18n.tsx, guard `scripts/verify-signed-in-language-is-kept.ts`). New signed-in preferences follow the same rule: saved to the account, restored everywhere. Guest fresh loads stay Arabic-first. Canonical detail: `docs/ARCHITECTURE.md` i18n section. Guard: `scripts/verify-chat-language-is-not-interface-language.ts`.
 
+# «منذ …» IS A PROVEN BRACKET, NEVER A GUESSED DAY (owner, 2026-11-11 — permanent)
+
+A site that prints only «منذ 23 يوم» gives a FLOOR («posted no earlier than») and a CEILING («no later than», capped by our first-stored time) — never a `date_added`. «نُشر خلال» counts by the floor, so an ad is never called newer than proven. Only a site PROVEN to print its ad's real age may do this (`AGO_COUNT_IS_REAL_AGE` in `scrapers/common/posting_date.py`, `ops_relative_age_site`); a hidden exact date on the page always wins; a site whose count restarts is switched off by `mon_detect_relative_posting_floor_unsafe` by itself. Never widen a window, loosen a unit or re-enable a site to clear it. Full rule: `docs/ARCHITECTURE.md` §20 «منذ …». Guard: `scripts/verify-relative-posting-date-is-a-floor.ts`.
+
 # GATHERN + AQAR MONTHLY SHOW NO PRICE LINE AT ALL (owner, 2026-10-02; note removed 2026-10-26 — permanent)
 
 **Every Gathern and Aqar Monthly listing, today's and every new one we ingest, shows NOTHING where the
