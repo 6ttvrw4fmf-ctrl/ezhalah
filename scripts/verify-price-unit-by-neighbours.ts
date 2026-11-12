@@ -29,8 +29,19 @@ let failed = 0;
 const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
 const mustCatch = (label: string, caught: boolean) => check(`catches: ${label}`, caught);
 const norm = (s: string) => s.replace(/\s+/g, ' ');
-const fnBody = (sql: string, name: string) =>
-  sql.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\$function\\$;`))?.[0] ?? '';
+// The LAST definition in the file, through its own closing dollar tag ($function$, $$, …); '' when the tag never closes,
+// so a body written with another tag can never read as healthy (verify-function-body-windows-fail-closed.ts).
+const fnBody = (sql: string, name: string): string => {
+  const re = new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${name}\\s*\\(`, 'gi');
+  let start = -1, m: RegExpExecArray | null;
+  while ((m = re.exec(sql))) start = m.index;
+  if (start < 0) return '';
+  const tagM = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(start));
+  if (!tagM) return '';
+  const openAt = start + tagM.index;
+  const closeAt = sql.indexOf(tagM[0], openAt + tagM[0].length);
+  return closeAt < 0 ? '' : sql.slice(start, closeAt + tagM[0].length);
+};
 
 check('the migration exists', FILE !== '' && SQL.length > 0);
 
