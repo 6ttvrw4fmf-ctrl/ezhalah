@@ -575,7 +575,7 @@ not, you put them beside each other. That's the rule. Just don't make them on to
 click»; it keeps the owner's 2026-11-05 «user cannot select what he wants» and replaces that day's join-when-touching
 rule, which read two different places a few metres apart as one «N إعلانات» head).** Listings on the SAME coordinates
 (a building, a same-site twin snapped by `map_pin_snap`) arrive as one row from `map_pins_ar` and are one head with their
-count. Before the map draws its street-level heads, `placeApart()` (src/lib/mapPins.ts) places every head (measured in
+count. «The same coordinates» means equal to 6 decimals (~0.1 m) — haraj and dealapp wrote one point as 24.333833307351 and 24.333833307351153 and got two pins (owner 2026-11-12, الجلة). A sale pin is priced like the Filter and the card, `coalesce(price_total_effective, price_total)`: 7,817 per-metre-priced ads read «السعر عند الطلب» on the pin over a priced card until then (migration `20261112184000`, guard `scripts/verify-map-pin-reads-the-filters-price.ts`). The pin's sheet asks for the card and its place in one parallel round trip. Before the map draws its street-level heads, `placeApart()` (src/lib/mapPins.ts) places every head (measured in
 the font it is drawn in, through MapKit's projection, 4 px of air): a head whose own spot is taken is DRAWN in the
 nearest free place beside its neighbours, at most `PIN_MAX_SHIFT_PX` (84 px: one head across, two rows down) away,
 keeps its own price and ad list, and gets a thin line and dot back to its own spot (`pinStemTo()`, drawn as MapKit
