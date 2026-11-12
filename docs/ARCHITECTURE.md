@@ -1709,6 +1709,9 @@ new detector needing a longer history must raise the retention in the same chang
   bisht or beard (`assets/icons/insight-falconer-original.png`). Neither has a face circle.
   These replace the magnifying-glass emoji; explanatory copy and dismissal stay the same.
   Guards: `scripts/verify-insight-welcome.ts`, `scripts/verify-filter-welcome.ts`.
+  **Retitled later on 2026-11-11 (owner): «كيف نعمل؟» / "How do we work?"** — the owner's final text in
+  `src/lib/insightHowItWorks.ts`: «من صقار إزهله؟», the falconer roams the LIVE site count, five rules; rule 2 reads «لا يحمل
+  تاريخا ولا مدة نشر» because relative «منذ …» ads now count by their proven floor; «نتحقق من كل رقم مرتين» was dropped.
   **Superseded 2026-11-11 (owner): the «كيف نحسبها؟» popup.** A small underlined «كيف نحسبها؟» / "How we calculate it"
   sits under a market fact (13 px, like «الشروط والخصوصية»). It and the fact open a centred popup laid out like «نماذج
   إزهله»: ✕ ALWAYS on the physical right; in the centre the sign-in eagle story played 2× slower
