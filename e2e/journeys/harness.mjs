@@ -31,6 +31,8 @@ import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own databa
 import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, webkit, firefox, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { freemem, totalmem } from 'node:os';
 import { isHydrationNoticePageError, hydrationNoticeNote, isEmbeddedSitePageError, embeddedSiteNote } from '../lib/pageErrors.mjs';
 
 // The production target lock (AGENTS.md): the ONE URL these journeys score. Named rather than
@@ -362,13 +364,84 @@ export async function withPage(opts, fn) {
       bag.rpc.push({ name: u.split('/rpc/')[1]?.split('?')[0], body });
     }
   });
+  const watch = watchForBrowserLoss(engine, browser, page);
   try {
     await gotoOrRetryTransport(page, BASE + path);
     await settle(page);
     return await fn(page, bag, ctx);
+  } catch (e) {
+    // A journey that dies because the BROWSER went away says so first, with the evidence, so the
+    // 220-character «journey threw» line names the cause instead of «Target page … has been closed».
+    const lost = watch.report();
+    if (lost) throw new Error(`the ${engine} browser itself went away (${lost}) — then: ${String(e).slice(0, 120)}`);
+    throw e;
   } finally {
+    watch.stop();
     await browser.close().catch(() => {});
   }
+}
+
+/**
+ * WHY DID THE BROWSER GO AWAY? (owner 2026-11-12: «Yes, check it».)
+ *
+ * WebKit closed mid-journey on the CI runner in 2 of 4 Safari sweeps on 2026-11-11 (runs 42977046098,
+ * 43128314382), and the log said only «Target page, context or browser has been closed». That cannot
+ * tell OUR PAGE eating memory apart from the test build of WebKit falling over, and the difference
+ * decides whether there is anything to fix. So every few seconds this records what the page and the
+ * machine look like — page size (elements, iframes, URL), the browser's own processes' memory, and
+ * the machine's free memory — and when the page crashes or the browser disconnects it prints the
+ * last readings on one line («BROWSER LOST …»). Rising memory before the loss points at the page;
+ * flat memory and a sudden crash points at the browser build.
+ */
+const LOSS_SAMPLE_MS = 3_000;
+const LOSS_SAMPLES_KEPT = 4;
+function browserProcessMemoryMb(engine) {
+  // Only Playwright's own build of the engine (it lives under ms-playwright/<engine>…), so a person's
+  // everyday browser on a laptop is never counted. Any failure → null, never a throw.
+  const want = new RegExp(`ms-playwright[\\\\/]+${engine}`, 'i');
+  try {
+    const out = execFileSync('ps', ['-eo', 'rss=,args='], { encoding: 'utf8', timeout: 2_000 });
+    let kb = 0; let n = 0;
+    for (const line of out.split('\n')) {
+      const m = line.trim().match(/^(\d+)\s+(.*)$/);
+      if (m && want && want.test(m[2]) && !/\bps\b/.test(m[2])) { kb += Number(m[1]); n += 1; }
+    }
+    return n ? { mb: Math.round(kb / 1024), procs: n } : null;
+  } catch { return null; }
+}
+function watchForBrowserLoss(engine, browser, page) {
+  const samples = [];
+  let lost = null;
+  let busy = false;
+  let stopped = false;
+  const sample = async () => {
+    if (busy || lost) return; busy = true;
+    const at = new Date().toISOString().slice(11, 19);
+    const pageSide = await page.evaluate(() => ({
+      path: location.pathname,
+      els: document.getElementsByTagName('*').length,
+      iframes: document.getElementsByTagName('iframe').length,
+    })).catch(() => null);
+    samples.push({ at, page: pageSide, browser: browserProcessMemoryMb(engine),
+      freeMb: Math.round(freemem() / 1048576), totalMb: Math.round(totalmem() / 1048576) });
+    while (samples.length > LOSS_SAMPLES_KEPT) samples.shift();
+    busy = false;
+  };
+  const timer = setInterval(() => { sample(); }, LOSS_SAMPLE_MS);
+  const mark = (what) => {
+    if (lost) return;
+    lost = { what, at: new Date().toISOString().slice(11, 19), freeMb: Math.round(freemem() / 1048576),
+      browser: browserProcessMemoryMb(engine) };
+    console.log(`  BROWSER LOST  [${engine}] ${what} at ${lost.at}; machine free ${lost.freeMb} MB; `
+      + `browser now ${JSON.stringify(lost.browser)}; last readings ${JSON.stringify(samples)}`);
+  };
+  page.on('crash', () => mark('the page crashed'));
+  browser.on('disconnected', () => { if (!stopped) mark('the browser disconnected'); });
+  sample();
+  return {
+    report: () => (lost ? `${lost.what} at ${lost.at}, machine free ${lost.freeMb} MB` : null),
+    stop: () => { stopped = true; clearInterval(timer); },
+  };
 }
 
 /**
