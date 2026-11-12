@@ -8,6 +8,8 @@ const root = join(import.meta.dirname, '..');
 let failed = 0;
 const check = (name: string, ok: boolean, info = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? ' — ' + info : ''}`); if (!ok) failed++; };
 
+const mustCatch = (name: string, mutantPasses: () => boolean) => check(`(mutation) catches ${name}`, !mutantPasses());
+
 const line = Array.from({ length: 40 }, (_, i) => ({ x: 100 + i * 10, y: 200 + i * 6 }));
 const wobbly = Array.from({ length: 40 }, (_, i) => ({ x: 100 + i * 10, y: 200 + (i % 2) }));
 const circle = Array.from({ length: 40 }, (_, i) => ({ x: 300 + 80 * Math.cos(i / 40 * 2 * Math.PI), y: 300 + 80 * Math.sin(i / 40 * 2 * Math.PI) }));
@@ -25,7 +27,8 @@ const wired = (src: string) => /import \{ isRealDrawnArea \} from '@\/lib\/drawn
   && /if \(isRealDrawnArea\(pagePts\)\) \{\s*(?:\/\/[^\n]*\n\s*)*const coords/.test(src)
   && /pagePts\.push\(last\)/.test(src) && /pagePts = \[last\]/.test(src);
 check('the map measures the stroke at finger-lift before it becomes a shape', wired(web));
-check('(mutation) catches the old «any 3 points is a shape» rule', !wired(web.replace('if (isRealDrawnArea(pagePts)) {', 'if (pts.length >= 3) {')));
+mustCatch('the old «any 3 points is a shape» rule', () => wired(web.replace('if (isRealDrawnArea(pagePts)) {', 'if (pts.length >= 3) {')));
+mustCatch('a rule that only counts points (a straight drag would pass)', () => { const pointsOnly = (pts: unknown[]) => pts.length >= 3; return !pointsOnly(line) && pointsOnly(circle); });
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-drawn-line-is-not-an-area: all checks passed');
 process.exit(failed ? 1 : 0);
