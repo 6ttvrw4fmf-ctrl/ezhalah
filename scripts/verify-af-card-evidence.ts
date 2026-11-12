@@ -203,9 +203,8 @@ function expected(id: string, opt: Opt): { row: AfCanon; text: string; not: AfCa
   const hand = HAND[`${id}:${opt.key}`];
   if (hand) return hand;
   switch (id) {
-    case 'rnpl': return opt.key === 'split_payments'
-      ? { row: { split_payments: true }, text: t(opt.labelKey), not: { split_payments: false } }
-      : { row: { rent_now_pay_later: true }, text: t(opt.labelKey), not: { rent_now_pay_later: false } };
+    // ONE chip since 2026-11-12 (owner): the site's box OR the ad's «دفعات» words; the union rows are pinned in T2b
+    case 'rnpl': return { row: { rent_now_pay_later: true }, text: t(opt.labelKey), not: { rent_now_pay_later: false } };
     case 'amenities': {
       const col = AMENITY_COL[opt.key];
       if (!col) return null;
@@ -334,6 +333,45 @@ console.log('\n── T2b. multi-value semantics + adjectival direction + AND on
   assert(same(rn.map((a) => a.id), ['rnpl', 'amenities']), 'rnpl rides q.amenities but is its own question; kitchen stays under amenities');
   assert(afEvidence([{ id: 'rnpl', keys: ['rnpl'] }], { rent_now_pay_later: null }, t).length === 0, 'rnpl: NULL → nothing');
   assert(afEvidence([{ id: 'rnpl', keys: ['rnpl'] }], { rent_now_pay_later: false }, t).length === 0, 'rnpl: false → nothing');
+  // THE MERGED INSTALMENTS CHIP (owner 2026-11-12: «merge … we cannot guarantee»; migration 20261112111809). The card's
+  // one 'rnpl' key means the site's box OR the ad's monthly / split-payment words — the clause arm
+  // `s.rent_now_pay_later or s.split_payments`. Stated here row by row, independently of afEvidence's own code: one
+  // literal TRUE proves it whatever the other column says; no TRUE proves nothing; it speaks ONE chip.
+  const RNPL_LABEL = t('Instalments / monthly payments');
+  const RNPL_UNION_ROWS: Array<[AfCanon, number, string]> = [
+    [{ rent_now_pay_later: true, split_payments: null }, 1, 'box TRUE, words unknown → the chip'],
+    [{ rent_now_pay_later: null, split_payments: true }, 1, 'box unknown, words TRUE → the chip'],
+    [{ rent_now_pay_later: false, split_payments: true }, 1, 'box FALSE, words TRUE → the chip (either is enough)'],
+    [{ rent_now_pay_later: true, split_payments: true }, 1, 'both TRUE → ONE chip, never two'],
+    [{ rent_now_pay_later: false, split_payments: null }, 0, 'box FALSE, words unknown → nothing'],
+    [{ rent_now_pay_later: false, split_payments: false }, 0, 'both FALSE → nothing'],
+    [{ rent_now_pay_later: null, split_payments: null }, 0, 'both unknown → nothing'],
+  ];
+  const unionHolds = (def: unknown, keys: string[]) => {
+    (AF_EVIDENCE as Record<string, unknown>).__rnpl_probe = def;
+    try {
+      return RNPL_UNION_ROWS.every(([row, n]) => {
+        const got = afEvidence([{ id: '__rnpl_probe', keys }], row, t);
+        return got.length === n && got.every((c) => c.text === RNPL_LABEL);
+      });
+    } finally { delete (AF_EVIDENCE as Record<string, unknown>).__rnpl_probe; }
+  };
+  for (const [row, n, why] of RNPL_UNION_ROWS) {
+    const got = afEvidence([{ id: 'rnpl', keys: ['rnpl'] }], row, t).map((x) => x.text);
+    assert(got.length === n && got.every((x) => x === RNPL_LABEL), `rnpl union: ${why} (got ${JSON.stringify(got)})`);
+  }
+  assert(unionHolds(AF_EVIDENCE.rnpl, ['rnpl']) && unionHolds(AF_EVIDENCE.rnpl, ['rnpl', 'split_payments']),
+    'rnpl union: the shipped def answers every row, for the card key and for the card key + a chat-typed «دفعات» token');
+  // MUTATION PROOF — each pre-merge shape, run through the same rows, must fail them
+  const rnplDef = AF_EVIDENCE.rnpl;
+  assert(!unionHolds({ ...rnplDef, ok: (_k: string[], r: AfCanon) => r.rent_now_pay_later === true }, ['rnpl']),
+    '(mutation) caught: rnpl read as the box alone (the pre-2026-11-12 arm)');
+  assert(!unionHolds({ ...rnplDef, ok: (_k: string[], r: AfCanon) => r.rent_now_pay_later === true && r.split_payments === true }, ['rnpl']),
+    '(mutation) caught: box AND words (the old two-chip SQL AND)');
+  assert(!unionHolds({ ...rnplDef, anyRead: undefined }, ['rnpl']),
+    '(mutation) caught: the default all-reads null-guard on the union (a TRUE beside an unknown would vanish)');
+  assert(!unionHolds({ ...rnplDef, chips: (k: string[], r: AfCanon, tt: typeof t) => k.map(() => tt('Instalments / monthly payments')) }, ['rnpl', 'split_payments']),
+    '(mutation) caught: one chip per key (two picks printing the merged chip twice)');
 
   // ── T2b. THE EVIDENCE REGISTRY COVERS EXACTLY THE CERTIFICATION GATE'S RNPL TOKEN SET ──────────
   // The gate (afCertify.isRnpl), the intent clear/keep, and the evidence registry all consume the
@@ -443,7 +481,7 @@ console.log('\n── T3. stale predicates leave; every def can activate; no act
     unit_subtype_ar: 'استديو', rent_now_pay_later: true, elevator: true,
   };
   const chips = afEvidence(all, full, t).map((x) => x.text);
-  assert(same(chips, [t('Offers installments'), 'عمر 4 سنوات', t('Elevator'), '4 حمامات', t('Unfurnished'), 'عرض الشارع 25 م', t('North'), '★ 9.4 (59 تقييم)', t('Studio unit')]),
+  assert(same(chips, [t('Instalments / monthly payments'), 'عمر 4 سنوات', t('Elevator'), '4 حمامات', t('Unfurnished'), 'عرض الشارع 25 م', t('North'), '★ 9.4 (59 تقييم)', t('Studio unit')]),
     `fully loaded + fully satisfying row → one chip per question, row values, registry order: ${JSON.stringify(chips)}`);
   // furnished:false is a STATED No (source said unfurnished) — shown as «غير مفروشة», never as unknown
   assert(chips.includes('غير مفروشة'), 'furnishedPref:false + furnished:false → «غير مفروشة» (a stated No is a value)');

@@ -565,7 +565,7 @@ const AR: Record<string, string> = {
   'South-east': 'جنوب شرق',
   'South-west': 'جنوب غرب',
   'Do you prefer listings with installment options?': 'تفضّل عقارات تتيح التقسيط / الدفع لاحقًا؟',
-  'Offers installments': 'يقبل التقسيط',
+  'Instalments / monthly payments': 'تقسيط أو دفعات شهرية',
   'What amenities matter to you?': 'وش المميزات المهمة لك؟',
   // Short stays: the amenities card in two halves (owner 2026-10-31) — the question titles and the
   // summary-line labels («• الراحة: مصعد»).
@@ -1919,7 +1919,7 @@ const AR: Record<string, string> = {
   // The Advanced Filter card's note and its reader (owner 2026-11-01). No emoji.
   "Counts come from the ads' own words": 'الأرقام من كلام الإعلانات نفسها',
   'Skip and you get more questions and options': 'تخطى وبنسألك أسئلة وخيارات أكثر',
-  'Ezhalah does not guarantee the payment method or the provider. Confirm with the lister directly.': 'إزهله لا تضمن طريقة الدفع ولا مزود التقسيط. تأكد من المعلن مباشرة.',
+  'Listers say you can pay in instalments or monthly, through one of these providers or another way. Ezhalah cannot guarantee it; confirm with the lister.': 'يذكر المعلن إمكانية الدفع بالتقسيط أو على دفعات، عبر أحد هؤلاء المزودين أو بطريقة أخرى. إزهله لا تضمن ذلك، تأكد من المعلن مباشرة.',
   'How it works?': 'كيف يشتغل؟',
   'How Refine with AI works': 'كيف يشتغل دقّق مع الذكاء الاصطناعي؟',
   'Please turn off your VPN': 'فضلاً أوقف الـ VPN',
