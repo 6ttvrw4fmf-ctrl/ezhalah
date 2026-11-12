@@ -20,6 +20,7 @@ const OLD_PRICE = 'then s.price_total else s.price_annual end as price';
 const NEW_PRICE = 'then coalesce(s.price_total_effective, s.price_total) else s.price_annual end as price';
 const NEW_LL = 'round(coalesce(snap.lat, s.latitude::double precision)::numeric, 6)::double precision la';
 const FIX = '20261112184000_map_pin_reads_the_filters_price_and_one_spot_is_one_pin.sql';
+const MAP_READS = ['map_pins_ar', 'map_posted_window_counts_ar', 'map_nopin_refresh_ar', 'map_view_facts_core'];
 
 const dir = join(root, 'supabase/migrations');
 const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
@@ -34,10 +35,19 @@ function migrationProblems(names: string[], read: (f: string) => string): string
   if (!/if n <> 2 then raise exception 'map_nopin_refresh_ar/.test(sql)) out.push('the district markers are not rewritten');
   if (!sql.includes("'    s.price_total_effective'")) out.push('the pins view does not carry price_total_effective');
   if (!sql.includes(NEW_LL) || !/if n <> 3 then raise exception 'map_pins_ar: expected 3 exact-spot reads/.test(sql)) out.push('exact spots are not rounded to 6 decimals on all 3 reads');
-  // Nothing after the fix may put the bare read back into a map function.
-  for (const f of names.filter((x) => x > FIX)) {
-    const t = read(f);
-    if (/map_(pins|posted_window_counts|nopin_refresh)_ar/.test(t) && t.includes(OLD_PRICE) && !t.includes(NEW_PRICE)) out.push(`${f} reads the bare sale price in a map function`);
+  // Nothing after the fix may put the bare read back into a map function: the NEWEST definition of every map read
+  // (map_view_facts_core included — the pill's facts, 2026-11-12) must price a sale by the Filter's column. A file that
+  // only MENTIONS a map read, or one a later migration redefines with the Filter's price, is not a regression.
+  for (const fn of MAP_READS) {
+    const head = new RegExp(`create or replace function public\\.${fn}\\(`);
+    const defining = names.filter((x) => x > FIX && head.test(read(x)));
+    const last = defining[defining.length - 1];
+    if (!last) continue;
+    const t = read(last);
+    const at = t.search(head);
+    const next = t.slice(at + 1).search(/create or replace function /);
+    const def = next < 0 ? t.slice(at) : t.slice(at, at + 1 + next);
+    if (def.includes(OLD_PRICE) && !def.includes(NEW_PRICE)) out.push(`${last} reads the bare sale price in ${fn}`);
   }
   return out;
 }
@@ -47,6 +57,7 @@ check(`every map read prices a sale like the Filter, and one spot is one pin${mi
 mustCatch('the view left without price_total_effective', migrationProblems(files, (f) => f === FIX ? readMig(f).split("'    s.price_total_effective'").join("''") : readMig(f)).length > 0);
 mustCatch('a map_pins_ar read left on the bare price', migrationProblems(files, (f) => f === FIX ? readMig(f).replace('if n <> 4 then', 'if n <> 3 then') : readMig(f)).length > 0);
 mustCatch('a later migration putting the bare read back', migrationProblems([...files, '20991231000000_x.sql'], (f) => f === '20991231000000_x.sql' ? `create or replace function public.map_pins_ar() … ${OLD_PRICE}` : readMig(f)).length > 0);
+mustCatch('the pill facts\' newest definition left on the bare price', migrationProblems([...files, '20991231000001_y.sql'], (f) => f === '20991231000001_y.sql' ? `create or replace function public.map_view_facts_core(p_s double precision) … ${OLD_PRICE}` : readMig(f)).length > 0);
 mustCatch('spots grouped by their raw coordinates', migrationProblems(files, (f) => f === FIX ? readMig(f).split(NEW_LL).join('x') : readMig(f)).length > 0);
 
 // 3. The sheet's fetch.
