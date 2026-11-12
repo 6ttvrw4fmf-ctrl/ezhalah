@@ -96,7 +96,7 @@ export function priceHead(min: number | null, max: number | null, unpriced: numb
  *  falls back to its count. */
 export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform' | 'price_max' | 'unpriced'>, loc: 'ar' | 'en'): string {
   if (row.deal === 'short' || isStayLengthPlatform(row.platform)) return loc === 'ar' ? 'إقامة قصيرة' : 'Short stay';
-  if (row.deal === 'mixed' && row.n > 1) return loc === 'ar' ? `${row.n} ${row.n === 2 ? 'إعلانان' : row.n <= 10 ? 'إعلانات' : 'إعلان'}` : `${row.n} listings`;
+  if (row.deal === 'mixed' && row.n > 1) return loc === 'ar' ? `${row.n} ${adsNounAr(row.n)}` : `${row.n} listings`;
   const f = priceFacts(row);
   return priceHead(f.min, f.max, f.unpriced, row.deal, loc);
 }
@@ -469,6 +469,20 @@ export const DEAL_WORD: Record<'ar' | 'en', Record<string, string>> = {
  * chosen: «12 إعلان للإيجار في أملج»; with none of it in view but others present (`others`): «لا يوجد للبيع في أملج ·
  * يوجد للإيجار». Several deals chosen: no deal word, as before.
  */
+/** The Arabic word for N listings: 2 → إعلانان, 3–10 → إعلانات, else إعلان (the last two digits decide, so 103 → إعلانات). */
+export function adsNounAr(n: number): string {
+  const r = n % 100;
+  return n === 2 ? 'إعلانان' : r >= 3 && r <= 10 ? 'إعلانات' : 'إعلان';
+}
+
+/** «عرض 10 إعلانات» on the map filter's button — correct Arabic for every count (found live 2026-11-12: «عرض 10 إعلان»). */
+export function showAdsAr(n: number): string {
+  if (n === 0) return 'لا توجد إعلانات';
+  if (n === 1) return 'عرض إعلان واحد';
+  if (n === 2) return 'عرض إعلانين';
+  return `عرض ${n.toLocaleString('en-US')} ${adsNounAr(n)}`;
+}
+
 export function viewCountText(n: number, place: string | null, loc: 'ar' | 'en', deals?: readonly string[], others: readonly string[] = []): string {
   const num = n.toLocaleString('en-US');
   const one = deals && deals.length === 1 ? deals[0] : null;
@@ -480,7 +494,7 @@ export function viewCountText(n: number, place: string | null, loc: 'ar' | 'en',
   }
   const dealWord = one ? ` ${w[one]}` : '';
   if (loc === 'en') return `${num} ${n === 1 ? 'listing' : 'listings'}${dealWord} ${place ? `in ${place}` : 'here'}`;
-  const noun = n === 2 ? 'إعلانان' : n >= 3 && n <= 10 ? 'إعلانات' : 'إعلان';
+  const noun = adsNounAr(n);
   return `${num} ${noun}${dealWord} في ${place ?? 'هذه المنطقة'}`;
 }
 
