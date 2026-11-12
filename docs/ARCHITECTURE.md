@@ -590,6 +590,18 @@ no touching pair, no id lost, 5 mutations) and the hourly MAP PIN ROBOT `e2e/map
 every pin tappable, district named; red → alert). Never "fix" a red robot by moving its spots, loosening the 1 px
 overlap test or shrinking PIN_GAP_PX.
 
+**The pill's second line — «آخر 30 يوما: 🆕 N إعلان جديد · ⚡ N اختفى · 💰 متوسط السعر X» (owner 2026-11-12, «it can't
+be wrong»).** At exact-point zoom, under a named place with ≥ 30 ads, the pill adds facts for EXACTLY the ads it counts
+(`map_view_facts_ar()`, the «نشر خلال» counter's filter word for word): 🆕 = the SITE's posting date in the last 30 days,
+cross-site copies once; ⚡ = ads whose own page was re-opened and found removed (direct-check sites, never an adjudicated
+withdrawal, dropped if it comes back), from the nightly `map_fact_removal` log — hidden until 30 nights are collected
+(started 2026-11-12); 💰 = the median asking price, sale only, one picked type, ≥ 10 priced ads. The line shows only when
+the server's `any` equals the pill's number; a failed read hides it (never «0»). Guests get blurred shapes and «سجل
+الدخول لعرض الأرقام» — the server sends them yes/no per part, never a number. `audit_map_view_facts()` recounts 25 random
+views nightly another way; any mismatch switches the line off (`ops_feature_flags.map_view_facts`) and pages
+(`mon_detect_map_view_facts`). Guard: `scripts/verify-map-view-facts.ts`. Never widen ⚡ to crawl-absence sites, show it
+before the log is ready, or loosen the `any` = pill rule to make the line appear more often.
+
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
 Preview tabs have no frame history/loading indicator, and reload remounts their content.
