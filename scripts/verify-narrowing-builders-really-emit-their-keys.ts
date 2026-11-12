@@ -56,6 +56,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 // is the difference between a key being emitted and omitted.
 const PRELUDE = `
 type SearchQuery = any;
+import { postedWindowParam } from '${ROOT}/src/lib/postedWindows.ts';
 const cohortTypesAr = (_q: any) => ['شقة'];
 const bedroomTokens = (q: any) => (q.__beds ?? []);
 const agentPriceCapAnnual = (_q: any) => null;

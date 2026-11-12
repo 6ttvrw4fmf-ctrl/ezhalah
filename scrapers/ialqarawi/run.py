@@ -93,6 +93,7 @@ import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -100,7 +101,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, http, normalize  # noqa: E402
+from scrapers.common import db, http, normalize, posting_date  # noqa: E402
 from scrapers.common.page_pin import pin_from_html, pin_from_page  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     find_district_in_text, is_ambiguous_standalone_word, known_district_keys, title_hayy_district, to_catalog,
@@ -693,6 +694,13 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "added_ago_raw": None if _is_blank(f.get("مضاف منذ")) else f.get("مضاف منذ"),
         **(detail.get("pin") or {}),
     }.items() if v is not None}
+    # «مضاف منذ 23 يوم» is all the site prints about when: how long ago, never the day. That is a FLOOR on the
+    # posting day (posted no earlier than now − 24 days), stored apart from date_added, which must hold a real day.
+    # The «نُشر خلال» window reads the floor; the database keeps the tightest one ever read (owner 2026-11-11).
+    read_at = datetime.now(timezone.utc)
+    if (floor := posting_date.posted_no_earlier_than(f.get("مضاف منذ"), read_at)):
+        row["posted_earliest_at"] = floor
+        row["posted_latest_at"] = posting_date.posted_no_later_than(f.get("مضاف منذ"), read_at)
     return row, category, ""
 
 

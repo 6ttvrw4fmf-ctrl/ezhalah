@@ -64,6 +64,13 @@ LISTING_COLUMNS = {
     'views_count', 'villa_on_roof', 'water_supply', 'zip_code',
 }
 
+# Columns ONE platform's two tables carry on top of the shared shape, with the migration that added them. Read from
+# production, never assumed: a key here that the table lacks is the PGRST204 batch loss this file exists to stop.
+PLATFORM_COLUMNS = {
+    # «منذ …» floor and ceiling (migrations 20261111233249, 20261111235627; docs/ARCHITECTURE.md §20 «منذ …»)
+    'ialqarawi': {'posted_earliest_at', 'posted_latest_at'},
+}
+
 # The names that were actually wrong, kept as an explicit anti-list so the specific defect cannot
 # come back wearing the same clothes. The right-hand side is the column that DOES exist.
 KNOWN_WRONG = {
@@ -251,7 +258,7 @@ def test_every_row_literal_key_of_an_onboarded_batch_is_a_real_column(platform):
     keys = _row_literal_keys(tree)
     assert {"ad_number", "listing_url", "source", "transaction_type"} <= keys, (
         f"{platform}: no row literal found — the reader stopped seeing this scraper's rows")
-    unknown = sorted(keys - LISTING_COLUMNS - FOLDED_BEFORE_UPSERT)
+    unknown = sorted(keys - LISTING_COLUMNS - FOLDED_BEFORE_UPSERT - PLATFORM_COLUMNS.get(platform, set()))
     assert not unknown, (
         f"{platform} writes {unknown}, which {'is' if len(unknown) == 1 else 'are'} not a column of "
         f"{platform}_residential_listings / _commercial_listings. PostgREST rejects the WHOLE batch "

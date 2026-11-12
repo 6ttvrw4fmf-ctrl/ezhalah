@@ -801,6 +801,53 @@ def fetch_detail(s: cc.Session, listing_url: str) -> dict:
     return {}
 
 
+def merge_detail_into_current(current: Any, detail: dict) -> dict:
+    """The detail page's fields (suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text,
+    rating, reviews_count, extra_sections) over the row's CURRENT additional_info. Every other key — the crawl's
+    monthly_price, district, amenities — is whatever the row holds NOW, never an older snapshot."""
+    base = dict(current) if isinstance(current, dict) else {}
+    base.update(detail)
+    return base
+
+
+def cas_write_detail(client: Any, ad_number: Any, d: dict, desc: Optional[str], tries: int = 3) -> Optional[bool]:
+    """Write one unit's detail-page fields by compare-and-swap. True = written · False = the row kept changing
+    under us (3 tries) · None = the row could not be re-read (nothing written)."""
+    tbl = "gathern_residential_listings"
+    for _ in range(tries):
+        try:
+            cur = (client.table(tbl).select("additional_info, bathrooms")
+                           .eq("ad_number", ad_number).limit(1).execute())
+        except Exception as e:  # noqa: BLE001
+            print("  ⚠ re-read failed", ad_number, str(e)[:80])
+            return None
+        rows = (cur.data if cur else None) or []
+        if not rows:
+            return None
+        before = rows[0].get("additional_info")
+        payload: dict[str, Any] = {"additional_info": merge_detail_into_current(before, d)}
+        # The page's own count fills a bathroom count the list's icon never gave; a stored value stays.
+        fill_baths = rows[0].get("bathrooms") is None and (n := _bathrooms_from_sections(d.get("extra_sections")))
+        if fill_baths:
+            payload["bathrooms"] = n
+        if _kitchen_from_sections(d.get("extra_sections")):
+            payload["kitchen"] = True
+        if desc:
+            payload["description"] = desc
+        q = client.table(tbl).update(payload).eq("ad_number", ad_number)
+        q = q.is_("additional_info", "null") if before is None else q.eq("additional_info", json.dumps(before, ensure_ascii=False))
+        if fill_baths:
+            q = q.is_("bathrooms", "null")
+        try:
+            res = q.execute()
+        except Exception as e:  # noqa: BLE001
+            print("  ⚠ update failed", ad_number, str(e)[:80])
+            return False
+        if (res.data if res else None):
+            return True
+    return False
+
+
 def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
                      shards: Optional[int] = None) -> tuple[int, int]:
     """Fill description (column) + the rich detail fields (additional_info) for ACTIVE Gathern rows that
@@ -831,29 +878,25 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
         work = work[shard::shards]  # stride partition spreads big + small evenly across runners
     if limit:
         work = work[:limit]
-    updated = 0
+    updated = reread_failed = cas_lost = 0
     for r in work:
         d = fetch_detail(s, r.get("listing_url") or "")
         if not d:
             continue
         desc = d.pop("description", None)
-        info = r.get("additional_info")
-        if not isinstance(info, dict):
-            info = {}
-        info.update(d)  # suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text, rating, reviews_count, extra_sections
-        payload: dict[str, Any] = {"additional_info": info}
-        # The page's own count fills a bathroom count the list's icon never gave; a stored value stays.
-        if r.get("bathrooms") is None and (n := _bathrooms_from_sections(d.get("extra_sections"))):
-            payload["bathrooms"] = n
-        if _kitchen_from_sections(d.get("extra_sections")):
-            payload["kitchen"] = True
-        if desc:
-            payload["description"] = desc
-        try:
-            client.table("gathern_residential_listings").update(payload).eq("ad_number", r["ad_number"]).execute()
+        # Compare-and-swap into the row's CURRENT additional_info (CodeRabbit #11809). Since 2026-11-11 this pass also
+        # runs right after the crawl (workflow_run), so a sync retry may rewrite monthly_price etc. while we fetch
+        # pages. Each try re-reads the row, merges the page fields into what it holds NOW, and writes only if the row
+        # still holds exactly that additional_info (and, when we fill bathrooms, still has none). A row that changed
+        # in between is re-read and merged again (3 tries). A failed re-read never writes the stale snapshot.
+        ok = cas_write_detail(client, r["ad_number"], d, desc)
+        if ok is True:
             updated += 1
-        except Exception as e:
-            print("  ⚠ update failed", r.get("ad_number"), str(e)[:80])
+        elif ok is None:
+            reread_failed += 1
+        else:
+            cas_lost += 1
+    print(f"  backfill: re-read failed {reread_failed} · lost the compare-and-swap 3x {cas_lost}", flush=True)
     return len(work), updated
 
 

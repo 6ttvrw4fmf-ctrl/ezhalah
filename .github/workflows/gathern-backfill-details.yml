@@ -22,7 +22,19 @@ on:
   # AI reader (07:40), so a unit's text is read the same morning it is filled.
   schedule:
     - cron: "0 2 * * *"
+  # AND right after the daily crawl (🆕 2026-11-11): the crawl (gh-gathern-daily, 04:08) brings the NEW units, and the
+  # 02:00 pass alone left every one of them without bathrooms / kitchen / description for ~22 hours (11-11 07:20 UTC:
+  # 34 of 62 units scraped that morning had no bathroom count; the af_new_listing_capture_regression alarms on gathern
+  # bathrooms / kitchen read that gap). Guard: scripts/verify-gathern-details-follow-the-crawl.ts.
+  workflow_run:
+    workflows: ["Gathern sync"]
+    types: [completed]
   workflow_dispatch:
+
+# workflow_run only starts THIS file from the default branch and runs no code from the triggering run (no artifact,
+# no PR head is checked out), so the after-crawl trigger carries no untrusted input. Read-only token.
+permissions:
+  contents: read
 
 concurrency:
   group: gathern-backfill-details

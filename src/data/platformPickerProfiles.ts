@@ -174,6 +174,13 @@ LOGOS["Maqam Al Wisam"] = require("../../assets/images/platform-clean/maqam.png"
 LOGOS["راز العقارية"] = require("../../assets/images/platform-clean/raz.png");
 LOGOS["الرفاعي للعقار"] = require("../../assets/images/platform-clean/alrifai-small.png");
 LOGOS["MAQRAT"] = require("../../assets/images/platform-clean/maqrat.png");
+// 6 sources launched 2026-11-04..06: official logos.
+LOGOS["بروبرتي فايندر"] = require("../../assets/images/platform-logos/propertyfinder-sa.png");
+LOGOS["كيلر وليامز"] = require("../../assets/images/platform-logos/kwsaudiarabia-com.png");
+LOGOS["الماجدية"] = require("../../assets/images/platform-logos/almajdiah-com.png");
+LOGOS["أساس مكين"] = require("../../assets/images/platform-logos/asasmakeen-com.png");
+LOGOS["الراجحي للتنمية"] = require("../../assets/images/platform-logos/mrajhi-com-sa.png");
+LOGOS["ستيم العربية"] = require("../../assets/images/platform-logos/steam-realestate-com.png");
 // Haraj: official header artwork, collected 2026-10-18 UTC.
 LOGOS["حراج"] = require("../../assets/images/platform-logos/haraj.png");
 const coverage = coverageSnapshot.platforms as Record<string, PickerCoverage>;

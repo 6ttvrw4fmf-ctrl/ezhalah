@@ -67,13 +67,17 @@ export const ADVISORY_MAY_SKIP = ['CodeRabbit'];
 // PROVEN mirror of production (mirrorOfProduction) carries nothing to review — merging it changes nothing production
 // has not already run — so it passes a rate-limited CodeRabbit without a prior review. Still not when it is required,
 // not with an open Major or unreadable threads, and not for any PR whose parity was not measured.
+// 0b⁗ (owner 2026-11-11, «Skip code rabbit»): the CodeRabbit account sits at its $50 spending cap and answers every PR
+// «Review rate limited», so NOTHING could merge (#11874 and every fix behind it, 2026-11-11). The owner chose to skip
+// it rather than raise the cap again: a rate-limited CodeRabbit now passes on ANY PR — reviewed or not, mirror or not —
+// while every other rule stands: all other checks SUCCESS, not required, threads read with no open Major (3b).
+// A NEUTRAL for any other reason, FAILURE, cancelled or pending still blocks.
 export const RATE_LIMITED = /rate limited/i;
 const advisorySkip = (c: CheckRun, input: MergeGateInput) => {
   if (!ADVISORY_MAY_SKIP.includes(c.context) || input.requiredContexts.includes(c.context)) return false;
   const k = normaliseConclusion(c.conclusion);
   return k === 'SKIPPED'
     || (k === 'NEUTRAL' && RATE_LIMITED.test(c.title ?? '')
-      && (input.codeRabbitReviewed === true || input.mirrorOfProduction === true)
       && Array.isArray(input.openReviewMajors) && input.openReviewMajors.length === 0);
 };
 
