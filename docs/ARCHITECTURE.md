@@ -601,6 +601,10 @@ the server's `any` equals the pill's number; a failed read hides it (never «0»
 views nightly another way; any mismatch switches the line off (`ops_feature_flags.map_view_facts`) and pages
 (`mon_detect_map_view_facts`). Guard: `scripts/verify-map-view-facts.ts`. Never widen ⚡ to crawl-absence sites, show it
 before the log is ready, or loosen the `any` = pill rule to make the line appear more often.
+Each number carries an arrow against last month (owner 2026-11-12) — «↑12%» / «↓5%» — computed over the map as it stood
+28–34 days ago (`map_fact_points_week`, a weekly copy kept 5 weeks): counts need ≥ 20 in both months and a ≥ 10% move,
+the price a ≥ 3% move (the home facts' rule); unfiltered views only; ⚡'s arrow only once the removal log covers the
+previous month. First 🆕/💰 arrows ~2026-12-10, ⚡'s ~2027-01-09. The checker recounts last month's numbers too.
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.

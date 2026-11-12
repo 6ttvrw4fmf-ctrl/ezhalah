@@ -10,6 +10,8 @@
 import { adsNounAr, shortMoney } from './mapPins.ts';
 
 export type ViewFacts = { any: number; locked: boolean; new30: number | null; gone30: number | null; median: number | null;
+  /** the same three numbers over the map as it stood 28–34 days ago (the month-arrows migration); null = no baseline */
+  prevNew30?: number | null; prevGone30?: number | null; prevMedian?: number | null;
   /** guest only: which parts a signed-in user would see (the server sends yes/no, never the number) */
   has?: { new: boolean; gone: boolean; median: boolean } };
 export const FACTS_MIN_ADS = 30;
@@ -28,7 +30,9 @@ export function parseViewFacts(result: { data: unknown; error: unknown }): ViewF
     return { any, locked: true, new30: null, gone30: null, median: null, has };
   }
   const median = typeof d.median === 'number' && d.median > 0 ? d.median : null;
-  return { any, locked: false, new30: count(d.new30), gone30: count(d.gone30), median };
+  const prevMedian = typeof d.prev_median === 'number' && d.prev_median > 0 ? d.prev_median : null;
+  return { any, locked: false, new30: count(d.new30), gone30: count(d.gone30), median,
+           prevNew30: count(d.prev_new30), prevGone30: count(d.prev_gone30), prevMedian };
 }
 
 /** «123 إعلان جديد» — the last two digits decide, as everywhere on the map. */
@@ -44,6 +48,21 @@ export function goneAr(n: number): string {
   return `${n.toLocaleString('en-US')} ${n !== 1 && r >= 2 && r <= 10 ? 'اختفت' : 'اختفى'}`;
 }
 
+/** THE ARROW AGAINST LAST MONTH (owner 2026-11-12): said only when the change is real, never for noise.
+ *  Counts: both months at least ARROW_MIN_COUNT and a change of at least ARROW_MIN_COUNT_PCT. Price: the home facts'
+ *  rule — a move of at least ARROW_MIN_PRICE_PCT. Rounded to a whole percent; «↑12%» / «↓5%». */
+export const ARROW_MIN_COUNT = 20;
+export const ARROW_MIN_COUNT_PCT = 10;
+export const ARROW_MIN_PRICE_PCT = 3;
+export function monthArrow(now: number | null, prev: number | null | undefined, kind: 'count' | 'price'): string {
+  if (now === null || prev === null || prev === undefined || prev <= 0 || now <= 0) return '';
+  if (kind === 'count' && (now < ARROW_MIN_COUNT || prev < ARROW_MIN_COUNT)) return '';
+  const pct = Math.round(((now - prev) / prev) * 100);
+  if (Math.abs(pct) < (kind === 'count' ? ARROW_MIN_COUNT_PCT : ARROW_MIN_PRICE_PCT)) return '';
+  // Isolated left-to-right (LRI … PDI) so an Arabic line shows «↑12%», never the flipped «%12↑».
+  return ` \u2066${pct > 0 ? '↑' : '↓'}${Math.abs(pct)}%\u2069`;
+}
+
 export type FactLine = { kind: 'none' } | { kind: 'locked' } | { kind: 'facts'; text: string };
 
 /** What the second line says, given the facts and the number the pill's first line shows. */
@@ -51,9 +70,9 @@ export function factLine(f: ViewFacts | null, shown: number | null, loc: 'ar' | 
   if (!f || shown === null || f.any !== shown || f.any < FACTS_MIN_ADS) return { kind: 'none' };
   if (f.locked) return f.has && (f.has.new || f.has.gone || f.has.median) ? { kind: 'locked' } : { kind: 'none' };
   const parts: string[] = [];
-  if (f.new30) parts.push(loc === 'ar' ? `🆕 ${newAdsAr(f.new30)}` : `🆕 ${f.new30.toLocaleString('en-US')} new listing${f.new30 === 1 ? '' : 's'}`);
-  if (f.gone30) parts.push(loc === 'ar' ? `⚡ ${goneAr(f.gone30)}` : `⚡ ${f.gone30.toLocaleString('en-US')} gone`);
-  if (f.median) parts.push(loc === 'ar' ? `💰 متوسط السعر ${shortMoney(f.median, 'ar')}` : `💰 avg price ${shortMoney(f.median, 'en')}`);
+  if (f.new30) parts.push((loc === 'ar' ? `🆕 ${newAdsAr(f.new30)}` : `🆕 ${f.new30.toLocaleString('en-US')} new listing${f.new30 === 1 ? '' : 's'}`) + monthArrow(f.new30, f.prevNew30, 'count'));
+  if (f.gone30) parts.push((loc === 'ar' ? `⚡ ${goneAr(f.gone30)}` : `⚡ ${f.gone30.toLocaleString('en-US')} gone`) + monthArrow(f.gone30, f.prevGone30, 'count'));
+  if (f.median) parts.push((loc === 'ar' ? `💰 متوسط السعر ${shortMoney(f.median, 'ar')}` : `💰 avg price ${shortMoney(f.median, 'en')}`) + monthArrow(f.median, f.prevMedian, 'price'));
   if (parts.length === 0) return { kind: 'none' };
   return { kind: 'facts', text: `${loc === 'ar' ? `آخر ${FACTS_DAYS} يوما` : `Last ${FACTS_DAYS} days`}: ${parts.join(' · ')}` };
 }

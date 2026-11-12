@@ -4,7 +4,7 @@
 // confirmed removal only and only on a full 30-day log, and a guest never receives a number.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { factLine, lockedLine, newAdsAr, goneAr, parseViewFacts, FACTS_MIN_ADS, type ViewFacts } from '../src/lib/mapViewFacts.ts';
+import { factLine, lockedLine, newAdsAr, goneAr, parseViewFacts, monthArrow, FACTS_MIN_ADS, ARROW_MIN_COUNT, type ViewFacts } from '../src/lib/mapViewFacts.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -13,7 +13,8 @@ const mustCatch = (name: string, mutantPasses: () => boolean) => check(`(mutatio
 const MARKS = /[ً-ْ]/;
 
 const full: ViewFacts = { any: 1081, locked: false, new30: 123, gone30: 85, median: 1_350_000 };
-const text = (f: ViewFacts | null, shown: number | null, loc: 'ar' | 'en' = 'ar') => { const l = factLine(f, shown, loc); return l.kind === 'facts' ? l.text : l.kind; };
+const text = (f: ViewFacts | null, shown: number | null, loc: 'ar' | 'en' = 'ar') => { const l = factLine(f, shown, loc); return l.kind === 'facts' ? l.text.replace(/[\u2066\u2069]/g, '') : l.kind; };
+const arrow = (n: number | null, p: number | null | undefined, k: 'count' | 'price') => monthArrow(n, p, k).replace(/[\u2066\u2069]/g, '');
 
 // 1. what the line says
 check('the full line reads as agreed', text(full, 1081) === 'آخر 30 يوما: 🆕 123 إعلان جديد · ⚡ 85 اختفى · 💰 متوسط السعر 1.4 مليون', text(full, 1081));
@@ -27,6 +28,16 @@ check('«إعلان جديد», never «جديد» alone (the Filter\'s «جدي
 check('Arabic words follow the count: 1, 2, 3, 11, 103', newAdsAr(1) === 'إعلان جديد واحد' && newAdsAr(2) === 'إعلانان جديدان' && newAdsAr(3) === '3 إعلانات جديدة' && newAdsAr(11) === '11 إعلان جديد' && newAdsAr(103) === '103 إعلانات جديدة' && goneAr(5) === '5 اختفت' && goneAr(85) === '85 اختفى');
 check('no Arabic diacritics anywhere in the line', [text(full, 1081), lockedLine({ ...full, locked: true, has: { new: true, gone: true, median: true } }, 'ar').ask].every((x) => !MARKS.test(String(x))));
 check('English reads too', text(full, 1081, 'en') === 'Last 30 days: 🆕 123 new listings · ⚡ 85 gone · 💰 avg price 1.4M', text(full, 1081, 'en'));
+
+// 1b. the arrow against last month — only a real change
+check('a real change gets an arrow: 123 vs 110 new → ↑12%, price 1.40M vs 1.35M → ↑4%, 85 vs 100 gone → ↓15%', arrow(123, 110, 'count') === ' ↑12%' && arrow(1_400_000, 1_350_000, 'price') === ' ↑4%' && arrow(85, 100, 'count') === ' ↓15%');
+check('noise gets none: a count move under 10%, a price move under 3%', monthArrow(123, 120, 'count') === '' && monthArrow(1_390_000, 1_360_000, 'price') === '');
+check(`small numbers get none (either month under ${ARROW_MIN_COUNT})`, monthArrow(19, 10, 'count') === '' && monthArrow(40, 12, 'count') === '');
+check('no baseline, no arrow', monthArrow(123, null, 'count') === '' && monthArrow(123, undefined, 'count') === '' && monthArrow(123, 0, 'count') === '');
+check('the line carries the arrows', text({ ...full, prevNew30: 110, prevGone30: 100, prevMedian: 1_300_000 }, 1081) === 'آخر 30 يوما: 🆕 123 إعلان جديد ↑12% · ⚡ 85 اختفى ↓15% · 💰 متوسط السعر 1.4 مليون ↑4%', String(text({ ...full, prevNew30: 110, prevGone30: 100, prevMedian: 1_300_000 }, 1081)));
+check('the arrow is isolated left-to-right so Arabic shows «↑12%», not «%12↑»', monthArrow(123, 110, 'count') === ' \u2066↑12%\u2069');
+check('a guest never gets an arrow (no numbers, no changes)', parseViewFacts({ data: { locked: true, any: 1081, has_new: true, prev_new30: 50 }, error: null })?.prevNew30 === undefined);
+mustCatch('an arrow on a 2% price wobble', () => { const loose = (n: number, p: number) => { const pct = Math.round(((n - p) / p) * 100); return pct === 0 ? '' : `${pct}`; }; return loose(1_390_000, 1_360_000) === ''; });
 
 // 2. the guest
 const guest = parseViewFacts({ data: { locked: true, any: 1081, has_new: true, has_gone: false, has_median: true, new30: 123, median: 1_350_000 }, error: null });
@@ -60,9 +71,16 @@ mustCatch('a facts filter that drifted from the counter', () => same(core.replac
 const newsBySiteDate = (src: string) => /'new30', \(select count\(\*\) from fd where fd\.own and fd\.posted_at >= now\(\) - make_interval\(days => 30\)/.test(src) && !/first_seen_at|scraped_at|last_seen_at/.test(src);
 check('«new» counts the SITE\'s posting date, never first-seen', newsBySiteDate(core));
 mustCatch('«new» by first-seen', () => newsBySiteDate(core.replace("fd.posted_at >= now() - make_interval(days => 30)", "fd.first_seen_at >= now() - make_interval(days => 30)")));
-const goneGated = (src: string) => /'gone30', case when v_plain and v_ready then/.test(src) && /where v_plain and v_ready and r\.left_at >= now\(\) - interval '30 days'/.test(src);
+const goneGated = (src: string) => /'gone30', case when v_plain and v_ready then \(select count\(\*\) from gd where gd\.own and gd\.left_at >= now\(\) - interval '30 days'\)/.test(src)
+  && /'prev_gone30', case when v_plain and v_prev_ready/.test(src)
+  && /v_prev_ready := v_base is not null\s+and exists \(select 1 from public\.map_fact_capture_run cr where cr\.ok and cr\.prev_taken_at is null and cr\.run_at::date <= v_base - 30\)/.test(src);
 check('«gone» only on a full, fresh log and an unfiltered view', goneGated(core));
 mustCatch('«gone» shown before the log is ready', () => goneGated(core.replace("'gone30', case when v_plain and v_ready then", "'gone30', case when true then")));
+mustCatch('last month\'s «gone» compared before the log covers that month', () => goneGated(core.replace('cr.run_at::date <= v_base - 30', 'cr.run_at::date <= v_base')));
+const baseline = (src: string) => /where w\.taken_on between current_date - 34 and current_date - 28;/.test(src) && /'prev_median', case when v_plain and v_base is not null and p_deals = array\['buy'\]::text\[\]/.test(src);
+check('«last month» is the map as it stood 28–34 days ago, unfiltered views only', baseline(core));
+mustCatch('a «last month» taken from last week', () => baseline(core.replace('current_date - 34 and current_date - 28', 'current_date - 10 and current_date - 4')));
+check('the checker recounts last month\'s new ads and median another way', /if \(c ->> 'prev_new30_raw'\)::bigint is distinct from pn then/.test(audit) && /with pbox as materialized/.test(audit));
 const readyRule = (src: string) => /prev_taken_at is null and run_at <= now\(\) - interval '30 days'/.test(src) && /run_at >= now\(\) - interval '36 hours'/.test(src);
 check('the log is «ready» only 30 days after its first night and while fresh', readyRule(ready));
 mustCatch('a log called ready after a week', () => readyRule(ready.replace("interval '30 days'", "interval '7 days'")));
