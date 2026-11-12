@@ -1,89 +1,229 @@
-"""سنان العقارية — www.senanrealestate.sa. Onboarding 2026-09-24. Nuzul tenant #3 (see
-scrapers/jawher/run.py for the platform reading, which this file imports).
+"""سنان العقارية — senanrealestate.sa. Rebuilt 2026-11-12 for the site's NEW static website.
 
-A DEVELOPER SITE: 77 «مشاريع» (projects), each selling individually priced UNITS. The owner's grain
-rule for such sites — EACH PRICED UNIT is one listing, a project with no priced unit is skipped —
-is met by enumerating the UNITS directly, because on this platform every unit is itself a property
-record with its own /properties/<id> page (the page a user lands on: «ضمن مشروع X», unit price,
-area, rooms, REGA licence line). MEASURED 2026-09-24 (live API, every id fetched):
-  · /api/public/v2/projects → 77 projects (72 available, 3 unavailable, 2 sold). Opening all 77:
-    74 carry property_cards, 77 distinct unit ids, 0 unpriced. /api/public/v2/properties → 82
-    records: the 77 project units PLUS 5 standalone properties (41522, 42533, 42543, 42793,
-    42852). Units ⊆ properties, so the properties route IS the complete unit catalogue and the
-    project walk adds nothing but the name — which every unit record already carries in its own
-    `projects` field (77/82) → additional_info.project. The manifest's «77» counted projects.
-  · sitemap.xml lists 9 properties + 9 projects (the first list page each) — stale, never used.
-  · Apex senanrealestate.sa 301s to www AND drops the path (/projects → /); BASE is the www host.
-  · All 82 purpose=sell, product=office. Statuses: 75 available, 3 sold, 4 unavailable (a sold
-    unit stays published with a «مباعة» badge → skipped `status_sold`). is_wafi_ad 1/82.
-  · Types: building_apartment 47 («شقة في عمارة» → Apartment), townhouse 26 (→ «تاون هاوس», the fleet's
-    Townhouse fold), villa 5, floor 4. bedrooms 81/82, bathrooms 82/82, area 79/82 (+9 built_up_
-    area, used as the printed م² when `area` is null — unit 44630 prints 438 م² from it).
-  · PRICE: selling_price 82/82 (the unit price the page prints, e.g. 44630 «1,280,000 سعر البيع»).
-    Project pages also print a prose price table («فيلا 1 - 10 السعر 1٫280٫000 …») — never read.
-  · LOCATION: cities ابها 32 / خميس مشيط 21 / احد رفيده 11 all resolve through to_catalog (hamza-
-    and taa-marbuta-insensitive). 18/82 records carry NO city → skipped `no_city`. Each of those
-    does carry the site's city TAG («ابها»/«خميس مشيط»/«احد رفيدة») and a project with a city;
-    using either is an owner decision (open issue), not a default.
-  · LICENCE: rega_ad_number 0/82 («لا يوجد»); the FAL licence 1200017563 on 74/82 → additional_info.
-  · Removal oracle (this host): gone 44629 (archived: 404 {"message":""}) / 1 / 99999999 → 404
-    JSON 3/3; live 44630 / 45254 / 41522 → 200 with data.id + available 3/3; HTML soft-404s with
-    200. STATUS DEATH (measured 2026-09-24): sold 41223 / 41222 / 44628 and unavailable 44610 /
-    44591 / 44579 all still answer 200 with data.id and their status (6/6) — the shared oracle
-    reads availability_status, so a 200 for THIS unit that is not «available» is GONE (fix
-    2026-09-24, see scrapers/jawher/run.py); the first build would have self-healed a sold unit.
-  · COVERAGE (full --dry-run): mapped 57 units, all residential (Apartment 31, Villa 23, Floor 3);
-    skipped 25: no_city 17, status_unavailable 4, status_sold 3, off_plan_wafi 1. price_total
-    57/57 · area 57/57 · district 52/57 (المربع/التضامن/مخطط الموسى not catalogued; raw kept) ·
-    photos 57/57 · bedrooms 56 · bathrooms 57 · halls 56 · majlis 56 · elevator 41 · parking 49
-    kitchen 55 · maid 39 · driver 7 · electricity 57 · water 54 · sanitation 55 · floor_number 4
-    direction 4 · street_width 5 · description 46 · project 52/57. Not published: ad licence,
-    property_age, furnished, coordinates (0/82).
+WHAT CHANGED AT THE SOURCE (measured 2026-11-12). The old site was a Nuzul tenant (82 priced units behind
+/api/public/v2/properties). It is gone: all 57 units we served answer 404 on BOTH their page
+(www.senanrealestate.sa/properties/<id>) and their API record, and every old route 404s. The new site is a
+static marketing site with NINE «مشاريع» (projects), each its own page /projects/<slug>.html carrying:
+  · a schema.org property JSON-LD (@id «…#property»): @type Apartment / SingleFamilyResidence, name,
+    description, address.addressLocality (city) + streetAddress (district), floorSize.value (م²),
+    offers.availability (InStock / PreOrder), keywords («… عقار للبيع …»);
+  · the visible «بيانات المشروع» box: المدينة · الحي · النوع · المساحة · الحالة (متاح / حجز مسبق / قريباً);
+  · NO PRICE: «الأسعار والدفعات النهائية تُحدَّد مع مستشار المبيعات» on every page.
+Measured: 6 «متاح» + InStock, 2 «حجز مسبق» + PreOrder, 1 «قريباً» + PreOrder.
+
+THE GRAIN — OWNER 2026-11-12. The fleet's developer-site rule skips a project with no priced unit. For
+Senan the owner decided otherwise, by name: the six «متاح» projects show (price «السعر عند الطلب»), the
+pre-booking / coming-soon ones do not (off-plan stays out of search, the rakez rule), and the old units are
+removed. So ONE PROJECT PAGE = ONE LISTING, only when BOTH the visible «الحالة» says «متاح» AND the JSON-LD
+offer says InStock. The price is the source's own silence — AUTHORITATIVE_NULL with its sentence as
+evidence, never a number.
+
+Type: the visible «النوع» first (شقق → Apartment, فلل → Villa); the generic «وحدات سكنية» (غيم هاوس) takes the
+page's own JSON-LD @type (Apartment). Purpose: Buy only when the page's own keywords say «للبيع».
+
+Removal oracle (this host, measured 2026-11-12): an unknown project path → 404; a live project → 200 with
+its #property JSON-LD naming its own url. A 200 for THIS page whose status is no longer «متاح»/InStock is
+GONE (sold out or back to pre-booking); 404 is GONE; anything else is UNKNOWN. Canary-gated.
 """
 from __future__ import annotations
 
 import argparse
+import html
+import json
+import re
 import sys
-import time
 from pathlib import Path
 from typing import Any, Optional
 
+from curl_cffi import requests as cc
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db  # noqa: E402
-from scrapers.common.http import retry_smarter_session  # noqa: E402
-from scrapers.jawher.run import (  # noqa: E402
-    API_PATH, ORACLE, fetch_detail, fetch_ids, make_verify_gone, nuzul_fields, session,
-)
+from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 
-BASE = "https://www.senanrealestate.sa"
+BASE = "https://senanrealestate.sa"
 SOURCE = "سنان العقارية"
-PREFIX = "SNN"
+PREFIX = "SNN-"
 SLUG = "senan"
+ORACLE = "senan.project_page.jsonld_url_available_instock"
+LIVE_STATUS = "متاح"
+LIVE_AVAILABILITY = "InStock"
+GENERIC_TYPE = "وحدات سكنية"
+NOT_FOUND_MARK = "This Page Does Not Exist"   # the host's own 404 page title (measured 2026-11-12)
+TYPE_BY_LABEL = {"شقق": "Apartment", "شقة": "Apartment", "فلل": "Villa", "فيلا": "Villa"}
+TYPE_BY_LD = {"Apartment": "Apartment", "SingleFamilyResidence": "Villa"}
+GENERIC_PHOTO = "hero-poster.jpg"     # the site-wide hero image, not the project's own
+_HREF = re.compile(r'href="(?:\.\./|/)?(projects/[a-z0-9-]+\.html)"')
+_SPEC = re.compile(r"<div><span>([^<]+)</span><b>([^<]+)</b></div>")
+_LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
+_OG_IMAGE = re.compile(r'<meta property="og:image" content="([^"]+)"')
+_PRICE_NOTE = re.compile(r'<div class="specnote">(.*?)</div>', re.S)
 
 
-def map_listing(d: dict[str, Any]) -> tuple[Optional[dict[str, Any]], str, str]:
-    """(row, category, skip_reason) for ONE UNIT record. row is None exactly when skip_reason is set."""
-    fields, category, why = nuzul_fields(d)
-    if not fields:
-        return None, category, why
-    row = {
-        "ad_number": f"{PREFIX}{d['id']}",
-        "listing_url": f"{BASE}/properties/{d['id']}",
+def _text(fragment: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment or ""))).strip()
+
+
+def session() -> cc.Session:
+    s = cc.Session(impersonate="chrome")   # impersonate OWNS the User-Agent
+    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
+    return s
+
+
+def project_hrefs(page: str) -> list[str]:
+    """Every /projects/<slug>.html the page links to, in order, once each."""
+    seen: list[str] = []
+    for h in _HREF.findall(page or ""):
+        if h not in seen:
+            seen.append(h)
+    return seen
+
+
+def sitemap_projects(xml: str) -> set[str]:
+    return set(re.findall(r"<loc>https://senanrealestate\.sa/(projects/[a-z0-9-]+\.html)</loc>", xml or ""))
+
+
+def parse_project(page: str) -> Optional[dict[str, Any]]:
+    """The page's own #property JSON-LD plus its «بيانات المشروع» box; None when the page carries no
+    property JSON-LD (not a project page)."""
+    prop = None
+    for block in _LD.findall(page or ""):
+        try:
+            d = json.loads(block)
+        except Exception:
+            continue
+        if isinstance(d, dict) and str(d.get("@id", "")).endswith("#property"):
+            prop = d
+            break
+    if prop is None:
+        return None
+    main = (page or "").split("MORE PROJECTS")[0]   # the «مشروعات أخرى» cards below repeat other projects
+    specs = {_text(k): _text(v) for k, v in _SPEC.findall(main)}
+    og = _OG_IMAGE.search(page or "")
+    note = _PRICE_NOTE.search(main)
+    return {"ld": prop, "specs": specs, "og_image": og.group(1) if og else None,
+            "price_note": _text(note.group(1)) if note else None}
+
+
+def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]:
+    """(row, category, skip_reason) for ONE project page. row is None exactly when skip_reason is set."""
+    ld, specs = d["ld"], d["specs"]
+    slug = href.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    if not slug:
+        return None, "residential", "no_id"
+    status = specs.get("الحالة")
+    offer = ld.get("offers") if isinstance(ld.get("offers"), dict) else {}
+    availability = str(offer.get("availability") or "").rsplit("/", 1)[-1] or None
+    if status != LIVE_STATUS or availability != LIVE_AVAILABILITY:
+        return None, "residential", f"status_{status or 'blank'}_{availability or 'blank'}"
+    if "للبيع" not in str(ld.get("keywords") or ""):
+        return None, "residential", "purpose_unstated"
+    label = specs.get("النوع")
+    property_type = TYPE_BY_LABEL.get(label or "")
+    if not property_type and label == GENERIC_TYPE:
+        property_type = TYPE_BY_LD.get(str(ld.get("@type") or ""))
+    if not property_type:
+        return None, "residential", f"type_unmapped_{label or 'blank'}"
+    category = normalize.category_for_type(property_type).lower()
+    addr = ld.get("address") if isinstance(ld.get("address"), dict) else {}
+    city_ar = specs.get("المدينة") or _text(addr.get("addressLocality")) or None
+    if not city_ar:
+        return None, category, "no_city"
+    city_id, region_id = to_catalog(city_ar)
+    if not city_id:
+        return None, category, "city_not_in_catalog"
+    district_raw = specs.get("الحي") or _text(addr.get("streetAddress")) or None
+    district_ar = find_district_in_text(district_raw, city_id) if district_raw else None
+    area = normalize.to_int_numeric((ld.get("floorSize") or {}).get("value")) or normalize.to_int(specs.get("المساحة"))
+    description = _text(ld.get("description")) or None
+    photo = d.get("og_image")
+    photos = [photo] if photo and photo.startswith("http") and not photo.endswith(GENERIC_PHOTO) else None
+    url = f"{BASE}/{href}"
+    row: dict[str, Any] = {
+        "ad_number": f"{PREFIX}{slug}",
+        "listing_url": url,
         "source": SOURCE,
-        "transaction_type": "Rent" if d.get("purpose") == "rent" else "Buy",
-        **fields,
+        "active": True,
+        "title": _text(ld.get("name")) or None,
+        "description": description,
+        **normalize.amenities_from_text(description),
+        "property_type": property_type,
+        "transaction_type": "Buy",
+        "city": normalize.map_city(city_ar),
+        "city_ar": city_ar,
+        "city_id": city_id,
+        "region_id": region_id,
+        "district_ar": district_ar,
+        "neighborhood": district_raw,
+        "area_m2": area,
+        "photo_urls": photos,
+        # The page states the price is set with a sales adviser — the source's own silence, never a number.
+        "price_total": db.AUTHORITATIVE_NULL,
+        "price_evidence": normalize.price_evidence(
+            field="specnote", raw=d.get("price_note"), stored=None, kind="total", origin="html",
+            authoritative_absent=True),
     }
+    row["additional_info"] = {k: v for k, v in {
+        "source_id": slug,
+        "grain": "project",
+        "type_ar": label,
+        "status_ar": status,
+        "availability": availability,
+        "printed_price_note": d.get("price_note"),
+        "advertiser_fal_licence": "1200017563",
+    }.items() if v is not None}
     return row, category, ""
 
 
-def walk_session() -> tuple[Any, list[str]]:
-    """3 browser profiles DIRECT, then the residential proxy (when the job has it), each a fresh
-    session; the first the catalogue answers 200 is kept. 2026-10-20 (Scraping Engineer): the one
-    pinned chrome session read «no properties» on 4 runs from 10-19 while jawher/m3tmd (same engine,
-    same runner) were served — and the note never said what the host answered."""
-    return retry_smarter_session(f"{BASE}{API_PATH}?page=1&per_page=1",
-                                 headers=dict(session().headers))
+def _make_signal(url: str):
+    """404 with the host's not-found page → gone; 200 with THIS page's #property JSON-LD → live while «متاح» + InStock, else gone;
+    a 200 naming another url, or carrying no property JSON-LD, is no opinion."""
+    def _signal(status, body, _moved):
+        if status == 404:
+            # the host's own measured not-found page; a bare or foreign 404 body is the law's call
+            return "gone" if NOT_FOUND_MARK in (body or "") else None
+        if status != 200:
+            return None
+        d = parse_project(body)
+        if d is None or d["ld"].get("url") != url:
+            return None
+        offer = d["ld"].get("offers") if isinstance(d["ld"].get("offers"), dict) else {}
+        availability = str(offer.get("availability") or "").rsplit("/", 1)[-1]
+        return "live" if d["specs"].get("الحالة") == LIVE_STATUS and availability == LIVE_AVAILABILITY else "gone"
+    return _signal
+
+
+def _make_verify_gone(control_ad: Optional[str], url_by_ad: dict[str, str]):
+    """`url_by_ad` holds THIS run's rows (the canary); an unseen row's URL is its own stored listing_url."""
+    def probe(ad_number: str, canary=None):
+        url = url_by_ad.get(ad_number) or _stored_url(ad_number)
+        if not url:
+            return "unknown", f"{ad_number!r}: no stored listing_url to probe"
+        return LivenessProbe(platform=SLUG, signal=_make_signal(url), session=session,
+                             url_for=lambda _ad: url, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control_ad:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control_ad)
+        return verdict == "live", f"positive control {control_ad}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
+def _stored_url(ad_number: str) -> Optional[str]:
+    from scrapers.common.http_liveness import stored_listing_url
+    return stored_listing_url(("senan_residential_listings", "senan_commercial_listings"))(ad_number)
+
+
+def _get(s: cc.Session, url: str) -> tuple[Optional[int], str]:
+    try:
+        r = s.get(url, timeout=30)
+        return r.status_code, r.text
+    except Exception:
+        return None, ""
 
 
 def main() -> int:
@@ -91,75 +231,74 @@ def main() -> int:
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--delay", type=float, default=0.4)
     args = ap.parse_args()
 
-    s, route = walk_session()
-    print(f"{SOURCE}: route {' · '.join(route)}", flush=True)
+    s = session()
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run(SLUG)
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
     try:
-        ids, complete = fetch_ids(s, BASE, limit=args.limit)
-        if not ids:
-            raise RuntimeError(f"{BASE}{API_PATH} returned no properties (route {' '.join(route)})")
-        print(f"{SOURCE}: {len(ids)} units discovered (complete={complete})", flush=True)
-        for i, pid in enumerate(ids, 1):
-            d, verdict = fetch_detail(s, BASE, pid)
+        st, page = _get(s, f"{BASE}/projects.html")
+        if st != 200:
+            raise RuntimeError(f"{BASE}/projects.html answered {st}")
+        hrefs = project_hrefs(page)
+        if not hrefs:
+            raise RuntimeError(f"{BASE}/projects.html links no project pages")
+        sst, xml = _get(s, f"{BASE}/sitemap.xml")
+        listed = sitemap_projects(xml) if sst == 200 else set()
+        complete = bool(listed) and listed == set(hrefs)
+        print(f"{SOURCE}: {len(hrefs)} project pages, sitemap lists {len(listed)}, complete={complete}", flush=True)
+        if args.limit:
+            hrefs = hrefs[:args.limit]
+        for href in hrefs:
+            st, body = _get(s, f"{BASE}/{href}")
+            d = parse_project(body) if st == 200 else None
             if d is None:
-                skipped[f"fetch_{verdict}"] = skipped.get(f"fetch_{verdict}", 0) + 1
+                complete = False
+                skipped[f"page_{st}"] = skipped.get(f"page_{st}", 0) + 1
                 continue
-            row, cat, why = map_listing(d)
+            row, cat, why = map_listing(href, d)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
             if args.type != "all" and cat != args.type:
                 continue
-            db.mark_direct_alive(row, oracle=ORACLE)
+            if d["ld"].get("url") == row["listing_url"]:
+                db.mark_direct_alive(row, oracle=ORACLE)
             (com if cat == "commercial" else res).append(row)
-            if args.delay:
-                time.sleep(args.delay)
 
         notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         if skipped:
             print(f"  skipped (not guessed): {notes}")
         if dry:
-            print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial "
-                  f"(nothing written)")
-            for r0 in (res + com)[:12]:
-                print(f"   {r0['ad_number']:>9} {r0['transaction_type']:4} {str(r0['property_type']):16} "
-                      f"{str(r0['city_ar']):10} d={str(r0['district_ar'])[:12]:12} "
-                      f"a={str(r0['area_m2']):>6} bd={str(r0['bedrooms']):>4} "
-                      f"pt={r0.get('price_total')} pa={r0.get('price_annual')} "
-                      f"rp={r0.get('rent_period')} ph={len(r0.get('photo_urls') or [])} "
-                      f"prj={str((r0.get('additional_info') or {}).get('project', {}).get('name_ar'))[:18]}")
+            print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial (nothing written)")
+            for r0 in res + com:
+                print(f"   {r0['ad_number']:>24} {r0['transaction_type']:4} {str(r0['property_type']):9} "
+                      f"{str(r0['city_ar']):10} d={str(r0['district_ar'])[:14]:14} n={str(r0['neighborhood'])[:14]:14} "
+                      f"a={str(r0['area_m2']):>5} ph={len(r0.get('photo_urls') or [])} {r0['title']}")
             return 0
-        # The public upsert_senan_{residential,commercial}_batch wrappers are added centrally later.
         db._wasalt_batch("senan_residential_listings", res)
         db._wasalt_batch("senan_commercial_listings", com)
         superseded = db.retire_superseded_siblings(
             res_table="senan_residential_listings", com_table="senan_commercial_listings",
-            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
-            source=SOURCE)
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com}, source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
         pruned = 0
         if args.type == "all" and complete:
-            verify_gone = make_verify_gone(BASE, PREFIX, SLUG, (res + com)[0] if (res or com) else None)
+            verify_gone = _make_verify_gone((res + com)[0]["ad_number"] if (res or com) else None,
+                                            {r["ad_number"]: r["listing_url"] for r in res + com})
             for tbl, rows in (("senan_residential_listings", res), ("senan_commercial_listings", com)):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
-                                    verify_gone=verify_gone)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE, verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:
                     pruned += n
-        healthy = db.end_run(run_id, ok=True, rows_seen=len(ids),
-                             rows_upserted=len(res) + len(com),
-                             notes=f"pruned={pruned} {notes}"[:300],
-                             check_tables=["senan_residential_listings",
-                                           "senan_commercial_listings"])
+        healthy = db.end_run(run_id, ok=True, rows_seen=len(hrefs), rows_upserted=len(res) + len(com),
+                             notes=f"pruned={pruned} complete={complete} {notes}"[:300],
+                             check_tables=["senan_residential_listings", "senan_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard", flush=True)
             return 1
@@ -168,8 +307,7 @@ def main() -> int:
     except Exception as e:
         if run_id:
             tally = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
-            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0,
-                       notes=f"{e} | skips: {tally}"[:300])
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=f"{e} | skips: {tally}"[:300])
         print(f"✗ {SOURCE}: {e}", flush=True)
         return 1
 

@@ -1,6 +1,6 @@
 """What a Nuzul site shows under «الاستخدام» — and whether a LAND ad is residential or commercial by it.
 
-Every Nuzul tenant (aldarim, abwbna, alobid, bahadhabab, goldendeal, jawher, m3tmd, october, senan, yameen) returns
+Every Nuzul tenant (aldarim, abwbna, alobid, bahadhabab, goldendeal, jawher, m3tmd, october, yameen) returns
 two different things about use:
 
   category        residential|commercial — the office's filing pick, a search facet. The ad page NEVER shows it.
