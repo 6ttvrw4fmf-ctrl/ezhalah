@@ -488,7 +488,7 @@ is normal) — but see the next rule: their heads never overlap on screen. Guard
 **«نُشر خلال» — PUBLISHED WITHIN, and «إعلان جديد» on pins (owner 2026-11-11, permanent).** A choice in BOTH the main
 Filter and the map filter, every deal except short stays: Any / 1 / 7 / 14 / 30 / 90 days / 6 / 12 / 24 / 36 months, each a
 MAXIMUM age like Zillow's «Time on Zillow». It reads the listing SITE's own posting date — `search_listings_ar.posted_at`
-= `source_posted_at(date_added)`, filled by `sync_search_posted_at()` (cron every 10 min) — never the day Ezhalah found the
+= `source_posted_at(date_added)`, filled by `sync_search_posted_at()` (pg_cron jobid 234, every 30 min at :29 and :59) — never the day Ezhalah found the
 ad. An undated ad is in no window and shows only under «أي وقت»; never guess a date. The choice opens as a floating menu
 with each period's number (`posted_window_counts_ar`, generated from the same eligibility clause as the results). It is a
 NORMAL narrowing (`rpcFilterParams` → every count surface), the map sends it to `map_pins_ar` / `map_nopin_markers_ar`, and
