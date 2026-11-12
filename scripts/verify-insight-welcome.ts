@@ -276,6 +276,10 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
     check('the eagle is preloaded once and each open replays it from memory (a fresh blob: URL, no download on tap)', /export function preloadHowEagle/.test(pop) && /URL\.createObjectURL\(eagleBlob\)/.test(pop) && /useEffect\(\(\) => \{ void preloadHowEagle\(\); \}, \[\]\)/.test(pop));
     check('the «information only» rule is bold as a whole sentence (owner 2026-11-11)', /ruleLast: \{ fontWeight: '700'/.test(pop) && /i === c\.rules\.length - 1 && s\.ruleLast/.test(pop));
     const models = readFileSync(new URL('../src/components/AgentModelSelector.tsx', import.meta.url), 'utf8');
+    check('the «نماذج إزهله» card has no Ezhalah logo inside (owner 2026-11-11: «our logo inside remove it»)', !/logo-cloud|EZHALAH_LOGO|storyLogo/.test(models));
+    check('the model text is the owner\'s 2026-11-11 wording: Saudi real estate facts, Hurr «سيكون», no «دقة متناهية»',
+      models.includes('يجيبك بحقائق العقار السعودي ويقتنص لك الإعلانات المطابقة من أول جملة') && models.includes('وفي إزهله، سيكون محللك العقاري')
+      && models.includes("'سريع للبحث اليومي وحقائق السوق'") && models.includes("'عميق للتحليل والمقارنة والطلبات المعقدة'") && !models.includes('متناهية'));
     check('the «نماذج إزهله» card has no diacritics either (owner 2026-11-11: «we can never have 7arakat»)', !/[\u064B-\u0652]/.test(models), (models.match(/[\u064B-\u0652]/g) ?? []).length + ' found');
     check('the backdrop is pointer-only — not focusable, hidden from screen readers (CodeRabbit)', /focusable=\{false\} accessible=\{false\}[^>]*testID="insight-how-backdrop"/.test(pop));
     check('a failed eagle preload is reported, not swallowed (CodeRabbit)', /reportError\(e, \{ source: 'InsightHowItWorks\.preloadHowEagle' \}\)/.test(pop));
