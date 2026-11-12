@@ -108,8 +108,10 @@ _AGO_NO_NUMBER = {w for w, _u, c in _AGO_WORDS if c != 1} | {"أمس", "امس",
 # scripts/verify-relative-posting-date-is-a-floor.ts fails on a scraper that reads «منذ …» without being in one list.
 AGO_COUNT_IS_REAL_AGE = {
     "ialqarawi": "2026-11-11: every ad saying «N يوم» was first stored by us exactly N days earlier (2,629 ads), "
-                 "no count ever ran below the days we had known the ad. No exact date anywhere: ad 3846 read live — "
-                 "no JSON-LD, no data blob, no date field; the «مضاف منذ» row is the only time on the page",
+                 "no count ever ran below the days we had known the ad. Months and years too: over the 2,602 «شهر» / "
+                 "«سنة» ads, ordered by the site's sequential ad number, 0 newer ads show an older age (a refresh "
+                 "time would scramble that order; «سنة» ads hold ids 21–3495, «يوم» ads start at 3803). No exact "
+                 "date anywhere: ad 3846 read live — no JSON-LD, no data blob, no date field",
 }
 AGO_TEXT_NOT_A_POSTING_AGE = {
     "aqaratikom": "2026-11-09: API accepted_at «٩ ساعات» on an ad first seen 40 days earlier — a refresh time",
