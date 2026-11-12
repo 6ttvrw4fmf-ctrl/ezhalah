@@ -15,7 +15,7 @@ import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { listingSearchedTypeAr } from '@/lib/listingDisplay';
-import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
+import { isShortStayListing, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
 import { monthlyLineText } from '@/lib/listingDisplay';
 
 // THE MONTHLY LINE UNDER EVERY YEARLY PRICE (owner 2026-10-26): «السعر المعلن 3,000 شهرياً» when the site quoted
@@ -24,9 +24,10 @@ import { monthlyLineText } from '@/lib/listingDisplay';
 function monthlyLine(listing: Listing, locale: 'ar' | 'en') {
   const text = monthlyLineText(listing, locale);
   if (text == null) return null;
-  return <Text style={card.pricePerMeter} numberOfLines={1} testID="card-monthly-line">{text}</Text>;
+  return <Text style={card.pricePerMeter} {...MONEY_LINE} testID="card-monthly-line">{text}</Text>;
 }
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
+import { MONEY_LINE } from '@/lib/moneyLine';
 import { typeImg } from '@/theme/propertyIcons';
 import { GoldShineButton, GoldSurface } from './CardReveal';
 import { BuzzLayer } from './CardBuzzer';
@@ -252,7 +253,7 @@ export function ResultCard({
   // nothing is derived, and a value the source did not give renders nothing.
   if (row === 'roomy') {
     const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
-    const stay = isStayLengthPriced(listing.source);
+    const stay = isShortStayListing(listing);
     const typeIcon = typeImg(listing.cleanType ?? '');
     // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
     // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
@@ -294,11 +295,11 @@ export function ResultCard({
           <View style={card.lpPriceRow}>
             <View style={card.lpPriceCol}>
               {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
-              {stay ? null : <Text style={[card.price, card.lpPrice]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+              {stay ? null : <Text style={[card.price, card.lpPrice]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
               {monthlyLine(listing, locale)}
               {listing.discount ? (
                 <View style={card.discountRow} testID="card-discount">
-                  <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+                  <Text style={card.discountOld} {...MONEY_LINE}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
                   <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
                 </View>
               ) : null}
@@ -313,14 +314,14 @@ export function ResultCard({
             ) : null}
           </View>
           {(listing.price === 'Price on request' || listing.priceIsDerived) && listing.pricePerMeter != null && listing.pricePerMeter > 1 ? (
-            <Text style={card.pricePerMeter} numberOfLines={1}>
+            <Text style={card.pricePerMeter} {...MONEY_LINE}>
               {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{Number(listing.pricePerMeter).toLocaleString('en-US')} {t('SAR/m²')}</Text>
             </Text>
           ) : null}
           {listing.priceIsDerived ? (() => {
             const eq = derivedTotalEquation(listing.pricePerMeter, listing.area);
             return eq ? (
-              <Text style={card.derivedTotalEquation} numberOfLines={1}>
+              <Text style={card.derivedTotalEquation} {...MONEY_LINE}>
                 {`${eq.perMeter.toLocaleString('en-US')} ${t('SAR/m²')} × ${eq.area.toLocaleString('en-US')} ${t('m²')} = ${eq.total.toLocaleString('en-US')} ${t('SAR')}`}
               </Text>
             ) : null;
@@ -329,12 +330,12 @@ export function ResultCard({
             <Text style={card.derivedTotalNote} numberOfLines={1}>{t('Calculated from price per m² × area — not published by the source')}</Text>
           ) : null}
           {listing.typedTotalAsPerMeter != null ? (
-            <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-total-as-ppm">
+            <Text style={card.derivedTotalNote} {...MONEY_LINE} testID="card-typed-total-as-ppm">
               {t('The ad put {n} SAR in the price box — read as the price per m²', { n: Number(listing.typedTotalAsPerMeter).toLocaleString('en-US') })}
             </Text>
           ) : null}
           {listing.typedInThousands != null ? (
-            <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-in-thousands">
+            <Text style={card.derivedTotalNote} {...MONEY_LINE} testID="card-typed-in-thousands">
               {t('The site wrote {n} — we read it in thousands', { n: Number(listing.typedInThousands).toLocaleString('en-US') })}
             </Text>
           ) : null}
@@ -469,14 +470,14 @@ export function ResultCard({
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
         {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
-        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+        {isShortStayListing(listing) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
         {monthlyLine(listing, locale)}
         </View>
         {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
             under the final price. Rendered only when the source showed one — see listingDiscountFrom(). */}
         {listing.discount ? (
           <View style={card.discountRow} testID="card-discount">
-            <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+            <Text style={card.discountOld} {...MONEY_LINE}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
             <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
           </View>
         ) : null}
@@ -518,7 +519,7 @@ export function ResultCard({
         {(listing.price === 'Price on request' || listing.priceIsDerived)
           && listing.pricePerMeter != null
           && listing.pricePerMeter > 1 ? (
-          <Text style={card.pricePerMeter} numberOfLines={1}>
+          <Text style={card.pricePerMeter} {...MONEY_LINE}>
             {/* UNIT-SUFFIXED, never prefix-only (owner 2026-08-09: "display it clearly as ريال/م²").
                 Renders «سعر المتر 750 ريال/م²». The old form put the currency BEFORE the number
                 («سعر المتر ر.س 750»), which reads like a total price with a label in front of it —
@@ -537,7 +538,7 @@ export function ResultCard({
         {listing.priceIsDerived ? (() => {
           const eq = derivedTotalEquation(listing.pricePerMeter, listing.area);
           return eq ? (
-            <Text style={card.derivedTotalEquation} numberOfLines={1}>
+            <Text style={card.derivedTotalEquation} {...MONEY_LINE}>
               {`${eq.perMeter.toLocaleString('en-US')} ${t('SAR/m²')} × ${eq.area.toLocaleString('en-US')} ${t('m²')} = ${eq.total.toLocaleString('en-US')} ${t('SAR')}`}
             </Text>
           ) : null;
@@ -550,14 +551,14 @@ export function ResultCard({
         {/* THE SELLER'S OWN FIGURE STAYS VISIBLE (owner 2026-11-04): the index read the ad's «total» as a per-metre price
             (src/lib/landPerMeterTotal.ts), so say what the ad actually wrote, next to the «≈» total we computed. */}
         {listing.typedTotalAsPerMeter != null ? (
-          <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-total-as-ppm">
+          <Text style={card.derivedTotalNote} {...MONEY_LINE} testID="card-typed-total-as-ppm">
             {t('The ad put {n} SAR in the price box — read as the price per m²', { n: Number(listing.typedTotalAsPerMeter).toLocaleString('en-US') })}
           </Text>
         ) : null}
         {/* A PRICE TYPED IN THOUSANDS (owner 2026-11-06): the index serves «≈ figure × 1000» (src/lib/priceInThousands.ts);
             the site's own figure stays visible next to it. */}
         {listing.typedInThousands != null ? (
-          <Text style={card.derivedTotalNote} numberOfLines={2} testID="card-typed-in-thousands">
+          <Text style={card.derivedTotalNote} {...MONEY_LINE} testID="card-typed-in-thousands">
             {t('The site wrote {n} — we read it in thousands', { n: Number(listing.typedInThousands).toLocaleString('en-US') })}
           </Text>
         ) : null}
@@ -684,7 +685,7 @@ const FURNISH_VALUES_AR: Record<string, string> = {
 const AR_ENUM: Record<string, Record<string, string>> = {
   // (owner report, 2026-07-16 Arabic-only sweep) 'agricultural'/'mixed' added — eaqartabuk/erapulse
   // raw values that fell through the enum lookup and rendered raw English.
-  'property usage': { residential: 'سكني', commercial: 'تجاري', agricultural: 'زراعي', mixed: 'مختلط' },
+  'property usage': { residential: 'سكني', commercial: 'تجاري', agricultural: 'زراعي', mixed: 'مختلط', industrial: 'صناعي', educational: 'تعليمي', health: 'صحي', 'residential commercial': 'سكني تجاري' },
   // BOTH label spellings are real and must BOTH be kept — see FURNISH_VALUES_AR below.
   // (fix, 2026-07-16) satel's ADDL_FIELDS label is 'Furnishing' ('Fully furnished'/'Unfurnished'/
   //   'Partially furnished', 203 rows).
@@ -743,6 +744,9 @@ export function isBlankAttrValue(label: unknown, value: unknown): boolean {
   return /street.*width|عرض الشارع/i.test(String(label ?? '')) && /^0+(?:\.0+)?\s*(?:m|متر|م)?$/i.test(v);
 }
 
+const AD_SOURCE_AR: Record<string, string> = { sakani: 'سكني', wasalt: 'وصلت' };
+// A four-digit year 1900-2099 under «Age» is the year the building was built, never its age in years.
+const BUILD_YEAR = /^(?:19|20)\d\d$/;
 export function arAttrValue(label: string, value: string, locale: string): string {
   const v = String(value ?? '').trim();
   if (!v) return value;
@@ -756,14 +760,20 @@ export function arAttrValue(label: string, value: string, locale: string): strin
     // Translate finite source enums in either direction without changing the stored fact.
     const known = Object.entries(AR_ENUM[ll] ?? {}).find(([, ar]) => ar === v);
     if (known) return known[0].replace(/-/g, ' ');
+    if (ll === 'property usage' && /[،,/]/.test(v)) {
+      // Nuzul sites print every use of the property on one row («سكني، تجاري»): translate it word by word.
+      const uses = Object.entries(AR_ENUM[ll]);
+      return v.split(/\s*[،,/]\s*/).filter(Boolean).map(p => uses.find(([, ar]) => ar === p)?.[0] ?? freeTextEn(englishCatalogText(p))).join(', ');
+    }
     if (v === 'نعم') return 'Yes';
     if (v === 'لا') return 'No';
     if (ll === 'facade') {
-      const directions: Record<string, string> = { شرق: 'East', شرقية: 'East', غرب: 'West', غربية: 'West', شمال: 'North', شمالية: 'North', جنوب: 'South', جنوبية: 'South' };
-      const parts = v.split(/[\s-]+/);
+      const directions: Record<string, string> = { شرق: 'East', شرقية: 'East', غرب: 'West', غربية: 'West', شمال: 'North', شمالية: 'North', جنوب: 'South', جنوبية: 'South', east: 'East', west: 'West', north: 'North', south: 'South' };
+      const parts = lv.split(/[\s_-]+/).filter(Boolean);
       if (parts.every(part => directions[part])) return parts.map(part => directions[part]).join(' ');
     }
     if (/street.*width|عرض الشارع/i.test(ll)) return v.replace(/^(\d+(?:\.\d+)?)\s*(?:متر|م)$/u, '$1 m');
+    if (ll === 'age' && BUILD_YEAR.test(v)) return `Built in ${v}`;
     if (ll === 'age' || ll === 'building age (years)') {
       if (v === 'جديد') return 'New';
       if (v === 'أقل من سنة') return 'Less than 1 year';
@@ -787,7 +797,13 @@ export function arAttrValue(label: string, value: string, locale: string): strin
     return freeTextEn(englishCatalogText(v));
   }
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
+  // wasalt's English words on an Arabic card (2026-11-10 sweep of every English value production serves): the platform
+  // that sourced the ad («SAKANI» 229, «wasalt» 22) and the many ways its users typed «none» under obligations (~140).
+  if (ll === 'ad source' && AD_SOURCE_AR[lv]) return AD_SOURCE_AR[lv];
+  if (ll === 'other obligations on the property' && /^(?:non|none|n\/a|na|nothing|nil)$/.test(lv)) return 'لا يوجد';
   if (ll === 'age') {
+    // The office sites (aldarim, abwbna) send the BUILD YEAR under «Age»: «عمر العقار 2018» read as 2018 years old.
+    if (BUILD_YEAR.test(v)) return `بُني عام ${v}`;
     if (lv === 'new') return 'جديد';
     if (lv === '<1 year' || lv === 'less than 1 year') return 'أقل من سنة';
     const plus = /^(\d+)\s*\+\s*years?$/i.exec(v); if (plus) return `أكثر من ${plus[1]} سنوات`;
@@ -797,6 +813,10 @@ export function arAttrValue(label: string, value: string, locale: string): strin
   }
   if (ll === 'facade') {
     if (AR_ENUM.facade[lv]) return AR_ENUM.facade[lv];
+    // The office sites send every side joined by «_» («north_south_east_west»); the ad page prints each side:
+    // «شمالية جنوبية شرقية غربية». Each part must be a side, or the value falls through to the guard below.
+    const sides = lv.split(/[\s_-]+/).filter(Boolean);
+    if (sides.length && sides.every(p => AR_ENUM.facade[p])) return sides.map(p => AR_ENUM.facade[p]).join(' ');
     const st = /^(\d+)\s*streets?$/i.exec(v); if (st) return `${st[1]} شوارع`;
     // (fix, 2026-07-16) dealapp's scraper mis-captures raw HTML/meta-tag fragments into this
     // field (e.g. '<meta name="twitter:title" content="...') — neither the compass-direction
@@ -990,6 +1010,13 @@ const EBRIZA_LOGO = require('../../assets/images/platform-logos/ebriza-com-sa.pn
 const SHOMOU_LOGO = require('../../assets/images/platform-logos/shomoalaqar-com-sa.png');
 // Haraj: official header artwork, collected 2026-10-18 UTC.
 const HARAJ_LOGO = require('../../assets/images/platform-logos/haraj.png');
+// The 6 sources of 2026-11-04..06: official logos from each site's own header/manifest (owner 2026-11-10).
+const PROPERTYFINDER_LOGO = require('../../assets/images/platform-logos/propertyfinder-sa.png');
+const KW_LOGO = require('../../assets/images/platform-logos/kwsaudiarabia-com.png');
+const ALMAJDIAH_LOGO = require('../../assets/images/platform-logos/almajdiah-com.png');
+const ASASMAKEEN_LOGO = require('../../assets/images/platform-logos/asasmakeen-com.png');
+const MRAJHI_LOGO = require('../../assets/images/platform-logos/mrajhi-com-sa.png');
+const STEAM_LOGO = require('../../assets/images/platform-logos/steam-realestate-com.png');
 const VMKSA_LOGO = require('../../assets/images/platform-logos/vm-ksa-com.png');
 const IBAAX_LOGO = require('../../assets/images/platform-logos/ibaax-sa.png');
 const THOUSAND_LOGO = require('../../assets/images/platform-logos/1000-com-sa.png');
@@ -1248,15 +1275,13 @@ export function SourceBadge({ source }: { source: string }) {
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return <PlatformLogo source={SUPEROFFICE_LOGO} />;
   if (s.includes('شموع العقار') || s.includes('shomou')) return <PlatformLogo source={SHOMOU_LOGO} />;
   if (s.includes('حراج') || s.includes('haraj')) return <PlatformLogo source={HARAJ_LOGO} />;
-  // Property Finder: NO badge until the owner supplies the official logo file (an explicit null, never the Aqar fallback).
-  if (s.includes('بروبرتي فايندر') || s.includes('propertyfinder')) return null;
-  // The five sources staged 2026-11-05: NO badge until the owner supplies each logo (explicit null, never the Aqar
-  // fallback). Inert while staged — no row of theirs is served (docs/ops/FIVE_SOURCES_LAUNCH.md).
-  if (s.includes('كيلر وليامز') || s.includes('kellerwilliams') || s.includes('keller williams')) return null;
-  if (s.includes('الماجدية') || s.includes('almajdiah')) return null;
-  if (s.includes('أساس مكين') || s.includes('asasmakeen') || s.includes('asas makeen')) return null;
-  if (s.includes('الراجحي للتنمية') || s.includes('mrajhi') || s.includes('al rajhi development')) return null;
-  if (raw === 'steam' || s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return null;
+  // Property Finder + the five sources of 2026-11-05: official logos supplied 2026-11-10.
+  if (s.includes('بروبرتي فايندر') || s.includes('propertyfinder')) return <PlatformLogo source={PROPERTYFINDER_LOGO} />;
+  if (s.includes('كيلر وليامز') || s.includes('kellerwilliams') || s.includes('keller williams')) return <PlatformLogo source={KW_LOGO} />;
+  if (s.includes('الماجدية') || s.includes('almajdiah')) return <PlatformLogo source={ALMAJDIAH_LOGO} />;
+  if (s.includes('أساس مكين') || s.includes('asasmakeen') || s.includes('asas makeen')) return <PlatformLogo source={ASASMAKEEN_LOGO} />;
+  if (s.includes('الراجحي للتنمية') || s.includes('mrajhi') || s.includes('al rajhi development')) return <PlatformLogo source={MRAJHI_LOGO} />;
+  if (raw === 'steam' || s.includes('ستيم العربية') || s.includes('steam residence') || s.includes('steam-realestate')) return <PlatformLogo source={STEAM_LOGO} />;
   if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={MAKTAB_LOGO} />;
   if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={SIRDAB_LOGO} />;
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;
@@ -1560,7 +1585,10 @@ const card = StyleSheet.create({
   wrapRow: { flexDirection: 'row' },
   bodyRow: { flex: 1, minWidth: 0 },
   photoColRow: { width: 168, minHeight: 118, margin: 8, borderRadius: 8, alignSelf: 'stretch' },
-  photoColTight: { width: 124, minHeight: 100, margin: 6 },
+  // The photo gives way before the price does (owner 2026-11-10): at a 1024-wide laptop with the ad beside, this row
+  // is ~262 px, and a fixed 124 px photo left the price 108 px — «ر.س 3,450,000» needs 112. It is 124 px from a
+  // 310 px card up and 40% of the card below that, so a seven-digit price keeps its one line there too.
+  photoColTight: { width: '40%', maxWidth: 124, minHeight: 100, margin: 6 },
   rankBadgeRow: { top: 5, left: 5, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
   rankTextRow: { fontSize: 10 },
   sourceStripRow: { paddingVertical: 4, paddingHorizontal: 7, columnGap: 6, rowGap: 0 },

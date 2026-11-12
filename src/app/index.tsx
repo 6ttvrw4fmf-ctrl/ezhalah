@@ -27,10 +27,12 @@ import { cityNameEn, regionNameEn, districtNameEn, ensureLocationIndex, ensureCi
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { grouped, emptyQuery, type SearchQuery } from '@/data/search';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
-import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam, fetchApartmentGuidedCounts } from '@/data/remote';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam, fetchApartmentGuidedCounts, fetchPostedWindowCounts, type PostedWindowCounts } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
 import { reconcileCommittedAf, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
+import PostedWindowMenu from '@/components/PostedWindowMenu';
+import { postedWindowOffered } from '@/lib/postedWindows';
 import { takeSearchLeftBehind } from '@/lib/searchLeftBehind';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -40,9 +42,11 @@ import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
 import { NAME_PARTY_EVENT, SHINE_MS } from '@/lib/nameParty';
 import { InsightHowItWorks } from '@/components/InsightHowItWorks';
+import { HOW_IT_WORKS } from '@/lib/insightHowItWorks';
 import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
+import { afterSharedChatRead, oneAtATime, sharedCardGaveUp, sharedCardRetryMs } from '@/lib/flowState';
 import { sentenceName } from '@/lib/nameSync';
 import { typedDir } from '@/lib/typedDir';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
@@ -171,20 +175,33 @@ export default function Home() {
   // A /s/<code> link is a whole SHARED CHAT (src/lib/sharedChat.ts): the card's facts are read from the
   // database, and the tap copies the conversation into the recipient's own history and opens it there.
   const [sharedSearch, setSharedSearch] = useState<{ q: SearchQuery | null; name: string; code?: string } | null>(null);
+  // A shared chat that could not be READ (its card, or its conversation): the visitor is told and offered «try
+  // again» — the link's code is kept here because the address bar no longer carries it.
+  const [sharedFail, setSharedFail] = useState<{ code: string; stage: 'card' | 'chat' } | null>(null);
+  const retrySharedCardRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const raw = new URLSearchParams(window.location.search).get(SHARE_PARAM);
     if (raw) { try { window.history.replaceState(null, '', window.location.pathname); } catch { /* cosmetic */ } }
     if (isShareCode(raw)) {
       let alive = true;
-      const load = async (tries: number) => {
+      // A card that could not be READ is asked for again on a widening schedule (sharedCardRetryMs: 1.5 s, 3 s, 6 s,
+      // 12 s) — it used to stop after two quick tries, and a link opened on a slow connection silently became a plain
+      // home page. A card that is genuinely absent (null) is never retried.
+      const load = async (attempt: number) => {
         const card = await fetchSharedChatCard(raw!);
         if (!alive) return;
-        if (isProbeFailure(card)) { if (tries > 0) setTimeout(() => void load(tries - 1), 1500); return; }
+        if (isProbeFailure(card)) {
+          const wait = sharedCardRetryMs(attempt);
+          if (wait !== null) setTimeout(() => { if (alive) void load(attempt + 1); }, wait);
+          if (sharedCardGaveUp(attempt)) setSharedFail({ code: raw!, stage: 'card' });
+          return;
+        }
         if (card) setSharedSearch({ q: card.q, name: card.name, code: raw! });
       };
-      void load(2);
-      return () => { alive = false; };
+      retrySharedCardRef.current = () => { if (alive) void load(0); };
+      void load(0);
+      return () => { alive = false; retrySharedCardRef.current = null; };
     }
     const s = decodeSharePayload(raw);
     if (s) { setSharedSearch(s); return; }
@@ -199,7 +216,10 @@ export default function Home() {
     if (!user) openAuth(shareJoinNote(sharedJoin.name, locale === 'en' ? 'en' : 'ar') ?? undefined);
     setSharedJoin(null);
   }, [sharedJoin, authChecked, user, openAuth, locale]);
-  const openSharedSearch = useCallback(async (s: { q: SearchQuery | null; code?: string }) => {
+  // ONE AT A TIME: the banner tap and the after-sign-in effect can both ask for the same link while its chat is
+  // still being read, and two runs meant two copies in the history (oneAtATime, src/lib/flowState.ts).
+  const openingSharedRef = useRef(false);
+  const openSharedSearch = useCallback((s: { q: SearchQuery | null; code?: string }) => oneAtATime(openingSharedRef, async () => {
     try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
     setSharedSearch(null);
     if (s.code) {
@@ -211,18 +231,28 @@ export default function Home() {
         router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q ?? emptyQuery()), replay: '0', hid: prior } });
         return;
       }
-      const chat = await fetchSharedChat(s.code);
-      if (chat && !isProbeFailure(chat)) {
+      const askedAt = Date.now();
+      let chat = await fetchSharedChat(s.code);
+      // A read that failed FAST is a blip: ask once more before giving up the conversation. A read that timed out
+      // is not asked again — the visitor has already waited, and the shared search below still opens.
+      if (isProbeFailure(chat) && Date.now() - askedAt < 3000) {
+        await new Promise((r) => setTimeout(r, 1200));
+        chat = await fetchSharedChat(s.code);
+      }
+      const next = afterSharedChatRead(isProbeFailure(chat) ? 'failed' : chat ? 'ok' : 'absent', !!s.q);
+      if (next === 'open-chat' && chat && !isProbeFailure(chat)) {
         const hid = importSharedChat(chat.q, chat.transcript);
         try { localStorage.setItem(SHARED_IMPORTED_KEY, JSON.stringify({ ...done, [s.code]: hid })); } catch { /* per-device only */ }
         setTimeout(() => router.push({ pathname: '/agent', params: { filter: JSON.stringify(chat.q ?? emptyQuery()), replay: '0', hid } }), 0);
         return;
       }
-      // The copy could not be read: the shared SEARCH still opens (never a dead tap). A chat with no
-      // search has nothing to run — Home stays.
+      // The copy could not be read: the shared SEARCH still opens (never a dead tap). A chat with no search has
+      // nothing to run — a FAILED read says so and offers «try again» (it used to leave a silent home page); a
+      // conversation that is genuinely gone leaves Home as it is.
+      if (next === 'retry-card') { setSharedFail({ code: s.code, stage: 'chat' }); return; }
     }
     if (s.q) router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
-  }, [router, history, importSharedChat]);
+  }), [router, history, importSharedChat]);
   // OPENING A SHARED LINK (owner 2026-10-18: «the pop up should be the log in and sign up … with a message
   // of what the user wants to send him … when user clicks sign up / log in the screen shows the history
   // and it gets saved in the side»). Once the session is known: a visitor who is not signed in gets the
@@ -242,6 +272,13 @@ export default function Home() {
     }
     if (sharedSearch.code) void openSharedSearch(sharedSearch);
   }, [sharedSearch, authChecked, user, openAuth, openSharedSearch, locale]);
+  const retryShared = () => {
+    const f = sharedFail;
+    if (!f) return;
+    setSharedFail(null);
+    if (f.stage === 'card') retrySharedCardRef.current?.();
+    else void openSharedSearch({ q: null, code: f.code });
+  };
   const onSharedTap = () => {
     if (!sharedSearch) return;
     if (user) { void openSharedSearch(sharedSearch); return; }
@@ -282,7 +319,7 @@ export default function Home() {
   // `welcomeSettled` gates the headline's ENTRANCE (owner 2026-10-17: it must never visibly change
   // after it appears): the title stays at opacity 0 until the session restore knows the visitor and,
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
-  // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
+  // «كيف نحسبها؟» opens when the user taps a market fact (or the small link under it) in the headline (owner 2026-10-22).
   const [howOpen, setHowOpen] = useState(false);
   const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight, celebrate: welcomeCelebrate } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
@@ -1271,6 +1308,34 @@ export default function Home() {
     if (furnRow === null && query.furnishedPref != null) setQuery((q) => ({ ...q, furnishedPref: null }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [furnRow, query.furnishedPref]);
+  // «نُشر خلال» (owner 2026-11-11): every deal but short stays. The numbers are the user's exact search with the window
+  // left open — built like furnBase, but the furniture choice is KEPT (it narrows the search). Numbers appear once a city
+  // is picked, like every other row; a failed read shows the choices without numbers, never a made-up 0.
+  const postedOn = postedWindowOffered(query);
+  const postedBase: SearchQuery = (() => {
+    const filterBase = buildFilterBaseQuery();
+    if (!filterBase) return { ...queryForPeriod, postedWithinDays: null };
+    const districts = districtsSelected.length ? [...new Set(districtsSelected.flatMap((d) => d.matchValues))] : undefined;
+    return { ...filterBase, districts, postedWithinDays: null };
+  })();
+  const postedKey = JSON.stringify(postedBase);
+  const [postedCounts, setPostedCounts] = useState<PostedWindowCounts | null>(null);
+  useEffect(() => {
+    setPostedCounts(null);   // never a number for the previous search while the new one loads (CodeRabbit #11828)
+    if (!postedOn || citySelected == null) return;
+    let live = true;
+    const timer = setTimeout(async () => {
+      const c = await fetchPostedWindowCounts(postedBase).catch(() => null);
+      if (live) setPostedCounts(c && !isProbeFailure(c) ? c : null);
+    }, 350);
+    return () => { live = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postedKey, postedOn, citySelected]);
+  // A hidden row never leaves a hidden filter behind (short stays).
+  useEffect(() => {
+    if (!postedOn && query.postedWithinDays != null) setQuery((q) => ({ ...q, postedWithinDays: null }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postedOn, query.postedWithinDays]);
   const furnShown = furnRow !== null && furnRow !== 'pending';
   const furnCounts = furnShown ? (furnRow as FurnRow) : {};
   // the number alone: «49,596 إعلان» was cut to «… 49,596» on a 578 px screen (live walk 2026-11-05); the row's note says what it counts
@@ -1541,6 +1606,13 @@ export default function Home() {
               <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
                 <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}</RNAnimated.Text>
               </Pressable>
+              {/* A small underlined «كيف نحسبها؟» under the market fact, so a user can SEE the fact opens an explanation (owner
+                  2026-11-11: «keep it small like» the «الشروط والخصوصية» link). Only when the headline IS a market fact. */}
+              {welcomeIsInsight ? (
+                <Pressable onPress={() => setHowOpen(true)} accessibilityRole="link" hitSlop={8} style={s.heroHowLinkWrap} testID="hero-how-link">
+                  <Text style={s.heroHowLink}>{HOW_IT_WORKS[locale === 'en' ? 'en' : 'ar'].title}</Text>
+                </Pressable>
+              ) : null}
             </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             {/* The falconer ENDS THE EZHALAH LINE, ONE FIXED SPOT (owner 2026-10-27: «for the falconer sign in sign out I want
@@ -2278,6 +2350,16 @@ export default function Home() {
                     </>
                   )}
 
+                  {/* «نُشر خلال» — PUBLISHED WITHIN, a floating menu with each period's number (owner 2026-11-11). */}
+                  {postedOn && (
+                    <>
+                      <Text style={[s.ctxSubLabel, x.ctxSubLabel, { marginTop: 14 }]}>{t('Published within')}</Text>
+                      <PostedWindowMenu value={query.postedWithinDays ?? null} counts={postedCounts}
+                        onChange={(days) => setQuery((q) => ({ ...q, postedWithinDays: days }))} testID="filter-posted" />
+                      <Text style={[s.ctxSub, x.ctxSub, { marginTop: 6 }]}>{t('Only ads whose site shows a publish date count in a period; the rest show under Any time.')}</Text>
+                    </>
+                  )}
+
                   {/* AREA range (من / إلى م²) — always shown alongside bedrooms (both supported by the RPC).
                       min only → ≥, max only → ≤. */}
                   {ctx?.showSize && (
@@ -2475,6 +2557,22 @@ export default function Home() {
           </View>
         </View>
       )}
+      {sharedFail && (
+        <View style={s.sharedBackdrop} accessibilityViewIsModal testID="shared-link-failed">
+          <View style={s.sharedCard}>
+            <Pressable onPress={() => setSharedFail(null)} hitSlop={10} style={[s.sharedClose, { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+            <XImage source={require('../../assets/images/logo-cloud-green-static.svg')} style={s.sharedEagle} contentFit="contain" />
+            <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
+              {t('Couldn’t open the shared chat. Check your connection and try again.')}
+            </Text>
+            <Pressable onPress={retryShared} style={({ pressed }) => [s.sharedButton, pressed && { opacity: 0.9 }]} accessibilityRole="button" testID="shared-link-retry">
+              <Text style={s.sharedButtonText}>{t('Try again')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -2597,6 +2695,8 @@ const s = StyleSheet.create({
   // headline, owner 2026-10-24). Latin tracking lives in the English-only layer E. Guard:
   // scripts/verify-no-letter-spacing-on-arabic.ts
   heroTitle: { fontSize: 24, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
+  heroHowLinkWrap: { alignSelf: 'center', marginTop: 4 },
+  heroHowLink: { fontSize: 13, fontWeight: '600', color: colors.ink, textDecorationLine: 'underline', textAlign: 'center' },
   heroSub: { fontSize: 12, fontWeight: '600', color: colors.ink, textAlign: 'center', marginTop: 4, lineHeight: 17 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.

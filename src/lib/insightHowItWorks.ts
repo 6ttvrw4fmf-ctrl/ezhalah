@@ -1,30 +1,40 @@
-// The «كيف تشتغل؟» sheet's words (owner-approved 2026-10-22), kept pure so tests can read them.
-export type Section = { icon: string; title: string; body: string };
-export type Copy = { title: string; sections: Section[]; note: string; ok: string };
+// The «كيف نحسبها؟» popup's words (owner-approved 2026-11-11, replacing the 2026-10-22 «كيف تشتغل؟» sheet), kept pure so
+// tests can read them. The same title is the small underlined link under the home headline's market fact.
+// Formal Arabic, no diacritics (owner: «keep it professional like» the «نماذج إزهله» card). {N} is the LIVE site count —
+// the same number the share card and the welcome line show (src/data/siteCount.ts); while it is unknown the clause that
+// carries it is left out, never a guessed number («وعددها {N}» keeps the Arabic correct for any N).
+export type Rule = { title: string; body: string };
+export type Copy = { title: string; falconer: string; story: (n: number | null) => string; rulesTitle: string; rules: Rule[]; close: string };
 
 export const HOW_IT_WORKS: Record<'ar' | 'en', Copy> = {
   ar: {
-    title: 'كيف تشتغل؟',
-    sections: [
-      { icon: '📊', title: 'من وين الرقم؟', body: 'نحسبه كل ليلة من الإعلانات المعروضة على المواقع العقارية في إزهله.' },
-      { icon: '🔁', title: 'الإعلانات المكررة', body: 'نفس العقار ممكن يكون معروض في أكثر من موقع (مثلاً عقار ووصلت وحراج). إذا الإعلان نفس الحي، نفس النوع، نفس السعر، ونفس المساحة، نحسبه مرة وحدة بس، في الأعداد وفي الأسعار.' },
-      { icon: '💰', title: 'الأسعار', body: 'الأسعار هي الأسعار المعروضة في الإعلانات (الرقم اللي في المنتصف)، وليست أسعار صفقات منفذة.' },
-      { icon: '✅', title: 'نتحقق مرتين', body: 'كل رقم نحسبه مرتين ونطابقه مع الفلتر قبل ما نعرضه.' },
-      { icon: '🕐', title: 'تتغير كل ساعة', body: 'كل ساعة تطلع لك معلومة جديدة، وأغلبها عن المدينة اللي تبحث فيها.' },
+    title: 'كيف نحسبها؟',
+    falconer: 'من هو الصقار؟',
+    story: (n) =>
+      `الصقار يربي صقره ويعتني به ويحسن إطعامه. وصقارنا يجمع كل يوم الإعلانات من جميع المواقع العقارية في السعودية${n ? `، وعددها ${n}` : ''}، ويقدم هذه البيانات الثمينة لصقره شاهين، ليجيبك بدقة عند سؤاله. وشاهين نموذج ذكاء اصطناعي، وقد يخطئ أحيانا، لذا تحقق دائما من الإعلان الأصلي. ومن هذه البيانات نفسها تأتي هذه المعلومة: الأسعار، والإعلانات الجديدة، والتغيرات، للمساكن والأراضي والمحلات.`,
+    rulesTitle: 'القواعد',
+    rules: [
+      { title: 'إعلانات حقيقية فقط', body: 'كل معلومة مصدرها إعلانات منشورة في هذه المواقع.' },
+      { title: 'تاريخ الموقع نفسه', body: '«اليوم» و«هذا الأسبوع» و«جديد» تعني تاريخ نشر الإعلان في موقعه، لا تاريخ وصولنا إليه. والإعلان الذي لا يحمل تاريخا لا يحتسب.' },
+      { title: 'أرقام دقيقة', body: 'الأسعار هي المطلوبة في الإعلانات، وليست أسعار صفقات منفذة. ونحتسب العقار المكرر في أكثر من موقع مرة واحدة، ونتحقق من كل رقم مرتين.' },
+      { title: 'مخصصة لك', body: 'معلومة جديدة كل ساعة، غالبا عن المدينة والحي اللذين بحثت فيهما.' },
+      { title: 'معلومة فقط', body: 'ليست نصيحة مالية أو استثمارية، ولا تقييما عقاريا. يرجى التحقق من التفاصيل مع المعلن قبل اتخاذ أي قرار.' },
     ],
-    note: '⚠️ معلومة فقط، وليست نصيحة استثمارية.',
-    ok: 'تمام',
+    close: 'إغلاق',
   },
   en: {
-    title: 'How it works',
-    sections: [
-      { icon: '📊', title: 'Where the number comes from', body: 'We calculate it every night from the listings on the real-estate sites in Ezhalah.' },
-      { icon: '🔁', title: 'Duplicate listings', body: 'The same property can be listed on more than one site (e.g. Aqar, Wasalt and Haraj). If a listing has the same district, type, price and area, we count it only once, in counts and in prices.' },
-      { icon: '💰', title: 'Prices', body: 'Prices are asking prices in the listings (the middle figure), not completed sale prices.' },
-      { icon: '✅', title: 'Checked twice', body: 'Every number is calculated twice and matched against the Filter before it is shown.' },
-      { icon: '🕐', title: 'Changes every hour', body: 'A new fact every hour, mostly about the city you search in.' },
+    title: 'How we calculate it',
+    falconer: 'Who is the falconer?',
+    story: (n) =>
+      `A falconer raises his falcon, cares for it and feeds it well. Every day our falconer collects the listings from every property website in Saudi Arabia${n ? `, and there are ${n} of them,` : ''} and gives this valuable data to his falcon Shaheen, so it answers you accurately when you ask. Shaheen is an AI model and can sometimes make mistakes, so always check the original listing. This fact comes from that same data: prices, new listings and changes, for homes, land and shops.`,
+    rulesTitle: 'The rules',
+    rules: [
+      { title: 'Only real listings', body: 'Every fact comes from listings published on these sites.' },
+      { title: "The site's own date", body: '"Today", "this week" and "new" mean the date the ad was posted on its site, not the date we reached it. An ad with no date isn\'t counted.' },
+      { title: 'Accurate numbers', body: 'Prices are the asking prices in the ads, not completed sale prices. A property listed on more than one site is counted once, and we check every number twice.' },
+      { title: 'Made for you', body: 'A new fact every hour, mostly about the city and district you searched.' },
+      { title: 'Information only', body: 'Not financial or investment advice, and not a property valuation. Please check the details with the advertiser before making any decision.' },
     ],
-    note: '⚠️ Information only, not investment advice.',
-    ok: 'OK',
+    close: 'Close',
   },
 };

@@ -51,7 +51,7 @@ check('a failed feed falls through to the live grid path (never an empty map)', 
 check('the canvas hides while the map moves and is removed with the layer', /m\.addEventListener\('region-change-start', hideCanvas\)/.test(web) && /canvas\.remove\(\);/.test(web));
 check('the projection is calibrated on two points MapKit itself placed on the page', /convertCoordinateToPointOnPage/.test(web) && /project = projectorFrom\(ref\(/.test(web));
 check('a tap on a dot zooms into it through the shared pick', /onSurface\(m, 'click', onCanvasTap\)/.test(web) && /const d = nearestDot\(shown, project,/.test(web));
-check('narrowing (category, type, beds, area, price, polygon) keeps the live filtered path', /const narrowed = !!\(pins\.category \|\| pins\.types\?\.length \|\| pins\.beds\?\.length/.test(web));
+check('narrowing (category, type, beds, area, price, polygon) keeps the live filtered path', /const narrowed = !!\(pins\.category \|\| pins\.scope \|\| pins\.furnished != null \|\| pins\.postedWithinDays != null \|\| pins\.types\?\.length \|\| pins\.beds\?\.length/.test(web));
 check('src/lib/mapDots.ts is import-free apart from a type (the barrier executes it in Node)', !/^import (?!type )/m.test(readFileSync(join(root, 'src/lib/mapDots.ts'), 'utf8')));
 check('a committed migration creates map_dots_ar() from the 0.01° grid and allowlists it', readdirSync(join(root, 'supabase/migrations')).some((f) => { if (!/map_dots_feed/.test(f)) return false; const sql = readFileSync(join(root, 'supabase/migrations', f), 'utf8'); return /create or replace function public\.map_dots_ar\(\)/.test(sql) && /where g\.cell = 0\.01/.test(sql) && /ops_public_secdef_allowlist/.test(sql); }));
 

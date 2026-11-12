@@ -25,7 +25,18 @@ export type CardDragOpts = {
   clamp: (p: { x: number; y: number }) => { x: number; y: number };
   /** The vector to paint before any saved position is restored (default {0,0}). */
   initial?: () => { x: number; y: number };
+  /** WHERE THE SURFACE RESTS WHEN NOBODY HAS MOVED IT (owner 2026-11-10). Without it a resized window only
+   *  re-clamps — and a card that was pushed inward by a narrow window STAYED there when the window grew back,
+   *  sitting on the search form (measured: 1920 → 1100 → 1440 left the sign-in card over the form). With it,
+   *  an un-dragged surface goes back to its rest slot on every resize and whenever the caller asks (toRest).
+   *  A surface the visitor dragged — now, or earlier in this session — is theirs: it is only ever clamped. */
+  rest?: () => { x: number; y: number };
 };
+
+/** What attachCardDrag returns: the cleanup function (so it still drops straight into a useEffect), plus two
+ *  questions the small sign-in card asks. `toRest()` re-paints the rest slot unless the visitor placed the
+ *  surface themselves; `pinned()` says whether they did. */
+export type CardDragHandle = (() => void) & { toRest: () => void; pinned: () => boolean };
 
 /** OFFSET-MODE clamp for a flex-centered surface: the painted translate is an offset from wherever
  *  centering rests the card, so the clamp derives the UNTRANSLATED base rect per call — live rect
@@ -48,11 +59,14 @@ export function clampOffsetOnScreen(node: HTMLElement): CardDragOpts['clamp'] {
 }
 
 /** Attach the drag to `node` (painted) via `grip` (grabbed). Returns a cleanup function. */
-export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardDragOpts): () => void {
+export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardDragOpts): CardDragHandle {
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   let off = opts.initial ? opts.initial() : { x: 0, y: 0 };
   const paint = () => { node.style.transform = `translate3d(${off.x}px, ${off.y}px, 0)`; };
   paint();
+  // PINNED = the visitor put the surface where it is (a drag just now, or one remembered from earlier in
+  // this session). A pinned surface is never moved back to its rest slot — only kept on-screen.
+  let pinned = false;
 
   // Restore this session's moved position (owner: "preserve if safe/easy"), re-clamped so a
   // narrower window since then can never restore the surface off-screen.
@@ -60,7 +74,7 @@ export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardD
     const saved = opts.posKey ? sessionStorage.getItem(opts.posKey) : null;
     if (saved) {
       const p = JSON.parse(saved);
-      if (typeof p?.x === 'number' && typeof p?.y === 'number') { off = opts.clamp(p); paint(); }
+      if (typeof p?.x === 'number' && typeof p?.y === 'number') { off = opts.clamp(p); paint(); pinned = true; }
     }
   } catch { /* private mode / blocked storage — the default position is always fine */ }
 
@@ -111,6 +125,7 @@ export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardD
     grip.style.cursor = 'grab';
     try { grip.releasePointerCapture(id); } catch { /* already released */ }
     if (!moved) return;   // a press that never moved is nothing — the grip is not a button
+    pinned = true;        // a real drag: from here on the surface is where the visitor wants it
     // Velocity from the RECENT history only (last ~120ms): drag → pause → release drops the
     // surface in place; a live flick projects the throw. Settle INSIDE the bounds.
     const now = performance.now();
@@ -146,15 +161,29 @@ export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardD
     raf = requestAnimationFrame(step);
   };
 
-  // A resized window re-clamps: the surface never ends up stranded outside the new viewport.
-  const onResize = () => { off = opts.clamp(off); paint(); };
+  // Back to the rest slot — only for a surface that has one and that the visitor never placed, and never
+  // in the middle of a drag.
+  const toRest = () => {
+    if (!opts.rest || pinned || dragging) return;
+    cancelAnimationFrame(raf);
+    clearTimeout(safety);
+    off = opts.rest();
+    paint();
+  };
+
+  // A resized window re-clamps: the surface never ends up stranded outside the new viewport. A surface
+  // with a rest slot that nobody dragged goes back to that slot instead (see CardDragOpts.rest).
+  const onResize = () => {
+    if (opts.rest && !pinned && !dragging) { toRest(); return; }
+    off = opts.clamp(off); paint();
+  };
 
   grip.addEventListener('pointerdown', onDown);
   grip.addEventListener('pointermove', onMove);
   grip.addEventListener('pointerup', onUp);
   grip.addEventListener('pointercancel', onUp);
   addEventListener('resize', onResize);
-  return () => {
+  const cleanup = () => {
     cancelAnimationFrame(raf);
     clearTimeout(safety);
     grip.removeEventListener('pointerdown', onDown);
@@ -163,4 +192,5 @@ export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardD
     grip.removeEventListener('pointercancel', onUp);
     removeEventListener('resize', onResize);
   };
+  return Object.assign(cleanup, { toRest, pinned: () => pinned });
 }

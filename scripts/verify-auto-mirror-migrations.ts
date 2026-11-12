@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
-const { planMirrors, safeName, versionTime, GRACE_MINUTES, MAX_PER_RUN, CLAIM_MINUTES } = await import('./auto-mirror-migrations.mjs');
+const { planMirrors, safeName, versionTime, GRACE_MINUTES, MAX_PER_RUN, CLAIM_MINUTES, ROBOT_MARK, ROBOT_TITLE, isRobotPr } = await import('./auto-mirror-migrations.mjs');
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`); if (!ok) failed++; };
 const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); if (!caught) failed++; };
@@ -62,9 +62,39 @@ check('an OPEN PR on mirror/<version>-auto is a claim too (2026-11-04: the robot
 mustCatch('a robot that ignores its own open -auto PR',
   planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642-auto'], ['mirror/20261027201642', 'mirror/20261027201642-auto']).length === 0);
 
+{ // 2026-11-10: the robot's OWN open mirror/<version> PR (98 min old here, past CLAIM_MINUTES) is never re-mirrored on -auto.
+  const own = planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642'], ['mirror/20261027201642'], ['mirror/20261027201642']);
+  check('the robot\'s own open mirror/<version> PR never expires as a claim (11-10: five duplicate -auto PRs)', own.length === 0, JSON.stringify(own));
+  const person = planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642'], ['mirror/20261027201642'], []);
+  check('a PERSON\'s open mirror/<version> PR still expires after CLAIM_MINUTES (the 11-08/11-09 shape is kept)',
+    person.length === 1 && person[0].branch === 'mirror/20261027201642-auto', JSON.stringify(person));
+  // Mutation: the 11-10 predicate (robot heads ignored) executed on the same input re-mirrors the robot's own PR.
+  const ignoresRobot = (missingIn: any[], nowIn: Date, takenIn: string[]) => missingIn.filter((m) => {
+    const t = versionTime(m.version); const age = t ? nowIn.getTime() - t.getTime() : -1;
+    return t && age >= GRACE_MINUTES * 60_000 && !(takenIn.includes(`mirror/${m.version}`) && age < CLAIM_MINUTES * 60_000);
+  });
+  mustCatch('a robot that lets its own claim expire (the 11-10 duplicate shape)',
+    ignoresRobot([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642']).length === 1 && own.length === 0);
+  check('the robot recognises its own PRs by the body mark it writes, and the mark names its workflow file',
+    ROBOT_MARK === '.github/workflows/migration-auto-mirror.yml');
+  // Provenance is title shape AND mark (CodeRabbit Major on #11673): a person's PR that mentions the workflow path is not the robot's.
+  const robotPr = { title: `${ROBOT_TITLE}20261027201642 x.sql`, body: `Applied … Opened by \`${ROBOT_MARK}\`.` };
+  const personMentions = { title: 'mirror: 20261027201642 + lesson', body: `see ${ROBOT_MARK} for the robot` };
+  const robotTitleOnly = { title: `${ROBOT_TITLE}20261027201642 x.sql`, body: 'hand-written' };
+  check('isRobotPr: the robot\'s own title + mark → robot', isRobotPr(robotPr) === true);
+  check('isRobotPr: a person\'s PR that mentions the workflow path is NOT the robot\'s (its claim still expires)', isRobotPr(personMentions) === false && isRobotPr(robotTitleOnly) === false);
+  mustCatch('a classifier that trusts the body mark alone (a person\'s mention would hold a version forever)',
+    String(personMentions.body).includes(ROBOT_MARK) && isRobotPr(personMentions) === false);
+  const personHeld = planMirrors([{ version: '20261027201642', name: 'x' }], now, ['mirror/20261027201642'], ['mirror/20261027201642'], [personMentions].filter(isRobotPr).map(() => 'mirror/20261027201642'));
+  check('…so after CLAIM_MINUTES the robot still mirrors that version on -auto', personHeld.length === 1 && personHeld[0].branch === 'mirror/20261027201642-auto');
+  // The body the robot WRITES carries the mark it READS (CodeRabbit nit): the create call references ROBOT_MARK and ROBOT_TITLE.
+  const scriptSrc = readFileSync(join(root, 'scripts/auto-mirror-migrations.mjs'), 'utf8');
+  check('the PR the robot opens is titled ROBOT_TITLE and its body carries ROBOT_MARK (written = read)',
+    /'--title', `\$\{ROBOT_TITLE\}/.test(scriptSrc) && /Opened by `' \+ ROBOT_MARK \+ '`\.'/.test(scriptSrc));
+}
 const wf = readFileSync(join(root, '.github/workflows/migration-auto-mirror.yml'), 'utf8');
 const script = readFileSync(join(root, 'scripts/auto-mirror-migrations.mjs'), 'utf8');
-check('the script asks GitHub for OPEN PR heads, not only for branches', /gh', \['pr', 'list', '--state', 'open'/.test(script) && /planMirrors\(missing, new Date\(\), openHeads, branches\)/.test(script));
+check('the script asks GitHub for OPEN PR heads, not only for branches', /gh', \['pr', 'list', '--state', 'open'/.test(script) && /planMirrors\(missing, new Date\(\), openHeads, branches, robotHeads\)/.test(script) && /'headRefName,title,body'/.test(script) && /openPrs\.filter\(isRobotPr\)/.test(script));
 check('the workflow runs on a schedule and invokes the script', /cron: '/.test(wf) && /node scripts\/auto-mirror-migrations\.mjs/.test(wf));
 check('it opens PRs with the PR token (a GITHUB_TOKEN PR triggers no checks, so it would never merge)', /BASELINE_PR_TOKEN/.test(wf));
 check('a queued run reads main as it is when it RUNS, not the dispatch-time commit (2026-11-04: duplicate PRs #10346/#10347)',

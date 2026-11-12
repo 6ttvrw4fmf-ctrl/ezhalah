@@ -104,13 +104,23 @@ _FIELD_NAMES = ("نوع العرض", "نوع العقار", "نوع الأرض",
                 "عدد الغرف", "مؤثثة", "عام الاكتمال", "العمر")
 
 
+# The page's own buttons/headings that FOLLOW the «تفاصيل العقار» table (live gudai 12390333, 2026-11-10:
+# «المرافق: مسبح، غرفة خادمة، كاميرات مراقبة، نظام صوت مركزي اتصل بنا واتساب احجز زيارتك»). «المرافق» is the
+# table's LAST cell, so no field name follows it: before these were stops the value never ended inside the
+# window, _label returned None, and every variant-A amenity list (maid room, pool …) was silently lost.
+_SECTION_ENDS = ("اتصل بنا", "واتساب", "احجز زيارتك", "عروض مشابهه", "عروض مشابهة")
+# a value is a short cell; «المرافق» is a comma list and may run longer than one cell
+_MAX_LEN = {"المرافق": 400}
+
+
 def _label(text: str, *names: str) -> Optional[str]:
-    stop = "|".join(re.escape(f) for f in _FIELD_NAMES)
+    stop = "|".join(re.escape(f) for f in _FIELD_NAMES + _SECTION_ENDS)
     for n in names:
-        m = re.search(re.escape(n) + r"\s*:?\s*(.{1,60}?)(?=\s*(?:" + stop + r")\b|\s*$)", text)
+        cap = _MAX_LEN.get(n, 60)
+        m = re.search(re.escape(n) + r"\s*:?\s*(.{1," + str(cap) + r"}?)(?=\s*(?:" + stop + r")\b|\s*$)", text)
         if m:
             v = re.sub(r"\s+", " ", m.group(1)).strip(" .،-:")
-            if v and v not in _FIELD_NAMES:
+            if v and v not in _FIELD_NAMES + _SECTION_ENDS:
                 return v
     return None
 
@@ -133,10 +143,11 @@ _TYPE_AR = {
     "عمارة": "عمارة", "عماره": "عمارة", "مبنى كامل": "عمارة", "مبنى تجاري": "عمارة",
     "مبنى": "عمارة", "برج": "عمارة",
     "استراحة": "استراحة", "استراحه": "استراحة", "استراحات": "استراحة",
-    "شاليه": "شاليه", "شاليهات": "شاليه",
+    "شاليه": "شاليه", "شاليهات": "شاليه", "شالية": "شاليه",  # «للبيع شالية بحي السلمان» (erapulse 21673925)
     "مزرعة": "مزرعة", "مزرعه": "مزرعة",
     "محل": "محل", "محلات": "محل", "معرض": "معرض", "صالة عرض": "معرض",
     "صالة تجارية": "محل", "صاله تجارية": "محل",
+    "صالات تجارية": "محل",  # «صالات تجارية للإيجار - مجمع روفان التجاري» (erapulse 26359507)
     "مكتب": "مكتب", "مكاتب": "مكتب",
     "مستودع": "مستودع", "مستودعات": "مستودع", "مخزن": "مستودع", "مخازن": "مستودع",
     "غرفة": "غرفة", "غرفه": "غرفة", "فندق": "فندق", "ورشة": "ورشة",

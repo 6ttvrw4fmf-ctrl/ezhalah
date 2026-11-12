@@ -484,6 +484,13 @@ _PREPARED = tuple(_n(w) for w in N._PREPARED_ONLY + ("تمديد", "تمديدا
                                                         "تسليك", "وتسليك", "تسليكات"))
 _PREPARED_PLACE = tuple(_n(w) for w in ("مكان", "مساحه", "موقع"))   # «مكان مسبح», «مكان للمصعد»
 _PLACE_FACTS = frozenset({"pool", "elevator"})
+# a washing machine's SPOT, never the machine (🔬 2026-11-10) — only for the washer word «غسالة»: «ركن غسيل», «مكان غسيل
+# ملابس» are a laundry space and stay yeses (haraj 18743786, dealapp 21427433 in the real-ad lock)
+_WASHER_SPOT = frozenset(_n(w) for w in ("ركن", "مخرج", "مخارج", "موقع", "لموقع", "مكان", "لمكان", "توصيله", "توصيلة",
+                                          "وصله", "وصلة", "تمديد", "تمديدات"))
+# a forecast of income, never income the property earns (🔬 2026-11-10)
+_FORECAST = frozenset(_n(w) for w in ("متوقع", "المتوقع", "متوقعه", "المتوقعه", "تحقيق",
+                                       "لتحقيق", "يحقق", "تحقق", "تقديري", "تقديريه", "تقديرية", "المحتمل", "محتمل"))
 # NEARBY: about the street, not the unit — no row. The scrapers' _PROXIMITY plus the words a view/distance uses.
 _NEAR = tuple(_n(w) for w in N._PROXIMITY + ("قريب", "قريبه", "قرب", "بالقرب", "بجوار", "جوار", "مجاور", "مجاوره",
                                                "بقرب", "قربها", "قربه", "مقابله", "جنب", "بجنب", "دقيقتين", "دقيقتان",
@@ -780,13 +787,20 @@ def _starts(word: str, stems: tuple[str, ...]) -> bool:
 _FIRE_CUES = tuple(_n(w) for w in ("نار", "النار", "حطب", "الحطب", "للحطب", "بالحطب", "مشب", "المشب", "فحم", "الفحم", "جمر",
                                    "تدفئه", "fire", "wood"))
 _FIRE_NEAR = tuple(_n(w) for w in ("خارجي", "خارجيه", "شتوي", "شتويه", "حوش", "الحوش", "جلسه", "الجلسه"))
+# «نار» alone is a WEAK fire word: «موقد نار» is also how a gas / electric burner is named in a kitchen list (🔬 2026-11-09,
+# 9 of 21 served home «موقد» yeses: «اجهزة الطبخ : ميكرويف ثلاجة صغيرة وموقد نار وغلاية», «مطبخ مجهز بالكامل (موقد نار
+# كهريائي», «اسطوانه غاز موقد نار ثلاجه», «المطبخ : … قدور , كاسات , موقد نار»). It still beats a kitchen word unless that
+# kitchen word is there and no seating / outdoor word sits within 4 («جلسة خارجية مع موقد نار», «5- جلسة ارضية مع موقد نار»).
+_WEAK_FIRE = tuple(_n(w) for w in ("نار", "النار", "للنار"))
 _COOKTOP_AFTER = tuple(_n(w) for w in ("سيراميك", "مسطح", "سطحي", "كهرب", "غاز", "الغاز", "عين", "عيون", "بوتجاز", "built",
-                                       "انفرا", "حراري", "مزدوج", "طبخ", "طهي", "ستيل", "اربع", "اربعه", "ثلاث", "خمس"))
+                                       "انفرا", "حراري", "مزدوج", "طبخ", "طهي", "ستيل", "اربع", "اربعه", "ثلاث", "خمس",
+                                       "لطبخ", "لطهي", "كهري"))
 _STOVE_CUES = tuple(_n(w) for w in ("فرن", "الفرن", "افران", "شفاط", "الشفاط", "ثلاج", "الثلاج", "ميكرو", "الميكرو", "مايكرو",
                                     "المايكرو", "مكرو", "غلاي", "الغلاي", "غساله", "الغساله", "مطبخ", "المطبخ", "طبخ", "الطبخ",
                                     "طهي", "الطهي", "عين", "عيون", "سيراميك", "مسطح", "سطحي", "كهرب", "غاز", "الغاز", "بوتجاز",
                                     "built", "اجهز", "الاجهز", "ادوات", "صحون", "الصحون", "فريزر", "قهوه", "القهوه", "اسطوان",
-                                    "مزدوج", "انفرا", "حراري", "ستيل", "اطباق", "الاطباق"))
+                                    "مزدوج", "انفرا", "حراري", "ستيل", "اطباق", "الاطباق", "قدور", "القدور", "ملاعق",
+                                    "كاسات", "اواني", "الاواني", "اوني", "سرفيس", "لطبخ", "لطهي", "كهري"))
 _SENTENCE_END = re.compile(r"[.!?؟\n]")
 
 
@@ -819,8 +833,14 @@ def _stove_not_fire(raw: str, clauses: list, ci: int, t: str, s: int, e: int) ->
         after = after + clauses[k][2].split()
     if any(_starts(_bare(w), _COOKTOP_AFTER) for w in after[:2]):
         return True
-    if any(_starts(_bare(w), _FIRE_CUES) for w in before[-4:] + after[:4]):
+    near4 = before[-4:] + after[:4]
+    strong = [w for w in near4 if _starts(_bare(w), _FIRE_CUES) and not _strip_wa(_bare(w)) in _WEAK_FIRE]
+    if strong:
         return False
+    if any(_starts(_bare(w), _FIRE_CUES) for w in near4):          # only a weak «نار»
+        if any(_starts(_bare(w), _FIRE_NEAR) for w in near4):
+            return False
+        return any(_starts(_bare(w), _STOVE_CUES) for w in before[-7:] + after[:7])
     if any(_starts(_bare(w), _FIRE_NEAR) for w in before[-2:] + after[:2]):
         return False
     return any(_starts(_bare(w), _STOVE_CUES) for w in before[-7:] + after[:7])
@@ -1142,6 +1162,19 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                                                      # project's corner unit, not this ad's plot (P2 13085, 2026-11-06)
     if fact == "laundry_room" and p2 and p2[-1] in ("حي", "بحي", "العدل"):
         return None, s, e                            # «حي العدل الغسالة»: a Makkah district, not a washing machine
+    if fact in ("kitchen", "laundry_room") and p2 and _starts(_strip_wa(p2[-1]), (_n("مجهز"), _n("مهيا"), _n("مهيأ"))) \
+            and _n(t[ws:we]).lstrip("و").startswith("ل"):
+        return None, s, e                            # «ممر مجهز لمطبخ»: a space prepared FOR a kitchen, not a kitchen
+                                                     # (P2 13085 «لمطبخ», aqar 5830, 🔬 2026-11-10). «مطبخ مجهز» stays a yes.
+    if fact == "laundry_room" and p2 and _strip_wa(p2[-1]) in _WASHER_SPOT and "غسال" in _n(t[ws:we]):
+        return None, s, e                            # «مجهز لموقع الغسالة», «ركن الغسالة», «مخرج الغسالة»: the washer's
+                                                     # spot or hook-up, not a washing machine (P2 13085 «الغساله», aqar
+                                                     # 71281 / 6477635, 🔬 2026-11-10)
+    if fact == "earning_income" and (any(_strip_wa(w) in _FORECAST for w in gp[-3:])
+                                     or any(_strip_wa(w.strip(":：")) in _FORECAST for w in gn[:3])):
+        return None, s, e                            # «دخل شهري: متوقع للشقه بعد التاثيث», «فرص تحقيق دخل شهري»: a
+                                                     # forecast, not income the property earns (P2 13085 «دخل شهري», aqar
+                                                     # 113914 / 38786, 🔬 2026-11-10)
     if fact == "reception" and re.match(r"^(?:ل|لل)استقبال(?:ك|كم|كن|كي)$", _n(t[ws:we]).lstrip("و")):
         return None, s, e                            # «جاهزة لاستقبالك», «بيتك جاهز لاستقبالك»: «ready to welcome YOU»,
                                                      # marketing, never a reception desk (P2 13085, 5 of 5 aqar, 🔬 2026-11-09)
@@ -2283,6 +2316,17 @@ def selftest() -> None:
         ("ومطبخ متوفر به فرن,ثلاجه,غلايه وفريزر مستقل و العديد من المرافق مثل ركن شواء,موقد حطب,مسطح اخضر", {"fire_pit": True}, ()),
         ("وادوات نظافة وجلسة خارجية مع موقد نار وادواتة التراثية", {"fire_pit": True}, ()),
         ("المكان مزود بغرفة مستقلة تحتوي على موقد (مشب) يضفي لمسة دفء", {"fire_pit": True}, ()),
+        # 🔬 2026-11-09: «موقد نار» inside a kitchen list is the burner (9 of 21 served home «موقد» yeses) — real sentences
+        ("يتوفر ايضا اجهزة الطبخ : ميكرويف ثلاجة صغيرة وموقد نار وغلاية الدورؤالأول فوق الأرضي", {}, ("fire_pit",)),
+        ("ومكرويف وموقد نار للطبخ وغسالة ملابس ومنشر ملابس", {}, ("fire_pit",)),
+        ("- المطبخ : يحتوي على صحون , ملاعق , شوكة , قدور , كاسات , موقد نار - أدوات السلامة : كاشف دخان", {}, ("fire_pit",)),
+        ("مطبخ مجهز بالكامل (موقد نار كهريائي . غلاية ماء . ميكرويف . ثلاجة فيريزر غسالة ملابس )", {}, ("fire_pit",)),
+        ("مؤثثه يوجد بها دوره مياه سرير مكيف سخان مياه اسطوانه غاز موقد نار ثلاجه مدخل خاص ومستقل", {}, ("fire_pit",)),
+        ("وصاله مطله على المسبح وشاشه 75 بوصه اشتراك نتفلكس مطلخ متكامل ب موقد نار وغلايه", {}, ("fire_pit",)),
+        # … while «نار» beside a seating / outdoor word, or a strong fire word, keeps the fire pit
+        ("4-جلسة خارجية كراسي مرتفعه مع موقد نار 5- جلسة ارضية مع موقد نار 6-دورتين مياه ومغسلتين ومطبخ", {"fire_pit": True}, ()),
+        ("عبارة عن خيمتين فيها مشب وموقد نار ودفاية وجلسة خارجية ومطبخ فية اوني طبخ الذبائح", {"fire_pit": True}, ()),
+        ("يتميز الاستوديو بمدفأة داخلية، وموقد نار خارجي، ومطبخ مجهز بالكامل، وعوازل صوتية", {"fire_pit": True}, ()),
         # CodeRabbit on #11295: a seating word must not veto a cooktop, and the previous SENTENCE lends no stove word
         ("جلسة خارجية، مطبخ مجهز بموقد سيراميكي", {}, ("fire_pit",)),
         ("مطبخ فيه فرن.\nموقد حجري في الصالة", {"fire_pit": True}, ()),
@@ -2756,6 +2800,15 @@ def selftest() -> None:
         ("العائد 8%", {"earning_income": True}, ()),
         ("عقد بين المؤجر والمستأجر", {}, ("earning_income",)),
         ("غير مؤجره", {"earning_income": False}, ()),
+        # 🔬 2026-11-10, P2 13085 phrase review: a forecast, a washer's spot, a space prepared FOR a kitchen (real aqar lines)
+        ("المكيفات راكبه دخل شهري: متوقع للشقه بعد التاثيث من ٢٠٠٠ إلى ٣٠٠٠ للشهر الواحد", {"air_conditioner": True}, ("earning_income",)),
+        ("مرونة عالية في التأجير ويعزز فرص تحقيق دخل شهري مستقر", {}, ("earning_income",)),
+        ("💰 العائد الاستثماري: • دخل شهري ثابت: 2,300 ريال", {"earning_income": True}, ()),
+        ("▪️ ارتداد خلفي مجهز لموقع الغسالة ومخرج غاز ▪️ 3 غرف نوم", {}, ("laundry_room",)),
+        ("تفاصيل العقار : غرفتين نوم يوجد ركن الغسالة مجلس", {}, ("laundry_room",)),
+        ("مؤثث بالكامل مع توفر الغسالة والثلاجة", {"laundry_room": True}, ()),
+        ("الملحق الخارجي: - غرفة نوم - حمام - ممر مجهز لمطبخ الطابق الأرضي", {}, ("kitchen",)),
+        ("وغرفة خادمه بحمام بلاضافه لمطبخ كبير", {"kitchen": True}, ()),
         ("فندق خمس نجوم", {"stars_mentioned": True}, ()),
         ("تصنيف 4 نجوم", {"stars_mentioned": True}, ()),
         ("قريب من فندق 5 نجوم", {}, ("stars_mentioned",)),

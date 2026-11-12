@@ -17,18 +17,27 @@ import { OptionBox, FieldLabel } from '@/components/ui';
 import { CATEGORIES } from '@/data/taxonomy';
 import { groupsFor, groupMembers, typeArForTypes, type Macro } from '@/data/propertyTypes';
 import { EMPTY_MAP_FILTER, digits, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
-import { pinFilterOf as pinFilterOfWith } from '@/lib/mapFilter';
+import { pinFilterOf as pinFilterOfWith, furnitureOffered, bedsOffered, postedOffered } from '@/lib/mapFilter';
+import { mapTypeScope, type PostedWindowCounts } from '@/data/remote';
+import PostedWindowMenu from '@/components/PostedWindowMenu';
 export { EMPTY_MAP_FILTER, isNarrowed, type MapFilterState } from '@/lib/mapFilter';
 /** The popup's state → the pin query, with the site's own group → type labels mapping. */
-export const pinFilterOf = (f: MapFilterState) => pinFilterOfWith(f, typeArForTypes, groupMembers);
-import { categoryImg, groupImg, typeImg, BED_IMG, RANGE_ICON } from '@/theme/propertyIcons';
+export const pinFilterOf = (f: MapFilterState, deals: readonly string[] = []) => pinFilterOfWith(f, typeArForTypes, groupMembers, deals, mapTypeScope);
+import { categoryImg, groupImg, typeImg, BED_IMG, RANGE_ICON, FURN_IMG } from '@/theme/propertyIcons';
 import { useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 
-export default function MapFilterCard({ value, onApply, onClose, countPins }: {
+export default function MapFilterCard({ value, onApply, onClose, onClear, countPins, countPostedWindows, deals = [] }: {
   value: MapFilterState; onApply: (f: MapFilterState) => void; onClose: () => void;
+  /** «مسح الكل» resets the MAP at once, not only the boxes here — so closing with X afterwards keeps it cleared
+   *  (owner 2026-11-11: «when I click clear all then x … doesn't get reset»). */
+  onClear: () => void;
+  /** The map's deal choice: «الأثاث» shows only on «إيجار» alone (yearly rent), as on the Filter home. */
+  deals?: readonly string[];
   /** Pins the choice leaves in the current view; null = could not count (the button then says «عرض الإعلانات»). */
   countPins: (f: MapFilterState) => Promise<number | null>;
+  /** «نُشر خلال» numbers for the pins in view (any + every window); null = could not count (no numbers shown). */
+  countPostedWindows?: (f: MapFilterState) => Promise<Record<string, number> | null>;
 }) {
   const { t, isRTL } = useI18n();
   const phone = useWindowDimensions().width < PHONE_MAX;
@@ -39,6 +48,7 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
   const key = JSON.stringify(f);
   useEffect(() => {
     const my = ++seq.current;
+    setCount(null);   // a number on the button is always for what is picked now (CodeRabbit #11828; live 2026-11-10: 59,686 lingered)
     const h = setTimeout(() => { countPins(f).then((n) => { if (my === seq.current) setCount(n); }); }, 250);
     return () => clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -56,6 +66,31 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
   // PROPERTY TYPE AFTER THE GROUP (owner 2026-11-10: «the filter button on the map is incomplete, no property type, just
   // group»): the picked groups' types, as on the Filter home.
   const typeChoices = useMemo(() => [...new Set(f.groups.flatMap((g) => groupMembers(g)))], [f.groups]);
+  // What «تطبيق» hands the map: a furniture choice the row no longer offers is dropped (no hidden filter left behind).
+  const applied0: MapFilterState = f.furnished != null && !furnitureOffered(deals, f.category) ? { ...f, furnished: null } : f;
+  const applied: MapFilterState = applied0.postedWithinDays != null && !postedOffered(deals) ? { ...applied0, postedWithinDays: null } : applied0;
+  // «نُشر خلال» numbers (owner 2026-11-11): the pins in VIEW for these choices, every window at once — the same count the
+  // «عرض N إعلان» button makes, so «أي وقت» and the button always agree (live that day the menu counted the whole country,
+  // 311,791, beside a 300,755 button). Cleared the moment the choices change, so a number on the menu is always for what
+  // is picked now; a failed read leaves the numbers blank, never zeros.
+  const [postedCounts, setPostedCounts] = useState<PostedWindowCounts | null>(null);
+  const postedKey = JSON.stringify([{ ...f, postedWithinDays: null }, deals]);
+  useEffect(() => {
+    setPostedCounts(null);
+    if (!postedOffered(deals) || !countPostedWindows) return;
+    let live = true;
+    const h = setTimeout(() => {
+      countPostedWindows({ ...f, postedWithinDays: null })
+        .then((c) => { if (live) setPostedCounts(c && typeof c.any === 'number' ? (c as unknown as PostedWindowCounts) : null); })
+        .catch(() => { if (live) setPostedCounts(null); });
+    }, 300);
+    return () => { live = false; clearTimeout(h); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postedKey]);
+  const clearAll = () => { setF(EMPTY_MAP_FILTER); onClear(); };
+  // Clear stays on while the MAP still has a filter, even if every box here was un-ticked by hand (review of #11818):
+  // otherwise X would keep the old filter with no way to reset it from here.
+  const canClear = isNarrowed(f) || isNarrowed(value);
   const toggleBed = (b: '1' | '2' | '3' | '4' | '5+') => setF((x) => ({ ...x, beds: x.beds.includes(b) ? x.beds.filter((y) => y !== b) : [...x.beds, b] }));
 
   return (
@@ -67,7 +102,7 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
           {/* Physical order: in Arabic the page is RTL and a plain row would put the X on the LEFT (measured live
               2026-11-10: 16 px from the left edge). row-reverse under RTL keeps it top RIGHT (owner 2026-11-10). */}
           <View style={[s.head, { flexDirection: isRTL ? 'row-reverse' : 'row' }, phone && { paddingTop: 12 + insets.top }]}>
-            <Text style={s.title} testID="map-filter-title">{phone && count !== null ? t('{n} results', { n: count.toLocaleString('en-US') }) : t('Filter')}</Text>
+            <Text style={s.title} testID="map-filter-title">{t('Filter')}</Text>
             <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-filter-close" style={s.close}>
               <Ionicons name="close" size={22} color={colors.ink} />
             </Pressable>
@@ -100,6 +135,8 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
                 </View>
               </>
             ) : null}
+            {bedsOffered(f) ? (
+              <>
             <FieldLabel>{t('Bedrooms')}</FieldLabel>
             <View style={s.wrap}>
               {(['any', '1', '2', '3', '4', '5+'] as const).map((opt) => (
@@ -107,6 +144,29 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
                   onPress={() => (opt === 'any' ? setF((x) => ({ ...x, beds: [] })) : toggleBed(opt))} style={s.cell} />
               ))}
             </View>
+              </>
+            ) : null}
+            {/* «الأثاث» — copied from the Filter home (owner 2026-11-10: «yeah you copy the filter»): yearly rent homes only. */}
+            {furnitureOffered(deals, f.category) ? (
+              <>
+                <FieldLabel>{t('Furniture')}</FieldLabel>
+                <View style={s.wrap} testID="map-filter-furniture">
+                  {([['any', null, 'Furniture: all'], ['yes', true, 'Furniture: furnished'], ['no', false, 'Furniture: unfurnished']] as const).map(([key, pref, label]) => (
+                    <OptionBox key={key} label={t(label)} img={FURN_IMG[key]} selected={(f.furnished ?? null) === pref}
+                      onPress={() => setF((x) => ({ ...x, furnished: pref }))} style={s.cell} />
+                  ))}
+                </View>
+              </>
+            ) : null}
+            {/* «نُشر خلال» — the Filter home's row, copied (owner 2026-11-11): a floating menu, each period with its number. */}
+            {postedOffered(deals) ? (
+              <>
+                <FieldLabel>{t('Published within')}</FieldLabel>
+                <PostedWindowMenu value={f.postedWithinDays ?? null}
+                  counts={postedCounts && count != null && f.postedWithinDays == null ? { ...postedCounts, any: count } : postedCounts}
+                  onChange={(days) => setF((x) => ({ ...x, postedWithinDays: days }))} testID="map-filter-posted" />
+              </>
+            ) : null}
             <View style={[s.rangeHead, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}><Image source={RANGE_ICON.areaHead} style={s.icon} /><Text style={s.rangeLabel}>{t('Area (m²)')}</Text></View>
             <View style={[s.row, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
               <Range icon={RANGE_ICON.areaFrom} label={t('From')} unit={t('m²')} value={f.areaMin} onChange={(v) => setF((x) => ({ ...x, areaMin: digits(v) }))} testID="map-filter-area-min" />
@@ -117,23 +177,24 @@ export default function MapFilterCard({ value, onApply, onClose, countPins }: {
               <Range icon={RANGE_ICON.priceFrom} label={t('From')} unit={t('SAR')} value={f.priceMin} onChange={(v) => setF((x) => ({ ...x, priceMin: digits(v) }))} testID="map-filter-price-min" />
               <Range icon={RANGE_ICON.priceTo} label={t('To')} unit={t('SAR')} value={f.priceMax} onChange={(v) => setF((x) => ({ ...x, priceMax: digits(v) }))} testID="map-filter-price-max" />
             </View>
-            {!phone && isNarrowed(f) ? (
-              <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} accessibilityRole="button" style={s.reset}><Text style={s.resetT}>{t('Clear all')}</Text></Pressable>
+            {!phone && canClear ? (
+              <Pressable onPress={clearAll} accessibilityRole="button" style={s.reset}><Text style={s.resetT}>{t('Clear all')}</Text></Pressable>
             ) : null}
           </ScrollView>
           {phone ? (
             // Fixed bottom bar (Zillow «Reset all filters» | «Apply»): clear on the start side, the button fills the rest.
             <View style={[s.foot, s.footRow, { flexDirection: isRTL ? 'row-reverse' : 'row', paddingBottom: 12 + insets.bottom }]}>
-              <Pressable onPress={() => setF(EMPTY_MAP_FILTER)} disabled={!isNarrowed(f)} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
-                <Text style={[s.resetT, !isNarrowed(f) && { color: colors.muted }]}>{t('Clear all')}</Text>
+              <Pressable onPress={clearAll} disabled={!canClear} accessibilityRole="button" testID="map-filter-clear" style={s.footClear}>
+                <Text style={[s.resetT, !canClear && { color: colors.muted }]}>{t('Clear all')}</Text>
               </Pressable>
-              <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(f)} accessibilityRole="button" testID="map-filter-apply">
-                <Text style={s.applyT}>{t('Show listings')}</Text>
+              <Pressable style={[s.apply, { flex: 1 }]} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
+                {/* The count lives in the button (owner 2026-11-11, Zillow's «See 201 rentals»), the title says «تصفية». */}
+                <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
               </Pressable>
             </View>
           ) : (
             <View style={s.foot}>
-              <Pressable style={s.apply} onPress={() => onApply(f)} accessibilityRole="button" testID="map-filter-apply">
+              <Pressable style={s.apply} onPress={() => onApply(applied)} accessibilityRole="button" testID="map-filter-apply">
                 <Text style={s.applyT}>{count === null ? t('Show listings') : t('Show {n} listings', { n: count.toLocaleString('en-US') })}</Text>
               </Pressable>
             </View>

@@ -26,6 +26,7 @@
 
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
+import { newHydrationLedger, recordHydration, dropsOf, pickResultsSearch, isHydrationRequest, hydrationRequestTracker, settleHeadline } from './lib/hydrationDrops.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { pickScreenCityCall } from './lib/trendingScreenCall.ts';
@@ -188,9 +189,27 @@ async function runJourney(j: Journey) {
   // matching by name alone silently pairs the wrong totals onto the wrong parameter set.
   const cityCalls: { body: any; rows: any[] }[] = [];
   const districtCalls: { body: any; rows: any[] }[] = [];
-  let lastSearch: { body: any; rows: any[] } | null = null;
+  let lastSearch: { body: any; rows: any[]; seq: number } | null = null;
+  // Raw-table hydrations (scripts/lib/hydrationDrops.ts): the app's headline is total_count minus the page rows the
+  // raw tables did not return (src/lib/honestTotal.ts), so the drops are MEASURED here, never tolerated.
+  const hyd = newHydrationLedger();
+  let hydSeq = 0;
+  // Pending from the REQUEST, not the response (CodeRabbit, PR 11725): a newer hydration still waiting for headers
+  // keeps dropsOf() at «not yet measured».
+  const hydReq = hydrationRequestTracker<object>(hyd);
+  page.on('request', (req) => { if (isHydrationRequest(req.method(), req.url())) hydReq.sent(req); });
+  page.on('requestfailed', (req) => hydReq.settled(req, false, hydSeq++));
   page.on('response', async (resp) => {
     const u = resp.url();
+    // ARRIVAL ORDER is stamped synchronously, before any await (CodeRabbit, PR 11725): a body read can finish in
+    // any order, but the app sends a page's hydration only after its search response ARRIVED, so arrival order is
+    // the one that says «this hydration belongs to that search».
+    const arrived = hydSeq++;
+    if (resp.request().method() === 'GET' && /\/rest\/v1\/[a-z0-9_]+_listings\?/.test(u)) {
+      let recorded = false;
+      try { recorded = recordHydration(hyd, u, resp.ok(), await resp.json(), arrived); } catch {} finally { hydReq.settled(resp.request(), recorded, arrived); }
+      return;
+    }
     if (resp.request().method() !== 'POST') return;
     try {
       const j2 = await resp.json();
@@ -198,7 +217,11 @@ async function runJourney(j: Journey) {
       const body = JSON.parse(resp.request().postData() || '{}');
       if (u.includes('/rpc/top_cities_by_deal_ar')) cityCalls.push({ body, rows: j2 });
       else if (u.includes('/rpc/district_options_ar')) districtCalls.push({ body, rows: j2 });
-      else if (u.includes('/rpc/location_search_candidates_ar')) lastSearch = { body, rows: j2 };
+      // Only a RESULTS page (page 0 of a real page size) is the search the headline describes; a late count probe
+      // (p_limit 1) must never replace it, or the drops would be counted over one probe row (CodeRabbit, PR 11725).
+      else if (u.includes('/rpc/location_search_candidates_ar')) {
+        lastSearch = pickResultsSearch(lastSearch, { body, rows: j2, seq: arrived });   // lib rule, wiring-checked
+      }
     } catch {}
   });
 
@@ -424,8 +447,6 @@ async function runJourney(j: Journey) {
         Array.isArray(body.p_cities) && body.p_cities.includes(city),
         `p_cities=${JSON.stringify(body.p_cities)}`);
 
-      const uiTxt = await page.evaluate(() => document.body.innerText);
-      const uiCount = resultsFoundCount(uiTxt);
       // AN UNREADABLE TOTAL IS A DEFECT, NOT A SKIP (2026-09-19, routine #5). This was
       // `if (uiCount != null) { check(...) }` over a parser pinned to the retired «لقينا N إعلان».
       // When PR #3186 rotated the sentence the parse returned null on every cohort, the `if` fell
@@ -434,13 +455,24 @@ async function runJourney(j: Journey) {
       // fixed in the live sweep; it recurred here because the barrier guarding the class was a
       // three-file list. The comparison is now unconditional: a screen showing results whose total
       // cannot be read fails, and says which of the two it is.
-      check(`${name}: the displayed result count == the search RPC's total_count`,
-        uiCount != null && uiCount === rpcTotal,
+      // The page-0 rows this search returned, and how many of them the raw hydration did not return. The listener may
+      // still be reading a hydration body when the headline settles, so wait (bounded) for the count to be MEASURED;
+      // if it never is, the strict rule applies — an unmeasured difference is never excused (CodeRabbit, PR 11725).
+      const pageKeys = rows.map((r: any) => `${r.source_table}:${r.listing_id}`);
+      // The headline is read AFTER the drops are measured and re-read until the pair agrees (bounded): a headline read
+      // before the wait can be stale (CodeRabbit, PR 11725). The verdict is the last pair read.
+      const searchSeq = (lastSearch as any).seq;
+      const settled = await settleHeadline(
+        async () => resultsFoundCount(await page.evaluate(() => document.body.innerText)),
+        () => dropsOf(hyd, pageKeys, searchSeq), rpcTotal, () => page.waitForTimeout(500));
+      const uiCount = settled.ui, drops = settled.drops;
+      check(`${name}: the displayed result count == the search RPC's total_count (minus the measured hydration drops)`,
+        settled.ok,
         uiCount == null
           ? `the rendered total could not be READ (rpc=${rpcTotal}). The pool-derived matcher matched `
             + 'nothing on a settled screen — check scripts/verify-results-sentence-parsers-track-the-pool.ts '
             + 'before accusing production.'
-          : `ui=${uiCount} rpc=${rpcTotal}`);
+          : `ui=${uiCount} rpc=${rpcTotal} drops=${drops.n ?? 'unobserved'}${drops.keys.length ? ` [${drops.keys.slice(0, 5).join(' ')}]` : ''}`);
 
       // THE LINK THAT WAS UNCHECKABLE BEFORE 2026-09-01.
       //

@@ -46,6 +46,14 @@ env:
   # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
   # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
   EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+  # PostgREST echoes the whole query back in its Content-Location reply header. A broad scope's oracle read (all
+  # residential + all commercial tables and types, ~15 KB of URL) makes that header overflow Node's 16 KB default and
+  # fetch throws «fetch failed» (cause UND_ERR_HEADERS_OVERFLOW) although the database answered 200 — every failed
+  # run 2026-11-04…11-10 ended «search_listings_ar count unreachable — fetch failed» on Trending scope «3 COMMERCIAL
+  # (broad)». Measured 2026-11-11: a 15,601-char URL throws at the default and answers 200 (header 16,755 bytes) at
+  # 64 KB; a 26,001-char URL gets an honest HTTP 400 from the gateway either way. Guard:
+  # scripts/verify-live-checks-read-long-postgrest-replies.ts.
+  NODE_OPTIONS: --max-http-header-size=65536
 
 jobs:
   # DID THE TRIGGERING DEPLOY ACTUALLY SHIP? (ops_incident #75, 2026-09-06)

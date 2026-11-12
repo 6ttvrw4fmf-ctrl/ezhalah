@@ -1,3 +1,4 @@
+import { postedWindowParam } from '@/lib/postedWindows';
 import { selectSourceTables } from '@/lib/agentSourceSelection';
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
@@ -7,6 +8,8 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
+import { bathroomsForCard } from '@/lib/indexBathrooms';
+import { reportMessage } from '@/lib/observability';
 import { honestTotal } from '@/lib/honestTotal';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { normalizeType, queryForSelection, queryForTypes, storedRawTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
@@ -388,6 +391,9 @@ function rpcFilterParams(q: SearchQuery) {
     p_price_max,
     p_area_min: pnum(q.areaMin),
     p_area_max: pnum(q.areaMax),
+    // «نُشر خلال» (owner 2026-11-11): a NORMAL narrowing like price and area — the site's own posting date, sent only when
+    // picked and never for short stays (postedWindowParam). Every count surface spreads this builder, so they all carry it.
+    ...(postedWindowParam(q) != null ? { p_posted_within_days: postedWindowParam(q) } : {}),
     // Real server-side ordering (2026-07-27 fix) for the sort keys the RPC now understands — it then
     // orders the FULL matching set before LIMIT/OFFSET, not just the recency-capped page. 'newest'/
     // undefined need no param (NULL reproduces the RPC's own default order). ppm_asc/ppm_desc stay
@@ -604,6 +610,18 @@ export function searchTableScope(q: SearchQuery): SearchTableScope | null {
         : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
 
   return { p_tables: mainTables, ...scopeB, isBroadCommercial };
+}
+
+// THE MAP FILTER ASKS LIKE THE FILTER (owner 2026-11-10: «this filter is like the one we have but it shows the result
+// in the map»). The type half of the request the Filter home sends for a category + exact types — table sets, type
+// lists, category gate — from the SAME functions (searchTableScope, cohortTypesAr, impliedCategory), so the map can
+// never read a choice differently: «أرض خام» (a tag, not a stored type), land under «تجاري», misfiled rows. Every
+// deal's tables are in scope (the map narrows by deal on its own). Pure and synchronous.
+export function mapTypeScope(category: Macro, types: string[]): { types: string[] | null; tables: string[] | null; tables2: string[] | null; types2: string[] | null; macro: Macro | null } {
+  const q = { deal: 'Rent', dealCombined: true, category, types: types.length ? types : null, geographicScope: 'NATIONWIDE' } as unknown as SearchQuery;
+  const ts = searchTableScope(q);
+  if (!ts) return { types: null, tables: [], tables2: null, types2: null, macro: category };
+  return { types: ts.isBroadCommercial ? COMMERCIAL_TYPE_AR_RES : cohortTypesAr(q), tables: ts.p_tables, tables2: ts.p_tables2, types2: ts.p_types2, macro: impliedCategory(q) };
 }
 
 // UNKNOWN IS NOT AN HONEST ZERO (P2, found 2026-09-04). `null` from here means the location genuinely
@@ -1041,6 +1059,47 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 const COUNT_MEMORY_TTL_MS = 120_000;
 const settledScopeCounts = new Map<string, { at: number; n: number }>();
 const inFlightScopeCounts = new Map<string, Promise<number | ProbeFailed>>();
+
+/** «نُشر خلال» — the number in every publish window for the user's exact current search, in one read
+ *  (posted_window_counts_ar, generated from the same eligibility clause as the results). The window itself is left
+ *  open, so each row of the menu shows what picking it would return. A failed read is UNKNOWN (PROBE_FAILED), never
+ *  zeros; the source answering nothing is null. */
+export type PostedWindowCounts = { any: number; d1: number; d7: number; d14: number; d30: number; d90: number; d183: number; d365: number; d730: number; d1095: number };
+const settledPostedCounts = new Map<string, { at: number; c: PostedWindowCounts }>();
+const inFlightPostedCounts = new Map<string, Promise<PostedWindowCounts | null | ProbeFailed>>();
+export async function fetchPostedWindowCounts(
+  q: SearchQuery,
+  timeoutMs: number = AGE_COUNT_TIMEOUT_MS,
+): Promise<PostedWindowCounts | null | ProbeFailed> {
+  if (!supabase) return null;
+  const open: SearchQuery = { ...q, postedWithinDays: null };
+  const ck = JSON.stringify(open);
+  const hit = settledPostedCounts.get(ck);
+  if (hit && Date.now() - hit.at < COUNT_MEMORY_TTL_MS) return hit.c;
+  const scope = await resolveSearchScope(open);
+  if (isProbeFailure(scope)) return PROBE_FAILED;
+  if (!scope) return null;
+  const { isBroadCommercial, ...scopeParams } = scope;
+  return dedupeInFlight(inFlightPostedCounts, ck, async () => {
+    if (!supabase) return null;
+    const result = await withTimeout(
+      supabase.rpc('posted_window_counts_ar', {
+        ...scopeParams,
+        ...rpcCountFilterParams(open),
+        ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
+        ...rpcAdvancedFilterParams(open),
+      }),
+      timeoutMs,
+    );
+    if ('timedOut' in result) return PROBE_FAILED;
+    const { data, error } = result;
+    if (error) return PROBE_FAILED;
+    if (!data || typeof data !== 'object') return null;
+    const c = data as PostedWindowCounts;
+    settledPostedCounts.set(ck, { at: Date.now(), c });
+    return c;
+  });
+}
 
 // BACKGROUND BUDGET (2026-09-21). The 4 s AGE_COUNT_TIMEOUT_MS exists because a user is staring at
 // the Advanced Filter card while it loads. The search-time prep (assessNarrowing) has no one waiting
@@ -1883,6 +1942,11 @@ export async function fetchListingsForQuery(
     // this row really satisfies each active predicate — read from the SAME row the filter ran on,
     // never from l.features/l.bathrooms (finalize() collapses their NULLs to 0/false).
     l.canon = c.af_canon;
+    // The bath count the card prints is the one the index SERVES when the site's own box is empty (Rule B: the
+    // seller's words fill it) — otherwise a customer who filtered «3 حمامات» reaches a card showing none
+    // (card_parity_card_missing fkralemar/aqargate, 🔧 2026-11-10; src/lib/indexBathrooms.ts).
+    const servedBaths = c.af_canon?.bathrooms;   // read only; the canonical row itself is attached verbatim above
+    l.bathrooms = bathroomsForCard(l.bathrooms, servedBaths) ?? 0;
     // A land «total» the index read as a PER-METRE price (owner 2026-11-04) prints the index's «≈ figure × area», so the
     // client budget net below keeps the card the server matched (src/lib/landPerMeterTotal.ts).
     followIndexPerMeterVerdict(l, c.effective_price);
@@ -1976,6 +2040,9 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   // ONE inventory — see DEEPLINK_TABLES. Never re-list the tables here: this loop is the surface a
   // deep link and a restored session both land on, and a private copy of the fleet is how it came to
   // miss aqarmonthly (a live, monthly-searchable platform) while still probing three retired ones.
+  // A FAILED READ IS NOT «NO SUCH AD». If any table's read errored and no table held the ad, the answer is unknown:
+  // throw, so the caller shows «couldn't load» instead of «Listing not found.» (2026-11-10).
+  let readFailed = false;
   for (const table of DEEPLINK_TABLES) {
     // `.eq('active', true)` — A DEEP LINK IS A SEARCH SURFACE (P1, incident #34, found by routine #11's
     // first run). Every other surface — results, AF, Trending, counts, pagination — resolves through
@@ -1988,10 +2055,12 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     // Proven with the production ANON key, not privileged SQL: ids 585260 / 629782 / 4744698 each
     // returned a full card payload carrying "active": false.
     const { data, error } = await supabase.from(table).select(listSelectFor(table)).eq('id', id).eq('active', true).limit(1);
+    if (error) readFailed = true;
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
     if (row) { row.sourceTable = table; LISTING_CACHE.set(row.id, row); return row; }
   }
+  if (readFailed) throw new Error('listing lookup failed');
   return null;
 }
 
@@ -2028,13 +2097,27 @@ export async function fetchListingCards(table: string, ids: number[]): Promise<L
   const rows = finalize(data, table.includes('_commercial') ? 'com' : 'res');
   // The same Arabic place the search results print (applyArabicLocation). A failed read keeps the CITY_AR mapping
   // below it — never worse than before, and never a blank-for-error.
-  const loc = await bounded(supabase.from('search_listings_ar').select('listing_id,region_ar,city_ar,district_ar')
+  const loc = await bounded(supabase.from('search_listings_ar').select('listing_id,region_ar,city_ar,district_ar,bathrooms,license_number,deal_ar,type_ar,area_m2,price_total,price_annual,floor_number')
     .eq('source_table', table).in('listing_id', ids).limit(ids.length));
+  // A FAILED FETCH IS NOT AN EMPTY ANSWER: the fallback below keeps every card, but the failure is reported, never
+  // swallowed (CodeRabbit Major on #11678) — a silent index read would silently drop the Arabic place AND the bath count.
+  if (loc.error) reportMessage('fetchListingCards: search_listings_ar read failed', { table, ids: ids.length, error: String((loc.error as { message?: string }).message ?? loc.error) });
   const arById = new Map<number, { region: string; city: string; district: string }>();
-  for (const x of ((loc.error ? null : loc.data) ?? []) as { listing_id: number; region_ar: string | null; city_ar: string | null; district_ar: string | null }[]) {
+  const bathsById = new Map<number, unknown>();
+  const foldById = new Map<number, NonNullable<Listing['fold']>>();
+  const num = (v: unknown): number | null => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  for (const x of ((loc.error ? null : loc.data) ?? []) as { listing_id: number; region_ar: string | null; city_ar: string | null; district_ar: string | null; bathrooms?: unknown; license_number?: string | null; deal_ar?: string | null; type_ar?: string | null; area_m2?: unknown; price_total?: unknown; price_annual?: unknown; floor_number?: unknown }[]) {
     arById.set(Number(x.listing_id), { region: x.region_ar || '', city: x.city_ar || '', district: x.district_ar || '' });
+    bathsById.set(Number(x.listing_id), x.bathrooms);
+    foldById.set(Number(x.listing_id), { lic: x.license_number ?? null, dealAr: x.deal_ar ?? null, typeAr: x.type_ar ?? null, area: num(x.area_m2), price: num(x.deal_ar === 'بيع' ? x.price_total : x.price_annual), floor: num(x.floor_number) });
   }
-  for (const r of rows) { r.sourceTable = table; applyArabicLocation(r, arById.get(Number(r.id))); }
+  for (const r of rows) {
+    r.sourceTable = table;
+    r.fold = foldById.get(Number(r.id));
+    applyArabicLocation(r, arById.get(Number(r.id)));
+    // Same rule as the search path: the index's bath count fills a box the site left empty (src/lib/indexBathrooms.ts).
+    r.bathrooms = bathroomsForCard(r.bathrooms, bathsById.get(Number(r.id))) ?? 0;
+  }
   return rows;
 }
 

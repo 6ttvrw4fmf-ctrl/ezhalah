@@ -72,5 +72,15 @@ const judgedRx = /s\.rent_period_judged and v\.platform not in \(''gathern'', ''
 check('the detector expects a price-judged silent-period row at ×12, not the published figure', judgedRx.test(sql));
 mutantCaught('detector back on rent_price_annual_ar alone for judged rows', !judgedRx.test(sql.replace(/s\.rent_period_judged and v\.platform not in/g, 'false and v.platform not in')));
 
+// the price-box gate (enforce_price_size_sanity, owner 2026-11-07): a rent whose price box holds the per-metre rate is
+// served NULL, so the detector must expect NULL there — aqar 1924571 / 11197701 (200 and 150 SAR/m² on ~20,000 m²) read
+// as «off the ×12 rule» for two days (🔧 2026-11-09). The LATEST detector definition is the one production runs.
+const detAll = [...sql.matchAll(/CREATE OR REPLACE FUNCTION public\.mon_detect_cheap_yearly_rent_served\(\)[\s\S]*?\$function\$;/gi)].map((m) => m[0]);
+const det = detAll[detAll.length - 1] ?? '';
+const boxRx = /r\.served is distinct from\s+case when public\.price_box_equals_rate_ar\('إيجار', r\.per_rule, r\.price_per_meter, r\.area_m2\) = 'rate' then null\s+else r\.per_rule end/;
+check('the detector expects NULL where the price box holds the rate, and per_rule everywhere else', boxRx.test(det));
+mutantCaught('detector blind to the price-box gate (served compared with per_rule alone)',
+  !boxRx.test(det.replace(/case when public\.price_box_equals_rate_ar\('إيجار', r\.per_rule, r\.price_per_meter, r\.area_m2\) = 'rate' then null\s+else r\.per_rule end/, 'r.per_rule')));
+
 if (failed) { console.log(`\n❌ verify-cheap-yearly-is-monthly: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-cheap-yearly-is-monthly: the rule, finalize() and the DB mirror all agree.');

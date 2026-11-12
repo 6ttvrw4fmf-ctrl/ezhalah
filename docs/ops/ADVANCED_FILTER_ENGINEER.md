@@ -19,6 +19,30 @@
 >    `select count(*) from alert_event where resolved_at is null and owner_routine = '<your routine>'` and write both numbers in :end.
 >    A night is GOOD only if end < start, with every closed alert closed by a proven fix (rule 1), not by hiding or resolving by hand.
 >    Equal or higher = a bad night whatever else you did: write why, and the ONE root cause you will hit first next run.
+>
+> 7. **Use CodeRabbit on every PR it reviews (owner 2026-11-10, paid usage budget is ON).** Wait for its review before merging.
+>    Fix every real finding: Major/Critical always, and any minor one that is a real bug. Add the test it suggests when it names one.
+>    On each thread, reply with the fix commit (or the proof that it is wrong), then resolve it. Never resolve a thread without one of the two.
+>    Rate-limited, «Skipped» or «Reviews paused» on a PR it should review → comment `@coderabbitai review` (or push ONE fresh commit);
+>    never merge around a review it owes. «Reviews paused» means too many commits, NOT the budget (usage billing is on).
+>    In :end write `CodeRabbit: <found> found, <fixed> fixed, <refuted> refuted` and name the best catch.
+>
+> 8. **Owner orders in your backlog are JOB 0 (owner 2026-11-11).** At :start run
+>    `select id, item from ops_engineer_backlog where status = 'open' and item ilike 'OWNER %' and engineer ilike '<your lane>%'`.
+>    Every row is the owner's decision: do it first, never re-ask it in LINE 1, and close it (status 'done') only with customer proof.
+>    The scraping lane missed backlog 1744 (Haraj daily rents → short stays) on 11-11 and asked the owner again.
+>
+> 9. **Fix the ROOT, so the bug never comes back (owner 2026-11-11).** About 1 in 5 bugs is a repeat, and a repeat means the last fix was a patch.
+>    Before you close any alert, check whether the same kind was closed in the last 30 days:
+>    `select count(*) from alert_event where kind = '<kind>' and resolved_at > now() - interval '30 days'`.
+>    If it was, this is a repeat. You MUST:
+>    - (a) write in one line WHY it came back;
+>    - (b) fix it in the shared place every caller goes through, not in the one site or row the alarm named;
+>    - (c) add a guard test that fails if it ever returns, and watch it fail on the old code;
+>    - (d) where the fix is mechanical, make the detector repair it by itself before it raises.
+>    Hiding, widening a threshold or resolving by hand is never a root fix.
+>    **Prove the same night:** pick work you can prove live tonight first, and open no more PRs than you can prove.
+>    In :end write `Repeats: <closed> closed, <root-fixed> root-fixed, <guards> guards added`, plus the one root cause you killed.
 
 
 > **🔒 MERGE LOCK 2026-11-08 (owner: «fully automate with the engineers and CodeRabbit»).** `safe-pr-merge.ts` (and so the robot) REFUSES a PR
@@ -537,6 +561,11 @@ row; a night is better on findability only when a score row says so.**
   ♻️'s three real PASS rows of 10-30 as 0 proven because `push_ok` was left NULL. The view now also reads the notes'
   `"result":"PASS"`, but the column is the contract.
 
+- **2026-11-10 (second night, 🔧 11-09 + 🔬 11-10 → a rule):** the cloud container's proxy refuses ezhalah.com, so a
+  live proof is ALWAYS a `customer-journey.yml` dispatch (or an RPC replay on rows that already exist), dispatched
+  before minute 30 because hosted runners queue 40–60 min; `safe-pr-merge.ts` is refused here too, so a merge is the
+  robot's. Never spend a minute on a container browser.
+
 ## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
 
 - **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
@@ -685,3 +714,22 @@ the owner:** (1) «3 دورات مياه» + «مجلس بدورة مياه» (~
   more — every Major or Critical is fixed or rebutted, owner order); never stack a second PR on a branch another PR is about to
   squash — after the sibling lands, `git fetch origin main && git merge origin/main` the same minute — a conflict is resolved keeping the review
   fixes, the relevant tests re-run, and only then `git push`.
+
+## 📚 FLEET LESSONS 2026-11-10 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A live proof is a `customer-journey.yml` dispatch from minute 1 — the cloud container's proxy refuses ezhalah.com.**
+  🔧 11-09 lost ~15 min planning a container browser proof (policy denial, tunnel failed); 🔬 11-10 measured the same
+  refusal and hosted runners queued 40–60 min per proof. Rule: never try the container browser; dispatch the journey
+  (or an RPC replay on existing rows) before minute 30, and date anything that lands later. Second night → 🔬's and
+  🔧's rulebooks carry it as a rule.
+- **② Before redefining a detector or a function, grep `scripts/verify-*` for its name.** 🆕 11-10: a check that read
+  «the latest migration that defines X» failed every later body fix, and mirror #11615 sat red until the check was
+  fixed (#11624) and the branch re-pushed; 🔧 11-09 (backlog 1683): the welcome-facts guard had to learn the latest
+  `welcome_unique_district_counts` definition. Rule: find the pinning check first and ship its change FIRST as a
+  scripts-only PR, then the migration.
+- **③ A sibling landing on main after your branch was cut turns your green PR red or strands it — and the robot
+  never refreshes a RED PR (it updates only a BEHIND one).** 🔧 11-10: five robot mirrors failed
+  `verify-migration-references-resolve` because 20261110083000's mirror (#11634) reached main after they were cut,
+  and `migration_drift` stayed open 1 h+ while every frontend deploy was refused; 🔬 11-02 #9949; 🆕 11-10 #11615.
+  Rule: before judging a red check, `git fetch origin main && git merge origin/main && git push`; cut a mirror from
+  CURRENT main; a PR «red» for more than one CI round is first a question about its base.
