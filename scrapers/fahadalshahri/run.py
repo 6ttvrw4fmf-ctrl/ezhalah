@@ -170,16 +170,66 @@ def posting_date_for(page_html: Optional[str], url: Optional[str]) -> Optional[s
     return site_posting_date(page_posted(page_html, url))
 
 
-def fetch_page(s: cc.Session, url: Optional[str]) -> Optional[str]:
-    """The product's own page through the same bare session the removal check uses; None unless it answered
-    200 as a product page (a 403 / wall / error is UNKNOWN, so the date stays NULL)."""
-    if not url:
-        return None
+# A bot check is never crossed: the site's reCAPTCHA «Bot Verification» page (seen 2026-11-10 on a 403), or a 403 /
+# 429 at all, STOPS the page reads for the rest of the run — the Store API data is kept, the dates stay NULL.
+_CHALLENGE_RE = re.compile(r"<title>\s*Bot Verification|g-recaptcha|grecaptcha|lsrecaptcha|cf-chl|challenge-platform", re.I)
+PAGE_GAP_S = 1.0          # ≤ 1 request per second to the product pages
+
+
+def fetch_page(s: cc.Session, url: str) -> tuple[Optional[str], str]:
+    """(html, "") when the product's own page answered 200 as a product page; else (None, reason): "challenge" (a
+    bot check — stop asking), "http <code>", the exception's name, or "not a product page". Same bare session the
+    removal check uses. A failure is UNKNOWN: the date stays NULL, never a guess."""
     try:
         r = s.get(url, timeout=30)
-    except Exception:  # noqa: BLE001 — unknown, never a guess
-        return None
-    return r.text if r.status_code == 200 and _PRODUCT_PAGE_RE.search(r.text) else None
+    except Exception as e:  # noqa: BLE001 — reported by the caller, never swallowed
+        return None, type(e).__name__
+    body = r.text or ""
+    if r.status_code in (403, 429) or _CHALLENGE_RE.search(body[:50000]):
+        return None, "challenge"
+    if r.status_code != 200:
+        return None, f"http {r.status_code}"
+    if not _PRODUCT_PAGE_RE.search(body):
+        return None, "not a product page"
+    return body, ""
+
+
+def add_page_dates(s: cc.Session, pairs: list[tuple[dict, Optional[str]]],
+                   clock=time.monotonic, sleep=time.sleep) -> dict:
+    """Read each mapped product's own page, one request per second at most, and set row["date_added"] from it.
+    Stops at the first bot check. Returns what happened, for the run notes:
+    {"asked": n, "dated": n, "failed": {reason: n}, "stopped": "challenge" | None}."""
+    out: dict[str, Any] = {"asked": 0, "dated": 0, "failed": {}, "stopped": None}
+    last = None
+    for row, url in pairs:
+        if out["stopped"]:
+            break
+        if not url:
+            out["failed"]["no link"] = out["failed"].get("no link", 0) + 1
+            continue
+        if last is not None and clock() - last < PAGE_GAP_S:
+            sleep(PAGE_GAP_S - (clock() - last))
+        last = clock()
+        out["asked"] += 1
+        html, why = fetch_page(s, url)
+        if html is None:
+            out["failed"][why] = out["failed"].get(why, 0) + 1
+            if why == "challenge":
+                out["stopped"] = "challenge"
+                print("  ⚠ product pages answered a bot check — no more page reads this run (never crossed); "
+                      "posting dates stay NULL", flush=True)
+            continue
+        posted = posting_date_for(html, url)
+        if posted:
+            row["date_added"] = posted
+            out["dated"] += 1
+    return out
+
+
+def page_dates_note(stats: dict) -> str:
+    fails = ",".join(f"{k}x{v}" for k, v in sorted(stats["failed"].items()))
+    return (f"page_dates={stats['dated']}/{stats['asked']}" + (f" failed={fails}" if fails else "")
+            + (f" stopped={stats['stopped']}" if stats["stopped"] else ""))
 
 
 def map_listing(p: dict, page_html: Optional[str] = None) -> tuple[Optional[dict], str, str]:
@@ -391,6 +441,7 @@ def main() -> int:
         print(f"{SOURCE}: {len(prods)} products discovered", flush=True)
         skipped: dict[str, int] = {}
         unmeasured: dict[str, int] = {}
+        page_pairs: list[tuple[dict, Optional[str]]] = []
         for p in prods:
             row, cat, why = map_listing(p)
             if not row:
@@ -399,14 +450,14 @@ def main() -> int:
             if args.type != "all" and cat != args.type:
                 continue
             # Only a product that maps costs a page read (5 of 25 on 2026-11-10); the page adds its posting date.
-            posted = posting_date_for(fetch_page(s, p.get("permalink")), p.get("permalink"))
-            if posted:
-                row["date_added"] = posted
+            page_pairs.append((row, p.get("permalink")))
             if p.get("is_in_stock") is not True:    # unmeasured here: kept as before, and counted
                 k = f"kept_active_is_in_stock={p.get('is_in_stock')}"
                 unmeasured[k] = unmeasured.get(k, 0) + 1
                 db.mark_presence_unproven(row)             # kept as before, never stamped as checked
             (com if cat == "commercial" else res).append(row)
+        page_stats = add_page_dates(s, page_pairs)
+        print(f"  {page_dates_note(page_stats)}", flush=True)
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1])))
@@ -449,7 +500,7 @@ def main() -> int:
         tally = ", ".join(f"{k}x{v}" for k, v in sorted({**skipped, **unmeasured}.items(),
                                                         key=lambda x: -x[1]))
         healthy = db.end_run(run_id, ok=True, rows_seen=len(prods), rows_upserted=len(res) + len(com),
-                             notes=f"pruned={pruned} skipped: {tally or 'none'}"[:300],
+                             notes=f"pruned={pruned} skipped: {tally or 'none'} {page_dates_note(page_stats)}"[:300],
                              check_tables=["fahadalshahri_residential_listings",
                                            "fahadalshahri_commercial_listings"])
         if not healthy:
