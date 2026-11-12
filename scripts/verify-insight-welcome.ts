@@ -272,7 +272,7 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
     const pop = readFileSync(new URL('../src/components/InsightHowItWorks.tsx', import.meta.url), 'utf8');
     check('the ✕ sits on the PHYSICAL right in both languages (owner: «the x is always on the right»)', /close: \{ position: 'absolute', top: [\w.]+, right: [\w.]+/.test(pop) && !/close: \{[^}]*left:/.test(pop));
     check('no «تمام» button: the ✕ or a tap outside closes it', !/insight-how-ok/.test(pop) && /testID="insight-how-backdrop"/.test(pop) && /onPress=\{onClose\}[^>]*testID="insight-how-close"/.test(pop));
-    check('the slow eagle animation and Shaheen\'s mark are shown', pop.includes("falconer-howto.svg") && pop.includes("models/shaheen.png"));
+    check('the slow eagle animation is shown and the falconer is the ONLY logo — no Shaheen mark (owner 2026-11-12)', pop.includes("falconer-howto.svg") && !pop.includes("models/shaheen.png"));
     check('the eagle is preloaded once and each open replays it from memory (a fresh blob: URL, no download on tap)', /export function preloadHowEagle/.test(pop) && /URL\.createObjectURL\(eagleBlob\)/.test(pop) && /useEffect\(\(\) => \{ void preloadHowEagle\(\); \}, \[\]\)/.test(pop));
     check('the «information only» rule is bold as a whole sentence (owner 2026-11-11)', /ruleLast: \{ fontWeight: '700'/.test(pop) && /i === c\.rules\.length - 1 && s\.ruleLast/.test(pop));
     const models = readFileSync(new URL('../src/components/AgentModelSelector.tsx', import.meta.url), 'utf8');
