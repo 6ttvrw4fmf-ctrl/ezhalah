@@ -1770,10 +1770,14 @@ new detector needing a longer history must raise the retention in the same chang
      the services field, never across aqar's form labels. (Not built yet.)
   3. «Villa» ads that call themselves تاون هاوس are townhouses; Duplex + Townhouse become ONE type «Duplex & Townhouse».
      (Not built yet; needs its own owner go.)
-  4. One payment question on every rent list, «💳 Rent now, pay later / split payments», two chips; under the provider
-     logos a disclaimer: Ezhalah does not guarantee the payment method or the provider — confirm with the lister
-     (owner 2026-11-02, `af-payment-note`). Both chips live since 2026-11-02 (split_payments is a text fact; picking both
-     narrows to listings with both, like every chip card).
+  4. One payment question on every rent list, «💳 Rent now, pay later / split payments», with ONE chip since 2026-11-12
+     (owner: «merge … we cannot guarantee»): «تقسيط أو دفعات شهرية» / «Instalments / monthly payments» matches a listing
+     when the site's own instalment box (rent_now_pay_later) OR the ad's monthly / split-payment words (split_payments,
+     a text fact) is TRUE — the clause's rnpl arm `s.rent_now_pay_later or s.split_payments`, cnt_rnpl the same union,
+     cnt_rnpl_unknown = box unknown and no «دفعات» words (migration 20261112111809). A chat-typed split_payments token
+     still means the words alone. Under the provider logos (`af-payment-note`): the lister says you can pay in
+     instalments or monthly, through one of these providers or another way; Ezhalah cannot guarantee it — confirm with
+     the lister. (2026-11-02 to 2026-11-12 it was two chips that ANDed in SQL.)
   5. No «Nearby» / «suitable for» chips — the seller's opinion; the map shows what's near. «On a main road» is a fact
      about the plot and stays.
   6. A chip says only what the ad says · Skip on every question · pick many · a chip at 0 hides itself · source tables
