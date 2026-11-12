@@ -1258,7 +1258,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     </Pressable>
   ) : null;
   return (
-    <View style={s.frame} onLayout={(e) => { const boxPx = e.nativeEvent.layout.height; setShort(boxPx < 280); setNarrow(e.nativeEvent.layout.width < 480); }}>
+    <View style={s.frame} onLayout={(e) => { const boxPx = e.nativeEvent.layout.height; setShort(boxPx < 280); const boxW = e.nativeEvent.layout.width; setNarrow(boxW < 480); }}>
       <View ref={hostRef} style={s.host} />
       {/* Compact: ⤢ top-left opens the map full screen; the box itself pans and zooms in place. */}
       {onExpand && !failed && !drawing ? (
