@@ -9,6 +9,7 @@ import { postedPhrase } from '../src/lib/postedWindows.ts';
 const root = join(import.meta.dirname, '..');
 let failed = 0;
 const check = (name: string, ok: boolean, info = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? ' — ' + info : ''}`); if (!ok) failed++; };
+const mustCatch = (name: string, mutantPasses: () => boolean) => check(`(mutation) catches ${name}`, !mutantPasses());
 const MARKS = /[ً-ْ]/;
 
 check('«عرض 10 إعلانات» — 3 to 10 take إعلانات', showAdsAr(10) === 'عرض 10 إعلانات' && showAdsAr(3) === 'عرض 3 إعلانات', showAdsAr(10));
@@ -22,12 +23,13 @@ const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 const lines = i18n.split('\n').filter((l) => /^\s*'(Published[^']*|The map could not load|Couldn’t load the listings here\. Try again|No route found between these two places|Only ads whose site shows a publish date[^']*)':/.test(l));
 check('the «نشر خلال» menu and map messages have no diacritics', lines.length >= 13 && !lines.some((l) => MARKS.test(l)), `${lines.length} lines; marked: ${lines.filter((l) => MARKS.test(l)).length}`);
 check('the search sentence\'s window has none either («آخر 30 يوما»)', [1, 7, 14, 30, 90, 183, 365, 730, 1095].every((d) => !MARKS.test(postedPhrase(d, 'ar'))) && postedPhrase(30, 'ar') === '، منشور خلال آخر 30 يوما');
-check('(mutation) a marked label is caught', MARKS.test("'Published: 14 days': '14 يوماً',"));
+mustCatch('a marked label', () => !MARKS.test("'Published: 14 days': '14 يوماً',"));
+mustCatch('the old «عرض 10 إعلان» wording', () => { const old = (n: number) => `عرض ${n} إعلان`; return old(10) === 'عرض 10 إعلانات'; });
 
 const card = readFileSync(join(root, 'src/components/MapFilterCard.tsx'), 'utf8');
 const wired = (src: string) => (src.match(/isRTL \? showAdsAr\(count\) : t\('Show \{n\} listings'/g) ?? []).length === 2;
 check('both map filter buttons (phone and wide) use the Arabic count words', wired(card));
-check('(mutation) catches the button back on «عرض {n} إعلان»', !wired(card.replace('isRTL ? showAdsAr(count) : ', '')));
+mustCatch('the button back on «عرض {n} إعلان»', () => wired(card.replace('isRTL ? showAdsAr(count) : ', '')));
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-map-arabic-reads-right: all checks passed');
 process.exit(failed ? 1 : 0);
