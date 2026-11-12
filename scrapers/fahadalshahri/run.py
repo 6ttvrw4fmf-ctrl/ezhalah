@@ -458,6 +458,9 @@ def main() -> int:
             (com if cat == "commercial" else res).append(row)
         page_stats = add_page_dates(s, page_pairs)
         print(f"  {page_dates_note(page_stats)}", flush=True)
+        if page_stats["stopped"]:
+            # The removal step's own probe reads product pages too: after a bot check it must not run at all.
+            INCOMPLETE.append(f"product pages answered a {page_stats['stopped']} — no removal probes this run")
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1])))

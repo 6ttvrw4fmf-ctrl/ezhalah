@@ -7,6 +7,7 @@ CodeRabbit review of PR #11606, three findings, all held here against scrapers/f
      rest of the run — never crossed, never retried on the next product.
 """
 import os
+import sys
 
 from scrapers.fahadalshahri import run as m
 
@@ -99,3 +100,76 @@ def test_the_run_note_names_a_stop():
 
 def test_a_real_product_page_is_not_mistaken_for_a_challenge():
     assert not m._CHALLENGE_RE.search(_read("20851.page.excerpt.html"))
+
+
+# ── main(): after a bot check, the removal step (whose probe reads product pages) does not run ─────────────
+class _FakeDb:
+    """Stands in for scrapers.common.db: records every call, writes nothing."""
+    def __init__(self):
+        self.calls = []
+
+    def __getattr__(self, name):
+        def call(*a, **k):
+            self.calls.append((name, a, k))
+            return {"begin_run": 1, "end_run": True}.get(name, 0)
+        return call
+
+    def prunes(self):
+        return [a[0] for n, a, k in self.calls if n == "prune_unseen"]
+
+    def notes(self):
+        return [k for n, _, k in self.calls if n == "end_run"][-1]["notes"]
+
+
+class _ApiResp(_Resp):
+    def __init__(self, status, text="", data=None, headers=None):
+        super().__init__(status, text)
+        self._data, self.headers = data, headers or {}
+
+    def json(self):
+        return self._data
+
+
+class _ApiSess:
+    def __init__(self, answer):
+        self.answer = answer
+
+    def get(self, url, **kw):
+        return self.answer(url)
+
+
+def _main(monkeypatch, page_answer):
+    db = _FakeDb()
+    items = [{"id": 1, "permalink": _URL, "is_in_stock": True}, {"id": 2, "permalink": _URL, "is_in_stock": True}]
+    pages = []
+
+    def answer(url):
+        if "/wp-json/wc/store/products" in url:
+            return _ApiResp(200, data=items, headers={"x-wp-total": "2"})
+        pages.append(url)
+        return page_answer()
+
+    monkeypatch.setattr(m, "db", db)
+    monkeypatch.setattr(m, "session", lambda: _ApiSess(answer))
+    monkeypatch.setattr(m, "map_listing", lambda p, page_html=None: (
+        {"ad_number": f"FAS{p['id']}", "title": "فيلا للبيع", "transaction_type": "Buy"}, "residential", ""))
+    monkeypatch.setattr(m.time, "sleep", lambda d: None)
+    monkeypatch.setattr(sys, "argv", ["run"])
+    return m.main(), db, pages
+
+
+def test_main_runs_no_removal_probe_after_a_bot_check(monkeypatch):
+    wall = _read("bot-verification.403.html")
+    rc, db, pages = _main(monkeypatch, lambda: _ApiResp(403, wall))
+    assert rc == 0, "a bot check on the product pages does not fail the Store API crawl"
+    assert len(pages) == 1, "asked for another product page after the bot check"
+    assert db.prunes() == [], "the removal step (its probe reads product pages) ran after a bot check"
+    assert "stopped=challenge" in db.notes()
+
+
+def test_main_still_prunes_when_the_pages_answer(monkeypatch):
+    page = _read("20851.page.excerpt.html")
+    rc, db, pages = _main(monkeypatch, lambda: _ApiResp(200, page))
+    assert rc == 0 and len(pages) == 2
+    assert db.prunes() == [m.RES_TABLE, m.COM_TABLE], "control: a normal run must still reach the removal step"
+    assert "page_dates=2/2" in db.notes()
