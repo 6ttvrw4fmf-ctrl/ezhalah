@@ -697,8 +697,10 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     # «مضاف منذ 23 يوم» is all the site prints about when: how long ago, never the day. That is a FLOOR on the
     # posting day (posted no earlier than now − 24 days), stored apart from date_added, which must hold a real day.
     # The «نُشر خلال» window reads the floor; the database keeps the tightest one ever read (owner 2026-11-11).
-    if (floor := posting_date.posted_no_earlier_than(f.get("مضاف منذ"), datetime.now(timezone.utc))):
+    read_at = datetime.now(timezone.utc)
+    if (floor := posting_date.posted_no_earlier_than(f.get("مضاف منذ"), read_at)):
         row["posted_earliest_at"] = floor
+        row["posted_latest_at"] = posting_date.posted_no_later_than(f.get("مضاف منذ"), read_at)
     return row, category, ""
 
 

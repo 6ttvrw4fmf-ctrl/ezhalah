@@ -108,7 +108,8 @@ _AGO_NO_NUMBER = {w for w, _u, c in _AGO_WORDS if c != 1} | {"أمس", "امس",
 # scripts/verify-relative-posting-date-is-a-floor.ts fails on a scraper that reads «منذ …» without being in one list.
 AGO_COUNT_IS_REAL_AGE = {
     "ialqarawi": "2026-11-11: every ad saying «N يوم» was first stored by us exactly N days earlier (2,629 ads), "
-                 "no count ever ran below the days we had known the ad",
+                 "no count ever ran below the days we had known the ad. No exact date anywhere: ad 3846 read live — "
+                 "no JSON-LD, no data blob, no date field; the «مضاف منذ» row is the only time on the page",
 }
 AGO_TEXT_NOT_A_POSTING_AGE = {
     "aqaratikom": "2026-11-09: API accepted_at «٩ ساعات» on an ad first seen 40 days earlier — a refresh time",
@@ -132,7 +133,10 @@ def ago_age_range(raw: Any) -> Optional[tuple[timedelta, timedelta]]:
         return None                       # «3 يومين» is not a count anyone writes: unreadable, never a guess
     n = int(m.group(1)) if m.group(1) is not None else alone
     day = _AGO_UNIT_DAYS[unit]
-    shortest = {"month": 28, "year": 365}.get(unit, day) * n
+    # The shortest age is just as conservative: a site may round («2 شهر» at 45 days) or count calendar days («1 يوم»
+    # a minute after midnight), so «N unit» only proves at least N−1 of the SHORTEST such unit (a 28-day month, a
+    # 365-day year).
+    shortest = {"month": 28, "year": 365}.get(unit, day) * max(0, n - 1)
     return timedelta(days=shortest), timedelta(days=day * (n + 1)) + _AGO_MARGIN
 
 
@@ -143,3 +147,13 @@ def posted_no_earlier_than(raw: Any, read_at: datetime) -> Optional[str]:
     if span is None or read_at.tzinfo is None:
         return None
     return (read_at - span[1]).astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def posted_no_later_than(raw: Any, read_at: datetime) -> Optional[str]:
+    """«23 يوم» read at `read_at` (aware) → the LATEST instant the ad can have been posted (it is at least 22 days old),
+    as ISO-8601 UTC for `posted_latest_at`. With the floor it brackets the posting day; the database narrows the
+    bracket with every reading and with the time we first stored the ad. None when the text is not a plain count."""
+    span = ago_age_range(raw)
+    if span is None or read_at.tzinfo is None:
+        return None
+    return (read_at - span[0]).astimezone(timezone.utc).isoformat(timespec="seconds")

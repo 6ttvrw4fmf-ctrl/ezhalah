@@ -18,7 +18,8 @@
 //   4. the real ialqarawi mapper writes the floor, and never into date_added;
 //   5. each of those is shown to catch a planted mistake.
 // The database half (keep the tightest floor, refuse a floor after the day we first stored the ad, feed the search
-// index) is watched live by mon_detect_relative_posting_floor_unsafe(), migration 20261111233249.
+// index, log every flip, switch a site off when its count restarts) is watched live by
+// mon_detect_relative_posting_floor_unsafe(), migrations 20261111233249 and 20261111235627.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -47,7 +48,7 @@ const mutate = (src: string, find: string, repl: string) => {
 // ── 1. no floor is ever after the truth ─────────────────────────────────────────────────────────────────────────
 const sweep = (src?: string) => py('sweep', [], src);
 const real = sweep();
-check(`no «منذ …» reading lands after the true posting time (${real.read} readings)`, real.read > 10000 && real.bad_count === 0,
+check(`no «منذ …» reading puts the floor after, or the ceiling before, the true posting time (${real.read} readings)`, real.read > 10000 && real.bad_count === 0,
   JSON.stringify(real.bad));
 
 // ── 2. exact floors, read at 2026-11-11 09:30 UTC (the +1 hour is the read-to-write and clock margin) ──────────────
@@ -66,6 +67,18 @@ const exact = (src?: string) => py('floors', [EXACT.map(([t]) => t)], src) as (s
 const got = exact();
 EXACT.forEach(([text, want], i) => check(`«${text}» → posted no earlier than ${want}`, got[i] === want, `got ${got[i]}`));
 
+// The ceiling («posted no later than»): «N unit» proves only N−1 of the shortest unit, because a site may round
+// or count calendar days. With the floor it brackets the day; for «23 يوم» the bracket is two days wide.
+const CEIL: [string, string][] = [
+  ['23 يوم', '2026-10-20T09:30:00+00:00'],          // at least 22 days old
+  ['7 شهر', '2026-05-27T09:30:00+00:00'],           // at least 6 × 28 days
+  ['1 سنة', '2026-11-11T09:30:00+00:00'],           // «1 سنة» proves nothing about the latest day by itself
+  ['أمس', '2026-11-11T09:30:00+00:00'],
+];
+const ceil = (src?: string) => py('ceilings', [CEIL.map(([t]) => t)], src) as (string | null)[];
+const gotCeil = ceil();
+CEIL.forEach(([text, want], i) => check(`«${text}» → posted no later than ${want}`, gotCeil[i] === want, `got ${gotCeil[i]}`));
+
 // ── 3. not a plain count → unknown ──────────────────────────────────────────────────────────────────────────────
 const UNKNOWN = ['آخر تحديث منذ 3 أيام', '2026-11-01', '3 يومين', 'منذ فترة', 'قليل', '', '4 سنة تقريبا', '2 أمس'];
 const unknown = (src?: string) => (py('floors', [UNKNOWN], src) as (string | null)[]);
@@ -79,6 +92,8 @@ const floorMs = m.floor ? Date.parse(m.floor) : NaN;
 const lo = Date.parse(m.before) - (24 * 86400 + 3600) * 1000 - 1000;
 const hi = Date.parse(m.after) - (24 * 86400 + 3600) * 1000 + 1000;
 check('ialqarawi «23 يوم» → posted_earliest_at = now − 24 days − 1 hour', m.mapped && floorMs >= lo && floorMs <= hi, JSON.stringify(m));
+check('ialqarawi writes the ceiling with the floor (posted_latest_at = now − 22 days)', m.mapped && m.ceiling != null
+  && Math.abs(Date.parse(m.ceiling) - (Date.parse(m.before) - 22 * 86400 * 1000)) < 60_000, JSON.stringify(m));
 check('ialqarawi never writes the floor into date_added (the card prints that as a real day)', m.mapped && m.date_added == null, JSON.stringify(m));
 const blank = mapped(null);
 check('ialqarawi with no «مضاف منذ» writes no floor', blank.mapped && blank.floor == null, JSON.stringify(blank));
@@ -113,6 +128,8 @@ const mustCatch = (name: string, caught: boolean) => check(`(mutation) catches $
 const H = (find: string, repl: string) => mutate(HELPER, find, repl);
 mustCatch('a count read as its OWN age («23 يوم» = 23 days, so a 23½-day ad looks newer)',
   sweep(H('timedelta(days=day * (n + 1))', 'timedelta(days=day * n)')).bad_count > 0);
+mustCatch('a ceiling that trusts the full count («2 شهر» at 45 days, rounded, is not 56 days old)',
+  sweep(H('* max(0, n - 1)', '* n')).bad_count > 0);
 mustCatch('a month taken as 30 days (calendar months run longer)', sweep(H('"month": 31,', '"month": 30,')).bad_count > 0);
 mustCatch('a year taken as 365 days in the bound', exact(H('"year": 366}', '"year": 365}'))[4] !== EXACT[4][1]);
 mustCatch('the read-to-write margin dropped', exact(H('_AGO_MARGIN = timedelta(hours=1)', '_AGO_MARGIN = timedelta(0)'))[0] !== EXACT[0][1]);

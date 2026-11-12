@@ -75,6 +75,9 @@ def sweep(mutated_source=None):
             read += 1
             if datetime.fromisoformat(floor) > posted:
                 bad.append({"text": text, "true_age_days": round(age / timedelta(days=1), 2), "floor": floor})
+            ceiling = pd.posted_no_later_than(text, READ_AT)
+            if ceiling is None or datetime.fromisoformat(ceiling) < posted:
+                bad.append({"text": text, "true_age_days": round(age / timedelta(days=1), 2), "ceiling": ceiling})
     return {"read": read, "bad": bad[:5], "bad_count": len(bad)}
 
 
@@ -88,6 +91,11 @@ def registry(mutated_source=None):
 def floors(texts, mutated_source=None):
     pd = _module("scrapers.common.posting_date", mutated_source)
     return [pd.posted_no_earlier_than(t, READ_AT) for t in texts]
+
+
+def ceilings(texts, mutated_source=None):
+    pd = _module("scrapers.common.posting_date", mutated_source)
+    return [pd.posted_no_later_than(t, READ_AT) for t in texts]
 
 
 def ialqarawi(added_ago, mutated_source=None):
@@ -104,7 +112,7 @@ def ialqarawi(added_ago, mutated_source=None):
     row, _cat, why = mod.map_listing(card, {"title": card["title"], "fields": fields, "desc": ""})
     after = datetime.now(timezone.utc)
     row = row or {}
-    return {"why": why, "mapped": bool(row), "floor": row.get("posted_earliest_at"),
+    return {"why": why, "mapped": bool(row), "floor": row.get("posted_earliest_at"), "ceiling": row.get("posted_latest_at"),
             "date_added": row.get("date_added"), "before": before.isoformat(), "after": after.isoformat()}
 
 
