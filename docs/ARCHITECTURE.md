@@ -1708,7 +1708,7 @@ new detector needing a longer history must raise the retention in the same chang
   it cannot repair is hidden. A count kind with no declared search is never shown, and `welcome_template_problem()`
   refuses its line (trigger + P1 wording audit); P1 `welcome_insights_audit:repro:<kind>` when half a kind fails.
   `city_land` = sale + residential land («الأراضي السكنية المعروضة للبيع»); `city_bld_sale` is off because
-  «عمارة» spans two Filter groups (migration `20261108214500`). Where plain «أرض» belongs is an open owner question.
+  «عمارة» spans two Filter groups (migration `20261108214500`). Plain «أرض» stays where it is (owner 2026-11-12 left it to the engineer, «your choice»): home macro Commercial, no box, found by every search that names no type. Measured that day: 8,366 rows, all from residential tables; showing them under سكني too would change the category gate in ~14 search functions plus the oracle for a small gain (land searchers pick a land type, and «أرض» is in none by the 2026-10-11 decision). Likewise the 202 plots whose text says «خام» while the site's own boxes tick electricity/water stay out of «Raw land»: there «خام» usually means an empty plot, and `sync_raw_land_subtype()` tags raw only when the boxes agree.
   Big and medium cities (≥300 ads) only until 3 clean checker nights. The line ends with its greeting's
   emoji (☀️ 🌙 🕌 🌴 👋), changes every hour, two lines in three about the user's searched city, city
   picked before fact, never the same city or kind twice in a row; tapping it opens «كيف تشتغل؟».
