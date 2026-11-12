@@ -1275,7 +1275,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       {/* Drawing: this layer takes the pointer instead of the map. */}
       {drawing ? <View ref={padRef} style={s.drawPad} testID="map-draw-pad" /> : null}
       {drawing ? (
-        <View style={s.drawBar} testID="map-draw-bar">
+        <View style={[s.drawBar, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row' }]} testID="map-draw-bar">
+          {/* «تطبيق» on the right, «إلغاء» on the left, in both languages (owner 2026-11-12: «replace them both»). */}
           <Pressable style={s.drawBarBtn} onPress={cancelDrawing} hitSlop={8} accessibilityRole="button"><Text style={s.drawBarT}>{t('Cancel')}</Text></Pressable>
           <Text style={s.drawBarTitle}>{t('Draw an area')}</Text>
           <Pressable style={s.drawBarBtn} onPress={applyDrawing} disabled={!sketch} hitSlop={8} accessibilityRole="button" accessibilityState={{ disabled: !sketch }} testID="map-draw-apply">
