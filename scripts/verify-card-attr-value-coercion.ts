@@ -240,7 +240,10 @@ try {
 
 } finally { rmSync(mutantDir, {recursive: true, force: true}); }
 
-check('both host-name render paths use English catalog lookup', (CARD.match(/name: locale === 'en' \? englishCatalogText\(sourceName\(listing.source\)\)/g) ?? []).length === 2);
+// 2026-11-13: one siteName (English catalog lookup on an English card) feeds both «Hosted on» lines and both strips.
+check('both host-name render paths use English catalog lookup',
+  /const siteName = locale === 'en' \? englishCatalogText\(sourceName\(listing\.source\)\)/.test(CARD)
+  && (CARD.match(/t\('Hosted on \{name\}', \{ name: siteName \}\)/g) ?? []).length === 2);
 
 if (failed > 0) {
   console.error(`\n❌ card-attr-value-coercion: ${failed} check(s) failed.`);
