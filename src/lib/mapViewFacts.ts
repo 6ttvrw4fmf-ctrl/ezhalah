@@ -1,91 +1,112 @@
-// THE MAP PILL'S SECOND LINE (owner 2026-11-12: «whenever a user zooms in we show that message here», «آخر 30 يوما»,
-// «we need proper guards … it can't be wrong»). Under «1,081 إعلان للبيع في حي الملقا» the pill adds, for EXACTLY the
-// ads it counts: «آخر 30 يوما: 🆕 123 إعلان جديد · ⚡ 85 اختفى · 💰 متوسط السعر 1.4 مليون».
-// The numbers come from map_view_facts_ar() (migration 20261112191654). This file only decides what may be SAID:
-//   • nothing when the read failed or the line is switched off (a failed read is never a «0»);
+// THE MAP BOX (owner 2026-11-12 — the agreed design is docs/ARCHITECTURE.md «THE MAP BOX AND ITS CARD»). Under the
+// pill's count, word-labelled chips for EXACTLY the ads it counts, under every map filter:
+//   «123 جديد» · «85 اختفى» · «المتر المعروض 6,100 ريال» · «أغلى من أحياء قريبة 9%» · «15 خفضوا السعر»
+// The numbers come from map_view_facts_ar() (migrations 20261112191654 … 20261113031654). This file only decides what may
+// be SAID:
+//   • nothing when the read failed or the facts are switched off (a failed read is never a «0»);
 //   • nothing unless the server counted the SAME ads the pill shows (its `any` equals the pill's number);
-//   • nothing for a view with fewer than FACTS_MIN_ADS ads, and no part whose number is 0 or missing;
-//   • a guest gets a blurred line and «سجل الدخول لعرض الأرقام» — the server never sends a guest the numbers.
-// «إعلان جديد», never «جديد» alone: «جديد» in the Filter means a newly BUILT property (src/lib/mapPins.ts freshTag).
-import { adsNounAr, shortMoney } from './mapPins.ts';
+//   • nothing for a view with fewer than FACTS_MIN_ADS ads, and no chip whose number is 0 or missing;
+//   • every price says «المعروض» (asking, never sold); with no single type picked the price is never mixed — the box
+//     asks for a type instead;
+//   • a guest gets the same chips as blurred shapes and «سجل الدخول لعرض الأرقام» — the server never sends a number.
+import { shortMoney } from './mapPins.ts';
 
-export type ViewFacts = { any: number; locked: boolean; new30: number | null; gone30: number | null; median: number | null;
-  /** the same three numbers over the map as it stood 28–34 days ago (the month-arrows migration); null = no baseline */
-  prevNew30?: number | null; prevGone30?: number | null; prevMedian?: number | null;
-  /** guest only: which parts a signed-in user would see (the server sends yes/no, never the number) */
-  has?: { new: boolean; gone: boolean; median: boolean } };
+export type FactTone = 'up' | 'down' | 'plain';
+export type FactChip = { text: string; tone: FactTone };
+export type ViewFacts = {
+  any: number;
+  locked: boolean;
+  new30: number | null;
+  gone30: number | null;
+  ppm: number | null;
+  nbPpm: number | null;
+  nbKind: 'near' | 'city' | null;
+  nbNames: string[];
+  cityAr: string | null;
+  cuts30: number | null;
+  oneType: boolean;
+  /** guest only: which chips a signed-in user would see (the server sends yes/no, never the number) */
+  has?: { new: boolean; gone: boolean; ppm: boolean; cmp: boolean; cuts: boolean };
+};
 export const FACTS_MIN_ADS = 30;
 export const FACTS_DAYS = 30;
+/** Under this difference from the neighbours the comparison says «قريب من …» rather than a percentage. */
+export const SAME_AS_NEIGHBOURS_PCT = 5;
 
 const count = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
+const money = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
 
-/** The RPC's `{ data, error }` → facts, or null when the read failed, the line is off (data null) or the shape is wrong. */
+/** The RPC's `{ data, error }` → facts, or null when the read failed, the facts are off (data null) or the shape is wrong. */
 export function parseViewFacts(result: { data: unknown; error: unknown }): ViewFacts | null {
   if (result.error || !result.data || typeof result.data !== 'object') return null;
   const d = result.data as Record<string, unknown>;
   const any = count(d.any);
   if (any === null) return null;
+  const nbKind: 'near' | 'city' | null = d.nb_kind === 'near' ? 'near' : d.nb_kind === 'city' ? 'city' : null;
+  const base = { any, nbKind, oneType: d.one_type === true, nbNames: [] as string[], cityAr: null as string | null };
   if (d.locked === true) {
-    const has = { new: d.has_new === true, gone: d.has_gone === true, median: d.has_median === true };
-    return { any, locked: true, new30: null, gone30: null, median: null, has };
+    const has = { new: d.has_new === true, gone: d.has_gone === true, ppm: d.has_ppm === true, cmp: d.has_cmp === true, cuts: d.has_cuts === true };
+    return { ...base, locked: true, new30: null, gone30: null, ppm: null, nbPpm: null, cuts30: null, has };
   }
-  const median = typeof d.median === 'number' && d.median > 0 ? d.median : null;
-  const prevMedian = typeof d.prev_median === 'number' && d.prev_median > 0 ? d.prev_median : null;
-  return { any, locked: false, new30: count(d.new30), gone30: count(d.gone30), median,
-           prevNew30: count(d.prev_new30), prevGone30: count(d.prev_gone30), prevMedian };
+  const names = Array.isArray(d.nb_names) ? d.nb_names.filter((x): x is string => typeof x === 'string') : [];
+  return {
+    ...base, locked: false, nbNames: names, cityAr: typeof d.city_ar === 'string' ? d.city_ar : null,
+    new30: count(d.new30), gone30: count(d.gone30), ppm: money(d.ppm), nbPpm: money(d.nb_ppm), cuts30: count(d.cuts30),
+  };
 }
 
-/** «123 إعلان جديد» — the last two digits decide, as everywhere on the map. */
-export function newAdsAr(n: number): string {
-  if (n === 1) return 'إعلان جديد واحد';
-  if (n === 2) return 'إعلانان جديدان';
-  const noun = adsNounAr(n);
-  return `${n.toLocaleString('en-US')} ${noun === 'إعلانات' ? 'إعلانات جديدة' : 'إعلان جديد'}`;
-}
-/** «85 اختفى» / «5 اختفت». */
-export function goneAr(n: number): string {
-  const r = n % 100;
-  return `${n.toLocaleString('en-US')} ${n !== 1 && r >= 2 && r <= 10 ? 'اختفت' : 'اختفى'}`;
+/** «أغلى من أحياء قريبة 9%» / «أرخص من الرياض 12%» / «قريب من أحياء قريبة». The percentage is isolated left-to-right so an
+ *  Arabic line never shows the flipped «%9». */
+export function comparisonChip(ppm: number, nbPpm: number, nbKind: 'near' | 'city', city: string | null, loc: 'ar' | 'en'): FactChip {
+  const pct = Math.round(((ppm - nbPpm) / nbPpm) * 100);
+  const whom = nbKind === 'city' && city ? city : loc === 'ar' ? 'أحياء قريبة' : 'nearby districts';
+  if (Math.abs(pct) < SAME_AS_NEIGHBOURS_PCT) return { text: loc === 'ar' ? `قريب من ${whom}` : `about the same as ${whom}`, tone: 'plain' };
+  const p = `⁦${Math.abs(pct)}%⁩`;
+  if (pct > 0) return { text: loc === 'ar' ? `أغلى من ${whom} ${p}` : `${p} pricier than ${whom}`, tone: 'up' };
+  return { text: loc === 'ar' ? `أرخص من ${whom} ${p}` : `${p} cheaper than ${whom}`, tone: 'down' };
 }
 
-/** THE ARROW AGAINST LAST MONTH (owner 2026-11-12): said only when the change is real, never for noise.
- *  Counts: both months at least ARROW_MIN_COUNT and a change of at least ARROW_MIN_COUNT_PCT. Price: the home facts'
- *  rule — a move of at least ARROW_MIN_PRICE_PCT. Rounded to a whole percent; «↑12%» / «↓5%». */
-export const ARROW_MIN_COUNT = 20;
-export const ARROW_MIN_COUNT_PCT = 10;
-export const ARROW_MIN_PRICE_PCT = 3;
-export function monthArrow(now: number | null, prev: number | null | undefined, kind: 'count' | 'price'): string {
-  if (now === null || prev === null || prev === undefined || prev <= 0 || now <= 0) return '';
-  if (kind === 'count' && (now < ARROW_MIN_COUNT || prev < ARROW_MIN_COUNT)) return '';
-  const pct = Math.round(((now - prev) / prev) * 100);
-  if (Math.abs(pct) < (kind === 'count' ? ARROW_MIN_COUNT_PCT : ARROW_MIN_PRICE_PCT)) return '';
-  // Isolated left-to-right (LRI … PDI) so an Arabic line shows «↑12%», never the flipped «%12↑».
-  return ` \u2066${pct > 0 ? '↑' : '↓'}${Math.abs(pct)}%\u2069`;
-}
+export type FactBox =
+  | { kind: 'none' }
+  | { kind: 'locked'; chips: string[] }
+  | { kind: 'chips'; chips: FactChip[]; hint: string | null };
 
-export type FactLine = { kind: 'none' } | { kind: 'locked' } | { kind: 'facts'; text: string };
-
-/** What the second line says, given the facts and the number the pill's first line shows. */
-export function factLine(f: ViewFacts | null, shown: number | null, loc: 'ar' | 'en'): FactLine {
+/** What the box says, given the facts, the number the pill's first line shows, and whether a property type is picked. */
+export function factBox(f: ViewFacts | null, shown: number | null, loc: 'ar' | 'en', typePicked: boolean): FactBox {
   if (!f || shown === null || f.any !== shown || f.any < FACTS_MIN_ADS) return { kind: 'none' };
-  if (f.locked) return f.has && (f.has.new || f.has.gone || f.has.median) ? { kind: 'locked' } : { kind: 'none' };
-  const parts: string[] = [];
-  if (f.new30) parts.push((loc === 'ar' ? `🆕 ${newAdsAr(f.new30)}` : `🆕 ${f.new30.toLocaleString('en-US')} new listing${f.new30 === 1 ? '' : 's'}`) + monthArrow(f.new30, f.prevNew30, 'count'));
-  if (f.gone30) parts.push((loc === 'ar' ? `⚡ ${goneAr(f.gone30)}` : `⚡ ${f.gone30.toLocaleString('en-US')} gone`) + monthArrow(f.gone30, f.prevGone30, 'count'));
-  if (f.median) parts.push((loc === 'ar' ? `💰 متوسط السعر ${shortMoney(f.median, 'ar')}` : `💰 avg price ${shortMoney(f.median, 'en')}`) + monthArrow(f.median, f.prevMedian, 'price'));
-  if (parts.length === 0) return { kind: 'none' };
-  return { kind: 'facts', text: `${loc === 'ar' ? `آخر ${FACTS_DAYS} يوما` : `Last ${FACTS_DAYS} days`}: ${parts.join(' · ')}` };
+  const n = (x: number) => x.toLocaleString('en-US');
+  if (f.locked) {
+    const h = f.has;
+    const shapes = [
+      h?.new ? (loc === 'ar' ? '88 جديد' : '88 new') : null,
+      h?.gone ? (loc === 'ar' ? '88 اختفى' : '88 gone') : null,
+      h?.ppm ? (loc === 'ar' ? 'المتر المعروض 8,888' : 'asking 8,888/m²') : null,
+      h?.cmp ? (loc === 'ar' ? 'مقارنة بأحياء قريبة 88%' : 'vs nearby 88%') : null,
+      h?.cuts ? (loc === 'ar' ? '88 خفضوا السعر' : '88 price cuts') : null,
+    ].filter((x): x is string => x !== null);
+    return shapes.length ? { kind: 'locked', chips: shapes } : { kind: 'none' };
+  }
+  const chips: FactChip[] = [];
+  if (f.new30) chips.push({ text: loc === 'ar' ? `${n(f.new30)} جديد` : `${n(f.new30)} new`, tone: 'plain' });
+  if (f.gone30) chips.push({ text: loc === 'ar' ? `${n(f.gone30)} اختفى` : `${n(f.gone30)} gone`, tone: 'plain' });
+  if (f.ppm) {
+    chips.push({ text: loc === 'ar' ? `المتر المعروض ${n(f.ppm)} ريال` : `asking ${n(f.ppm)} SAR/m²`, tone: 'plain' });
+    if (f.nbPpm && f.nbKind) chips.push(comparisonChip(f.ppm, f.nbPpm, f.nbKind, f.cityAr, loc));
+  }
+  if (f.cuts30) chips.push({ text: loc === 'ar' ? `${n(f.cuts30)} خفضوا السعر` : `${n(f.cuts30)} price cuts`, tone: 'plain' });
+  const hint = !typePicked && !f.ppm ? (loc === 'ar' ? 'اختر نوع العقار لعرض السعر' : 'Pick a property type to see the price') : null;
+  if (chips.length === 0 && !hint) return { kind: 'none' };
+  return { kind: 'chips', chips, hint };
 }
 
-/** The guest's line: the words stay, the numbers are blurred shapes (never real numbers), then the sign-in ask. */
-export function lockedLine(f: ViewFacts, loc: 'ar' | 'en'): { lead: string; blurred: string; ask: string } {
-  const shapes = [f.has?.new ? '🆕 888' : null, f.has?.gone ? '⚡ 88' : null, f.has?.median ? '💰 8.8' : null].filter(Boolean).join(' · ');
-  return loc === 'ar'
-    ? { lead: `آخر ${FACTS_DAYS} يوما:`, blurred: shapes, ask: '🔒 سجل الدخول لعرض الأرقام' }
-    : { lead: `Last ${FACTS_DAYS} days:`, blurred: shapes, ask: '🔒 Sign in to see the numbers' };
-}
+/** The small grey label after the count: «· آخر 30 يوما». */
+export const factsWindowLabel = (loc: 'ar' | 'en'): string => (loc === 'ar' ? `آخر ${FACTS_DAYS} يوما` : `last ${FACTS_DAYS} days`);
+export const lockedAsk = (loc: 'ar' | 'en'): string => (loc === 'ar' ? '🔒 سجل الدخول لعرض الأرقام' : '🔒 Sign in to see the numbers');
 
 /** Facts are asked for only at exact-point zoom (a view under ~13 km tall), where the read takes tens of ms. */
 export function factsZoom(latitudeDelta: number): boolean {
   return latitudeDelta <= 0.12;
 }
+
+// shortMoney stays exported from here for the card (step 2), which prints «1.4 مليون».
+export { shortMoney };

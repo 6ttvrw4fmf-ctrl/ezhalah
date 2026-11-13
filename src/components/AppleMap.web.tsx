@@ -38,7 +38,7 @@ import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, 
 import { keepSaudiPlaces } from '@/lib/saudiOutline';
 import { isRealDrawnArea } from '@/lib/drawnArea';
 import { fetchViewFacts } from '@/data/mapViewFacts';
-import { factLine, lockedLine, factsZoom, FACTS_MIN_ADS, type ViewFacts } from '@/lib/mapViewFacts';
+import { factBox, factsWindowLabel, lockedAsk, factsZoom, FACTS_MIN_ADS, type ViewFacts } from '@/lib/mapViewFacts';
 import { useApp } from '@/store';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
@@ -1391,16 +1391,30 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         <Pressable style={s.countPill} onPress={() => retryPinsRef.current?.()} accessibilityRole="button" testID="map-pin-retry"><Text style={s.countPillT}>{t('Couldn’t load the listings here. Try again')}</Text></Pressable>
       ) : null}
       {!drawing && typeof pinCount === 'number' ? (() => {
-        const fl = factLine(viewFacts, hasShape ? null : placeCount ?? pinCount, locale === 'ar' ? 'ar' : 'en');
-        const lock = fl.kind === 'locked' && viewFacts ? lockedLine(viewFacts, locale === 'ar' ? 'ar' : 'en') : null;
+        const loc = locale === 'ar' ? 'ar' : 'en';
+        const typePicked = !!(pinFilter?.types?.length || pinFilter?.scope?.types2?.length);
+        const box = factBox(viewFacts, hasShape ? null : placeCount ?? pinCount, loc, typePicked);
+        const locked = box.kind === 'locked';
         return (
-          <View style={[s.countPill, fl.kind !== 'none' && s.countPillTall]} pointerEvents={lock ? 'box-none' : 'none'} testID="map-pin-count">
-            <Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}</Text>
-            {fl.kind === 'facts' ? <Text style={s.factT} testID="map-pin-facts">{fl.text}</Text> : null}
-            {lock ? (
+          <View style={[s.countPill, box.kind !== 'none' && s.countPillTall]} pointerEvents={locked ? 'box-none' : 'none'} testID="map-pin-count">
+            <Text style={s.countPillT}>
+              {hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}
+              {box.kind !== 'none' ? <Text style={s.factWindow}>{`  · ${factsWindowLabel(loc)}`}</Text> : null}
+            </Text>
+            {box.kind === 'chips' ? (
+              <View style={s.factChips} testID="map-pin-facts">
+                {box.chips.map((c) => (
+                  <Text key={c.text} style={[s.factChip, c.tone === 'up' && s.factUp, c.tone === 'down' && s.factDown]}>{c.text}</Text>
+                ))}
+                {box.hint ? <Text style={[s.factChip, s.factHint]}>{box.hint}</Text> : null}
+              </View>
+            ) : null}
+            {box.kind === 'locked' ? (
               <Pressable onPress={() => openAuth()} accessibilityRole="button" testID="map-pin-facts-locked">
-                <Text style={s.factT}>{lock.lead} <Text style={FACT_BLUR}>{lock.blurred}</Text></Text>
-                <Text style={s.factAsk}>{lock.ask}</Text>
+                <View style={s.factChips}>
+                  {box.chips.map((c) => <Text key={c} style={[s.factChip, FACT_BLUR]}>{c}</Text>)}
+                </View>
+                <Text style={s.factAsk}>{lockedAsk(loc)}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -1418,8 +1432,13 @@ const s = StyleSheet.create({
   countPill: { position: 'absolute', left: 12, bottom: 12, backgroundColor: 'rgba(36,35,43,0.86)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   countPillT: { color: '#fff', fontSize: 13, fontWeight: '700' },
   countPillTall: { borderRadius: 14, maxWidth: 360 },
-  factT: { color: '#fff', fontSize: 12, fontWeight: '600', marginTop: 3 },
-  factAsk: { color: '#FAC775', fontSize: 12, fontWeight: '700', marginTop: 3 },
+  factWindow: { color: '#bbb', fontSize: 11.5, fontWeight: '600' },
+  factChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 6 },
+  factChip: { color: '#fff', fontSize: 12.5, fontWeight: '700', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 9, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
+  factUp: { color: '#FF9B8A' },
+  factDown: { color: '#7FE3A0' },
+  factHint: { color: '#ccc', fontWeight: '600' },
+  factAsk: { color: '#FAC775', fontSize: 12.5, fontWeight: '700', marginTop: 6, textAlign: 'center' },
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
