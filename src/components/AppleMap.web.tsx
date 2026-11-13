@@ -1393,7 +1393,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       {!drawing && typeof pinCount === 'number' ? (() => {
         const loc = locale === 'ar' ? 'ar' : 'en';
         const typePicked = !!(pinFilter?.types?.length || pinFilter?.scope?.types2?.length);
-        const box = factBox(viewFacts, hasShape ? null : placeCount ?? pinCount, loc, typePicked);
+        const saleOnly = (pinFilter?.deals ?? []).length === 1 && pinFilter?.deals[0] === 'buy';
+        const box = factBox(viewFacts, hasShape ? null : placeCount ?? pinCount, loc, typePicked, saleOnly, translitPlace);
         const locked = box.kind === 'locked';
         return (
           <View style={[s.countPill, box.kind !== 'none' && s.countPillTall]} pointerEvents={locked ? 'box-none' : 'none'} testID="map-pin-count">
@@ -1410,8 +1411,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
               </View>
             ) : null}
             {box.kind === 'locked' ? (
-              <Pressable onPress={() => openAuth()} accessibilityRole="button" testID="map-pin-facts-locked">
-                <View style={s.factChips}>
+              <Pressable onPress={() => openAuth()} accessibilityRole="button" accessibilityLabel={lockedAsk(loc)} testID="map-pin-facts-locked">
+                <View style={s.factChips} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>
                   {box.chips.map((c) => <Text key={c} style={[s.factChip, FACT_BLUR]}>{c}</Text>)}
                 </View>
                 <Text style={s.factAsk}>{lockedAsk(loc)}</Text>

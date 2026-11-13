@@ -86,9 +86,13 @@ const confirmedOnly = (src: string) => /r\.active = false and r\.deactivated_at 
 check('«gone» = page re-opened and removed: inactive, direct-check site, not an owner withdrawal, dropped if it comes back', confirmedOnly(capture));
 mustCatch('a removal log that trusts crawl absence (any strategy)', () => confirmedOnly(capture.replace("lr.strategy in ('DIRECT_REVISIT', 'CANDIDATE_PLUS_DIRECT')", "lr.strategy is not null")));
 const guestBranch = (src: string) => { const m = src.match(/if auth\.uid\(\) is null then([\s\S]*?)end if;/); return m ? m[1] : ''; };
-const guestNoNumbers = (src: string) => { const g = guestBranch(src); return g !== '' && /'locked', true/.test(g) && !/'(new30|gone30|median|ppm|nb_ppm|cuts30)',/.test(g) && !/return v;/.test(g); };
+// An ALLOWLIST: every key a guest receives must be a yes/no or a label, never a number (new30_raw, priced, ppm_n … too).
+const GUEST_KEYS = new Set(['locked', 'any', 'has_new', 'has_gone', 'has_ppm', 'has_cmp', 'nb_kind', 'has_cuts', 'one_type']);
+const guestKeys = (g: string) => [...g.matchAll(/(?:\(|,)\s*'([a-z_0-9]+)',/g)].map((m) => m[1]);
+const guestNoNumbers = (src: string) => { const g = guestBranch(src); const keys = guestKeys(g); return g !== '' && keys.includes('locked') && keys.every((k) => GUEST_KEYS.has(k)) && !/return v;/.test(g); };
 check('a guest gets {locked, any, has_*} — never a number', guestNoNumbers(rpc));
 mustCatch('a guest branch that leaks the price per metre', () => guestNoNumbers(rpc.replace("'has_ppm', (v ->> 'ppm') is not null", "'ppm', v -> 'ppm'")));
+mustCatch('a guest branch that leaks a count of priced ads', () => guestNoNumbers(rpc.replace("'one_type', v -> 'one_type'", "'one_type', v -> 'one_type', 'ppm_n', v -> 'ppm_n'")));
 const switchable = (src: string) => /if not coalesce\(\(select ff\.enabled from public\.ops_feature_flags ff where ff\.name = 'map_view_facts'\), false\) then\s*return null;/.test(src);
 check('the facts have an off switch the checker uses', switchable(rpc) && /update public\.ops_feature_flags set enabled = false/.test(audit));
 mustCatch('an RPC that ignores the off switch', () => switchable(rpc.replace("ff.name = 'map_view_facts'", "ff.name = 'something_else'")));

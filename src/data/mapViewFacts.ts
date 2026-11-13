@@ -3,7 +3,7 @@
 // arguments). null when the read failed — the line then stays hidden, never «0».
 import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
-import { reportMessage } from '@/lib/observability';
+import { reportError, reportMessage } from '@/lib/observability';
 import { postedCountArgs, type PinFilter } from '@/lib/mapPins';
 import { parseViewFacts, type ViewFacts } from '@/lib/mapViewFacts';
 
@@ -27,7 +27,8 @@ export async function fetchViewFacts(box: { s: number; w: number; n: number; e: 
       if (recent.size > CACHE_MAX) recent.delete(recent.keys().next().value as string);
     }
     return f;
-  } catch {
+  } catch (e) {
+    reportError(e, { where: 'map box facts (map_view_facts_ar)' });
     return null;
   }
 }

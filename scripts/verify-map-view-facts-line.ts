@@ -26,6 +26,10 @@ check('a missing or zero number leaves its chip out', !texts(factBox({ ...full, 
 check('no price, no comparison', !texts(factBox({ ...full, ppm: null }, 560, 'ar', true)).some((t) => t.includes('المتر') || t.includes('أحياء قريبة')));
 const noType = factBox({ ...full, ppm: null, nbPpm: null }, 560, 'ar', false);
 check('with no type picked the price is never mixed — the box asks for a type', noType.kind === 'chips' && noType.hint === 'اختر نوع العقار لعرض السعر');
+const rentNoType = factBox({ ...full, ppm: null, nbPpm: null }, 560, 'ar', false, false);
+check('a rent or mixed-deal view never asks for a type (no price can appear there)', rentNoType.kind === 'chips' && rentNoType.hint === null);
+check('the English city fallback goes through the transliterator', comparisonChip(11800, 10000, 'city', 'الرياض', 'en', () => 'Riyadh').text.includes('Riyadh') && comparisonChip(11800, 10000, 'city', 'الرياض', 'ar', () => 'Riyadh').text.includes('الرياض'));
+check('screen readers hear the sign-in ask, not the fake numbers', /accessibilityLabel=\{lockedAsk\(loc\)\}/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')) && /importantForAccessibility="no-hide-descendants"/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 check('no Arabic diacritics anywhere in the box', texts(b).every((t) => !MARKS.test(t)) && !MARKS.test(String(noType.kind === 'chips' ? noType.hint : '')));
 mustCatch('a box that ignores the pill\'s count', () => { const ignoresPill = (f: ViewFacts, _shown: number) => factBox(f, f.any, 'ar', true); return ignoresPill(full, 559).kind === 'none'; });
 
@@ -50,10 +54,10 @@ const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(paddedBox\(center, span\)\);/.test(src)
   && (src.match(/setFactsBox\(paddedBox/g) ?? []).length === 1
   && /const my = \+\+seq;\s*setFactsBox\(null\);/.test(src)
-  && /factBox\(viewFacts, hasShape \? null : placeCount \?\? pinCount, loc, typePicked\)/.test(src)
+  && /factBox\(viewFacts, hasShape \? null : placeCount \?\? pinCount, loc, typePicked, saleOnly, translitPlace\)/.test(src)
   && /fetchViewFacts\(box, pinFilter, !!user\)/.test(src);
 check('the map asks for the counted box and shows the facts only against the number it shows', wired(web));
-mustCatch('facts compared with a different number than the pill shows', () => wired(web.replace('factBox(viewFacts, hasShape ? null : placeCount ?? pinCount, loc, typePicked)', 'factBox(viewFacts, viewFacts?.any ?? null, loc, typePicked)')));
+mustCatch('facts compared with a different number than the pill shows', () => wired(web.replace('factBox(viewFacts, hasShape ? null : placeCount ?? pinCount, loc, typePicked, saleOnly, translitPlace)', 'factBox(viewFacts, viewFacts?.any ?? null, loc, typePicked, saleOnly, translitPlace)')));
 mustCatch('facts asked for an area total (a box the count was not read over)', () => wired(web.replace('setPinCount(areasTotal(areas));', 'setPinCount(areasTotal(areas)); setFactsBox(paddedBox(center, span));')));
 mustCatch('a new map read that keeps the last box (facts for the previous view)', () => wired(web.replace(/(const my = \+\+seq;)\s*setFactsBox\(null\);[^\n]*/, '$1')));
 
