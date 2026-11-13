@@ -627,6 +627,10 @@ boxed chips), at most 64% of the map wide so it stays clear of the round buttons
 gold «🔒 سجل الدخول لعرض الأرقام» (no blurred row), and the server never sends them a number. The box is read AT THE SAME TIME as the pins (no pause), a second
 ask for the same view joins the read already out, and the box is cleared only when asked about another view — never
 blinked off when the count or the place name lands (owner 2026-11-13, «it takes time … it feels glitchy»).
+The card is built (2026-11-13): `map_view_card_ar()` (`map_view_card_core`, the facts filter word for word plus one
+line naming a district) for the box's own view, or for a named district (all its ads); a guest gets `{locked}` only;
+«قريبا» where a log does not yet cover a window; the card module loads on the first tap only (src/components/
+MapFactsCard.tsx, rules in src/lib/mapCard.ts); a new map view closes it. Guard: `scripts/verify-map-card.ts`.
 History: «اختفى» counts confirmed removals from the nightly `map_fact_removal` log (started 2026-11-12 — only 37% of
 older removals kept their district, so no backfill); «خفضوا السعر» counts price-diary drops (`listing_price_history`
 'price' events, started 2026-11-11; a drop of more than half is a page re-read, not a cut). Each shows once its window

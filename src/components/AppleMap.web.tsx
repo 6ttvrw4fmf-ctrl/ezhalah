@@ -38,6 +38,7 @@ import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, 
 import { keepSaudiPlaces } from '@/lib/saudiOutline';
 import { isRealDrawnArea } from '@/lib/drawnArea';
 import { fetchViewFacts, fetchPlaceFacts } from '@/data/mapViewFacts';
+import type { CardTarget } from '@/data/mapCard';
 import { factBox, factsWindowLabel, lockedAsk, factsZoom, factsWide, placeFactsFit, FACTS_MIN_ADS, type ViewFacts } from '@/lib/mapViewFacts';
 import { useApp } from '@/store';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
@@ -712,6 +713,11 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // At city/district LABEL zoom the pill names a place with its own count: the box reads that place's prepared facts.
   const [factsPlace, setFactsPlace] = useState<PlaceFactsKey | null>(null);
   const factsKeyRef = useRef('');
+  // THE CARD (owner 2026-11-12/13): tapping the box opens it; loaded on the first tap only, so it never adds to the first
+  // download. A new map read closes it — it belongs to the view it was opened on.
+  const [cardTarget, setCardTarget] = useState<CardTarget | null>(null);
+  const [CardComp, setCardComp] = useState<null | typeof import('@/components/MapFactsCard').default>(null);
+  const [cardLoadFailed, setCardLoadFailed] = useState(false);   // the card's own download failed: say so, offer a retry
   const { user, openAuth } = useApp();
   const signedInRef = useRef(false); signedInRef.current = !!user;
   const retryPinsRef = useRef<(() => void) | null>(null);
@@ -1038,6 +1044,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const load = async () => {
       const my = ++seq;
       setFactsBox(null); setFactsExact(false); setFactsPlace(null);   // the pill's facts belong to one counted view; a new read starts without one
+      setCardTarget(null);
       const { center, span } = m.region;
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
@@ -1434,20 +1441,38 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         const saleOnly = (pinFilter?.deals ?? []).length === 1 && pinFilter?.deals[0] === 'buy';
         const box = factBox(viewFacts, hasShape ? pinCount : placeCount ?? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape);
         const locked = box.kind === 'locked';
+        // the card is for the box's own ads: the live box, or the named district (a city or a sum of districts has none)
+        const target: CardTarget | null = box.kind !== 'chips' || !pinFilter ? null
+          : factsPlace ? (factsPlace.level === 'district' ? { kind: 'district', city: factsPlace.city, district: factsPlace.district, deals: pinFilter.deals } : null)
+          : factsBox ? { kind: 'box', box: factsBox, filter: pinFilter } : null;
+        const openCard = () => {
+          if (!target) return;
+          setCardLoadFailed(false);
+          if (!CardComp) {
+            void import('@/components/MapFactsCard').then((m) => setCardComp(() => m.default)).catch((e: unknown) => {
+              reportError(e, { where: 'map card module download (import MapFactsCard)' });
+              setCardLoadFailed(true);
+            });
+          }
+          setCardTarget(target);
+        };
         return (
-          <View style={[s.countPill, box.kind !== 'none' && s.countPillTall]} pointerEvents={locked ? 'box-none' : 'none'} testID="map-pin-count">
+          <View style={[s.countPill, box.kind !== 'none' && s.countPillTall]} pointerEvents={locked || target ? 'box-none' : 'none'} testID="map-pin-count">
             <Text style={s.countPillT}>
               {hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}
               {box.kind === 'chips' ? <Text style={s.factWindow}>{`  · ${factsWindowLabel(loc)}`}</Text> : null}
             </Text>
             {/* SMALL (owner 2026-11-13: «the box is very very big»): one line of small words, never boxed chips */}
             {box.kind === 'chips' ? (
+              <Pressable onPress={openCard} disabled={!target} accessibilityRole="button" accessibilityLabel={loc === 'ar' ? 'عرض التفاصيل' : 'Show details'} testID="map-pin-facts-open">
               <Text style={s.factLine} testID="map-pin-facts">
                 {box.chips.map((c, i) => (
                   <Text key={c.text}>{i > 0 ? <Text style={s.factSep}>{' · '}</Text> : null}<Text style={[c.tone === 'up' && s.factUp, c.tone === 'down' && s.factDown]}>{c.text}</Text></Text>
                 ))}
                 {box.hint ? <Text style={s.factHint}>{box.chips.length ? ` · ${box.hint}` : box.hint}</Text> : null}
+                {target ? <Text style={s.factSep}>{loc === 'ar' ? '  ‹' : '  ›'}</Text> : null}
               </Text>
+              </Pressable>
             ) : null}
             {/* a guest: only the small gold ask — no blurred row (the server never sends a guest a number) */}
             {box.kind === 'locked' ? (
@@ -1458,6 +1483,16 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           </View>
         );
       })() : null}
+      {cardTarget && !CardComp && cardLoadFailed ? (
+        <Pressable style={s.cardFail} onPress={() => { setCardLoadFailed(false); void import('@/components/MapFactsCard').then((m) => setCardComp(() => m.default)).catch((e: unknown) => { reportError(e, { where: 'map card module download (retry)' }); setCardLoadFailed(true); }); }}
+          accessibilityRole="button" testID="map-card-load-failed">
+          <Text style={s.cardFailT}>{locale === 'ar' ? 'تعذر فتح التفاصيل، اضغط للمحاولة مرة أخرى' : 'The details could not open. Tap to try again.'}</Text>
+        </Pressable>
+      ) : null}
+      {cardTarget && CardComp ? (
+        <CardComp target={cardTarget} signedIn={!!user} loc={locale === 'ar' ? 'ar' : 'en'} onClose={() => setCardTarget(null)} onSignIn={() => openAuth()}
+          title={`${viewPlace ?? (locale === 'ar' ? 'هذه المنطقة' : 'This area')}${pinFilter?.deals.length === 1 ? (locale === 'ar' ? (pinFilter.deals[0] === 'buy' ? ' · للبيع' : ' · للإيجار') : (pinFilter.deals[0] === 'buy' ? ' · for sale' : ' · for rent')) : ''}`} />
+      ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
   );
@@ -1475,6 +1510,8 @@ const s = StyleSheet.create({
   factDown: { color: '#7FE3A0' },
   factHint: { color: '#ccc', fontWeight: '500' },
   factAsk: { color: '#FAC775', fontSize: 11.5, fontWeight: '700', marginTop: 2 },
+  cardFail: { position: 'absolute', left: 12, right: 12, bottom: 12, backgroundColor: '#fff', borderRadius: 12, padding: 14 },
+  cardFailT: { color: '#1f1e24', fontSize: 13, fontWeight: '600', textAlign: 'center' },
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
