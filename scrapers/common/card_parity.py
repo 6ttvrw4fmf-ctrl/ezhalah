@@ -51,7 +51,7 @@ from scrapers.common.new_listings_score import (
     closed_ad_page, compare_listing, is_other_ads_page, load_owner_district_aliases, norm, norm_district,
     page_lacks_its_ad, scope_to_its_ad,
 )
-from scrapers.common.served_link_check import classify, repairable
+from scrapers.common.served_link_check import classify, customer_url, repairable
 from scrapers.common.source_reread import page_evidence, page_image_count
 
 TABLE = "ops_card_parity"
@@ -552,9 +552,13 @@ def check(client, picks: list[dict], cards: dict[str, dict], reader: SourceReade
             elif url and is_home(url):
                 note = "the stored link is the site's home page: it names no ad (nothing compared)"
             elif url:
-                why, status, landed, body = reader.read(url)
+                # Open what the CUSTOMER opens (🔗 2026-11-13): the Arabic app never opens Gathern's bare /view/…
+                # (served_link_check.customer_url, #11520); reading the stored form called live gathern 740319
+                # «link=mismatch» on night 11-12 while its own liveness read it ALIVE the next morning.
+                opened = customer_url(url)
+                why, status, landed, body = reader.read(opened)
                 if why == "ok":
-                    link_kind = classify(url, status, landed)
+                    link_kind = classify(opened, status, landed)
                     if link_kind == "moved" and repairable(url, landed):
                         repaired = True
                         if write:
