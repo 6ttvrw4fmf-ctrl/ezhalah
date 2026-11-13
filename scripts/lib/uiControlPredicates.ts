@@ -53,7 +53,8 @@ export const REGISTRY_KEY: Record<string, string> = {
  */
 export const INTERVIEW_FIELDS: Record<string, string[]> = {
   property_age: ['property_age'],
-  rnpl: ['installment_available'],
+  // ONE instalments chip since 2026-11-12 (owner): the site's box OR the ad's split-payment words — it narrows on both
+  rnpl: ['installment_available', 'split_payments'],
   bathrooms: ['bathrooms'],
   furnished: ['furnished'],
   amenities: ['kitchen', 'parking', 'elevator', 'air_conditioner', 'private_entrance', 'maid_room', 'driver_room', 'furnished'],
@@ -92,7 +93,8 @@ export const INTERVIEW_FIELDS: Record<string, string[]> = {
  */
 export const AF_QUESTION_FIELDS: Record<string, string[]> = {
   property_age: ['property_age'],
-  rnpl: ['installment_available'],
+  // ONE instalments chip since 2026-11-12 (owner): the site's box OR the ad's split-payment words — it narrows on both
+  rnpl: ['installment_available', 'split_payments'],
   bathrooms: ['bathrooms'],
   furnished: ['furnished'],
   // The amenity question's own fields are the chip keys, judged separately and by name.

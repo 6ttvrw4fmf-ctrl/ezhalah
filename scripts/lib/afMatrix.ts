@@ -419,6 +419,17 @@ const EITHER_COLS: Record<string, string[]> = {
   palm_fruit_trees: ['palms', 'fruit_trees'],
   pool_gym: ['pool', 'gym'],
 };
+// The merged instalments chip (owner 2026-11-12, migration 20261112111809): the site's own «إيجار بالتقسيط» box OR the
+// ad's monthly / split-payment words, stated here on the two canonical columns — never imported from the app. Its
+// «did not mention» is the RPC's cnt_rnpl_unknown: the box is unknown and the ad does not say «دفعات» (a box that
+// says NO is a known answer, so FALSE + silent words is known-not-matching).
+const RNPL_EITHER: Meaning = {
+  params: { p_amenities: ['rnpl'] }, cntCol: 'cnt_rnpl', cols: ['rent_now_pay_later', 'split_payments'],
+  rest: 'or=(rent_now_pay_later.is.true,split_payments.is.true)',
+  notMatching: 'rent_now_pay_later=is.false&split_payments=not.is.true',
+  unknown: 'rent_now_pay_later=is.null&split_payments=not.is.true',
+  satisfies: (r) => r.rent_now_pay_later === true || r.split_payments === true,
+};
 const eitherOf = (token: string): Meaning => {
   const C = EITHER_COLS[token];
   return {
@@ -463,8 +474,7 @@ const ladder = (col: string, cnt: string, params: Record<string, unknown>, n: nu
 
 export function optionMeaning(field: string, key: string): Meaning | null {
   switch (field) {
-    case 'rnpl': return key === 'rnpl' ? bool('rent_now_pay_later', 'cnt_rnpl', { p_amenities: ['rnpl'] })
-      : key === 'split_payments' ? bool('split_payments', 'cnt_split_payments', { p_amenities: ['split_payments'] }) : null; // owner 2026-11-01: two chips
+    case 'rnpl': return key === 'rnpl' ? RNPL_EITHER : null; // ONE chip since 2026-11-12 (owner): the box OR the words
     // The themed cards (owner 2026-10-31 / 11-01) are the amenities card split by theme — same tokens, same meaning,
     // plus the one derived chip (separate_meters) a card may carry.
     case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who': case 'features': case 'services': case 'fun':
@@ -472,6 +482,7 @@ export function optionMeaning(field: string, key: string): Meaning | null {
     case 'water': case 'games': case 'camp_life': case 'water_land': case 'land_papers': case 'power': case 'crops': case 'animals': case 'buildings': case 'plot': case 'deal_papers': case 'land': case 'location': case 'cspace': case 'cservices': case 'business': case 'office_kind': case 'ready': case 'building': case 'trucks': case 'loc_papers': case 'inside': case 'investment': case 'hotel': case 'station': case 'deal_loc': case 'space_papers': case 'services_business': case 'workshop': case 'loc_business': case 'building_papers': case 'factory': case 'loc_safety': case 'papers_c':
     case 'amenities':
       if (EITHER_COLS[key]) return eitherOf(key);
+      if (key === 'rnpl') return RNPL_EITHER;   // the token means the union wherever it rides
       return AMENITY_COL[key] ? bool(AMENITY_COL[key], `cnt_${key}`, { p_amenities: [key] }) : null;
     // The Residential Building ladders (owner 2026-10-31): one token per rung, the predicate on the ad's own number.
     case 'apartments': return APTS_RUNG[key] ? ladder('apartments_count', `cnt_${key}`, { p_amenities: [key] }, APTS_RUNG[key]) : null;
@@ -587,7 +598,8 @@ export function fieldMeaning(field: string): FieldMeaning | null {
       paramsBoth: (a, b) => ({ p_age_buckets: Object.keys(AGE).filter((k) => sameParams(AGE[k].params, a) || sameParams(AGE[k].params, b)) }) };
     // «😔 on every question» (owner 2026-10-03): these read a DB IS NULL column (migration 20261003184909),
     // so «did not mention» means exactly that column — never a subtraction over the rungs.
-    // two chips since 2026-11-02 (the site's installment box + the ad's «دفعات» words): a multi-select bag like shops/amenities
+    // ONE chip since 2026-11-12 (the site's installment box OR the ad's «دفعات» words, RNPL_EITHER); combine is moot
+    // with one option and stays the bag rule a chat-typed second token would follow
     case 'rnpl': return { ...single('cnt_total_base', ['cnt_rnpl_unknown']), combine: 'and',
       paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
     case 'bathrooms': return { ...single('cnt_total_base', ['cnt_bath_unknown']), combine: 'or', restBoth: lowerRung,

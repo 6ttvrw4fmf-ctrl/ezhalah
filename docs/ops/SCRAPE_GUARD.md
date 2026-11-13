@@ -75,7 +75,9 @@ about moving our robots, not visitors.
    the value in the Desktop file `EZHALAH-GATE-SECRET-paste-into-Vercel-then-delete.txt`, then delete that file.
 2. Dispatch **Front door secret** (stores the same value in the database).
 3. Deploy, then confirm `/sb/rest/v1/…` answers and the database sees the visitor's address.
-4. After a day of `x-ezhalah-bot` showing real visitors as `human`: set `EZ_BOTID_ENFORCE=1`.
+4. After a day of `x-ezhalah-bot` showing real visitors as `human`: set `EZ_BOTID_ENFORCE=1`. **Done 2026-11-12 (owner
+   approved):** 48 h of front-door logs read 3,220 + ~2,330 real-visitor calls, every one `bot=human` (0 `bot=bot`); every
+   `bot=bot` call carried the robot pass.
    Switch: dispatch **Vercel guard switch** (`.github/workflows/vercel-guard-switch.yml`, `EZ_BOTID_ENFORCE` / `EZ_TURNSTILE_ENFORCE`,
    1 = block, 0 = watch), then deploy through deploy-frontend.yml. Undo = the same with 0. Owner approves each flip.
 5. Move our robots off the bare public key (they send the handshake too, from the GitHub secret), then close the back
@@ -94,6 +96,11 @@ upserts the rule through the Vercel API and fails unless the ACTIVE config shows
   match — not EZ_GATE_SECRET, which would sit in plain text in the firewall config); (2) Saudi mobile carriers share
   addresses (CGNAT), so many real phones can sit behind one IP — check the log hits first; (3) the owner approves.
   A 429 is final for the app (it only retries 502/503/504).
+- **Done 2026-11-12 (owner: «speed limit: switch to blocking, with a pass for our robots»).** (1) The bypass is
+  `x-ezhalah-ratepass` = sha256(`EZ_GATE_SECRET:speed-limit-pass`): one-way, so the firewall config never holds the
+  secret; robots send it from `scripts/lib/robotPassCore.mjs`, the workflow derives the same value, and
+  `scripts/verify-speed-limit-robot-pass.ts` pins that both agree. (2) Measured 24 h to 2026-11-12: busiest real visitor
+  110 calls/min (vid-keyed), ~3k real calls/day — CGNAT sharing at that volume stays far under 300. (3) Owner approved.
 - Undo: dispatch `log` again; off: dispatch `off`.
 
 ## Cloudflare Turnstile (owner 2026-10-21: invisible, "users shouldn't verify every time")
@@ -127,7 +134,10 @@ Barrier: `scripts/verify-turnstile-reports-why.ts`.
   everyone. Lookups are fail-open.
 - Our own browser robots (GitHub, Google Cloud = datacenter) send `x-ezhalah-robot: <EZ_GATE_SECRET>`. The front
   door turns that into `x-ezhalah-robot: 1` for the database, and they are never judged.
-- **Mode** (`guard.network_block_mode`): `watch` today (count only, in `ops_network_block_hits`, POST/RPC calls),
+- **`block` since 2026-11-12 10:32 UTC (owner: «VPN block: switch to blocking, with a friendly turn off your VPN
+  message»).** Watch mode had counted 2–7 datacenter calls a day and no VPN/Tor; the robots carry the pass and the app's
+  NetworkBlockedNotice («فضلاً أوقف الـ VPN») already handles the 403. Undo: set mode back to `watch`.
+- **Mode** (`guard.network_block_mode`): was `watch` (count only, in `ops_network_block_hits`, POST/RPC calls),
   then `block` (HTTP 403 «This network is not supported», with a message to turn the VPN off), or `off`.
   Switch: `update guard.network_block_mode set mode = 'block', set_at = now();` (service role / SQL editor).
 - Before `block`: (1) a day of `watch` numbers, (2) our Playwright robots that browse the real site send the robot

@@ -188,9 +188,13 @@ check('known amenity tokens map to their boolean columns and are ANDed',
   && F({ p_amenities: ['kitchen', 'elevator'] }).includes('elevator.is.true'), F({ p_amenities: ['kitchen', 'elevator'] }));
 check('the ac token maps to air_conditioner, not a column named ac',
   F({ p_amenities: ['ac'] }).includes('air_conditioner.is.true'), F({ p_amenities: ['ac'] }));
-check('rnpl and rent_now_pay_later both map to rent_now_pay_later',
-  F({ p_amenities: ['rnpl'] }).includes('rent_now_pay_later.is.true')
-  && F({ p_amenities: ['rent_now_pay_later'] }).includes('rent_now_pay_later.is.true'));
+// owner 2026-11-12: the ONE instalments chip = the site's box OR the ad's monthly / split-payment words
+const RNPL_OR = 'or(rent_now_pay_later.is.true,split_payments.is.true)';
+const rnplUnion = (f: string) => f.includes(RNPL_OR) && !f.split(RNPL_OR).join('').includes('rent_now_pay_later.is.true');
+check('rnpl and rent_now_pay_later both map to the box OR the words (never the box alone)',
+  rnplUnion(F({ p_amenities: ['rnpl'] })) && rnplUnion(F({ p_amenities: ['rent_now_pay_later'] })), F({ p_amenities: ['rnpl'] }));
+check('MUTATION: the pre-2026-11-12 box-alone clause is not read as the union',
+  !rnplUnion('and=(deal_ar.eq.x,rent_now_pay_later.is.true)'));
 check('MUTATION: an UNKNOWN amenity token refuses the comparison, never guesses',
   F({ p_amenities: ['kitchen', 'not_a_real_token'] }).startsWith('NOT-COMPARABLE:'),
   F({ p_amenities: ['kitchen', 'not_a_real_token'] }));
