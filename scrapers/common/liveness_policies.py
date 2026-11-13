@@ -1177,7 +1177,7 @@ POLICIES: dict[str, _P] = {
     "asasmakeen": _P(
         _pol("asasmakeen", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's unit sitemap (sitemap-units-ar.xml), every listed page read; run.py prunes only when every page answered with a unit block.",
-        "An oracle is possible (a removed unit should leave the sitemap and its page) but is not written; the sitemap + every page read IS this run's check."),
+        "2026-11-13: the ad's OWN page decides at grace (run.py::_make_gone — 404/410 gone, 200 with its unit block live, else unknown, control-gated); a sitemap unit whose page 404s no longer freezes every prune (ASM2676 was served at 3 strikes while its page answered 404)."),
     "mrajhi": _P(
         _pol("mrajhi", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's sitemap.xml /units/ pages, every page read and its JSON-LD parsed; run.py prunes only when every page answered (a page answering 404 counts as read: the ad is gone).",
