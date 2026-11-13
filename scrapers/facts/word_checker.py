@@ -329,7 +329,7 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "horses_stable": ["^خيل$", "^خيول$", "^اسطبل", "^اصطبل", "re:ركوب (?:ال)?خيل", "horse riding", "horse stable", "stables"],   # bare «stable» is «stable returns» (P2 13085, 2026-11-08)
     # «جمال» alone is beauty — only «ركوب الجمال»
     "camels": ["re:(?:(?<= )|^)(?:و|ال|وال|بال)?ابل(?!\\w)", "^هجن$", "re:ركوب (?:ال)?(?:جمال|ابل|هجن)", "camels"],
-    "toilets_on_site": ["re:دورات (?:ال)?مياه", "re:دوره (?:ال)?مياه", "^حمامات", "^حمام$", "toilets"],
+    "toilets_on_site": ["re:دورات (?:ال)?مياه", "re:دوره (?:ال)?مياه", "re:دورت(?:ين|ي|ا) (?:ال)?مياه", "^حمامات", "^حمام$", "toilets"],
     "lighting": ["^اناره", "^اضاءه", "^انارات", "lighting"],
     "artesian_well": ["re:(?:بئر|بير) ارتوازي", "^ارتوازي", "re:ابار ارتوازيه", "artesian"],
     "solar_power": ["re:طاقه شمسيه", "re:الواح شمسيه", "re:خلايا شمسيه", "solar"],
@@ -551,8 +551,10 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
               ("به", "بها", "بالغرفه", "بالصاله", "بالمطبخ", "بالمجلس", "بغرفه", "بالمبني", "بالفيلا")),
     "storage": (("خلف", "بجوار", "مقابل", "صناعي", "صناعيه", "يصلح", "تصلح", "مناسب", "مناسبه", "مثالي", "مثاليه", "ينفع", "تنفع", "لبناء", "لانشاء", "او"),     # «خلف مخازن …» is an address, «أرض صناعية ومستودعات» the type
                 ("للايجار", "للبيع", "تجاري", "صناعي", "تجاريه", "صناعيه", "مبرد", "مبرده", "للتاجير")),
-    "garden": (_BEARINGS + ("مناسب", "مثالي", "خلف", "مقابل"),   # «الوجهة: غرب حديقة» is a boundary; «مناسب للحديقة» a maybe
-               ("عامه", "عام", "الحي", "العامه")),
+    # «أرض سكنية شارع وحديقة»: the plot's neighbours, not its garden (🔬 2026-11-11 garden sample, aqar 3543112)
+    "garden": (_BEARINGS + ("مناسب", "مثالي", "خلف", "مقابل"),   # «الوجهة: غرب حديقة» is a boundary
+               # «حديقة الإمام وبجانبها ملعب», «حديقة الملك عبدالله»: a named public park (aqar 10513608, 2026-11-11)
+               ("عامه", "عام", "الحي", "العامه", "الملك", "الامير", "الامام", "الشيخ", "الملكه", "الاميره")),
     "parking": (_BEARINGS, ()),
     # A POSSIBLE use or the STREET's shops are not shops inside the property (🔬 2026-11-07 two-way sample, 4 of 25
     # served yeses wrong): «مناسبة لمحلات تجارية» (aqar 20809503), «منها: كافيه أو مطعم 🏪 4 محلات حسب الرخصة» (9566204),
@@ -594,7 +596,10 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
                   ("الصحيح", "صحيح")),
     # ── group B (owner handoff 2026-11-01) ──
     "raised_plot": (("سعر", "اسعار", "قيمه", "ايجار", "اسقف", "سقف", "ارتفاع", "نسبه", "طلب"), ()),   # a high price / ceiling
-    "all_services": ((), ("قريبه", "قريب", "بالقرب", "المجاوره", "مجاوره", "حولها", "حوله")),       # «جميع الخدمات قريبة»
+    "all_services": (("حولها", "حوله", "حواليها", "حواليه", "جنبها", "جنبه"),                       # «حولها كل خدمات»: around it
+                     ("قريبه", "قريب", "بالقرب", "المجاوره", "مجاوره", "حولها", "حوله",            # «جميع الخدمات قريبة»
+                      )),      # «كل خدمات الشقه مستقله»: separate utilities (P2 13085, 🔬 2026-11-11);
+                                                  # «جميع خدمات الشقة متوفرة» stays a yes (CodeRabbit on #11820)
     "street_lights": (("جوهره"), ("تحميل", "للتحميل", "تنزيل", "للتنزيل", "والتحميل")),                                        # «رصيف تحميل» is a dock
     "approved_plan": (("مكتب", "مسوق", "وسيط", "مقاول", "مهندس", "مقيم", "مثمن", "وكيل"), ()),
     "direct_owner": (("تفويض", "توكيل", "وكاله", "بتفويض", "مفوض", "مفوضين", "وكيل", "موكل"), ()),
@@ -622,7 +627,10 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "smart_home": (("بوابه", "بوابات", "دخول", "الدخول", "مدخل", "قفل"), ()),              # «بوابات بنظام ذكي»
     "singles": (("يمنع", "نؤجر", "اؤجر", "استقبل", "نستقبل", "نعتذر"), ()),                       # the positive word inside a refusal («يمنع سكن العزاب»)
     "office_inside": (("التواصل", "تواصل", "اتصل", "بالتواصل", "تواصلوا", "راسل"), ()),
-    "for_events": (("قاعه", "صاله", "قاعات", "صالات", "لاقامه"), ()),
+    # «غرفة حفلات ومناسبات», «قاعة اجتماعات ومناسبات», «منطقة احتفالات ومناسبات للسكان»: the building's own room; «هدايا
+    # ومناسبات», «ورد … ومناسبات»: what a shop sells (P2 13085 «ومناسبات», aqar 1783289 / 19532680, 🔬 2026-11-11)
+    "for_events": (("قاعه", "صاله", "قاعات", "صالات", "لاقامه", "غرفه", "هدايا", "هديه", "ورود", "ورد",
+                    "اجتماعات", "احتفالات", "منطقه"), ()),
     "industrial_area": (("الجبيل", "جبيل", "ينبع", "شارع"), ()),
     "quad_bikes": (("توصيل", "لتوصيل", "مندوب", "مناديب"), ()),
     "camels": (("قرين", "جرين"), ()),                                                    # «قرين ابل» is a brand
@@ -728,9 +736,15 @@ _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "rest
 _NEAR_NEVER_FACTS = frozenset({"air_conditioner", "furnished"})
 # A VIEW is not a distance (🔬 2026-11-05): «صالة معيشة مطلة بلكونة مطبخ أمريكي» has a balcony and a kitchen. A view word only
 # silences what can be outside (a park, a pool, a sea) — never the home's own rooms.
+_SEPARATE = frozenset(_n(w) for w in ("مستقل", "مستقله", "منفصل", "منفصله", "مستقلة", "منفصلة"))
+_UNIT_NOUNS = frozenset(_n(w) for w in ("الشقه", "الشقة", "الوحده", "الوحدة", "العقار", "الفيلا", "الدور", "المحل",
+                                        "شقه", "وحده", "عقار", "فيلا", "دور", "محل"))
+_ROAD_NAMED = frozenset(_n(w) for w in ("الدائري", "السريع", "العام", "الرئيسي", "الدولي", "السريعه", "الرئيسيه",
+                                        "المسمى", "المسمي"))   # «الطريق المسمى طريق الملك فهد» (CodeRabbit on #11820)
 _VIEW_WORDS = frozenset(_n(w) for w in ("مطل", "مطله", "تطل", "يطل", "اطلاله", "باطلاله", "overlooking", "views"))
 _UNIT_ROOMS = frozenset({"kitchen", "balcony", "maid_room", "driver_room", "laundry_room", "majlis", "dining_majlis", "elevator",
-                         "storage", "roof", "annex", "furnished", "two_entrances", "private_entrance", "car_entrance"})
+                         "storage", "roof", "annex", "furnished", "two_entrances", "private_entrance", "car_entrance",
+                         "toilets_on_site"})   # «غرفه مطله للحوش) عدد (۳) دورات مياه» (aqar 15126306, CodeRabbit #11820)
 # A NEARBY LIST item names a PLACE (🔬 2026-11-04 café audit): «Close to shops, restaurants, and markets». The list ends at
 # the first item that is not a place — DealApp's REGA list «مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» goes on
 # with the unit's own features — and it only ever silences the public places of _NEAR_PUBLIC_FACTS (never parking).
@@ -928,18 +942,36 @@ def _strip_wa(w: str) -> str:
 _AFFIRM = frozenset(_n(w) for w in ("يوجد", "توجد"))
 
 
+# «لا يوجد في المبنى مصعد», «لا يوجد بالعمارة مصعد» (CodeRabbit on #11820): ONE place phrase may sit between the no and
+# the item — it says where the lift is missing, not that something else is.
+_NEG_PLACES = frozenset(_n(w) for w in ("المبنى", "المبني", "العماره", "العمارة", "الشقه", "الشقة", "العقار", "الفيلا",
+                                         "الفله", "الدور", "البيت", "المنزل", "الموقع"))
+_NEG_PLACES_B = frozenset("ب" + w for w in _NEG_PLACES)
+
+
 def _negated_before(prev: list[str]) -> Optional[int]:
     """How many words back the negation starts, or None. A list of catalogue words may sit in between."""
     j = len(prev)
     affirmed = False
-    for _ in range(3):
+    placed = False
+    for _ in range(6):     # «لا يوجد مطبخ أو مكيفات أو مصعد متوفر»: a longer denied list (CodeRabbit on #11820)
         if j >= 1 and (prev[j - 1] in _NEG1 or _strip_wa(prev[j - 1]) in _NEG1):
             return len(prev) - (j - 1)
         if j >= 2 and (" ".join(prev[j - 2:j]) in _NEG2 or (_strip_wa(prev[j - 2]) + " " + prev[j - 1]) in _NEG2):
             return len(prev) - (j - 2)
         if affirmed:
             return None
-        if j >= 1 and _strip_wa(prev[j - 1]) in _LIST_WORDS | {"اي", "وجود", "يوجد"}:
+        if not placed and j == len(prev) and j >= 3 and prev[j - 2] == "في" and prev[j - 1] in _NEG_PLACES:
+            placed = True
+            j -= 2
+            continue
+        if not placed and j == len(prev) and j >= 2 and prev[j - 1] in _NEG_PLACES_B:
+            placed = True
+            j -= 1
+            continue
+        # «او» joins a denied list like «و» does: «لا يوجد مطبخ أو مكيفات راكبة» denies the ACs too (reinvest 19994388,
+        # 🔬 2026-11-11 — read when a trailing «لا يوجد» after «راكبة» stopped answering for them)
+        if j >= 1 and _strip_wa(prev[j - 1]) in _LIST_WORDS | {"اي", "وجود", "يوجد", "او"}:
             affirmed = _strip_wa(prev[j - 1]) in _AFFIRM
             j -= 1
             continue
@@ -950,7 +982,10 @@ def _negated_before(prev: list[str]) -> Optional[int]:
 # The NEXT label of a REGA licence block is not a descriptor of this word: «… ماء، كهرباء النزاعات: لا يوجد» says the
 # ad has no DISPUTES, not no electricity (🔬 2026-11-01: 12 dealapp/aqar ads, ops_text_facts_conflicts).
 _FORM_LABELS = frozenset(_n(w) for w in ("النزاعات", "نزاعات", "الالتزامات", "التزامات", "الحقوق", "القيود", "الرهن",
-                                          "الرهون", "الضمانات"))
+                                          "الرهون", "الضمانات",
+                                          # «عداد كهرب مستقل ملاحظات: * لا يوجد حوش» (reinvest 19994388, 🔬 2026-11-11):
+                                          # a NOTES heading opens the next list, its «لا يوجد» is the yard's
+                                          "ملاحظات", "الملاحظات", "ملاحظه", "الملاحظه", "تنبيه", "تنبيهات"))
 # Whether a RENT includes the bill is not whether the unit has the supply: «لا يشمل الكهرباء», «الماء: غير شامل»,
 # «المياه متوفرة (غير مشمولة)» (🔬 2026-11-01: ~35 ads served electricity / water unknown against a yes box).
 _BILLING = tuple(_n(w) for w in ("شامل", "مشمول", "يشمل", "تشمل"))
@@ -981,6 +1016,29 @@ def _billing_not_supply(fact: str, prev: list[str], nxt: list[str]) -> bool:
     return False
 
 
+# «مطبخ راكب لا يوجد مكيفات», «مطبخ راكب لا يتوفر مصعد», «مكيفات ومطبخ راكب لا يوجد أي تعاملات» (🔬 2026-11-11 kitchen
+# recall sample, aqar 23092840 / 22064297 / 14846870 / 9242120 / 14860625): the «لا يوجد» opens the NEXT item — the
+# ACs, the lift, the payments — so it is not this token's no. «مطبخ لا يوجد», «المطبخ: لا يوجد», «مطبخ لا يوجد حاليا»
+# and «… لا يوجد فيها» stay a no.
+_NEG_TAIL = frozenset(_n(w) for w in ("في", "فيه", "فيها", "به", "بها", "له", "لها", "معه", "معها", "حاليا", "حالياً", "ابدا",
+                                      "اطلاقا", "نهائيا", "للاسف", "بالشقه", "بالعقار", "بالفيلا", "بالدور"))
+
+
+def _affirmed(descriptor: str, fact: str) -> bool:
+    """The word between the token and a trailing «لا يوجد» already says it is there: «مطبخ راكب», «مصعد متوفر»."""
+    return _starts(_strip_wa(descriptor), _POST_NOT + tuple(_n(x) for x in _POST_NOT_FACT.get(fact, ())))
+
+
+def _negates_next_item(rest: list[str]) -> bool:
+    """True when words follow a «لا يوجد» that are another item, not this token's tail."""
+    # «لا يوجد في المبنى مصعد»: a place, THEN an item — the lift is the no, not the fitted kitchen (CodeRabbit on #11820).
+    # «لا يوجد في الشقة» (nothing after the place) stays a tail.
+    if len(rest) >= 3 and rest[0] == "في" and rest[2] not in _NEG_TAIL and _strip_wa(rest[2]) not in _NEG_TAIL \
+            and not rest[2].isdigit():
+        return True
+    return bool(rest) and not rest[0].isdigit() and _strip_wa(rest[0]) not in _NEG_TAIL and rest[0] not in _NEG_TAIL
+
+
 def _negated_after(nxt: list[str], fact: str) -> int:
     """How many words after the token belong to a post-negation («غير راكب», «لا», «لا يوجد», «0»), else 0."""
     for skip in (0, 1):                      # one descriptor may sit between: «مطبخ عربي غير راكب», «الضمانات ومدتها لا يوجد»
@@ -998,12 +1056,12 @@ def _negated_after(nxt: list[str], fact: str) -> int:
         if len(w) >= 2 and w[0] == "غير" and _starts(w[1], _POST_NOT + tuple(_n(x) for x in _POST_NOT_FACT.get(fact, ()))):
             return skip + 2
         if len(w) >= 1 and w[0] in ("لايوجد", "لاتوجد"):
-            return skip + 1
+            return 0 if skip and _affirmed(nxt[0], fact) and _negates_next_item(w[1:]) else skip + 1
         # «مطبخ: (لم يُركب وقيمته على المستأجر …)» (dealapp 22700725, 2026-11-05 two-way sample): «not fitted» is a no
         if len(w) >= 2 and w[0] == "لم" and _starts(w[1], ("يركب", "تركب", "يتم", "يتوفر", "تتوفر", "يوجد", "توجد")):
             return skip + 2
         if len(w) >= 2 and w[0] == "لا" and w[1] in ("يوجد", "توجد", "يتوفر", "تتوفر"):
-            return skip + 2
+            return 0 if skip and _affirmed(nxt[0], fact) and _negates_next_item(w[2:]) else skip + 2
         if len(w) >= 1 and w[0] == "لا" and (len(w) == 1 or w[1] == "غير"):
             return skip + 1
         if not skip and w and (w[0] in ("0", "no", "none") or (fact == "furnished" and w[0] == "unfurnished")):
@@ -1175,6 +1233,25 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «دخل شهري: متوقع للشقه بعد التاثيث», «فرص تحقيق دخل شهري»: a
                                                      # forecast, not income the property earns (P2 13085 «دخل شهري», aqar
                                                      # 113914 / 38786, 🔬 2026-11-10)
+    if fact == "main_road" and (_n(t[ws:we]).endswith("الطريق") or (_n(t[ws:we]).endswith("طريق") and (not gn or gn[0].startswith("و")))) \
+            and (_starts(_strip_wa(t[ws:we].split()[0]), tuple(_VIEW_WORDS)) or any(_strip_wa(w) in _VIEW_WORDS for w in p2)) \
+            and not (gn[:1] and (gn[0] in _ROAD_NAMED or _strip_wa(gn[0]) in _ROAD_NAMED or "ال" + _strip_wa(gn[0]) in _ROAD_NAMED)):
+        return None, s, e                            # «بلكونه (شرفه) مطلة على الطريق», «شقه … مطله على الطريق»: a view of
+                                                     # «the road», not a plot on a main road (P2 13085, 5 of 5 aqar,
+                                                     # 🔬 2026-11-11). «مطلة على الطريق الدائري» and «على طريق الملك فهد» stay.
+    if fact == "all_services" and not _strip_wa(t[ws:we].split()[-1]).startswith(_n("مخدوم")) \
+            and (gn[:1] and _strip_wa(gn[0]) in _SEPARATE
+                                   or len(gn) >= 2 and _strip_wa(gn[0]) in _UNIT_NOUNS and _strip_wa(gn[1]) in _SEPARATE):
+        return None, s, e                            # «كل خدمات الشقه مستقله / منفصلة»: separate utilities; «جميع
+                                                     # الخدمات ومطبخ مستقل» keeps it — the kitchen is separate (CodeRabbit #11820);
+                                                     # «أرض مخدومة مستقلة بصك» keeps it — «مستقلة» is the plot's (CodeRabbit #11820)
+    if fact == "garden" and p2 and _strip_wa(p2[-1]) in ("شارع", "شارعين") and t[ws:we].startswith("و") \
+            and not _owned_after(gn):
+        return None, s, e                            # «أرض سكنية شارع وحديقة»: the plot's neighbours (aqar 3543112);
+                                                     # «على شارع وبها حديقة خاصة» keeps its own (CodeRabbit on #11820)
+    if fact == "for_events" and p2 and _strip_wa(p2[-1]) in ("غرف", "الغرف"):
+        return None, s, e                            # «غرف مناسبات واسعة»: the building's event ROOMS — the plural only, so
+                                                     # «غرفتين ومسموح للمناسبات» keeps its permission (CodeRabbit on #11820)
     if fact == "reception" and re.match(r"^(?:ل|لل)استقبال(?:ك|كم|كن|كي)$", _n(t[ws:we]).lstrip("و")):
         return None, s, e                            # «جاهزة لاستقبالك», «بيتك جاهز لاستقبالك»: «ready to welcome YOU»,
                                                      # marketing, never a reception desk (P2 13085, 5 of 5 aqar, 🔬 2026-11-09)
@@ -1360,7 +1437,10 @@ _STAR_BULLET_RE = re.compile(r"(?<=\s)\*+(?=\s)")
 # العامة: 🏫 مدارس 🏥 مستشفيات 🛍️ محلات تجارية» the «المرافق» is what the flat is near, not «مرافق المشروع», so the
 # area's shops / market / mosque after it are the area's. Only that one word: «قريب من الخدمات ويوجد بالمجمع مسجد» still
 # owns its mosque («يوجد»), and a second «مرافق» later in the clause still counts.
-_NEAR_OBJECT_SKIP = frozenset(_n(w) for w in ("من", "جميع", "كل", "لجميع", "لكل", "الى", "إلى", "ل", "جدا", "جداً"))
+# «قريب من أهم الخدمات والمرافق🔥:- 🕌 مسجد 🌳 حديقة» (aqar 15006770 / 15017963, 🔬 2026-11-11 garden sample): «أهم / أبرز /
+# كافة» before the services word is the same heading
+_NEAR_OBJECT_SKIP = frozenset(_n(w) for w in ("من", "جميع", "كل", "لجميع", "لكل", "الى", "إلى", "ل", "جدا", "جداً",
+                                              "اهم", "ابرز", "افضل", "كافه", "كافة", "مختلف"))
 
 
 def _near_object_at(words: list[str], at: int) -> int:
@@ -1384,6 +1464,11 @@ _SVC_STOP = frozenset(_n(w) for w in ("المشروع", "للمشروع", "با�
                                       "للعماره", "بالعماره", "للسكان"))
 
 
+# «المبنى الآخر», «العمارة المجاورة»: ANOTHER building — its services are the area's, not the ad's (CodeRabbit on #11820)
+_OTHER_PLACE = frozenset(_n(w) for w in ("الاخر", "الآخر", "الاخري", "الأخرى", "المجاور", "المجاوره", "المجاورة",
+                                         "المقابل", "المقابله", "المقابلة"))
+
+
 def _svc_heading_end(words: list[str]) -> int:
     """Index just past «<near word> من [جميع/كل] الخدمات/المرافق/خدمات …» in `words`, or -1."""
     for k, w in enumerate(words):
@@ -1392,6 +1477,9 @@ def _svc_heading_end(words: list[str]) -> int:
             while j < len(words) and _strip_wa(words[j]) in _NEAR_OBJECT_SKIP:
                 j += 1
             if j < len(words) and _starts(_strip_wa(words[j]), _SERVICES_OBJECT):
+                # «الخدمات والمرافق» is ONE heading object: the «مرافق» joined to it is not «مرافق المشروع» (🔬 2026-11-11)
+                while j + 1 < len(words) and words[j + 1].startswith("و") and _starts(_strip_wa(words[j + 1]), _SERVICES_OBJECT):
+                    j += 1
                 return j + 1
     return -1
 
@@ -1552,8 +1640,13 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # an item that STARTS with a place runs on as the list's item however long the clause is: «إطلالة ونافذة على: حديقة،
         # جامع، ونادي صحي خدمات الموقع القريبة: * مدارس» (aqar 15128626, 🔬 2026-11-06 — the view's gym served as the unit's)
         list_base = near_list and comma and (len(words) <= 5 or _starts(_strip_wa(words[0]), _PLACE_WORDS)) \
-            and any(_starts(_strip_wa(w), _PLACE_WORDS) for w in words)
-        list_in = list_base and not _owns_item(words)
+            and any(_starts(_strip_wa(w), _PLACE_WORDS) or _strip_wa(w) in _SERVICES_OBJECT for w in words)
+        # «بالقرب من المسجد، المدارس، الخدمات، والحديقة» (aqar 14865940, 🔬 2026-11-11): «الخدمات» is an ITEM of the list,
+        # so the park after it is still the area's
+        list_in = list_base and not _owns_item(words) and not any(
+            (_strip_wa(w) in _SVC_STOP or w in _SVC_STOP)
+            and not (k + 1 < len(words) and (words[k + 1] in _OTHER_PLACE or _strip_wa(words[k + 1]) in _OTHER_PLACE))   # «حديقة المبنى الآخر»: another
+            for k, w in enumerate(words))                                              # building's, the list goes on (CodeRabbit #11820)   # «خدمات المبنى»: the building's own
         # …but only the ITEM continues the list: a spaced «*» bullet starts the next one (🔬 2026-11-07, P1 13301). aqar
         # 15128626 «إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس … * اتحاد ملاك مجاناً مميزات
         # المشروع» — «مميزات» 60 words and eight bullets later is the project's heading, not the gym's owner. The item's
@@ -2852,6 +2945,57 @@ def selftest() -> None:
         ("عمارة 4 أدوار", {"floors": 4.0}, ("building_rules",)),
         ("عدد الشقق 12", {"apartments_count": 12.0}, ()),
         ("عمارة فيها محلين", {"shops_count": 2.0}, ()),
+        # 🔬 2026-11-11 (P2 13085, backlog 1773): a view of «the road», a shop's goods, a building's own events room and
+        # services AROUND the home are not the feature
+        ("+ بلكونه (شرفه) مطلة على الطريق. شاشه TV", {}, ("main_road",)),                 # aqar 15126306
+        ("٣ غرف نوم واسعه و مطله على الطريق صالون و سفره", {}, ("main_road",)),           # aqar 19285205
+        ("ارض مطلة على الطريق الدائري", {"main_road": True}, ()),
+        ("عمارة تطل على طريق الملك عبدالله", {"main_road": True}, ()),
+        ("• هدايا ومناسبات ✔ واجهة واضحة", {}, ("for_events",)),                          # aqar_commercial 19532680
+        ("* غرفة حفلات ومناسبات غرف سائقين", {}, ("for_events",)),                        # aqar 1783289
+        ("استراحة للحفلات والمناسبات", {"for_events": True}, ()),
+        ("حولها كل خدمات وفي بداية الحي", {}, ("all_services",)),                         # aqar 15789013
+        ("المساحة: 130م² كل خدمات الشقه مستقله", {}, ("all_services",)),                 # aqar 15126557
+        ("ارض واصل لها جميع الخدمات", {"all_services": True}, ()),
+        # CodeRabbit on #11820
+        ("شقة مطلة على طريق", {}, ("main_road",)),
+        # a bare «طريق» then the next item is still a generic road view (CodeRabbit on #11820)
+        ("شقة مطلة على طريق وبها مطبخ راكب", {"kitchen": True}, ("main_road",)),
+        ("مطلة على طريق الملك فهد", {"main_road": True}, ()),
+        ("عمارة مطلة على الطريق المسمى طريق الملك فهد", {"main_road": True}, ()),
+        ("جميع خدمات الشقة متوفرة", {"all_services": True}, ()),
+        ("شاليه فيه غرفتين ومسموح للمناسبات", {"for_events": True}, ()),
+        ("شاليه فيه غرفتين ممنوع الحفلات", {"for_events": False}, ()),
+        # 🔬 2026-11-11 garden precision sample (5 of 25 served yeses were nearby places)
+        ("📍قريب من أهم الخدمات والمرافق🔥:- 🕌 مسجد 🌳 حديقة 🏃🏻‍♂️ ممشى الرحاب 🏥 مركز صحي", {}, ("garden",)),  # aqar 15006770
+        ("- مجمع كفاءات الطبي. - حديقة الإمام وبجانبها ملعب.", {}, ("garden",)),                          # aqar 10513608
+        ("◾️أرض سكنية شارع وحديقة في مركز البندرية", {}, ("garden",)),                                     # aqar 3543112
+        ("موقع مميز بالقرب من المسجد، المدارس، الخدمات، والحديقة. تفاصيل العقار", {}, ("garden",)),        # aqar 14865940
+        ("* حوش واسع. * مدخل سيارة. * حديقة خلفية. * مكيفات راكبة.", {"garden": True}, ()),                # aqar 14870810
+        ("مخازن وحديقة خاصة. ☀️ الدور الأول: صالة عائلية", {"garden": True}, ()),                          # aqar 18338000
+        ("فيلا على شارع وبها حديقة خاصة", {"garden": True}, ()),                                           # CodeRabbit on #11820
+        ("فيلا على شارع وحديقة خاصة", {"garden": True}, ()),
+        ("٣ غرف وصاله ٢ دورتين مياه مطبخ", {"toilets_on_site": True}, ()),                      # CodeRabbit on #11820
+        ("3 غرف نوم دورتا مياه صالة واحدة", {"toilets_on_site": True}, ()),
+        ("(ومنهم غرفه مطله للحوش) عدد (۳) دورات مياه. + بلكونه", {"toilets_on_site": True, "balcony": True}, ()),
+        ("غرف مناسبات واسعة", {}, ("for_events",)),                                              # CodeRabbit on #11820
+        ("قريب من المسجد، حديقة المبنى الآخر، بقالة", {}, ("garden", "market")),                 # CodeRabbit on #11820
+        ("كل خدمات الشقة منفصلة", {}, ("all_services",)),
+        ("جميع الخدمات ومطبخ مستقل", {"all_services": True}, ()),
+        ("لا يوجد مطبخ أو مكيفات أو مصعد متوفر لا يوجد حوش", {"elevator": False}, ()),   # CodeRabbit on #11820: denied, never yes
+        ("مطبخ راكب: لا يوجد في الشقة", {"kitchen": False}, ()),
+        ("أرض سكنية شارع وحديقة خاصة بالحي", {}, ("garden",)),
+        ("قريب من المسجد، خدمات المبنى، نادي رياضي، حضانة", {"gym": True}, ()),
+        # 🔬 2026-11-11 kitchen recall sample: a «لا يوجد» that opens the NEXT item is not this one's no
+        ("٣ غرف وصاله ٢ دورتين مياه مطبخ راكب لا يوجد مكيفات الشق الدور الاول", {"kitchen": True, "air_conditioner": False}, ()),  # aqar 23092840
+        ("3 غرف + 2 دورة مياه + صالة + مطبخ راكب لا يتوفر مصعد .", {"kitchen": True, "elevator": False}, ()),   # aqar 9242120
+        ("غرفتين نوم وصاله مكيفات ومطبخ راكب لا يوجد أي تعاملات ماليه خارج المكتب", {"kitchen": True}, ()),    # aqar 14860625
+        ("المطبخ: لا يوجد", {"kitchen": False}, ()),
+        ("مطبخ لا يوجد حاليا", {"kitchen": False}, ()),
+        ("* لا يوجد مطبخ أو مكيفات راكبة لا يوجد حوش", {"kitchen": False, "air_conditioner": False}, ()),   # reinvest 19994388
+        ("* 3 دورات مياه * عداد كهرب مستقل ملاحظات: * لا يوجد حوش أو ارتداد * الماء مشترك",
+         {"separate_electricity_meter": True, "yard": False}, ()),                                          # reinvest 19994388
+        ("مطبخ أمريكي راكب 4 مكيفات راكبة لا توجد منطقة خارجية موقف خاص", {"kitchen": True, "air_conditioner": True}, ()),  # muhaysini 25533105
     ]
     bad = []
     for text, want, absent in cases:
