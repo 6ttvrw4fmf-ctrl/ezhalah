@@ -62,6 +62,9 @@ const goneFiltered = (src: string) => /'gone30', case when v_ready then \(select
   && src.includes('(p_price_min is null or r.price >= p_price_min) and (p_price_max is null or r.price <= p_price_max)')
   && src.includes('(p_area_min is null or r.area_m2 >= p_area_min) and (p_area_max is null or r.area_m2 <= p_area_max)');
 check('«gone» follows every map filter, and only on a full, fresh log', goneFiltered(core));
+const goneSkipsDefaultPins = (src: string) => /from public\.map_fact_removal r\s+where v_ready[\s\S]*?and not exists \(select 1 from public\.ops_default_pin_register d\s+where d\.source_table = r\.source_table/.test(src);
+check('«gone» skips ads on a site\'s default pin, exactly as the pill\'s count does', goneSkipsDefaultPins(core));
+mustCatch('«gone» counting ads the pill never showed (default pins)', () => goneSkipsDefaultPins(core.replace(/(from public\.map_fact_removal r\s+where v_ready[^\n]*\n[^\n]*\n)\s*and not exists \(select 1 from public\.ops_default_pin_register d[^\n]*\n[^\n]*\n/, '$1')));
 mustCatch('«gone» shown before the log is ready', () => goneFiltered(core.replace("'gone30', case when v_ready then", "'gone30', case when true then")));
 mustCatch('«gone» ignoring the rooms filter', () => goneFiltered(core.replace('(p_beds is null or r.bedrooms = any (p_beds)) and ', '')));
 const keepsRooms = (src: string) => /posted_at, deactivated_at, left_at,\s*bedrooms, furnished\)/.test(src) && /posted_at, taken_at, bedrooms, furnished\)/.test(src);
@@ -76,6 +79,15 @@ mustCatch('neighbours from another city', () => nearRule(neighbors.replace('on b
 mustCatch('ten «nearest» districts', () => nearRule(neighbors.replace('where nb.rk <= 4', 'where nb.rk <= 10')));
 const fallback = (src: string) => /v_kind := 'near';/.test(src) && /v_kind := 'city';/.test(src) && /case when v_kind = 'near' then to_jsonb\(v_nb\.neighbors\) else to_jsonb\(array\[v_city\]\) end/.test(src);
 check('with no usable neighbours the comparison falls back to the city, and names the city', fallback(core));
+const freshNeighbours = (src: string) => /v_fresh_nb := exists \(select 1 from public\.map_district_neighbors nbt where nbt\.built_at >= now\(\) - interval '36 hours'\)/.test(src)
+  && /if \(v ->> 'ppm'\) is not null and v_city is not null and v_fresh_nb then/.test(src);
+check('a neighbours table older than 36 h hides the comparison (never yesterday\'s districts)', freshNeighbours(core));
+mustCatch('a comparison read from a stale neighbours table', () => freshNeighbours(core.replace('and v_city is not null and v_fresh_nb then', 'and v_city is not null then')));
+const detector = latestDef('mon_detect_map_view_facts');
+const watchesNeighbours = (src: string) => /select max\(built_at\) into nb_at from public\.map_district_neighbors;/.test(src) && /nb_at is null or nb_at < now\(\) - interval '36 hours'/.test(src) && /'map_view_facts:neighbors_stale'/.test(src);
+check('the alarm pages when the neighbours table is empty or older than 36 h', watchesNeighbours(detector));
+mustCatch('an alarm blind to an empty neighbours table', () => watchesNeighbours(detector.replace('nb_at is null or ', '')));
+check('the facts carry the time of the last nightly run (for «آخر تحديث»)', /'updated_at', \(select max\(cr\.run_at\) from public\.map_fact_capture_run cr where cr\.ok\)/.test(core));
 const cutsRule = (src: string) => src.includes('h.price_total < h.old_price_total and h.price_total >= h.old_price_total * 0.5') && /ss\.source = 'price_diary' and ss\.started_at <= now\(\) - interval '30 days'/.test(src);
 check('«خفضوا السعر»: a real drop (not a page re-read), shown once the diary covers 30 days', cutsRule(core));
 mustCatch('a 90% «cut» counted (a page re-read)', () => cutsRule(core.replace(' and h.price_total >= h.old_price_total * 0.5', '')));
