@@ -77,7 +77,7 @@ The empty English chat subtitle is “Describe it and Ezhalah” without punctua
 
 The header and sidebar Ezhalah name uses the theme ink, and assistant sparkle stars use the theme accent (sky/dusk redesign, owner 2026-10-24). Source artwork retains its original colors.
 
-The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction. The entire user bubble sits on the left for English and on the right for Arabic, determined per message (owner clarification, 2026-10-13).
+The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction. The user bubble sits on the right in both languages (owner clarification, 2026-10-23). English Filter requests reserve their complete text layout during the typing reveal, so letters appear left to right without the sentence sliding left or changing its wrapping (owner, 2026-10-28). Arabic keeps its right-to-left reveal.
 
 English property cards localize platform attribution, property-type labels and finite attribute values using the existing bilingual catalog (owner, 2026-10-13). Source reference IDs, including Arabic letters in plan numbers, remain verbatim; source images and logos remain original. Arabic card display is preserved.
 
