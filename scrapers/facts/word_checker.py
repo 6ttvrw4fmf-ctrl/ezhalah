@@ -545,9 +545,10 @@ def _near_later(words: list[str]) -> bool:
     for w in words:
         if any(b in w for b in _NEAR_LATER_BREAK):
             return False
-        if w.startswith("و") or _strip_wa(w) in ("في", "بموقع", "موقع", "الموقع", "موقعها", "موقعه"):
+        if w.startswith("و") or _strip_wa(w) in ("بموقع", "موقع", "موقعها", "موقعه"):
             return False                             # «… بجميع الخدمات وقريبة من الطريق»: «و» opens the NEXT item;
-                                                     # «متوفرة في موقع قريب من الطريق»: the LOCATION is near (CodeRabbit #12178)
+                                                     # «متوفرة في موقع قريب من الطريق»: the LOCATION is near; a bare «في» is not a new
+                                                     # subject — «جميع الخدمات في مكان قريب» stays silent (CodeRabbit #12178)
         if _starts(w, ("قريب", "بالقرب")):
             return True
     return False
@@ -1309,7 +1310,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «معرض للمطابخ» (a showroom), «تكييف كاسيت للمطابخ», «مراوح شفط
                                                      # للمطابخ»: something FOR the kitchens, not a fitted kitchen (P2 13085
                                                      # «للمطابخ», 4 of 4 aqar, 🔬 2026-11-13; like «للحمامات» 11-09)
-    if fact == "optical_fibers" and ((p2 and p2[-1] == "glass") or (gn[:1] and gn[0] == "glass")
+    if fact in ("optical_fibers", "internet") and ((p2 and p2[-1] == "glass") or (gn[:1] and gn[0] == "glass")
                                      or _n(t[ws:we]).startswith(("fiberglass", "fibreglass"))):
         return None, s, e                            # «أرضيات Glass Fiber», «fiber glass»: a building material, not optical
                                                      # fibre internet (P2 13085 «fiber», aqar 9561593, 🔬 2026-11-13)
@@ -1375,7 +1376,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # …and an un-negated EXISTENCE verb that opens the match affirms it: «لا يوجد مصعد ويوجد محلات» has shops (the old
     # look-back walked past «مصعد» to the lift's «لا يوجد»). Prepositions keep the look-back: «لا يوجد بها محلات» is a no.
     verb_affirms = fact in _LEAD_VERB_FACTS and bool(lead) and _strip_wa(lead[0]) in _EXIST_VERBS
-    if fact in _UNIT_ROOMS and prev and _strip_wa(prev[-1].strip("(")) in _EXCEPT_WORDS and "غسال" not in _n(t[ws:we]):
+    if fact in _UNIT_ROOMS and prev and _strip_wa(prev[-1].strip("(")) in _EXCEPT_WORDS and "غسال" not in _n(t[ws:we]) \
+            and not _negated_after(nxt, fact):                # «باستثناء المطبخ غير راكب» keeps its own «no» (CodeRabbit #12178)
         return None, s, e                            # «مكيفات مخفية (ماعدا غرفة السائق … مكيفات سبيلت)», «جميع الغرف
                                                      # ماعدا غرفة السائق»: the room EXISTS — it is the exception to
                                                      # something else, never a «no» (aqar 14875791, 21286, 17657272,
@@ -2992,7 +2994,10 @@ def selftest() -> None:
         ("تمديدات كهرباء وتكييف سبليت راكب", {"air_conditioner": True}, ()),                      # CodeRabbit #12178
         ("تمديدات السباكة والتكييف المركزي", {}, ("air_conditioner",)),                            # CodeRabbit #12178
         ("شترات كاملة لجميع النوافذ * مكيفات راكبة * أرضيات Glass Fiber * صيانة شاملة", {}, ("optical_fibers",)),  # aqar 9561593
-        ("Fiber glass water tank", {}, ("optical_fibers",)),
+        ("Fiber glass water tank", {}, ("optical_fibers", "internet")),
+        ("أرضيات Glass Fiber * صيانة شاملة", {}, ("optical_fibers", "internet")),                 # CodeRabbit #12178
+        ("جميع الخدمات في مكان قريب", {}, ("all_services",)),                                    # CodeRabbit #12178
+        ("جميع التجهيزات متوفرة باستثناء المطبخ غير راكب", {"kitchen": False}, ()),               # CodeRabbit #12178
         ("High-speed fiber internet 📺 Smart TV", {"optical_fibers": True}, ()),
         ("ارض مسورة للايجار مساحتها 615م وعليها رخصة انشاء وبها قسم معزول بمسبح وغرف", {"pool": True}, ()),   # aqar 27587225
         ("توجد رخصة بناء تسوير وملاحق", {}, ("annex", "fence")),
