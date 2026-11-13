@@ -30,14 +30,20 @@ check('with no type picked the price is never mixed — the box asks for a type'
 const rentNoType = factBox({ ...full, ppm: null, nbPpm: null }, 560, 'ar', false, false);
 check('a rent or mixed-deal view never asks for a type (no price can appear there)', rentNoType.kind === 'chips' && rentNoType.hint === null);
 check('the English city fallback goes through the transliterator', comparisonChip(11800, 10000, 'city', 'الرياض', 'en', () => 'Riyadh').text.includes('Riyadh') && comparisonChip(11800, 10000, 'city', 'الرياض', 'ar', () => 'Riyadh').text.includes('الرياض'));
-check('screen readers hear the sign-in ask, not the fake numbers', /accessibilityLabel=\{lockedAsk\(loc\)\}/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')) && /importantForAccessibility="no-hide-descendants"/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+const screenSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
+const guestSmall = (src: string) => /accessibilityLabel=\{lockedAsk\(loc\)\}/.test(src) && /\{box\.kind === 'locked' \? \(\s*<Pressable onPress=\{\(\) => openAuth\(\)\}[^>]*>\s*<Text style=\{s\.factAsk\}>\{lockedAsk\(loc\)\}<\/Text>\s*<\/Pressable>/.test(src) && !/FACT_BLUR/.test(src);
+check('a guest sees only the small sign-in ask (no blurred row), and screen readers hear it', guestSmall(screenSrc));
+mustCatch('the big blurred guest row coming back', () => guestSmall(screenSrc.replace('<Text style={s.factAsk}>{lockedAsk(loc)}</Text>', '<View style={[s.factLine, FACT_BLUR]} /><Text style={s.factAsk}>{lockedAsk(loc)}</Text>')));
+const small = (src: string) => /countPillTall: \{ borderRadius: 12, maxWidth: '64%', paddingVertical: 6 \}/.test(src) && /factLine: \{ color: '#fff', fontSize: 11\.5,/.test(src) && !/factChip:/.test(src);
+check('the box is small: one line of 11.5px words, at most 64% of the map wide (clear of the buttons)', small(screenSrc));
+mustCatch('boxed chips back (the big box)', () => small(screenSrc + "\n  factChip: { color: '#fff' },"));
 check('no Arabic diacritics anywhere in the box', texts(b).every((t) => !MARKS.test(t)) && !MARKS.test(String(noType.kind === 'chips' ? noType.hint : '')));
 mustCatch('a box that ignores the pill\'s count', () => { const ignoresPill = (f: ViewFacts, _shown: number) => factBox(f, f.any, 'ar', true); return ignoresPill(full, 559).kind === 'none'; });
 
 const drawnBox = factBox(full, 560, 'ar', true, true, (x) => x, true);
 check('a drawn boundary gets the facts for the ads inside it, without «أحياء قريبة»', drawnBox.kind === 'chips' && texts(drawnBox).includes('72 جديد') && !texts(drawnBox).some((t) => t.includes('أحياء قريبة')));
 mustCatch('a drawing compared with «nearby districts»', () => { const b2 = factBox(full, 560, 'ar', true, true, (x) => x, false); return b2.kind === 'chips' && !texts(b2).some((t) => t.includes('أحياء قريبة')); });
-check('the map asks for facts inside a drawing too (its pin read carries the polygon)', /\(!viewPlace && !hasShape && !factsExact\)\) return;/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')) && !/hasShape \|\| drawing \|\|/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+check('the map asks for facts inside a drawing too (its pin read carries the polygon)', /\(!viewPlace && !hasShape && !factsExact\)\) \{ forget\(''\); return; \}/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')) && !/hasShape \|\| drawing \|\|/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 
 // 2. the comparison
 check('pricier than the neighbours reads red with the percentage', plain(comparisonChip(10900, 10000, 'near', 'الرياض', 'ar').text) === 'أغلى من أحياء قريبة 9%' && comparisonChip(10900, 10000, 'near', 'الرياض', 'ar').tone === 'up');
@@ -78,6 +84,50 @@ const atDistrict = areaPlace(rows, 'district', 'ar', (x) => x, { latitude: 24.8,
 check('the district the pill names carries its own facts key (city + district)', atDistrict?.facts?.level === 'district' && atDistrict.facts.city === 'الرياض' && atDistrict.facts.district === 'الملقا' && atDistrict.n === 900);
 check('the whole-Kingdom view carries no place facts', !areaPlace(rows, 'country', 'ar', (x) => x, { latitude: 24, longitude: 45 }, { latitudeDelta: 17, longitudeDelta: 17 })?.facts);
 
+// 3d. the pill names a city but counts only the districts on screen: the facts of EXACTLY those districts (summed)
+const part: AreaRow[] = [{ city: 'الرياض', district: 'حي الملقا', lat: 24.8, lng: 46.6, n: 400 }, { city: 'الرياض', district: 'حي حطين', lat: 24.76, lng: 46.6, n: 350 },
+  { city: 'الرياض', district: 'حي النرجس', lat: 24.85, lng: 46.65, n: 380 }, { city: 'جدة', district: 'حي الروضة', lat: 24.82, lng: 46.62, n: 20 }];
+const cityNamed = areaPlace(part, 'district', 'ar', (x) => x, { latitude: 24.8, longitude: 46.62 }, { latitudeDelta: 0.3, longitudeDelta: 0.3 });
+const keyedToItsDistricts = (p: typeof cityNamed) => p?.facts?.level === 'districts' && p.facts.city === 'الرياض'
+  && JSON.stringify([...(p.facts.districts ?? [])].sort()) === JSON.stringify(['حي الملقا', 'حي النرجس', 'حي حطين'].sort()) && p.n === 1130;
+check('a city-named view of part of the city reads the facts of exactly its districts (same ads as its count)', keyedToItsDistricts(cityNamed), JSON.stringify(cityNamed));
+mustCatch('a part-of-the-city view keyed to the WHOLE city (facts for ads it does not count)', () => keyedToItsDistricts(cityNamed ? { ...cityNamed, facts: { level: 'city', city: 'الرياض', district: '' } } : null));
+const data = readFileSync(join(root, 'src/data/mapViewFacts.ts'), 'utf8');
+check('the districts on screen are summed by map_place_facts_sum_ar', /place\.level === 'districts' \? 'map_place_facts_sum_ar' : 'map_place_facts_ar'/.test(data) && /p_districts: \[\.\.\.new Set\(place\.districts \?\? \[\]\)\]\.sort\(\)/.test(data));
+check('a place\'s facts (all types) never ask «اختر نوع العقار» — picking a type would leave them', (() => { const x = factBox({ ...full, ppm: null, nbPpm: null, place: true }, 560, 'ar', false); return x.kind === 'chips' && x.hint === null; })());
+mustCatch('a place box that asks for a type', () => { const x = factBox({ ...full, ppm: null, nbPpm: null, place: false }, 560, 'ar', false); return x.kind === 'chips' && x.hint === null; });
+
+// 3e. after a district search the pill and its box are about THAT district (owner 2026-11-13: «it shows later … not true»)
+const around: AreaRow[] = [{ city: 'الرياض', district: 'حي الملقا', lat: 24.81, lng: 46.61, n: 1916 }, { city: 'الرياض', district: 'حي القيروان', lat: 24.84, lng: 46.58, n: 1205 },
+  { city: 'الرياض', district: 'حي حطين', lat: 24.76, lng: 46.6, n: 592 }, { city: 'الرياض', district: 'حي الصحافة', lat: 24.8, lng: 46.64, n: 840 },
+  { city: 'الرياض', district: 'حي النرجس', lat: 24.83, lng: 46.66, n: 6539 }, { city: 'الرياض', district: 'حي العقيق', lat: 24.77, lng: 46.63, n: 546 }];
+const V0 = { latitude: 24.805, longitude: 46.615 }; const S0 = { latitudeDelta: 0.12, longitudeDelta: 0.12 };
+const malqa = { district: 'الملقا', lat: 24.808, lng: 46.612, latitudeDelta: 0.12 };
+const leads = (p: ReturnType<typeof areaPlace>) => p?.name === 'حي الملقا' && p.n === 1916 && p.facts?.level === 'district' && p.facts.district === 'حي الملقا' && p.facts.city === 'الرياض';
+check('a searched district names the pill with ITS count and ITS facts, even when it is not most of the screen', leads(areaPlace(around, 'district', 'ar', (x) => x, V0, S0, malqa)));
+check('…and lets go once the user zooms well out', !leads(areaPlace(around, 'district', 'ar', (x) => x, V0, { latitudeDelta: 0.3, longitudeDelta: 0.3 }, malqa)));
+check('…or pans it off the screen', !leads(areaPlace(around, 'district', 'ar', (x) => x, { latitude: 24.6, longitude: 46.8 }, S0, malqa)));
+check('a same-named district far from where Apple put the search is never taken for it', !leads(areaPlace(around, 'district', 'ar', (x) => x, V0, S0, { ...malqa, lat: 21.5, lng: 39.2 })));
+check('with no search the old rule stands (the city named over many districts)', areaPlace(around, 'district', 'ar', (x) => x, V0, S0)?.facts?.level === 'districts');
+mustCatch('a searched district ignored (the pill names the whole screen after the user searched one district)', () => leads(areaPlace(around, 'district', 'ar', (x) => x, V0, S0)));
+const webSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
+const focusWired = (src: string) => /if \(p\.kind === 'district'\) live\.focus = \{ district: /.test(src) && /areaPlace\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span, live\.focus\);/.test(src) && /live\.focus = null;/.test(src);
+check('a district search sets the focus, the label view reads it, clearing the search clears it', focusWired(webSrc));
+mustCatch('a label view that never reads the searched district', () => focusWired(webSrc.replace('m.region.span, live.focus);', 'm.region.span);')));
+
+// 3f. fast and steady (owner 2026-11-13: «it takes time for it to show … it feels glitchy»)
+const fast = (src: string, data: string) => /if \(!level && factsZoom\(span\.latitudeDelta\)\) void fetchViewFacts\(paddedBox\(center, span\), pins, signedInRef\.current\);/.test(src)
+  && !/setTimeout\(\(\) => \{ void fetch(View|Place)Facts/.test(src)
+  && /const out = inflight\.get\(key\);\s*if \(out\) return out;/.test(data);
+const dataSrc = readFileSync(join(root, 'src/data/mapViewFacts.ts'), 'utf8');
+const webNow = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
+check('the box\'s facts are read with the pins (no pause), and a second ask for the same view joins the read already out', fast(webNow, dataSrc));
+mustCatch('the 350 ms pause back before the box is asked for', () => fast(webNow.replace('void fetchViewFacts(box, pinFilter, !!user).then(', 'const tm = setTimeout(() => { void fetchViewFacts(box, pinFilter, !!user).then('), dataSrc));
+mustCatch('two reads for the same view (the box waits for the second)', () => fast(webNow, dataSrc.replace('if (out) return out;', '')));
+const steady = (src: string) => /const forget = \(key: string\) => \{ if \(factsKeyRef\.current !== key\) \{ factsKeyRef\.current = key; setViewFacts\(null\); \} \};/.test(src) && !/useEffect\(\(\) => \{\s*setViewFacts\(null\);/.test(src);
+check('the box is cleared only when asked about another view (no blink when the count or the name lands)', steady(webNow));
+mustCatch('a box that blinks off on every re-ask', () => steady(webNow.replace('  useEffect(() => {\n    const m = mapRef.current;\n    // The box is cleared only', '  useEffect(() => {\n    setViewFacts(null);\n    const m = mapRef.current;\n    // The box is cleared only')));
+
 // 4. the screen asks for the box the count was read over, and compares with the number it shows
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(paddedBox\(center, span\)\);/.test(src)
@@ -88,6 +138,9 @@ const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(p
   && /factBox\(viewFacts, hasShape \? pinCount : placeCount \?\? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape\)/.test(src)
   && /fetchViewFacts\(box, pinFilter, !!user\)/.test(src);
 check('the map asks for the counted box and shows the facts only against the number it shows', wired(web));
+const bubblesExact = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(paddedBox\(center, span\)\); if \(drawCell > 0 && factsWide\(span\.latitudeDelta\)\) setFactsExact\(true\);/.test(src);
+check('a bubble view (whole map squares) takes the exact count of the view from the box, so the box can show', bubblesExact(web));
+mustCatch('a bubble view whose square count never meets the box\'s exact count (box never shows)', () => bubblesExact(web.replace(' if (drawCell > 0 && factsWide(span.latitudeDelta)) setFactsExact(true);', '')));
 const placeWired = (src: string) => /factsPlace && !hasShape && !drawing && pinFilter && placeFactsFit\(pinFilter\) && typeof placeCount === 'number'/.test(src)
   && /fetchPlaceFacts\(place, deals, !!user\)/.test(src)
   && /setFactsPlace\(!whole && place\?\.facts \? place\.facts : null\);/.test(src)

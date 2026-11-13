@@ -138,7 +138,8 @@ export function factBox(f: ViewFacts | null, shown: number | null, loc: 'ar' | '
     }
   }
   if (f.cuts30) chips.push({ text: loc === 'ar' ? `${n(f.cuts30)} خفضوا السعر` : `${n(f.cuts30)} price cuts`, tone: 'plain' });
-  const hint = saleOnly && !typePicked && !f.ppm && !f.topPpm ? (loc === 'ar' ? 'اختر نوع العقار لعرض السعر' : 'Pick a property type to see the price') : null;
+  // a place's prepared facts are for ALL types (picking one leaves them), so they never ask for a type
+  const hint = saleOnly && !typePicked && !f.ppm && !f.topPpm && !f.place ? (loc === 'ar' ? 'اختر نوع العقار لعرض السعر' : 'Pick a property type to see the price') : null;
   if (chips.length === 0 && !hint) return { kind: 'none' };
   return { kind: 'chips', chips, hint };
 }
