@@ -533,7 +533,9 @@ _BEARINGS = ("شمال", "جنوب", "شرق", "غرب", "الشمال", "الج
 # Per-fact context words: (excluded if one of the 2 words BEFORE starts with…, excluded if one of the 2 AFTER…)
 # 🔬 2026-11-13 (P1 14340 «كل خدمات» / «ومناسبات» still served after #11820): words that make «كل خدمات» someone
 # else's or a set-up, an exception before an event word, and a «nearby» read a little past the 2-word window.
-_SERVICES_NOT_OWN = frozenset({"يشمل", "تشمل", "يشملها", "مؤسس", "مؤسسه", "تاسيس"})   # «شامل جميع الخدمات ⚡ الكهرباء» stays a yes
+_SERVICES_NOT_OWN = frozenset({"مؤسس", "مؤسسه", "تاسيس"})   # «شامل جميع الخدمات ⚡ الكهرباء» stays a yes
+_SERVICES_COVER = frozenset({"يشمل", "تشمل", "يشملها"})       # «ويشمل كل خدمات العمارة»: only with the building's noun after
+_BUILDING_NOUNS = frozenset({"عماره", "مبني", "برج", "مجمع", "كمباوند"})   # compared after _strip_wa (drops «ال»)
 _EXCEPT_WORDS = frozenset({"عدا", "ماعدا", "باستثناء", "خلا"})
 _NEAR_LATER_BREAK = ("⭐", "✅", "✔", "•", "🔸", "🔹", "-", ".", "،", ",", "؛", ":")
 
@@ -543,8 +545,9 @@ def _near_later(words: list[str]) -> bool:
     for w in words:
         if any(b in w for b in _NEAR_LATER_BREAK):
             return False
-        if w.startswith("و"):
-            return False                             # «… بجميع الخدمات وقريبة من الطريق»: «و» opens the NEXT item
+        if w.startswith("و") or _strip_wa(w) in ("في", "بموقع", "موقع", "الموقع", "موقعها", "موقعه"):
+            return False                             # «… بجميع الخدمات وقريبة من الطريق»: «و» opens the NEXT item;
+                                                     # «متوفرة في موقع قريب من الطريق»: the LOCATION is near (CodeRabbit #12178)
         if _starts(w, ("قريب", "بالقرب")):
             return True
     return False
@@ -1282,7 +1285,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
             and not _owned_after(gn):
         return None, s, e                            # «أرض سكنية شارع وحديقة»: the plot's neighbours (aqar 3543112);
                                                      # «على شارع وبها حديقة خاصة» keeps its own (CodeRabbit on #11820)
-    if fact == "all_services" and any(_strip_wa(w) in _SERVICES_NOT_OWN for w in gp[-3:]):
+    if fact == "all_services" and (any(_strip_wa(w) in _SERVICES_NOT_OWN for w in gp[-3:])
+                                   or (any(_strip_wa(w) in _SERVICES_COVER for w in gp[-3:])
+                                       and any(_strip_wa(w) in _BUILDING_NOUNS for w in gn[:2]))):
         return None, s, e                            # «ويشمل كل خدمات العمارة» (the rent covers the building's services),
                                                      # «منطقة مؤسس فيها كل خدمات التاون هاوس من خزان المياة» (a utility
                                                      # zone): neither says the home is connected (P1 14340, aqar 25431484 /
@@ -1291,7 +1296,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «كل خدمات شمال الرياض قريبة»: the services NEAR it, read past the
                                                      # 2-word window (P1 14340, aqar 15134259, 🔬 2026-11-13)
     if fact == "air_conditioner" and _strip_wa(_n(t[ws:we])) in ("التكييف", "تكييف", "التكيف", "تكيف") \
-            and any(_starts(_strip_wa(w), ("تمديد",)) for w in gp[-3:]):
+            and any(_starts(_strip_wa(w), ("تمديد",)) for w in gp[-3:]) \
+            and not any(_starts(_strip_wa(w), ("راكب", "مركب", "سبليت", "سبلت", "شباك", "مخفي", "كونسيلد", "مركزي", "كاست", "دكت"))
+                        for w in gn[:2]):
         return None, s, e                            # «خزان المياة وتمديدات السباكة و التكييف»: the AC PIPEWORK, not AC
                                                      # units (aqar 35244 / 7041221 / 9605735, 🔬 2026-11-13)
     if fact == "bills_included" and gn[:1] and _starts(_strip_wa(gn[0]), ("العقار", "عقار")):
@@ -2979,6 +2986,9 @@ def selftest() -> None:
         ("ميزات المشروع / Project Features: • نادي رياضي • Gym • ممشى مشترك • Shared Walking Path • مسبح • Swimming Pool", {"pool": True}, ()),  # aqar 20965749
         ("وحدات ذكيه مكانس كهربائيه مسبح غرفة خادمه وسائق ديوانيه", {"pool": True}, ()),   # aqar 14998996
         ("مكان مسبح", {}, ("pool",)),
+        ("تشمل الأرض جميع الخدمات من كهرباء وماء وصرف صحي", {"all_services": True}, ()),          # CodeRabbit #12178
+        ("جميع الخدمات متوفرة في موقع قريب من الطريق", {"all_services": True}, ()),              # CodeRabbit #12178
+        ("تمديدات كهرباء وتكييف سبليت راكب", {"air_conditioner": True}, ()),                      # CodeRabbit #12178
         ("شترات كاملة لجميع النوافذ * مكيفات راكبة * أرضيات Glass Fiber * صيانة شاملة", {}, ("optical_fibers",)),  # aqar 9561593
         ("Fiber glass water tank", {}, ("optical_fibers",)),
         ("High-speed fiber internet 📺 Smart TV", {"optical_fibers": True}, ()),
