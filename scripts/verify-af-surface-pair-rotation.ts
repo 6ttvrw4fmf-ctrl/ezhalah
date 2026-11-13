@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const SRC = join(ROOT, 'scripts', 'verify-af-full-surface-differential.ts');
@@ -46,7 +47,7 @@ mutation('a «budget» that stops even unbudgeted local runs is caught', !stopsW
 
 // The workflow must actually set the budget, below the job's own cap.
 const wf = readFileSync(join(ROOT, '.github', 'workflows', 'af-live-truth-check.yml'), 'utf8');
-const job = wf.slice(wf.indexOf('  af-surface-region:'), wf.indexOf('  af-surface-city:'));
+const job = windowBetween(wf, '  af-surface-region:', '  af-surface-city:', 'af-live-truth-check.yml');
 const budget = Number(/AF_FSD_PAIR_BUDGET_MIN:\s*['"]?(\d+)/.exec(job)?.[1] ?? NaN);
 const cap = Number(/timeout-minutes:\s*(\d+)/.exec(job)?.[1] ?? NaN);
 check('af-surface-region sets AF_FSD_PAIR_BUDGET_MIN', Number.isFinite(budget) && budget > 0, `budget=${budget}`);
