@@ -754,6 +754,13 @@
       "proven_on": "2026-10-30",
       "note": "Partial: pinned ad has JSON + Maps link; 287995454 and 287440508 show nothing. Served 71/88 (80.7%) on 2026-10-30 before today's fixes."
     },
+    "propertyfinder": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://www.propertyfinder.sa/ar/plp/buy/apartment-for-sale-makkah-al-mukarramah-ar-%D9%85%D9%83%D8%A9-%D8%A7%D9%84%D9%85%D9%83%D8%B1%D9%85%D8%A9-%D8%A7%D9%84%D8%AE%D8%B6%D8%B1%D8%A7%D8%A1-52399980.html",
+      "proven_on": "2026-11-06",
+      "note": "Each ad's own payload property.location.coordinates (scrapers/propertyfinder/run.py _location); source-reread run 42279053408 found it on the ad page; 4,544 pins on 4,549 ads on 2026-11-06. Production row: migration 20261106203732 (the JSON row was never committed — added 2026-11-13)."
+    },
     "qmra": {
       "pin_source": "none",
       "floor_pct": 0,
