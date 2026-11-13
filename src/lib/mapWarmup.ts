@@ -10,6 +10,22 @@ let armed = false;     // the timer and the first-touch listener are set
 // answers measured 5.8 s to city names on a mid-range phone (site-speed robot, 2026-11-05), because nothing had been
 // fetched yet. The first touch anywhere on the page now starts the warm-up at once (warmMapNow), whichever is first.
 export const WARM_DELAY_MS = 1200;
+// THE TABS' CODE GOES FIRST (owner 2026-11-13: «slow slow slow moving between AI agent, map …»). Measured with Safari's
+// engine: tapping «خريطة» or «الوسيط الذكي» 1.5 s after opening downloaded 286 / 614 KB on the tap and took ~1 s; with
+// that code already fetched the same tap took 0.37 s. The three screens' code alone (no map data, no feeds) is fetched
+// CODE_WARM_MS after the page starts — light enough not to slow the home page; the map's data still waits WARM_DELAY_MS.
+export const CODE_WARM_MS = 300;
+let codeStarted = false;
+const goCode = () => {
+  if (codeStarted) return;
+  codeStarted = true;
+  void import('@/app/agent').catch(() => { codeStarted = false; });
+  void import('@/app/map').catch(() => { codeStarted = false; });
+  void import('@/app/index').catch(() => { codeStarted = false; });
+  // The map screen's own pieces (code only — Apple's script and the feeds still wait for go()).
+  void import('@/components/AppleMap').catch(() => {});
+  void import('@/components/MapDealRow').catch(() => {});
+};
 
 const go = () => {
   if (started) return;
@@ -39,6 +55,7 @@ export function warmMapSoon(delayMs = WARM_DELAY_MS): void {
   const conn = (navigator as unknown as { connection?: { saveData?: boolean } }).connection;
   if (conn?.saveData) return;
   armed = true;
+  setTimeout(goCode, CODE_WARM_MS);
   // the first finger on the page (a pointerdown comes before the tap on «خريطة» itself) starts it at once
   window.addEventListener('pointerdown', warmMapNow, { once: true, passive: true, capture: true });
   const idle = (window as unknown as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;

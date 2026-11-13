@@ -45,6 +45,10 @@ const touchOk = (src: string) => /window\.addEventListener\('pointerdown', warmM
   && /export const WARM_DELAY_MS = 1200;/.test(src) && /if \(started\) return;\n\s*started = true;/.test(src);
 check('the first touch starts the warm-up at once, and the timer is 1.2 s + ≤ 1.5 s idle', touchOk(warm));
 mustCatch('no first-touch start', !touchOk(warm.replace("window.addEventListener('pointerdown', warmMapNow, { once: true, passive: true, capture: true });", '')));
+const codeOk = (src: string) => /export const CODE_WARM_MS = 300;/.test(src) && /armed = true;\n\s*setTimeout\(goCode, CODE_WARM_MS\);/.test(src)
+  && /void import\('@\/app\/agent'\)\.catch\(\(\) => \{ codeStarted = false; \}\);/.test(src) && /void import\('@\/app\/map'\)\.catch\(\(\) => \{ codeStarted = false; \}\);/.test(src);
+check('the three tabs\' code is fetched 0.3 s after the page starts, before the map data (owner 2026-11-13)', codeOk(warm));
+mustCatch('the tabs\' code waiting for the 1.2 s map warm-up again', !codeOk(warm.replace('setTimeout(goCode, CODE_WARM_MS);', '')));
 mustCatch('the old 2.5 s delay', !touchOk(warm.replace('WARM_DELAY_MS = 1200;', 'WARM_DELAY_MS = 2500;')));
 mustCatch('a warm-up that can run twice', !touchOk(warm.replace(/if \(started\) return;\n(\s*)started = true;/, '$1started = true;')));
 
