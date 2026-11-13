@@ -158,5 +158,24 @@ const placeGuest = (src: string) => { const g = guestBranch(src); const keys = g
 check('a guest gets only yes/no flags from the prepared facts too', placeGuest(placeRpc));
 mustCatch('a prepared guest branch that leaks the price', () => placeGuest(placeRpc.replace("'has_ppm', r.top_ppm is not null", "'top_ppm', r.top_ppm")));
 
+// the districts on screen, added up (the pill names a city but counts only them): every named district or nothing, counts
+// only unless they are the whole city, and a guest still gets only yes/no flags — in EVERY guest branch
+const sumRpc = latestDef('map_place_facts_sum_ar');
+const sumRules = (src: string) => /if s\.k is distinct from v_want then return null; end if;/.test(src)
+  && /b\.built_at < now\(\) - interval '3 hours' or b\.failed > 0 then return null;/.test(src)
+  && /cardinality\(p_deals\) <> 1 then return null;/.test(src)
+  && /if found and abs\(c\.n_ads - s\.n\) <= greatest\(3, round\(c\.n_ads \* 0\.03\)\) then/.test(src)
+  && /case when bool_and\(pf\.gone30 is not null\) then sum\(pf\.gone30\) end as gone30/.test(src)
+  && /case when bool_and\(pf\.cuts30 is not null\) then sum\(pf\.cuts30\) end as cuts30/.test(src)
+  && !/'(top_ppm|top_type|nb_ppm)', s\./.test(src);
+check('summed districts: every named district has a row or nothing is served, fresh only, counts only (a median is never added up), the city\'s price only when they ARE the city', sumRules(sumRpc));
+mustCatch('a sum served with a district missing (its ads counted, its facts not)', () => sumRules(sumRpc.replace('if s.k is distinct from v_want then return null; end if;', '')));
+mustCatch('the city\'s price served for a part of the city', () => sumRules(sumRpc.replace('<= greatest(3, round(c.n_ads * 0.03)) then', '<= c.n_ads then')));
+mustCatch('a «gone» sum over districts whose log is not ready', () => sumRules(sumRpc.replace('case when bool_and(pf.gone30 is not null) then sum(pf.gone30) end as gone30', 'sum(pf.gone30) as gone30')));
+const allGuests = (src: string) => { const gs = [...src.matchAll(/if auth\.uid\(\) is null then([\s\S]*?)end if;/g)].map((m) => m[1]);
+  return gs.length === 2 && gs.every((g) => { const keys = guestKeys(g); return keys.includes('locked') && keys.every((k) => GUEST_KEYS.has(k) || k === 'place'); }); };
+check('a guest gets only yes/no flags from the summed districts too (both branches)', allGuests(sumRpc));
+mustCatch('a summed guest branch that leaks the new-ads count', () => allGuests(sumRpc.replace("'has_new', s.new30 > 0,", "'new30', s.new30,")));
+
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-map-view-facts: all checks passed');
 process.exit(failed ? 1 : 0);
