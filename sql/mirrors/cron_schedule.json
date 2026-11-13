@@ -11,9 +11,9 @@
     "DO NOT go green by raising max_per_instant, adding a starvation exemption or editing hog_p95_s down.",
     "Fix the SCHEDULE. max_per_instant is shrink-only (8 before 2026-11-03, 4 after, 2 after the 2026-11-04 consolidation)."
   ],
-  "_mirrored_through_migration": "20261111025049",
+  "_mirrored_through_migration": "20261113091050",
   "_measured_at": "2026-11-04",
-  "_measured_by": "cron-rebalance session via Supabase MCP: select jobname, schedule from cron.job where active; p95 = percentile_cont(0.95) of end_time - start_time over cron.job_run_details, last 7 days (the window mon_cron_hog_windows() uses); writers = distinct jobname from ops_cron_start_instants() where writer_fn is not null. [2026-11-04 01:02] re-read after 20261104010208: 4 re-slots; hog p95s re-measured (38: 667 s, 28: 890 s). [2026-11-04] re-read after 20261104043631 (cron consolidation): 33 small jobs became steps of 4 bundle jobs (ops_run_cron_bundle), 18 re-slots; busiest hour 99 starts, no instant above 2, so the ratchet drops 4 -> 2 = the live detector's own bar (>= 3 raises). [2026-11-04 09:36] +purge-cron-run-history '27 1 * * *' (20261104093546, owner decision 3: cron.job_run_details keeps 30 days); 1:27 had no other start. [2026-11-05 07:21] gh-wasalt-enrich-ar 30 5,17 → 30 1,5,9,13,17,21 (20261105072102, 🆕: a 1,800-ad arrivals burst outran two runs a day). [2026-11-05 17:24] re-read after 20261105172415: no schedule changed — bundle-hourly-resolvers (:12) and bundle-hourly-monitors (:43) each gained one step, trigger_gh_workflow('site-speed-live.yml'), so the phone speed robot runs ~every 30 min (GitHub ran its own '9,39' schedule ~3 times a day). [2026-11-06 01:53] re-read after 20261106015317: no schedule changed — bundle-quarter-hour gained one step, trigger_gh_workflow('migration-auto-mirror.yml'), dispatched before engineer-automerge (GitHub fired the mirror robot's own 15-min schedule 3 times on 2026-11-05). [2026-11-06 06:04] +gh-checks-that-cry-wolf '27 7 * * 1' (20261106060445, owner: «test every alarm … so they don't stop»; weekly Monday dispatch of checks-that-cry-wolf.yml on the database clock, 07:27 had no other start). [2026-11-07 07:45] +mon-price-box-equals-rate '9 6 * * *' (20261107074502, owner «make sure it never ever happens»: daily repair-first detector for one figure in both price boxes; 06:09 had no other start and the hourly sync is not running). [2026-11-09 04:50] re-read after 20261109015850 + 20261109031432: no net schedule change — the first added map-pin-borrow-refresh '47 * * * *', the second unscheduled it and folded its step into map_grid_refresh_ar (still '53 * * * *'); cron.job has no map-pin-borrow-refresh. [2026-11-09 05:14] re-read after 20261109051420: no schedule changed — refresh-loader-scale-stats ('39 * * * *') now refreshes loader_scale_stats_ready_mv (the headline total counts production_ready rows only). [2026-11-09 04:51] 20261109045105: no schedule changed — map_grid_refresh_ar ('53 * * * *') gained a third step, map_nopin_refresh_ar() (one marker per district for listings with no exact location).",
+  "_measured_by": "cron-rebalance session via Supabase MCP: select jobname, schedule from cron.job where active; p95 = percentile_cont(0.95) of end_time - start_time over cron.job_run_details, last 7 days (the window mon_cron_hog_windows() uses); writers = distinct jobname from ops_cron_start_instants() where writer_fn is not null. [2026-11-04 01:02] re-read after 20261104010208: 4 re-slots; hog p95s re-measured (38: 667 s, 28: 890 s). [2026-11-04] re-read after 20261104043631 (cron consolidation): 33 small jobs became steps of 4 bundle jobs (ops_run_cron_bundle), 18 re-slots; busiest hour 99 starts, no instant above 2, so the ratchet drops 4 -> 2 = the live detector's own bar (>= 3 raises). [2026-11-04 09:36] +purge-cron-run-history '27 1 * * *' (20261104093546, owner decision 3: cron.job_run_details keeps 30 days); 1:27 had no other start. [2026-11-05 07:21] gh-wasalt-enrich-ar 30 5,17 → 30 1,5,9,13,17,21 (20261105072102, 🆕: a 1,800-ad arrivals burst outran two runs a day). [2026-11-05 17:24] re-read after 20261105172415: no schedule changed — bundle-hourly-resolvers (:12) and bundle-hourly-monitors (:43) each gained one step, trigger_gh_workflow('site-speed-live.yml'), so the phone speed robot runs ~every 30 min (GitHub ran its own '9,39' schedule ~3 times a day). [2026-11-06 01:53] re-read after 20261106015317: no schedule changed — bundle-quarter-hour gained one step, trigger_gh_workflow('migration-auto-mirror.yml'), dispatched before engineer-automerge (GitHub fired the mirror robot's own 15-min schedule 3 times on 2026-11-05). [2026-11-06 06:04] +gh-checks-that-cry-wolf '27 7 * * 1' (20261106060445, owner: «test every alarm … so they don't stop»; weekly Monday dispatch of checks-that-cry-wolf.yml on the database clock, 07:27 had no other start). [2026-11-07 07:45] +mon-price-box-equals-rate '9 6 * * *' (20261107074502, owner «make sure it never ever happens»: daily repair-first detector for one figure in both price boxes; 06:09 had no other start and the hourly sync is not running). [2026-11-09 04:50] re-read after 20261109015850 + 20261109031432: no net schedule change — the first added map-pin-borrow-refresh '47 * * * *', the second unscheduled it and folded its step into map_grid_refresh_ar (still '53 * * * *'); cron.job has no map-pin-borrow-refresh. [2026-11-09 05:14] re-read after 20261109051420: no schedule changed — refresh-loader-scale-stats ('39 * * * *') now refreshes loader_scale_stats_ready_mv (the headline total counts production_ready rows only). [2026-11-09 04:51] 20261109045105: no schedule changed — map_grid_refresh_ar ('53 * * * *') gained a third step, map_nopin_refresh_ar() (one marker per district for listings with no exact location). [2026-11-11 10:32] +sync-search-posted-at '3-59/10 * * * *' (20261111103220, owner «time published … by date of publishment not ours»: fills search_listings_ar.posted_at from each site's date_added, 25,000 rows a run; a single writer — takes search_index_writer_lock() — on :03/:13/…). [2026-11-11 11:20] sync-search-posted-at → '29-59/30 * * * *' (20261111112025): '3-59/10' put a third job on :43; :29/:59 is the one stepped slot verify-cron-slot-discipline leaves free. [2026-11-13 07:13] re-read after 20261113071310: no schedule changed — bundle-hourly-monitors (:43) gained one step, map_fact_build_place_facts() (the map box's prepared city/district facts, ~9 s; every minute of the hour already starts two jobs). [2026-11-13 09:11] re-read after 20261113091050: no schedule changed — map-view-facts ('11 22 * * *') gained one step, audit_map_view_card() (the map card's nightly recount, ~14 s). [2026-11-12 05:31] gh-dealapp-sharded 33 0 → 23 20 (20261112053109, ⚡: the fleet is TWO waves ≈ 504 min, 20:23 + 504 ≈ 04:47 UTC; minute :23 of hour 20 held no other start). Mirrored by 🔧 2026-11-13 from the applied migration's own verify block (the Supabase MCP was unreachable from the session, so cron.job was not re-read).",
   "_capacity": "<= 99 starts an hour after the 2026-11-04 consolidation (24 are mon-p0-fast-lane). The live detector raises at 3 per (hour, minute), so the ratchet is 2.",
   "max_per_instant": 2,
   "single_writer_jobs": [
@@ -22,7 +22,8 @@
     "refresh-rnpl-flags",
     "dealapp-location-propagate",
     "sync-rich-attrs-wasalt",
-    "sync-search-first-seen-at"
+    "sync-search-first-seen-at",
+    "sync-search-posted-at"
   ],
   "hog_p95_s": {
     "refresh_listing_native_location_v1": 282.0,
@@ -63,7 +64,7 @@
     "gh-checks-that-cry-wolf": "27 7 * * 1",
     "gh-dead-visible-score": "5 9 * * *",
     "gh-dealapp-liveness": "40 * * * *",
-    "gh-dealapp-sharded": "33 0 * * *",
+    "gh-dealapp-sharded": "23 20 * * *",
     "gh-facts-ai-new": "8 7 * * *",
     "gh-fleet-cleanup": "8 6 * * *",
     "gh-fleet-liveness": "17 7 * * *",
@@ -90,6 +91,7 @@
     "gh-wasalt-res": "25 2 * * *",
     "location-pipeline-monitor": "52 * * * *",
     "location-selftest-hourly": "53 * * * *",
+    "map-view-facts": "11 22 * * *",
     "map_grid_refresh_ar": "53 * * * *",
     "mon-af-new-listing-readiness": "29 8 * * *",
     "mon-detectors-and-dispatch": "59 * * * *",
@@ -140,7 +142,8 @@
     "sync-search-first-seen-at": "6-59/10 * * * *",
     "sync-search-listings-ar": "22 * * * *",
     "text-facts-status-snapshot": "50 10 * * *",
-    "title-district": "43 * * * *"
+    "title-district": "43 * * * *",
+    "sync-search-posted-at": "29-59/30 * * * *"
   },
   "single_writer_functions": [
     "backfill_location_display_labels",
@@ -153,6 +156,7 @@
     "sync_raw_land_subtype",
     "sync_search_first_seen_at",
     "sync_search_listings_ar",
+    "sync_search_posted_at",
     "text_facts_apply_slice"
   ],
   "_single_writer_functions_measured": "2026-11-04 via Supabase MCP: proname from pg_proc where prosrc ~ search_index_writer_lock\\s*\\( (the predicate ops_cron_start_instants() uses). A bundle step may never be one of these: scripts/verify-cron-bundles-stay-honest.ts."

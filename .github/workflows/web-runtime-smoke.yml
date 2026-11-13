@@ -64,7 +64,10 @@ env:
 jobs:
   smoke:
     name: built app runs («بحث» → results → refresh)
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (owner 2026-11-13, «we can split for now»): its phone-speed robots drive Apple's map at a 4× slowed
+    # CPU, and on our own server the page froze ~10 s whenever all 8 helpers were busy (passes on a quiet server and on
+    # GitHub). Listed in HOSTED_ONLY in scripts/verify-runner-switch.ts; every other workflow follows the switch.
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -77,7 +80,20 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Install Chromium for Playwright
-        run: npx playwright install --with-deps chromium
+        # apt went unreachable on 2026-11-11 (12:24 UTC on, «Temporary failure resolving archive.ubuntu.com») and this
+        # REQUIRED check failed on every PR. Retry; if apt is still down, install Chromium alone (the runner image carries
+        # its libraries) and prove it launches — a browser that cannot start still fails this check.
+        run: |
+          ok=""
+          for i in 1 2 3; do
+            if timeout 240 npx playwright install --with-deps chromium; then ok=1; break; fi
+            echo "playwright --with-deps failed (attempt $i)"; sleep 20
+          done
+          if [ -z "$ok" ]; then
+            echo "::warning::apt unreachable after 3 tries — installing Chromium without system packages"
+            npx playwright install chromium
+          fi
+          node -e "require('@playwright/test').chromium.launch().then((b) => b.close()).then(() => console.log('chromium launches'), (e) => { console.error(e); process.exit(1); })"
 
       - name: Build the web bundle
         # EXPO_PUBLIC_* are CLIENT-PUBLIC by definition — they are inlined into the browser bundle

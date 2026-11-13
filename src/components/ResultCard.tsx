@@ -12,10 +12,12 @@ import { freeTextEn } from '@/lib/freeTextEn';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { whenNear } from '@/lib/nearViewport';
+import { listedAgoText } from '@/lib/listedAgo';
+import { cardPhotoCandidates } from '@/lib/photoUrl';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { listingSearchedTypeAr } from '@/lib/listingDisplay';
-import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
+import { isShortStayListing, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
 import { monthlyLineText } from '@/lib/listingDisplay';
 
 // THE MONTHLY LINE UNDER EVERY YEARLY PRICE (owner 2026-10-26): «السعر المعلن 3,000 شهرياً» when the site quoted
@@ -193,6 +195,8 @@ export function ResultCard({
     return raw.length <= 12 ? raw : '';
   };
   const listedClean = cleanDate(listing.listed);
+  const listedAgo = listedAgoText(listedClean, locale === 'en' ? 'en' : 'ar');
+  const siteName = locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source));
   // #1 (source-accurate, owner 2026-07-06): show the RAW scraped type when it is already Arabic
   // (dealapp "تاون هاوس", "ملحق علوي"…); for English-raw sources (aqar stores "Apartment") show the
   // source-matching Arabic via the clean mapping — never English on the card. Mapping stays filter-only.
@@ -240,7 +244,7 @@ export function ResultCard({
   // Information" panel, which reads as self-contradicting even though the two sections cover different
   // data. Same filter AdditionalInformationPanel uses below, so the empty-state only fires when BOTH
   // panels would otherwise be blank. (owner-reported 2026-09-13, found while re-testing amlakalahsa.)
-  const hasAddlInfo = !!listing.additional_info?.some((r) => r && r.label && r.value);
+  const hasAddlInfo = pickKeyFacts((listing.additional_info ?? []).filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value))).length > 0;
 
 
   // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───────────────────────────────────────────────
@@ -253,7 +257,7 @@ export function ResultCard({
   // nothing is derived, and a value the source did not give renders nothing.
   if (row === 'roomy') {
     const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
-    const stay = isStayLengthPriced(listing.source);
+    const stay = isShortStayListing(listing);
     const typeIcon = typeImg(listing.cleanType ?? '');
     // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
     // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
@@ -261,13 +265,14 @@ export function ResultCard({
     // usage — exactly as published, at most 3 on one fixed row (so every card stays the same size). A fact the
     // source did not give is simply absent; nothing is derived or guessed.
     const factRows = (listing.additional_info ?? []).filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
-    const FACT_ORDER = [/age|عمر/i, /facade|الواجهة/i, /street|عرض الشارع|الشارع/i, /plan|المخطط/i, /usage|استخدام/i];
+    const FACT_ORDER = KEY_FACT_ORDER;
     const lpFacts: Array<{ k: string; label: string; value: string }> = [];
     for (const re of FACT_ORDER) {
       const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
       if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale), value: arAttrValue(r.label, r.value, locale) });
     }
-    if (listedClean && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
+    // A recent date is «اليوم / قبل ٣ أيام» at the front of the main line (owner 2026-11-13); an older one stays here.
+    if (listedClean && !listedAgo && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
     const CHIP_CAP = 3;
     const shownFeats = visible.slice(0, CHIP_CAP);
     const moreFeats = visible.length - shownFeats.length;
@@ -287,7 +292,7 @@ export function ResultCard({
           {/* THE GOLD STRIP on the laptop photo-first card too (owner 2026-10-17: «for all»). */}
           <GoldSurface tone={tone} style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">
             <Text style={card.lpPhotoFootTx}>{searchedTypeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
-            {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{sourceHost(listing.source)}</Text> : null}
+            {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{siteName}</Text> : null}
           </GoldSurface>
         </Pressable>
 
@@ -340,8 +345,8 @@ export function ResultCard({
             </Text>
           ) : null}
 
-          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
-            {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
+          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1} testID="card-place">
+            {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `${locale === 'en' ? ', ' : '، '}${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
           </Text>
 
           {ratingVal != null ? (
@@ -357,6 +362,7 @@ export function ResultCard({
 
           {/* The main filter line: the TYPE first (its own icon from the Filter), then rooms, baths, size. */}
           <View style={card.statsRow}>
+            {listedClean && listedAgo ? <View style={card.agoPill} testID="card-listed-ago"><Text style={card.agoText}>{listedAgo}</Text></View> : null}
             <View style={card.lpType}>
               {typeIcon ? <Image source={typeIcon} style={card.lpTypeIcon} contentFit="contain" tintColor={colors.primary} /> : <Ionicons name="business-outline" size={16} color={colors.primary} />}
               <Text style={card.lpTypeTx} numberOfLines={1}>{typeLabel}</Text>
@@ -409,7 +415,7 @@ export function ResultCard({
           <View style={card.lpFoot}>
             <View style={card.hostHead}>
               <View style={[card.hostBadge, card.lpBadge]}><SourceBadge source={listing.source} /></View>
-              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
+              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: siteName })}</Text>
             </View>
           </View>
         </View>
@@ -444,7 +450,8 @@ export function ResultCard({
         {listing.source_url ? (
           <GoldSurface tone={tone} style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">
             <Text style={[card.photoAction, row && card.photoActionRow]}>{t('Click here 👆')}</Text>
-            <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{sourceHost(listing.source)}</Text>
+            {/* The website's NAME, not its domain (owner 2026-11-13: «ksaaqar.com» → «عقارات السعودية»). */}
+            <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{siteName}</Text>
           </GoldSurface>
         ) : null}
       </Pressable>
@@ -455,7 +462,7 @@ export function ResultCard({
         <View style={card.sourceRow}>
           <View style={card.hostHead}>
             <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
-            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
+            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: siteName })}</Text>
           </View>
           <Text style={card.typeLabel}>{searchedTypeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
@@ -465,12 +472,12 @@ export function ResultCard({
             «الموقع غير محدد» instead of an empty title / a bare ", السعودية" — never blank, never
             the raw junk token. A present district with no city (or vice versa) is the normal,
             non-bug case and is untouched. */}
+        {/* THE PRICE LEADS (owner 2026-11-13: «I don't like how the price is far left, put it right»): it is the
+            first thing on the line — the right edge in Arabic — and the place moved to the 📍 line below, so the card
+            keeps its height. */}
         <View style={card.headline}>
-        <Text style={[card.title, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]}>
-          {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
-        </Text>
         {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
-        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
+        {isShortStayListing(listing) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
         {monthlyLine(listing, locale)}
         </View>
         {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
@@ -483,7 +490,10 @@ export function ResultCard({
         ) : null}
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
-          <Text style={card.locText}>{place(cityAr) || LOCATION_UNRESOLVED_AR}, {t('Saudi Arabia')}</Text>
+          {/* District and city (owner 2026-11-13: «الياسمين، الرياض», never «الرياض، المملكة العربية السعودية»). */}
+          <Text style={[card.title, card.placeLine, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]} testID="card-place">
+            {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `${locale === 'en' ? ', ' : '، '}${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
+          </Text>
           {regionLabel ? (
             <View style={card.regionChip}>
               <Ionicons name="compass-outline" size={10} color={colors.primary} />
@@ -581,11 +591,13 @@ export function ResultCard({
           <Text style={[card.desc, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={2}>{titleAr}</Text>
         ) : null)}
         <View style={card.statsRow}>
+          {/* «اليوم» / «أمس» / «قبل ٣ أيام» FIRST (owner 2026-11-13), from the site's own date (src/lib/listedAgo.ts). */}
+          {listedClean && listedAgo ? <View style={card.agoPill} testID="card-listed-ago"><Text style={card.agoText}>{listedAgo}</Text></View> : null}
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
           {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${t('m²')}`} small={t('Area')} /> : null}
           <Stat icon="business-outline" big={typeLabel} small={t('Property Type')} />
-          {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
+          {listedClean && !listedAgo ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
         {/* «مطابق لطلبك» — every active Advanced-Filter predicate this listing's canonical row proves,
             carrying the ROW's actual value («4 حمامات», «شمال», «عرض الشارع 20 م»), never the filter's
@@ -640,7 +652,7 @@ export function ResultCard({
       <View style={[card.rightCol, row && card.rightColRow]}>
         {visible.length > 0 ? (
           <View style={card.featGrid}>
-            {visible.map((f) => {
+            {visible.slice(0, CARD_CHIP_CAP).map((f) => {
               const picked = pickedFeatures.has(f.key);
               return (
                 <View key={f.key} style={[card.featCell, picked && card.featCellPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
@@ -649,6 +661,9 @@ export function ResultCard({
                 </View>
               );
             })}
+            {visible.length > CARD_CHIP_CAP ? (
+              <View style={card.featCell} testID="card-feature-more"><Text style={card.featText}>{`+${visible.length - CARD_CHIP_CAP}`}</Text></View>
+            ) : null}
           </View>
         ) : hasAddlInfo ? null : (
           <Text style={card.noFeat}>{t('No additional features listed')}</Text>
@@ -839,6 +854,24 @@ export function arAttrValue(label: string, value: string, locale: string): strin
 // Render Wasalt's "Additional Information" rows on the card. Shows first 4 rows, with a
 // "See more" toggle that reveals the rest. Hidden entirely for Aqar (and for any Wasalt row
 // where the field hasn't been backfilled yet). Mirrors the on-site Wasalt panel design.
+// THE CARD'S KEY FACTS — one list for the phone and the laptop card (owner 2026-10-11 laptop rule, made the phone's too on
+// 2026-11-13: «I don't like how it shows the licence number … balance it»). At most CARD_FACT_CAP of the source's own facts,
+// in this order, exactly as published; licence numbers, ad numbers and other codes are not card facts (they stay on the
+// site's page, one tap away). Every card therefore carries the same few lines.
+const KEY_FACT_ORDER = [/age|عمر/i, /facade|الواجهة/i, /street|عرض الشارع|الشارع/i, /plan|المخطط/i, /usage|استخدام/i];
+const CARD_FACT_CAP = 3;
+/** The source rows a card shows: the first row matching each KEY_FACT_ORDER entry, at most CARD_FACT_CAP. Pure. */
+export function pickKeyFacts<R extends { key: string; label: string }>(rows: R[]): R[] {
+  const out: R[] = [];
+  for (const re of KEY_FACT_ORDER) {
+    const r = rows.find((x) => re.test(`${x.key} ${x.label}`) && !out.includes(x));
+    if (r && out.length < CARD_FACT_CAP) out.push(r);
+  }
+  return out;
+}
+/** At most this many extras on the phone card, then «+N» (the laptop's CHIP_CAP). */
+const CARD_CHIP_CAP = 3;
+
 function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
   listing: Listing; t: (k: string, p?: any) => string; locale: string;
   /** Laptop 'tight' row: the same rows as one truncated line (the card unfolds it on tap). */
@@ -846,10 +879,10 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
 }) {
   const rows = listing.additional_info;
   if (!rows || rows.length === 0) return null;
-  // Preserve the existing valid-row filter; all rows are visible without an expander.
+  // The existing valid-row filter, then only the card's key facts (pickKeyFacts) — never the licence or other codes.
   const all = rows.filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
-  if (all.length === 0) return null;
-  const visible = all;
+  const visible = pickKeyFacts(all);
+  if (visible.length === 0) return null;
   if (oneLine) {
     return (
       <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, locale === 'ar' ? card.oneLineRtl : card.oneLineLtr]}>
@@ -1044,7 +1077,9 @@ const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.png');
 // been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
 // dead URL would leave the card with an empty grey block. We try each URL in order and, if every
 // one fails (or the listing genuinely has no photo), render a clean "no photo" placeholder.
-function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (k: string) => string }) {
+function ListingPhoto({ photos: sitePhotos, style, t }: { photos: string[]; style: any; t: (k: string) => string }) {
+  // Web: each photo is tried shrunk first, then as the site serves it (src/lib/photoUrl.ts cardPhotoCandidates).
+  const photos = IS_WEB ? sitePhotos.flatMap(cardPhotoCandidates) : sitePhotos;
   const [idx, setIdx] = useState(0);
   useEffect(() => { setIdx(0); }, [photos.join('|')]);
 
@@ -1677,6 +1712,9 @@ const card = StyleSheet.create({
   desc: { display: 'none' },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
   locText: { fontSize: 11, color: colors.primary, fontWeight: '500' },
+  placeLine: { fontSize: 14 },
+  agoPill: { alignSelf: 'center', backgroundColor: '#e8f5ee', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  agoText: { fontSize: 13, fontWeight: '800', color: '#1f6f4a' },
   // Small region pill (e.g. "North Riyadh") next to the city line — light green, compact.
   regionChip: {
     flexDirection: 'row', alignItems: 'center', gap: 3,

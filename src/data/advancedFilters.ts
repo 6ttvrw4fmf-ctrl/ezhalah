@@ -216,7 +216,7 @@ function guidedOptions(
   };
 }
 
-// Installments (RNPL) — one strict chip. NEUTRAL metadata filter only (no payment calc/estimate/
+// Installments (RNPL) — one chip: the site's instalment box OR the ad's monthly / split-payment words. NEUTRAL metadata filter only (no payment calc/estimate/
 // ranking/advice). Placed first. Carries the instalment-partners strip — EJARI · رايز · tamam · tabby ·
 // tamara (owner 2026-11-01, replacing the EJARI×رايز pair of 2026-07-21) via the brandImage TOKEN — the
 // card owns the asset + slot; this config only names it.
@@ -228,11 +228,12 @@ const RNPL_QUESTION: AdvancedQuestion = {
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'rnpl'),
   async resolveOptions(q) {
-    // Two chips (owner 2026-11-01): the site's own «إيجار بالتقسيط» box, and the ad's words about monthly / split
-    // payments (text fact split_payments, migration «countryside_group_advanced_filter_chips»); either or both; a chip at 0 hides.
+    // ONE chip (owner 2026-11-12: «merge … we cannot guarantee»): the site's own «إيجار بالتقسيط» box OR the ad's words
+    // about monthly / split payments (text fact split_payments). The SQL arm for the 'rnpl' token is
+    // `s.rent_now_pay_later or s.split_payments`, and cnt_rnpl counts exactly that union. Until 2026-11-12 these were two
+    // chips that ANDed in SQL while the card evidence read them as either.
     const chips: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
-      { key: 'rnpl', labelKey: 'Offers installments', count: (c) => c.cnt_rnpl },
-      { key: 'split_payments', labelKey: 'Monthly / split payments', count: (c) => (c as unknown as Record<string, number>).cnt_split_payments },
+      { key: 'rnpl', labelKey: 'Instalments / monthly payments', count: (c) => c.cnt_rnpl },
     ];
     return guidedOptions(await fetchApartmentGuidedCounts(q), chips, (c) => c.cnt_rnpl_unknown);
   },

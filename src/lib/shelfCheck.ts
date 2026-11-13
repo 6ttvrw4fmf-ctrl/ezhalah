@@ -20,7 +20,7 @@ export const NARROWING = [
   'priceMinRent', 'priceMaxRent', 'keywords', 'proximity', 'sources', 'excludedSources', 'contextBeds', 'contextBedsList',
   'contextSize', 'areaMin', 'areaMax', 'ageMin', 'ageMax', 'isNewConstruction', 'amenities', 'bathMin',
   'ratingMin', 'reviewsMin', 'unitSubtypes', 'furnishedPref', 'streetWidthMin', 'ageBuckets',
-  'ratingBuckets', 'furnishedIn', 'directions',
+  'ratingBuckets', 'furnishedIn', 'directions', 'postedWithinDays',
 ] as const;
 
 type ShelfQuery = {

@@ -21,7 +21,7 @@ Wasalt enum liveness, AF backend-truth live check, Dealapp liveness, Common loca
 setup**. Confirm the exact price and setup fee on the checkout page before buying. Any Ubuntu 24.04 server of that size
 works the same.
 
-It runs **12 runners** at once (2.5 CPU and 9 GB each). Each one runs **one job in a fresh container, then is thrown
+It runs **12 runners** at once (2.5 CPU and 9 GB each). The server actually delivered on 2026-11-13 is an **AX42** (8 cores / 16 threads, 64 GB): run setup with `RUNNERS=6`. Each one runs **one job in a fresh container, then is thrown
 away**, so nothing a job leaves behind reaches the next job.
 
 ## The switch (already in every workflow)
@@ -40,13 +40,15 @@ runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_
 - `scripts/verify-runner-switch.ts` (in `npm test`) fails if any job hard-codes a runner or if the expression could
   route a pull-request event to our server.
 
+**Kept on GitHub on purpose (`HOSTED_ONLY` in `scripts/verify-runner-switch.ts`):** `web-runtime-smoke.yml` (owner 2026-11-13, «we can split for now»). Its phone-speed robots drive Apple's map at a 4× slowed CPU; on the AX42 the page froze ~10 s whenever all 8 helpers were busy, while the same robot passed on a quiet server (0.1–0.2 s switches) and on GitHub. Moving it back needs a bigger server or fewer, larger runners — re-measure first.
+
 ## Setup (about 30 minutes, after the owner buys the server)
 
 1. Create a **fine-grained GitHub token**: only repository `6ttvrw4fmf-ctrl/ezhalah`, permission **Administration: read
    and write** (needed to register runners), expiry 90 days. Put a calendar reminder to renew it.
 2. SSH into the new server with the key Hetzner installed, copy `ops/runner/` onto it, then run:
-   `OWNER_IP=<your home IP> bash setup.sh` and paste the token when asked.
-3. GitHub → Settings → Actions → Runners: 12 runners named `ezhalah-own-…` show **Idle**.
+   `OWNER_IP=<your home IP> RUNNERS=6 bash setup.sh` (AX42; leave RUNNERS out on an AX102) and paste the token when asked.
+3. GitHub → Settings → Actions → Runners: 6 runners (12 on an AX102) named `ezhalah-own-…` show **Idle**.
 4. GitHub → Settings → Actions → General → "Fork pull request workflows from outside collaborators": set
    **Require approval for all outside collaborators** (defence in depth; PR events already stay on GitHub).
 

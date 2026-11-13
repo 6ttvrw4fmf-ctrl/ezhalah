@@ -6,7 +6,8 @@
 // One real visitor journey on a mid-range PHONE (iPhone 13 screen, 4× slower CPU, 4G):
 //   1. OPEN   — ezhalah.com from a cold start until the search form answers (the «بحث» button is on screen).
 //   2. SEARCH — Riyadh through the real Filter, until the first result card is on screen.
-//   3. TAP    — press the first golden card («اضغط هنا»): the longest freeze (long task) in the 3 s after the tap,
+//   3. TAP    — press the first golden card («اضغط هنا»): the time until the source site opens (new tab ≤ 0.5 s, frame
+//              ≤ 3 s, through our preview's contact button when one shows), its address in Arabic, and the longest freeze (long task) in the 3 s after the tap,
 //               the moment the owner felt as «not smooth» (measured 2026-10-27: 380 ms on a laptop ≈ 1.5 s here).
 //   0. TABS + MAP (owner 2026-11-04: «we need to make sure it's never ever slow … people will run away»), run first:
 //      tap «خريطة» until city names are on the map (first visit), back to «تصفية» until the form answers, «خريطة» again
@@ -18,7 +19,7 @@ import '../../scripts/lib/robotPass.mjs';
 import { chromium, devices } from '@playwright/test';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah.com';
-export const BUDGET = { openMs: 12_000, searchMs: 25_000, tapFreezeMs: 1_000, mapFirstMs: 5_000, filterBackMs: 2_500, mapReturnMs: 3_000, zoomMs: 4_000, brokerMs: 4_000, panMs: 3_000, panFreezeMs: 500, mapColdTapMs: 5_000 };
+export const BUDGET = { openMs: 12_000, searchMs: 25_000, tapFreezeMs: 1_000, mapFirstMs: 5_000, filterBackMs: 2_500, mapReturnMs: 3_000, zoomMs: 4_000, brokerMs: 4_000, panMs: 3_000, panFreezeMs: 500, mapColdTapMs: 5_000, siteOpenMs: 500, siteFrameMs: 3_000 };
 
 const browser = await chromium.launch();
 const results = {};
@@ -118,12 +119,45 @@ try {
   await page.evaluate(() => {
     window.__ezLong = [];
     new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__ezLong.push([e.startTime, e.duration]); }).observe({ type: 'longtask' });
+    // THE TAP REACHES THE SITE AT ONCE (owner 2026-11-12: «it takes so long for me to get redirected … we need to keep a
+    // robot to check this»). Every way a tap leaves for the source site is timed: a new tab (window.open — stubbed, so the
+    // robot never loads the other site), the in-app frame, or our own preview's «اضغط هنا للتواصل». The address must
+    // also be the visitor's language: this visitor is Arabic, so never a site's /en/ page.
+    window.__ezOpens = [];
+    window.open = (u) => { window.__ezOpens.push([performance.now(), String(u)]); return {}; };
+    window.__ezFrame = null;
+    new MutationObserver(() => { if (window.__ezFrame) return; const f = [...document.querySelectorAll('iframe')].find((x) => x.src && !/google\.com\/maps/.test(x.src)); if (f) window.__ezFrame = [performance.now(), f.src]; })
+      .observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     window.__ezTap = performance.now();
   });
   await page.getByText('اضغط هنا 👆', { exact: false }).first().click({ timeout: 20_000 });
   await page.waitForTimeout(3_000);
   results.tapFreezeMs = Math.round(await page.evaluate(() => Math.max(0, ...window.__ezLong.filter(([s]) => s >= window.__ezTap - 50 && s <= window.__ezTap + 3_000).map(([, d]) => d))));
   say(results.tapFreezeMs <= BUDGET.tapFreezeMs, 'tap: longest freeze after pressing a golden listing', results.tapFreezeMs, BUDGET.tapFreezeMs);
+  let left = await page.evaluate(() => ({ open: window.__ezOpens[0] ?? null, frame: window.__ezFrame, tap: window.__ezTap }));
+  if (!left.open && !left.frame) {
+    // Our own preview opened (Wasalt, Aqar …): press its contact button the way a visitor does.
+    const contact = page.getByTestId('listing-preview-contact').first();
+    await contact.waitFor({ state: 'visible', timeout: 20_000 });
+    await page.evaluate(() => { window.__ezTap = performance.now(); });
+    await contact.click({ timeout: 20_000 });
+    await page.waitForTimeout(1_500);
+    left = await page.evaluate(() => ({ open: window.__ezOpens[0] ?? null, frame: null, tap: window.__ezTap }));
+  }
+  const [at, url] = left.open ?? left.frame ?? [NaN, ''];
+  if (!url) { console.error('FAIL  tap: the golden listing never reached its site (no new tab, no frame, no contact open)'); failed++; }
+  else if (left.open) {
+    results.siteOpenMs = Math.round(at - left.tap);
+    say(results.siteOpenMs <= BUDGET.siteOpenMs, `tap: until the site opens in a new tab (${new URL(url).hostname})`, results.siteOpenMs, BUDGET.siteOpenMs);
+  } else {
+    results.siteFrameMs = Math.round(at - left.tap);
+    say(results.siteFrameMs <= BUDGET.siteFrameMs, `tap: until the site starts loading inside Ezhalah (${new URL(url).hostname})`, results.siteFrameMs, BUDGET.siteFrameMs);
+  }
+  if (url) {
+    const english = /^\/en(\/|$)/.test(new URL(url).pathname);
+    console.log(`${english ? 'FAIL' : 'PASS'}  tap: an Arabic visitor lands on the site's Arabic page (${url.slice(0, 90)})`);
+    if (english) failed++;
+  }
   await ctx.close();
 
   // 4. IMPATIENT MAP TAP (owner 2026-11-05): a visitor who taps «خريطة» the moment the page answers — no reader's

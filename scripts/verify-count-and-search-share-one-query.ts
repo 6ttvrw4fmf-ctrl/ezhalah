@@ -151,6 +151,7 @@ const liftedNarrow = await liftSymbols(
   ],
   ['rpcAllNarrowingParams'],
   `type SearchQuery = any;
+import { postedWindowParam } from '${ROOT}src/lib/postedWindows.ts';
 const RPC_SORT_KEYS = new Set(['oldest','price_asc','price_desc','area_asc','area_desc','beds_desc']);
 function cohortTypesAr(_q: any) { return null; }
 function bedroomTokens(_q: any) { return []; }`,
@@ -175,6 +176,7 @@ async function buildPair(parts: {
   const src = `
 type SearchQuery = any;
 import { validRentPeriod } from '${ROOT}src/lib/searchDefaults.ts';
+import { postedWindowParam } from '${ROOT}src/lib/postedWindows.ts';
 ${(parts.rentPeriod ?? L_RENT_PERIOD).replace(/^ {2}/gm, '')}
 ${''}
 export function countToken(query: any, rentPeriodParam: any): string | null {
@@ -412,6 +414,7 @@ async function buildNarrowing(parts: { queryForPeriod?: string; cityAf?: string;
   const src = `
 type SearchQuery = any;
 import { validRentPeriod } from '${ROOT}src/lib/searchDefaults.ts';
+import { postedWindowParam } from '${ROOT}src/lib/postedWindows.ts';
 export function countParams(query: any, rpcAllNarrowingParams: any): any {
 ${L_RENT_PERIOD}
 ${L_EFF_DEAL}

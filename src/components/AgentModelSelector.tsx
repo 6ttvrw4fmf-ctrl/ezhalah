@@ -8,23 +8,21 @@ import { MODELS_POPUP_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { cardShadow, colors, radius } from '@/theme/tokens';
 import { TAP44, TAP44_DOWN } from '@/theme/palette';
 
-const EZHALAH_LOGO = require('../../assets/images/logo-cloud-green-static.svg'); // solid green cloud eagle: the glowing one looked faded on the white card (owner 2026-10-28, option A)
-
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
     mark: require('../../assets/models/shaheen.png'),
-    descriptionAr: 'سرعة خاطفة ودقة متناهية للإجابات السريعة',
-    descriptionEn: 'Lightning-fast precision for instant answers',
-    // Why the name, and what it does (owner 2026-10-10, approved wording). Describes the model only —
-    // never «best», never a recommendation about a property.
-    storyAr: 'الشاهين أسرع الطيور انقضاضاً، ومن هنا جاء اسمه. نموذجٌ يفهم طلبك من أول جملة، ويعرض لك الإعلانات المطابقة بسرعة ودقة.',
-    storyEn: 'The Shaheen (peregrine falcon) is the fastest bird when it dives. That is where the name comes from. A model that understands your request from the first sentence and shows you the matching listings quickly and accurately.' },
-  { id: 'hurr', ar: 'حُر', en: 'Hurr', version: '4.4',
+    descriptionAr: 'سريع للبحث اليومي وحقائق السوق',
+    descriptionEn: 'Fast, for everyday search and market facts',
+    // Why the name, and what it does (owner 2026-11-11, approved wording). Describes the model only —
+    // never «best» against other apps, never a promise of perfect accuracy, never a recommendation about a property.
+    storyAr: 'في السماء، لا طير يسبق الشاهين. وفي إزهله، هو خيارك الأسرع: يجيبك بحقائق العقار السعودي ويقتنص لك الإعلانات المطابقة من أول جملة.',
+    storyEn: 'In the sky, no bird outpaces the Shaheen. In Ezhalah, it is your fastest choice: it answers you with facts about Saudi real estate and catches the matching listings for you from your first sentence.' },
+  { id: 'hurr', ar: 'حر', en: 'Hurr', version: '4.4',
     mark: require('../../assets/models/hurr.png'),
-    descriptionAr: 'قوة وتحمل فائق لأصعب المهام والمعالجات',
-    descriptionEn: 'Unmatched endurance for your toughest challenges',
-    storyAr: 'الحُرّ أقوى صقور الجزيرة العربية وأكثرها صبراً في الصيد، ومن هنا جاء اسمه. نموذجٌ يبحث بعمق في جميع المواقع، ويتعامل مع الطلبات المعقّدة متعددة الشروط.',
-    storyEn: 'The Hurr (saker falcon) is the strongest falcon in the Arabian Peninsula and the most patient hunter. That is where the name comes from. A model that searches deeply across all websites and handles complex requests with many conditions.' },
+    descriptionAr: 'عميق للتحليل والمقارنة والطلبات المعقدة',
+    descriptionEn: 'Deep, for analysis, comparison and complex requests',
+    storyAr: 'في الصحراء، لا صقر يضاهي الحر في الصبر. وفي إزهله، سيكون محللك العقاري: يربط المعلومات ببعضها ليجيب عن أعقد الأسئلة العقارية.',
+    storyEn: "In the desert, no falcon matches the Hurr's patience. In Ezhalah, it will be your real estate analyst: it connects the information to answer your most complex real estate questions." },
 ] as const;
 
 // Decorative: the adjacent model name already labels each control for assistive technology.
@@ -91,7 +89,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
                 onPress={() => { setSelected(item.id); close(); trigger.current?.focus(); }}
                 style={({ pressed }) => [styles.option, { flexDirection: arabic ? 'row-reverse' : 'row' }, item.id === 'hurr' && styles.unavailable, pressed && styles.pressed]}>
                 {/* Name + its one-line sentence (owner 2026-10-10: «for the models include the sentence»); an
-                    unavailable model says «قريباً» in words instead of an ⓘ glyph. */}
+                    unavailable model says «قريبا» in words instead of an ⓘ glyph. */}
                 <View style={styles.copy}>
                   <View style={[styles.modelIdentity, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row' }]}>
                     <ModelMark model={item} size={22} />
@@ -101,7 +99,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
                 </View>
                 <View style={styles.check}>
                   {selected === item.id ? <Ionicons name="checkmark" size={18} color={colors.primary} />
-                    : item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريباً' : 'Soon'}</Text> : null}
+                    : item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريبا' : 'Soon'}</Text> : null}
                 </View>
               </Pressable>
             ))}
@@ -111,25 +109,24 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
               style={({ pressed }) => [styles.aboutRow, styles.aboutLink, { flexDirection: 'row' }, pressed && styles.pressed]}>
               {/* The arrow sits beside the words, small and quiet — a link, not a far-away chevron. The page is
                   dir=rtl in Arabic, so a plain row already starts at the right edge (row-reverse put it on the left). */}
-              <Text style={styles.aboutText}>{arabic ? 'لماذا شاهين وحُر؟' : 'Why Shaheen and Hurr?'}</Text>
+              <Text style={styles.aboutText}>{arabic ? 'لماذا شاهين وحر؟' : 'Why Shaheen and Hurr?'}</Text>
               <Ionicons name={arabic ? 'chevron-back' : 'chevron-forward'} size={12} color={colors.muted} style={arabic ? styles.rtlFlip : undefined} />
             </Pressable>
               </>
           </View>
         </View>
       </Modal>
-      {/* «لماذا شاهين وحُر؟» — a small card in the MIDDLE of the screen (owner 2026-10-10): why each model is
-          named so, and what it does. Hurr stays dimmed with «قريباً», as in the menu. */}
+      {/* «لماذا شاهين وحر؟» — a small card in the MIDDLE of the screen (owner 2026-10-10): why each model is
+          named so, and what it does. Hurr stays dimmed with «قريبا», as in the menu. */}
       <Modal visible={about} transparent animationType="fade" onRequestClose={() => setAbout(false)}>
         <View style={styles.storyOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setAbout(false)}
             accessibilityLabel={arabic ? 'إغلاق' : 'Close'} accessibilityRole="button" />
-          {/* Bigger in the middle on a laptop, with the Ezhalah logo by the title (owner 2026-10-23). The card
+          {/* Bigger in the middle on a laptop, no logo by the title (owner 2026-11-11: «our logo inside remove it»). The card
               opens only after a tap, so reading the window width here never meets the static export. */}
           <View testID="agent-models-story" style={[styles.storyCard, wide && styles.storyCardWide, { width: Math.min(wide ? 540 : 380, width - 32) }]} accessibilityViewIsModal>
             <View style={[styles.storyHead, { flexDirection: arabic ? 'row-reverse' : 'row' }, arabic && { justifyContent: 'flex-end', gap: 8 }]}>
               <View style={[styles.storyTitleRow, { flexDirection: arabic ? 'row-reverse' : 'row' }]}>
-                <Image source={EZHALAH_LOGO} style={wide ? styles.storyLogoWide : styles.storyLogo} contentFit="contain" accessible={false} />
                 <Text style={[styles.storyTitle, wide && styles.storyTitleWide, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? 'نماذج إزهله' : "Ezhalah's models"}</Text>
               </View>
               <Pressable accessibilityRole="button" accessibilityLabel={arabic ? 'إغلاق' : 'Close'} onPress={() => setAbout(false)} hitSlop={8}
@@ -142,7 +139,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
                 <View style={[styles.modelIdentity, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row' }]}>
                   <ModelMark model={item} size={wide ? 38 : 30} />
                   <Text style={[styles.name, styles.storyName, wide && styles.storyNameWide]}>{arabic ? item.ar : item.en} {item.version}</Text>
-                  {item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريباً' : 'Coming soon'}</Text> : null}
+                  {item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريبا' : 'Coming soon'}</Text> : null}
                 </View>
                 <Text style={[styles.storyText, wide && styles.storyTextWide, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.storyAr : item.storyEn}</Text>
               </View>
@@ -186,8 +183,6 @@ const styles = StyleSheet.create({
   storyHead: { alignItems: 'center', justifyContent: 'space-between' },
   storyCardWide: { padding: 28, gap: 20, borderRadius: 24 },
   storyTitleRow: { alignItems: 'center', gap: 10, flexShrink: 1 },
-  storyLogo: { width: 30, height: 30 },
-  storyLogoWide: { width: 40, height: 40 },
   storyTitleWide: { fontSize: 22, lineHeight: 32 },
   storyNameWide: { fontSize: 17, lineHeight: 25 },
   storyTextWide: { fontSize: 16, lineHeight: 27 },

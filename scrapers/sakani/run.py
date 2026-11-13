@@ -192,6 +192,15 @@ PAUSE = 1.5            # seconds between requests — the pace that drew no chal
 # minutes instead of burning the job — nothing is guessed, nothing is pruned, stored rows are kept.
 DETAIL_WALL_AFTER = 3
 MAX_RENEGOTIATIONS = 2
+# A FRESH SESSION THAT WORKS EARNS ITS RENEGOTIATION BACK (2026-11-11, job 129630208235's log). The wall is per
+# SESSION and comes back about every hour: session 1 walled at 06:29, the fresh one then served ~1,000 details until
+# 07:28, the second fresh one walled again by 07:38 and the 2-renegotiation cap stopped the run at unit 2,623 of
+# 2,840 — 217 units short, so the walk was partial and nothing could be pruned (silent_scraper_death 14112). Only
+# UNPRODUCTIVE renegotiations count now: a session that served SESSION_PRODUCTIVE details resets the count, so a
+# route walled from the start still stops after MAX_RENEGOTIATIONS fresh sessions (2026-10-05), and the run budget
+# below bounds the whole walk. Each renegotiation waits WALL_COOLDOWN_S first: a wall is pacing, not a verdict.
+SESSION_PRODUCTIVE = 20
+WALL_COOLDOWN_S = 30
 # THE RUN ENDS ITSELF BEFORE CI KILLS IT (2026-11-09, small-sources job 128978543773). The walk finished
 # at 06:02 and every row was WRITTEN, then the prune's oracle spent 49 silent minutes on at-grace units
 # (~70 s each: four backed-off attempts before the blank-403 owner rule was even consulted) until
@@ -339,7 +348,17 @@ def enumerate_catalogue(s: cc.Session, purpose: str) -> list[tuple[dict, dict]]:
                 print(f"   ↻ {purpose} page {page} unreadable — cool-down, fresh session "
                       f"{renewed}/{WALK_RENEGOTIATIONS}", flush=True)
                 time.sleep(PAUSE * 20)
-                _oracle_sess = s = _walk_renew()
+                try:
+                    _oracle_sess = s = _walk_renew()
+                except Exception as e:  # noqa: BLE001 — a failed renewal after real pages is a late wall
+                    # 2026-11-13 nightly: the renewal itself raised («no TLS profile was served … 429»)
+                    # and escaped the walk, so the 8 sale pages AND the 276 rent units already read were
+                    # lost (rows_upserted 0). After page 1 it is the same late wall as an unreadable page.
+                    msg = (f"{purpose} catalogue page {page} unreadable and the fresh session failed "
+                           f"({type(e).__name__}: {str(e)[:160]}) — walk aborted")
+                    if page > 1 and out:
+                        raise WalkIncomplete(msg, out) from e
+                    raise
                 continue
             msg = (f"{purpose} catalogue page {page} unreadable "
                    f"({'HTTP %s' % got[0] if got else 'challenge/transport'}) — walk aborted")
@@ -913,6 +932,7 @@ def main() -> int:
         walled_run = 0          # consecutive details that drew no answer at all
         renegotiated = 0
         details_read = 0        # detail records actually served this run (a late wall keeps them)
+        session_read = 0        # served by the CURRENT session (a productive one resets `renegotiated`)
         for n_unit, (purpose, idx, rich) in enumerate(units):
             if _over_budget():
                 # The rows read so far are real and get written; the rest were never visited, so this
@@ -933,6 +953,8 @@ def main() -> int:
                 state, detail = fetch_detail(s, uid)
                 walled_run = walled_run + 1 if state == "miss" else 0
                 if walled_run >= DETAIL_WALL_AFTER:
+                    if session_read >= SESSION_PRODUCTIVE:
+                        renegotiated = 0        # that session worked: the wall is the hourly one, not a block
                     if renegotiated >= MAX_RENEGOTIATIONS:
                         if not details_read:
                             # Walled from the first detail (2026-10-05): nothing real was read, so
@@ -955,13 +977,26 @@ def main() -> int:
                         break
                     renegotiated += 1
                     walled_run = 0
-                    print(f"   ↻ detail route walled — fresh session {renegotiated}/{MAX_RENEGOTIATIONS}",
-                          flush=True)
-                    _oracle_sess = s = session()
+                    session_read = 0
+                    print(f"   ↻ detail route walled — fresh session {renegotiated}/{MAX_RENEGOTIATIONS} "
+                          f"(after {details_read} details read)", flush=True)
+                    time.sleep(WALL_COOLDOWN_S)
+                    try:
+                        _oracle_sess = s = session()
+                    except Exception as e:  # noqa: BLE001 — a failed handshake after real reads is a late wall
+                        if not details_read:
+                            raise
+                        cut = len(units) - n_unit
+                        skipped["detail_walled_cut"] = cut
+                        partial = True
+                        print(f"  ⛔ fresh session failed ({type(e).__name__}) at unit {seen} of {len(units)}: "
+                              f"keeping the {details_read} detail(s) read, {cut} left unread, no prune", flush=True)
+                        break
                     state, detail = fetch_detail(s, uid)
                     walled_run = 1 if state == "miss" else 0
                 if state == "ok":
                     details_read += 1
+                    session_read += 1
                 if state == "not_found":
                     # The index still lists it but its own page would bounce the user home.
                     skipped["detail_not_found"] = skipped.get("detail_not_found", 0) + 1

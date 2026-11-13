@@ -1,0 +1,60 @@
+# 📱 iPhone robot (owner 2026-11-08 20:30 UTC: «We need to check this always… I am scared it happens to other things»).
+# Safari's engine (WebKit) on the iPhone 13 screen walks the Filter's city and district boxes and fails when a list opens
+# under where the keyboard sits (bottom 45 %) or a tap answers nothing within 3 s. Born from #11362 (the district list
+# hidden under the iOS 26 keyboard). Read-only; uses the robot pass. Logic: e2e/speed/iphone-keyboard-zone-live.mjs
+# (wiring pinned by scripts/verify-iphone-robot-wired.ts). Runs after every site speed watch (pg_cron starts that one
+# twice an hour), on its own schedule as a backup, and by hand. A red run raises journey_live_check_failed.
+name: iPhone robot (live)
+
+on:
+  schedule:
+    - cron: '27 * * * *'
+  workflow_run:
+    workflows: ['Site speed watch (live)']
+    types: [completed]
+  workflow_dispatch: {}
+
+concurrency:
+  group: iphone-robot-live
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  iphone:
+    name: iPhone (WebKit) — lists open above the keyboard, every tap answers
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright + WebKit
+        run: |
+          npm i -D @playwright/test@^1.49
+          npx playwright install --with-deps webkit
+      - name: City and district boxes on an iPhone
+        env:
+          BASE_URL: https://ezhalah.com
+        run: node e2e/speed/iphone-keyboard-zone-live.mjs
+      - name: Screenshot of a red run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iphone-robot-fail
+          path: iphone-robot-fail.png
+          if-no-files-found: ignore
+      # Unattended: a red run must reach a human. One open alert per workflow file; the next green run resolves it.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind journey_live_check_failed
+          --workflow iphone-robot-live.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

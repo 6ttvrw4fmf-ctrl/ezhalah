@@ -2230,6 +2230,12 @@ def end_run(
         tag = " | ".join(read_gone_report_line(t, c) for t, c in sorted(_READ_GONE_REPORT.items()))
         final_notes = f"{final_notes} | {tag}" if final_notes else tag
         _READ_GONE_REPORT.clear()
+    from scrapers.common import browser_recheck   # owner order 1828: every run says what the browser saw
+    tag = browser_recheck.summary()
+    if tag:
+        if tag not in (final_notes or ""):
+            final_notes = f"{final_notes} | {tag}" if final_notes else tag
+        browser_recheck.log.clear()
     _execute(
         sb().table("scrape_runs").update(
             {

@@ -37,6 +37,7 @@ except ImportError:
 from scrapers.ialqarawi import run as R  # noqa: E402
 from scrapers.common.tests.test_scraper_rows_only_use_real_columns import (  # noqa: E402
     LISTING_COLUMNS,
+    PLATFORM_COLUMNS,
 )
 
 UNAIZAH, CITY_ID, REGION_ID = "عنيزة", 21, 4
@@ -402,7 +403,7 @@ def test_every_key_the_scraper_writes_is_a_real_listing_column():
     row, _, _ = mapped(section="فلل", land_area="270م", som="850 الف", parcel="131",
                        details="4غرف نوم مع 3دوراة مياة+ صالة مصعد مدخل سيارة "
                                "ترخيص الاعلان : 7200123456 شارع عرض 15م")
-    extra = set(row) - LISTING_COLUMNS
+    extra = set(row) - LISTING_COLUMNS - PLATFORM_COLUMNS["ialqarawi"]
     assert not extra, f"not columns of ialqarawi_*_listings: {sorted(extra)}"
     assert row["license_number"] == "7200123456"
     assert row["ad_number"] == "QRW3793"

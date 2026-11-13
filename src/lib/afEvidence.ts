@@ -51,6 +51,10 @@ export type EvidenceDef = {
   ok: (keys: string[], row: AfCanon) => boolean;
   /** Chip text from the ROW value. Called only when ok() held. */
   chips: (keys: string[], row: AfCanon, t: T) => string[];
+  /** A DISJUNCTION over its reads (owner 2026-11-12, the merged instalments chip): one literal TRUE proves it, so the
+   *  null-guard blocks only when EVERY read is null, and ok() must decide with `=== true` alone (a null is never a yes).
+   *  Default (absent): every read must be non-null before ok() runs. */
+  anyRead?: true;
 };
 
 // Amenity token → canonical column (the RPC's p_amenities allowlist, 20 tokens; rnpl is its own
@@ -388,6 +392,13 @@ function ageText(v: number, t: T): string {
   return v < 10 ? t('Age: {n} years', { n: v }) : t('Age: {n} years (over ten)', { n: v });
 }
 
+// The merged instalments chip (owner 2026-11-12): the card's 'rnpl' key holds on the site's own «إيجار بالتقسيط» box
+// OR the ad's monthly / split-payment words — the SQL arm `s.rent_now_pay_later or s.split_payments`. A chat-typed
+// 'split_payments' token holds on its own column only. Only a literal TRUE proves either.
+function rnplKeyHolds(key: string, r: Record<string, unknown>): boolean {
+  return key === 'split_payments' ? r.split_payments === true : (r.rent_now_pay_later === true || r.split_payments === true);
+}
+
 function ratingRungOk(key: string, r: Record<string, unknown>): boolean {
   const [min, rc] = key.split('_rc');
   return num(r.rating) >= Number(min) && (rc == null || num(r.reviews_count) >= Number(rc));
@@ -398,13 +409,15 @@ function ratingRungOk(key: string, r: Record<string, unknown>): boolean {
 export const AF_EVIDENCE: Record<string, EvidenceDef> = {
   rnpl: {
     fields: ['amenities'],
-    // Two chips since 2026-11-01 (owner): the site's installment box («rnpl») and the ad's own words about monthly /
-    // split payments («split_payments», a text fact). Each key reads its own column and speaks its own chip.
+    // ONE chip since 2026-11-12 (owner: «merge … we cannot guarantee»). The card's 'rnpl' key means the site's
+    // instalment box («rent_now_pay_later») OR the ad's own words about monthly / split payments («split_payments», a
+    // text fact) — the SQL arm is `s.rent_now_pay_later or s.split_payments`. A chat-typed «split_payments» token still
+    // reads only its own column. Whichever key holds, the card speaks the one merged chip, once.
     active: (q) => { const k = (q.amenities ?? []).filter((x) => RNPL_TOKENS.includes(x)).map((x) => (x === 'rent_now_pay_later' ? 'rnpl' : x)); return k.length ? [...new Set(k)] : null; },
-    reads: (k) => k.map((x) => (x === 'split_payments' ? 'split_payments' : 'rent_now_pay_later')),
-    ok: (k, r) => k.some((x) => (x === 'split_payments' ? r.split_payments === true : r.rent_now_pay_later === true)),
-    chips: (k, r, t) => k.filter((x) => (x === 'split_payments' ? r.split_payments === true : r.rent_now_pay_later === true))
-      .map((x) => (x === 'split_payments' ? t('Monthly / split payments') : t('Offers installments'))),
+    reads: (k) => [...new Set(k.flatMap((x) => (x === 'split_payments' ? ['split_payments'] : ['rent_now_pay_later', 'split_payments'])))],
+    anyRead: true,
+    ok: (k, r) => k.some((x) => rnplKeyHolds(x, r)),
+    chips: (k, r, t) => (k.some((x) => rnplKeyHolds(x, r)) ? [t('Instalments / monthly payments')] : []),
   },
   property_age: {
     fields: ['ageMin', 'ageMax', 'isNewConstruction', 'ageBuckets'],
@@ -510,7 +523,9 @@ export function afEvidence(active: ActiveAf, row: AfCanon | null | undefined, t:
   for (const { id, keys } of active) {
     const d = AF_EVIDENCE[id];
     if (!d) continue;
-    if (d.reads(keys).some((c) => row[c] == null)) continue;   // UNKNOWN → NOTHING, before any formatter
+    const reads = d.reads(keys);
+    const nulls = reads.filter((c) => row[c] == null).length;
+    if (d.anyRead ? nulls === reads.length : nulls > 0) continue;   // UNKNOWN → NOTHING, before any formatter
     if (!d.ok(keys, row)) continue;                           // drift → NOTHING, never a false match
     for (const text of d.chips(keys, row, t)) out.push({ id, text });
   }

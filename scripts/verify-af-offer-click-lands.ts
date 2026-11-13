@@ -382,6 +382,78 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
   const r2 = await clickWitnessed(silent as any, { x: 1, y: 2 }, { testid: 'x' });
   mustCatch('a page that reports no click reading as a landing (fail closed)',
     r2.landed === false && r2.hit === '(no click event seen)');
+
+  // 🔬 2026-11-11 (alert 11763): the mouse produced NO event at all → one witnessed tap by test id
+  const seq: string[] = [];
+  let h3: any = null;
+  const mobile = {
+    evaluate: async (fn: any) => {
+      if (fn === ARM_CLICK_WITNESS_SRC) { seq.push('arm'); h3 = null; return undefined; }
+      if (fn === READ_CLICK_WITNESS_SRC) { seq.push('read'); const h = h3; h3 = null; return h; }
+      return undefined;
+    },
+    mouse: { click: async () => { seq.push('click'); } },
+    locator: (sel: string) => ({ first: () => ({ click: async () => { seq.push(`locator:${sel}`); h3 = { onTarget: true, tid: 'x', txt: '' }; } }) }),
+  };
+  const r3 = await clickWitnessed(mobile as any, { x: 1, y: 2 }, { testid: 'x' });
+  check('a mouse click the document never saw is retried ONCE by test id, armed and read again',
+    r3.landed === true && seq.join(',') === 'arm,click,read,arm,locator:[data-testid="x"],read', seq.join(','));
+  const deaf = { ...mobile, locator: () => ({ first: () => ({ click: async () => {} }) }) };
+  const r4 = await clickWitnessed(deaf as any, { x: 1, y: 2 }, { testid: 'x' });
+  mustCatch('a locator tap the page never reports reading as a landing (the witness still decides)',
+    r4.landed === false && r4.hit === '(no click event seen)');
+  let locatorCalls = 0;
+  const elsewhere = {
+    evaluate: async (fn: any) => (fn === READ_CLICK_WITNESS_SRC ? { onTarget: false, tid: 'card-listing-1', txt: '' } : undefined),
+    mouse: { click: async () => {} },
+    locator: () => ({ first: () => ({ click: async () => { locatorCalls++; } }) }),
+  };
+  // a witness that failed to ARM or to READ cannot say «no event» — no second tap (CodeRabbit on #11821)
+  for (const broken of ['arm', 'read'] as const) {
+    let taps = 0;
+    const p = {
+      evaluate: async (fn: any) => {
+        if (broken === 'arm' && fn === ARM_CLICK_WITNESS_SRC) throw new Error('context destroyed');
+        if (broken === 'read' && fn === READ_CLICK_WITNESS_SRC) throw new Error('context destroyed');
+        return fn === READ_CLICK_WITNESS_SRC ? null : undefined;
+      },
+      mouse: { click: async () => {} },
+      locator: () => ({ first: () => ({ click: async () => { taps++; } }) }),
+    };
+    const rb = await clickWitnessed(p as any, { x: 1, y: 2 }, { testid: 'x' });
+    mustCatch(`a failed witness ${broken} spending a second tap (or reading as a landing)`, rb.landed === false && taps === 0);
+  }
+  // a document REPLACED by the click reads the witness back as `undefined` — the first click acted; no second tap
+  {
+    let taps = 0;
+    const replaced = {
+      evaluate: async (fn: any) => (fn === READ_CLICK_WITNESS_SRC ? undefined : undefined),
+      mouse: { click: async () => {} },
+      locator: () => ({ first: () => ({ click: async () => { taps++; } }) }),
+    };
+    const rr = await clickWitnessed(replaced as any, { x: 1, y: 2 }, { testid: 'x' });
+    mustCatch('a replaced document (witness read back undefined) spending a second tap', rr.landed === false && taps === 0);
+    check('…and it is reported as UNKNOWN, so the caller spends no further tap either', rr.unknown === true, JSON.stringify(rr));
+  }
+  // the locator tap ran, then the SECOND witness read rejected — the tap may have acted: UNKNOWN, never a clean miss
+  {
+    let reads = 0;
+    const second = {
+      evaluate: async (fn: any) => {
+        if (fn !== READ_CLICK_WITNESS_SRC) return undefined;
+        if (++reads === 2) throw new Error('context destroyed');
+        return null;
+      },
+      mouse: { click: async () => {} },
+      locator: () => ({ first: () => ({ click: async () => {} }) }),
+    };
+    const rs = await clickWitnessed(second as any, { x: 1, y: 2 }, { testid: 'x' });
+    mustCatch('a rejected second witness read reading as a confirmed miss (the caller would tap again)',
+      rs.landed === false && rs.unknown === true && reads === 2);
+  }
+  const r5 = await clickWitnessed(elsewhere as any, { x: 1, y: 2 }, { testid: 'x' });
+  check('a click that landed on something ELSE is a real miss — no second tap is spent on it',
+    r5.landed === false && r5.hit === 'card-listing-1' && locatorCalls === 0, `${JSON.stringify(r5)} locatorCalls=${locatorCalls}`);
 }
 
 // ── 10. MOBILE 2026-11-05: the CTA is far below the screen while the cards still reveal ─────────────

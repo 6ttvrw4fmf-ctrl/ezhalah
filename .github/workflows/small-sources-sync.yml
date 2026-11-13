@@ -322,7 +322,7 @@ jobs:
             #   profiles DIRECT before the proxy, so the proxy is only used when DIRECT is refused.
             - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10, proxy: true }
             - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10, proxy: true }
-            - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10, proxy: true }
+            - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 15, proxy: true, browser: true }   # browser: the project-button goo.gl hop answers a script page, not a redirect (⚡ 11-10, run 42762924130)
             - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 15, proxy: true, browser: true }   # browser: the goo.gl pin hop (⚡ 11-03)
             # SuperOffice (2026-09-27): owner-approved — available private offices only.
             - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10, proxy: true }
@@ -504,8 +504,22 @@ jobs:
         # pins ONLY as a Google short link, and Google answers a plain HTTP client on a datacenter
         # address with a script page, not the redirect. A headless Chromium runs that script
         # (scrapers/common/page_pin.py _browser_hop). Only the `browser: true` sources pay for it.
+        #
+        # ⚡ 2026-11-12: the install's apt step DIES when the runner's DNS blips («Temporary failure
+        # resolving 'security.ubuntu.com'»): on the 11-11 04:22 nightly 5 of 11 red jobs (tawia, shomou,
+        # nowaisiry, therc, abralosol) never reached their crawl — no scrape_runs row, therc paged P0
+        # silent_scraper_death. The browser only serves the pin hop, and page_pin._browser_hop already
+        # degrades to «keep yesterday's pin» when Chromium cannot launch. So: 3 tries with backoff, then
+        # crawl WITHOUT the hop (a warning, never a lost crawl). Guard:
+        # scrapers/common/tests/test_browser_install_never_kills_the_crawl_2026_11_12.py
         if: ${{ matrix.browser }}
-        run: python -m playwright install --with-deps chromium
+        run: |
+          for i in 1 2 3; do
+            python -m playwright install --with-deps chromium && exit 0
+            echo "::warning::Chromium install try $i failed (runner apt/DNS); retrying in $((i * 30)) s"
+            sleep $((i * 30))
+          done
+          echo "::warning::Chromium install failed 3 times — crawling WITHOUT the pin hop; stored pins are kept (page_pin keep_stored_pin)"
       - name: Sync ${{ matrix.source }}
         # No per-source `if:` here any more: `plan` already put only the requested sources in the matrix.
         # A comma-separated list still runs exactly those sources in ONE run (one per-list concurrency lane).

@@ -200,14 +200,8 @@ def source_pin(html: str) -> Optional[dict[str, float]]:
     return None
 
 
-def _listing_json(html: str) -> Optional[dict[str, Any]]:
-    """The listing object aqar embeds in its RSC flight payload, or None if it is not present.
-
-    None means we could not read aqar's structured data on this fetch — NOT that the flat lacks
-    amenities. Callers must treat it as unknown.
-    """
-    if not html or '"listing"' not in html and '\\"listing\\"' not in html:
-        return None
+def _flight_blob(html: str) -> str:
+    """aqar's RSC flight payload as one decoded string (the self.__next_f.push chunks joined and unescaped)."""
     # The payload arrives as JS string literals inside self.__next_f.push([1,"..."]) chunks; joining
     # them and unescaping reconstitutes the JSON. Fall back to the raw html for already-plain markup.
     chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html, re.S)
@@ -223,6 +217,55 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
             blob = blob.encode("latin-1", "ignore").decode("utf-8", "ignore")
         except UnicodeError:      # already clean on some payload shapes — keep what we have
             pass
+    return blob
+
+
+# THE SELLER'S TEXT BEHIND A FLIGHT REFERENCE (2026-11-11, owner launch audit). When the description is long, aqar
+# does not put it inline: `listing.content` is a reference such as «$8a», and the text travels as its own flight row
+# «8a:T8ae,<0x8ae bytes of UTF-8>». The audit ad itself (6560368, «السعر الشهري: 9499») is one: the seller-says-monthly
+# rule received the literal «$8a» and could not read a word of it (dry run, Actions 42936167561). An unresolvable
+# reference is unknown text — None, never the reference string.
+_FLIGHT_REF = re.compile(r"\$([0-9a-f]+)")
+
+
+def seller_text(obj: Optional[dict[str, Any]], html: str) -> Optional[str]:
+    """The seller's own description: `listing.content` itself, or the flight text row it points to."""
+    c = (obj or {}).get("content")
+    if not isinstance(c, str):
+        return None
+    ref = _FLIGHT_REF.fullmatch(c.strip())
+    if not ref:
+        return c
+    blob = _flight_text_blob(html)
+    row = re.search(r"(?:^|\n)" + re.escape(ref.group(1)) + r":T([0-9a-f]+),", blob)
+    if not row:
+        return None
+    return blob[row.end():].encode("utf-8")[:int(row.group(1), 16)].decode("utf-8", "ignore") or None
+
+
+def _flight_text_blob(html: str) -> str:
+    """The flight payload decoded LOSSLESSLY, for byte-counted text rows (CodeRabbit on #11753). Each push chunk is a
+    JSON string literal, so json.loads restores every character — an emoji written as «\\ud83d\\udd25» included —
+    where _flight_blob's latin-1 round trip drops what it cannot map and the «T<bytes>» length then cuts the seller's
+    text short or runs into the next row. A chunk json cannot read falls back to _flight_blob's reading."""
+    chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html, re.S)
+    if not chunks:
+        return _flight_blob(html)
+    try:
+        return "".join(_json.loads('"' + c + '"') for c in chunks)
+    except ValueError:
+        return _flight_blob(html)
+
+
+def _listing_json(html: str) -> Optional[dict[str, Any]]:
+    """The listing object aqar embeds in its RSC flight payload, or None if it is not present.
+
+    None means we could not read aqar's structured data on this fetch — NOT that the flat lacks
+    amenities. Callers must treat it as unknown.
+    """
+    if not html or '"listing"' not in html and '\\"listing\\"' not in html:
+        return None
+    blob = _flight_blob(html)
     # raw_decode, not a brace counter: the counter ignored strings, so an ad whose own text holds a
     # «{» or «}» closed the object mid-string, failed to parse, and the WHOLE payload read as None —
     # photos, pin, price and amenities all unknown. Live 2026-10-10: ad 6753755 and 42 more rows kept
@@ -1033,7 +1076,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             # Skipping those pages left the very ad of the owner's audit (aqar 6560368, a pay-later page) at 9,499
             # «a year» and 12 of the 21 known cases unfixed (dry run 2026-11-11, Actions run 42931691834).
             if rent_period != "monthly" \
-                    and seller_says_monthly(s_price, (obj or {}).get("content"), property_type):
+                    and seller_says_monthly(s_price, seller_text(obj, html), property_type):
                 rent_period = "monthly"
                 rent_period_from = "seller_text"
             if rent_period == "monthly" and price_annual:

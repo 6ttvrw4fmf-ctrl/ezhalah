@@ -49,8 +49,9 @@ export function unknownColumnFilter(keys: string[], amenityKeys: Set<string>): U
   if (any(STW)) return { what: 'street_width_m', qs: 'street_width_m=is.null', rpcCol: 'cnt_stw_unknown' };
   if (any(RATING)) return { what: 'rating', qs: 'rating=is.null', rpcCol: 'cnt_rating_unknown' };
   if (any(SUBTYPE)) return { what: 'unit_subtype_ar', qs: 'unit_subtype_ar=is.null', rpcCol: 'cnt_sub_unknown' };
-  // The installments card is its own question with the single key `rnpl`.
-  if (keys.length > 0 && keys.every((k) => k === 'rnpl')) return { what: 'rent_now_pay_later', qs: 'rent_now_pay_later=is.null', rpcCol: 'cnt_rnpl_unknown' };
+  // The installments card is its own question with the single key `rnpl`. Since 2026-11-12 (owner) the chip is the box
+  // OR the ad's «دفعات» words, so «did not mention» = the box is unknown AND the words are not a yes (cnt_rnpl_unknown).
+  if (keys.length > 0 && keys.every((k) => k === 'rnpl')) return { what: 'rent_now_pay_later (and no split-payment words)', qs: 'rent_now_pay_later=is.null&split_payments=not.is.true', rpcCol: 'cnt_rnpl_unknown' };
   if (keys.some((k) => amenityKeys.has(k))) {
     return {
       what: `every amenity column (${AMEN_UNKNOWN_COLUMNS.length})`,
