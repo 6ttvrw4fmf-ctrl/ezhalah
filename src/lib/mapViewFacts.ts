@@ -71,10 +71,11 @@ export type FactBox =
   | { kind: 'locked'; chips: string[] }
   | { kind: 'chips'; chips: FactChip[]; hint: string | null };
 
-/** What the box says, given the facts, the number the pill's first line shows, whether a property type is picked, and
- *  whether the view is sale-only (the only place a price can appear, so the only place to ask for a type). */
+/** What the box says, given the facts, the number the pill's first line shows, whether a property type is picked,
+ *  whether the view is sale-only (the only place a price can appear, so the only place to ask for a type), and whether
+ *  the count is a drawn boundary (then the facts are for the ads inside it, without «أحياء قريبة»). */
 export function factBox(f: ViewFacts | null, shown: number | null, loc: 'ar' | 'en', typePicked: boolean, saleOnly = true,
-                        latin: (s: string) => string = (s) => s): FactBox {
+                        latin: (s: string) => string = (s) => s, drawn = false): FactBox {
   if (!f || shown === null || f.any !== shown || f.any < FACTS_MIN_ADS) return { kind: 'none' };
   const n = (x: number) => x.toLocaleString('en-US');
   if (f.locked) {
@@ -83,7 +84,7 @@ export function factBox(f: ViewFacts | null, shown: number | null, loc: 'ar' | '
       h?.new ? (loc === 'ar' ? '88 جديد' : '88 new') : null,
       h?.gone ? (loc === 'ar' ? '88 اختفى' : '88 gone') : null,
       h?.ppm ? (loc === 'ar' ? 'المتر المعروض 8,888' : 'asking 8,888/m²') : null,
-      h?.cmp ? (loc === 'ar' ? 'مقارنة بأحياء قريبة 88%' : 'vs nearby 88%') : null,
+      h?.cmp && !drawn ? (loc === 'ar' ? 'مقارنة بأحياء قريبة 88%' : 'vs nearby 88%') : null,
       h?.cuts ? (loc === 'ar' ? '88 خفضوا السعر' : '88 price cuts') : null,
     ].filter((x): x is string => x !== null);
     return shapes.length ? { kind: 'locked', chips: shapes } : { kind: 'none' };
@@ -93,7 +94,8 @@ export function factBox(f: ViewFacts | null, shown: number | null, loc: 'ar' | '
   if (f.gone30) chips.push({ text: loc === 'ar' ? `${n(f.gone30)} اختفى` : `${n(f.gone30)} gone`, tone: 'plain' });
   if (f.ppm) {
     chips.push({ text: loc === 'ar' ? `المتر المعروض ${n(f.ppm)} ريال` : `asking ${n(f.ppm)} SAR/m²`, tone: 'plain' });
-    if (f.nbPpm && f.nbKind) chips.push(comparisonChip(f.ppm, f.nbPpm, f.nbKind, f.cityAr, loc, latin));
+    // a drawn boundary is not a district: nothing fair to compare it with, so «أحياء قريبة» is not said
+    if (f.nbPpm && f.nbKind && !drawn) chips.push(comparisonChip(f.ppm, f.nbPpm, f.nbKind, f.cityAr, loc, latin));
   }
   if (f.cuts30) chips.push({ text: loc === 'ar' ? `${n(f.cuts30)} خفضوا السعر` : `${n(f.cuts30)} price cuts`, tone: 'plain' });
   const hint = saleOnly && !typePicked && !f.ppm ? (loc === 'ar' ? 'اختر نوع العقار لعرض السعر' : 'Pick a property type to see the price') : null;

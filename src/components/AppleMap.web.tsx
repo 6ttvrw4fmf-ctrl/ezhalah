@@ -713,8 +713,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   useEffect(() => {
     setViewFacts(null);
     const m = mapRef.current;
-    if (!m || !pinFilter || !factsBox || hasShape || drawing || typeof pinCount !== 'number' || pinCount < FACTS_MIN_ADS || !viewPlace) return;
-    if (!factsZoom(m.region.span.latitudeDelta)) return;
+    // A drawn boundary gets the facts for exactly the ads inside it (the pin read already carries its polygon), at any zoom.
+    if (!m || !pinFilter || !factsBox || drawing || typeof pinCount !== 'number' || pinCount < FACTS_MIN_ADS || (!viewPlace && !hasShape)) return;
+    if (!hasShape && !factsZoom(m.region.span.latitudeDelta)) return;
     let stale = false;
     const box = factsBox;
     const tm = setTimeout(() => { void fetchViewFacts(box, pinFilter, !!user).then((f) => { if (!stale) setViewFacts(f); }); }, 350);
@@ -1394,7 +1395,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         const loc = locale === 'ar' ? 'ar' : 'en';
         const typePicked = !!(pinFilter?.types?.length || pinFilter?.scope?.types2?.length);
         const saleOnly = (pinFilter?.deals ?? []).length === 1 && pinFilter?.deals[0] === 'buy';
-        const box = factBox(viewFacts, hasShape ? null : placeCount ?? pinCount, loc, typePicked, saleOnly, translitPlace);
+        const box = factBox(viewFacts, hasShape ? pinCount : placeCount ?? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape);
         const locked = box.kind === 'locked';
         return (
           <View style={[s.countPill, box.kind !== 'none' && s.countPillTall]} pointerEvents={locked ? 'box-none' : 'none'} testID="map-pin-count">

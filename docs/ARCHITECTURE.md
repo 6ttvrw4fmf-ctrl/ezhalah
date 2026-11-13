@@ -606,7 +606,8 @@ posting date; a copy on another site counts once; a price is the MEDIAN, shown o
 «إعلانات قليلة»; with no type picked the price is never mixed — the box says «اختر نوع العقار لعرض السعر» and the card
 lists the price per type; «أحياء قريبة» = the 4 nearest districts of the same city with enough ads, under the SAME
 filters (counts compared as the neighbours' average, so a big district is not compared unfairly), falling back to the
-city — named as such — when the neighbours lack data; a drawn boundary hides «أحياء قريبة»; «أمس» is the last FINISHED
+city — named as such — when the neighbours lack data; a drawn boundary gets the facts for exactly the ads inside it
+(any zoom) but never «أحياء قريبة» (a drawing is not a district); «أمس» is the last FINISHED
 day (never «اليوم», which reads 0 in the morning); a failed read hides the box's facts (never «0»); guests see the same
 layout with blurred shapes and «🔒 سجل الدخول لعرض الأرقام», and the server never sends them a number.
 History: «اختفى» counts confirmed removals from the nightly `map_fact_removal` log (started 2026-11-12 — only 37% of
