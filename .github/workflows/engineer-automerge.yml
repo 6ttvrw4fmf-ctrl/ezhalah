@@ -67,9 +67,13 @@ jobs:
           # --limit 200, not 50 (🔧 2026-11-01): the deploy robot opens a deploy/baseline-* PR per deploy and ~85 of them were
           # open, so the 50 newest PRs were almost all baselines and every engineer PR older than ~2 days fell out of the
           # robot's window — #8855 (green barrier), #8818 / #8790 (one-line docs), #8954 (scripts) sat 5–6 days unseen.
+          # BRANCH PREFIXES (🔧 2026-11-13): a lane is a regex. On 11-13 four green, thread-free engineer PRs (#11910 repair/,
+          # #11911 repair/, #11912 speed/, #11504 robots/) and #11606 data/ / #11398 map/ sat 2–4 days unseen because their
+          # prefixes were not in this list; the files were all in the lanes below. The list names the prefixes the engineers
+          # really use — the FILE lanes and the gate below are what decide whether a PR merges.
           prs=$(gh pr list --repo "$REPO" --state open --limit 200 \
                   --json number,headRefName,isDraft,isCrossRepository,title \
-                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror|docs|deploy)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
+                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror|docs|deploy|repair|speed|robots|map|data)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
           while IFS=$'\t' read -r pr title <&3; do
             [ -n "$pr" ] || continue
             files=$(gh pr view "$pr" --repo "$REPO" --json files -q '.files[].path')
