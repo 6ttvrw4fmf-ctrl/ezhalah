@@ -2,7 +2,8 @@
 # Ezhalah runner host setup — run ONCE, as root, on a fresh Ubuntu 24.04 server (Hetzner AX102 recommended).
 # Full guide, trial checklist and rollback: docs/ops/OWN_SERVER_RUNNERS.md. Nothing here touches GitHub settings:
 # jobs move only when the owner sets the repo variable EZ_RUNNER=ezhalah-own, and move back when it is deleted.
-#   usage:  OWNER_IP=<your home IP> bash setup.sh
+#   usage:  OWNER_IP=<your home IP> bash setup.sh            (AX102: 12 runners, the default)
+#           OWNER_IP=<your home IP> RUNNERS=6 bash setup.sh  (AX42: 8 cores / 64 GB → 6 × 2.5 CPU × 9 GB)
 set -euo pipefail
 : "${OWNER_IP:?set OWNER_IP to the one address allowed to SSH in}"
 
@@ -28,11 +29,11 @@ if [ ! -f /opt/ezhalah-runner/.env ]; then
   read -r -s -p "Paste the fine-grained GitHub token: " PAT; echo
   BASE_DIGEST=$(docker pull -q myoung34/github-runner:ubuntu-noble >/dev/null && docker inspect --format '{{index .RepoDigests 0}}' myoung34/github-runner:ubuntu-noble)
   umask 077
-  printf 'GH_RUNNER_PAT=%s\nBASE_IMAGE=%s\nRUNNERS=12\nCPUS_PER_RUNNER=2.5\nMEM_PER_RUNNER=9g\n' "$PAT" "$BASE_DIGEST" > /opt/ezhalah-runner/.env
+  printf 'GH_RUNNER_PAT=%s\nBASE_IMAGE=%s\nRUNNERS=%s\nCPUS_PER_RUNNER=%s\nMEM_PER_RUNNER=%s\n' "$PAT" "$BASE_DIGEST" "${RUNNERS:-12}" "${CPUS_PER_RUNNER:-2.5}" "${MEM_PER_RUNNER:-9g}" > /opt/ezhalah-runner/.env
 fi
 cp Dockerfile docker-compose.yml /opt/ezhalah-runner/
 
-# 5. Build and start. `docker compose ps` should show 12 runners; GitHub → Settings → Actions → Runners shows them Idle.
+# 5. Build and start. `docker compose ps` should show RUNNERS runners; GitHub → Settings → Actions → Runners shows them Idle.
 cd /opt/ezhalah-runner
 docker compose --env-file .env up -d --build
 docker compose ps
