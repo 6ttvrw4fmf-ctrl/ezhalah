@@ -43,7 +43,7 @@ mustCatch('a box that ignores the pill\'s count', () => { const ignoresPill = (f
 const drawnBox = factBox(full, 560, 'ar', true, true, (x) => x, true);
 check('a drawn boundary gets the facts for the ads inside it, without «أحياء قريبة»', drawnBox.kind === 'chips' && texts(drawnBox).includes('72 جديد') && !texts(drawnBox).some((t) => t.includes('أحياء قريبة')));
 mustCatch('a drawing compared with «nearby districts»', () => { const b2 = factBox(full, 560, 'ar', true, true, (x) => x, false); return b2.kind === 'chips' && !texts(b2).some((t) => t.includes('أحياء قريبة')); });
-check('the map asks for facts inside a drawing too (its pin read carries the polygon)', /\(!viewPlace && !hasShape && !factsExact\)\) return;/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')) && !/hasShape \|\| drawing \|\|/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+check('the map asks for facts inside a drawing too (its pin read carries the polygon)', /\(!viewPlace && !hasShape && !factsExact\)\) \{ forget\(''\); return; \}/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')) && !/hasShape \|\| drawing \|\|/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 
 // 2. the comparison
 check('pricier than the neighbours reads red with the percentage', plain(comparisonChip(10900, 10000, 'near', 'الرياض', 'ar').text) === 'أغلى من أحياء قريبة 9%' && comparisonChip(10900, 10000, 'near', 'الرياض', 'ar').tone === 'up');
@@ -114,6 +114,19 @@ const webSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8
 const focusWired = (src: string) => /if \(p\.kind === 'district'\) live\.focus = \{ district: /.test(src) && /areaPlace\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span, live\.focus\);/.test(src) && /live\.focus = null;/.test(src);
 check('a district search sets the focus, the label view reads it, clearing the search clears it', focusWired(webSrc));
 mustCatch('a label view that never reads the searched district', () => focusWired(webSrc.replace('m.region.span, live.focus);', 'm.region.span);')));
+
+// 3f. fast and steady (owner 2026-11-13: «it takes time for it to show … it feels glitchy»)
+const fast = (src: string, data: string) => /if \(!level && factsZoom\(span\.latitudeDelta\)\) void fetchViewFacts\(paddedBox\(center, span\), pins, signedInRef\.current\);/.test(src)
+  && !/setTimeout\(\(\) => \{ void fetch(View|Place)Facts/.test(src)
+  && /const out = inflight\.get\(key\);\s*if \(out\) return out;/.test(data);
+const dataSrc = readFileSync(join(root, 'src/data/mapViewFacts.ts'), 'utf8');
+const webNow = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
+check('the box\'s facts are read with the pins (no pause), and a second ask for the same view joins the read already out', fast(webNow, dataSrc));
+mustCatch('the 350 ms pause back before the box is asked for', () => fast(webNow.replace('void fetchViewFacts(box, pinFilter, !!user).then(', 'const tm = setTimeout(() => { void fetchViewFacts(box, pinFilter, !!user).then('), dataSrc));
+mustCatch('two reads for the same view (the box waits for the second)', () => fast(webNow, dataSrc.replace('if (out) return out;', '')));
+const steady = (src: string) => /const forget = \(key: string\) => \{ if \(factsKeyRef\.current !== key\) \{ factsKeyRef\.current = key; setViewFacts\(null\); \} \};/.test(src) && !/useEffect\(\(\) => \{\s*setViewFacts\(null\);/.test(src);
+check('the box is cleared only when asked about another view (no blink when the count or the name lands)', steady(webNow));
+mustCatch('a box that blinks off on every re-ask', () => steady(webNow.replace('  useEffect(() => {\n    const m = mapRef.current;\n    // The box is cleared only', '  useEffect(() => {\n    setViewFacts(null);\n    const m = mapRef.current;\n    // The box is cleared only')));
 
 // 4. the screen asks for the box the count was read over, and compares with the number it shows
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');

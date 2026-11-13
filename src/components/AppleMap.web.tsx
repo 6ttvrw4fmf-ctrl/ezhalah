@@ -711,7 +711,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const [factsExact, setFactsExact] = useState(false);
   // At city/district LABEL zoom the pill names a place with its own count: the box reads that place's prepared facts.
   const [factsPlace, setFactsPlace] = useState<PlaceFactsKey | null>(null);
+  const factsKeyRef = useRef('');
   const { user, openAuth } = useApp();
+  const signedInRef = useRef(false); signedInRef.current = !!user;
   const retryPinsRef = useRef<(() => void) | null>(null);
   // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
   const [viewPlace, setViewPlace] = useState<string | null>(null);
@@ -719,28 +721,33 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const [placeCount, setPlaceCount] = useState<number | null>(null);
   // Asked once the count has settled (350 ms), only at exact-point zoom and only for a named place with enough ads.
   useEffect(() => {
-    setViewFacts(null);
     const m = mapRef.current;
+    // The box is cleared only when it is asked about ANOTHER view (owner 2026-11-13: «it feels glitchy») — the same view
+    // asked again (the count landing, the place name arriving) keeps it on screen instead of blinking it off and on.
+    const forget = (key: string) => { if (factsKeyRef.current !== key) { factsKeyRef.current = key; setViewFacts(null); } };
     // City/district label zoom: the named place's prepared facts — only when the count is all of one deal's ads there.
     if (factsPlace && !hasShape && !drawing && pinFilter && placeFactsFit(pinFilter) && typeof placeCount === 'number' && placeCount >= FACTS_MIN_ADS) {
       let staleP = false;
       const place = factsPlace;
       const deals = pinFilter.deals;
-      const tmP = setTimeout(() => { void fetchPlaceFacts(place, deals, !!user).then((f) => { if (!staleP) setViewFacts(f); }); }, 350);
-      return () => { staleP = true; clearTimeout(tmP); };
+      forget(`P|${JSON.stringify(place)}|${deals.join(',')}|${user ? 'u' : 'g'}`);
+      void fetchPlaceFacts(place, deals, !!user).then((f) => { if (!staleP) setViewFacts(f); });
+      return () => { staleP = true; };
     }
     // A drawn boundary gets the facts for exactly the ads inside it (the pin read already carries its polygon), at any zoom.
-    if (!m || !pinFilter || !factsBox || drawing || typeof pinCount !== 'number' || pinCount < FACTS_MIN_ADS || (!viewPlace && !hasShape && !factsExact)) return;
-    if (!hasShape && !factsExact && !factsZoom(m.region.span.latitudeDelta)) return;
+    if (!m || !pinFilter || !factsBox || drawing || typeof pinCount !== 'number' || pinCount < FACTS_MIN_ADS || (!viewPlace && !hasShape && !factsExact)) { forget(''); return; }
+    if (!hasShape && !factsExact && !factsZoom(m.region.span.latitudeDelta)) { forget(''); return; }
     let stale = false;
     const box = factsBox;
     const exact = factsExact;
-    const tm = setTimeout(() => { void fetchViewFacts(box, pinFilter, !!user).then((f) => {
+    forget(`B|${JSON.stringify(box)}|${pinsKey}|${user ? 'u' : 'g'}`);
+    // no pause: the read was already started when the map stopped (load(), below) — this joins it or reads the cache
+    void fetchViewFacts(box, pinFilter, !!user).then((f) => {
       if (stale) return;
       setViewFacts(f);
       if (exact && f) setPinCount(f.any);   // the estimate gives way to the exact count of the same box
-    }); }, 350);
-    return () => { stale = true; clearTimeout(tm); };
+    });
+    return () => { stale = true; };
     // pinsKey stands for pinFilter (a new object every render)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factsBox, factsExact, factsPlace, pinsKey, hasShape, drawing, pinCount, placeCount, viewPlace, user]);
@@ -1035,6 +1042,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
       const level = narrowed ? null : areaLevelShown(span.latitudeDelta);
+      // The box's facts are read AT THE SAME TIME as the pins (owner 2026-11-13: «it takes time for it to show»): the box
+      // the count will be read over is known now, so its facts are on their way before the count lands.
+      if (!level && factsZoom(span.latitudeDelta)) void fetchViewFacts(paddedBox(center, span), pins, signedInRef.current);
       if (level) {
         const areas = await fetchMapAreas(paddedBox(center, span), level, pins.deals);
         if (my !== seq || mapRef.current !== m) return;

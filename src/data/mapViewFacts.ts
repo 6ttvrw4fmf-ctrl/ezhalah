@@ -11,13 +11,25 @@ import type { PlaceFactsKey } from '@/lib/mapAreas';
 const CACHE_MS = 120_000;
 const CACHE_MAX = 40;
 const recent = new Map<string, { at: number; f: ViewFacts }>();
+// the same view asked twice while its read is still out (the map asks as soon as it moves, then again once the count
+// lands) shares ONE read — the box appears when that read does, never after a second one
+const inflight = new Map<string, Promise<ViewFacts | null>>();
 
-export async function fetchViewFacts(box: { s: number; w: number; n: number; e: number }, filter: PinFilter, signedIn: boolean): Promise<ViewFacts | null> {
-  if (!supabase) return null;
+export function fetchViewFacts(box: { s: number; w: number; n: number; e: number }, filter: PinFilter, signedIn: boolean): Promise<ViewFacts | null> {
+  if (!supabase) return Promise.resolve(null);
   const args = postedCountArgs(box, filter);
   const key = `${signedIn ? 'u' : 'g'}|${JSON.stringify(args)}`;
   const hit = recent.get(key);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.f;
+  if (hit && Date.now() - hit.at < CACHE_MS) return Promise.resolve(hit.f);
+  const out = inflight.get(key);
+  if (out) return out;
+  const p = readViewFacts(args, key).finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
+async function readViewFacts(args: ReturnType<typeof postedCountArgs>, key: string): Promise<ViewFacts | null> {
+  if (!supabase) return null;
   try {
     const result = await boundedRpc<unknown>(supabase.rpc('map_view_facts_ar', args));
     const { error } = result as { error: unknown };
