@@ -1378,7 +1378,11 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # look-back walked past «مصعد» to the lift's «لا يوجد»). Prepositions keep the look-back: «لا يوجد بها محلات» is a no.
     verb_affirms = fact in _LEAD_VERB_FACTS and bool(lead) and _strip_wa(lead[0]) in _EXIST_VERBS
     if fact in _UNIT_ROOMS and prev and _strip_wa(prev[-1].strip("(")) in _EXCEPT_WORDS and "غسال" not in _n(t[ws:we]) \
-            and not _negated_after(nxt, fact):                # «باستثناء المطبخ غير راكب» keeps its own «no» (CodeRabbit #12178)
+            and (fwd_ex := _negated_after(nxt, fact)):
+        # «باستثناء المطبخ غير راكب»: the room's OWN trailing verdict is the evidence, never the exception word
+        # (CodeRabbit #12178: the quote read «باستثناء المطبخ»)
+        return False, ws, we + len(" ".join([""] + nxt[:fwd_ex]))
+    if fact in _UNIT_ROOMS and prev and _strip_wa(prev[-1].strip("(")) in _EXCEPT_WORDS and "غسال" not in _n(t[ws:we]):
         return None, s, e                            # «مكيفات مخفية (ماعدا غرفة السائق … مكيفات سبيلت)», «جميع الغرف
                                                      # ماعدا غرفة السائق»: the room EXISTS — it is the exception to
                                                      # something else, never a «no» (aqar 14875791, 21286, 17657272,
