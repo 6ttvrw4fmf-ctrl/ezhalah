@@ -38,6 +38,13 @@ CASES = [
     ("للبيع شقة دور أرضي – شارع عثمان بن عفان | بريدة", "Floor", "residential"),  # 648058: longest token «دور أرضي»
     ("شقة فاخرة حي الروضة", "Apartment", "residential"),                   # 3961981 stays a flat
     ("للبيع شالية بحي السلمان", "Chalet", "residential"),                  # 21673925: «شالية» is «شاليه»
+    # 🦅 2026-11-13 (CodeRabbit on #11710): a type word after «تضم / مع / فيها / بها» names a PART of the property.
+    ("عمارة سكنية للبيع تضم صالات تجارية", "Building", "residential"),   # was Shop → commercial table
+    ("عمارة سكنية للبيع وتضم محلات", "Building", "residential"),
+    ("فيلا للبيع مع محل تجاري", "Villa", "residential"),
+    ("عمارة للبيع فيها شقق مفروشة", "Building", "residential"),
+    ("للإيجار صالة تجارية – سلطانة", "Shop", "commercial"),               # no connector: unchanged
+    ("معرض للإيجار مع مستودع", "Showroom", "commercial"),                 # «معرض» is never split by «مع»
     ("صالات تجارية للإيجار - مجمع روفان التجاري بريدة", "Shop", "commercial"),  # 26359507
 ]
 bad = []

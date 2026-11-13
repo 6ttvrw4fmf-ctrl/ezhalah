@@ -29,7 +29,10 @@ def _install_step_script(text: str) -> str:
 
 
 def _run(script: str, python_ok: bool) -> tuple[int, int]:
-    with tempfile.TemporaryDirectory() as d:
+    # The fakes live beside this file, not in /tmp: the self-hosted runner mounts /tmp noexec, so a fake `python`
+    # there cannot run, bash falls through to the REAL python (which installs Chromium fine) and the test read
+    # «0 tries» (PR 12167 run 43491832212, 2026-11-13). The checkout is always executable.
+    with tempfile.TemporaryDirectory(dir=pathlib.Path(__file__).resolve().parent, prefix=".tmp-fakes-") as d:
         calls = pathlib.Path(d, "calls")
         fake = pathlib.Path(d, "python")
         fake.write_text(f"#!/bin/sh\necho x >> {calls}\nexit {0 if python_ok else 100}\n")
@@ -37,6 +40,7 @@ def _run(script: str, python_ok: bool) -> tuple[int, int]:
         sleep = pathlib.Path(d, "sleep")
         sleep.write_text("#!/bin/sh\nexit 0\n")
         sleep.chmod(sleep.stat().st_mode | stat.S_IEXEC)
+        assert os.access(fake, os.X_OK), f"the fake python at {fake} is not executable — the test would silently run the real one"
         env = dict(os.environ, PATH=f"{d}:{os.environ['PATH']}")
         rc = subprocess.run(["bash", "-e", "-c", script], env=env, capture_output=True).returncode
         n = len(calls.read_text().splitlines()) if calls.exists() else 0
