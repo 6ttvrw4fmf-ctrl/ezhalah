@@ -9,6 +9,7 @@
 // mutation for each fact.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { windowBetween } from './lib/sourceWindow.ts';
 import { listedAgoText, daysSinceCardDate, riyadhToday, AGO_MAX_DAYS } from '../src/lib/listedAgo.ts';
 
 const root = join(import.meta.dirname ?? '.', '..');
@@ -36,8 +37,9 @@ check('«today» is the Riyadh calendar day, not the viewer\'s', r.y === 2026 &&
 const CARD = readFileSync(join(root, 'src/components/ResultCard.tsx'), 'utf8');
 function layout(src: string): string[] {
   const out: string[] = [];
-  const head = src.slice(src.indexOf('<View style={card.headline}>'), src.indexOf('</View>', src.indexOf('<View style={card.headline}>')));
-  if (!head || /<Text style=\{\[card\.title/.test(head)) out.push('something is drawn before the price in the headline');
+  let head = '';
+  try { head = windowBetween(src, '<View style={card.headline}>', '{monthlyLine(listing, locale)}', 'ResultCard headline'); } catch { out.push('the headline cannot be found'); }
+  if (/<Text style=\{\[card\.title/.test(head)) out.push('something is drawn before the price in the headline');
   if (!/testID="card-price"/.test(head)) out.push('the price is not in the headline');
   if (/t\('Saudi Arabia'\)/.test(src)) out.push('the 📍 line still says «المملكة العربية السعودية»');
   if ((src.match(/testID="card-place">\s*\{\(place\(arabicOrPlaceholder\(t\(listing\.district\)/g) ?? []).length < 2) out.push('a place line does not lead with the district');
