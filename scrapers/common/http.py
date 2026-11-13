@@ -20,6 +20,8 @@ from urllib.parse import urlsplit
 
 from curl_cffi import requests as cc
 
+from scrapers.common import browser_recheck
+
 
 # Polite throttle: request STARTS are spaced at least MIN_INTERVAL seconds apart PER HOST. Unlike
 # the old "sleep 2s after each request" model, this only spaces the *starts*, so many workers can
@@ -261,6 +263,8 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25,
             proxies = {"http": purl, "https": purl}
     host = urlsplit(url).netloc
     pinned = None if proxies is not None else _host_route.get(host)
+    if pinned is not None and pinned[0] == BROWSER_ROUTE[0]:
+        return _fetch_on(pinned, url, timeout)          # this host is read through the real browser
     if pinned is not None:
         s = _route_session(*pinned)
     blocked = None    # the reason the default route looks BLOCKED (401/403 or refused), if it does
@@ -281,6 +285,11 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25,
             return r
         if r.status_code in BLOCK_STATUSES:
             blocked = f"HTTP {r.status_code}"
+            break
+        if r.status_code in (429, 503) and browser_recheck.classify(r.status_code, _body(r)) != "failed":
+            # An automatic «checking your browser» page (or a CAPTCHA) served with 429/503 is a wall,
+            # not a hiccup: retrying it only repeats it (owner order 2026-11-12, backlog 1828).
+            blocked = f"HTTP {r.status_code} challenge"
             break
         if r.status_code in TRANSIENT_STATUSES:
             # Server-side temporary hiccup — back off, rotate the connection, and retry.
@@ -313,6 +322,14 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25,
 # fail fast exactly as before (None), so a real ban cannot become a probe storm or a proxy bill. A 404/410 is never escaped: a
 # page that is gone stays gone. The metered proxy is never used unless the workflow set the var.
 BLOCK_STATUSES = frozenset({401, 403})
+BROWSER_ROUTE = ("browser", False)   # the last leg: a real browser (scrapers/common/browser_recheck.py)
+
+
+def _body(r) -> str:
+    try:
+        return r.text or ""
+    except Exception:   # noqa: BLE001 — an undecodable body is simply not a challenge page
+        return ""
 FALLBACK_PROFILES = ("chrome124", "safari17_0", "firefox133", "edge101")
 _host_route: dict[str, tuple[str, bool]] = {}      # host -> (profile, via_proxy) that answered 200
 _host_exhausted: set[str] = set()
@@ -368,7 +385,18 @@ def _escape_block(url: str, host: str, reason: str, *, timeout: int,
                 print(f"   ↻ http.get {host} blocked, escaped via {tried[-1]} "
                       f"(tried {', '.join(tried)}) — pinned for this run", flush=True)
                 return r
-        _escape_failures[host] = _escape_failures.get(host, 0) + 1
+        # OWNER ORDER 2026-11-12 (backlog 1828): before this host's refusal becomes a verdict, a REAL
+        # browser re-reads the URL. It reads it → our transport, not a dead site: pin the browser for
+        # the run. A CAPTCHA → stop for this host (never solved or bypassed). Else the failure stands.
+        br, verdict = browser_recheck.recheck(url, reason=", ".join(tried))
+        tried.append(f"browser:{verdict}")
+        if br is not None:
+            _escape_failures.pop(host, None)
+            _host_route[host] = BROWSER_ROUTE
+            print(f"   ↻ http.get {host} blocked on every curl route, READ by the real browser "
+                  f"(tried {', '.join(tried)}) — pinned for this run", flush=True)
+            return br
+        _escape_failures[host] = _escape_failures.get(host, 0) + (EXHAUST_AFTER if verdict == "captcha" else 1)
         final = _escape_failures[host] >= EXHAUST_AFTER
         if final:
             _host_exhausted.add(host)
@@ -381,6 +409,9 @@ def _escape_block(url: str, host: str, reason: str, *, timeout: int,
 
 
 def _fetch_on(route: tuple[str, bool], url: str, timeout: int) -> Optional[cc.Response]:
+    if route == BROWSER_ROUTE:
+        br, _ = browser_recheck.recheck(url, reason="host pinned to the browser")
+        return br
     _throttle(url)
     try:
         r = _route_session(*route).get(url, timeout=timeout, allow_redirects=True)

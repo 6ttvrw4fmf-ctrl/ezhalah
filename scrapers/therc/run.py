@@ -54,7 +54,8 @@ from typing import Any, Optional
 
 from curl_cffi import requests as cc
 
-from scrapers.common import db
+from scrapers.common import browser_recheck, db
+from scrapers.common import http as http_shared
 from scrapers.common import normalize as N
 from scrapers.common.page_pin import pin_from_page
 from scrapers.common.pii import redact_pii
@@ -130,9 +131,28 @@ def _session() -> cc.Session:
 _last_hit = 0.0
 
 
+# 2026-11-13 (owner order 1828): every route of ours answered 403 on the sitemap (run 16:55 UTC). A refused
+# read now goes through the SHARED escape — the other TLS profiles, the proxy when set, then a real browser
+# that waits out an automatic «checking your browser» page (a CAPTCHA stops it). Once that escape has
+# pinned a route for the host, every later page goes straight through it.
+def _refused(r) -> bool:
+    """A refusal (401/403) or a wall page (an automatic check / CAPTCHA, whatever its status) — never a
+    plain 5xx, which stays the site's own failure."""
+    return r.status_code in (401, 403) or browser_recheck.classify(r.status_code, r.text or "") != "failed" \
+        and r.status_code != 200
+
+
+def _escaped(url: str) -> Optional[Any]:
+    return http_shared.get(url, keep=(404, 410))
+
+
 def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
     """Throttled GET with bounded retries. Returns None on a permanent miss or exhausted retries."""
     global _last_hit
+    if http_shared._host_route.get(BASE.split("//", 1)[1]):
+        r = _escaped(url)
+        return r.text if r is not None and r.status_code == 200 else None
+    refused = False
     for attempt in range(tries):
         wait = MIN_INTERVAL - (time.time() - _last_hit)
         if wait > 0:
@@ -147,7 +167,11 @@ def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
             return r.text
         if r.status_code in (404, 410):
             return None          # gone for good — do not retry
+        refused = refused or _refused(r)
         time.sleep(1.5 * (attempt + 1))
+    if refused:
+        r = _escaped(url)
+        return r.text if r is not None and r.status_code == 200 else None
     return None
 
 
@@ -262,6 +286,7 @@ def _fetch_sitemap(s: cc.Session) -> str:
     with a longer pause, then fail the run naming the answer."""
     global _last_hit
     last = "no answer"
+    refused = False
     for attempt in range(_SITEMAP_TRIES):
         wait = MIN_INTERVAL - (time.time() - _last_hit)   # the same ≤ 1 request/second limiter as _get
         if wait > 0:
@@ -272,11 +297,19 @@ def _fetch_sitemap(s: cc.Session) -> str:
             if r.status_code == 200 and r.text:
                 return r.text
             last = f"HTTP {r.status_code}"
+            refused = refused or _refused(r)
         except Exception as e:  # noqa: BLE001 — retried, then reported below
             last = type(e).__name__
         if attempt + 1 < _SITEMAP_TRIES:
             time.sleep(_SITEMAP_BACKOFF_S * (attempt + 1))
-    raise RuntimeError(f"sitemap.xml answered {last} after {_SITEMAP_TRIES} tries — the site is failing, not empty")
+    escape = ""
+    if refused:
+        r = _escaped(SITEMAP)
+        if r is not None and r.status_code == 200 and r.text:
+            return r.text
+        escape = " | " + (browser_recheck.summary() or "shared escape (profiles, proxy, browser) refused too")
+    raise RuntimeError(f"sitemap.xml answered {last} after {_SITEMAP_TRIES} tries — the site is failing, not empty"
+                       + escape)
 
 
 def sitemap_urls(s: cc.Session) -> list[tuple[str, Optional[str]]]:
@@ -613,7 +646,8 @@ def main() -> int:
                 pruned += nn
         print(f"✓ THE RC: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
-                             notes=f"pruned={pruned}",
+                             notes=f"pruned={pruned}" + (f" | {browser_recheck.summary()}"
+                                                         if browser_recheck.log else ""),
                              check_tables=["therc_residential_listings", "therc_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
