@@ -433,6 +433,14 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    a seeded shuffle (the seed is printed). Before you write «N/100 real listings found», count the distinct
    `listing` keys across your runs' logs.
 
+33. A clause change leaves its hand-copied oracles behind, and the robots then go red on a RIGHT product (11-13):
+   20261111141500 kept pooled short stays (Haraj daily/weekly) out of «سنوي»; the shared translator was updated, six
+   hand copies were not, and af-live-truth-check plus the live sweep read the correct RPC as «1 eligible listing never
+   served» for two days (haraj 18957735 is a weekly rent). When a robot says RPC < oracle by a handful, read the extra
+   rows' own period first. `scripts/verify-yearly-oracles-keep-short-stays-out.ts` now finds the shape anywhere.
+   Same night, same class: a robot that listens late (the app fetches the district list at the CITY pick) and an
+   alert bridge with no setup-node on the self-hosted runner (Node 18) — check the robot before the product.
+
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,
   the quick searches show 0 missing / extra / duplicates / count mismatches, ≥ 99 of 100 real listings were found in each
