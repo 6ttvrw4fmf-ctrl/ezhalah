@@ -1280,6 +1280,13 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
             and any(_starts(_strip_wa(w), ("تمديد",)) for w in gp[-3:]):
         return None, s, e                            # «خزان المياة وتمديدات السباكة و التكييف»: the AC PIPEWORK, not AC
                                                      # units (aqar 35244 / 7041221 / 9605735, 🔬 2026-11-13)
+    if fact == "bills_included" and gn[:1] and _starts(_strip_wa(gn[0]), ("العقار", "عقار")):
+        return None, s, e                            # «مكتب النطاق الشامل للخدمات العقاريه»: an office's NAME, not bills in
+                                                     # the rent (P2 13085 «الشامل للخدمات», 4 of 4 aqar, 🔬 2026-11-13)
+    if fact == "kitchen" and re.match(r"^(?:ل|لل)مطابخ", _n(t[ws:we]).lstrip("و")):
+        return None, s, e                            # «معرض للمطابخ» (a showroom), «تكييف كاسيت للمطابخ», «مراوح شفط
+                                                     # للمطابخ»: something FOR the kitchens, not a fitted kitchen (P2 13085
+                                                     # «للمطابخ», 4 of 4 aqar, 🔬 2026-11-13; like «للحمامات» 11-09)
     if fact == "for_events" and any(_strip_wa(w) in _EXCEPT_WORDS for w in gp[-4:]):
         return None, s, e                            # «للايجار الشهري عدا الإيجازات الدراسية ومناسبات الأعياد»: an
                                                      # exception to the rent, not events allowed (P1 14340, aqar 12109734)
@@ -1342,6 +1349,12 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     # …and an un-negated EXISTENCE verb that opens the match affirms it: «لا يوجد مصعد ويوجد محلات» has shops (the old
     # look-back walked past «مصعد» to the lift's «لا يوجد»). Prepositions keep the look-back: «لا يوجد بها محلات» is a no.
     verb_affirms = fact in _LEAD_VERB_FACTS and bool(lead) and _strip_wa(lead[0]) in _EXIST_VERBS
+    if fact in _UNIT_ROOMS and prev and _strip_wa(prev[-1].strip("(")) in _EXCEPT_WORDS and "غسال" not in _n(t[ws:we]):
+        return None, s, e                            # «مكيفات مخفية (ماعدا غرفة السائق … مكيفات سبيلت)», «جميع الغرف
+                                                     # ماعدا غرفة السائق»: the room EXISTS — it is the exception to
+                                                     # something else, never a «no» (aqar 14875791, 21286, 17657272,
+                                                     # 🔬 2026-11-13). An APPLIANCE stays a no: «جميع الاجهزه ماعدا
+                                                     # الثلاجة وغسالة الملابس» (aqar 71606) has no washer.
     back = None if verb_affirms else _negated_before(prev)
     if back is not None:
         qs = len(" ".join(prev[:len(prev) - back])) + (1 if len(prev) > back else 0)
@@ -2940,6 +2953,13 @@ def selftest() -> None:
         ("مؤثث بالكامل مع توفر الغسالة والثلاجة", {"laundry_room": True}, ()),
         ("الملحق الخارجي: - غرفة نوم - حمام - ممر مجهز لمطبخ الطابق الأرضي", {}, ("kitchen",)),
         ("وغرفة خادمه بحمام بلاضافه لمطبخ كبير", {"kitchen": True}, ()),
+        ("مكيفات مخفية (ماعدا غرفة السائق والعاملة المنزلية مكيفات سبيلت) ومراوح", {}, ("driver_room",)),   # aqar 14875791
+        ("جميع الغرف مكيفة ماعدا المطبخ", {}, ("kitchen",)),
+        ("المكيفات مركبة في جميع الغرف، باستثناء غرفة العاملة.", {}, ("maid_room",)),        # aqar 17657272
+        ("وكل طابق مكون من أربع شقق باستثناء الملحق مكون من شقتين", {}, ("annex",)),         # aqar 21286
+        ("الأجهزة الكهربائية كاملة ما عدا الغسالة", {"laundry_room": False}, ()),             # aqar 13470086
+        ("لا يوجد غرفة سائق", {"driver_room": False}, ()),
+        ("يمنع العزاب عدا الموظفين", {}, ()),
         ("فندق خمس نجوم", {"stars_mentioned": True}, ()),
         ("تصنيف 4 نجوم", {"stars_mentioned": True}, ()),
         ("قريب من فندق 5 نجوم", {}, ("stars_mentioned",)),
@@ -3008,6 +3028,20 @@ def selftest() -> None:
         ("فرصة استثمارية قصر أفراح ومناسبات فاخر للإيجار", {"for_events": True}, ()),               # aqar 9152301
         ("من خزان المياة وتمديدات السباكة و التكييف واطلالات الغرف", {}, ("air_conditioner",)),       # aqar 35244
         ("تمديدات كهرباء وسباكة ومكيفات راكبة", {"air_conditioner": True}, ()),
+        ("نحن مكتب النطاق الشامل للخدمات العقاريه رخصة وساطة", {}, ("bills_included",)),           # aqar 14869751
+        ("الايجار شامل للخدمات", {"bills_included": True}, ()),
+        ("للتقبيل معرض للمطابخ والخزائن مساحته 200 متر", {}, ("kitchen",)),                         # aqar 18683956
+        ("التكييف مخفي راكب بالصالات والمجالس وتكييف كاسيت للمطابخ", {}, ("kitchen",)),             # aqar 7174053
+        ("ومراوح شفط للمطابخ والحمامات - سخان مركزي", {}, ("kitchen",)),                            # aqar 14875791
+        ("شقة 3 غرف ومطبخ راكب", {"kitchen": True}, ()),
+        ("وغرفة خادمه بحمام بلاضافه لمطبخ كبير", {"kitchen": True}, ()),
+        ("مكيفات مخفية (ماعدا غرفة السائق والعاملة المنزلية مكيفات سبيلت) ومراوح", {}, ("driver_room",)),   # aqar 14875791
+        ("جميع الغرف مكيفة ماعدا المطبخ", {}, ("kitchen",)),
+        ("المكيفات مركبة في جميع الغرف، باستثناء غرفة العاملة.", {}, ("maid_room",)),        # aqar 17657272
+        ("وكل طابق مكون من أربع شقق باستثناء الملحق مكون من شقتين", {}, ("annex",)),         # aqar 21286
+        ("الأجهزة الكهربائية كاملة ما عدا الغسالة", {"laundry_room": False}, ()),             # aqar 13470086
+        ("لا يوجد غرفة سائق", {"driver_room": False}, ()),
+        ("يمنع العزاب عدا الموظفين", {}, ()),
         ("استراحة مناسبة لاستقبال الضيوف والمناسبات", {"for_events": True}, ()),
         # CodeRabbit on #11820
         ("شقة مطلة على طريق", {}, ("main_road",)),
