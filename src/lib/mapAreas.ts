@@ -220,7 +220,20 @@ export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en
  *  pill said «13,528 إعلان للبيع في الرياض» for the whole screen): its name, where Apple put it, and how tall the view was
  *  when the map landed on it. While its label is on screen and the view is no more than 1.5× that tall, the pill and its
  *  box are about THAT district — its own count, its own facts. */
-export type AreaFocus = { district: string; lat: number; lng: number; latitudeDelta: number };
+export type AreaFocus = { district: string; lat: number; lng: number; latitudeDelta: number; landed?: boolean };
+// `latitudeDelta` is the height of the view the map ACTUALLY landed on (recorded at the first read after the flight —
+// MapKit widens a requested span to the screen's shape, so on a tall phone the landing is ~2× the request: measured live
+// 2026-11-13, the owner's «it shows later» bug came back as «13,673 في الرياض» after searching الملقا).
+/** Record where the search flight LANDED (review of #12129): only at the end of a map move, only while the focus still
+ *  waits for its landing, and only when the view is centred on the searched place — a read during the flight, or a move
+ *  that ends somewhere else, never sets the height the «zoomed well out» rule is measured from. */
+export function landFocus(focus: AreaFocus | null | undefined, center: { latitude: number; longitude: number },
+  span: { latitudeDelta: number }): AreaFocus | null {
+  if (!focus) return null;
+  if (focus.landed) return focus;
+  const near = Math.abs(center.latitude - focus.lat) <= focus.latitudeDelta && Math.abs(center.longitude - focus.lng) <= focus.latitudeDelta * 2;
+  return near ? { ...focus, latitudeDelta: span.latitudeDelta, landed: true } : focus;
+}
 const FOCUS_NAME_NEAR_DEG = 0.05;   // a same-named district within ~5 km of Apple's point is the one searched
 const FOCUS_POINT_NEAR_DEG = 0.015; // no name match (e.g. an English suggestion): only a label within ~1.5 km of the point
 const plainDistrict = (d: string) => d.replace(/^حي\s+/, '').trim();

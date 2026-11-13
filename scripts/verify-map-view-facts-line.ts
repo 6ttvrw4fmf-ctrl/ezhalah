@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { factBox, comparisonChip, parseViewFacts, sameCount, placeFactsFit, FACTS_MIN_ADS, type ViewFacts, type FactBox } from '../src/lib/mapViewFacts.ts';
-import { areaPlace, type AreaRow } from '../src/lib/mapAreas.ts';
+import { areaPlace, landFocus, type AreaRow } from '../src/lib/mapAreas.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -113,6 +113,16 @@ mustCatch('a searched district ignored (the pill names the whole screen after th
 const webSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const focusWired = (src: string) => /if \(p\.kind === 'district'\) live\.focus = \{ district: /.test(src) && /areaPlace\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span, live\.focus\);/.test(src) && /live\.focus = null;/.test(src);
 check('a district search sets the focus, the label view reads it, clearing the search clears it', focusWired(webSrc));
+const landedWired = (src: string) => /const onRegion = \(\) => \{[\s\S]{0,400}live\.focus = landFocus\(live\.focus, m\.region\.center, m\.region\.span\);/.test(src) && !/if \(live\.focus && !live\.focus\.landed\) live\.focus = /.test(src);
+check('the focus is recorded at the END of a move (where the search landed), never by a read during the flight', landedWired(webSrc));
+mustCatch('a focus recorded by any map read (a read during the flight sets the wrong height)', () => landedWired(webSrc.replace('const { center, span } = m.region;', 'const { center, span } = m.region; if (live.focus && !live.focus.landed) live.focus = { ...live.focus, latitudeDelta: span.latitudeDelta, landed: true };')));
+const pending = { ...malqa, latitudeDelta: 0.05, landed: false };
+const midFlight = landFocus(pending, { latitude: 24.2, longitude: 45.9 }, { latitudeDelta: 0.6 });
+check('a move that ends away from the searched place (mid-flight) leaves the focus waiting', !!midFlight && midFlight.landed === false && midFlight.latitudeDelta === 0.05);
+const landed = landFocus(midFlight, { latitude: 24.80, longitude: 46.60 }, { latitudeDelta: 0.117 });
+check('the landing centred on it records the real height (0.117 on a tall phone), once', !!landed && landed.landed === true && landed.latitudeDelta === 0.117 && landFocus(landed, { latitude: 24.8, longitude: 46.6 }, { latitudeDelta: 0.03 })?.latitudeDelta === 0.117);
+check('…and the searched district then holds at that height', leads(areaPlace(around, 'district', 'ar', (x) => x, V0, { latitudeDelta: 0.11, longitudeDelta: 0.06 }, landed)));
+mustCatch('a landing recorded from a move centred far away', () => landFocus(pending, { latitude: 21.5, longitude: 39.2 }, { latitudeDelta: 0.03 })?.landed === true);
 mustCatch('a label view that never reads the searched district', () => focusWired(webSrc.replace('m.region.span, live.focus);', 'm.region.span);')));
 
 // 3f. fast and steady (owner 2026-11-13: «it takes time for it to show … it feels glitchy»)

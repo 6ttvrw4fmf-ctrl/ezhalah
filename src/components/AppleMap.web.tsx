@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow, type PlaceFactsKey, type AreaFocus } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, landFocus, type AreaLevel, type AreaRow, type PlaceFactsKey, type AreaFocus } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
@@ -1170,7 +1170,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       mine = [...keyed.values()];
       drawStems(drawCell === 0 ? rows : []);
     };
-    const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 120); };
+    const onRegion = () => {
+      // the searched district is measured from where its flight LANDED (the end of a move centred on it), never from a
+      // read during the flight or the span it asked for — a tall phone widens that ~2× (src/lib/mapAreas.ts landFocus)
+      live.focus = landFocus(live.focus, m.region.center, m.region.span);
+      if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 120);
+    };
     const onSelect = (e: { annotation?: { data?: { pin?: PinRow; cell?: number } } }) => {
       const d = e.annotation?.data; if (!d?.pin) return;
       if (Date.now() - lastPick < 600) return;   // the element's own tap handler already picked it
