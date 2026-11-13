@@ -312,6 +312,14 @@ def main() -> int:
             note += f"pruned={db.prune_unseen(RES_TABLE, {r['ad_number'] for r in rows}, source=SOURCE, verify_gone=_gone)}"
         else:
             note += "NOT pruned (walk incomplete or empty)"
+        wall = getattr(_GONE[0], "challenged", lambda: None)()
+        if wall:
+            # Readings made before the challenge stand (each is its own page's 404 with a live control read first);
+            # the run itself is reported FAILED so the challenge is seen (CodeRabbit #12130).
+            db.end_run(run_id, ok=False, rows_seen=len(w["units"]), rows_upserted=len(rows),
+                       notes=(f"CHALLENGED during own-page reads: {wall}; " + note)[:900])
+            print(f"✗ {SOURCE}: the site challenged the own-page reads — run reported failed", flush=True)
+            return 1
         healthy = db.end_run(run_id, ok=True, rows_seen=len(w["units"]), rows_upserted=len(rows), notes=note[:900],
                              check_tables=["asasmakeen_residential_listings"])
         if not healthy:
@@ -379,6 +387,7 @@ def _make_gone(control_url: Optional[str], page=_page, url_for=None):
         if not memo["v"]:
             return "unknown", f"{url} answers {st} but the control {control_url} did not read live"
         return "gone", f"{url} answers HTTP {st} (control {control_url} live)"
+    gone.challenged = lambda: memo.get("wall")      # main() fails the run when a challenge latched
     return gone
 
 

@@ -130,3 +130,15 @@ def test_a_project_page_wall_stops_the_run(monkeypatch):
         raise H.Blocked(f"HTTP 404 at {url} (not a 200 — stopping, never guessing)")
     monkeypatch.setattr(M.H, "get_text", plain)
     assert M._project("x") is None
+
+
+def test_a_challenge_is_reported_by_the_oracle_and_fails_the_run():
+    def page(url):
+        if url.endswith("3/c"):
+            raise H.Blocked(f"HTTP 429 wall at {url}: 'captcha'")
+        return PAGES.get(url, (None, ""))
+    g = M._make_gone(U + "1/a", page=page, url_for=URLS.get)
+    assert g("ASM2")[0] == "gone" and g.challenged() is None, "a reading before any wall stands"
+    assert g("ASM3")[0] == "unknown" and "wall" in (g.challenged() or "")
+    src = open(M.__file__, encoding="utf-8").read()
+    assert 'getattr(_GONE[0], "challenged"' in src and "ok=False" in src.split('getattr(_GONE[0], "challenged"')[1][:600]
