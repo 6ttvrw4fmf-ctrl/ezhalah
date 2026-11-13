@@ -12,6 +12,7 @@ import { freeTextEn } from '@/lib/freeTextEn';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { whenNear } from '@/lib/nearViewport';
+import { listedAgoText } from '@/lib/listedAgo';
 import { cardPhotoCandidates } from '@/lib/photoUrl';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
@@ -194,6 +195,8 @@ export function ResultCard({
     return raw.length <= 12 ? raw : '';
   };
   const listedClean = cleanDate(listing.listed);
+  const listedAgo = listedAgoText(listedClean, locale === 'en' ? 'en' : 'ar');
+  const siteName = locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source));
   // #1 (source-accurate, owner 2026-07-06): show the RAW scraped type when it is already Arabic
   // (dealapp "تاون هاوس", "ملحق علوي"…); for English-raw sources (aqar stores "Apartment") show the
   // source-matching Arabic via the clean mapping — never English on the card. Mapping stays filter-only.
@@ -268,7 +271,8 @@ export function ResultCard({
       const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
       if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale), value: arAttrValue(r.label, r.value, locale) });
     }
-    if (listedClean && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
+    // A recent date is «اليوم / قبل ٣ أيام» at the front of the main line (owner 2026-11-13); an older one stays here.
+    if (listedClean && !listedAgo && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
     const CHIP_CAP = 3;
     const shownFeats = visible.slice(0, CHIP_CAP);
     const moreFeats = visible.length - shownFeats.length;
@@ -288,7 +292,7 @@ export function ResultCard({
           {/* THE GOLD STRIP on the laptop photo-first card too (owner 2026-10-17: «for all»). */}
           <GoldSurface tone={tone} style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">
             <Text style={card.lpPhotoFootTx}>{searchedTypeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
-            {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{sourceHost(listing.source)}</Text> : null}
+            {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{siteName}</Text> : null}
           </GoldSurface>
         </Pressable>
 
@@ -341,8 +345,8 @@ export function ResultCard({
             </Text>
           ) : null}
 
-          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
-            {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
+          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1} testID="card-place">
+            {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `${locale === 'en' ? ', ' : '، '}${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
           </Text>
 
           {ratingVal != null ? (
@@ -358,6 +362,7 @@ export function ResultCard({
 
           {/* The main filter line: the TYPE first (its own icon from the Filter), then rooms, baths, size. */}
           <View style={card.statsRow}>
+            {listedClean && listedAgo ? <View style={card.agoPill} testID="card-listed-ago"><Text style={card.agoText}>{listedAgo}</Text></View> : null}
             <View style={card.lpType}>
               {typeIcon ? <Image source={typeIcon} style={card.lpTypeIcon} contentFit="contain" tintColor={colors.primary} /> : <Ionicons name="business-outline" size={16} color={colors.primary} />}
               <Text style={card.lpTypeTx} numberOfLines={1}>{typeLabel}</Text>
@@ -410,7 +415,7 @@ export function ResultCard({
           <View style={card.lpFoot}>
             <View style={card.hostHead}>
               <View style={[card.hostBadge, card.lpBadge]}><SourceBadge source={listing.source} /></View>
-              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
+              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: siteName })}</Text>
             </View>
           </View>
         </View>
@@ -445,7 +450,8 @@ export function ResultCard({
         {listing.source_url ? (
           <GoldSurface tone={tone} style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">
             <Text style={[card.photoAction, row && card.photoActionRow]}>{t('Click here 👆')}</Text>
-            <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{sourceHost(listing.source)}</Text>
+            {/* The website's NAME, not its domain (owner 2026-11-13: «ksaaqar.com» → «عقارات السعودية»). */}
+            <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{siteName}</Text>
           </GoldSurface>
         ) : null}
       </Pressable>
@@ -456,7 +462,7 @@ export function ResultCard({
         <View style={card.sourceRow}>
           <View style={card.hostHead}>
             <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
-            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
+            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: siteName })}</Text>
           </View>
           <Text style={card.typeLabel}>{searchedTypeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
@@ -466,10 +472,10 @@ export function ResultCard({
             «الموقع غير محدد» instead of an empty title / a bare ", السعودية" — never blank, never
             the raw junk token. A present district with no city (or vice versa) is the normal,
             non-bug case and is untouched. */}
+        {/* THE PRICE LEADS (owner 2026-11-13: «I don't like how the price is far left, put it right»): it is the
+            first thing on the line — the right edge in Arabic — and the place moved to the 📍 line below, so the card
+            keeps its height. */}
         <View style={card.headline}>
-        <Text style={[card.title, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]}>
-          {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
-        </Text>
         {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
         {isShortStayListing(listing) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} {...MONEY_LINE} testID="card-price">{listingPrice(listing, locale)}</Text>}
         {monthlyLine(listing, locale)}
@@ -484,7 +490,10 @@ export function ResultCard({
         ) : null}
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
-          <Text style={card.locText}>{place(cityAr) || LOCATION_UNRESOLVED_AR}, {t('Saudi Arabia')}</Text>
+          {/* District and city (owner 2026-11-13: «الياسمين، الرياض», never «الرياض، المملكة العربية السعودية»). */}
+          <Text style={[card.title, card.placeLine, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]} testID="card-place">
+            {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `${locale === 'en' ? ', ' : '، '}${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
+          </Text>
           {regionLabel ? (
             <View style={card.regionChip}>
               <Ionicons name="compass-outline" size={10} color={colors.primary} />
@@ -582,11 +591,13 @@ export function ResultCard({
           <Text style={[card.desc, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={2}>{titleAr}</Text>
         ) : null)}
         <View style={card.statsRow}>
+          {/* «اليوم» / «أمس» / «قبل ٣ أيام» FIRST (owner 2026-11-13), from the site's own date (src/lib/listedAgo.ts). */}
+          {listedClean && listedAgo ? <View style={card.agoPill} testID="card-listed-ago"><Text style={card.agoText}>{listedAgo}</Text></View> : null}
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
           {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${t('m²')}`} small={t('Area')} /> : null}
           <Stat icon="business-outline" big={typeLabel} small={t('Property Type')} />
-          {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
+          {listedClean && !listedAgo ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
         {/* «مطابق لطلبك» — every active Advanced-Filter predicate this listing's canonical row proves,
             carrying the ROW's actual value («4 حمامات», «شمال», «عرض الشارع 20 م»), never the filter's
@@ -1680,6 +1691,9 @@ const card = StyleSheet.create({
   desc: { display: 'none' },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
   locText: { fontSize: 11, color: colors.primary, fontWeight: '500' },
+  placeLine: { fontSize: 14 },
+  agoPill: { alignSelf: 'center', backgroundColor: '#e8f5ee', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  agoText: { fontSize: 13, fontWeight: '800', color: '#1f6f4a' },
   // Small region pill (e.g. "North Riyadh") next to the city line — light green, compact.
   regionChip: {
     flexDirection: 'row', alignItems: 'center', gap: 3,
