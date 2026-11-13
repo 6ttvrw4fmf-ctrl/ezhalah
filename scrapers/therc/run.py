@@ -149,6 +149,8 @@ def _escaped(url: str) -> Optional[Any]:
 def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
     """Throttled GET with bounded retries. Returns None on a permanent miss or exhausted retries."""
     global _last_hit
+    if browser_recheck.is_walled(url):
+        return None                                   # a CAPTCHA was seen: stop, never asked again
     if http_shared._host_route.get(BASE.split("//", 1)[1]):
         r = _escaped(url)
         return r.text if r is not None and r.status_code == 200 else None
@@ -163,6 +165,8 @@ def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
         except Exception:
             time.sleep(1.5 * (attempt + 1))
             continue
+        if browser_recheck.stop_on_captcha(url, r.status_code, r.text or "", via="therc session"):
+            return None
         if r.status_code == 200:
             return r.text
         if r.status_code in (404, 410):
@@ -292,8 +296,13 @@ def _fetch_sitemap(s: cc.Session) -> str:
         if wait > 0:
             time.sleep(wait)
         _last_hit = time.time()
+        if browser_recheck.is_walled(SITEMAP):
+            break
         try:
             r = s.get(SITEMAP)
+            if browser_recheck.stop_on_captcha(SITEMAP, r.status_code, r.text or "", via="therc session"):
+                last = "a CAPTCHA wall (owner decision; never solved or bypassed)"
+                break
             if r.status_code == 200 and r.text:
                 return r.text
             last = f"HTTP {r.status_code}"
@@ -303,7 +312,7 @@ def _fetch_sitemap(s: cc.Session) -> str:
         if attempt + 1 < _SITEMAP_TRIES:
             time.sleep(_SITEMAP_BACKOFF_S * (attempt + 1))
     escape = ""
-    if refused:
+    if refused and not browser_recheck.is_walled(SITEMAP):
         r = _escaped(SITEMAP)
         if r is not None and r.status_code == 200 and r.text:
             return r.text

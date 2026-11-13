@@ -262,9 +262,11 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25,
         if purl:
             proxies = {"http": purl, "https": purl}
     host = urlsplit(url).netloc
+    if browser_recheck.is_walled(url):
+        return None                                     # a CAPTCHA was seen on this host: no transport asks again
     pinned = None if proxies is not None else _host_route.get(host)
     if pinned is not None and pinned[0] == BROWSER_ROUTE[0]:
-        return _fetch_on(pinned, url, timeout)          # this host is read through the real browser
+        return _fetch_on(pinned, url, timeout, keep)    # this host is read through the real browser
     if pinned is not None:
         s = _route_session(*pinned)
     blocked = None    # the reason the default route looks BLOCKED (401/403 or refused), if it does
@@ -280,6 +282,9 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25,
                 s = _route_session(*pinned, fresh=True) if pinned else _rotate_session()
             time.sleep(2 * (attempt + 1))
             continue
+        if browser_recheck.stop_on_captcha(url, r.status_code, _body(r), via="curl"):
+            _host_exhausted.add(host)
+            return None                                 # a person-only wall: never escaped, never retried
         if r.status_code == 200:
             _escape_failures.pop(host, None)
             return r
@@ -304,7 +309,7 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25,
         # 4xx (other than rate-limit) is permanent — bail out.
         return None
     if blocked is not None and proxies is None:
-        return _escape_block(url, host, blocked, timeout=timeout, current=pinned)
+        return _escape_block(url, host, blocked, timeout=timeout, current=pinned, keep=keep)
     return None
 
 
@@ -354,7 +359,7 @@ def _route_session(profile: str, via_proxy: bool, *, fresh: bool = False) -> cc.
 
 
 def _escape_block(url: str, host: str, reason: str, *, timeout: int,
-                  current: Optional[tuple[str, bool]]) -> Optional[cc.Response]:
+                  current: Optional[tuple[str, bool]], keep: tuple[int, ...] = ()) -> Optional[cc.Response]:
     with _escape_locks_guard:
         lock = _escape_locks.setdefault(host, threading.Lock())
     with lock:   # one thread probes per host; the others then reuse its verdict
@@ -363,7 +368,7 @@ def _escape_block(url: str, host: str, reason: str, *, timeout: int,
         route = _host_route.get(host)
         if route is not None and route != current:
             # Another thread already found a working route while we waited — use it.
-            return _fetch_on(route, url, timeout)
+            return _fetch_on(route, url, timeout, keep)
         tried = [f"{'proxy' if current and current[1] else 'direct'}/"
                  f"{current[0] if current else 'chrome124'}:{reason}"]
         legs = [(p, False) for p in FALLBACK_PROFILES]
@@ -379,6 +384,9 @@ def _escape_block(url: str, host: str, reason: str, *, timeout: int,
                 tried.append(f"{'proxy' if leg[1] else 'direct'}/{leg[0]}:{type(e).__name__}")
                 continue
             tried.append(f"{'proxy' if leg[1] else 'direct'}/{leg[0]}:{r.status_code}")
+            if browser_recheck.stop_on_captcha(url, r.status_code, _body(r), via=tried[-1]):
+                _host_exhausted.add(host)
+                return None
             if r.status_code == 200:
                 _escape_failures.pop(host, None)
                 _host_route[host] = leg
@@ -388,7 +396,7 @@ def _escape_block(url: str, host: str, reason: str, *, timeout: int,
         # OWNER ORDER 2026-11-12 (backlog 1828): before this host's refusal becomes a verdict, a REAL
         # browser re-reads the URL. It reads it → our transport, not a dead site: pin the browser for
         # the run. A CAPTCHA → stop for this host (never solved or bypassed). Else the failure stands.
-        br, verdict = browser_recheck.recheck(url, reason=", ".join(tried))
+        br, verdict = browser_recheck.recheck(url, reason=", ".join(tried), keep=keep)
         tried.append(f"browser:{verdict}")
         if br is not None:
             _escape_failures.pop(host, None)
@@ -408,9 +416,10 @@ def _escape_block(url: str, host: str, reason: str, *, timeout: int,
         return None
 
 
-def _fetch_on(route: tuple[str, bool], url: str, timeout: int) -> Optional[cc.Response]:
+def _fetch_on(route: tuple[str, bool], url: str, timeout: int,
+              keep: tuple[int, ...] = ()) -> Optional[cc.Response]:
     if route == BROWSER_ROUTE:
-        br, _ = browser_recheck.recheck(url, reason="host pinned to the browser")
+        br, _ = browser_recheck.recheck(url, reason="host pinned to the browser", keep=keep)
         return br
     _throttle(url)
     try:

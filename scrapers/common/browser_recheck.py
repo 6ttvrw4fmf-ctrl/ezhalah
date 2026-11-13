@@ -98,6 +98,21 @@ def _pace(host: str) -> None:
         time.sleep(slot - now)
 
 
+SKIPPED_TYPES = ("image", "font", "media", "stylesheet")
+
+
+def _route(route) -> None:
+    """Every request the browser makes: pictures, fonts, media and styles are never fetched; every
+    other request (the page, its scripts, the automatic check, our fetch) waits for the same per-host
+    ≤ 1 request/second slot (CodeRabbit #12157: pacing once per re-check let goto + fetch go together)."""
+    req = route.request
+    if req.resource_type in SKIPPED_TYPES:
+        route.abort()
+        return
+    _pace(urlsplit(req.url).netloc)
+    route.continue_()
+
+
 def _context():
     ctx = getattr(_local, "ctx", None)
     if ctx is not None:
@@ -112,10 +127,12 @@ def _context():
         pw.stop()           # no Chromium on this runner: leave nothing running, the caller reads «unavailable»
         raise
     ctx = browser.new_context(user_agent=HONEST_UA, locale="ar-SA")
-    ctx.route("**/*", lambda route: route.abort()
-              if route.request.resource_type in ("image", "font", "media") else route.continue_())
+    ctx.route("**/*", _route)
     _local.pw, _local.browser, _local.ctx = pw, browser, ctx
     return ctx
+
+
+FETCH_TIMEOUT_S = 30.0
 
 
 def _page_fetch(url: str, wait_s: float) -> tuple[Optional[int], str, dict, str]:
@@ -134,10 +151,14 @@ def _page_fetch(url: str, wait_s: float) -> tuple[Optional[int], str, dict, str]
             verdict = classify(200, page.content())
         if verdict in ("captcha", "challenge"):
             return None, page.content(), {}, verdict
+        # The abort covers the request AND the body read, so a response that never ends cannot hold the
+        # host's escape lock past FETCH_TIMEOUT_S (CodeRabbit #12157); an aborted read raises → «unavailable».
         got = page.evaluate(
-            """async (u) => { const r = await fetch(u, {credentials: 'include'});
-                               const h = {}; r.headers.forEach((v, k) => { h[k] = v; });
-                               return {status: r.status, text: await r.text(), headers: h}; }""", url)
+            """async ([u, ms]) => { const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
+                 try { const r = await fetch(u, {credentials: 'include', signal: c.signal});
+                       const h = {}; r.headers.forEach((v, k) => { h[k] = v; });
+                       return {status: r.status, text: await r.text(), headers: h}; }
+                 finally { clearTimeout(t); } }""", [url, int(FETCH_TIMEOUT_S * 1000)])
         status, body = int(got["status"]), got["text"] or ""
         return status, body, got.get("headers") or {}, classify(status, body)
     finally:
@@ -147,9 +168,30 @@ def _page_fetch(url: str, wait_s: float) -> tuple[Optional[int], str, dict, str]
             pass
 
 
-def recheck(url: str, *, reason: str, wait_s: float = WAIT_S) -> tuple[Optional[BrowserResponse], str]:
+def stop_on_captcha(url: str, status: Optional[int], body: str, *, via: str) -> bool:
+    """True (and the host walled for the run) when an answer from ANY transport is a CAPTCHA. Every
+    caller checks this before escaping to another route, so a person-only wall is never worked around."""
+    host = urlsplit(url).netloc
+    if host in walled_hosts:
+        return True
+    if classify(status, body) != "captcha":
+        return False
+    walled_hosts.add(host)
+    line = f"browser re-check {host}: CAPTCHA/puzzle wall seen by {via} — STOP, never solved or bypassed; owner decision"
+    log.append(line)
+    print(f"   🧭 {line}", flush=True)
+    return True
+
+
+def is_walled(url: str) -> bool:
+    return urlsplit(url).netloc in walled_hosts
+
+
+def recheck(url: str, *, reason: str, wait_s: float = WAIT_S,
+            keep: tuple[int, ...] = ()) -> tuple[Optional[BrowserResponse], str]:
     """Re-read `url` in a real browser after curl_cffi was refused (`reason`). Returns (response, verdict):
-    a BrowserResponse only for verdict 'ok'; None for 'captcha' / 'challenge' / 'failed' / 'unavailable'."""
+    a BrowserResponse for verdict 'ok', or for a plain (non-wall) answer whose status is in `keep` (a
+    liveness sweep's 404/410 is its answer); None for 'captcha' / 'challenge' / 'failed' / 'unavailable'."""
     host = urlsplit(url).netloc
     if not enabled():
         return None, "disabled"
@@ -172,6 +214,8 @@ def recheck(url: str, *, reason: str, wait_s: float = WAIT_S) -> tuple[Optional[
     log.append(line)
     print(f"   🧭 {line}", flush=True)
     if verdict == "ok" and status == 200:
+        return BrowserResponse(url, status, body, headers), verdict
+    if verdict == "failed" and status in keep:
         return BrowserResponse(url, status, body, headers), verdict
     return None, verdict
 
