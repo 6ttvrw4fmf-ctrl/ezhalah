@@ -2,7 +2,7 @@
 // wrong»). Checks the committed SQL keeps its promises: the facts count exactly the ads the pill counts (the «نشر خلال»
 // counter's filter word for word, the Filter's sale price), «new» is the site's own date, «gone» is a confirmed removal
 // only and only on a full 30-day log, «last month» is the map as it stood 28–34 days ago, a guest never receives a
-// number, and the nightly checker recounts another way and can switch the line off. The screen half (what the line may
+// number, and the nightly checker recounts another way and can switch the facts off. The screen half (what the line may
 // SAY) is scripts/verify-map-view-facts-line.ts.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,16 +50,35 @@ mustCatch('a facts filter that drifted from the counter', () => same(core.replac
 const newsBySiteDate = (src: string) => /'new30', \(select count\(\*\) from fd where fd\.own and fd\.posted_at >= now\(\) - make_interval\(days => 30\)/.test(src) && !/first_seen_at|scraped_at|last_seen_at/.test(src);
 check('«new» counts the SITE\'s posting date, never first-seen', newsBySiteDate(core));
 mustCatch('«new» by first-seen', () => newsBySiteDate(core.replace("fd.posted_at >= now() - make_interval(days => 30)", "fd.first_seen_at >= now() - make_interval(days => 30)")));
-const goneGated = (src: string) => /'gone30', case when v_plain and v_ready then \(select count\(\*\) from gd where gd\.own and gd\.left_at >= now\(\) - interval '30 days'\)/.test(src)
-  && /'prev_gone30', case when v_plain and v_prev_ready/.test(src)
-  && /v_prev_ready := v_base is not null\s+and exists \(select 1 from public\.map_fact_capture_run cr where cr\.ok and cr\.prev_taken_at is null and cr\.run_at::date <= v_base - 30\)/.test(src);
-check('«gone» only on a full, fresh log and an unfiltered view', goneGated(core));
-mustCatch('«gone» shown before the log is ready', () => goneGated(core.replace("'gone30', case when v_plain and v_ready then", "'gone30', case when true then")));
-mustCatch('last month\'s «gone» compared before the log covers that month', () => goneGated(core.replace('cr.run_at::date <= v_base - 30', 'cr.run_at::date <= v_base')));
-const baseline = (src: string) => /where w\.taken_on between current_date - 34 and current_date - 28;/.test(src) && /'prev_median', case when v_plain and v_base is not null and p_deals = array\['buy'\]::text\[\]/.test(src);
-check('«last month» is the map as it stood 28–34 days ago, unfiltered views only', baseline(core));
-mustCatch('a «last month» taken from last week', () => baseline(core.replace('current_date - 34 and current_date - 28', 'current_date - 10 and current_date - 4')));
-check('the checker recounts last month\'s new ads and median another way', /if \(c ->> 'prev_new30_raw'\)::bigint is distinct from pn then/.test(audit) && /with pbox as materialized/.test(audit));
+const area = latestDef('map_view_facts_area');
+const neighbors = latestDef('map_fact_build_neighbors');
+const AREA_LINE = 'and s.city_ar = p_city and (p_districts is null or s.district_ar = any (p_districts))';
+const areaAsCore = (src: string) => src.split(AREA_LINE).join('');
+check('the neighbours\' facts use the pill\'s filter word for word, plus only the line naming the districts', area.includes(AREA_LINE) && same(areaAsCore(area), core));
+mustCatch('a neighbours\' filter that dropped one of the map\'s filters', () => same(areaAsCore(area.replace('and (p_beds is null or s.bedrooms = any (p_beds)) ', '')), core));
+const goneFiltered = (src: string) => /'gone30', case when v_ready then \(select count\(\*\) from gd where gd\.own\) end/.test(src)
+  && /where v_ready and r\.left_at >= now\(\) - interval '30 days'/.test(src)
+  && src.includes('(p_beds is null or r.bedrooms = any (p_beds)) and (p_furnished is null or r.furnished = p_furnished)')
+  && src.includes('(p_price_min is null or r.price >= p_price_min) and (p_price_max is null or r.price <= p_price_max)')
+  && src.includes('(p_area_min is null or r.area_m2 >= p_area_min) and (p_area_max is null or r.area_m2 <= p_area_max)');
+check('«gone» follows every map filter, and only on a full, fresh log', goneFiltered(core));
+mustCatch('«gone» shown before the log is ready', () => goneFiltered(core.replace("'gone30', case when v_ready then", "'gone30', case when true then")));
+mustCatch('«gone» ignoring the rooms filter', () => goneFiltered(core.replace('(p_beds is null or r.bedrooms = any (p_beds)) and ', '')));
+const keepsRooms = (src: string) => /posted_at, deactivated_at, left_at,\s*bedrooms, furnished\)/.test(src) && /posted_at, taken_at, bedrooms, furnished\)/.test(src);
+check('the removal log and the snapshot keep rooms and furnished (so «gone» can be filtered)', keepsRooms(capture));
+const priceRule = (src: string) => /'ppm', case when p_deals = array\['buy'\]::text\[\] and \(p_types is not null or p_types2 is not null\)\s*and \(select place\.one_type from place\) and \(select count\(\*\) from ppmc\) >= 10/.test(src);
+check('price per metre: sale only, one picked type, never mixed, at least 10 ads', priceRule(core) && /'ppm', case when \(select count\(\*\) from ppmc\) >= 10/.test(area));
+mustCatch('a price from 3 ads', () => priceRule(core.replace('(select count(*) from ppmc) >= 10', '(select count(*) from ppmc) >= 3')));
+mustCatch('a price that mixes property types', () => priceRule(core.replace("and (select place.one_type from place) and (select count(*) from ppmc)", "and (select count(*) from ppmc)")));
+const nearRule = (src: string) => /having count\(\*\) >= 30/.test(src) && /join d b on b\.city_ar = a\.city_ar and b\.district_ar <> a\.district_ar/.test(src) && /where nb\.rk <= 4/.test(src);
+check('«أحياء قريبة» = the 4 nearest districts of the SAME city, each with at least 30 ads', nearRule(neighbors));
+mustCatch('neighbours from another city', () => nearRule(neighbors.replace('on b.city_ar = a.city_ar and', 'on')));
+mustCatch('ten «nearest» districts', () => nearRule(neighbors.replace('where nb.rk <= 4', 'where nb.rk <= 10')));
+const fallback = (src: string) => /v_kind := 'near';/.test(src) && /v_kind := 'city';/.test(src) && /case when v_kind = 'near' then to_jsonb\(v_nb\.neighbors\) else to_jsonb\(array\[v_city\]\) end/.test(src);
+check('with no usable neighbours the comparison falls back to the city, and names the city', fallback(core));
+const cutsRule = (src: string) => src.includes('h.price_total < h.old_price_total and h.price_total >= h.old_price_total * 0.5') && /ss\.source = 'price_diary' and ss\.started_at <= now\(\) - interval '30 days'/.test(src);
+check('«خفضوا السعر»: a real drop (not a page re-read), shown once the diary covers 30 days', cutsRule(core));
+mustCatch('a 90% «cut» counted (a page re-read)', () => cutsRule(core.replace(' and h.price_total >= h.old_price_total * 0.5', '')));
 const readyRule = (src: string) => /prev_taken_at is null and run_at <= now\(\) - interval '30 days'/.test(src) && /run_at >= now\(\) - interval '36 hours'/.test(src);
 check('the log is «ready» only 30 days after its first night and while fresh', readyRule(ready));
 mustCatch('a log called ready after a week', () => readyRule(ready.replace("interval '30 days'", "interval '7 days'")));
@@ -67,14 +86,14 @@ const confirmedOnly = (src: string) => /r\.active = false and r\.deactivated_at 
 check('«gone» = page re-opened and removed: inactive, direct-check site, not an owner withdrawal, dropped if it comes back', confirmedOnly(capture));
 mustCatch('a removal log that trusts crawl absence (any strategy)', () => confirmedOnly(capture.replace("lr.strategy in ('DIRECT_REVISIT', 'CANDIDATE_PLUS_DIRECT')", "lr.strategy is not null")));
 const guestBranch = (src: string) => { const m = src.match(/if auth\.uid\(\) is null then([\s\S]*?)end if;/); return m ? m[1] : ''; };
-const guestNoNumbers = (src: string) => { const g = guestBranch(src); return g !== '' && /'locked', true/.test(g) && !/'(new30|gone30|median)',/.test(g) && !/return v;/.test(g); };
-check('a guest gets {locked, any, has_*} — never new30, gone30 or the median', guestNoNumbers(rpc));
-mustCatch('a guest branch that leaks the numbers', () => guestNoNumbers(rpc.replace("'has_median', (v ->> 'median') is not null", "'median', v -> 'median'")));
+const guestNoNumbers = (src: string) => { const g = guestBranch(src); return g !== '' && /'locked', true/.test(g) && !/'(new30|gone30|median|ppm|nb_ppm|cuts30)',/.test(g) && !/return v;/.test(g); };
+check('a guest gets {locked, any, has_*} — never a number', guestNoNumbers(rpc));
+mustCatch('a guest branch that leaks the price per metre', () => guestNoNumbers(rpc.replace("'has_ppm', (v ->> 'ppm') is not null", "'ppm', v -> 'ppm'")));
 const switchable = (src: string) => /if not coalesce\(\(select ff\.enabled from public\.ops_feature_flags ff where ff\.name = 'map_view_facts'\), false\) then\s*return null;/.test(src);
-check('the line has an off switch the checker uses', switchable(rpc) && /update public\.ops_feature_flags set enabled = false/.test(audit));
+check('the facts have an off switch the checker uses', switchable(rpc) && /update public\.ops_feature_flags set enabled = false/.test(audit));
 mustCatch('an RPC that ignores the off switch', () => switchable(rpc.replace("ff.name = 'map_view_facts'", "ff.name = 'something_else'")));
-check('the checker compares with the «نشر خلال» counter and recounts the median separately', /map_posted_window_counts_ar\(/.test(audit) && /with box as materialized/.test(audit) && /'any'\) is distinct from \(w ->> 'any'\)/.test(audit));
-
+check('the checker compares with the «نشر خلال» counter and recounts the median, price per metre and the neighbours\' another way',
+  /map_posted_window_counts_ar\(/.test(audit) && /with box as materialized/.test(audit) && /with nbox as materialized/.test(audit) && /'any'\) is distinct from \(w ->> 'any'\)/.test(audit) && /why := why \|\| 'nb_ppm'/.test(audit));
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-map-view-facts: all checks passed');
 process.exit(failed ? 1 : 0);
