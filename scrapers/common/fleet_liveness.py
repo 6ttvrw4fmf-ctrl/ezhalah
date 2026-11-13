@@ -211,7 +211,8 @@ def struck(client, site: str) -> int:
     return total
 
 
-def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None) -> list[dict]:
+def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None,
+          unstruck: bool = False) -> list[dict]:
     # Offset pages are only a partition of the table when the order is TOTAL. Every row one run
     # touches gets the SAME last_liveness_probe_at, so on that key alone Postgres may order a tie
     # differently on each page request: rows were read twice while others never were (2026-10-26:
@@ -225,6 +226,8 @@ def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit
         q = client.table(table).select(cols).eq("active", True)
         if since:
             q = q.gte("last_seen_at", since)
+        if unstruck:      # filtered BEFORE the limit, so a page of struck rows cannot starve the pool (CodeRabbit #12130)
+            q = q.or_("missing_count.is.null,missing_count.eq.0")
         for col, desc in order:
             q = q.order(col, desc=desc, nullsfirst=not desc)
         n = min(PAGE, limit - offset)
@@ -253,7 +256,7 @@ def controls(client, tables) -> list[dict]:
     ctl = []
     for t in tables:
         ctl += _unstruck(_rows(client, t, "ad_number, listing_url, last_seen_at, missing_count",
-                               order=[("last_seen_at", True)], limit=MIN_CANARIES * 3, since=since))[:MIN_CANARIES]
+                               order=[("last_seen_at", True)], limit=MIN_CANARIES, since=since, unstruck=True))
     if len(ctl) < MIN_CANARIES:
         # The site's crawl has not seen MIN_CANARIES ads in CONTROL_HOURS (its crawl is failing —
         # dwelleo and muhaysini, 2026-09-29..10-02). Without this the run had 0/0 controls,
@@ -264,8 +267,8 @@ def controls(client, tables) -> list[dict]:
         have = {r["ad_number"] for r in ctl}
         for t in tables:
             ctl += [r for r in _unstruck(_rows(client, t, "ad_number, listing_url, last_seen_at, missing_count",
-                                               order=[("last_seen_at", True)], limit=MIN_CANARIES * 3))
-                    if r["ad_number"] not in have][:MIN_CANARIES]
+                                               order=[("last_seen_at", True)], limit=MIN_CANARIES, unstruck=True))
+                    if r["ad_number"] not in have]
     return sorted(ctl, key=lambda r: r.get("last_seen_at") or "", reverse=True)[:MIN_CANARIES]
 
 

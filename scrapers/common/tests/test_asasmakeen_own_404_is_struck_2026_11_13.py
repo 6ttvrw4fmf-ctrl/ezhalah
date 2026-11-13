@@ -55,3 +55,38 @@ def test_a_sitemap_404_does_not_freeze_the_prune(monkeypatch):
     assert w["bad"] == {"gone_404": 1} and list(w["units"]) == ["1"]
     src = open(M.__file__, encoding="utf-8").read()
     assert 'not (set(w["bad"]) - {"gone_404"})' in src
+
+
+def test_a_wall_served_as_404_stops_the_walk_and_the_oracle(monkeypatch):
+    sm = f"<loc>{U}1/a</loc><loc>{U}2/b</loc>"
+
+    def get_text(url, **_):
+        if url == M.SITEMAP:
+            return sm
+        if url.endswith("2/b"):
+            raise H.Blocked(f"HTTP 404 wall at {url}: 'captcha'")
+        return "unit"
+    monkeypatch.setattr(M.H, "get_text", get_text)
+    monkeypatch.setattr(M, "project_slugs", lambda page: {})
+    monkeypatch.setattr(M, "parse_unit", lambda body: {"project": ""} if body == "unit" else None)
+    with pytest.raises(H.Blocked):
+        M.walk(log=lambda *_: None)
+
+    def wall(*_, **__):
+        raise H.Blocked(f"HTTP 404 wall at {U}2/b: 'captcha'")
+    monkeypatch.setattr(M.H, "request", wall)
+    with pytest.raises(H.Blocked):
+        M._page(U + "2/b")
+
+
+def test_page_maps_plain_404_and_prints_an_unreadable_page(monkeypatch, capsys):
+    def plain(*_, **__):
+        raise H.Blocked(f"HTTP 410 at {U}2/b (not a 200 — stopping, never guessing)")
+    monkeypatch.setattr(M.H, "request", plain)
+    assert M._page(U + "2/b") == (410, "")
+
+    def timeout(*_, **__):
+        raise TimeoutError("read timed out")
+    monkeypatch.setattr(M.H, "request", timeout)
+    assert M._page(U + "4/d") == (None, "")
+    assert "unreadable (TimeoutError: read timed out)" in capsys.readouterr().out

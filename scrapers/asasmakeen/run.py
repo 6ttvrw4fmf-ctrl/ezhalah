@@ -86,6 +86,7 @@ _DEST_RE = re.compile(r'project-location-map__directions"\s+href="[^"]*destinati
 _H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S)
 _ABOUT_RE = re.compile(r'معلومات عن المشروع</h2>\s*<div class="fs-5 lh-lg">(.*?)</div>', re.S)
 _FLOOR = {"الأرضي": 0, "الأول": 1, "الثاني": 2, "الثالث": 3, "الرابع": 4, "الخامس": 5, "الروف": None, "الملحق": None}
+_PLAIN_GONE_RE = re.compile(r"HTTP (404|410) at ")     # honest_fetch's non-200 form; its wall form reads «HTTP 404 wall at»
 _WORD_BATHS = (("دورتان", 2), ("دورتين", 2), ("دورة", 1))
 
 
@@ -234,7 +235,9 @@ def walk(limit: int = 0, log=print) -> dict:
         try:
             page = H.get_text(u, allowed=_allowed)
         except H.Blocked as e:
-            if " 404 " in str(e) or " 410 " in str(e):
+            # Only the PLAIN form («HTTP 404 at …») is a removed page; the wall form («HTTP 404 wall at …», a challenge
+            # served with a 404) stops the run like any challenge — never counted as gone (CodeRabbit on #12130).
+            if _PLAIN_GONE_RE.search(str(e)):
                 bad["gone_404"] += 1
                 continue
             raise
@@ -328,9 +331,15 @@ def _page(url: str) -> tuple[Optional[int], str]:
         r = H.request("GET", url, allowed=_allowed, accept="text/html")
         return r.status_code, r.text or ""
     except H.Blocked as e:
-        m = re.search(r"HTTP (404|410) at ", str(e))
-        return (int(m.group(1)), "") if m else (None, "")
-    except Exception:  # noqa: BLE001 — unreadable is no opinion
+        m = _PLAIN_GONE_RE.search(str(e))
+        if m:
+            return int(m.group(1)), ""
+        if " wall at " in str(e):
+            raise          # a challenge stops the whole run, nothing is pruned (honest client rule; CodeRabbit #12130)
+        print(f"asasmakeen: {url} unreadable ({e}); held as unknown", flush=True)
+        return None, ""
+    except Exception as e:  # noqa: BLE001 — unreadable is no opinion
+        print(f"asasmakeen: {url} unreadable ({type(e).__name__}: {e}); held as unknown", flush=True)
         return None, ""
 
 
