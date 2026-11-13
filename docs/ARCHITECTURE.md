@@ -614,7 +614,9 @@ older removals kept their district, so no backfill); «خفضوا السعر» c
 'price' events, started 2026-11-11; a drop of more than half is a page re-read, not a cut). Each shows once its window
 is fully covered. Built on `map_view_facts_ar()` (the «نشر خلال» counter's filter word for word); `audit_map_view_facts()`
 recounts 25 random views nightly another way and switches the facts off (`ops_feature_flags.map_view_facts`) and pages
-(`mon_detect_map_view_facts`) on any mismatch. Guards: `scripts/verify-map-view-facts.ts` (server),
+(`mon_detect_map_view_facts`) on any mismatch. Freshness (owner 2026-11-13, «we can't have mistakes … strong barrier»): a
+nightly table older than 36 h hides what it feeds — «اختفى» (removal log) and «أحياء قريبة» (`map_district_neighbors`) —
+and the same detector pages; the facts carry `updated_at` for the card's «آخر تحديث». Guards: `scripts/verify-map-view-facts.ts` (server),
 `scripts/verify-map-view-facts-line.ts` (screen). Never widen «اختفى» to crawl-absence sites, show a window before it is
 covered, lower the 10-ad price floor, or loosen the «same ads as the pill» rule to make facts appear more often.
 
