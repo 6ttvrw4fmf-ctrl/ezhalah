@@ -617,7 +617,10 @@ ads in the hour — else nothing; where the pill names a city but counts only th
 districts' prepared facts added up (`map_place_facts_sum_ar()`: counts only — a median cannot be added — unless they are
 the whole city, then the city's own facts; every named district must have a row, else nothing); a bubble view (counted
 by whole map squares) takes the box's exact count of the view, as the wider district view does; the whole-Kingdom view
-keeps its count only; «أمس» is the last FINISHED
+keeps its count only; after a DISTRICT search (owner 2026-11-13, «it shows later … it's not true» — the pill had said
+«13,528 إعلان للبيع في الرياض» for Malqa's screen) the pill and its box follow that district — its own count and facts —
+while its label is on screen and the view is at most 1.5× as tall as where the search landed (`AreaFocus`,
+src/lib/mapAreas.ts); «أمس» is the last FINISHED
 day (never «اليوم», which reads 0 in the morning); a failed read hides the box's facts (never «0»); guests see the same
 layout with blurred shapes and «🔒 سجل الدخول لعرض الأرقام», and the server never sends them a number.
 History: «اختفى» counts confirmed removals from the nightly `map_fact_removal` log (started 2026-11-12 — only 37% of

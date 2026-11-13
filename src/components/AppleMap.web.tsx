@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow, type PlaceFactsKey } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow, type PlaceFactsKey, type AreaFocus } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
@@ -275,7 +275,7 @@ function initOnce(mk: MapKit, language: string) {
 // ── The page's search field talks to the map through this (MapDealRow's MapSearchBar) ─────────────────────────
 // One map per page, so one handle: the mounted map registers itself; the field asks Apple for places and flies there.
 // `history`: the views left behind by a jump (a search pick, a region tap) so «رجوع» can return to them.
-const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown; shapes?: unknown[] }; markSeq: number; route: unknown[]; onRoute?: (on: boolean) => void; poly?: PinFilter['poly'] } = { map: null, search: null, lang: '', history: [], mark: {}, markSeq: 0, route: [] };
+const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown; shapes?: unknown[] }; markSeq: number; route: unknown[]; onRoute?: (on: boolean) => void; poly?: PinFilter['poly']; focus?: AreaFocus | null } = { map: null, search: null, lang: '', history: [], mark: {}, markSeq: 0, route: [] };
 
 /** Remove the drawn route (band, line, end pins). */
 export function clearRoute() {
@@ -329,6 +329,7 @@ export function clearPlaceMark() {
   if (m) for (const o of live.mark.shapes ?? []) m.removeOverlay(o);
   live.mark = {};
   live.markSeq++;
+  live.focus = null;   // the searched district stops leading the pill once its search is cleared
 }
 
 /** Apple Maps' own place suggestions (owner 2026-10-31: «this search connected to Apple Maps, like how a user
@@ -444,6 +445,8 @@ export function flyToPlace(p: PlaceSuggestion) {
     // they searched»). One mark at a time.
     clearPlaceMark();
     if (!c) return;
+    // a searched DISTRICT leads the pill and its box while it is on screen (owner 2026-11-13, src/lib/mapAreas.ts AreaFocus)
+    if (p.kind === 'district') live.focus = { district: (place ? place.name : undefined) ?? p.name ?? p.displayLines[0] ?? '', lat: c.latitude, lng: c.longitude, latitudeDelta: region ? region.span.latitudeDelta * 1.3 : 0.08 };
     // NO BOUNDARY DRAWING (owner 2026-11-02: «remove this boundary drawing, keep it how it is»): a landmark gets a brand
     // pin with its name and a small 120 m circle so the user sees what they searched; a district, city, region or
     // street just comes into view — Apple's own labels say where it is. The place_shapes lookup stays in src/data for
@@ -953,7 +956,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // district most of the view's listings are in — «في هذه المنطقة» only when no one place holds most of them.
       // The whole-Kingdom view shows regions (owner 2026-11-09): the pill keeps the country and its WHOLE total, read
       // over COUNTRY_BOX, so a pan that leaves a region off screen never shrinks «… في السعودية».
-      const place = whole ? areaPlace(whole, 'country', loc, translitPlace, m.region.center, m.region.span) : areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
+      const place = whole ? areaPlace(whole, 'country', loc, translitPlace, m.region.center, m.region.span) : areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span, live.focus);
       setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
       clearStems();   // area labels replace the pins: no line may outlive the head it belonged to
       // the box at city/district label zoom reads that place's prepared facts (the whole-Kingdom view keeps its count only)

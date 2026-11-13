@@ -91,6 +91,24 @@ check('the districts on screen are summed by map_place_facts_sum_ar', /place\.le
 check('a place\'s facts (all types) never ask «اختر نوع العقار» — picking a type would leave them', (() => { const x = factBox({ ...full, ppm: null, nbPpm: null, place: true }, 560, 'ar', false); return x.kind === 'chips' && x.hint === null; })());
 mustCatch('a place box that asks for a type', () => { const x = factBox({ ...full, ppm: null, nbPpm: null, place: false }, 560, 'ar', false); return x.kind === 'chips' && x.hint === null; });
 
+// 3e. after a district search the pill and its box are about THAT district (owner 2026-11-13: «it shows later … not true»)
+const around: AreaRow[] = [{ city: 'الرياض', district: 'حي الملقا', lat: 24.81, lng: 46.61, n: 1916 }, { city: 'الرياض', district: 'حي القيروان', lat: 24.84, lng: 46.58, n: 1205 },
+  { city: 'الرياض', district: 'حي حطين', lat: 24.76, lng: 46.6, n: 592 }, { city: 'الرياض', district: 'حي الصحافة', lat: 24.8, lng: 46.64, n: 840 },
+  { city: 'الرياض', district: 'حي النرجس', lat: 24.83, lng: 46.66, n: 6539 }, { city: 'الرياض', district: 'حي العقيق', lat: 24.77, lng: 46.63, n: 546 }];
+const V0 = { latitude: 24.805, longitude: 46.615 }; const S0 = { latitudeDelta: 0.12, longitudeDelta: 0.12 };
+const malqa = { district: 'الملقا', lat: 24.808, lng: 46.612, latitudeDelta: 0.12 };
+const leads = (p: ReturnType<typeof areaPlace>) => p?.name === 'حي الملقا' && p.n === 1916 && p.facts?.level === 'district' && p.facts.district === 'حي الملقا' && p.facts.city === 'الرياض';
+check('a searched district names the pill with ITS count and ITS facts, even when it is not most of the screen', leads(areaPlace(around, 'district', 'ar', (x) => x, V0, S0, malqa)));
+check('…and lets go once the user zooms well out', !leads(areaPlace(around, 'district', 'ar', (x) => x, V0, { latitudeDelta: 0.3, longitudeDelta: 0.3 }, malqa)));
+check('…or pans it off the screen', !leads(areaPlace(around, 'district', 'ar', (x) => x, { latitude: 24.6, longitude: 46.8 }, S0, malqa)));
+check('a same-named district far from where Apple put the search is never taken for it', !leads(areaPlace(around, 'district', 'ar', (x) => x, V0, S0, { ...malqa, lat: 21.5, lng: 39.2 })));
+check('with no search the old rule stands (the city named over many districts)', areaPlace(around, 'district', 'ar', (x) => x, V0, S0)?.facts?.level === 'districts');
+mustCatch('a searched district ignored (the pill names the whole screen after the user searched one district)', () => leads(areaPlace(around, 'district', 'ar', (x) => x, V0, S0)));
+const webSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
+const focusWired = (src: string) => /if \(p\.kind === 'district'\) live\.focus = \{ district: /.test(src) && /areaPlace\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span, live\.focus\);/.test(src) && /live\.focus = null;/.test(src);
+check('a district search sets the focus, the label view reads it, clearing the search clears it', focusWired(webSrc));
+mustCatch('a label view that never reads the searched district', () => focusWired(webSrc.replace('m.region.span, live.focus);', 'm.region.span);')));
+
 // 4. the screen asks for the box the count was read over, and compares with the number it shows
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(paddedBox\(center, span\)\);/.test(src)

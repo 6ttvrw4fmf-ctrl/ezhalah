@@ -216,9 +216,37 @@ export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en
 /** The named place AND its own count. The pill prints THIS count beside the name — measured live 2026-11-05 it said
  *  «14,531 إعلان في حي النرجس» (every district in view) where النرجس alone holds ~5,900, and «127,013 … في منطقة
  *  الرياض» where the region holds 108K. A number beside a name is that place's number. */
+/** The district the user just searched (owner 2026-11-13: «it shows later … it's not true» — after a district search the
+ *  pill said «13,528 إعلان للبيع في الرياض» for the whole screen): its name, where Apple put it, and how tall the view was
+ *  when the map landed on it. While its label is on screen and the view is no more than 1.5× that tall, the pill and its
+ *  box are about THAT district — its own count, its own facts. */
+export type AreaFocus = { district: string; lat: number; lng: number; latitudeDelta: number };
+const FOCUS_NAME_NEAR_DEG = 0.05;   // a same-named district within ~5 km of Apple's point is the one searched
+const FOCUS_POINT_NEAR_DEG = 0.015; // no name match (e.g. an English suggestion): only a label within ~1.5 km of the point
+const plainDistrict = (d: string) => d.replace(/^حي\s+/, '').trim();
+export function focusedArea(rows: AreaRow[], focus: AreaFocus | null | undefined,
+  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): AreaRow | null {
+  if (!focus || span.latitudeDelta > focus.latitudeDelta * 1.5) return null;
+  const want = plainDistrict(focus.district);
+  let named: AreaRow | null = null; let nd = Infinity; let near: AreaRow | null = null; let pd = Infinity;
+  for (const a of rows) {
+    if (!a.district || !inView(a, center, span)) continue;
+    const d = Math.hypot(a.lat - focus.lat, (a.lng - focus.lng) * Math.cos((focus.lat * Math.PI) / 180));
+    if (plainDistrict(a.district) === want && d < nd) { nd = d; named = a; }
+    if (d < pd) { pd = d; near = a; }
+  }
+  if (named && nd <= FOCUS_NAME_NEAR_DEG) return named;
+  return near && pd <= FOCUS_POINT_NEAR_DEG ? near : null;
+}
+
 export function areaPlace(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
-  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): AreaPlace | null {
+  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }, focus?: AreaFocus | null): AreaPlace | null {
   if (level === 'country') { const n = rows.reduce((t, a) => t + a.n, 0); return n > 0 ? { name: COUNTRY_NAME[loc], n } : null; }
+  const searched = level === 'district' ? focusedArea(rows, focus, center, span) : null;
+  if (searched) {
+    const name = areaName(searched, 'district', loc, latin);
+    return { name: loc === 'ar' ? `حي ${name}` : name, n: searched.n, facts: { level: 'district', city: searched.city, district: searched.district } };
+  }
   // A region is on screen where its label is drawn OR where its listings are (review of #11608); anything else by its
   // own point.
   const onScreen = rows.filter((a) => (!a.offLabel && a.at && inView(a.at, center, span)) || inView(a, center, span));
