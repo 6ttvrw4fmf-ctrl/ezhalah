@@ -62,6 +62,9 @@ const goneFiltered = (src: string) => /'gone30', case when v_ready then \(select
   && src.includes('(p_price_min is null or r.price >= p_price_min) and (p_price_max is null or r.price <= p_price_max)')
   && src.includes('(p_area_min is null or r.area_m2 >= p_area_min) and (p_area_max is null or r.area_m2 <= p_area_max)');
 check('«gone» follows every map filter, and only on a full, fresh log', goneFiltered(core));
+const goneSkipsDefaultPins = (src: string) => /from public\.map_fact_removal r\s+where v_ready[\s\S]*?and not exists \(select 1 from public\.ops_default_pin_register d\s+where d\.source_table = r\.source_table/.test(src);
+check('«gone» skips ads on a site\'s default pin, exactly as the pill\'s count does', goneSkipsDefaultPins(core));
+mustCatch('«gone» counting ads the pill never showed (default pins)', () => goneSkipsDefaultPins(core.replace(/(from public\.map_fact_removal r\s+where v_ready[^\n]*\n[^\n]*\n)\s*and not exists \(select 1 from public\.ops_default_pin_register d[^\n]*\n[^\n]*\n/, '$1')));
 mustCatch('«gone» shown before the log is ready', () => goneFiltered(core.replace("'gone30', case when v_ready then", "'gone30', case when true then")));
 mustCatch('«gone» ignoring the rooms filter', () => goneFiltered(core.replace('(p_beds is null or r.bedrooms = any (p_beds)) and ', '')));
 const keepsRooms = (src: string) => /posted_at, deactivated_at, left_at,\s*bedrooms, furnished\)/.test(src) && /posted_at, taken_at, bedrooms, furnished\)/.test(src);
