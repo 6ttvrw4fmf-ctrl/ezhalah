@@ -702,6 +702,8 @@ _NEAR_PUBLIC = frozenset(_n(w) for w in ("جنبها", "جنبه", "خلف", "خ
                                          "ملاصق", "ملاصقه", "حولها", "حوله", "يفتح", "محيطه", "يحيط", "تحيط", "يحيطها",
                                          "تحيطها", "بلقرب"))
 # …and a public place the ad OWNS says so: «مرافق المشروع: مصلى», «سوبر ماركت داخل المجمع», «يضم مسجد»
+# «… رخصة انشاء وبها مسبح»: a «has» word opening a new item after a permit says the place HAS it (🔬 2026-11-13).
+_HAS_CUES = frozenset(_n(w) for w in ("بها", "فيها", "به", "فيه", "يوجد", "توجد", "يحتوي", "تحتوي"))
 _OWN_CUES = tuple(_n(w) for w in ("داخل", "بالمجمع", "بالمشروع", "بالعماره", "بالمبني", "مرافق", "يضم", "تضم",
                                    "يحتوي", "تحتوي", "يوجد", "توجد", "لسكان", "للسكان", "خاص", "خاصه", "مميزات",
                                    "متكامل", "متكامله"))      # «*خدمات متكاملة* 🔸 ممشى وحديقة» — the project's own list
@@ -1155,9 +1157,13 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) and not _strip_wa(w).startswith(_n("مكانس")) for w in p2):
         return None, s, e
     g5 = " ".join(gp[-5:])                           # «توجد رخصة بناء تسوير وملاحق»: allowed to build ≠ built
-    if any(_strip_wa(w) in ("رخصه", "تصريح", "يسمح", "مسموح") for w in gp[-5:]) and "اعلان" not in g5 and "فال" not in g5 \
+    w5 = gp[-5:]
+    pk = max((k for k, w in enumerate(w5) if _strip_wa(w) in ("رخصه", "تصريح", "يسمح", "مسموح")), default=-1)
+    has_after = pk >= 0 and any(w.startswith("و") and _strip_wa(w) in _HAS_CUES for w in w5[pk + 1:])
+    if (pk >= 0 and not has_after) and "اعلان" not in g5 and "فال" not in g5 \
             or "نظام البناء" in g5:
-        return None, s, e
+        return None, s, e                            # …but «عليها رخصة انشاء وبها قسم معزول بمسبح»: «وبها» says the
+                                                     # plot HAS it (🔬 2026-11-13 pool recall, aqar 27587225)
     # A floor covering usually comes with its proclitic: «سطح مفروش بنجيل», «مفروشة بالموكيت», «حوش مفروش بالعشب»
     # (dealapp 438767 / 598307 / 493432 served furnished = yes, 2026-11-04) — so the word is read bare too.
     if fact == "furnished" and (any(_starts(w, _PARTIAL) or _starts(_bare(w), _PARTIAL) for w in n2)
@@ -2969,6 +2975,9 @@ def selftest() -> None:
         ("ميزات المشروع / Project Features: • نادي رياضي • Gym • ممشى مشترك • Shared Walking Path • مسبح • Swimming Pool", {"pool": True}, ()),  # aqar 20965749
         ("وحدات ذكيه مكانس كهربائيه مسبح غرفة خادمه وسائق ديوانيه", {"pool": True}, ()),   # aqar 14998996
         ("مكان مسبح", {}, ("pool",)),
+        ("ارض مسورة للايجار مساحتها 615م وعليها رخصة انشاء وبها قسم معزول بمسبح وغرف", {"pool": True}, ()),   # aqar 27587225
+        ("توجد رخصة بناء تسوير وملاحق", {}, ("annex", "fence")),
+        ("يوجد تصريح لبناء مسبح", {}, ("pool",)),
         ("a 5 minutes walking distance to the pool", {}, ("pool",)),
         ("لا يوجد غرفة سائق", {"driver_room": False}, ()),
         ("يمنع العزاب عدا الموظفين", {}, ()),
