@@ -166,7 +166,7 @@ export async function trendingDistrict(plan) {
       // The panel's OWN RPC settles it: what the surface was given is not a guess.
       if (!rows.length) {
         // An answer that landed before the tap (at the city pick) is the panel's answer too.
-        if (!rpc.returned && early.returned) Object.assign(rpc, { returned: true, rows: early.rows, status: early.status, ms: 0 });
+        if (early.returned && rpc.returned === false) Object.assign(rpc, { returned: true, rows: early.rows, status: early.status, ms: 0 });
         if (!rpc.returned) {
           defect(name, 'R14.4.2', `district panel never rendered: district_options_ar had not answered `
             + `${renderMs} ms after the field was opened. The user is left with an empty surface.`);
