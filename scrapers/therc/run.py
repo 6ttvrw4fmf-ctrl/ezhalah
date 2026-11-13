@@ -646,8 +646,7 @@ def main() -> int:
                 pruned += nn
         print(f"✓ THE RC: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
-                             notes=f"pruned={pruned}" + (f" | {browser_recheck.summary()}"
-                                                         if browser_recheck.log else ""),
+                             notes=f"pruned={pruned}",
                              check_tables=["therc_residential_listings", "therc_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
