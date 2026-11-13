@@ -59,7 +59,7 @@ check('the guard\'s refusal is recognised, and nothing else is',
 check('the message is raised on that refusal and mounted at the root, in Arabic and English',
   /isNetworkBlocked\(r\.status, b\)\) window\.dispatchEvent\(new Event\(NETWORK_BLOCKED_EVENT\)\)/.test(client)
   && /<NetworkBlockedNotice \/>/.test(layout)
-  && /'Please turn off your VPN': 'يرجى إيقاف شبكة VPN'/.test(i18n));
+  && /title: 'يرجى إيقاف شبكة VPN'/.test(readFileSync(join(root, 'src/components/NetworkBlockedNotice.tsx'), 'utf8')));
 // A FULL BLOCK (owner 2026-11-13: «blue screen behind … user has to close vpn to continue»): the notice covers the whole
 // page (fixed, one plain blue colour, no blur — «don't let it look vibe coded»), has NO way to dismiss it, and its one
 // button reloads the page.
@@ -67,10 +67,12 @@ const notice = readFileSync(join(root, 'src/components/NetworkBlockedNotice.tsx'
 const fullBlock = (n: string) => /const retry = \(\) => \{ if \(typeof window !== 'undefined'\) window\.location\.reload\(\); \};/.test(n)
   && /onPress=\{retry\}/.test(n) && !/setOpen\(false\)/.test(n)
   && /backgroundColor: BLUE/.test(n) && !/backdropFilter/.test(n) && /'fixed'/.test(n)
-  && /'Ezhalah cannot be used while a VPN is on\. Turn off the VPN, then try again\.': 'لا يمكن استخدام إزهله أثناء تشغيل شبكة VPN\. أوقف شبكة VPN ثم حاول مرة أخرى\.'/.test(i18n)
-  && /\{t\('Try again'\)\}/.test(n);
-check('the VPN notice is a full block: plain blue cover, no dismiss, the only button reloads (AR + EN)', fullBlock(notice));
+  // both languages on the one screen, always (owner 2026-11-13: «say it in English and Arabic»), no diacritics
+  && /\{VPN_COPY\.ar\.title\}/.test(n) && /\{VPN_COPY\.en\.title\}/.test(n) && /\{VPN_COPY\.ar\.body\}/.test(n) && /\{VPN_COPY\.en\.body\}/.test(n)
+  && !/[\u064B-\u0652]/.test(n);
+check('the VPN notice is a full block: plain blue cover, no dismiss, the only button reloads, Arabic AND English together', fullBlock(notice));
 mustCatch('a VPN notice the visitor can simply close', !fullBlock(notice.replace('onPress={retry}', 'onPress={() => setOpen(false)}')));
+mustCatch('a VPN screen that drops the English lines', !fullBlock(notice.replace('{VPN_COPY.en.title}', '')));
 mustCatch('a VPN screen that is not the plain blue cover', !fullBlock(notice.replace('backgroundColor: BLUE,', "backgroundColor: 'rgba(0,0,0,0.35)',")));
 mustCatch('the refusal no longer raising the message', !/isNetworkBlocked\(r\.status, b\)\) window\.dispatchEvent/.test(client.replace('window.dispatchEvent(new Event(NETWORK_BLOCKED_EVENT))', 'void 0')));
 

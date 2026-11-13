@@ -7,12 +7,17 @@
 // Mounted at the root in src/app/_layout.tsx. Guard: scripts/verify-network-block.ts.
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useI18n } from '@/i18n';
 import { radius } from '@/theme/tokens';
 import { NETWORK_BLOCKED_EVENT } from '@/lib/supabase';
 
+// BOTH LANGUAGES AT ONCE (owner 2026-11-13: «say it in English and Arabic»): a visitor on a VPN may not have picked a
+// language yet, so the screen always shows the Arabic lines and the English lines together, whatever the UI language.
+export const VPN_COPY = {
+  ar: { title: 'يرجى إيقاف شبكة VPN', body: 'لا يمكن استخدام إزهله أثناء تشغيل شبكة VPN. أوقف شبكة VPN ثم حاول مرة أخرى.', button: 'حاول مرة أخرى' },
+  en: { title: 'Please turn off your VPN', body: 'Ezhalah cannot be used while a VPN is on. Turn off the VPN, then try again.', button: 'Try again' },
+};
+
 export default function NetworkBlockedNotice() {
-  const { t, isRTL } = useI18n();
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -23,14 +28,16 @@ export default function NetworkBlockedNotice() {
   if (!open) return null;
   // The only way on: reload. A VPN still switched on is refused again and this screen returns.
   const retry = () => { if (typeof window !== 'undefined') window.location.reload(); };
-  const align = { textAlign: 'center' as const };
   return (
     <View style={s.screen} accessibilityRole="alert" accessibilityViewIsModal testID="network-blocked-notice">
       <View style={s.inner}>
-        <Text style={[s.title, align]}>{t('Please turn off your VPN')}</Text>
-        <Text style={[s.body, align, isRTL && { writingDirection: 'rtl' }]}>{t('Ezhalah cannot be used while a VPN is on. Turn off the VPN, then try again.')}</Text>
+        <Text style={[s.title, s.ar]}>{VPN_COPY.ar.title}</Text>
+        <Text style={[s.body, s.ar]}>{VPN_COPY.ar.body}</Text>
+        <View style={s.rule} />
+        <Text style={[s.title, s.en]}>{VPN_COPY.en.title}</Text>
+        <Text style={[s.body, s.en]}>{VPN_COPY.en.body}</Text>
         <Pressable onPress={retry} style={s.button} accessibilityRole="button" testID="network-blocked-retry">
-          <Text style={s.buttonText}>{t('Try again')}</Text>
+          <Text style={s.buttonText}>{`${VPN_COPY.ar.button} · ${VPN_COPY.en.button}`}</Text>
         </Pressable>
       </View>
     </View>
@@ -48,6 +55,9 @@ const s = StyleSheet.create({
   inner: { width: '100%', maxWidth: 420, alignItems: 'center', gap: 12 },
   title: { fontSize: 22, fontWeight: '700', color: '#ffffff' },
   body: { fontSize: 16, lineHeight: 24, color: '#dbe4ff' },
+  ar: { textAlign: 'center', writingDirection: 'rtl' },
+  en: { textAlign: 'center', writingDirection: 'ltr' },
+  rule: { width: 48, height: 1, backgroundColor: 'rgba(255,255,255,0.35)', marginVertical: 6 },
   button: { marginTop: 12, minWidth: 180, backgroundColor: '#ffffff', borderRadius: radius.field, paddingVertical: 12, paddingHorizontal: 28, alignItems: 'center' },
   buttonText: { color: BLUE, fontSize: 16, fontWeight: '700' },
 });

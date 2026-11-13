@@ -1922,8 +1922,6 @@ const AR: Record<string, string> = {
   'Listers say you can pay in instalments or monthly, through one of these providers or another way. Ezhalah cannot guarantee it; confirm with the lister.': 'يذكر المعلن إمكانية الدفع بالتقسيط أو على دفعات، عبر أحد هؤلاء المزودين أو بطريقة أخرى. إزهله لا تضمن ذلك، تأكد من المعلن مباشرة.',
   'How it works?': 'كيف يشتغل؟',
   'How Refine with AI works': 'كيف يشتغل دقّق مع الذكاء الاصطناعي؟',
-  'Please turn off your VPN': 'يرجى إيقاف شبكة VPN',
-  'Ezhalah cannot be used while a VPN is on. Turn off the VPN, then try again.': 'لا يمكن استخدام إزهله أثناء تشغيل شبكة VPN. أوقف شبكة VPN ثم حاول مرة أخرى.',
   'Terms of Use': 'شروط الاستخدام',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',
 
