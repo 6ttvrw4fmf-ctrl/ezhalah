@@ -54,3 +54,19 @@ export function dedupePhotoUrls(urls: string[]): string[] {
     return true;
   });
 }
+
+// A CARD PHOTO IS SHRUNK BEFORE IT REACHES THE PHONE (owner 2026-11-12: «I don't want it to feel slow … moving around»).
+// Measured on ezhalah.com: the sites' own photos arrive poster-size (nofodh 2700×1519, a WhatsApp upload 2560×1706)
+// for a card frame of 328×184, so the phone downloads and shrinks every one while the list scrolls. A card photo is
+// asked first from the free open resizing service wsrv.nl at CARD_PHOTO_PX wide (webp, never enlarged) and, if that
+// fails for any reason, from the site itself — the card's existing «try the next photo» step (ResultCard ListingPhoto)
+// falls through to the original, so a resizer outage only costs the old speed, never a photo. Only the public photo
+// address is sent. The ad page's gallery keeps the full-size photo. Same-origin /_img paths and Aqar's own sized copies
+// (images.aqar.fm/webp/750x0/…, already card-sized) are left as they are.
+export const CARD_PHOTO_PX = 720;
+const RESIZER = 'https://wsrv.nl/';
+export function cardPhotoCandidates(raw: string): string[] {
+  if (!raw || typeof raw !== 'string' || !/^https?:\/\//i.test(raw)) return raw ? [raw] : [];
+  if (/^https:\/\/images\.aqar\.fm\/webp\/\d+x\d+\//.test(raw)) return [raw];
+  return [`${RESIZER}?url=${encodeURIComponent(raw)}&w=${CARD_PHOTO_PX}&we&output=webp&q=75`, raw];
+}
