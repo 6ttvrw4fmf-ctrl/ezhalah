@@ -70,7 +70,9 @@ check('no web logos (native) → nothing scheduled', scheduleLogoPrefetch([1, 2,
 // prefetch never ran on Home (measured 2026-10-25: 11 logos before a search). The root layout runs on
 // every page.
 const layout = readFileSync(join(root, 'src/app/_layout.tsx'), 'utf8');
-const LAYOUT_WIRE = /useEffect\(\(\) => \{\s*if \(Platform\.OS === 'web'\) scheduleLogoPrefetch\(PLATFORM_META\.map\(\(p\) => p\.logo\), \(uris\) => ExpoImage\.prefetch\(uris\)\);\s*\}, \[\]\);/;
+// 🔧 2026-11-11: the fetch goes through afterMapIsLabelled() (the map's city names download first; executed by
+// scripts/verify-logo-prefetch-yields-to-the-map.ts).
+const LAYOUT_WIRE = /useEffect\(\(\) => \{\s*(?:\/\/[^\n]*\n\s*)?if \(Platform\.OS === 'web'\) scheduleLogoPrefetch\(PLATFORM_META\.map\(\(p\) => p\.logo\), \(uris\) => afterMapIsLabelled\(\(\) => \{ void ExpoImage\.prefetch\(uris\); \}\)\);\s*\}, \[\]\);/;
 check('the ROOT LAYOUT schedules the prefetch on web with every catalog logo (runs on every page)', LAYOUT_WIRE.test(layout));
 const loader = readFileSync(join(root, 'src/components/SearchLoader.tsx'), 'utf8');
 check('it is not (only) in a route-level module, where it never ran on Home', !/scheduleLogoPrefetch/.test(loader));

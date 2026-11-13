@@ -171,12 +171,30 @@ try {
   await p2.goto(`${BASE}/?speedwatch=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await p2.getByText('بحث', { exact: true }).first().waitFor({ state: 'visible', timeout: 60_000 });
   await p2.getByText('الضروري فقط', { exact: true }).click({ timeout: 3_000 }).catch(() => {});
+  // A timeline of the impatient tap (printed only when the step is over budget, 🔧 2026-11-11): every read the page
+  // started after the tap that took >= 250 ms, and every main-thread freeze >= 200 ms — where the seconds went.
+  await p2.evaluate(() => {
+    window.__ct = { t0: performance.now(), long: [] };
+    try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__ct.long.push([e.startTime, e.duration]); }).observe({ type: 'longtask' }); } catch { /* no longtask API */ }
+  });
   t = Date.now();
   await p2.locator('[role=tab]', { hasText: 'خريطة' }).first().click();
   await p2.waitForFunction(() => location.pathname === '/map' && [...document.querySelectorAll('[data-testid=map-area]')]
     .some((a) => { const r = a.getBoundingClientRect(); return r.width > 0 && r.top >= 0 && r.top < innerHeight; }), null, { timeout: 30_000, polling: 25 });
   results.mapColdTapMs = Date.now() - t;
   say(results.mapColdTapMs <= BUDGET.mapColdTapMs, 'map: tapped at once (no pause) until city names are on the map', results.mapColdTapMs, BUDGET.mapColdTapMs);
+  if (results.mapColdTapMs > BUDGET.mapColdTapMs) {
+    const tl = await p2.evaluate(() => {
+      const { t0, long } = window.__ct;
+      const ms = (x) => Math.round(x - t0);
+      const reads = performance.getEntriesByType('resource').filter((e) => e.startTime >= t0 && e.duration >= 250)
+        .map((e) => `${ms(e.startTime)}→${ms(e.responseEnd)} ${e.name.replace(/^https?:\/\/[^/]+/, '').split('?')[0].slice(0, 60)}`);
+      const freezes = long.filter(([s0, d]) => s0 >= t0 && d >= 200).map(([s0, d]) => `${ms(s0)}+${Math.round(d)}`);
+      return { reads, freezes };
+    });
+    console.log(`      cold-tap reads (ms after tap): ${tl.reads.join(' · ') || 'none >= 250 ms'}`);
+    console.log(`      cold-tap freezes (start+length): ${tl.freezes.join(' · ') || 'none >= 200 ms'}`);
+  }
   await ctx2.close();
 } catch (e) {
   console.error(`FAIL  the journey could not complete: ${e.message}`);
