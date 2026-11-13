@@ -603,11 +603,17 @@ green = below); (2) «سعر المتر المعروض حي حي» — each near
 الإعلانات، وليست أسعار البيع النهائية».
 Rules: every price says «المعروض» (asking, never sold); «اختفى» = removed at source, never «sold»; «جديد» = the SITE's
 posting date; a copy on another site counts once; a price is the MEDIAN, shown only from ≥ 10 ads, else the cell says
-«إعلانات قليلة»; with no type picked the price is never mixed — the box says «اختر نوع العقار لعرض السعر» and the card
-lists the price per type; «أحياء قريبة» = the 4 nearest districts of the same city with enough ads, under the SAME
+«إعلانات قليلة»; with no type picked the price is never mixed — the box shows the most common type's OWN price, named
+(«الشقق: المتر المعروض 3,500 ريال»; owner 2026-11-13 «if nothing is selected … just show a general»), and says «اختر نوع
+العقار لعرض السعر» only when no type has 10 priced ads; the card lists the price per type; «أحياء قريبة» = the 4 nearest districts of the same city with enough ads, under the SAME
 filters (counts compared as the neighbours' average, so a big district is not compared unfairly), falling back to the
 city — named as such — when the neighbours lack data; a drawn boundary gets the facts for exactly the ads inside it
-(any zoom) but never «أحياء قريبة» (a drawing is not a district); «أمس» is the last FINISHED
+(any zoom) but never «أحياء قريبة» (a drawing is not a district); at a wider district view (up to ~22 km tall) the pill's estimated count (dots feed)
+gives way to the exact count of the same box, so the box shows there too; at city and district LABEL zoom (owner
+2026-11-13, «from city level to district level») the box reads the named place's prepared facts (`map_place_facts`,
+rebuilt hourly by `bundle-hourly-monitors`; `map_place_facts_ar()`), only when the count is all of one deal's ads there
+(no type, rooms, price, area or other filter) and the pill's count is within 3% (or 3 ads) of the prepared count — new
+ads in the hour — else nothing; the whole-Kingdom view keeps its count only; «أمس» is the last FINISHED
 day (never «اليوم», which reads 0 in the morning); a failed read hides the box's facts (never «0»); guests see the same
 layout with blurred shapes and «🔒 سجل الدخول لعرض الأرقام», and the server never sends them a number.
 History: «اختفى» counts confirmed removals from the nightly `map_fact_removal` log (started 2026-11-12 — only 37% of
