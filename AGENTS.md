@@ -38,6 +38,10 @@ SDK. Both were cut (logos → 1.7 MB, bundle → ~972 KB) and are now guarded on
 - **Logos:** each ≤ 60 KB, pack ≤ 2.5 MB — `scripts/verify-logo-weight-budget.ts`. Add a logo shrunk (≤ 320 px, palette PNG with alpha).
 - **First download:** web entry ≤ 1,100 KB brotli — `scripts/web-bundle-budget.mjs`, run by `web-runtime-smoke.yml` after the build.
   A new heavy library loads LATER (lazy) or not at all; raising the budget is a reviewed decision, never a way to go green.
+- **Card photos are shrunk (owner 2026-11-12, «fix whatever u can … don't want it to feel slow»):** a card photo is asked from the free
+  resizer wsrv.nl at 720 px (webp) first and from the site second, so an outage costs speed, never a photo (a 1.28 MB nofodh photo → 13 KB).
+  The ad page gallery keeps full size; Aqar's own sized copies are untouched — `cardPhotoCandidates()` in src/lib/photoUrl.ts,
+  guard `scripts/verify-card-photos-are-shrunk-with-fallback.ts`. Owner declined the paid Vercel resizer for now.
 - **Web-only bundle hygiene:** `metro.config.js` keeps native-only packages out of the web build (`verify-web-bundle-skips-native-sentry.ts`).
 
 # OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN (2026-10-09 — permanent)

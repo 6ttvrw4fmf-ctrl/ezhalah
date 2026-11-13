@@ -12,6 +12,7 @@ import { freeTextEn } from '@/lib/freeTextEn';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { whenNear } from '@/lib/nearViewport';
+import { cardPhotoCandidates } from '@/lib/photoUrl';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { listingSearchedTypeAr } from '@/lib/listingDisplay';
@@ -1044,7 +1045,9 @@ const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.png');
 // been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
 // dead URL would leave the card with an empty grey block. We try each URL in order and, if every
 // one fails (or the listing genuinely has no photo), render a clean "no photo" placeholder.
-function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (k: string) => string }) {
+function ListingPhoto({ photos: sitePhotos, style, t }: { photos: string[]; style: any; t: (k: string) => string }) {
+  // Web: each photo is tried shrunk first, then as the site serves it (src/lib/photoUrl.ts cardPhotoCandidates).
+  const photos = IS_WEB ? sitePhotos.flatMap(cardPhotoCandidates) : sitePhotos;
   const [idx, setIdx] = useState(0);
   useEffect(() => { setIdx(0); }, [photos.join('|')]);
 
