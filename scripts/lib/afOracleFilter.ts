@@ -21,7 +21,7 @@ export type RpcBody = Record<string, unknown>;
 //
 // This is a MAP, not a set of column names, because the token the RPC receives is not always the
 // column it filters: the clause reads «'ac' → s.air_conditioner» and «'rnpl'/'rent_now_pay_later'
-// → s.rent_now_pay_later». The previous version listed COLUMN names as if they were tokens, so the
+// → s.rent_now_pay_later or s.split_payments» (the latter a derived union since 2026-11-12). The previous version listed COLUMN names as if they were tokens, so the
 // two most common real chips were invisible to the oracle:
 //
 //   • 'ac' (Air conditioning) — 2,831 of the 11,153 Riyadh/Rent-Annual/شقة cohort, the single
@@ -68,8 +68,8 @@ export const AMENITY_TOKEN_COL: Record<string, string> = {
   separate_electricity_meter: 'separate_electricity_meter',
   separate_water_meter: 'separate_water_meter',
   furnished: 'furnished',
-  rnpl: 'rent_now_pay_later',
-  rent_now_pay_later: 'rent_now_pay_later',
+  // rnpl / rent_now_pay_later are NOT column tokens since 2026-11-12 (owner: one instalments chip) — they are the
+  // union of the site's box and the ad's «دفعات» words; see AMENITY_TOKEN_DERIVED.
   // The 39 column-backed chips of the Apartments & Co-living cards (owner handoff 2026-10-31, migration
   // 20261101100930): the clause guards each as `and (not ('tok' = any(p_amenities)) or s.tok)` — token = column.
   roof: 'roof', two_entrances: 'two_entrances', annex: 'annex', yard: 'yard', garage: 'garage', grill: 'grill',
@@ -206,6 +206,10 @@ export const AMENITY_TOKEN_DERIVED: Record<string, DerivedAmenity> = {
   camels_horses: { cols: ['camels', 'horses_stable'], filter: 'camels.is.true,horses_stable.is.true', orGroup: true },
   palm_fruit_trees: { cols: ['palms', 'fruit_trees'], filter: 'palms.is.true,fruit_trees.is.true', orGroup: true },
   pool_gym: { cols: ['pool', 'gym'], filter: 'pool.is.true,gym.is.true', orGroup: true },
+  // the merged instalments chip (owner 2026-11-12, migration 20261112111809): the clause's rnpl / rent_now_pay_later
+  // arm reads `s.rent_now_pay_later or s.split_payments` — the site's box OR the ad's monthly / split-payment words
+  rnpl: { cols: ['rent_now_pay_later', 'split_payments'], filter: 'rent_now_pay_later.is.true,split_payments.is.true', orGroup: true },
+  rent_now_pay_later: { cols: ['rent_now_pay_later', 'split_payments'], filter: 'rent_now_pay_later.is.true,split_payments.is.true', orGroup: true },
   apts4: { cols: ['apartments_count'], filter: 'apartments_count=gte.4' },
   apts8: { cols: ['apartments_count'], filter: 'apartments_count=gte.8' },
   apts12: { cols: ['apartments_count'], filter: 'apartments_count=gte.12' },
@@ -214,6 +218,8 @@ export const AMENITY_TOKEN_DERIVED: Record<string, DerivedAmenity> = {
 };
 
 export type OracleOpts = {
+  /** «now» for the p_posted_within_days cut (ms since epoch); defaults to Date.now(). */
+  nowMs?: number;
   /** type_ar → macro ('Residential' | 'Commercial' | 'both'), read from the same `known_type_ar`
    *  reference table the RPC's category-purity clause reads. Required whenever p_category is set. */
   typeMacros?: Record<string, string>;
@@ -753,8 +759,11 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         // The سنوي and كلاهما arms also admit price on request (price_annual NULL) — the line the clause
         // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»). Under شهري («إقامات قصيرة»)
         // an unpriced row is admitted ONLY from the two stay-length platforms (owner 2026-10-26, migration
-        // 20261026071543: «shift those to annual rent»).
-        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
+        // 20261026071543: «shift those to annual rent»). Since 2026-11-11 (migration 20261111141500) the سنوي and
+        // كلاهما arms admit an unpriced row only when it is NOT in the short-stays pool (rent_period_ar is distinct
+        // from 'شهري' → PostgREST or(is.null, neq)): Haraj's daily/weekly rents carry no price by owner order and
+        // were leaking into yearly searches.
+        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${enc('شهري')})))`);
         else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))`);
         // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
         //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
@@ -762,7 +771,7 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         //                                 or (s.rent_period_ar = 'شهري' and coalesce(s.rent_now_pay_later,false)))
         // It is the union of the two single-period arms — NOT "no period filter": a rent row whose
         // source published no period at all stays OUT (R1.5.1; migration rent_period_both_monthly_and_annual).
-        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
+        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${enc('شهري')})))`);
         else unhandled.push(`p_rent_period=${v}`);
         break;
       // beds/bath/price/floor are handled ABOVE, where the clause's exact-vs-min and
@@ -858,6 +867,14 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
           if (derived.orGroup) orGroups.push(derived.filter); else parts.push(derived.filter);
         }
         break;
+      // «نُشر خلال» (owner 2026-11-11): the clause keeps `s.posted_at is not null and s.posted_at >= now() - N days`. The
+      // oracle reads the same column with the same cut, computed at query time (opts.nowMs pins it for a test).
+      case 'p_posted_within_days': {
+        const days = Number(v);
+        if (!Number.isFinite(days) || days <= 0) { unhandled.push(`p_posted_within_days=${JSON.stringify(v)}`); break; }
+        parts.push(`posted_at=gte.${enc(new Date((opts?.nowMs ?? Date.now()) - days * 86_400_000).toISOString())}`);
+        break;
+      }
       // genuinely irrelevant to the WHERE clause (paging/sorting/informational), always safe:
       case 'p_platforms': case 'p_per_platform': case 'p_limit': case 'p_offset':
       case 'p_sort_by':

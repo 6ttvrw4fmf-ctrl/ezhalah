@@ -11,7 +11,7 @@ import type { SearchQuery } from './search';
 const FILTERS = ['type', 'types', 'typeGroups', 'detail', 'priceInput', 'priceBand', 'priceMin', 'priceMax',
   'priceMinRent', 'priceMaxRent', 'rentPeriod', 'contextBeds', 'contextBedsList', 'contextSize', 'areaMin',
   'areaMax', 'ageMin', 'ageMax', 'ageBuckets', 'isNewConstruction', 'amenities', 'bathMin', 'ratingMin',
-  'ratingBuckets', 'reviewsMin', 'unitSubtypes', 'furnishedPref', 'furnishedIn', 'streetWidthMin', 'directions',
+  'ratingBuckets', 'reviewsMin', 'unitSubtypes', 'furnishedPref', 'furnishedIn', 'postedWithinDays', 'streetWidthMin', 'directions',
   'sources'] as const;
 
 export function logZeroResult(q: SearchQuery, shelf: number | null, clash: boolean): void {

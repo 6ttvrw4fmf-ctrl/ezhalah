@@ -1,6 +1,7 @@
 // ROBOT PASS, CORE (docs/ops/SCRAPE_GUARD.md): the rule and the per-context hook, with no load-time side effects and no
 // top-level await, so the Playwright test runner (which loads specs synchronously) can import it. robotPass.mjs builds
 // on it and adds the automatic hook for standalone robot scripts.
+import { createHash } from 'node:crypto';
 import { gateHeaders } from './gateFetch.mjs';
 
 export const ROBOT_PASS_HOSTS = ['ezhalah-app.vercel.app', 'ezhalah.com', 'www.ezhalah.com'];
@@ -12,7 +13,15 @@ export function robotPassHeaders(url, headers, secret) {
   let u;
   try { u = new URL(url); } catch { return null; }
   if (!ROBOT_PASS_HOSTS.includes(u.hostname) || !ROBOT_PASS_PATH.test(u.pathname)) return null;
-  return { ...headers, 'x-ezhalah-robot': secret };
+  return { ...headers, 'x-ezhalah-robot': secret, 'x-ezhalah-ratepass': ratePass(secret) };
+}
+/** THE SPEED-LIMIT PASS (owner 2026-11-12: «speed limit: switch to blocking, with a pass for our robots»). The Vercel
+ *  firewall rule (.github/workflows/vercel-rate-limit.yml) skips a request whose x-ezhalah-ratepass equals this value.
+ *  It is DERIVED from the gate secret (one-way), so the firewall config never holds the secret itself and no new secret
+ *  exists to manage. Both sides use RATE_PASS_LABEL; scripts/verify-speed-limit-robot-pass.ts pins that they agree. */
+export const RATE_PASS_LABEL = 'speed-limit-pass';
+export function ratePass(secret) {
+  return createHash('sha256').update(`${secret}:${RATE_PASS_LABEL}`).digest('hex');
 }
 
 /** Add the pass (front door) and the handshake (a test copy's direct database calls) to one Playwright context.

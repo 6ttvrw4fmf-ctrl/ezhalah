@@ -89,12 +89,17 @@ check('scoreQuestion gates on scope size and the shared narrowing predicate, not
   && !/Math\.max\(15, Math\.ceil\(0\.08 \* N\)\)/.test(advSrc)
   && !/o\.count <= 0\.9 \* N/.test(advSrc));
 // The installment answer means ONLY "source-confirmed supported". No invented payment frequency.
+// The chip keys the RNPL card declares, read from its own const block (up to its apply:).
+const rnplChipKeys = (src: string): string[] =>
+  [...(/const RNPL_QUESTION[\s\S]*?apply:/.exec(src)?.[0] ?? '').matchAll(/\{\s*key:\s*'([a-z_0-9]+)'\s*,\s*labelKey:/g)].map((m) => m[1]);
 check('the installment question stays a single binary source-confirmed chip (no invented frequencies)',
-  // 2026-11-01 (owner): a SECOND chip, the ad's own words about monthly / split payments — still source-confirmed
-  // (text fact split_payments), still no invented frequencies.
-  /RNPL_QUESTION[\s\S]{0,900}labelKey: 'Offers installments'/.test(advSrc)
-  && /RNPL_QUESTION[\s\S]{0,900}key: 'split_payments'/.test(advSrc)
+  // 2026-11-12 (owner: «merge … we cannot guarantee»): ONE chip again — the site's box OR the ad's own words about
+  // monthly / split payments (both source-confirmed); the 2026-11-01 second chip is gone; no invented frequencies.
+  rnplChipKeys(advSrc).join() === 'rnpl'
+  && /RNPL_QUESTION[\s\S]{0,1400}labelKey: 'Instalments \/ monthly payments'/.test(advSrc)
   && !/٤ دفعات|١٢ دفعة/.test(advSrc));
+check('(mutation) catches the 2026-11-01 two-chip RNPL card (rnpl + split_payments)',
+  rnplChipKeys("const RNPL_QUESTION = { chips: [{ key: 'rnpl', labelKey: 'Offers installments' }, { key: 'split_payments', labelKey: 'Monthly / split payments' }], apply: addAmenities };").join() !== 'rnpl');
 // COHORT CONFIG (owner 2026-08-15): eligibility is data — COHORT_QUESTIONS maps each single type ×
 // deal to its source-justified question list; cohortAllows() is the ONLY eligibility gate for the
 // config-driven questions. The old per-question hardcoded gates are superseded, but their

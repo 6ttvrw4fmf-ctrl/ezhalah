@@ -55,6 +55,7 @@ from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E
 from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
+from scrapers.common.http_liveness import stored_listing_url  # noqa: E402
 
 PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance", "furnished", "balcony_terrace", "laundry_room")
 SOURCE = "Asas Makeen"
@@ -85,6 +86,7 @@ _DEST_RE = re.compile(r'project-location-map__directions"\s+href="[^"]*destinati
 _H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S)
 _ABOUT_RE = re.compile(r'معلومات عن المشروع</h2>\s*<div class="fs-5 lh-lg">(.*?)</div>', re.S)
 _FLOOR = {"الأرضي": 0, "الأول": 1, "الثاني": 2, "الثالث": 3, "الرابع": 4, "الخامس": 5, "الروف": None, "الملحق": None}
+_PLAIN_GONE_RE = re.compile(r"HTTP (404|410) at ")     # honest_fetch's non-200 form; its wall form reads «HTTP 404 wall at»
 _WORD_BATHS = (("دورتان", 2), ("دورتين", 2), ("دورة", 1))
 
 
@@ -213,9 +215,9 @@ def _project(slug: str) -> Optional[dict]:
     try:
         return parse_project(H.get_text(SITE + PROJECT_PATH + quote(slug), allowed=_allowed))
     except H.Blocked as e:
-        if " 404 " in str(e) or " 410 " in str(e):
+        if _PLAIN_GONE_RE.search(str(e)):
             return None                 # a gone project page: its units carry no pin claim either way
-        raise
+        raise                           # «HTTP 404 wall at …» is a challenge: the run stops (CodeRabbit #12130)
 
 
 def walk(limit: int = 0, log=print) -> dict:
@@ -233,7 +235,9 @@ def walk(limit: int = 0, log=print) -> dict:
         try:
             page = H.get_text(u, allowed=_allowed)
         except H.Blocked as e:
-            if " 404 " in str(e) or " 410 " in str(e):
+            # Only the PLAIN form («HTTP 404 at …») is a removed page; the wall form («HTTP 404 wall at …», a challenge
+            # served with a 404) stops the run like any challenge — never counted as gone (CodeRabbit on #12130).
+            if _PLAIN_GONE_RE.search(str(e)):
                 bad["gone_404"] += 1
                 continue
             raise
@@ -286,7 +290,10 @@ def main() -> int:
                 continue
             row, why = map_unit(uid, url, u, w["projects"].get(u["project"]))
             (rows.append(row) if row else skipped.update([why]))
-        ok = not w["limited"] and not w["bad"] and len(w["units"]) == w["listed"] > 0
+        # A sitemap unit whose OWN page answers 404/410 is a removed ad, not an unreadable walk: it must not freeze every
+        # prune (the mrajhi lesson of 2026-11-07; ♻️ 2026-11-13). Any other bad page still makes the walk incomplete.
+        gone404 = w["bad"].get("gone_404", 0)
+        ok = not w["limited"] and not (set(w["bad"]) - {"gone_404"}) and len(w["units"]) + gone404 == w["listed"] > 0
         cover = {"sitemap": w["listed"], "read": w["read"], "parsed": len(w["units"]), "bad": dict(w["bad"]),
                  "complete": ok, "offplan_projects": sorted(off),
                  "project_pins": sum(1 for p in w["projects"].values() if p["pin"]), "projects_read": len(w["projects"])}
@@ -300,10 +307,19 @@ def main() -> int:
         db.upsert_asasmakeen_residential_batch(rows)
         db.upsert_asasmakeen_offplan(offplan)
         note = f"coverage {json.dumps(cover, ensure_ascii=False)}; offplan={len(offplan)}; "
+        _GONE[0] = _make_gone(next((r["listing_url"] for r in rows), None))
         if rows and ok:
             note += f"pruned={db.prune_unseen(RES_TABLE, {r['ad_number'] for r in rows}, source=SOURCE, verify_gone=_gone)}"
         else:
             note += "NOT pruned (walk incomplete or empty)"
+        wall = getattr(_GONE[0], "challenged", lambda: None)()
+        if wall:
+            # Readings made before the challenge stand (each is its own page's 404 with a live control read first);
+            # the run itself is reported FAILED so the challenge is seen (CodeRabbit #12130).
+            db.end_run(run_id, ok=False, rows_seen=len(w["units"]), rows_upserted=len(rows),
+                       notes=(f"CHALLENGED during own-page reads: {wall}; " + note)[:900])
+            print(f"✗ {SOURCE}: the site challenged the own-page reads — run reported failed", flush=True)
+            return 1
         healthy = db.end_run(run_id, ok=True, rows_seen=len(w["units"]), rows_upserted=len(rows), notes=note[:900],
                              check_tables=["asasmakeen_residential_listings"])
         if not healthy:
@@ -317,11 +333,69 @@ def main() -> int:
         raise
 
 
+def _page(url: str) -> tuple[Optional[int], str]:
+    """The ad page's own HTTP status and body (honest client, its 1 s gap); (None, "") when unreadable or walled."""
+    try:
+        r = H.request("GET", url, allowed=_allowed, accept="text/html")
+        return r.status_code, r.text or ""
+    except H.Blocked as e:
+        m = _PLAIN_GONE_RE.search(str(e))
+        if m:
+            return int(m.group(1)), ""
+        if " wall at " in str(e):
+            raise          # a challenge stops the whole run, nothing is pruned (honest client rule; CodeRabbit #12130)
+        print(f"asasmakeen: {url} unreadable ({e}); held as unknown", flush=True)
+        return None, ""
+    except Exception as e:  # noqa: BLE001 — unreadable is no opinion
+        print(f"asasmakeen: {url} unreadable ({type(e).__name__}: {e}); held as unknown", flush=True)
+        return None, ""
+
+
+def _make_gone(control_url: Optional[str], page=_page, url_for=None):
+    """prune_unseen's answer at grace, from the ad's OWN page (LISTING_LIVENESS.md §2; ♻️ 2026-11-13). Until today it
+    held every candidate UNKNOWN, so ASM2676 (24218552) sat at 3 strikes, served, while its page answered 404 to the
+    09:05 dead-visible score (2 of 10 sampled gone). 404/410 is gone, 200 WITH the unit block is live, anything else
+    (a 200 shell, a wall, a timeout) is unknown — and a removal counts only while this run's control unit reads live."""
+    memo: dict[str, Any] = {}
+    url_for = url_for or stored_listing_url((RES_TABLE,))
+
+    def gone(ad_number: str) -> tuple[str, str]:
+        # A challenge LATCHES: prune_unseen treats an oracle that raises as one unknown and moves to the next
+        # candidate, so re-raising alone would keep requesting pages behind a wall. After the first challenge every
+        # later candidate is unknown with NO further request (honest client: a challenge stops; CodeRabbit #12130).
+        if memo.get("wall"):
+            return "unknown", f"not read: the site challenged this run ({memo['wall']})"
+        try:
+            return _decide(ad_number)
+        except H.Blocked as e:
+            memo["wall"] = str(e)[:160]
+            print(f"asasmakeen: challenge — no more own-page reads this run: {memo['wall']}", flush=True)
+            return "unknown", f"not read: the site challenged this run ({memo['wall']})"
+
+    def _decide(ad_number: str) -> tuple[str, str]:
+        url = url_for(ad_number)
+        if not url or not url.startswith(SITE + UNIT_PATH):
+            return "unknown", f"{ad_number!r} has no stored {SITE}{UNIT_PATH} page to read"
+        st, body = page(url)
+        if st == 200 and parse_unit(body) is not None:
+            return "live", f"{url} answers 200 with its unit block"
+        if st not in (404, 410):
+            return "unknown", f"{url} answered {st}" + (" without a unit block" if st == 200 else "")
+        if "v" not in memo:
+            cst, cbody = page(control_url) if control_url else (None, "")
+            memo["v"] = cst == 200 and parse_unit(cbody) is not None
+        if not memo["v"]:
+            return "unknown", f"{url} answers {st} but the control {control_url} did not read live"
+        return "gone", f"{url} answers HTTP {st} (control {control_url} live)"
+    gone.challenged = lambda: memo.get("wall")      # main() fails the run when a challenge latched
+    return gone
+
+
+_GONE = [_make_gone(None)]          # main() binds this run's control before any prune
+
+
 def _gone(ad_number: str) -> tuple[str, str]:
-    """prune_unseen's answer at grace. Absence from a list is a CANDIDATE, never a kill (LISTING_LIVENESS.md §2:
-    only a DIRECT reading of the ad's own page may deactivate). Until this site has a measured own-page oracle the
-    strike is held: UNKNOWN. ♻️ 2026-11-06 — it used to return «gone» here, an absence-only kill."""
-    return "unknown", "absent from 3 consecutive COMPLETE walks of the site's own unit sitemap; no own-page oracle yet — held (absence never kills)"
+    return _GONE[0](ad_number)
 
 
 if __name__ == "__main__":

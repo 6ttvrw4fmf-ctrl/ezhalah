@@ -99,8 +99,10 @@ test('Filter mode — Buy in Riyadh returns Arabic results', async ({ page }) =>
 
   const summary = await page.getByText(FOUND).first().textContent();
   expect(summary && ARABIC.test(summary)).toBeTruthy();
-  // A result card renders with a real external source (neutral aggregator behavior).
-  await expect(page.getByText(/wasalt\.sa|aqar|\.sa|\.com/).first()).toBeVisible();
+  // A result card renders with a real external source (neutral aggregator behavior). Since 2026-11-13 the card
+  // names the WEBSITE («مستضاف على عقار»), not its domain (owner, #12106); the domain forms are kept for an older
+  // bundle a canary may still serve. Red 3/3 on the 12:59 run for asking the new card for a domain.
+  await expect(page.getByText(/مستضاف على\s+\S+|wasalt\.sa|aqar|\.sa|\.com/).first()).toBeVisible();
 });
 
 test('Filter mode — Rent + Monthly in Riyadh returns results', async ({ page }) => {

@@ -54,7 +54,8 @@ from typing import Any, Optional
 
 from curl_cffi import requests as cc
 
-from scrapers.common import db
+from scrapers.common import browser_recheck, db
+from scrapers.common import http as http_shared
 from scrapers.common import normalize as N
 from scrapers.common.page_pin import pin_from_page
 from scrapers.common.pii import redact_pii
@@ -130,9 +131,30 @@ def _session() -> cc.Session:
 _last_hit = 0.0
 
 
+# 2026-11-13 (owner order 1828): every route of ours answered 403 on the sitemap (run 16:55 UTC). A refused
+# read now goes through the SHARED escape — the other TLS profiles, the proxy when set, then a real browser
+# that waits out an automatic «checking your browser» page (a CAPTCHA stops it). Once that escape has
+# pinned a route for the host, every later page goes straight through it.
+def _refused(r) -> bool:
+    """A refusal (401/403) or a wall page (an automatic check / CAPTCHA, whatever its status) — never a
+    plain 5xx, which stays the site's own failure."""
+    return r.status_code in (401, 403) or browser_recheck.classify(r.status_code, r.text or "") != "failed" \
+        and r.status_code != 200
+
+
+def _escaped(url: str) -> Optional[Any]:
+    return http_shared.get(url, keep=(404, 410))
+
+
 def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
     """Throttled GET with bounded retries. Returns None on a permanent miss or exhausted retries."""
     global _last_hit
+    if browser_recheck.is_walled(url):
+        return None                                   # a CAPTCHA was seen: stop, never asked again
+    if http_shared._host_route.get(BASE.split("//", 1)[1]):
+        r = _escaped(url)
+        return r.text if r is not None and r.status_code == 200 else None
+    refused = False
     for attempt in range(tries):
         wait = MIN_INTERVAL - (time.time() - _last_hit)
         if wait > 0:
@@ -143,11 +165,17 @@ def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
         except Exception:
             time.sleep(1.5 * (attempt + 1))
             continue
+        if browser_recheck.stop_on_captcha(url, r.status_code, r.text or "", via="therc session"):
+            return None
         if r.status_code == 200:
             return r.text
         if r.status_code in (404, 410):
             return None          # gone for good — do not retry
+        refused = refused or _refused(r)
         time.sleep(1.5 * (attempt + 1))
+    if refused:
+        r = _escaped(url)
+        return r.text if r is not None and r.status_code == 200 else None
     return None
 
 
@@ -248,11 +276,55 @@ def _gallery(page: str) -> list[str]:
     return [u for u in arr if isinstance(u, str) and u.startswith("http")]
 
 
+_SITEMAP_TRIES = 5
+_SITEMAP_BACKOFF_S = 10.0
+
+
+def _fetch_sitemap(s: cc.Session) -> str:
+    """The sitemap body, or RAISE with what the site answered.
+
+    ⚡ 2026-11-12: this used to go through `_get`, whose None means BOTH «404» and «every try failed»,
+    and `sitemap_urls` turned that None into []. On 2026-11-10 07:02 the crawl logged «0 listing URLs
+    from sitemap.xml» (11-09: 457), RC-B demoted it to a bare «0-row run (blocked/empty source?)» and
+    the P0 silent_scraper_death had no reason to read. A failed fetch is not an empty catalogue: retry
+    with a longer pause, then fail the run naming the answer."""
+    global _last_hit
+    last = "no answer"
+    refused = False
+    for attempt in range(_SITEMAP_TRIES):
+        wait = MIN_INTERVAL - (time.time() - _last_hit)   # the same ≤ 1 request/second limiter as _get
+        if wait > 0:
+            time.sleep(wait)
+        _last_hit = time.time()
+        if browser_recheck.is_walled(SITEMAP):
+            break
+        try:
+            r = s.get(SITEMAP)
+            if browser_recheck.stop_on_captcha(SITEMAP, r.status_code, r.text or "", via="therc session"):
+                last = "a CAPTCHA wall (owner decision; never solved or bypassed)"
+                break
+            if r.status_code == 200 and r.text:
+                return r.text
+            last = f"HTTP {r.status_code}"
+            refused = refused or _refused(r)
+        except Exception as e:  # noqa: BLE001 — retried, then reported below
+            last = type(e).__name__
+        if attempt + 1 < _SITEMAP_TRIES:
+            time.sleep(_SITEMAP_BACKOFF_S * (attempt + 1))
+    escape = ""
+    if refused and not browser_recheck.is_walled(SITEMAP):
+        r = _escaped(SITEMAP)
+        if r is not None and r.status_code == 200 and r.text:
+            return r.text
+        escape = " | " + (browser_recheck.summary() or "shared escape (profiles, proxy, browser) refused too")
+    raise RuntimeError(f"sitemap.xml answered {last} after {_SITEMAP_TRIES} tries — the site is failing, not empty"
+                       + escape)
+
+
 def sitemap_urls(s: cc.Session) -> list[tuple[str, Optional[str]]]:
-    """[(detail_url, lastmod)] for every /properties/ loc. One request for the whole catalog."""
-    xml = _get(s, SITEMAP)
-    if not xml:
-        return []
+    """[(detail_url, lastmod)] for every /properties/ loc. One request for the whole catalog.
+    Raises when the sitemap cannot be read, or is read and lists no /properties/ page (a layout change)."""
+    xml = _fetch_sitemap(s)
     out: list[tuple[str, Optional[str]]] = []
     seen: set[str] = set()
     for block in re.findall(r"<url>(.*?)</url>", xml, re.S):
@@ -265,6 +337,8 @@ def sitemap_urls(s: cc.Session) -> list[tuple[str, Optional[str]]]:
         seen.add(url)
         lm = re.search(r"<lastmod>([^<]+)</lastmod>", block)
         out.append((url, lm.group(1).strip() if lm else None))
+    if not out:
+        raise RuntimeError(f"sitemap.xml read ({len(xml)} bytes) but lists 0 /properties/ pages — layout changed?")
     return out
 
 

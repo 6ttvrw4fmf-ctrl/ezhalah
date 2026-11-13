@@ -126,6 +126,16 @@ BUDGET_S = 320 * 60
 # what it does not reach waits for the next daily run, which has a runner per site. Sites are also
 # read smallest struck backlog first (recheck_order), so a small site is never queued behind a big one.
 RECHECK_BUDGET_S = 12 * 60
+# ...but 12 minutes is a FLOOR, not a ceiling (♻️ 2026-11-11). Most sites finish their struck rows in
+# seconds, and the time they leave was simply thrown away: nofodh (≈6.7 s a read, its oracle re-reads a
+# live control on every «gone») had 873 rows struck at the 11-10 daily run and each recheck read only
+# 96-99 of them in its 12 minutes while the 120-minute job had ~60 minutes unused, so 777 dead nofodh
+# ads stayed on screen at one strike. Each site now gets an equal share of what is LEFT of the job's
+# own reading time (recheck_budget_s), never less than the floor; read smallest backlog first, the
+# biggest backlog comes last and inherits everything the small sites did not use. The job's ceiling
+# (fleet-liveness-recheck.yml timeout-minutes: 120) keeps RECHECK_JOB_S + setup + the closing controls
+# under it.
+RECHECK_JOB_S = 95 * 60
 FLUSH = 200             # reads between writes of what is already known (live stamps, "we looked")
 CONTROL_HOURS = 48
 # A row its own crawl already read DIRECTLY within FRESH_HOURS (last_verified_alive_at — only the
@@ -201,7 +211,8 @@ def struck(client, site: str) -> int:
     return total
 
 
-def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None) -> list[dict]:
+def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None,
+          unstruck: bool = False) -> list[dict]:
     # Offset pages are only a partition of the table when the order is TOTAL. Every row one run
     # touches gets the SAME last_liveness_probe_at, so on that key alone Postgres may order a tie
     # differently on each page request: rows were read twice while others never were (2026-10-26:
@@ -215,6 +226,8 @@ def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit
         q = client.table(table).select(cols).eq("active", True)
         if since:
             q = q.gte("last_seen_at", since)
+        if unstruck:      # filtered BEFORE the limit, so a page of struck rows cannot starve the pool (CodeRabbit #12130)
+            q = q.or_("missing_count.is.null,missing_count.eq.0")
         for col, desc in order:
             q = q.order(col, desc=desc, nullsfirst=not desc)
         n = min(PAGE, limit - offset)
@@ -230,12 +243,20 @@ def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit
     return out
 
 
+def _unstruck(rows: list[dict]) -> list[dict]:
+    """A row our own reader has already read gone (missing_count > 0) is not a known-live control.
+    ♻️ 2026-11-13: opensooq OSQ288563804 was struck by the crawl's own-page read at 05:00 and still the
+    most recently SEEN ad, so the 03:31 recheck opened with it as a control, read it gone and quarantined
+    the whole pass (controls 2/5) — the dead ad blocked its own removal."""
+    return [r for r in rows if not (r.get("missing_count") or 0)]
+
+
 def controls(client, tables) -> list[dict]:
     since = (datetime.now(timezone.utc) - timedelta(hours=CONTROL_HOURS)).isoformat()
     ctl = []
     for t in tables:
-        ctl += _rows(client, t, "ad_number, listing_url, last_seen_at", order=[("last_seen_at", True)],
-                     limit=MIN_CANARIES, since=since)
+        ctl += _unstruck(_rows(client, t, "ad_number, listing_url, last_seen_at, missing_count",
+                               order=[("last_seen_at", True)], limit=MIN_CANARIES, since=since, unstruck=True))
     if len(ctl) < MIN_CANARIES:
         # The site's crawl has not seen MIN_CANARIES ads in CONTROL_HOURS (its crawl is failing —
         # dwelleo and muhaysini, 2026-09-29..10-02). Without this the run had 0/0 controls,
@@ -245,8 +266,8 @@ def controls(client, tables) -> list[dict]:
         # that is really gone only fails the gate, so this can quarantine more runs, never fewer.
         have = {r["ad_number"] for r in ctl}
         for t in tables:
-            ctl += [r for r in _rows(client, t, "ad_number, listing_url, last_seen_at",
-                                     order=[("last_seen_at", True)], limit=MIN_CANARIES)
+            ctl += [r for r in _unstruck(_rows(client, t, "ad_number, listing_url, last_seen_at, missing_count",
+                                               order=[("last_seen_at", True)], limit=MIN_CANARIES, unstruck=True))
                     if r["ad_number"] not in have]
     return sorted(ctl, key=lambda r: r.get("last_seen_at") or "", reverse=True)[:MIN_CANARIES]
 
@@ -307,7 +328,7 @@ def run_label(site: str, struck_only: bool = False) -> str:
     return f"fleet_liveness:{site}:recheck" if struck_only else f"fleet_liveness:{site}"
 
 
-def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
+def run_site(site: str, *, shadow: bool, struck_only: bool = False, budget_s: float | None = None) -> dict:
     spec = SITES[site]
     shadow = shadow or site not in APPLY
     client = sb()
@@ -372,7 +393,7 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
                 alive.clear()
                 looked.clear()
 
-            budget = RECHECK_BUDGET_S if struck_only else BUDGET_S
+            budget = budget_s if budget_s is not None else (RECHECK_BUDGET_S if struck_only else BUDGET_S)
             for r in work:
                 if time.monotonic() - started > budget:
                     break
@@ -471,6 +492,14 @@ def recheck_order(client, sites: list[str]) -> list[str]:
     return sorted(sites, key=n)
 
 
+def recheck_budget_s(elapsed_s: float, sites_left: int) -> float:
+    """One site's reading time in the recheck: an equal share of what is left of RECHECK_JOB_S after
+    `elapsed_s`, split over the `sites_left` sites still to read (this one included), never below the
+    RECHECK_BUDGET_S floor. Read smallest backlog first, so the leftover flows to the biggest."""
+    left = max(0.0, RECHECK_JOB_S - elapsed_s)
+    return max(float(RECHECK_BUDGET_S), left / max(1, sites_left))
+
+
 def plan_sites(spec: str) -> list[str]:
     """'' → every site; 'a,b' → exactly those, in order, each a registered site, else SystemExit."""
     if not spec.strip():
@@ -533,10 +562,12 @@ def main() -> int:
     sites = a.site or sorted(SITES)
     if a.struck_only:
         sites = recheck_order(sb(), sites)
-    for site in sites:
+    t0 = time.monotonic()
+    for i, site in enumerate(sites):
         try:
             with site_proxy_env(site):
-                run_site(site, shadow=a.shadow, struck_only=a.struck_only)
+                budget = recheck_budget_s(time.monotonic() - t0, len(sites) - i) if a.struck_only else None
+                run_site(site, shadow=a.shadow, struck_only=a.struck_only, budget_s=budget)
         except Exception as e:  # noqa: BLE001 — one site failing never stops the rest
             print(f"✗ {site}: {e}", flush=True)
             failed += 1

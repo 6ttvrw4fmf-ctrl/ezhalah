@@ -8,6 +8,10 @@ export type PinDeal = 'buy' | 'rent' | 'short' | 'mixed';
 export type PinRow = {
   lat: number; lng: number; n: number; deal: PinDeal; type_ar: string | null; platforms: number;
   ids: { t: string; i: number }[] | null; price: number | string | null; platform: string | null;
+  /** The spot's highest real price and how many of its ads show none (map_pins_ar, owner 2026-11-10). */
+  price_max?: number | string | null; unpriced?: number | null;
+  /** How many of the spot's ads the SITE published in the last 3 days (short stays excepted): the «إعلان جديد» tag. */
+  fresh?: number | null;
   /** Set on a DISTRICT MARKER (src/lib/mapNoPin.ts): these listings have no exact location and sit at the district's
    *  centre — the sheet titles them by district and prints no head price. */
   noPin?: { city: string; district: string };
@@ -27,6 +31,8 @@ export type PinFilter = {
   priceMin?: number | null; priceMax?: number | null;
   /** «الأثاث» (owner 2026-11-10): true = furnished, false = unfurnished, null = all. Ads that do not say show only under all. */
   furnished?: boolean | null;
+  /** «نُشر خلال» (owner 2026-11-11): published within N days by the site's own date; null = any time. */
+  postedWithinDays?: number | null;
   /** GeoJSON polygon drawn by the user («رسم» → «تطبيق»): only pins strictly inside it. */
   poly?: { type: 'Polygon'; coordinates: number[][][] } | null;
 };
@@ -62,17 +68,48 @@ export function shortMoney(value: number, loc: 'ar' | 'en'): string {
   return Math.round(v).toLocaleString('en-US');
 }
 
-/** THE HEAD OF THE PIN (owner: «always show the price … if it's merged … the number»): a shared spot shows its count;
- *  a Short-stays listing shows the pool's name (no price by rule); a priced listing its price, a rent per year;
- *  an unpriced listing «السعر عند الطلب», never a blank head. */
-export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform'>, loc: 'ar' | 'en'): string {
-  if (row.n > 1) return loc === 'ar' ? `${row.n} ${row.n === 2 ? 'إعلانان' : row.n <= 10 ? 'إعلانات' : 'إعلان'}` : `${row.n} listings`;
-  if (row.deal === 'short' || isStayLengthPlatform(row.platform)) return loc === 'ar' ? 'إقامة قصيرة' : 'Short stay';
-  const p = typeof row.price === 'string' ? Number(row.price) : row.price;
-  if (typeof p !== 'number' || !Number.isFinite(p) || p <= 0) return loc === 'ar' ? 'السعر عند الطلب' : 'Price on request';
-  const money = shortMoney(p, loc);
-  return row.deal === 'rent' ? (loc === 'ar' ? `${money}/سنة` : `${money}/yr`) : money;
+/** A FIGURE THIS LOW IS A PLACEHOLDER, NOT A PRICE (owner 2026-11-10: «yeah ok do that»): on the pin a sale under
+ *  10,000 or a yearly rent under 1,000 reads as «السعر عند الطلب» — sites print 1 or 100 for «call me». Display only:
+ *  the card still shows the site's own figure. map_pins_ar applies the same floor. */
+export const PIN_PRICE_FLOOR = { buy: 10_000, rent: 1_000 } as const;
+export function pinPrice(v: number | string | null | undefined, deal: string | null | undefined): number | null {
+  const p = typeof v === 'string' ? Number(v) : v;
+  if (typeof p !== 'number' || !Number.isFinite(p) || p <= 0) return null;
+  return p >= (deal === 'rent' ? PIN_PRICE_FLOOR.rent : PIN_PRICE_FLOOR.buy) ? p : null;
 }
+
+/** THE PRICE RULE OF A PIN (owner 2026-11-10: «we don't say 2 instead we just put the price … lowest price wins …
+ *  price on request = price listed if there is»). Never a count:
+ *    · one price and nothing else at the spot          → «750 ألف»
+ *    · anything else there (another price, or an ad with no price) → «من 750 ألف» — the lowest real price
+ *    · no real price at all                            → «السعر عند الطلب»
+ *  A rent is per year («/سنة»). Every ad stays in the sheet, priced or not. */
+export function priceHead(min: number | null, max: number | null, unpriced: number, deal: string | null | undefined, loc: 'ar' | 'en'): string {
+  if (min === null) return loc === 'ar' ? 'السعر عند الطلب' : 'Price on request';
+  const money = shortMoney(min, loc) + (deal === 'rent' ? (loc === 'ar' ? '/سنة' : '/yr') : '');
+  const from = unpriced > 0 || (max !== null && max > min);
+  return from ? (loc === 'ar' ? `من ${money}` : `from ${money}`) : money;
+}
+
+/** THE HEAD OF THE PIN: a Short-stays spot shows the pool's name (no price by rule); every other spot its price by
+ *  priceHead(). Only a zoomed-out bubble mixing buy and rent (never an exact spot — map_pins_ar splits those by deal)
+ *  falls back to its count. */
+export function pinHead(row: Pick<PinRow, 'n' | 'deal' | 'price' | 'platform' | 'price_max' | 'unpriced'>, loc: 'ar' | 'en'): string {
+  if (row.deal === 'short' || isStayLengthPlatform(row.platform)) return loc === 'ar' ? 'إقامة قصيرة' : 'Short stay';
+  if (row.deal === 'mixed' && row.n > 1) return loc === 'ar' ? `${row.n} ${adsNounAr(row.n)}` : `${row.n} listings`;
+  const f = priceFacts(row);
+  return priceHead(f.min, f.max, f.unpriced, row.deal, loc);
+}
+
+/** «إعلان جديد» — A NEW AD AT THIS SPOT (owner 2026-11-11, Zillow's «New»): a spot holding an ad its SITE published in the
+ *  last 3 days (map_pins_ar's `fresh`, by the site's own posting date — never the day Ezhalah found it) shows a small tag
+ *  above its price. Short stays never get it. The word is «إعلان جديد», never «جديد» alone: «جديد» in the Filter means a
+ *  newly BUILT property. */
+export const FRESH_DAYS = 3;
+export function isFreshHead(row: Pick<PinRow, 'fresh' | 'deal'>): boolean {
+  return Number(row.fresh ?? 0) > 0 && row.deal !== 'short';
+}
+export const freshTag = (loc: 'ar' | 'en'): string => (loc === 'ar' ? 'إعلان جديد' : 'New listing');
 
 /** ZOOM → WHAT TO ASK FOR. From about city zoom inward (a view under ~0.12° ≈ 13 km tall) the map asks for exact
  *  points; wider views ask for count cells sized so the screen holds ~30 columns of bubbles, which is how 424,000
@@ -148,8 +185,16 @@ export function rpcArgs(box: { s: number; w: number; n: number; e: number }, cel
     p_area_min: f.areaMin ?? null, p_area_max: f.areaMax ?? null,
     p_price_min: f.priceMin ?? null, p_price_max: f.priceMax ?? null,
     ...(f.furnished != null ? { p_furnished: f.furnished } : {}),
+    ...(f.postedWithinDays != null ? { p_posted_within_days: f.postedWithinDays } : {}),
     ...(f.scope ? { p_tables: f.scope.tables, p_tables2: f.scope.tables2, p_types2: f.scope.types2, p_macro: f.scope.macro } : {}),
   };
+}
+
+/** The arguments of map_posted_window_counts_ar(): map_pins_ar's own, minus the cell, the cap and the window (every window
+ *  is counted at once) — so the map menu's numbers count exactly the pins the map's button counts. */
+export function postedCountArgs(box: { s: number; w: number; n: number; e: number }, f: PinFilter): Record<string, unknown> {
+  const { p_cell: _c, p_limit: _l, p_posted_within_days: _p, ...args } = rpcArgs(box, 0, { ...f, postedWithinDays: null }) as Record<string, unknown>;
+  return args;
 }
 
 /** Pure: the RPC's `{ data, error }` → rows, or 'unknown' when the fetch failed (A FAILED FETCH IS NOT AN EMPTY ANSWER:
@@ -279,18 +324,43 @@ export const PIN_PAD_PX = 17;  // 7 px padding each side + 1.5 px border each si
 /** A head's width when the page cannot measure text (no canvas): ~6.4 px a character at 11 px semibold. */
 export function pinWidthGuess(text: string): number { return Math.ceil(text.length * 6.4) + PIN_PAD_PX; }
 
-type Placed = { row: PinRow; x: number; y: number; w: number };
+type Placed = { row: PinRow; x: number; y: number; w: number; h?: number };
 /** Two heads touch when their pills, plus the gap, overlap. Both sit centred on x, bottom on y (same height). */
-export function headsTouch(a: { x: number; y: number; w: number }, b: { x: number; y: number; w: number }): boolean {
-  return Math.abs(a.x - b.x) < (a.w + b.w) / 2 + PIN_GAP_PX && Math.abs(a.y - b.y) < PIN_H_PX + PIN_GAP_PX;
+/** A head with «إعلان جديد» above its price is one tag line taller (CodeRabbit #11828: placement assumed 22 px for all). */
+export const FRESH_TAG_PX = 13;
+export const headHeight = (row: Pick<PinRow, 'fresh' | 'deal'>): number => (isFreshHead(row) ? PIN_H_PX + FRESH_TAG_PX : PIN_H_PX);
+export function headsTouch(a: { x: number; y: number; w: number; h?: number }, b: { x: number; y: number; w: number; h?: number }): boolean {
+  return Math.abs(a.x - b.x) < (a.w + b.w) / 2 + PIN_GAP_PX && Math.abs(a.y - b.y) < ((a.h ?? PIN_H_PX) + (b.h ?? PIN_H_PX)) / 2 + PIN_GAP_PX;
 }
-/** Two heads as one: the count and every id of both, at their weighted centre; deal kept only when both agree. */
+/** A head's price facts: its lowest and highest real price and how many of its ads show none (pinPrice's floor). */
+export function priceFacts(r: Pick<PinRow, 'n' | 'deal' | 'price' | 'price_max' | 'unpriced'>): { min: number | null; max: number | null; unpriced: number } {
+  const min = pinPrice(r.price, r.deal);
+  if (r.n <= 1) return { min, max: min, unpriced: min === null ? 1 : 0 };
+  return { min, max: pinPrice(r.price_max, r.deal) ?? min, unpriced: Number(r.unpriced ?? 0) };
+}
+/** Two heads as one: every id of both at their weighted centre, deal kept only when both agree — and, under the price
+ *  rule, the LOWEST real price of both, the highest, and their no-price ads added up (CodeRabbit #11777: a joined head
+ *  used to drop its price and read «السعر عند الطلب» over priced ads). */
 export function joinPins(a: PinRow, b: PinRow): PinRow {
   const n = a.n + b.n;
+  const fa = priceFacts(a), fb = priceFacts(b);
+  const lo = [fa.min, fb.min].filter((x): x is number => x !== null);
+  const hi = [fa.max, fb.max].filter((x): x is number => x !== null);
+  // A head joining buy AND rent shows its count (pinHead), so it carries no price: a sale figure and a rent are never
+  // one number, and a later join must not re-read a rent through the sale floor.
+  if (a.deal !== b.deal) return {
+    lat: (a.lat * a.n + b.lat * b.n) / n, lng: (a.lng * a.n + b.lng * b.n) / n, n,
+    deal: 'mixed', type_ar: null, platforms: Math.max(a.platforms || 0, b.platforms || 0),
+    ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null, price: null, platform: null, price_max: null, unpriced: 0,
+    fresh: Number(a.fresh ?? 0) + Number(b.fresh ?? 0),
+  };
   return {
     lat: (a.lat * a.n + b.lat * b.n) / n, lng: (a.lng * a.n + b.lng * b.n) / n, n,
     deal: a.deal === b.deal ? a.deal : 'mixed', type_ar: null, platforms: Math.max(a.platforms || 0, b.platforms || 0),
-    ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null, price: null, platform: null,
+    ids: a.ids || b.ids ? [...(a.ids ?? []), ...(b.ids ?? [])] : null,
+    price: lo.length ? Math.min(...lo) : null, platform: null,
+    price_max: hi.length ? Math.max(...hi) : null, unpriced: fa.unpriced + fb.unpriced,
+    fresh: Number(a.fresh ?? 0) + Number(b.fresh ?? 0),
   };
 }
 /** How far a head may be drawn from its own spot to sit beside a neighbour. A head is ~60 px wide, so «beside» needs
@@ -310,7 +380,7 @@ function shiftsWithin(max: number): [number, number][] {
 }
 /**
  * The heads to draw for one view, none touching another. `at` places a coordinate on the screen (px), `widthOf` gives
- * a head's width for the text it will show (a joined head shows its count, so its width is re-measured). A row comes
+ * a head's width for the text it will show (a joined head shows the lowest price of both, so its width is re-measured). A row comes
  * back unchanged when it sits on its own spot, with `shift` when it is drawn beside it, or joined (joinPins) when no
  * place within `maxShift` was free. Shared spots are placed first so they keep their own place; the rest in a fixed
  * order, so a pan does not reshuffle who moved.
@@ -321,21 +391,22 @@ export function placeApart(rows: PinRow[], at: (lat: number, lng: number) => [nu
   // A grid of what is already placed, so a head is checked against its neighbours only (a deepest-zoom view can read
   // 3,000 points).
   const CELL = 64; const grid = new Map<string, Head[]>();
-  const cellsOf = (c: { x: number; y: number; w: number }): string[] => {
+  const cellsOf = (c: { x: number; y: number; w: number; h?: number }): string[] => {
     const out: string[] = [];
     const x1 = Math.floor((c.x - c.w / 2 - PIN_GAP_PX) / CELL), x2 = Math.floor((c.x + c.w / 2 + PIN_GAP_PX) / CELL);
-    const y1 = Math.floor((c.y - PIN_H_PX - PIN_GAP_PX) / CELL), y2 = Math.floor((c.y + PIN_H_PX + PIN_GAP_PX) / CELL);
+    const hh = c.h ?? PIN_H_PX;
+    const y1 = Math.floor((c.y - hh - PIN_GAP_PX) / CELL), y2 = Math.floor((c.y + hh + PIN_GAP_PX) / CELL);
     for (let gx = x1; gx <= x2; gx++) for (let gy = y1; gy <= y2; gy++) out.push(`${gx},${gy}`);
     return out;
   };
-  const isFree = (c: { x: number; y: number; w: number }): boolean => {
+  const isFree = (c: { x: number; y: number; w: number; h?: number }): boolean => {
     for (const k of cellsOf(c)) for (const h of grid.get(k) ?? []) if (headsTouch(c, h)) return false;
     return true;
   };
   const all = new Set<Head>();
   const put = (h: Head) => { h.cells = cellsOf(h); for (const k of h.cells) { const g = grid.get(k); if (g) g.push(h); else grid.set(k, [h]); } all.add(h); };
   const take = (h: Head) => { for (const k of h.cells) { const g = grid.get(k); if (g) g.splice(g.indexOf(h), 1); } all.delete(h); };
-  const start = (row: PinRow): Head => { const [x0, y0] = at(row.lat, row.lng); return { row, x: x0, y: y0, x0, y0, w: widthOf(row), cells: [] }; };
+  const start = (row: PinRow): Head => { const [x0, y0] = at(row.lat, row.lng); return { row, x: x0, y: y0, x0, y0, w: widthOf(row), h: headHeight(row), cells: [] }; };
 
   const order = [...rows].sort((a, b) => b.n - a.n || b.lat - a.lat || a.lng - b.lng);
   for (const row of order) {
@@ -398,6 +469,20 @@ export const DEAL_WORD: Record<'ar' | 'en', Record<string, string>> = {
  * chosen: «12 إعلان للإيجار في أملج»; with none of it in view but others present (`others`): «لا يوجد للبيع في أملج ·
  * يوجد للإيجار». Several deals chosen: no deal word, as before.
  */
+/** The Arabic word for N listings: 2 → إعلانان, 3–10 → إعلانات, else إعلان (the last two digits decide, so 103 → إعلانات). */
+export function adsNounAr(n: number): string {
+  const r = n % 100;
+  return n === 2 ? 'إعلانان' : r >= 3 && r <= 10 ? 'إعلانات' : 'إعلان';
+}
+
+/** «عرض 10 إعلانات» on the map filter's button — correct Arabic for every count (found live 2026-11-12: «عرض 10 إعلان»). */
+export function showAdsAr(n: number): string {
+  if (n === 0) return 'لا توجد إعلانات';
+  if (n === 1) return 'عرض إعلان واحد';
+  if (n === 2) return 'عرض إعلانين';
+  return `عرض ${n.toLocaleString('en-US')} ${adsNounAr(n)}`;
+}
+
 export function viewCountText(n: number, place: string | null, loc: 'ar' | 'en', deals?: readonly string[], others: readonly string[] = []): string {
   const num = n.toLocaleString('en-US');
   const one = deals && deals.length === 1 ? deals[0] : null;
@@ -409,6 +494,7 @@ export function viewCountText(n: number, place: string | null, loc: 'ar' | 'en',
   }
   const dealWord = one ? ` ${w[one]}` : '';
   if (loc === 'en') return `${num} ${n === 1 ? 'listing' : 'listings'}${dealWord} ${place ? `in ${place}` : 'here'}`;
-  const noun = n === 2 ? 'إعلانان' : n >= 3 && n <= 10 ? 'إعلانات' : 'إعلان';
+  const noun = adsNounAr(n);
   return `${num} ${noun}${dealWord} في ${place ?? 'هذه المنطقة'}`;
 }
+

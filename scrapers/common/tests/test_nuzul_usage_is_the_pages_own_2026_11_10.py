@@ -45,7 +45,8 @@ FLAGS = [f for f, _, _ in U.USE_FLAGS]
 # the three code families, and every tenant that runs each
 CLONES = ["aldarim", "abwbna", "alobid", "bahadhabab"]     # map_listing(L) -> (row, category)
 GOLDEN = ["goldendeal", "yameen"]                          # map_listing(L, tenant, this_year=) -> (row, category, why)
-JAWHER = ["jawher", "m3tmd", "october", "senan"]           # map_listing(d) -> (row, category, why)
+JAWHER = ["jawher", "m3tmd", "october"]                    # map_listing(d) -> (row, category, why)
+# senan left Nuzul on 2026-11-12 (its new static site: scrapers/senan/run.py, test_senan_static_projects_2026_11_12.py)
 EVERY = CLONES + GOLDEN + JAWHER
 
 
@@ -213,7 +214,7 @@ def test_the_discovery_catches_a_tenant_added_tomorrow():
     assert _unguarded(src) == [] and "newoffice" in _nuzul_scrapers(src)
     # …and an engine that drops the rule uncovers every tenant riding on it
     src["jawher"] = src["jawher"].replace("nuzul_usage.", "nuzul_usage_")
-    assert set(_unguarded(src)) >= {"jawher", "m3tmd", "october", "senan", "newoffice"}
+    assert set(_unguarded(src)) >= {"jawher", "m3tmd", "october", "newoffice"}
 
 
 @pytest.mark.parametrize("site", CLONES)

@@ -38,6 +38,10 @@ SDK. Both were cut (logos → 1.7 MB, bundle → ~972 KB) and are now guarded on
 - **Logos:** each ≤ 60 KB, pack ≤ 2.5 MB — `scripts/verify-logo-weight-budget.ts`. Add a logo shrunk (≤ 320 px, palette PNG with alpha).
 - **First download:** web entry ≤ 1,100 KB brotli — `scripts/web-bundle-budget.mjs`, run by `web-runtime-smoke.yml` after the build.
   A new heavy library loads LATER (lazy) or not at all; raising the budget is a reviewed decision, never a way to go green.
+- **Card photos are shrunk (owner 2026-11-12, «fix whatever u can … don't want it to feel slow»):** a card photo is asked from the free
+  resizer wsrv.nl at 720 px (webp) first and from the site second, so an outage costs speed, never a photo (a 1.28 MB nofodh photo → 13 KB).
+  The ad page gallery keeps full size; Aqar's own sized copies are untouched — `cardPhotoCandidates()` in src/lib/photoUrl.ts,
+  guard `scripts/verify-card-photos-are-shrunk-with-fallback.ts`. Owner declined the paid Vercel resizer for now.
 - **Web-only bundle hygiene:** `metro.config.js` keeps native-only packages out of the web build (`verify-web-bundle-skips-native-sentry.ts`).
 
 # OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN (2026-10-09 — permanent)
@@ -68,6 +72,10 @@ English user message → English reply. Arabic → Arabic. Mixed Arabic/English 
 
 The language button changes only the UI, settings and displayed account name. Existing chat replies, summaries and closing notes retain their own language; switching never translates history, reruns a search or adds paid translation calls. Save a signed-in user's UI language choice on the device and restore it on refresh/return. **Signed-in choices follow the ACCOUNT (owner 2026-10-27: «the phone and laptop same account … same things»):** the language is also written to `user_metadata.ui_locale` and the account's value wins on every device; a slow sign-in on refresh is never read as a guest, so nothing a signed-in user set is erased (`languageOnAuth` in src/i18n.tsx, guard `scripts/verify-signed-in-language-is-kept.ts`). New signed-in preferences follow the same rule: saved to the account, restored everywhere. Guest fresh loads stay Arabic-first. Canonical detail: `docs/ARCHITECTURE.md` i18n section. Guard: `scripts/verify-chat-language-is-not-interface-language.ts`.
 
+# «منذ …» IS A PROVEN BRACKET, NEVER A GUESSED DAY (owner, 2026-11-11 — permanent)
+
+A site that prints only «منذ 23 يوم» gives a FLOOR («posted no earlier than») and a CEILING («no later than», capped by our first-stored time) — never a `date_added`. «نُشر خلال» counts by the floor, so an ad is never called newer than proven. Only a site PROVEN to print its ad's real age may do this (`AGO_COUNT_IS_REAL_AGE` in `scrapers/common/posting_date.py`, `ops_relative_age_site`); a hidden exact date on the page always wins; a site whose count restarts is switched off by `mon_detect_relative_posting_floor_unsafe` by itself. Never widen a window, loosen a unit or re-enable a site to clear it. Full rule: `docs/ARCHITECTURE.md` §20 «منذ …». Guard: `scripts/verify-relative-posting-date-is-a-floor.ts`.
+
 # GATHERN + AQAR MONTHLY SHOW NO PRICE LINE AT ALL (owner, 2026-10-02; note removed 2026-10-26 — permanent)
 
 **Every Gathern and Aqar Monthly listing, today's and every new one we ingest, shows NOTHING where the
@@ -88,11 +96,25 @@ figure misstates them. They are the whole of the «إقامات قصيرة» poo
   owner's approval.
 - Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
 
+# EVERY AD'S PRICES AND DATES ARE KEPT FOREVER (owner, 2026-11-11 — permanent; full text `docs/ARCHITECTURE.md` §20)
+
+**`listing_price_history` (every price change, gone, back, removed — with its date) and `listing_comparables` (one slim
+card per ad: what, where, size, rooms, first/last price, the site's posting date, first seen, gone, removed) are written by
+`tg_listing_price_diary()` on every listing table and outlive the ad, including ads the retention engine deletes.** Never
+delete or update them, never drop the triggers. «gone/removed» means the ad disappeared, never that it sold. Later the AI
+agent answers comparables («prices in this district in this time frame») FROM these tables and their dates, never from
+the model's own knowledge. **Every NEW site joins automatically**: the event trigger `listing_price_diary_born_attached` attaches the diary to
+any new listing table the moment it is created — and REFUSES the CREATE if it cannot — while the hourly watcher is only
+the safety net that rings `price_diary_unhealthy` if one is still missing; all sites share ONE diary and ONE card table —
+never a separate store per site. Guard: `scripts/verify-price-diary.ts`.
+
 # RENT POOLS AND THE CHEAP-«YEARLY» RULE (owner, 2026-10-25/26 — permanent; full text `docs/ARCHITECTURE.md` §20)
 
 **«إقامات قصيرة» (the old «شهري» pool) is Gathern + Aqar Monthly ONLY. Every other site's rent listing is
 YEARLY: a per-month figure pools under «سنوي» at ×12 and the card keeps the site's word — «السعر المعلن
-3,000 شهرياً». A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
+3,000 شهرياً». ONE per-listing exception (owner 2026-11-10, backlog 1744): a rent whose SELLER states a daily or
+weekly stay (Haraj «للإيجار اليومي» → source rent_period 'daily' / 'weekly', price never ×12, no price on the card)
+joins «إقامات قصيرة» — `SHORT_STAY_PERIODS` / `rent_pool_ar()`, migration 20261111070829. A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
 Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom, Commercial Building) is a
 per-month price and is SERVED ×12; rooms, land, rest houses, chalets, camps and farms are out.** The
 SOURCE TABLES ARE UNTOUCHED (PRICE = SOURCE, PERIOD = SOURCE still hold there) — the index serves through
@@ -437,6 +459,11 @@ query. Nothing reached production — no workflow applies migrations on merge an
 runs on push to `main` — and the owner directed that it not be reverted, since the merged state was
 green, production-aligned and drift-free. The lesson is recorded here rather than in any one agent's
 memory so the next session cannot repeat it.
+
+**CodeRabbit out of money is skipped (owner, 2026-11-11 — «Skip code rabbit»).** The CodeRabbit account sits at its
+$50 spending cap and answers «Review rate limited»; the owner chose not to raise it again. `scripts/lib/mergeGate.ts`
+rule 0b⁗ passes a rate-limited CodeRabbit on ANY PR, while every other check must still be SUCCESS and no CodeRabbit
+Major may be open. Any other CodeRabbit NEUTRAL, FAILURE or pending still blocks. Guard: `scripts/verify-merge-gate.ts`.
 
 **Merge gate — use `scripts/safe-pr-merge.ts`, never a bare `gh pr merge` (permanent, 2026-08-24):**
 `gh pr checks --watch` returning means "nothing is still running" — NOT "safe to merge." PR #1046

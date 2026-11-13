@@ -2467,28 +2467,76 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
       const s = await page.evaluate(READ);
       if (s.frames.some((f) => !f.hidden && f.box[3] > 0)) return s;
       if (Date.now() > end) return s;
-      await sleep(1000);
+      await sleep(250);   // first sight close to the card's arrival, so a cover's duration is honest
     }
   };
 
+  const AT_REST_MS = 4_000;     // past the app's last re-measure (3,000 ms) with a margin
+  const POLL_MS = 250;          // how often the cover is re-read while watching
+  // A cover that clears within this is the app's first re-measure doing its job (it re-reads at once,
+  // then at 300 and 800 ms); one that lasts longer is long enough for a user to tap into — a DEFECT.
+  const COVER_GRACE_MS = 1_000;
   const seen = {};
   let sawOverlay = false;
   for (const [where, path] of [['Filter home', '/'], ['AI Agent', '/agent']]) {
     await gotoOrRetryTransport(page, BASE + path);
     await settle(page);
-    const state = await waitForOverlay(20_000);
+    // HOW LONG a control stays covered, not one snapshot. The app makes room by re-measuring the card
+    // (src/lib/bottomPromptInset.ts: on every change, then again at PROMPT_SETTLE_MS = 300/800/1600/3000
+    // ms), so the frame the card first paints in can legitimately show a control under it. One snapshot
+    // there cannot tell «moved at once» from «never moved» — run 42977046098 (WebKit desktop) read the
+    // sidebar CTA under the card in 2 of 4 runs and could not say which. Run 43014216633 then read
+    // «first sight: 5 blocked; after 4000 ms: 0». A temporary cover is still a cover a user can tap
+    // into, so it is NOT excused: the journey times it from first sight (polled every POLL_MS) and fails
+    // when it lasts longer than COVER_GRACE_MS, or when anything is still covered at AT_REST_MS.
+    // If the card goes away during the watch, only the readings in which it was VISIBLE are judged —
+    // a reading taken after it left proves nothing about covering and is never counted as clear.
+    const first = await waitForOverlay(20_000);
+    const visible = (s) => s.frames.some((f) => !f.hidden && f.box[3] > 0);
+    const firstSeen = visible(first);
+    let state = first;
+    let coveredMs = first.blockedCount ? 0 : null;   // null = never covered while watched
+    let clearedMs = first.blockedCount ? null : 0;
+    let vanishedMs = null;
+    let lastBlocked = first.blockedCount ? first : null;
+    if (firstSeen) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < AT_REST_MS) {
+        await sleep(POLL_MS);
+        const s = await page.evaluate(READ);
+        const at = Date.now() - t0;
+        if (!visible(s)) { vanishedMs = at; break; }
+        state = s;
+        if (s.blockedCount) { coveredMs = at; clearedMs = null; lastBlocked = s; }
+        else if (clearedMs === null) clearedMs = at;
+      }
+    }
+    // The cover ends when the control clears OR the card leaves; a card Google dismissed at 300 ms
+    // covered for 300 ms, not for ever.
+    const coverEnd = clearedMs ?? vanishedMs;
+    const coveredTooLong = coveredMs !== null && (coverEnd === null || coverEnd > COVER_GRACE_MS);
+    const stillCovered = vanishedMs === null && state.blockedCount > 0;
+    const atFirst = firstSeen
+      ? ` (first sight: ${first.blockedCount} blocked; `
+        + (coveredMs === null ? 'never covered' : clearedMs === null ? `still covered at ${coveredMs} ms` : `clear after ${clearedMs} ms`)
+        + (vanishedMs !== null ? `; card went away at ${vanishedMs} ms` : `; at ${AT_REST_MS} ms: ${state.blockedCount}`) + ')'
+      : '';
     seen[where] = state;
     if (!state.frames.length) continue;
     sawOverlay = true;
-    if (state.blockedCount) {
-      defect(name, 'an auth overlay is sitting on top of an Ezhalah control',
-        `${where}: ${state.blockedCount} control(s) blocked — `
-        + state.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')
-        + `. APP RESERVED top=${state.reservedTop} bottom=${state.reservedBottom}`
-        + ` appSees=${JSON.stringify(state.appSees)}`
-        + `. overlay=${JSON.stringify(state.frames)} viewport=${JSON.stringify(state.vp)}`);
+    if (stillCovered || coveredTooLong) {
+      // When the cover cleared but too slowly, name what WAS covered (the first reading), not the clear one.
+      const shown = state.blockedCount ? state : (lastBlocked ?? first);
+      defect(name, !stillCovered
+          ? `an auth overlay covered an Ezhalah control for longer than ${COVER_GRACE_MS} ms`
+          : 'an auth overlay is sitting on top of an Ezhalah control',
+        `${where}${atFirst}: ${shown.blockedCount} control(s) blocked — `
+        + shown.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')
+        + `. APP RESERVED top=${shown.reservedTop} bottom=${shown.reservedBottom}`
+        + ` appSees=${JSON.stringify(shown.appSees)}`
+        + `. overlay=${JSON.stringify(shown.frames)} viewport=${JSON.stringify(shown.vp)}`);
     } else {
-      pass(name, `${where}: auth overlay present (${JSON.stringify(state.frames.map((f) => f.box))}) and 0 controls blocked`);
+      pass(name, `${where}${atFirst}: auth overlay present (${JSON.stringify(state.frames.map((f) => f.box))}) and 0 controls blocked`);
     }
   }
 
@@ -2496,22 +2544,47 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   // intercepted target, so a tab that actually switches is proof the control was reachable — the
   // half a rect comparison can never give. Run whether or not an overlay showed: it is the same
   // journey a person makes, and it costs two clicks.
+  //
+  // MEASURED, NOT SLEPT (2026-11-10, WebKit sweeps 42789448147 / 42815563644). The tab press used to look for the label
+  // the instant settle() returned and to read the URL after a fixed 1.5 s. On WebKit it failed in 3-4 of 8 runs as
+  // «الوسيط الذكي is not present» or «landed=true, url=/» with no click ever intercepted — and nothing recorded whether the
+  // tab was slow, missing, or covered, so the finding could not be acted on. This journey asks REACHABLE (speed has its
+  // own robot, scripts/verify-web-tab-switch-speed.mjs, on every PR): each tab gets TAB_WAIT_MS to appear and its tap
+  // TAB_WAIT_MS to switch the screen, both times are printed, and a failure carries what the screen showed — so «slow»,
+  // «never there» and «a Cloudflare check on screen» read differently.
+  const TAB_WAIT_MS = 15_000;
+  const screenNow = () => page.evaluate(() => ({
+    path: location.pathname,
+    text: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 120),
+    challenge: !!document.querySelector('iframe[src*="challenges.cloudflare.com"]'),
+  })).catch((e) => ({ path: '?', text: `unreadable: ${String(e).slice(0, 60)}`, challenge: null }));
+  const pressTab = async (label, toAgentScreen) => {
+    const t0 = Date.now();
+    const shown = await page.getByText(label, { exact: true }).first()
+      .waitFor({ state: 'visible', timeout: TAB_WAIT_MS }).then(() => true, () => false);
+    const appearMs = Date.now() - t0;
+    if (!shown) return { ok: false, appearMs, switchMs: null, why: `«${label}» never appeared in ${TAB_WAIT_MS} ms`, screen: await screenNow() };
+    const landed = await clickText(page, label);
+    if (!landed) return { ok: false, appearMs, switchMs: null, why: clickReason() || 'the tap did not land', screen: await screenNow() };
+    const t1 = Date.now();
+    const switched = await page.waitForFunction((agent) => location.pathname.startsWith('/agent') === agent,
+      toAgentScreen, { timeout: TAB_WAIT_MS }).then(() => true, () => false);
+    const switchMs = Date.now() - t1;
+    return { ok: switched, appearMs, switchMs: switched ? switchMs : null,
+      why: switched ? '' : `the tap landed but the screen did not change in ${TAB_WAIT_MS} ms`, screen: await screenNow() };
+  };
+  const told = (r) => `appeared ${r.appearMs} ms, switched ${r.switchMs ?? '—'} ms`
+    + (r.ok ? '' : `; ${r.why}; screen ${JSON.stringify(r.screen)}`);
   await gotoOrRetryTransport(page, BASE + '/');
   await settle(page);
-  const toAgent = await clickText(page, 'الوسيط الذكي');
-  await sleep(1500);
-  const onAgent = page.url().includes('/agent');
-  const back = onAgent ? await clickText(page, 'تصفية') : false;
-  await sleep(1500);
-  const home = page.url();
-  if (!toAgent || !onAgent) {
-    defect(name, 'a primary tab could not be pressed while the auth surface was live',
-      `«الوسيط الذكي» click landed=${toAgent}, url=${page.url()} (${clickReason() || 'no reason recorded'})`);
-  } else if (!back || home.includes('/agent')) {
-    defect(name, 'the return tab could not be pressed while the auth surface was live',
-      `«تصفية» click landed=${back}, url=${home} (${clickReason() || 'no reason recorded'})`);
+  const go = await pressTab('الوسيط الذكي', true);
+  const ret = go.ok ? await pressTab('تصفية', false) : null;
+  if (!go.ok) {
+    defect(name, 'a primary tab could not be pressed while the auth surface was live', `«الوسيط الذكي» ${told(go)}`);
+  } else if (!ret.ok) {
+    defect(name, 'the return tab could not be pressed while the auth surface was live', `«تصفية» ${told(ret)}`);
   } else {
-    pass(name, 'both primary tabs were pressed and both navigated — the controls are genuinely reachable');
+    pass(name, `both primary tabs were pressed and both navigated — the controls are genuinely reachable («الوسيط الذكي» ${told(go)}; «تصفية» ${told(ret)})`);
   }
 
   if (!sawOverlay) {

@@ -25,13 +25,13 @@ mustCatch('a shared spot drawn in the deal colour', pinColor({ n: 5, deal: 'rent
 // The head: price for a priced sale, price/year for a rent, the count for a shared spot, no price for Short stays.
 check('a sale head is the short price: 650,000 → «650 ألف», 1,250,000 → «1.3 مليون»', pinHead(one('buy', 650000), 'ar') === '650 ألف' && pinHead(one('buy', 1250000), 'ar') === '1.3 مليون');
 check('a rent head says per year: 45,000 → «45 ألف/سنة» / «45K/yr»', pinHead(one('rent', 45000), 'ar') === '45 ألف/سنة' && pinHead(one('rent', 45000), 'en') === '45K/yr');
-check('a shared spot head is its count, never a price (3 → «3 إعلانات», 12 → «12 إعلان», 2 → «إعلانان»)', pinHead({ n: 3, deal: 'mixed', price: 1, platform: null }, 'ar') === '3 إعلانات' && pinHead({ n: 12, deal: 'buy', price: 1, platform: null }, 'ar') === '12 إعلان' && pinHead({ n: 2, deal: 'buy', price: 1, platform: null }, 'ar') === '2 إعلانان');
+check('a shared spot head is its PRICE, never a count (owner 2026-11-10 final rule — verify-map-pin-shows-the-price-never-a-count.ts)', pinHead({ n: 3, deal: 'buy', price: 650000, price_max: 650000, unpriced: 0, platform: null }, 'ar') === '650 ألف' && pinHead({ n: 12, deal: 'buy', price: 650000, price_max: 900000, unpriced: 0, platform: null }, 'ar') === 'من 650 ألف' && pinHead({ n: 2, deal: 'buy', price: null, price_max: null, unpriced: 2, platform: null }, 'ar') === 'السعر عند الطلب');
 check('a Short-stays head prints no figure (Gathern / Aqar Monthly rule), by deal AND by platform', pinHead(one('short', 3000, 'gathern'), 'ar') === 'إقامة قصيرة' && pinHead(one('rent', 3000, 'aqarmonthly'), 'ar') === 'إقامة قصيرة' && !/\d/.test(pinHead(one('short', 3000), 'en')));
 check('an unpriced listing says price on request, never a blank head', pinHead(one('buy', null), 'ar') === 'السعر عند الطلب' && pinHead(one('buy', 0), 'en') === 'Price on request');
 check('a price that arrives as a string (numeric over JSON) still formats', pinHead({ n: 1, deal: 'buy', price: '650000', platform: 'aqar' }, 'ar') === '650 ألف');
 check('shortMoney keeps one decimal under 10 and none above (1.25M → 1.3M, 12.4K → 12K)', shortMoney(1250000, 'en') === '1.3M' && shortMoney(12400, 'en') === '12K' && shortMoney(950, 'en') === '950');
 mustCatch('a Short-stays pin printing its stored price', !/3/.test(pinHead(one('short', 3000, 'gathern'), 'ar')));
-mustCatch('a shared spot printing a price instead of its count', !/ألف|مليون/.test(pinHead({ n: 4, deal: 'buy', price: 650000, platform: 'aqar' }, 'ar')));
+mustCatch('a shared spot printing its count instead of its price', /إعلان/.test(`${4} إعلانات`) && !/إعلان/.test(pinHead({ n: 4, deal: 'buy', price: 650000, price_max: 650000, unpriced: 0, platform: 'aqar' }, 'ar')));
 
 // Zoom → cell: exact points from city zoom inward, cells sized to ~7 rows wider out (measured live 2026-11-02: /30 drew
 // hundreds of overlapping «1» bubbles over the country), never below 0.01°.
@@ -128,7 +128,7 @@ check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure argumen
 check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins, cell === 0 \? PIN_SHOW_MAX \+ 1 : PIN_LIMIT\)/.test(web) && /keyed\.set\(k, a\); m\.addAnnotation\(a\);/.test(web) && /mine = \[\.\.\.keyed\.values\(\)\];/.test(web));
 // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan removes only the pins that left the view and adds only
 // the new ones, keyed by what the head shows; never the old clear-all-then-add-all flicker.
-check('AppleMap.web.tsx diffs the pins by key on every load (remove the gone, add the new, keep the rest)', /for \(const \[k, a\] of keyed\) if \(!next\.has\(k\)\) \{ m\.removeAnnotation\(a\); keyed\.delete\(k\); \}/.test(web) && /if \(keyed\.has\(k\)\) continue;/.test(web) && /const keyOf = \(r: PinRow\) => `\$\{drawCell\}\|\$\{r\.lat\}\|\$\{r\.lng\}\|\$\{r\.n\}\|\$\{r\.deal\}\|\$\{r\.price \?\? ''\}\|\$\{r\.shift \? r\.shift\.join\(','\) : ''\}`/.test(web));
+check('AppleMap.web.tsx diffs the pins by key on every load (remove the gone, add the new, keep the rest)', /for \(const \[k, a\] of keyed\) if \(!next\.has\(k\)\) \{ m\.removeAnnotation\(a\); keyed\.delete\(k\); \}/.test(web) && /if \(keyed\.has\(k\)\) continue;/.test(web) && /const keyOf = \(r: PinRow\) => `\$\{drawCell\}\|\$\{r\.lat\}\|\$\{r\.lng\}\|\$\{r\.n\}\|\$\{r\.deal\}\|\$\{r\.price \?\? ''\}\|\$\{r\.price_max \?\? ''\}\|\$\{r\.unpriced \?\? ''\}\|\$\{r\.fresh \?\? ''\}\|\$\{r\.shift \? r\.shift\.join\(','\) : ''\}`/.test(web));
 mustCatch('the clear-all-then-add-all redraw (the flicker on every pan)', !/clear\(\);\n\s*mine = rows\.map/.test(web));
 // The layer mounts BEFORE MapKit has loaded and returns early; the map's arrival must re-run it (measured live
 // 2026-11-02: a fresh /map load drew nothing until the deal changed).
@@ -146,10 +146,10 @@ const sheetSrc = readFileSync(join(root, 'src/components/MapPinSheet.tsx'), 'utf
 // Owner 2026-11-10 (the final pin rule) replaced «every copy is its own card»: ads PROVEN to be one property fold into
 // one card, and every folded ad stays on screen as a named link under it. The fold itself is executed in
 // verify-map-same-property-is-one-card.ts; here: nothing may be dropped on the way to the screen.
-check('the sheet folds proven-same ads into one card and names every other ad under it as a link', /foldSameProperty\(cards, factsOf\)/.test(sheetSrc) && /\{groups\.map\(\(\{ main, others \}\) => \(/.test(sheetSrc) && /\{others\.map\(\(o\) => \(\s*<Pressable key=\{`\$\{o\.sourceTable\}#\$\{o\.id\}`\} onPress=\{\(\) => \{ void openListing\(o\); \}\}/.test(sheetSrc) && !/foldDuplicates\(cards/.test(sheetSrc));
+check('the sheet groups proven-same ads and shows every other ad under it as its own full card', /foldSameProperty\(cards, factsOf\)/.test(sheetSrc) && /\{groups\.map\(\(\{ main, others \}\) => \(/.test(sheetSrc) && /\{others\.map\(\(o\) => \(\s*<ResultCard key=\{`\$\{o\.sourceTable\}#\$\{o\.id\}`\} listing=\{o\} onOpen=\{\(\) => \{ void openListing\(o\); \}\}/.test(sheetSrc) && !/foldDuplicates\(cards/.test(sheetSrc));
 mustCatch('a sheet that drops same-site copies instead of naming them (foldDuplicates keeps one and shows nothing else)', !/foldDuplicates\(cards/.test(sheetSrc));
 check('a committed migration restores map_pins_ar and the grid without the same-site fold', (() => { const dir = join(root, 'supabase/migrations'); const f = readdirSync(dir).filter((x) => /map_same_site_copies_stay/.test(x)).pop(); if (!f) return false; const sql = readFileSync(join(dir, f), 'utf8'); return !/row_number\(\) over \(partition by k\.source_table/.test(sql) && !/distinct on \(u\.source_table/.test(sql) && /select k\.la, k\.lo, count\(\*\)::int,/.test(sql) && !/same_site_dupes/.test(sql); })());
-check('the sheet shows the head\'s own words (price or count) at once while the cards load', /\$\{t\('Listing'\)\} · \$\{pinHead\(row, isRTL \? 'ar' : 'en'\)\}/.test(sheetSrc));
+check('the sheet shows the head\'s own words (price or count) at once while the cards load', /const head = pinHead\(row, isRTL \? 'ar' : 'en'\);/.test(sheetSrc) && /\$\{t\('Listing'\)\} · \$\{head\}/.test(sheetSrc));
 // AN INVISIBLE OUTLINE IS NOT CLICKABLE (measured live 2026-11-02, phone: a tap between two pins in central Riyadh flew
 // the map out to the whole region because the faded-out polygon took the tap). The region select bails when fade is 0.
 check('AppleMap.web.tsx ignores a region tap once its outline has faded to nothing', /const r = e\.overlay\?\.data;[\s\S]{0,600}?if \(!r \|\| !map \|\| fade <= 0\) return;/.test(web));
@@ -206,9 +206,15 @@ mustCatch('groups shown before a category (both lists mixed)', !groupsRx.test(ca
 // Owner 2026-11-09 (Zillow's mobile filter): on a phone the filter is FULL SCREEN, the live count is the title, and a
 // fixed bottom bar carries «مسح الكل» + «عرض الإعلانات». A wider screen keeps the centered card.
 const fullRx = /const phone = useWindowDimensions\(\)\.width < PHONE_MAX;/;
-check('on a phone the map filter is full screen with the live count on top and a Clear / Show bar at the bottom',
-  fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /phone && count !== null \? t\('\{n\} results'/.test(cardSrc)
+check('on a phone the map filter is full screen, titled «تصفية», with a Clear / «Show N listings» bar at the bottom (owner 2026-11-11: the count lives in the button, like Zillow)',
+  fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /testID=\"map-filter-title\">\{t\('Filter'\)\}/.test(cardSrc) && (cardSrc.match(/count === null \? t\('Show listings'\) : isRTL \? showAdsAr\(count\) : t\('Show \{n\} listings'/g) ?? []).length === 2
   && /testID="map-filter-clear"/.test(cardSrc) && /export const PHONE_MAX = 768;/.test(cardSrc));
+const filterCountSrc = readFileSync(join(root, 'src/lib/mapFilter.ts'), 'utf8');
+const mf = await import('../src/lib/mapFilter.ts');
+check('the map Filter button shows how many choices are picked', mf.filterCount({ category: 'Residential', groups: ['Villas & Houses'], types: ['Villa'], beds: ['3', '4'], furnished: null, areaMin: '200', areaMax: '', priceMin: '', priceMax: '900000' }) === 7
+  && mf.filterCount({ category: null, groups: [], types: [], beds: [], furnished: null, areaMin: '', areaMax: '', priceMin: '', priceMax: '' }) === 0
+  && /testID="map-filter-count"/.test(readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8')) && /filterCount=\{filterCount\(mapFilter\)\}/.test(readFileSync(join(root, 'src/app/map.tsx'), 'utf8')) && /export const filterCount/.test(filterCountSrc));
+mustCatch('a phone filter button with no count (the old «Show listings» only)', !(cardSrc.replace(/count === null \? t\('Show listings'\) : t\('Show \{n\} listings', \{ n: count\.toLocaleString\('en-US'\) \}\)/, "t('Show listings')").match(/count === null \? t\('Show listings'\) : t\('Show \{n\} listings'/g)?.length === 2));
 mustCatch('a phone filter that is still the small centered card', !/phone && s\.cardFull/.test(cardSrc.replace('phone && s.cardFull', 'false && s.cardFull')));
 // Owner 2026-11-09: the «نوع الصفقة» popup is bigger, with «تطبيق» at the bottom. Ticks edit a DRAFT; only Apply
 // hands them to the map (so the pins show exactly what was applied); X / a tap outside leaves the map as it was.

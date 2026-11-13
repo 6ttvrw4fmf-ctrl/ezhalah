@@ -31,13 +31,20 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, landFocus, type AreaLevel, type AreaRow, type PlaceFactsKey, type AreaFocus } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
-import { fetchMapPins, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
+import { keepSaudiPlaces } from '@/lib/saudiOutline';
+import { isRealDrawnArea } from '@/lib/drawnArea';
+import { fetchViewFacts, fetchPlaceFacts } from '@/data/mapViewFacts';
+import type { CardTarget } from '@/data/mapCard';
+import { factBox, factsWindowLabel, lockedAsk, factsZoom, factsWide, placeFactsFit, FACTS_MIN_ADS, type ViewFacts } from '@/lib/mapViewFacts';
+import { useApp } from '@/store';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
+import { reportError } from '@/lib/observability';
 import { onSurface } from '@/lib/mapSurface';
 import { pillCount, type PillCount } from '@/lib/flowState';
 import { RESOLVE_BUDGET_MS, makeSuggestCache, suggestKey } from '@/lib/placeSearch';
@@ -47,6 +54,10 @@ import { RESOLVE_BUDGET_MS, makeSuggestCache, suggestKey } from '@/lib/placeSear
 const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
 const TOKEN_URL = '/api/mapkit-token';
 const REGIONS_URL = '/ksa-regions.json';
+// The Kingdom's outer border, one ring per land piece (mainland + Farasan), built from ksa-regions.json by merging the 13
+// regions and growing the result ~4 km outwards, so no Saudi coast or border town is ever faded (built by
+// scripts/build-ksa-outline.py; scripts/verify-saudi-only-map.ts checks it against the regions and 15 cities).
+const OUTLINE_URL = '/ksa-outline.json';
 // Each request gets a few tries with a growing wait before it counts as failed. Measured on production (first
 // visit after the 2026-10-31 deploy): the token and the regions file both timed out at 8 s once, the next visit
 // answered in ~150 ms — and MapKit never retries a token, so one slow first answer left the map blank for the
@@ -62,6 +73,14 @@ const KSA_SPAN = { latitudeDelta: 18, longitudeDelta: 21.5 };
 // A phone held upright is taller than wide: the same span would leave the Kingdom small in the middle, so there the
 // first view fits the country to the screen's width instead (the neighbours still show above and below).
 const KSA_SPAN_PORTRAIT = { latitudeDelta: 17, longitudeDelta: 19.5 };
+// SAUDI ARABIA ONLY (owner 2026-11-11). The map's centre may move only inside this box: the Kingdom's own outline
+// (16.3–32.2° N, 34.5–55.7° E) plus ~0.5°, so ANY town — Haql, Tabuk, Jazan, Arar, Al Khafji — can be centred
+// (scripts/verify-saudi-only-map.ts checks 15 cities against it). CodeRabbit on #11818 caught the first box excluding them.
+const SAUDI_BOX_CENTER = { latitude: 24.25, longitude: 45.1 };
+const SAUDI_CENTRE_BOX = { latitudeDelta: 17, longitudeDelta: 22.4 };
+// How far out the user may zoom: this many times the home view's camera distance.
+const MAX_ZOOM_OUT = 1.3;
+// The fade over the countries around: a rectangle well past every neighbour, with the Kingdom cut out ([lat, lng]).
 
 type Region = {
   id: number; iso: string; en: string; ar: string;
@@ -83,6 +102,9 @@ type MKMap = {
   isScrollEnabled: boolean;
   isZoomEnabled: boolean;
   isRotationEnabled: boolean;
+  cameraBoundary: unknown;
+  cameraZoomRange: unknown;
+  cameraDistance: number;
   region: { center: Coord; span: { latitudeDelta: number; longitudeDelta: number } };
   addOverlay: (o: unknown) => void;
   removeOverlay: (o: unknown) => void;
@@ -119,6 +141,7 @@ type MapKit = {
   Coordinate: new (lat: number, lng: number) => unknown;
   CoordinateSpan: new (lat: number, lng: number) => unknown;
   CoordinateRegion: new (center: unknown, span: unknown) => unknown;
+  CameraZoomRange: new (minCameraDistance: number, maxCameraDistance: number) => unknown;
   Style: new (o: { strokeColor?: string; strokeOpacity?: number; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
   PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => Shape;
   PolylineOverlay: new (points: unknown[], o?: { style?: unknown; enabled?: boolean }) => Shape;
@@ -195,6 +218,23 @@ function loadRegions(): Promise<Region[]> {
   return regionsLoad;
 }
 
+let outlineLoad: Promise<[number, number][][]> | null = null;
+/** Saudi Arabia's outline ([lng, lat] rings), fetched once per page. A failed fetch is an error: the map then simply
+ *  shows no fading (never a wrong one). Every failure is reported HERE, once — whoever asked (the map, or the quiet
+ *  prewarm before the map opens; review of #11818). */
+function loadOutline(): Promise<[number, number][][]> {
+  if (outlineLoad) return outlineLoad;
+  outlineLoad = fetchWithRetry(OUTLINE_URL)
+    .then(async (r) => {
+      if (!r.ok) throw new Error(`outline ${r.status}`);
+      const j = (await r.json()) as [number, number][][];
+      if (!Array.isArray(j) || !j.length || !j.every((ring) => Array.isArray(ring) && ring.length >= 4)) throw new Error('outline file is not rings');
+      return j;
+    })
+    .catch((e) => { outlineLoad = null; reportError(e, { where: 'map: Saudi outline' }); throw e; });
+  return outlineLoad;
+}
+
 /** INSTANT FIRST MAP (owner 2026-11-04: «why does it feel slow moving between tabs»). Measured on ezhalah.com: the first
  *  visit to «خريطة» downloaded Apple's script (~230 KB), the region outlines, a map key and the labels/dots feeds only
  *  after the tap. Called quietly a few seconds after any page settles (src/lib/mapWarmup.ts): everything the map needs is
@@ -202,6 +242,7 @@ function loadRegions(): Promise<Region[]> {
 export function prewarmMap(): void {
   void loadMapKit().catch(() => {});
   void loadRegions().catch(() => {});
+  void loadOutline().catch(() => {});
   if (!warmToken) { const p = (async () => { const r = await fetchWithRetry(TOKEN_URL, { cache: 'no-store' }); if (!r.ok) throw new Error(`token ${r.status}`); const j = (await r.json()) as { token?: unknown }; if (typeof j.token !== 'string' || !j.token) throw new Error('token missing'); return j.token; })(); p.catch(() => {}); warmToken = { at: Date.now(), p }; }
   void fetchMapDots();
   void fetchAreasFeed();
@@ -235,7 +276,7 @@ function initOnce(mk: MapKit, language: string) {
 // ── The page's search field talks to the map through this (MapDealRow's MapSearchBar) ─────────────────────────
 // One map per page, so one handle: the mounted map registers itself; the field asks Apple for places and flies there.
 // `history`: the views left behind by a jump (a search pick, a region tap) so «رجوع» can return to them.
-const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown; shapes?: unknown[] }; markSeq: number; route: unknown[]; onRoute?: (on: boolean) => void } = { map: null, search: null, lang: '', history: [], mark: {}, markSeq: 0, route: [] };
+const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown; shapes?: unknown[] }; markSeq: number; route: unknown[]; onRoute?: (on: boolean) => void; poly?: PinFilter['poly']; focus?: AreaFocus | null } = { map: null, search: null, lang: '', history: [], mark: {}, markSeq: 0, route: [] };
 
 /** Remove the drawn route (band, line, end pins). */
 export function clearRoute() {
@@ -289,6 +330,7 @@ export function clearPlaceMark() {
   if (m) for (const o of live.mark.shapes ?? []) m.removeOverlay(o);
   live.mark = {};
   live.markSeq++;
+  live.focus = null;   // the searched district stops leading the pill once its search is cleared
 }
 
 /** Apple Maps' own place suggestions (owner 2026-10-31: «this search connected to Apple Maps, like how a user
@@ -297,10 +339,15 @@ export function clearPlaceMark() {
 // Recent answers (src/lib/placeSearch.ts): backspace or the same words again shows the list at once.
 const suggestCache = makeSuggestCache<PlaceSuggestion[]>();
 export async function suggestPlaces(q: string, uiLanguage: string): Promise<PlaceSuggestion[]> {
+  return (await suggestPlacesResult(q, uiLanguage)).rows;
+}
+/** The same, saying whether the lookup FAILED (Apple's script did not load, or its autocomplete errored) — a failed
+ *  search is not «no places» (A FAILED FETCH IS NOT AN EMPTY ANSWER). The phone's search page shows «حاول مرة أخرى». */
+export async function suggestPlacesResult(q: string, uiLanguage: string): Promise<{ rows: PlaceSuggestion[]; failed: boolean }> {
   const query = q.trim();
-  if (query.length < 2) return [];
+  if (query.length < 2) return { rows: [], failed: false };
   let mk: MapKit;
-  try { mk = await loadMapKit(); } catch { return []; }
+  try { mk = await loadMapKit(); } catch (e) { reportError(e, { where: 'map search: MapKit did not load' }); return { rows: [], failed: true }; }
   initOnce(mk, uiLanguage);
   // THE MAP SPEAKS THE LANGUAGE THE USER TYPES (owner 2026-10-31: «if the user types English or Arabic make sure the
   // map turns that language»): Arabic letters → Arabic labels and suggestions, Latin letters → English. A query with
@@ -319,12 +366,17 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   if (live.map) search.region = live.map.region;
   const key = suggestKey(query, language, live.map?.region);
   const cached = suggestCache.get(key);
-  if (cached) return cached;
+  if (cached) return { rows: cached, failed: false };
+  let lookupFailed = false;
   const rows = await new Promise<PlaceSuggestion[]>((resolve) => {
     // Only real PLACES: Apple also returns query completions («adidas · Search Nearby») that carry no coordinate and
     // land nowhere (owner 2026-11-01 saw one in the route fields).
-    search.autocomplete(query, (err, data) => resolve(err || !data ? [] : data.results.filter((r) => r.displayLines?.length && r.coordinate)));
+    search.autocomplete(query, (err, data) => {
+      if (err || !data) { lookupFailed = true; reportError(err ?? new Error('autocomplete returned no data'), { where: 'map search: autocomplete' }); resolve([]); return; }
+      resolve(data.results.filter((r) => r.displayLines?.length && r.coordinate));
+    });
   });
+  if (lookupFailed) return { rows: [], failed: true };
   // SAY WHAT KIND OF PLACE EACH ROW IS (owner 2026-11-01: «identify between landmarks, cities and like this»): the
   // autocomplete row carries two lines and nothing else, so each of the top rows is resolved to Apple's Place (one
   // round trip, in parallel, ~200 ms measured) and classified in src/lib/placeKind.ts — then duplicates (the same
@@ -350,9 +402,11 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   const named = resolved.map((r) => ({ ...r, apple: r.apple ?? r, name: r.name ?? r.displayLines[0] }));
   // A user-written description («طريق الملك فهد اللي دايم زحمه») is not a place; what was typed sorts first.
   const places = named.filter((r) => !isNoiseName(r.name));
-  const out = sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
+  // SAUDI ONLY (owner 2026-11-11): a place outside the Kingdom's outline is never suggested, whatever Apple returns.
+  const rings = await loadOutline().catch(() => null);
+  const out = keepSaudiPlaces(sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query), rings).slice(0, 6);
   if (rows.length) suggestCache.set(key, out);   // an empty answer may be a failed call: never remembered
-  return out;
+  return { rows: out, failed: false };
 }
 
 /** HOW MANY PINS A FILTER LEAVES IN THE CURRENT VIEW (the popup's button): one coarse count-cell read over the
@@ -361,9 +415,18 @@ export async function countPinsInView(filter: PinFilter): Promise<number | null>
   const m = live.map;
   if (!m) return null;
   const { center, span } = m.region;
-  const rows = await fetchMapPins(paddedBox(center, span), Math.max(0.01, span.latitudeDelta / 4), filter, 5000);
+  // A DRAWN AREA COUNTS TOO (CodeRabbit #11903): the pins keep only what is inside the applied drawing, so the counts do.
+  const rows = await fetchMapPins(paddedBox(center, span), Math.max(0.01, span.latitudeDelta / 4), { ...filter, poly: live.poly ?? filter.poly ?? null }, 5000);
   if (rows === 'unknown') return null;
   return rows.reduce((a, r) => a + r.n, 0);
+}
+
+/** The «نُشر خلال» numbers for the pins in view — the box countPinsInView counts, every window at once. */
+export async function countPostedWindowsInView(filter: PinFilter): Promise<Record<string, number> | null> {
+  const m = live.map;
+  if (!m) return null;
+  const { center, span } = m.region;
+  return fetchMapPostedWindowCounts(paddedBox(center, span), { ...filter, poly: live.poly ?? filter.poly ?? null });
 }
 
 /** Glide the map to a suggestion: Apple's bounding region for it when it has one, else a town-sized view around it. */
@@ -383,6 +446,8 @@ export function flyToPlace(p: PlaceSuggestion) {
     // they searched»). One mark at a time.
     clearPlaceMark();
     if (!c) return;
+    // a searched DISTRICT leads the pill and its box while it is on screen (owner 2026-11-13, src/lib/mapAreas.ts AreaFocus)
+    if (p.kind === 'district') live.focus = { district: (place ? place.name : undefined) ?? p.name ?? p.displayLines[0] ?? '', lat: c.latitude, lng: c.longitude, latitudeDelta: region ? region.span.latitudeDelta * 1.3 : 0.08 };
     // NO BOUNDARY DRAWING (owner 2026-11-02: «remove this boundary drawing, keep it how it is»): a landmark gets a brand
     // pin with its name and a small 120 m circle so the user sees what they searched; a district, city, region or
     // street just comes into view — Apple's own labels say where it is. The place_shapes lookup stays in src/data for
@@ -413,9 +478,12 @@ const regionView = (mk: MapKit, r: Region) => {
   );
 };
 
-/** `onExpand` (compact box): the ⤢ button top-left opens the map full screen; the box itself pans and zooms in place
+/** `onExpand` (compact box): the ⤢ button top-right opens the map full screen; the box itself pans and zooms in place
  *  (owner 2026-10-31: «zoom in within his screen without leaving»). `full` + `onClose`: the full-screen map, with its
  *  close button top-left. */
+/** This device has opened the big map once → the «tap to open» hint beside ⤢ stops showing. */
+const EXPAND_HINT_KEY = 'ezhalah.mapExpandHintSeen';
+
 export default function AppleMap({ full = false, onExpand, onClose, onRoute, pins, onPinSelect }: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void; pins?: PinFilter; onPinSelect?: (row: PinRow) => void }) {
   const { t, locale } = useI18n();
   const hostRef = useRef<View>(null);
@@ -426,6 +494,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const shapeRef = useRef<Shape | null>(null);
   const ptsRef = useRef<Coord[]>([]);
   const [drawing, setDrawing] = useState(false);
+  // The arrow sits at the pill's RIGHT end, next to ⤢, in both languages (owner 2026-11-11: «the arrow … is opposite»):
+  // an Arabic page starts 'row' at the right, so Arabic reverses it to put the arrow last on the right.
+  // «اضغط لتكبير الخريطة ←» beside ⤢ (owner 2026-11-11: «an arrow … point at the zoom … so user knows to click»), until
+  // this device has opened the big map once. Device storage is a convenience only: unreadable → the hint shows.
+  const [expandHint, setExpandHint] = useState<boolean>(() => { try { return globalThis.localStorage?.getItem(EXPAND_HINT_KEY) !== '1'; } catch { return true; } });
+  const openFull = () => { try { globalThis.localStorage?.setItem(EXPAND_HINT_KEY, '1'); } catch { /* private mode: fine */ } setExpandHint(false); };
   const [sketch, setSketch] = useState<Shape | null>(null);
   const [poly, setPoly] = useState<PinFilter['poly']>(null);  // the applied drawn boundary, as the pin query's polygon
   const [hasShape, setHasShape] = useState(false);
@@ -519,6 +593,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       mapRef.current = map;
       live.map = map;
       setMapReady((n) => n + 1);
+
+      // SAUDI ARABIA ONLY (owner 2026-11-11: «just Saudi Arabia focus … not everything shows»): the centre stays inside
+      // SAUDI_CENTRE_BOX and zooming out stops at MAX_ZOOM_OUT × the home view — both set NOW, from the view MapKit
+      // settled on (read synchronously, measured live), never from a view the user zoomed to while a file loaded.
+      // NO FADE over the neighbours (owner 2026-11-11: «I don't like how it shows highlighted in Saudi … what I meant
+      // was the search on top should only get Saudi»): the map looks like Apple's; the SEARCH is what keeps to Saudi.
+      map.cameraBoundary = new mk.CoordinateRegion(new mk.Coordinate(SAUDI_BOX_CENTER.latitude, SAUDI_BOX_CENTER.longitude), new mk.CoordinateSpan(SAUDI_CENTRE_BOX.latitudeDelta, SAUDI_CENTRE_BOX.longitudeDelta));
+      map.cameraZoomRange = new mk.CameraZoomRange(0, map.cameraDistance * MAX_ZOOM_OUT);
 
       // The 13 regions: boundaries + names, and click-to-zoom. Drawn QUIETLY so they blend into Apple's map rather
       // than sit on top of it (owner 2026-10-30: «blending in with Apple Maps, I don't want it very bright»): thin,
@@ -616,14 +698,65 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // failed fetch keeps what is on screen (A FAILED FETCH IS NOT AN EMPTY ANSWER — an empty map must never read as
   // «no listings here»). Tapping a bubble zooms into it; tapping a pin hands its row up (the card sheet).
   const pinFilter: PinFilter | undefined = pins ? { ...pins, poly: poly ?? pins.poly ?? null } : undefined;
+  // The counters outside this component (countPinsInView, countPostedWindowsInView) read the applied drawing from here.
+  useEffect(() => { live.poly = poly; return () => { live.poly = null; }; }, [poly]);
   const pinsKey = JSON.stringify(pinFilter ?? null);
   // A number, 'failed' (the read for the view on screen failed — «try again» is shown), or null (nothing read yet).
   const [pinCount, setPinCount] = useState<PillCount | null>(null);
+  // The pill's second line (src/lib/mapViewFacts.ts): asked for the exact box the count was read over, and shown only
+  // when the server counted the same ads. factsBox is set ONLY where the count is a sum over that box.
+  const [factsBox, setFactsBox] = useState<{ s: number; w: number; n: number; e: number } | null>(null);
+  const [viewFacts, setViewFacts] = useState<ViewFacts | null>(null);
+  // Wider district views show an ESTIMATED count (the dots feed, by 1 km cell); there the facts read the exact count for
+  // the same box and the pill shows that exact number, so the count and the box are always the same ads.
+  const [factsExact, setFactsExact] = useState(false);
+  // At city/district LABEL zoom the pill names a place with its own count: the box reads that place's prepared facts.
+  const [factsPlace, setFactsPlace] = useState<PlaceFactsKey | null>(null);
+  const factsKeyRef = useRef('');
+  // THE CARD (owner 2026-11-12/13): tapping the box opens it; loaded on the first tap only, so it never adds to the first
+  // download. A new map read closes it — it belongs to the view it was opened on.
+  const [cardTarget, setCardTarget] = useState<CardTarget | null>(null);
+  const [CardComp, setCardComp] = useState<null | typeof import('@/components/MapFactsCard').default>(null);
+  const [cardLoadFailed, setCardLoadFailed] = useState(false);   // the card's own download failed: say so, offer a retry
+  const { user, openAuth } = useApp();
+  const signedInRef = useRef(false); signedInRef.current = !!user;
   const retryPinsRef = useRef<(() => void) | null>(null);
   // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
   const [viewPlace, setViewPlace] = useState<string | null>(null);
   // The named place's OWN count (owner 2026-11-05): beside «في حي النرجس» the pill prints النرجس's number, not the view's.
   const [placeCount, setPlaceCount] = useState<number | null>(null);
+  // Asked once the count has settled (350 ms), only at exact-point zoom and only for a named place with enough ads.
+  useEffect(() => {
+    const m = mapRef.current;
+    // The box is cleared only when it is asked about ANOTHER view (owner 2026-11-13: «it feels glitchy») — the same view
+    // asked again (the count landing, the place name arriving) keeps it on screen instead of blinking it off and on.
+    const forget = (key: string) => { if (factsKeyRef.current !== key) { factsKeyRef.current = key; setViewFacts(null); } };
+    // City/district label zoom: the named place's prepared facts — only when the count is all of one deal's ads there.
+    if (factsPlace && !hasShape && !drawing && pinFilter && placeFactsFit(pinFilter) && typeof placeCount === 'number' && placeCount >= FACTS_MIN_ADS) {
+      let staleP = false;
+      const place = factsPlace;
+      const deals = pinFilter.deals;
+      forget(`P|${JSON.stringify(place)}|${deals.join(',')}|${user ? 'u' : 'g'}`);
+      void fetchPlaceFacts(place, deals, !!user).then((f) => { if (!staleP) setViewFacts(f); });
+      return () => { staleP = true; };
+    }
+    // A drawn boundary gets the facts for exactly the ads inside it (the pin read already carries its polygon), at any zoom.
+    if (!m || !pinFilter || !factsBox || drawing || typeof pinCount !== 'number' || pinCount < FACTS_MIN_ADS || (!viewPlace && !hasShape && !factsExact)) { forget(''); return; }
+    if (!hasShape && !factsExact && !factsZoom(m.region.span.latitudeDelta)) { forget(''); return; }
+    let stale = false;
+    const box = factsBox;
+    const exact = factsExact;
+    forget(`B|${JSON.stringify(box)}|${pinsKey}|${user ? 'u' : 'g'}`);
+    // no pause: the read was already started when the map stopped (load(), below) — this joins it or reads the cache
+    void fetchViewFacts(box, pinFilter, !!user).then((f) => {
+      if (stale) return;
+      setViewFacts(f);
+      if (exact && f) setPinCount(f.any);   // the estimate gives way to the exact count of the same box
+    });
+    return () => { stale = true; };
+    // pinsKey stands for pinFilter (a new object every render)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [factsBox, factsExact, factsPlace, pinsKey, hasShape, drawing, pinCount, placeCount, viewPlace, user]);
   // The deals NOT chosen that do have listings in view — so an empty deal says where the listings are (owner 2026-11-05).
   const [otherDeals, setOtherDeals] = useState<string[]>([]);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
@@ -640,7 +773,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     // font they are drawn in and placed through MapKit's own projection, so «touching» means touching on this screen.
     const measure = document.createElement('canvas').getContext('2d');
     if (measure) measure.font = '600 11px -apple-system,system-ui,sans-serif';
-    const headWidth = (r: PinRow) => { const tx = pinHead(r, loc); return measure ? Math.ceil(measure.measureText(tx).width) + PIN_PAD_PX : pinWidthGuess(tx); };
+    const headWidth = (r: PinRow) => { const tx = pinHead(r, loc); const w = (x: string) => (measure ? Math.ceil(measure.measureText(x).width) + PIN_PAD_PX : pinWidthGuess(x)); return isFreshHead(r) ? Math.max(w(tx), w(freshTag(loc))) : w(tx); };
     const onScreen = (lat: number, lng: number): [number, number] => {
       const conv = (m as unknown as { convertCoordinateToPointOnPage?: (c: unknown) => { x: number; y: number } }).convertCoordinateToPointOnPage;
       if (conv) { const p = conv.call(m, new mk.Coordinate(lat, lng)); return [p.x, p.y]; }
@@ -683,6 +816,19 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           : 'border-radius:10px;padding:4px 7px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);position:relative');
       el.textContent = cell > 0 ? '' : pinHead(row, loc);
       if (counted && cell > 0 && row.n > 1) el.textContent = areaCount(row.n, loc);
+      // «إعلان جديد» above the price when the site published one of this spot's ads in the last 3 days (owner 2026-11-11).
+      if (cell === 0 && isFreshHead(row)) {
+        el.textContent = '';
+        el.setAttribute('data-fresh', '1');
+        el.style.textAlign = 'center';
+        const tag = document.createElement('div');
+        tag.setAttribute('data-testid', 'map-pin-fresh');
+        tag.textContent = freshTag(loc);
+        tag.style.cssText = 'font-size:10px;font-weight:700;line-height:1.1;margin-bottom:2px;opacity:.95';
+        const price = document.createElement('div');
+        price.textContent = pinHead(row, loc);
+        el.append(tag, price);
+      }
       // A head on its own spot points at it with a tip; a head drawn beside its neighbour gets a line back to its spot
       // instead, drawn under every head by drawStems() below.
       if (cell === 0 && !row.shift) {
@@ -756,7 +902,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:5;opacity:0;transition:opacity .15s';
     host?.appendChild(canvas);
     let shown: MapDot[] = []; let project: ((lat: number, lng: number) => [number, number]) | null = null;
-    const narrowed = !!(pins.category || pins.scope || pins.furnished != null || pins.types?.length || pins.beds?.length || pins.areaMin != null || pins.areaMax != null
+    const narrowed = !!(pins.category || pins.scope || pins.furnished != null || pins.postedWithinDays != null || pins.types?.length || pins.beds?.length || pins.areaMin != null || pins.areaMax != null
       || pins.priceMin != null || pins.priceMax != null || pins.poly);
     const paint = (dots: MapDot[]) => {
       const rect = canvas.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
@@ -823,9 +969,11 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // district most of the view's listings are in — «في هذه المنطقة» only when no one place holds most of them.
       // The whole-Kingdom view shows regions (owner 2026-11-09): the pill keeps the country and its WHOLE total, read
       // over COUNTRY_BOX, so a pan that leaves a region off screen never shrinks «… في السعودية».
-      const place = whole ? areaPlace(whole, 'country', loc, translitPlace, m.region.center, m.region.span) : areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
+      const place = whole ? areaPlace(whole, 'country', loc, translitPlace, m.region.center, m.region.span) : areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span, live.focus);
       setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
       clearStems();   // area labels replace the pins: no line may outlive the head it belonged to
+      // the box at city/district label zoom reads that place's prepared facts (the whole-Kingdom view keeps its count only)
+      setFactsPlace(!whole && place?.facts ? place.facts : null);
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
       for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
@@ -895,10 +1043,15 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     };
     const load = async () => {
       const my = ++seq;
+      setFactsBox(null); setFactsExact(false); setFactsPlace(null);   // the pill's facts belong to one counted view; a new read starts without one
+      setCardTarget(null);
       const { center, span } = m.region;
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
       const level = narrowed ? null : areaLevelShown(span.latitudeDelta);
+      // The box's facts are read AT THE SAME TIME as the pins (owner 2026-11-13: «it takes time for it to show»): the box
+      // the count will be read over is known now, so its facts are on their way before the count lands.
+      if (!level && factsZoom(span.latitudeDelta)) void fetchViewFacts(paddedBox(center, span), pins, signedInRef.current);
       if (level) {
         const areas = await fetchMapAreas(paddedBox(center, span), level, pins.deals);
         if (my !== seq || mapRef.current !== m) return;
@@ -921,7 +1074,11 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (all !== 'unknown') {
           const inView = dotsInView(all, pins.deals, paddedBox(center, span));
           clear();
-          if (paint(inView)) { setPinCount(dotsTotal(inView)); return; }
+          if (paint(inView)) {
+            setPinCount(dotsTotal(inView));
+            if (factsWide(span.latitudeDelta)) { setFactsBox(paddedBox(center, span)); setFactsExact(true); }
+            return;
+          }
         }
         // The feed failed (or the projection could not be calibrated): the live grid path below, never an empty map.
       }
@@ -984,13 +1141,13 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (drawCell === 0) rows = placeApart(rows, onScreen, headWidth);
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
-      setPinCount(pillCount(rows));
+      setPinCount(pillCount(rows)); setFactsBox(paddedBox(center, span)); if (drawCell > 0 && factsWide(span.latitudeDelta)) setFactsExact(true);   // bubbles count whole map squares: the box's exact count of the view replaces it
       setPlaceCount(null);
       void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc, translitPlace)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
       // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
       // head would change (count, deal, price, cell size) is replaced.
-      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}|${r.shift ? r.shift.join(',') : ''}`;
+      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}|${r.price_max ?? ''}|${r.unpriced ?? ''}|${r.fresh ?? ''}|${r.shift ? r.shift.join(',') : ''}`;
       const next = new Map<string, PinRow>(); for (const row of rows) next.set(keyOf(row), row);
       // The district markers join the same diff. A FAILED marker read keeps the markers already on the map (A FAILED
       // FETCH IS NOT AN EMPTY ANSWER: a marker that vanished after an error would read as «no such listings here»).
@@ -1013,7 +1170,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       mine = [...keyed.values()];
       drawStems(drawCell === 0 ? rows : []);
     };
-    const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 120); };
+    const onRegion = () => {
+      // the searched district is measured from where its flight LANDED (the end of a move centred on it), never from a
+      // read during the flight or the span it asked for — a tall phone widens that ~2× (src/lib/mapAreas.ts landFocus)
+      live.focus = landFocus(live.focus, m.region.center, m.region.span);
+      if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 120);
+    };
     const onSelect = (e: { annotation?: { data?: { pin?: PinRow; cell?: number } } }) => {
       const d = e.annotation?.data; if (!d?.pin) return;
       if (Date.now() - lastPick < 600) return;   // the element's own tap handler already picked it
@@ -1109,13 +1271,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const m = mapRef.current; const mk = mapkitOf();
     if (!el || !m || !mk) return;
     let down = false; let last: { x: number; y: number } | null = null;
+    let pagePts: { x: number; y: number }[] = [];   // the same stroke in screen pixels, to measure its area
     // The PENCIL LINE while the finger moves (owner 2026-10-31: «like a pencil, like Zillow»): a stroke that follows
     // the finger; the filled shape appears only when the finger lifts.
     let line: Shape | null = null;
     const dropLine = () => { if (line) { m.removeOverlay(line); line = null; } };
     const onDown = (e: PointerEvent) => {
       e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch { /* a pointer the browser no longer tracks */ }
-      down = true; last = { x: e.pageX, y: e.pageY };
+      down = true; last = { x: e.pageX, y: e.pageY }; pagePts = [last];
       if (sketchRef.current) m.removeOverlay(sketchRef.current);
       // MapKit accepts ONLY a real DOMPoint here (a plain {x,y} throws — measured live 2026-10-31: nothing drew).
       ptsRef.current = [m.convertPointOnPageToCoordinate(new DOMPoint(e.pageX, e.pageY))];
@@ -1124,7 +1287,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const onMove = (e: PointerEvent) => {
       if (!down || !last) return;
       if (Math.hypot(e.pageX - last.x, e.pageY - last.y) < 4) return;
-      last = { x: e.pageX, y: e.pageY };
+      last = { x: e.pageX, y: e.pageY }; pagePts.push(last);
       ptsRef.current.push(m.convertPointOnPageToCoordinate(new DOMPoint(last.x, last.y)));
       const coords = ptsRef.current.map((p) => new mk.Coordinate(p.latitude, p.longitude));
       if (line) line.points = coords;
@@ -1137,7 +1300,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (!down) return;
       down = false; dropLine();
       const pts = ptsRef.current;
-      if (pts.length >= 3) {
+      // A straight drag has points but no inside: it stays a sketch-less pad, so «تطبيق» stays off and the
+      // «اسحب على الخريطة لرسم منطقة» hint comes back (src/lib/drawnArea.ts).
+      if (isRealDrawnArea(pagePts)) {
         const coords = pts.map((p) => new mk.Coordinate(p.latitude, p.longitude));
         sketchRef.current = new mk.PolygonOverlay(coords, { style: new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.95, lineWidth: 2.5, fillColor: lightColors.primary, fillOpacity: 0.14 }), enabled: false });
         m.addOverlay(sketchRef.current);
@@ -1157,27 +1322,37 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // keyboard up the box is ~120 px tall and «رسم», + / − and the layers button piled on top of each other. Under
   // 280 px those three hide; the full-screen map never is that short.
   const [short, setShort] = useState(false);
+  const [narrow, setNarrow] = useState(false);  // a phone-width box: no room for the hint AND «رسم» + «رجوع» in one row
   const roomy = full || !short;
+  // «رجوع» in the top row, just right of «رسم» (owner 2026-11-11: «make the button back top left beside it draw»;
+  // first added 2026-10-31: «a button that allows the user to go back»): returns to the view before the last jump,
+  // and with none left, to the whole Kingdom. An Arabic page lays a row out from the right, so the button goes FIRST
+  // there and LAST in English: either way it lands on the right of «رسم».
+  const backEl = zoomed && !failed && !drawing ? (
+    <Pressable key="back" style={s.backBtn} onPress={goBack} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Back')} testID="map-back">
+      <Ionicons name="arrow-undo-outline" size={19} color={colors.ink} />
+    </Pressable>
+  ) : null;
   return (
-    <View style={s.frame} onLayout={(e) => { const boxPx = e.nativeEvent.layout.height; setShort(boxPx < 280); }}>
+    <View style={s.frame} onLayout={(e) => { const boxPx = e.nativeEvent.layout.height; setShort(boxPx < 280); const boxW = e.nativeEvent.layout.width; setNarrow(boxW < 480); }}>
       <View ref={hostRef} style={s.host} />
       {/* Compact: ⤢ top-left opens the map full screen; the box itself pans and zooms in place. */}
-      {/* «رجوع» under the top-left button, only once zoomed in (owner 2026-10-31: «a button that allows the user to go
-          back»): returns to the view before the last jump, and with none left, to the whole Kingdom. */}
-      {zoomed && !failed && !drawing ? (
-        <Pressable style={s.backBtn} onPress={goBack} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Back')} testID="map-back">
-          <Ionicons name="arrow-undo-outline" size={19} color={colors.ink} />
+      {onExpand && !failed && !drawing ? (
+        <Pressable style={[s.closeBtn, s.closeBtnRight]} onPress={() => { closePanels(); onExpand(); openFull(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+          <Ionicons name="expand-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
-      {onExpand && !failed && !drawing ? (
-        <Pressable style={[s.closeBtn, s.closeBtnLeft]} onPress={() => { closePanels(); onExpand(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
-          <Ionicons name="expand-outline" size={20} color={colors.ink} />
+      {onExpand && expandHint && !failed && !drawing && roomy && !(narrow && zoomed) ? (
+        <Pressable style={[s.expandHint, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row' }]} onPress={() => { closePanels(); onExpand(); openFull(); }} accessibilityRole="button" accessibilityLabel={t('Tap to open the full map')} testID="map-expand-hint">
+          <Text style={s.expandHintT}>{t('Tap to open the full map')}</Text>
+          <Ionicons name="arrow-forward" size={16} color={colors.surface} />
         </Pressable>
       ) : null}
       {/* Drawing: this layer takes the pointer instead of the map. */}
       {drawing ? <View ref={padRef} style={s.drawPad} testID="map-draw-pad" /> : null}
       {drawing ? (
-        <View style={s.drawBar} testID="map-draw-bar">
+        <View style={[s.drawBar, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row' }]} testID="map-draw-bar">
+          {/* «تطبيق» on the right, «إلغاء» on the left, in both languages (owner 2026-11-12: «replace them both»). */}
           <Pressable style={s.drawBarBtn} onPress={cancelDrawing} hitSlop={8} accessibilityRole="button"><Text style={s.drawBarT}>{t('Cancel')}</Text></Pressable>
           <Text style={s.drawBarTitle}>{t('Draw an area')}</Text>
           <Pressable style={s.drawBarBtn} onPress={applyDrawing} disabled={!sketch} hitSlop={8} accessibilityRole="button" accessibilityState={{ disabled: !sketch }} testID="map-draw-apply">
@@ -1194,7 +1369,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       ) : null}
-      {roomy ? <View style={[s.topRight, onClose && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
+      {/* Corners (owner 2026-11-11): ⤢ / ✕ top-RIGHT, «رسم» top-LEFT — in the small box and full screen alike. */}
+      {roomy ? <View style={[s.topRight, (onClose || onExpand) && !drawing ? s.topRightAsLeft : s.topRightAt]} pointerEvents="box-none">
+      {locale === 'ar' ? null : backEl}
       {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
           becomes «إزالة المسار ✕». */}
       {onRoute && !failed && !drawing ? (
@@ -1214,6 +1391,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           {hasShape ? <Ionicons name="close" size={17} color={colors.primary} /> : null}
         </Pressable>
       ) : null}
+      {locale === 'ar' ? backEl : null}
       </View> : null}
       {/* + / − above the layers button, same column. */}
       {roomy && !failed && !drawing ? (
@@ -1262,8 +1440,63 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       {!drawing && pinCount === 'failed' ? (
         <Pressable style={s.countPill} onPress={() => retryPinsRef.current?.()} accessibilityRole="button" testID="map-pin-retry"><Text style={s.countPillT}>{t('Couldn’t load the listings here. Try again')}</Text></Pressable>
       ) : null}
-      {!drawing && typeof pinCount === 'number' ? (
-        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}</Text></View>
+      {!drawing && typeof pinCount === 'number' ? (() => {
+        const loc = locale === 'ar' ? 'ar' : 'en';
+        const typePicked = !!(pinFilter?.types?.length || pinFilter?.scope?.types2?.length);
+        const saleOnly = (pinFilter?.deals ?? []).length === 1 && pinFilter?.deals[0] === 'buy';
+        const box = factBox(viewFacts, hasShape ? pinCount : placeCount ?? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape);
+        const locked = box.kind === 'locked';
+        // the card is for the box's own ads: the live box, or the named district (a city or a sum of districts has none)
+        const target: CardTarget | null = box.kind !== 'chips' || !pinFilter ? null
+          : factsPlace ? (factsPlace.level === 'district' ? { kind: 'district', city: factsPlace.city, district: factsPlace.district, deals: pinFilter.deals } : null)
+          : factsBox ? { kind: 'box', box: factsBox, filter: pinFilter } : null;
+        const openCard = () => {
+          if (!target) return;
+          setCardLoadFailed(false);
+          if (!CardComp) {
+            void import('@/components/MapFactsCard').then((m) => setCardComp(() => m.default)).catch((e: unknown) => {
+              reportError(e, { where: 'map card module download (import MapFactsCard)' });
+              setCardLoadFailed(true);
+            });
+          }
+          setCardTarget(target);
+        };
+        return (
+          <View style={[s.countPill, box.kind !== 'none' && s.countPillTall]} pointerEvents={locked || target ? 'box-none' : 'none'} testID="map-pin-count">
+            <Text style={s.countPillT}>
+              {hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}
+              {box.kind === 'chips' ? <Text style={s.factWindow}>{`  · ${factsWindowLabel(loc)}`}</Text> : null}
+            </Text>
+            {/* SMALL (owner 2026-11-13: «the box is very very big»): one line of small words, never boxed chips */}
+            {box.kind === 'chips' ? (
+              <Pressable onPress={openCard} disabled={!target} accessibilityRole="button" accessibilityLabel={loc === 'ar' ? 'عرض التفاصيل' : 'Show details'} testID="map-pin-facts-open">
+              <Text style={s.factLine} testID="map-pin-facts">
+                {box.chips.map((c, i) => (
+                  <Text key={c.text}>{i > 0 ? <Text style={s.factSep}>{' · '}</Text> : null}<Text style={[c.tone === 'up' && s.factUp, c.tone === 'down' && s.factDown]}>{c.text}</Text></Text>
+                ))}
+                {box.hint ? <Text style={s.factHint}>{box.chips.length ? ` · ${box.hint}` : box.hint}</Text> : null}
+                {target ? <Text style={s.factSep}>{loc === 'ar' ? '  ‹' : '  ›'}</Text> : null}
+              </Text>
+              </Pressable>
+            ) : null}
+            {/* a guest: only the small gold ask — no blurred row (the server never sends a guest a number) */}
+            {box.kind === 'locked' ? (
+              <Pressable onPress={() => openAuth()} accessibilityRole="button" accessibilityLabel={lockedAsk(loc)} testID="map-pin-facts-locked">
+                <Text style={s.factAsk}>{lockedAsk(loc)}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        );
+      })() : null}
+      {cardTarget && !CardComp && cardLoadFailed ? (
+        <Pressable style={s.cardFail} onPress={() => { setCardLoadFailed(false); void import('@/components/MapFactsCard').then((m) => setCardComp(() => m.default)).catch((e: unknown) => { reportError(e, { where: 'map card module download (retry)' }); setCardLoadFailed(true); }); }}
+          accessibilityRole="button" testID="map-card-load-failed">
+          <Text style={s.cardFailT}>{locale === 'ar' ? 'تعذر فتح التفاصيل، اضغط للمحاولة مرة أخرى' : 'The details could not open. Tap to try again.'}</Text>
+        </Pressable>
+      ) : null}
+      {cardTarget && CardComp ? (
+        <CardComp target={cardTarget} signedIn={!!user} loc={locale === 'ar' ? 'ar' : 'en'} onClose={() => setCardTarget(null)} onSignIn={() => openAuth()}
+          title={`${viewPlace ?? (locale === 'ar' ? 'هذه المنطقة' : 'This area')}${pinFilter?.deals.length === 1 ? (locale === 'ar' ? (pinFilter.deals[0] === 'buy' ? ' · للبيع' : ' · للإيجار') : (pinFilter.deals[0] === 'buy' ? ' · for sale' : ' · for rent')) : ''}`} />
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
@@ -1273,6 +1506,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
 const s = StyleSheet.create({
   countPill: { position: 'absolute', left: 12, bottom: 12, backgroundColor: 'rgba(36,35,43,0.86)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   countPillT: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  // stays clear of the round buttons on the right (owner 2026-11-13: «the box is very very big»)
+  countPillTall: { borderRadius: 12, maxWidth: '64%', paddingVertical: 6 },
+  factWindow: { color: '#bbb', fontSize: 11, fontWeight: '600' },
+  factLine: { color: '#fff', fontSize: 11.5, fontWeight: '600', marginTop: 2, lineHeight: 16 },
+  factSep: { color: '#888' },
+  factUp: { color: '#FF9B8A' },
+  factDown: { color: '#7FE3A0' },
+  factHint: { color: '#ccc', fontWeight: '500' },
+  factAsk: { color: '#FAC775', fontSize: 11.5, fontWeight: '700', marginTop: 2 },
+  cardFail: { position: 'absolute', left: 12, right: 12, bottom: 12, backgroundColor: '#fff', borderRadius: 12, padding: 14 },
+  cardFailT: { color: '#1f1e24', fontSize: 13, fontWeight: '600', textAlign: 'center' },
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
@@ -1304,9 +1548,14 @@ const s = StyleSheet.create({
   hint: { position: 'absolute', top: 60, left: 0, right: 0, alignItems: 'center' },
   hintT: { fontFamily: font.family.medium, fontSize: 13, color: colors.ink, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, overflow: 'hidden', borderWidth: 1, borderColor: colors.tintLine },
   backBtn: {
-    position: 'absolute', top: 56, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
+    width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
+  expandHint: {
+    position: 'absolute', top: 12, right: 56, height: 36, flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, borderRadius: 18, backgroundColor: colors.primary,
+  },
+  expandHintT: { fontFamily: font.family.bold, fontSize: 13, color: colors.surface },
   closeBtn: {
     position: 'absolute', top: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,

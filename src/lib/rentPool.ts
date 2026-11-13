@@ -2,7 +2,8 @@
 // executes every function here, and the DB mirror (public.rent_pool_ar in supabase/migrations) carries the same
 // truth table — the search index decides the pool with it, and this file decides what the card says about it.
 //
-//   «إقامات قصيرة» (Short stays) = Gathern + Aqar Monthly ONLY — stays shorter than a year, priced by length of stay.
+//   «إقامات قصيرة» (Short stays) = Gathern + Aqar Monthly — stays shorter than a year, priced by length of stay —
+//                                  plus any row whose seller states a daily/weekly rent (Haraj, 2026-11-10, below).
 //   «سنوي» (Yearly)             = every other platform's rent listing with a published period. A site that quotes
 //                                  PER MONTH is a yearly listing at ×12 (price_annual is already stored as monthly×12),
 //                                  and the card still shows the site's own words: «السعر المعلن 3,000 شهرياً».
@@ -24,6 +25,11 @@ export const SHORT_STAY_TABLE_RE = /^(gathern|aqarmonthly)(_|$)/;
 // name (`Aqar Monthly`, `Gathern`): spaces dropped, case ignored, so the three spellings agree.
 export const isShortStayTable = (tableOrPlatformOrSource: string): boolean =>
   SHORT_STAY_TABLE_RE.test(String(tableOrPlatformOrSource || '').replace(/\s+/g, '').toLowerCase());
+// A SHORT STAY THE SELLER STATES, on any other site (owner 2026-11-10, backlog 1744): Haraj stores the seller's own
+// word — «للإيجار اليومي» → rent_period 'daily', «التأجير الأسبوعي» → 'weekly' (scrapers/haraj/prose.py
+// short_stay_rent(); price_annual NULL, never ×12) — and that ROW joins «إقامات قصيرة». SQL mirror: rent_pool_ar().
+export const SHORT_STAY_PERIODS = ['daily', 'weekly'] as const;
+const isShortStayPeriod = (p: string) => (SHORT_STAY_PERIODS as readonly string[]).includes(p);
 
 export type RentPool = 'monthly' | 'annual' | null;
 
@@ -44,6 +50,7 @@ export function rentPool(sourceTable: string, sourceRentPeriod: string | null | 
   priceAnnual?: unknown, cleanType?: string | null): RentPool {
   if (isShortStayTable(sourceTable)) return 'monthly';
   const p = String(sourceRentPeriod ?? '').trim().toLowerCase();
+  if (isShortStayPeriod(p)) return 'monthly';
   if (p === 'annual' || p === 'monthly') return 'annual';
   // SILENT = the column is NULL/absent — exactly what the index trigger judges. An empty or unknown WORD is not
   // silent: the index leaves it alone, so the card must too (the parity enumeration in verify-short-stays-pool.ts).
@@ -95,7 +102,7 @@ export function advertisedMonthly(pool: RentPool, sourceRentPeriod: string | nul
 // dropping a row the count already included (10-31: «111 نتيجة» with 21 judged rows the old clause would drop).
 export function cardFetchPeriodOr(pool: 'monthly' | 'annual' | 'both', sourceTable: string): string | null {
   const shortStay = isShortStayTable(sourceTable);
-  if (pool === 'monthly') return shortStay ? null : 'rent_period.eq.monthly,price_annual.is.null';
+  if (pool === 'monthly') return shortStay ? null : 'rent_period.in.(monthly,daily,weekly),price_annual.is.null';
   if (pool === 'annual') return shortStay ? 'rent_period.eq.annual,price_annual.is.null' : 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null';
-  return shortStay ? null : 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null';
+  return shortStay ? null : 'rent_period.in.(monthly,annual,daily,weekly),rent_period.is.null,price_annual.is.null';
 }
