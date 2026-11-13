@@ -329,7 +329,7 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "horses_stable": ["^خيل$", "^خيول$", "^اسطبل", "^اصطبل", "re:ركوب (?:ال)?خيل", "horse riding", "horse stable", "stables"],   # bare «stable» is «stable returns» (P2 13085, 2026-11-08)
     # «جمال» alone is beauty — only «ركوب الجمال»
     "camels": ["re:(?:(?<= )|^)(?:و|ال|وال|بال)?ابل(?!\\w)", "^هجن$", "re:ركوب (?:ال)?(?:جمال|ابل|هجن)", "camels"],
-    "toilets_on_site": ["re:دورات (?:ال)?مياه", "re:دوره (?:ال)?مياه", "^حمامات", "^حمام$", "toilets"],
+    "toilets_on_site": ["re:دورات (?:ال)?مياه", "re:دوره (?:ال)?مياه", "re:دورت(?:ين|ي|ا) (?:ال)?مياه", "^حمامات", "^حمام$", "toilets"],
     "lighting": ["^اناره", "^اضاءه", "^انارات", "lighting"],
     "artesian_well": ["re:(?:بئر|بير) ارتوازي", "^ارتوازي", "re:ابار ارتوازيه", "artesian"],
     "solar_power": ["re:طاقه شمسيه", "re:الواح شمسيه", "re:خلايا شمسيه", "solar"],
@@ -743,7 +743,8 @@ _ROAD_NAMED = frozenset(_n(w) for w in ("الدائري", "السريع", "ال�
                                         "المسمى", "المسمي"))   # «الطريق المسمى طريق الملك فهد» (CodeRabbit on #11820)
 _VIEW_WORDS = frozenset(_n(w) for w in ("مطل", "مطله", "تطل", "يطل", "اطلاله", "باطلاله", "overlooking", "views"))
 _UNIT_ROOMS = frozenset({"kitchen", "balcony", "maid_room", "driver_room", "laundry_room", "majlis", "dining_majlis", "elevator",
-                         "storage", "roof", "annex", "furnished", "two_entrances", "private_entrance", "car_entrance"})
+                         "storage", "roof", "annex", "furnished", "two_entrances", "private_entrance", "car_entrance",
+                         "toilets_on_site"})   # «غرفه مطله للحوش) عدد (۳) دورات مياه» (aqar 15126306, CodeRabbit #11820)
 # A NEARBY LIST item names a PLACE (🔬 2026-11-04 café audit): «Close to shops, restaurants, and markets». The list ends at
 # the first item that is not a place — DealApp's REGA list «مصعد ، قريب من الخدمات ، نوافذ زجاج ، موقف سيارات» goes on
 # with the unit's own features — and it only ever silences the public places of _NEAR_PUBLIC_FACTS (never parking).
@@ -2971,6 +2972,9 @@ def selftest() -> None:
         ("مخازن وحديقة خاصة. ☀️ الدور الأول: صالة عائلية", {"garden": True}, ()),                          # aqar 18338000
         ("فيلا على شارع وبها حديقة خاصة", {"garden": True}, ()),                                           # CodeRabbit on #11820
         ("فيلا على شارع وحديقة خاصة", {"garden": True}, ()),
+        ("٣ غرف وصاله ٢ دورتين مياه مطبخ", {"toilets_on_site": True}, ()),                      # CodeRabbit on #11820
+        ("3 غرف نوم دورتا مياه صالة واحدة", {"toilets_on_site": True}, ()),
+        ("(ومنهم غرفه مطله للحوش) عدد (۳) دورات مياه. + بلكونه", {"toilets_on_site": True, "balcony": True}, ()),
         ("غرف مناسبات واسعة", {}, ("for_events",)),                                              # CodeRabbit on #11820
         ("قريب من المسجد، حديقة المبنى الآخر، بقالة", {}, ("garden", "market")),                 # CodeRabbit on #11820
         ("كل خدمات الشقة منفصلة", {}, ("all_services",)),
