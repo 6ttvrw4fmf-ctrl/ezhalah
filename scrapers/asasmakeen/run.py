@@ -55,6 +55,7 @@ from scrapers.common.arabic_location import catalog_district, resolve  # noqa: E
 from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
+from scrapers.common.http_liveness import stored_listing_url  # noqa: E402
 
 PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance", "furnished", "balcony_terrace", "laundry_room")
 SOURCE = "Asas Makeen"
@@ -286,7 +287,10 @@ def main() -> int:
                 continue
             row, why = map_unit(uid, url, u, w["projects"].get(u["project"]))
             (rows.append(row) if row else skipped.update([why]))
-        ok = not w["limited"] and not w["bad"] and len(w["units"]) == w["listed"] > 0
+        # A sitemap unit whose OWN page answers 404/410 is a removed ad, not an unreadable walk: it must not freeze every
+        # prune (the mrajhi lesson of 2026-11-07; ♻️ 2026-11-13). Any other bad page still makes the walk incomplete.
+        gone404 = w["bad"].get("gone_404", 0)
+        ok = not w["limited"] and not (set(w["bad"]) - {"gone_404"}) and len(w["units"]) + gone404 == w["listed"] > 0
         cover = {"sitemap": w["listed"], "read": w["read"], "parsed": len(w["units"]), "bad": dict(w["bad"]),
                  "complete": ok, "offplan_projects": sorted(off),
                  "project_pins": sum(1 for p in w["projects"].values() if p["pin"]), "projects_read": len(w["projects"])}
@@ -300,6 +304,7 @@ def main() -> int:
         db.upsert_asasmakeen_residential_batch(rows)
         db.upsert_asasmakeen_offplan(offplan)
         note = f"coverage {json.dumps(cover, ensure_ascii=False)}; offplan={len(offplan)}; "
+        _GONE[0] = _make_gone(next((r["listing_url"] for r in rows), None))
         if rows and ok:
             note += f"pruned={db.prune_unseen(RES_TABLE, {r['ad_number'] for r in rows}, source=SOURCE, verify_gone=_gone)}"
         else:
@@ -317,11 +322,49 @@ def main() -> int:
         raise
 
 
+def _page(url: str) -> tuple[Optional[int], str]:
+    """The ad page's own HTTP status and body (honest client, its 1 s gap); (None, "") when unreadable or walled."""
+    try:
+        r = H.request("GET", url, allowed=_allowed, accept="text/html")
+        return r.status_code, r.text or ""
+    except H.Blocked as e:
+        m = re.search(r"HTTP (404|410) at ", str(e))
+        return (int(m.group(1)), "") if m else (None, "")
+    except Exception:  # noqa: BLE001 — unreadable is no opinion
+        return None, ""
+
+
+def _make_gone(control_url: Optional[str], page=_page, url_for=None):
+    """prune_unseen's answer at grace, from the ad's OWN page (LISTING_LIVENESS.md §2; ♻️ 2026-11-13). Until today it
+    held every candidate UNKNOWN, so ASM2676 (24218552) sat at 3 strikes, served, while its page answered 404 to the
+    09:05 dead-visible score (2 of 10 sampled gone). 404/410 is gone, 200 WITH the unit block is live, anything else
+    (a 200 shell, a wall, a timeout) is unknown — and a removal counts only while this run's control unit reads live."""
+    memo: dict[str, bool] = {}
+    url_for = url_for or stored_listing_url((RES_TABLE,))
+
+    def gone(ad_number: str) -> tuple[str, str]:
+        url = url_for(ad_number)
+        if not url or not url.startswith(SITE + UNIT_PATH):
+            return "unknown", f"{ad_number!r} has no stored {SITE}{UNIT_PATH} page to read"
+        st, body = page(url)
+        if st == 200 and parse_unit(body) is not None:
+            return "live", f"{url} answers 200 with its unit block"
+        if st not in (404, 410):
+            return "unknown", f"{url} answered {st}" + (" without a unit block" if st == 200 else "")
+        if "v" not in memo:
+            cst, cbody = page(control_url) if control_url else (None, "")
+            memo["v"] = cst == 200 and parse_unit(cbody) is not None
+        if not memo["v"]:
+            return "unknown", f"{url} answers {st} but the control {control_url} did not read live"
+        return "gone", f"{url} answers HTTP {st} (control {control_url} live)"
+    return gone
+
+
+_GONE = [_make_gone(None)]          # main() binds this run's control before any prune
+
+
 def _gone(ad_number: str) -> tuple[str, str]:
-    """prune_unseen's answer at grace. Absence from a list is a CANDIDATE, never a kill (LISTING_LIVENESS.md §2:
-    only a DIRECT reading of the ad's own page may deactivate). Until this site has a measured own-page oracle the
-    strike is held: UNKNOWN. ♻️ 2026-11-06 — it used to return «gone» here, an absence-only kill."""
-    return "unknown", "absent from 3 consecutive COMPLETE walks of the site's own unit sitemap; no own-page oracle yet — held (absence never kills)"
+    return _GONE[0](ad_number)
 
 
 if __name__ == "__main__":
