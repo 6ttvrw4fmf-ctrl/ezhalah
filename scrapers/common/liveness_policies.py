@@ -617,7 +617,7 @@ POLICIES: dict[str, _P] = {
         "Measured 2026-09-24: gone 24916/1/99999999 → 404 (3/3); sold 48506/45942/44329, "
         "unavailable 39450/26004, reserved 48840/36684 → 200 with that status (7/7); live "
         "24915/42818/52519 → 200 available (3/3). Every row built from its own record carries the "
-        "direct-alive stamp. This file is also the engine m3tmd and senan import."),
+        "direct-alive stamp. This file is also the engine m3tmd imports."),
     "m3tmd": _P(
         _pol("m3tmd", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the same engine as jawher (scrapers/jawher/run.py::make_verify_gone on this tenant's host): "
@@ -643,15 +643,17 @@ POLICIES: dict[str, _P] = {
         "last_verified_alive_at of its own meanwhile."),
     "senan": _P(
         _pol("senan", 3, 168), CANDIDATE_PLUS_DIRECT,
-        "the same engine as jawher (scrapers/jawher/run.py::make_verify_gone on this tenant's host): "
-        "the record's own API detail route — a 404 JSON with a «message» is GONE; a 200 for THIS id "
-        "is LIVE only while availability_status == available, otherwise GONE (a sold unit stays "
-        "published with a «مباعة» badge); another record, an unparseable body and 401/403/429/5xx "
-        "are UNKNOWN; canary-gated (fails CLOSED), after a complete enumeration only.",
-        "Measured 2026-09-24 on this host: gone 44629 (archived, 404 with an empty message) / 1 / "
-        "99999999 → 404 JSON (3/3); sold 41223/41222/44628 and unavailable 44610/44591/44579 → 200 "
-        "with that status (6/6); live 44630/45254/41522 → 200 available (3/3). Every row built "
-        "from its own record carries the direct-alive stamp."),
+        "the project's OWN page (scrapers/senan/run.py::_make_signal; the site left the Nuzul platform on "
+        "2026-11-12 for a static site of nine project pages): a 404 carrying the host's own «This Page Does "
+        "Not Exist» page is GONE; a 200 whose #property JSON-LD names THIS page's url is LIVE only while the "
+        "visible «الحالة» says «متاح» and the offer says InStock, otherwise GONE (sold out / back to "
+        "pre-booking); a 200 naming another url, a page with no property JSON-LD, a bare 404 and "
+        "401/403/429/5xx are UNKNOWN; canary-gated (fails CLOSED), after a complete index only (the "
+        "projects page and the sitemap list the same project pages).",
+        "Measured 2026-11-12 on this host: an unknown path (/projects/nope.html) → 404 «This Page Does Not "
+        "Exist»; the six «متاح» projects → 200 with their own #property JSON-LD and InStock; the 57 old "
+        "Nuzul units → 404 on page AND API (57/57 each), retired by migration with that evidence. Every "
+        "row built from its own page carries the direct-alive stamp."),
     "goldendeal": _P(
         _pol("goldendeal", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the Nuzul tenant's own API record GET goldendeal.nzl-backend.com/api/public/properties/"
@@ -1175,7 +1177,7 @@ POLICIES: dict[str, _P] = {
     "asasmakeen": _P(
         _pol("asasmakeen", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's unit sitemap (sitemap-units-ar.xml), every listed page read; run.py prunes only when every page answered with a unit block.",
-        "An oracle is possible (a removed unit should leave the sitemap and its page) but is not written; the sitemap + every page read IS this run's check."),
+        "2026-11-13: the ad's OWN page decides at grace (run.py::_make_gone — 404/410 gone, 200 with its unit block live, else unknown, control-gated); a sitemap unit whose page 404s no longer freezes every prune (ASM2676 was served at 3 strikes while its page answered 404)."),
     "mrajhi": _P(
         _pol("mrajhi", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's sitemap.xml /units/ pages, every page read and its JSON-LD parsed; run.py prunes only when every page answered (a page answering 404 counts as read: the ad is gone).",

@@ -120,7 +120,9 @@ await mustCatch('a fallback to today\'s date — an invention that even looks pr
 // either half of this changed, the mapping-layer fix would no longer be the load-bearing one.
 const card = readFileSync(join(ROOT, 'src/components/ResultCard.tsx'), 'utf8');
 check('ResultCard still hides the chip entirely when the date is empty (this fix relies on it)',
-  /\{listedClean \?/.test(card));
+  // 2026-11-13: two branches («اليوم» words or the «أضيف» date) — each still gated on listedClean.
+  /\{listedClean && listedAgo \?/.test(card) && /\{listedClean && !listedAgo \?/.test(card)
+  && !/\{listedAgo \?/.test(card));
 check('…and cleanDate still maps a «recently»/«مؤخر» string to a VISIBLE chip — so the card cannot ' +
       'tell a fabricated sentinel from a real source claim, which is why the mapping must not make one',
   // The first alternative here used to be /recently\\s\*\$\|مؤخر/ — an escaped literal matching the

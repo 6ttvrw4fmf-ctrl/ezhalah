@@ -89,6 +89,7 @@ const summaries = await liftSymbols(join(root, 'src/data/search.ts'), [
   {header: 'function locationLines('}, {header: 'export function searchSummary('},
 ], ['searchSummary'], `
 import { furnishingLabelKey } from ${JSON.stringify(join(root, 'src/lib/furnishingWords.ts'))};
+import { postedPhrase, postedWindowLabel, postedWindowParam } from ${JSON.stringify(join(root, 'src/lib/postedWindows.ts'))};
 type Locale = 'ar' | 'en'; type SearchQuery = any;
 const getLocale = () => 'ar'; const translate = (loc: string, key: string) => loc + ':' + key;
 const tWord = translateWord; const tPlace = translateWord; const tPriceTab = translateWord; const tDetailOption = translateWord;

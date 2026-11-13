@@ -78,6 +78,33 @@ const HINT = (src: string) => /testID="map-expand-hint"/.test(src) && /onExpand 
 check('a hint with an arrow points at ⤢, opens the map when tapped, and stops once the big map was opened', HINT(web));
 mustCatch('a hint that never goes away (⤢ forgets to remember it was opened)', !HINT(web.replace("onPress={() => { closePanels(); onExpand(); openFull(); }} hitSlop={8}", "onPress={() => { closePanels(); onExpand(); }} hitSlop={8}")));
 
+// 3e. The arrow is at the pill's RIGHT end, beside ⤢, in Arabic too (owner 2026-11-11: «the arrow … is opposite»).
+// An Arabic page starts 'row' at the right, so text-then-arrow needs 'row-reverse' there to put the arrow last on the right.
+const ARROW = (src: string) => /<Pressable style=\{\[s\.expandHint, \{ flexDirection: locale === 'ar' \? 'row-reverse' : 'row' \}\]\}/.test(src)
+  && /\{t\('Tap to open the full map'\)\}<\/Text>\s*<Ionicons name="arrow-forward"/.test(src);
+check('the hint\'s arrow sits beside ⤢ and points at it, in Arabic and English', ARROW(web));
+mustCatch('the arrow back on the far side of the text in Arabic', !ARROW(web.replace("flexDirection: locale === 'ar' ? 'row-reverse' : 'row'", "flexDirection: 'row'")));
+
+// 3f. «رجوع» sits in the top row BEFORE «رسم» — on its left, at the corner — in both languages (owner 2026-11-11:
+// «make the button back top left beside it draw», then «the back button should be before the draw»). An RTL row
+// starts at the right, so Arabic renders it LAST to land on the left. The hint steps aside on a phone-width box.
+const BACK = (src: string) => /const backEl = zoomed && !failed && !drawing \?/.test(src)
+  && /pointerEvents="box-none">\n\s*\{locale === 'ar' \? null : backEl\}/.test(src)
+  && /\{locale === 'ar' \? backEl : null\}\n\s*<\/View> : null\}/.test(src)
+  && !/backBtn: \{\s*position: 'absolute'/.test(src)
+  && /roomy && !\(narrow && zoomed\)/.test(src);
+check('«رجوع» sits beside «رسم» in the top row, and the hint never covers it on a phone', BACK(web));
+mustCatch('«رجوع» floating on its own again under «رسم»', !BACK(web.replace("backBtn: {\n    width: 36,", "backBtn: {\n    position: 'absolute', top: 56, left: 12, width: 36,")));
+mustCatch('«رجوع» after «رسم» again', !BACK(web.replace("{locale === 'ar' ? null : backEl}", 'X').replace("{locale === 'ar' ? backEl : null}", "{locale === 'ar' ? null : backEl}").replace('X', "{locale === 'ar' ? backEl : null}")));
+mustCatch('the hint shown over «رسم» + «رجوع» on a phone', !BACK(web.replace('roomy && !(narrow && zoomed)', 'roomy')));
+
+// 3g. The draw bar: «تطبيق» on the right and «إلغاء» on the left in both languages (owner 2026-11-12: «replace them
+// both»). The children stay Cancel → title → Apply; an RTL row starts at the right, so Arabic reverses it.
+const DRAWBAR = (src: string) => /<View style=\{\[s\.drawBar, \{ flexDirection: locale === 'ar' \? 'row-reverse' : 'row' \}\]\} testID="map-draw-bar">\s*(?:\{\/\*[^\n]*\*\/\}\s*)?<Pressable style=\{s\.drawBarBtn\} onPress=\{cancelDrawing\}/.test(src)
+  && /\{t\('Draw an area'\)\}<\/Text>\s*<Pressable style=\{s\.drawBarBtn\} onPress=\{applyDrawing\}/.test(src);
+check('the draw bar puts «تطبيق» on the right and «إلغاء» on the left, in Arabic and English', DRAWBAR(web));
+mustCatch('«إلغاء» back on the right in Arabic', !DRAWBAR(web.replace("[s.drawBar, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row' }]", 's.drawBar')));
+
 // 4. The database half (the committed migration production runs).
 const dir = join(root, 'supabase/migrations');
 const file = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().reverse()

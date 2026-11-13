@@ -73,7 +73,7 @@ const fullCards = (src: string) => /\{others\.map\(\(o\) => \(\s*<ResultCard key
 mustCatch('the other site shown as a small link button again', fullCards(sheet) && !fullCards(sheet.replace(/(\{others\.map\(\(o\) => \(\s*)<ResultCard/, '$1<Pressable testID="map-pin-sheet-also-chip"')));
 check('every other ad is a full ResultCard, so its price goes through listingPrice() like every card (stay-length sites print none)', /\{others\.map\(\(o\) => \(\s*<ResultCard /.test(sheet));
 check('a card without index facts has no site to match on', /site: l\.fold \? l\.source : ''/.test(sheet));
-check('the cards read the licence, deal, type, size, price and floor from the index', /license_number,deal_ar,type_ar,area_m2,price_total,price_annual,floor_number/.test(remote) && /r\.fold = foldById\.get\(Number\(r\.id\)\);/.test(remote));
+check('the cards read the licence, deal, type, size, price and floor from the index', /license_number,deal_ar,type_ar,area_m2,price_total,price_total_effective,price_annual,floor_number/.test(remote) && /r\.fold = foldById\.get\(Number\(r\.id\)\);/.test(remote));
 
 // 6. The SQL half: the committed migration production runs.
 const dir = join(root, 'supabase/migrations');

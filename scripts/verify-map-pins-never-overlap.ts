@@ -131,7 +131,7 @@ const dropPrice = real.replace('    price: lo.length ? Math.min(...lo) : null, p
 mustCatch('a joined head that drops its price (it would read «السعر عند الطلب» over priced ads)', dropPrice !== real && (await sweep(dropPrice)).priced > 0);
 const highest = real.replace('    price: lo.length ? Math.min(...lo) : null, platform: null,', '    price: hi.length ? Math.max(...hi) : null, platform: null,');
 mustCatch('a joined head that shows the highest price instead of the lowest', highest !== real && (await sweep(highest)).priced > 0);
-const xOnly = real.replace('&& Math.abs(a.y - b.y) < PIN_H_PX + PIN_GAP_PX;', '&& Math.abs(a.y - b.y) < 2;');
+const xOnly = real.replace('&& Math.abs(a.y - b.y) < ((a.h ?? PIN_H_PX) + (b.h ?? PIN_H_PX)) / 2 + PIN_GAP_PX;', '&& Math.abs(a.y - b.y) < 2;');
 mustCatch('heads stacked on top of each other (a few px apart vertically) not counted as touching', xOnly !== real && (await sweep(xOnly)).touching > 0);
 const noGap = real.replace('export const PIN_GAP_PX = 4;', 'export const PIN_GAP_PX = -12;');
 mustCatch('heads allowed to overlap by a little (no air left for a finger)', noGap !== real && (await sweep(noGap)).touching > 0);

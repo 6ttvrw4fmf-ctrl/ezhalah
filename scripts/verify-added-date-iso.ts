@@ -105,7 +105,11 @@ check('cleanDate() does not construct a Date (no timezone drift)',
 // ── 4. the chip is still gated on cleanDate's output ────────────────────────────────────────────
 check('the «أضيف» chip still renders from listedClean = cleanDate(listing.listed)',
       /const listedClean = cleanDate\(listing\.listed\);/.test(CARD)
-      && /\{listedClean \? <Stat icon="calendar-outline" big=\{t\('Added'\)\} small=\{listedClean\} \/> : null\}/.test(CARD));
+      // 2026-11-13: a recent date reads «اليوم / قبل ٣ أيام» (src/lib/listedAgo.ts), an older one keeps the «أضيف» chip —
+      // BOTH branches render only from listedClean, so an ISO date still reaches the card either way.
+      && /\{listedClean && listedAgo \? <View style=\{card\.agoPill\}/.test(CARD)
+      && /\{listedClean && !listedAgo \? <Stat icon="calendar-outline" big=\{t\('Added'\)\} small=\{listedClean\} \/> : null\}/.test(CARD)
+      && /const listedAgo = listedAgoText\(listedClean,/.test(CARD));
 check("i18n renders «أضيف» for 'Added'", /'Added':\s*'أضيف'/.test(I18N));
 
 // ── mutation proofs (added 2026-09-04 by routine #10, leaving the grandfather list) ─────────────

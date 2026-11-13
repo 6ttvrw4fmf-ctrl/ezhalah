@@ -14,8 +14,13 @@ export type MapFilterState = {
   furnished: boolean | null;
   areaMin: string; areaMax: string;
   priceMin: string; priceMax: string;
+  /** «نُشر خلال» — the Filter home's row, copied (owner 2026-11-11): published within N days by the site's own date. */
+  postedWithinDays?: number | null;
 };
-export const EMPTY_MAP_FILTER: MapFilterState = { category: null, groups: [], types: [], beds: [], furnished: null, areaMin: '', areaMax: '', priceMin: '', priceMax: '' };
+export const EMPTY_MAP_FILTER: MapFilterState = { category: null, groups: [], types: [], beds: [], furnished: null, areaMin: '', areaMax: '', priceMin: '', priceMax: '', postedWithinDays: null };
+
+/** «نُشر خلال» applies to every deal but short stays (owner 2026-11-11): the row hides when «إقامات قصيرة» is shown. */
+export const postedOffered = (deals: readonly string[]): boolean => !deals.includes('short');
 
 export const digits = (v: string): string => v.replace(/[^\d]/g, '').slice(0, 10);
 export const num = (v: string): number | null => { const d = digits(v); const n = Number(d); return d && Number.isFinite(n) && n > 0 ? n : null; };
@@ -62,6 +67,7 @@ export function pinFilterOf(f: MapFilterState, typeAr: (groups: string[]) => str
     areaMin: num(f.areaMin), areaMax: num(f.areaMax),
     priceMin: num(f.priceMin), priceMax: num(f.priceMax),
     furnished: f.furnished != null && furnitureOffered(deals, f.category) ? f.furnished : null,
+    postedWithinDays: f.postedWithinDays != null && postedOffered(deals) ? f.postedWithinDays : null,
     ...(sc ? { scope: { tables: sc.tables, tables2: sc.tables2, types2: sc.types2, macro: sc.macro } } : {}),
   };
 }
@@ -69,5 +75,5 @@ export function pinFilterOf(f: MapFilterState, typeAr: (groups: string[]) => str
  *  bedroom count, the furniture choice, and the area and the price as one each. Shown on the map's Filter button. */
 export const filterCount = (f: MapFilterState): number =>
   (f.category ? 1 : 0) + f.groups.length + (f.types ?? []).length + f.beds.length + (f.furnished != null ? 1 : 0)
-  + (num(f.areaMin) || num(f.areaMax) ? 1 : 0) + (num(f.priceMin) || num(f.priceMax) ? 1 : 0);
-export const isNarrowed = (f: MapFilterState): boolean => !!(f.category || f.groups.length || (f.types ?? []).length || f.furnished != null || f.beds.length || num(f.areaMin) || num(f.areaMax) || num(f.priceMin) || num(f.priceMax));
+  + (num(f.areaMin) || num(f.areaMax) ? 1 : 0) + (num(f.priceMin) || num(f.priceMax) ? 1 : 0) + (f.postedWithinDays != null ? 1 : 0);
+export const isNarrowed = (f: MapFilterState): boolean => !!(f.category || f.groups.length || (f.types ?? []).length || f.furnished != null || f.postedWithinDays != null || f.beds.length || num(f.areaMin) || num(f.areaMax) || num(f.priceMin) || num(f.priceMax));

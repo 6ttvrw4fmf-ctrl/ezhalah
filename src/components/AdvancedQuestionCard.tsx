@@ -495,9 +495,9 @@ export default function AdvancedQuestionCard({
               <Image source={BRAND_IMAGES[brandImage]} style={s.brandImg} contentFit="contain" />
               {/* PAYMENT DISCLAIMER (owner 2026-11-02): the strip says these providers EXIST, never that this ad or
                   Ezhalah guarantees a method or a provider — the user confirms with the lister. One quiet line,
-                  under the logos, on every question that shows them (the «💳» question of every rent list). */}
+                  under the logos, on every question that shows them (the «💳» question of every rent list). Reworded 2026-11-12. */}
               <Text testID="af-payment-note" style={[s.paymentNote, { textAlign: isRTL ? 'right' : 'left' }]}>
-                {t('Ezhalah does not guarantee the payment method or the provider. Confirm with the lister directly.')}
+                {t('Listers say you can pay in instalments or monthly, through one of these providers or another way. Ezhalah cannot guarantee it; confirm with the lister.')}
               </Text>
             </View>
           ) : null}

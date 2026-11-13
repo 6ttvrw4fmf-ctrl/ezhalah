@@ -128,7 +128,7 @@ check('mapPins.ts asks map_pins_ar through the bounded RPC with the pure argumen
 check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and draws every row', /fetchMapPins\(paddedBox\(center, span\), cell, pins, cell === 0 \? PIN_SHOW_MAX \+ 1 : PIN_LIMIT\)/.test(web) && /keyed\.set\(k, a\); m\.addAnnotation\(a\);/.test(web) && /mine = \[\.\.\.keyed\.values\(\)\];/.test(web));
 // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan removes only the pins that left the view and adds only
 // the new ones, keyed by what the head shows; never the old clear-all-then-add-all flicker.
-check('AppleMap.web.tsx diffs the pins by key on every load (remove the gone, add the new, keep the rest)', /for \(const \[k, a\] of keyed\) if \(!next\.has\(k\)\) \{ m\.removeAnnotation\(a\); keyed\.delete\(k\); \}/.test(web) && /if \(keyed\.has\(k\)\) continue;/.test(web) && /const keyOf = \(r: PinRow\) => `\$\{drawCell\}\|\$\{r\.lat\}\|\$\{r\.lng\}\|\$\{r\.n\}\|\$\{r\.deal\}\|\$\{r\.price \?\? ''\}\|\$\{r\.price_max \?\? ''\}\|\$\{r\.unpriced \?\? ''\}\|\$\{r\.shift \? r\.shift\.join\(','\) : ''\}`/.test(web));
+check('AppleMap.web.tsx diffs the pins by key on every load (remove the gone, add the new, keep the rest)', /for \(const \[k, a\] of keyed\) if \(!next\.has\(k\)\) \{ m\.removeAnnotation\(a\); keyed\.delete\(k\); \}/.test(web) && /if \(keyed\.has\(k\)\) continue;/.test(web) && /const keyOf = \(r: PinRow\) => `\$\{drawCell\}\|\$\{r\.lat\}\|\$\{r\.lng\}\|\$\{r\.n\}\|\$\{r\.deal\}\|\$\{r\.price \?\? ''\}\|\$\{r\.price_max \?\? ''\}\|\$\{r\.unpriced \?\? ''\}\|\$\{r\.fresh \?\? ''\}\|\$\{r\.shift \? r\.shift\.join\(','\) : ''\}`/.test(web));
 mustCatch('the clear-all-then-add-all redraw (the flicker on every pan)', !/clear\(\);\n\s*mine = rows\.map/.test(web));
 // The layer mounts BEFORE MapKit has loaded and returns early; the map's arrival must re-run it (measured live
 // 2026-11-02: a fresh /map load drew nothing until the deal changed).
@@ -207,7 +207,7 @@ mustCatch('groups shown before a category (both lists mixed)', !groupsRx.test(ca
 // fixed bottom bar carries «مسح الكل» + «عرض الإعلانات». A wider screen keeps the centered card.
 const fullRx = /const phone = useWindowDimensions\(\)\.width < PHONE_MAX;/;
 check('on a phone the map filter is full screen, titled «تصفية», with a Clear / «Show N listings» bar at the bottom (owner 2026-11-11: the count lives in the button, like Zillow)',
-  fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /testID=\"map-filter-title\">\{t\('Filter'\)\}/.test(cardSrc) && (cardSrc.match(/count === null \? t\('Show listings'\) : t\('Show \{n\} listings'/g) ?? []).length === 2
+  fullRx.test(cardSrc) && /phone && s\.cardFull/.test(cardSrc) && /testID=\"map-filter-title\">\{t\('Filter'\)\}/.test(cardSrc) && (cardSrc.match(/count === null \? t\('Show listings'\) : isRTL \? showAdsAr\(count\) : t\('Show \{n\} listings'/g) ?? []).length === 2
   && /testID="map-filter-clear"/.test(cardSrc) && /export const PHONE_MAX = 768;/.test(cardSrc));
 const filterCountSrc = readFileSync(join(root, 'src/lib/mapFilter.ts'), 'utf8');
 const mf = await import('../src/lib/mapFilter.ts');

@@ -109,7 +109,7 @@ export function unresolvedPublicRefs(files: SqlFile[]): Map<string, string[]> {
       .replace(/(\binsert\s+into\s+public\.[a-zA-Z0-9_]+)\s*\(/gi, '$1 /*cols*/ (');
     for (const n of namesIn(code, DEFINES_FUNCTION)) defined.add(n);
     for (const n of namesIn(code, DEFINES_RELATION)) defined.add(n);
-    if (/rebuild_af_filter_rpcs\(\)/i.test(code)) for (const n of namesIn(sql, DEFINES_TEMPLATE)) defined.add(n);
+    if (/rebuild_af_filter_rpcs\(\)/i.test(code)) for (const n of namesIn(stripSqlCommentsAndBlanks(sql), DEFINES_TEMPLATE)) defined.add(n);
     for (const n of namesIn(code, REFERENCES)) {
       const seen = referenced.get(n) ?? [];
       if (!seen.includes(file)) seen.push(file);
@@ -189,6 +189,8 @@ const TEMPLATE_ROW = "insert into af_rpc_templates (fn_name, template) values ('
 mustCatch('a template row with no rebuild being counted as a definition',
   unresolvedPublicRefs([{ file: 'a.sql', sql: TEMPLATE_ROW }, { file: 'b.sql', sql: 'select public.tpl_fn();' }]).has('tpl_fn')
   && !unresolvedPublicRefs([{ file: 'a.sql', sql: TEMPLATE_ROW + ' perform * from rebuild_af_filter_rpcs();' }, { file: 'b.sql', sql: 'select public.tpl_fn();' }]).has('tpl_fn'));
+mustCatch('a template row that exists only inside a comment being counted as a definition',
+  unresolvedPublicRefs([{ file: 'a.sql', sql: '-- ' + TEMPLATE_ROW + '\nperform * from rebuild_af_filter_rpcs();' }, { file: 'b.sql', sql: 'select public.tpl_fn();' }]).has('tpl_fn'));
 
 // An INSERT target with a column list is a relation, not a call (2026-10-12: a plain
 // `insert into public.aqar_resolver_log (run_at, …)` read as a call to a production-only function).
