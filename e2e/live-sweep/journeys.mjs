@@ -111,6 +111,17 @@ export async function trendingCity(plan) {
 export async function trendingDistrict(plan) {
   const name = `trending-district:${plan.city}/${plan.deal}`;
   return withPage(false, async (page, requests) => {
+    // The app asks district_options_ar the moment the CITY is picked (src/app/index.tsx, citySelected effect), not
+    // when the district field is tapped. An observer attached at the tap missed that answer, so a city that
+    // genuinely has no districts read as «never answered» (live sweep 43403869090: حرض, 54 sale ads, 0 districts,
+    // the RPC answers [] in 16 ms). Keep the NEWEST answer from before the city pick onwards.
+    const early = { returned: false, rows: null, ms: null, status: null };
+    page.on('response', async (r) => {
+      if (!r.url().includes('district_options_ar')) return;
+      early.status = r.status();
+      try { const b = await r.json(); early.rows = Array.isArray(b) ? b.length : -1; } catch { early.rows = -1; }
+      early.returned = true;
+    });
     await setDeal(page, plan.deal);
     await setPeriod(page, plan.period);
     if (!await pickCity(page, plan.city)) { note(`${name}: city «${plan.city}» not offered — skipped`); return null; }
@@ -154,6 +165,8 @@ export async function trendingDistrict(plan) {
       // is exactly why the district render bug could fail once, pass on re-run, and never be a defect.
       // The panel's OWN RPC settles it: what the surface was given is not a guess.
       if (!rows.length) {
+        // An answer that landed before the tap (at the city pick) is the panel's answer too.
+        if (!rpc.returned && early.returned) Object.assign(rpc, { returned: true, rows: early.rows, status: early.status, ms: 0 });
         if (!rpc.returned) {
           defect(name, 'R14.4.2', `district panel never rendered: district_options_ar had not answered `
             + `${renderMs} ms after the field was opened. The user is left with an empty surface.`);

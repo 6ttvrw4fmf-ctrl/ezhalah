@@ -182,6 +182,12 @@ async function main() {
   await run('trending district (narrowed)',
     () => trendingDistrict({ city: tdCity, deal: 'بيع', period: null, priceMax: 900000 }),
     () => { done.tDistrict++; citiesTested.add(tdCity); });
+  // A drawn city can stock the deal and still have NO districts (2026-11-13 حرض: 54 sale ads, none with a district):
+  // the journey then honestly skips and the floor was lost on a healthy production. الرياض always has districts.
+  if (!done.tDistrict && tdCity !== RIYADH) {
+    await run('trending district (narrowed) · last resort', () => trendingDistrict({ city: RIYADH, deal: 'بيع', period: null, priceMax: 900000 }),
+      () => { done.tDistrict++; citiesTested.add(RIYADH); });
+  }
   await ledgerRecord('trending_city', 'live-sweep', 'pass', 'live browser sweep');
   // Record the city the journey ACTUALLY ran against, not pickCities[0] — crediting coverage to a
   // city that was never reached marks it fresh and pushes it to the back of the stalest-first
