@@ -641,6 +641,12 @@
         "evidence": "mon_image_coverage / ops_image_coverage_latest() daily snapshots 2026-09-30 … 10-07 (queried 2026-10-07 05:40 UTC)."
       }
     },
+    "propertyfinder": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 4698,
+      "note": "Declared 2026-11-13 by the 🔧 Quality & Repair Engineer: live since 2026-11-04 with no baseline row, so loader-active-platforms-check.yml failed its onboarding gate on every run. Measured from production, mon_image_coverage daily snapshots 2026-11-05 … 11-13: 100% every day (4,541 → 4,698 active rows, 13,469 photos on 11-13). Floor = observed low minus 3 points, so the gate fires on a capture regression, not on churn."
+    },
     "qmra": {
       "floor_pct": 60,
       "today_pct": 100.0,
