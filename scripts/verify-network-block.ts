@@ -61,16 +61,17 @@ check('the message is raised on that refusal and mounted at the root, in Arabic 
   && /<NetworkBlockedNotice \/>/.test(layout)
   && /'Please turn off your VPN': 'يرجى إيقاف شبكة VPN'/.test(i18n));
 // A FULL BLOCK (owner 2026-11-13: «blue screen behind … user has to close vpn to continue»): the notice covers the whole
-// page (fixed, blurred dark blue), has NO way to dismiss it, and its one button reloads the page.
+// page (fixed, one plain blue colour, no blur — «don't let it look vibe coded»), has NO way to dismiss it, and its one
+// button reloads the page.
 const notice = readFileSync(join(root, 'src/components/NetworkBlockedNotice.tsx'), 'utf8');
 const fullBlock = (n: string) => /const retry = \(\) => \{ if \(typeof window !== 'undefined'\) window\.location\.reload\(\); \};/.test(n)
   && /onPress=\{retry\}/.test(n) && !/setOpen\(false\)/.test(n)
-  && /backdropFilter: 'blur\(/.test(n) && /'fixed'/.test(n)
+  && /backgroundColor: BLUE/.test(n) && !/backdropFilter/.test(n) && /'fixed'/.test(n)
   && /'Ezhalah cannot be used while a VPN is on\. Turn off the VPN, then try again\.': 'لا يمكن استخدام إزهله أثناء تشغيل شبكة VPN\. أوقف شبكة VPN ثم حاول مرة أخرى\.'/.test(i18n)
   && /\{t\('Try again'\)\}/.test(n);
-check('the VPN notice is a full block: blurred cover, no dismiss, the only button reloads (AR + EN)', fullBlock(notice));
+check('the VPN notice is a full block: plain blue cover, no dismiss, the only button reloads (AR + EN)', fullBlock(notice));
 mustCatch('a VPN notice the visitor can simply close', !fullBlock(notice.replace('onPress={retry}', 'onPress={() => setOpen(false)}')));
-mustCatch('a VPN notice without the blurred cover', !fullBlock(notice.replace(/backdropFilter: 'blur\(14px\)', /, '')));
+mustCatch('a VPN screen that is not the plain blue cover', !fullBlock(notice.replace('backgroundColor: BLUE,', "backgroundColor: 'rgba(0,0,0,0.35)',")));
 mustCatch('the refusal no longer raising the message', !/isNetworkBlocked\(r\.status, b\)\) window\.dispatchEvent/.test(client.replace('window.dispatchEvent(new Event(NETWORK_BLOCKED_EVENT))', 'void 0')));
 
 if (failed) { console.error(`\n❌ verify-network-block: ${failed} check(s) failed.`); process.exit(1); }
