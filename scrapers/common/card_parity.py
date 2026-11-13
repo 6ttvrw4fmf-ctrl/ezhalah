@@ -414,8 +414,11 @@ def run_journeys(picks: list[dict], log=print) -> dict[str, dict]:
                                    "--listings", json.dumps(batch, ensure_ascii=False)],
                                   capture_output=True, text=True, timeout=BATCH * 240, cwd=ROOT)
             lines = proc.stdout.splitlines()
+            if proc.returncode:   # the journey died: say so — its cards (not its exit code) are the evidence below
+                log(f"  journey exited {proc.returncode}: {(proc.stderr or '').strip()[-240:]}")
         except subprocess.TimeoutExpired as e:
             lines = (e.stdout or b"").decode("utf-8", "replace").splitlines() if isinstance(e.stdout, bytes) else []
+            log(f"  journey timed out after {BATCH * 240}s")
         for line in lines:
             if not line.startswith("{"):
                 continue
@@ -455,8 +458,8 @@ class SourceReader:
             rp = robotparser.RobotFileParser()
             try:   # through the browser's own client: same honest UA, the browser's TLS trust store
                 resp = self._ctx.request.get(f"{u.scheme}://{host}/robots.txt", timeout=15000)
-                if resp.status in (401, 403) or resp.status >= 500:
-                    rp.disallow_all = True    # RFC 9309: unreachable robots.txt (5xx) = complete disallow
+                if resp.status in (401, 403, 429) or resp.status >= 500:
+                    rp.disallow_all = True    # RFC 9309: unreachable robots.txt (5xx) = complete disallow; 429 = asked to stop
                 elif resp.status >= 400:
                     rp.allow_all = True       # no robots.txt (4xx) = no rule
                 else:
@@ -602,6 +605,22 @@ def check(client, picks: list[dict], cards: dict[str, dict], reader: SourceReade
     return rows
 
 
+def exit_code(totals: dict) -> int:
+    """A red run, never a quiet green. Picked nothing because picking failed → red. A chunk whose ads were picked
+    while production was quiet and that read NOT ONE card → red: the journey died (CodeRabbit on #10958 — its exit
+    code was ignored, so the PR dry-run passed after reading sources and no cards). Judged PER CHUNK, so a busy chunk
+    elsewhere in the run cannot mask it, and an UNREADABLE load check (the RPC kept failing) is a red of its own: cards
+    were not opened for a reason nobody read (CodeRabbit on #11512). Only a chunk skipped because production was
+    confirmed busy stays green."""
+    if totals["pick_errors"] and not totals["ads"]:
+        return 1
+    if totals.get("unreadable_chunks"):
+        return 1
+    if totals.get("dead_chunks"):
+        return 1
+    return 0 if totals["sites"] or not totals["ads"] else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Our card vs the source page, field by field, every website a day")
     ap.add_argument("--sites", default="", help="comma/space list (default: this hour's slice)")
@@ -624,7 +643,8 @@ def main() -> int:
     sites = wanted or (active if a.all else [p for p in active if slot_of(p) == slot])
     print(f"card parity: {len(sites)} website(s) (slot {slot}/{SLOTS}, {len(active)} active)", flush=True)
 
-    types, totals = tappable_types(), {"ads": 0, "cards": 0, "sources": 0, "sites": 0, "pick_errors": 0}
+    types, totals = tappable_types(), {"ads": 0, "cards": 0, "sources": 0, "sites": 0, "pick_errors": 0,
+                                       "busy_chunks": 0, "unreadable_chunks": 0, "dead_chunks": 0}
     reader = SourceReader()
     try:
         # One chunk = one journey batch (<= 12 ads): pick, check the database is quiet, open the cards, read the
@@ -644,8 +664,15 @@ def main() -> int:
                 picks += got
             busy = database_quiet(client) if picks else None
             cards = {} if busy or not picks else run_journeys(picks)
-            if busy:
+            if busy and busy.startswith("load unreadable"):
+                totals["unreadable_chunks"] += 1       # not a confirmed busy: the run ends red
+                print(f"load check failed ({busy}): cards not opened for this chunk; sources still compared", flush=True)
+            elif busy:
+                totals["busy_chunks"] += 1
                 print(f"production busy ({busy}): cards not opened for this chunk; sources still compared", flush=True)
+            elif picks and not cards:
+                totals["dead_chunks"] += 1             # quiet, ads picked, not one card read: the journey died here
+                print(f"journey read no card for {len(picks)} picked ad(s): this chunk is dead", flush=True)
             rows.update(check(client, picks, cards, reader, night=night, write=not a.dry_run))
             out = list(rows.values())
             for r in out:
@@ -664,9 +691,7 @@ def main() -> int:
         reader.close()
     print(f"{len(sites)} website(s), {totals['ads']} ad(s), {totals['cards']} card(s) read, "
           f"{totals['sources']} source page(s) read", flush=True)
-    if totals["pick_errors"] and not totals["ads"]:
-        return 1                  # nothing sampled because picking failed: a red run, never a quiet green
-    return 0 if totals["sites"] or not totals["ads"] else 1
+    return exit_code(totals)
 
 
 if __name__ == "__main__":

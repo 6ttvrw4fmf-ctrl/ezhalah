@@ -201,6 +201,37 @@ def test_a_total_rooms_site_card_never_matches_a_bedroom_count():
     assert v["bedrooms"] == MISMATCH, v
 
 
+def test_exit_code_is_red_when_ads_were_picked_but_no_card_was_read():
+    """CodeRabbit on #10958: run_journeys() ignored the journey's exit code, so a PR dry-run that read every source
+    page and not one card still returned 0. Ads picked + production quiet + zero cards = the journey died = red."""
+    base = {"ads": 6, "cards": 0, "sources": 6, "sites": 3, "pick_errors": 0,
+            "busy_chunks": 0, "unreadable_chunks": 0, "dead_chunks": 1}
+    assert cp.exit_code(base) == 1                                      # a quiet chunk read no card: the journey died
+    assert cp.exit_code({**base, "cards": 6, "dead_chunks": 0}) == 0    # every chunk read cards: green
+    assert cp.exit_code({**base, "dead_chunks": 0, "busy_chunks": 1}) == 0   # cards skipped on purpose: not a death
+    assert cp.exit_code({**base, "ads": 0, "sites": 0, "dead_chunks": 0}) == 0   # nothing to sample: honest green
+    assert cp.exit_code({**base, "ads": 0, "sites": 0, "dead_chunks": 0, "pick_errors": 2}) == 1   # picking failed
+    assert cp.exit_code({**base, "cards": 6, "sites": 0, "dead_chunks": 0}) == 1   # ads read, no site row: red
+    # CodeRabbit on #11512: one busy chunk must not mask a dead quiet chunk, and an unreadable load check is red
+    assert cp.exit_code({**base, "cards": 6, "busy_chunks": 1, "dead_chunks": 1}) == 1
+    assert cp.exit_code({**base, "dead_chunks": 0, "unreadable_chunks": 1}) == 1
+    assert cp.exit_code({**base, "cards": 6, "dead_chunks": 0, "busy_chunks": 2, "unreadable_chunks": 1}) == 1
+
+
+def test_main_loop_tells_unreadable_load_from_busy_and_counts_a_dead_chunk():
+    """The accounting lives in main(): read its source so the three counters are fed from the right branches."""
+    import inspect
+    src = inspect.getsource(cp.main)
+    assert 'busy.startswith("load unreadable")' in src and 'totals["unreadable_chunks"] += 1' in src
+    assert 'elif picks and not cards:' in src and 'totals["dead_chunks"] += 1' in src
+    assert 'totals["busy_chunks"] += 1' in src
+    # database_quiet() really does return that prefix on repeated RPC errors
+    class Boom:
+        def rpc(self, *_a, **_k):
+            raise RuntimeError("down")
+    assert (cp.database_quiet(Boom(), tries=2, wait_s=0) or "").startswith("load unreadable")
+
+
 def _page(lines, meta=None):
     return {**PAGE, "title": "عقار", "meta": meta or {}, "evidence_lines": lines, "text_head": " | ".join(lines),
             "_text": "\n".join(lines)}
