@@ -1046,6 +1046,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       setFactsBox(null); setFactsExact(false); setFactsPlace(null);   // the pill's facts belong to one counted view; a new read starts without one
       setCardTarget(null);
       const { center, span } = m.region;
+      // the searched district is measured from where the map really landed, not from the span it asked for
+      if (live.focus && !live.focus.landed) live.focus = { ...live.focus, latitudeDelta: span.latitudeDelta, landed: true };
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
       const level = narrowed ? null : areaLevelShown(span.latitudeDelta);

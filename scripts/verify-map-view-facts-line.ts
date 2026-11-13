@@ -113,6 +113,10 @@ mustCatch('a searched district ignored (the pill names the whole screen after th
 const webSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const focusWired = (src: string) => /if \(p\.kind === 'district'\) live\.focus = \{ district: /.test(src) && /areaPlace\(areas, level, loc, translitPlace, m\.region\.center, m\.region\.span, live\.focus\);/.test(src) && /live\.focus = null;/.test(src);
 check('a district search sets the focus, the label view reads it, clearing the search clears it', focusWired(webSrc));
+const landedWired = (src: string) => /if \(live\.focus && !live\.focus\.landed\) live\.focus = \{ \.\.\.live\.focus, latitudeDelta: span\.latitudeDelta, landed: true \};/.test(src);
+check('the focus is measured from where the map really LANDED (a tall phone widens the requested span ~2×)', landedWired(webSrc));
+mustCatch('a focus measured from the requested span (dropped the moment the map lands on a phone)', () => landedWired(webSrc.replace('if (live.focus && !live.focus.landed) live.focus = { ...live.focus, latitudeDelta: span.latitudeDelta, landed: true };', '')));
+check('…and it holds at the landing height on a tall phone (requested 0.05, landed 0.11)', leads(areaPlace(around, 'district', 'ar', (x) => x, V0, { latitudeDelta: 0.11, longitudeDelta: 0.06 }, { ...malqa, latitudeDelta: 0.11, landed: true })));
 mustCatch('a label view that never reads the searched district', () => focusWired(webSrc.replace('m.region.span, live.focus);', 'm.region.span);')));
 
 // 3f. fast and steady (owner 2026-11-13: «it takes time for it to show … it feels glitchy»)
