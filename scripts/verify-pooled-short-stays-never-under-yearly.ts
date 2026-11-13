@@ -54,5 +54,16 @@ mustCatch('an arm that drops the pool test but keeps the shape is caught',
 mustCatch('a mirror without the builder is caught', !poolNeverUnderYearly(clauseFromMirror('-- header only\n')).ok);
 check('SELF-CHECK — the real mirror passes the same predicate the mutants fail', poolNeverUnderYearly(clause).ok);
 
+// The live oracle that judges «سنوي» (verify-strict-filter-parity-live.ts) must count price-on-request by the SAME rule:
+// a no-price row pooled under «شهري» is a short stay, never a yearly rent. Its old term still counted them and went red
+// on a correct RPC (af-live-truth-check run 43424461595, 2026-11-13: rpc 139127 vs ground 139858, +731 Haraj daily/weekly).
+const PARITY = readFileSync(join(ROOT, 'scripts', 'verify-strict-filter-parity-live.ts'), 'utf8');
+const OLD_POR = "price_annual=is.null&or=(rent_period_ar.is.null,and(rent_period_ar.eq.";
+const NEW_POR = "price_annual=is.null&rent_period_ar=is.null`";
+const oracleKeepsPoolOut = (src: string) => src.includes(NEW_POR) && !src.includes(OLD_POR);
+check('the strict-parity oracle counts price on request under «سنوي» only with NO stated period', oracleKeepsPoolOut(PARITY));
+mustCatch('the 2026-09-28 oracle term (no-price «شهري» rows counted as yearly) is caught',
+  !oracleKeepsPoolOut(PARITY.replace(NEW_POR, "price_annual=is.null&or=(rent_period_ar.is.null,and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.not.is.true))`")));
+
 console.log(failed === 0 ? 'OK: a pooled short stay is never served as a yearly rent' : `${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);

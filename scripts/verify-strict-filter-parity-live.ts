@@ -145,7 +145,12 @@ async function main() {
     rpcCount({ p_deal: RENT, p_rent_period: 'سنوي' }),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=eq.${enc('سنوي')}`),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=eq.${enc('شهري')}&rent_now_pay_later=is.true`),
-    tableCount(`deal_ar=eq.${enc(RENT)}&price_annual=is.null&or=(rent_period_ar.is.null,and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.not.is.true))`),
+    // Price on request joins «سنوي» only when it is NOT a pooled short stay (owner 2026-10-25/26 + backlog 1744,
+    // migration 20261111141500: `s.rent_period_ar is distinct from 'شهري'`). A no-price row the index pools under
+    // «شهري» (Haraj seller-stated daily/weekly, Aqar Monthly) is a short stay, never a yearly rent; the old term
+    // still counted them and went red on a correct RPC (run 43424461595: rpc 139127, ground 139858 = +731 Haraj
+    // daily/weekly). A no-price row with a «سنوي» period is already in annualSrc, so the term is the NULL period only.
+    tableCount(`deal_ar=eq.${enc(RENT)}&price_annual=is.null&rent_period_ar=is.null`),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=is.null&price_annual=not.is.null`),
   ]);
   check('annual rent = SOURCE-published annual + SOURCE-marked monthly-RNPL + price on request, exactly',
