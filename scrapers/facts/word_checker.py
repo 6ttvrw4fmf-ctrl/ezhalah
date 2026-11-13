@@ -507,6 +507,14 @@ _NEAR = tuple(_n(w) for w in N._PROXIMITY + ("قريب", "قريبه", "قرب",
 _DISTANCE_TO = re.compile(r"(?:علي (?:بعد|مقربه|مسافه)|بمقربه|خطوات|بضع خطوات|(?<!\S)(?:د|كم|كيلو|م|متر))(?: \S+){0,4} "
                           r"(?<!يتكون )(?<!تتكون )(?<!مكون )(?<!مكونه )(?<!يتالف )(?<!تتالف )(?:من|عن)(?: \S+){0,3}$")
 _NEAR_WORDS = frozenset(w for w in _NEAR if " " not in w)
+# «Shared Walking Path • مسبح • Swimming Pool»: a walking PATH is a facility in the list, not «walking distance» (🔬 2026-11-13
+# pool recall sample, aqar 20965749); «مكانس كهربائيه مسبح» — vacuum cleaners, not «مكان مسبح» (aqar 14998996).
+_WALK_FACILITY = frozenset({"path", "paths", "track", "tracks", "trail", "trails"})
+
+
+def _drop_walk_facility(words: list[str]) -> list[str]:
+    """«walking path / track» is a facility; drop that «walking» before the nearby checks read it."""
+    return [w for k, w in enumerate(words) if not (w == "walking" and k + 1 < len(words) and words[k + 1] in _WALK_FACILITY)]
 _NEAR_PHRASES = tuple(w for w in _NEAR if " " in w)
 _PARTIAL = tuple(_n(w) for w in N._PARTIAL_ONLY + N._FLOOR_COVERING)
 _PARTIAL_BEFORE = tuple(_n(w) for w in N._PARTIAL_BEFORE)
@@ -1144,7 +1152,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if (any(_starts(w, _PREPARED) for w in gp[-2:] + gn[:2]) if public
             else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:4]), t[ws:we])) or "prepared for" in " ".join(n2):
         return None, s, e
-    if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) for w in p2):
+    if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) and not _strip_wa(w).startswith(_n("مكانس")) for w in p2):
         return None, s, e
     g5 = " ".join(gp[-5:])                           # «توجد رخصة بناء تسوير وملاحق»: allowed to build ≠ built
     if any(_strip_wa(w) in ("رخصه", "تصريح", "يسمح", "مسموح") for w in gp[-5:]) and "اعلان" not in g5 and "فال" not in g5 \
@@ -1155,7 +1163,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if fact == "furnished" and (any(_starts(w, _PARTIAL) or _starts(_bare(w), _PARTIAL) for w in n2)
                                 or any(_starts(w, _PARTIAL_BEFORE) for w in prev[-1:])):
         return None, s, e
-    p5 = gp[-5:]
+    p5 = _drop_walk_facility(gp[-5:])
     # «قريب من الخدمات» is a COMPLETE item: the near word's object is «the services», so the words after it are the unit's
     # own (🔬 2026-11-04, muhaysini 14819114 «مميزات العقار موقع قريب من الخدمات موقف سيارات مصعد غرفة غسيل», 14817077
     # «وقريب من الخدمات مدخلان للشقة مصعدين متوفر»: the lift and the parking read as nearby — 6 of 25 sampled
@@ -1194,7 +1202,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if fact in _NEAR_PUBLIC_FACTS:
         # a near word up to 9 words back in the same clause («قريب من الدانوب و لولو هايبر ماركت»), unless the ad says it
         # owns the place after that word («قريب من الخدمات ويوجد بالمجمع مسجد»)
-        w9 = gp[-9:]
+        w9 = _drop_walk_facility(gp[-9:])
         at = max((k for k, w in enumerate(w9) if _strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS
                   or _strip_wa(w) in _NEAR_PUBLIC or w in _NEAR_PUBLIC), default=-1)
         if at >= 0 and not any(_starts(_strip_wa(w), _OWN_CUES) for k, w in enumerate(w9[at + 1:], at + 1)
@@ -1749,9 +1757,9 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         # a heading ENDS with the nearby word: «خدمات قريبة:», «بالقرب من:», «Nearby:»
         # …but a VIEW word ending an item («/بلكونة مطلة / موقف خاص», dealapp 17549152) describes that item, not a heading
         near_in = any((_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS) and not (_strip_wa(w) in _VIEW_WORDS or w in _VIEW_WORDS)
-                      for w in words[-2:]) or (near_in and n_words <= 3)
+                      for w in _drop_walk_facility(words)[-2:]) or (near_in and n_words <= 3)
         near_list = list_in or any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS or _strip_wa(w) in _NEAR_PUBLIC
-                                   or w in _NEAR_PUBLIC or _is_boundary(w) for w in words) \
+                                   or w in _NEAR_PUBLIC or _is_boundary(w) for w in _drop_walk_facility(words)) \
             or any(p in t for p in _NEAR_PHRASES)
         for fact in _COUNT_RES:
             num_hits.setdefault(fact, []).extend(_num_hits(fact, t, ci, _c, list_idx))
@@ -2958,6 +2966,10 @@ def selftest() -> None:
         ("المكيفات مركبة في جميع الغرف، باستثناء غرفة العاملة.", {}, ("maid_room",)),        # aqar 17657272
         ("وكل طابق مكون من أربع شقق باستثناء الملحق مكون من شقتين", {}, ("annex",)),         # aqar 21286
         ("الأجهزة الكهربائية كاملة ما عدا الغسالة", {"laundry_room": False}, ()),             # aqar 13470086
+        ("ميزات المشروع / Project Features: • نادي رياضي • Gym • ممشى مشترك • Shared Walking Path • مسبح • Swimming Pool", {"pool": True}, ()),  # aqar 20965749
+        ("وحدات ذكيه مكانس كهربائيه مسبح غرفة خادمه وسائق ديوانيه", {"pool": True}, ()),   # aqar 14998996
+        ("مكان مسبح", {}, ("pool",)),
+        ("a 5 minutes walking distance to the pool", {}, ("pool",)),
         ("لا يوجد غرفة سائق", {"driver_room": False}, ()),
         ("يمنع العزاب عدا الموظفين", {}, ()),
         ("فندق خمس نجوم", {"stars_mentioned": True}, ()),
@@ -3035,13 +3047,6 @@ def selftest() -> None:
         ("ومراوح شفط للمطابخ والحمامات - سخان مركزي", {}, ("kitchen",)),                            # aqar 14875791
         ("شقة 3 غرف ومطبخ راكب", {"kitchen": True}, ()),
         ("وغرفة خادمه بحمام بلاضافه لمطبخ كبير", {"kitchen": True}, ()),
-        ("مكيفات مخفية (ماعدا غرفة السائق والعاملة المنزلية مكيفات سبيلت) ومراوح", {}, ("driver_room",)),   # aqar 14875791
-        ("جميع الغرف مكيفة ماعدا المطبخ", {}, ("kitchen",)),
-        ("المكيفات مركبة في جميع الغرف، باستثناء غرفة العاملة.", {}, ("maid_room",)),        # aqar 17657272
-        ("وكل طابق مكون من أربع شقق باستثناء الملحق مكون من شقتين", {}, ("annex",)),         # aqar 21286
-        ("الأجهزة الكهربائية كاملة ما عدا الغسالة", {"laundry_room": False}, ()),             # aqar 13470086
-        ("لا يوجد غرفة سائق", {"driver_room": False}, ()),
-        ("يمنع العزاب عدا الموظفين", {}, ()),
         ("استراحة مناسبة لاستقبال الضيوف والمناسبات", {"for_events": True}, ()),
         # CodeRabbit on #11820
         ("شقة مطلة على طريق", {}, ("main_road",)),
