@@ -1297,8 +1297,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                                                      # 2-word window (P1 14340, aqar 15134259, 🔬 2026-11-13)
     if fact == "air_conditioner" and _strip_wa(_n(t[ws:we])) in ("التكييف", "تكييف", "التكيف", "تكيف") \
             and any(_starts(_strip_wa(w), ("تمديد",)) for w in gp[-3:]) \
-            and not any(_starts(_strip_wa(w), ("راكب", "مركب", "سبليت", "سبلت", "شباك", "مخفي", "كونسيلد", "مركزي", "كاست", "دكت"))
-                        for w in gn[:2]):
+            and not any(_starts(_strip_wa(w), ("راكب", "مركب", "موجود", "متوفر", "يعمل", "شغال")) for w in gn[:3]):
+        # only an INSTALLED word keeps the AC: «تكييف سبليت راكب» yes; «والتكييف المركزي» names a type, so pipework alone
+        # stays silent (CodeRabbit #12178)
         return None, s, e                            # «خزان المياة وتمديدات السباكة و التكييف»: the AC PIPEWORK, not AC
                                                      # units (aqar 35244 / 7041221 / 9605735, 🔬 2026-11-13)
     if fact == "bills_included" and gn[:1] and _starts(_strip_wa(gn[0]), ("العقار", "عقار")):
@@ -2989,6 +2990,7 @@ def selftest() -> None:
         ("تشمل الأرض جميع الخدمات من كهرباء وماء وصرف صحي", {"all_services": True}, ()),          # CodeRabbit #12178
         ("جميع الخدمات متوفرة في موقع قريب من الطريق", {"all_services": True}, ()),              # CodeRabbit #12178
         ("تمديدات كهرباء وتكييف سبليت راكب", {"air_conditioner": True}, ()),                      # CodeRabbit #12178
+        ("تمديدات السباكة والتكييف المركزي", {}, ("air_conditioner",)),                            # CodeRabbit #12178
         ("شترات كاملة لجميع النوافذ * مكيفات راكبة * أرضيات Glass Fiber * صيانة شاملة", {}, ("optical_fibers",)),  # aqar 9561593
         ("Fiber glass water tank", {}, ("optical_fibers",)),
         ("High-speed fiber internet 📺 Smart TV", {"optical_fibers": True}, ()),
