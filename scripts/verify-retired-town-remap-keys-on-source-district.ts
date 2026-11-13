@@ -58,7 +58,12 @@ export function problems(ms: Mig[]): string[] {
       // Count the PREDICATE both arms use, with SQL comments removed — a mention in a comment or a select list
       // is not a key (CodeRabbit #11974).
       const body = rest.slice(open!.index + tag.length, close).replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
-      if (count(body, `from public.${KEY} sd`) < 2)
+      // Each ARM on its own (CodeRabbit #11974: two hits in g2 and none in g2n must fail): g2 runs from «g2 as (» to
+      // «g2n as (», g2n from «g2n as (» to the end of the body.
+      const g2 = body.search(/\bg2\s+as\s*\(/i);
+      const g2n = body.search(/\bg2n\s+as\s*\(/i);
+      const pred = `from public.${KEY} sd`;
+      if (g2 < 0 || g2n < 0 || g2n < g2 || count(body.slice(g2, g2n), pred) < 1 || count(body.slice(g2n), pred) < 1)
         p.push(`${m.f}: redefines retired_place_remap_rows() without the ${KEY} key in both g2 and g2n — the hourly city swap returns`);
     }
   }
@@ -87,21 +92,26 @@ mustCatch(
 );
 
 const ARM = `(select sd.source_district_ar from public.${KEY} sd where sd.listing_id = v1.listing_id)`;
+const ARMS = (a: string, b: string): string => `with g2 as (select ${a}), g2n as (select ${b}) select 1`;
 mustCatch(
   'a later migration redefines twice: compliant body first, regressing body second',
-  problems([...real, { f: '29991231235959_regress_twice.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ select ${ARM}, ${ARM} $function$;\ncreate or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ select 1 $function$;` }]).length > 0,
+  problems([...real, { f: '29991231235959_regress_twice.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ ${ARMS(ARM, ARM)} $function$;\ncreate or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ select 1 $function$;` }]).length > 0,
 );
 mustCatch(
   'a later redefinition keeps the key only in a comment and a select list, one arm lost',
-  problems([...real, { f: '29991231235959_regress_comment.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$\n -- both arms read ${KEY}\n select ${KEY}, ${ARM} $function$;` }]).length > 0,
+  problems([...real, { f: '29991231235959_regress_comment.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$\n -- both arms read ${KEY}\n ${ARMS(ARM, KEY)} $function$;` }]).length > 0,
+);
+mustCatch(
+  'a later redefinition keeps the predicate twice in g2 and drops it from g2n',
+  problems([...real, { f: '29991231235959_regress_one_arm.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ ${ARMS(ARM + ', ' + ARM, '1')} $function$;` }]).length > 0,
 );
 mustCatch(
   'a compliant later redefinition is NOT flagged (the check tells the cases apart)',
-  problems([...real, { f: '29991231235959_ok.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ select ${ARM}, ${ARM} $function$;` }]).length === 0,
+  problems([...real, { f: '29991231235959_ok.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ ${ARMS(ARM, ARM)} $function$;` }]).length === 0,
 );
 
 if (now.length || failures.length) {
   for (const x of [...now, ...failures]) console.error(`❌ ${x}`);
   process.exit(1);
 }
-console.log(`✅ retired_place_remap_rows() keys a retired town on the source's own district in g2 and g2n (${FIX}); 9 mutations caught`);
+console.log(`✅ retired_place_remap_rows() keys a retired town on the source's own district in g2 and g2n (${FIX}); 10 mutations caught`);
