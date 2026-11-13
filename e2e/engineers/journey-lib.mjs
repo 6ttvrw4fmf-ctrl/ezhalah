@@ -8,8 +8,13 @@
 // localized form of a source URL (src/lib/localizeAdUrl.ts: gathern.co/view/… → /ar/view/…), so a
 // customer who opened the unit still read FAIL «opened …/ar/view/… ≠ stored …/view/…» (🔧 10-23,
 // backlog 801). One leading /ar/ or /en/ is dropped on BOTH sides; the rest of the path must match.
+// Percent-encoding is decoded on BOTH sides (🔗 Click Guardian 2026-11-13): since #11956 the app sends Sakan
+// through localizeAdUrl's `new URL().href`, which writes an Arabic slug as %D8%B4…, while the stored link keeps
+// the Arabic letters — the same address in two spellings. card-parity read both sakan cards of night 11-13 as
+// «link=mismatch» though the customer opened the right ad. A malformed escape is left as it was, never guessed.
+const _decode = (s) => { try { return decodeURI(s); } catch { return s; } };
 export const normUrl = (u) =>
-  String(u || '').split('#')[0].replace(/\/+$/, '').replace(/^http:/, 'https:')
+  _decode(String(u || '').split('#')[0]).replace(/\/+$/, '').replace(/^http:/, 'https:')
     .replace(/^(https:\/\/[^/]+)\/(?:ar|en)(?=\/|$)/i, '$1');
 
 /** The main search of a بحث press: page 0 of a real page size. index.tsx also fires one
@@ -250,6 +255,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   assert.equal(normUrl('https://aoujestates.com/ar/properties/x'), normUrl('https://aoujestates.com/ar/properties/x'));
   assert.notEqual(normUrl('https://gathern.co/ar/view/1/unit/2'), normUrl('https://gathern.co/view/1/unit/3'), 'a different unit is a different ad');
   assert.notEqual(normUrl('https://x.sa/area/1'), normUrl('https://x.sa/1'), 'only a whole /ar/ segment is a language, not a prefix of a word');
+  // Sakan via localizeAdUrl (2026-11-13): the opened href is percent-encoded, the stored link is not — same ad.
+  const sakanStored = 'https://sa.sakan.co/ar/property/details/89517-شقة---الجبيل---حي-العزيزية';
+  assert.equal(normUrl(new URL(sakanStored).href), normUrl(sakanStored), 'percent-encoded and raw Arabic are one address');
+  assert.notEqual(normUrl(new URL('https://sa.sakan.co/ar/property/details/89518-شقة').href), normUrl('https://sa.sakan.co/ar/property/details/89517-شقة'), 'another ad number is another ad');
+  assert.equal(normUrl('https://x.sa/a/%E0%A4%A'), 'https://x.sa/a/%E0%A4%A', 'a malformed escape is kept, never thrown on');
   { // seededShuffle: same seed → same order; different seeds → a different pick; nothing lost or added
     const xs = Array.from({ length: 30 }, (_, i) => ({ platform: `p${i % 3}`, listing_id: i }));
     const a = seededShuffle(xs, 7), b = seededShuffle(xs, 7), c = seededShuffle(xs, 8);

@@ -312,6 +312,30 @@ def test_the_offices_own_address_is_not_the_ads_district():                # sqc
 
 
 
+class _GathernReader:
+    """Gathern as measured (#11520): the bare /view/ the crawl stores can bounce home; /ar/view/ — what the Arabic
+    app opens — answers the ad. Records every URL it was asked to read."""
+    def __init__(self):
+        self.asked = []
+
+    def read(self, url):
+        self.asked.append(url)
+        if "/ar/view/" in url:
+            return "ok", 200, url, "<html><body>unit</body></html>"
+        return "ok", 200, "https://gathern.co/ar?error=500", "<html><body>home</body></html>"
+
+
+def test_the_link_is_read_where_the_customer_lands(monkeypatch):   # 🔗 2026-11-13, gathern 740319 night 11-12
+    stored_url = "https://gathern.co/view/115498/unit/163423"
+    monkeypatch.setattr(cp, "stored_of", lambda client, table, rid: ({**STORED, "platform": "gathern"}, stored_url))
+    reader = _GathernReader()
+    pick = {"platform": "gathern", "source_table": "gathern_residential_listings", "listing_id": 740319}
+    rows = cp.check(None, [pick], {"gathern_residential_listings:740319": CARD}, reader, night="2026-11-13", write=False)
+    assert reader.asked == ["https://gathern.co/ar/view/115498/unit/163423"], reader.asked
+    samples = [s for s in rows["gathern"].get("samples") or [] if s.get("field") == "link"]
+    assert not samples, samples        # a live unit opened at the customer's address is not a broken link
+
+
 def test_licence_is_not_asked_of_the_card_since_2026_11_13():
     """Owner 2026-11-13 (#12123): the card never prints the REGA licence; it stays on the ad page. A card whose text
     lacks the number is MATCH when the page and our row carry the same licence — never CARD_MISSING (13:33 UTC 11-13:
