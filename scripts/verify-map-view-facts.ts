@@ -107,14 +107,42 @@ const confirmedOnly = (src: string) => /r\.active = false and r\.deactivated_at 
 check('«gone» = page re-opened and removed: inactive, direct-check site, not an owner withdrawal, dropped if it comes back', confirmedOnly(capture));
 mustCatch('a removal log that trusts crawl absence (any strategy)', () => confirmedOnly(capture.replace("lr.strategy in ('DIRECT_REVISIT', 'CANDIDATE_PLUS_DIRECT')", "lr.strategy is not null")));
 const guestBranch = (src: string) => { const m = src.match(/if auth\.uid\(\) is null then([\s\S]*?)end if;/); return m ? m[1] : ''; };
-const guestNoNumbers = (src: string) => { const g = guestBranch(src); return g !== '' && /'locked', true/.test(g) && !/'(new30|gone30|median|ppm|nb_ppm|cuts30)',/.test(g) && !/return v;/.test(g); };
+// An ALLOWLIST: every key a guest receives must be a yes/no or a label, never a number (new30_raw, priced, ppm_n … too).
+const GUEST_KEYS = new Set(['locked', 'any', 'has_new', 'has_gone', 'has_ppm', 'has_cmp', 'nb_kind', 'has_cuts', 'one_type']);
+const guestKeys = (g: string) => [...g.matchAll(/(?:\(|,)\s*'([a-z_0-9]+)',/g)].map((m) => m[1]);
+const guestNoNumbers = (src: string) => { const g = guestBranch(src); const keys = guestKeys(g); return g !== '' && keys.includes('locked') && keys.every((k) => GUEST_KEYS.has(k)) && !/return v;/.test(g); };
 check('a guest gets {locked, any, has_*} — never a number', guestNoNumbers(rpc));
 mustCatch('a guest branch that leaks the price per metre', () => guestNoNumbers(rpc.replace("'has_ppm', (v ->> 'ppm') is not null", "'ppm', v -> 'ppm'")));
+mustCatch('a guest branch that leaks a count of priced ads', () => guestNoNumbers(rpc.replace("'one_type', v -> 'one_type'", "'one_type', v -> 'one_type', 'ppm_n', v -> 'ppm_n'")));
 const switchable = (src: string) => /if not coalesce\(\(select ff\.enabled from public\.ops_feature_flags ff where ff\.name = 'map_view_facts'\), false\) then\s*return null;/.test(src);
 check('the facts have an off switch the checker uses', switchable(rpc) && /update public\.ops_feature_flags set enabled = false/.test(audit));
 mustCatch('an RPC that ignores the off switch', () => switchable(rpc.replace("ff.name = 'map_view_facts'", "ff.name = 'something_else'")));
 check('the checker compares with the «نشر خلال» counter and recounts the median, price per metre and the neighbours\' another way',
   /map_posted_window_counts_ar\(/.test(audit) && /with box as materialized/.test(audit) && /with nbox as materialized/.test(audit) && /'any'\) is distinct from \(w ->> 'any'\)/.test(audit) && /why := why \|\| 'nb_ppm'/.test(audit));
+
+
+// the prepared city/district facts (area-label zoom): same rules, built hourly, served only fresh and checked
+const place = latestDef('map_fact_build_place_facts');
+const placeRpc = latestDef('map_place_facts_ar');
+const placeRules = (src: string) => /from public\.map_listing_points_ar s/.test(src)
+  && /not exists \(select 1 from public\.ops_default_pin_register d/.test(src)
+  && /min\(y\.platform\) over \(partition by y\.deal, y\.type_ar, y\.price, y\.area_m2, y\.city_ar, y\.district_ar\)\) as own/.test(src)
+  && /b\.own and b\.posted_at >= now\(\) - interval '30 days'/.test(src)
+  && /from types t where t\.n >= 10/.test(src)
+  && /t\.ppm between 10 and 200000/.test(src)
+  && /and x\.n >= 10 and x\.ppm between 10 and 200000 and abs\(p\.top_ppm - x\.ppm\) <= 2 \* x\.ppm/.test(src)
+  && /for chk in select \* from public\.map_place_facts where level = 'district'/.test(src);
+check('prepared place facts: same sources and rules as live (default pins out, copies once, site date, ≥ 10 ads, sane bounds, self-check)', placeRules(place));
+mustCatch('a prepared price from 3 ads', () => placeRules(place.replace('from types t where t.n >= 10', 'from types t where t.n >= 3')));
+mustCatch('prepared facts without their self-check', () => placeRules(place.replace("for chk in select * from public.map_place_facts where level = 'district'", 'for chk in select 1')));
+const placeServed = (src: string) => /b\.built_at < now\(\) - interval '3 hours' or b\.failed > 0 then return null;/.test(src)
+  && /cardinality\(p_deals\) <> 1 then return null;/.test(src);
+check('prepared facts are served only fresh (≤ 3 h), after a clean self-check, for exactly one deal', placeServed(placeRpc));
+mustCatch('stale prepared facts served', () => placeServed(placeRpc.replace("interval '3 hours'", "interval '300 hours'")));
+mustCatch('prepared facts served after a failed check', () => placeServed(placeRpc.replace(' or b.failed > 0 then return null;', ' then return null;')));
+const placeGuest = (src: string) => { const g = guestBranch(src); const keys = guestKeys(g); return g !== '' && keys.includes('locked') && keys.every((k) => GUEST_KEYS.has(k) || k === 'place') && !/return jsonb_build_object\('any', r\.n_ads, 'place', true, 'new30'/.test(g); };
+check('a guest gets only yes/no flags from the prepared facts too', placeGuest(placeRpc));
+mustCatch('a prepared guest branch that leaks the price', () => placeGuest(placeRpc.replace("'has_ppm', r.top_ppm is not null", "'top_ppm', r.top_ppm")));
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-map-view-facts: all checks passed');
 process.exit(failed ? 1 : 0);
