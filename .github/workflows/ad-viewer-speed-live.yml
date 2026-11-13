@@ -45,7 +45,11 @@ jobs:
       - name: Install Playwright + browser
         run: |
           npm i -D @playwright/test@^1.49
-          npx playwright install --with-deps chromium
+          # apt behind «--with-deps» flaked on 2026-11-11 (exit 100); three tries, a mirror blip never fails a run.
+          ok=0; for i in 1 2; do timeout 240 npx playwright install --with-deps chromium && { ok=1; break; }; echo "playwright install --with-deps failed or hung on apt (try $i)"; sleep 15; done
+          # 2026-11-11 15:0x: three tries still failed (the apt mirror of the runner image was down) — the Ubuntu runner image already
+          # carries the browser libraries, so the browser itself is installed without apt and the run goes on; a missing lib fails the launch, visibly.
+          [ "$ok" = 1 ] || { echo "apt still failing — installing the browser without --with-deps"; npx playwright install chromium; }
       - name: Phone + 4G — every in-app site frames, shows fast, production has the fix
         env:
           BASE_URL: https://ezhalah-app.vercel.app
