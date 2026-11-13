@@ -154,6 +154,9 @@ _TYPE_AR = {
 }
 # longest-first so «أرض تجارية» wins over «أرض» and «دور علوي» over «دور»
 _TYPE_TOKENS = sorted(_TYPE_AR, key=len, reverse=True)
+# Words that start a list of what the property CONTAINS («تضم صالات», «مع محل», «فيها شقق»). Arabic-letter boundaries,
+# and «و» / «ب» prefixes («وتضم», «وبها»), so «معرض» / «مجمع» / «بهاء» never split a title.
+_CONTAINS_RE = re.compile(r"(?<![\u0621-\u064A])[وف]?(?:تضم|يضم|تحتوي|يحتوي|تشمل|يشمل|مع|فيها|فيه|بها)(?![\u0621-\u064A])")
 _LAND_QUALIFIER = (("تجاري", "أرض تجارية"), ("زراعي", "أرض زراعية"), ("سكني", "أرض"))
 
 
@@ -185,12 +188,19 @@ def parse_type_ar(title: str, text: str) -> Optional[str]:
     vocabulary is how a «مخطط» becomes a «مخط».
     """
     t = (title or "").strip()
-    for tok in _TYPE_TOKENS:
-        # Boundary = "not an Arabic letter or digit" on each side, NOT whitespace: titles run
-        # emoji and punctuation flush against the word («للايجار السنوي ✨دور علوي بحي الريان»),
-        # and a whitespace-only boundary silently fell through to the coarser dropdown value.
-        if re.search(r"(?<![\u0621-\u064A0-9])" + re.escape(tok) + r"(?![\u0621-\u064A])", t):
-            return _qualify_land(_TYPE_AR[tok], text)
+    # THE PROPERTY, NOT WHAT IT CONTAINS (🦅 2026-11-13, CodeRabbit on #11710): «عمارة سكنية للبيع تضم صالات تجارية» is a
+    # residential building whose ground floor holds halls; a longest-token scan over the whole title read «صالات» → محل
+    # and would file the building as a Shop. A type word after «تضم / يضم / مع / فيها / بها / تحتوي / يحتوي / تشمل / يشمل»
+    # describes a PART, so the title's head (before the first such word) is read first; only a head that names
+    # nothing falls back to the whole title, exactly as before.
+    head = _CONTAINS_RE.split(t, maxsplit=1)[0]
+    for part in ((head, t) if head != t else (t,)):
+        for tok in _TYPE_TOKENS:
+            # Boundary = "not an Arabic letter or digit" on each side, NOT whitespace: titles run
+            # emoji and punctuation flush against the word («للايجار السنوي ✨دور علوي بحي الريان»),
+            # and a whitespace-only boundary silently fell through to the coarser dropdown value.
+            if re.search(r"(?<![\u0621-\u064A0-9])" + re.escape(tok) + r"(?![\u0621-\u064A])", part):
+                return _qualify_land(_TYPE_AR[tok], text)
     lab = _label(text, "نوع العقار")
     if lab:
         for tok in _TYPE_TOKENS:
