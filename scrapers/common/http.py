@@ -105,6 +105,21 @@ def session() -> cc.Session:
 # The scraper asks for a profile the host actually serves, and says so loudly when none is.
 IMPERSONATE_ORDER = ("chrome", "safari17_0", "firefox133", "edge101", "safari15_5")
 
+# 429 handling for negotiated_session(): how many times one profile waits out a rate limit, and the
+# bounds on each wait (Retry-After seconds when the host sends it, else the default).
+RATE_LIMIT_RETRIES = 2
+RATE_LIMIT_DEFAULT_S = 30.0
+RATE_LIMIT_MAX_S = 120.0
+_sleep = time.sleep          # tests replace it
+
+
+def _retry_after_s(r) -> float:
+    try:
+        v = float(str((r.headers or {}).get("retry-after") or "").strip())
+    except (TypeError, ValueError):
+        v = RATE_LIMIT_DEFAULT_S
+    return max(1.0, min(v, RATE_LIMIT_MAX_S))
+
 
 def negotiated_session(probe_url: str, *, order: tuple[str, ...] = IMPERSONATE_ORDER,
                        headers: Optional[dict] = None, timeout: int = 40,
@@ -118,21 +133,38 @@ def negotiated_session(probe_url: str, *, order: tuple[str, ...] = IMPERSONATE_O
     """
     last = ""
     for prof in order:
+        r = None
         # proxies= (2026-09-24): a host walled through the residential proxy answers a DIFFERENT profile
         # than it does directly (sakani: chrome → 403 page, safari17_0 → 200), so the probe must ride
         # the same route the run will use.
         s = cc.Session(impersonate=prof, proxies=proxies)   # impersonate OWNS the User-Agent — never set one here
         if headers:
             s.headers.update(headers)
-        try:
-            r = s.get(probe_url, timeout=timeout)
-        except Exception as e:             # noqa: BLE001 — any transport error → try the next one
-            last = f"{prof}:{type(e).__name__}"
+        waits = 0
+        while True:
+            try:
+                r = s.get(probe_url, timeout=timeout)
+            except Exception as e:         # noqa: BLE001 — any transport error → try the next one
+                last = f"{prof}:{type(e).__name__}"
+                r = None
+                break
+            # A 429 is PACING, not a verdict about the handshake (2026-11-13, sakani nightly job
+            # 131687422795): a walk that drew «429» on page 9 asked for a fresh session, and the
+            # renegotiation then spent all six profiles in 50 s against the SAME rate limit — every one
+            # answered 429, the run raised «no TLS profile was served» and the 276 rent units already
+            # read were thrown away. So wait as the host asks (Retry-After, bounded) and ask the same
+            # profile again before calling it unserved.
+            if r.status_code == 429 and waits < RATE_LIMIT_RETRIES:
+                waits += 1
+                _sleep(_retry_after_s(r))
+                continue
+            break
+        if r is None:
             continue
         if served(r):
             s.__dict__["_impersonate_profile"] = prof
             return s
-        last = f"{prof}:HTTP {r.status_code}"
+        last = f"{prof}:HTTP {r.status_code}" + (f" after {waits} rate-limit waits" if waits else "")
     raise RuntimeError(f"no TLS profile was served by {probe_url} (tried {', '.join(order)}; last {last})")
 
 
