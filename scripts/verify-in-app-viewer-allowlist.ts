@@ -268,6 +268,21 @@ const localeFails = (f: (u: string, l: string) => string | undefined): string[] 
     eq(f(en, 'ar'), ar, `Arabic app turns ${new URL(ar).hostname} /en/ into /ar/`);
     eq(f(ar, 'ar'), ar, `Arabic app keeps ${new URL(ar).hostname} /ar/`);
   }
+  // 2026-11-12: Property Finder and Sakan follow the first-segment rule (two live ads each).
+  for (const [ar, en] of [
+    ['https://www.propertyfinder.sa/ar/plp/buy/apartment-for-sale-makkah-al-mukarramah-jeddah-al-marwah-51268617.html', 'https://www.propertyfinder.sa/en/plp/buy/apartment-for-sale-makkah-al-mukarramah-jeddah-al-marwah-51268617.html'],
+    ['https://sa.sakan.co/ar/property/details/86298-x', 'https://sa.sakan.co/en/property/details/86298-x'],
+  ]) {
+    eq(f(ar, 'en'), en, `English app turns ${new URL(ar).hostname} /ar/ into /en/`);
+    eq(f(en, 'ar'), ar, `Arabic app turns ${new URL(ar).hostname} /en/ into /ar/`);
+    eq(f(ar, 'ar'), ar, `Arabic app keeps ${new URL(ar).hostname} /ar/`);
+  }
+  // 2026-11-12: Wasalt's Arabic page is the bare path (no /ar/ exists); every stored link is /en/.
+  const W = 'https://wasalt.sa/property/villa-3406-sqm-facing-south-on-15m-width-street-5815890', WE = 'https://wasalt.sa/en/property/villa-3406-sqm-facing-south-on-15m-width-street-5815890';
+  eq(f(WE, 'ar'), W, 'Arabic app opens a stored Wasalt /en/ ad on its Arabic (bare) page');
+  eq(f(WE, 'en'), WE, 'English app keeps Wasalt /en/');
+  eq(f(W, 'en'), WE, 'English app adds /en to a bare Wasalt ad');
+  eq(f(W, 'ar'), W, 'Arabic app keeps a bare Wasalt ad');
   // Proven NOT to work, so left untouched: mar-ksa /en redirects to /ar, and daryusuf /ar is a 404.
   eq(f('https://mar-ksa.com/ar/property/showitem/875', 'en'), 'https://mar-ksa.com/ar/property/showitem/875', 'mar-ksa is untouched');
   eq(f('https://daryusuf.com/en/portfolio/x/', 'ar'), 'https://daryusuf.com/en/portfolio/x/', 'daryusuf is untouched');
@@ -429,6 +444,9 @@ mustCatch('an English app that leaves Rakez on /ar', localeFails((u, l) => (u.in
 // A rule applied to every host (mar-ksa /en redirects to /ar; daryusuf /ar is a 404).
 mustCatch('a language swap applied to sites without a proven rule', localeFails((u, l) => { if (!u) return localizeAdUrl(u, l); const x = new URL(u); if (/^\/(ar|en)\//.test(x.pathname)) { x.pathname = x.pathname.replace(/^\/(ar|en)/, l === 'en' ? '/en' : '/ar'); return x.href; } return localizeAdUrl(u, l); }).length > 0);
 // A rule that invents a language segment on a link that has none.
+mustCatch('an Arabic app that leaves Wasalt on its English page', localeFails((u, l) => (u.includes('wasalt.sa') ? u : localizeAdUrl(u, l))).length > 0);
+mustCatch('an Arabic app that invents a Wasalt /ar/ path (it 404s)', localeFails((u, l) => (u.includes('wasalt.sa') && l === 'ar' ? localizeAdUrl(u, l)!.replace('wasalt.sa/', 'wasalt.sa/ar/') : localizeAdUrl(u, l))).length > 0);
+mustCatch('an English app that leaves Property Finder on /ar', localeFails((u, l) => (u.includes('propertyfinder.sa') ? u : localizeAdUrl(u, l))).length > 0);
 mustCatch('a language segment invented on a bare link', localeFails((u, l) => (u === 'https://rakez.sa/project/1/' ? 'https://rakez.sa/en/project/1/' : localizeAdUrl(u, l))).length > 0);
 mustCatch('a pane ✕ that deletes the tabs', paneFails({ ...realPane, hide: () => ({ tabs: [], active: 0, hidden: true }) }).length > 0);
 mustCatch('a tab ✕ that only hides the pane', paneFails({ ...realPane, close: (p) => ({ ...p, hidden: true }) }).length > 0);
@@ -587,7 +605,7 @@ check('contact opens the original URL in a new tab with the opener severed, neve
 check('source-ordered gallery prioritizes the shown photo and lazy-loads the rest', previewPhotos(preview));
 mustCatch('preview formats its own price', !previewPrice(preview.replace('listingPrice(l, locale)', 'l.price')));
 mustCatch('contact drops opener protection', !previewContact(preview.replace('if (w) w.opener = null;', '')));
-mustCatch('a blocked tab navigates Ezhalah away', !previewContact(preview.replace("if (!open()) blockedOnce.current = true;\n      busy.current = false;", "if (!open()) window.location.assign(url);\n      busy.current = false;")));
+mustCatch('a blocked tab navigates Ezhalah away', !previewContact(preview.replace("if (!open() || reduced || !IS_WEB) return;", "if (!open()) { window.location.assign(url); return; }\n    if (reduced || !IS_WEB) return;")));
 mustCatch('90 photos load eagerly', !previewPhotos(preview.replace("loading={eager ? 'eager' : 'lazy'}", 'loading="eager"')));
 
 
@@ -687,18 +705,21 @@ const hostBadgePass = (src: string) => ['ar', 'en'].every((locale) => {
   return !!host && !!contact && host.props.onPress === contact.props.onPress && host.props.accessibilityLabel === contact.props.accessibilityLabel;
 });
 check('the host badge opens the ad through the contact handler, with the same spoken name', hostBadgePass(preview));
-// The tap moment delays the real open behind a pop-up — it must stay inside the browser's user-activation
-// window (≤ 1s) or Safari blocks the tab; and the open is still the one window.open.
-const tapMomentPass = (src: string) => {
-  const code = codeOnly(src);
-  const delay = Number((/const OPEN_DELAY_MS = (\d+);/.exec(code) ?? [])[1]);
-  return delay > 0 && delay <= 1000 && /later\(fire, OPEN_DELAY_MS\);/.test(code) && /const fire = \(\) => \{\s*if \(!open\(\)\) blockedOnce\.current = true;/.test(code)
-    && /if \(reduced \|\| blockedOnce\.current \|\| !IS_WEB\) \{ if \(!open\(\)\) blockedOnce\.current = true; return; \}/.test(code);
+// THE SITE OPENS INSIDE THE TAP (owner 2026-11-12: «it takes so long for me to get redirected … totally unacceptable»).
+// The open used to wait 950 ms for the confetti (measured 1.1 s live — past Safari's activation window). Now goOpen's
+// FIRST act after the double-tap lock is the one window.open (open()); no timer stands between the tap and the site.
+const goOpenBody = (src: string) => { const c = codeOnly(src); const i = c.indexOf('const goOpen = (e?: any) => {'); return i < 0 ? '' : c.slice(i, c.indexOf('\n  };', i)); };
+const instantOpenPass = (src: string) => {
+  const body = goOpenBody(src);
+  const openAt = body.indexOf('if (!open() || reduced || !IS_WEB) return;');
+  return openAt > 0 && !/OPEN_DELAY_MS/.test(codeOnly(src)) && !/later\([^;]*open\(/.test(body)
+    && !body.slice(0, openAt).includes('setBurst(') && !body.slice(0, openAt).includes('party(')
+    && /if \(busy\.current\) return;\s*busy\.current = true;/.test(body);
 };
-check('the delayed open stays inside the user-activation window and goes through open()', tapMomentPass(preview));
-mustCatch('the open drifts past the activation window', !tapMomentPass(preview.replace('const OPEN_DELAY_MS = 950;', 'const OPEN_DELAY_MS = 2000;')));
-mustCatch('the party opens the ad some other way', !tapMomentPass(preview.replace('const fire = () => {', "const fire = () => {\n      window.location.assign(url); return;")));
-mustCatch('reduced motion still waits for the party', !tapMomentPass(preview.replace('if (reduced || blockedOnce.current || !IS_WEB)', 'if (blockedOnce.current || !IS_WEB)')));
+check('the contact button opens the site inside the tap (no confetti delay) and a double tap opens one tab', instantOpenPass(preview));
+mustCatch('the confetti delay brought back', !instantOpenPass(preview.replace('if (!open() || reduced || !IS_WEB) return;', 'if (reduced || !IS_WEB) { open(); return; }\n    later(() => { open(); }, 950);')));
+mustCatch('the party plays before the open', !instantOpenPass(preview.replace(/(    if \(!open\(\) \|\| reduced \|\| !IS_WEB\) return;\n)([\s\S]*?)(    setBurst\(Date\.now\(\)\);\n)/, '$3$1$2')));
+mustCatch('a double tap opens two tabs', !instantOpenPass(preview.replace(/    if \(busy\.current\) return;\n/, '')));
 mustCatch('host badge opens something else', !hostBadgePass(preview.replace(/testID="listing-preview-host"\s+onPress=\{goOpen\}/, 'testID="listing-preview-host" onPress={openMap}')));
 // INSIDE THE VIEWER THE PAGE HAS NO BAR OF ITS OWN (owner 2026-10-10): the viewer's tab strip already names
 // the site and closes the tab, so the page's source pill + ✕ repeated it right underneath. AdViewer passes

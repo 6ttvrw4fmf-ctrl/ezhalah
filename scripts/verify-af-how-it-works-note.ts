@@ -72,8 +72,16 @@ const skipAr = /'Skip and you get more questions and options': '([^']+)'/.exec(i
 assert.ok(skipAr.length > 10 && !hasHarakat(skipAr) && !hasEmoji(skipAr), 'i18n: the Arabic Skip note has no diacritics and no emoji');
 // The payment disclaimer sits INSIDE the brand strip, right under the provider logos (owner 2026-11-02).
 assert.ok(/<Image source=\{BRAND_IMAGES\[brandImage\]\}[\s\S]{0,600}<Text testID="af-payment-note"/.test(card), 'card: the payment note renders under the provider logos');
-const payAr = /'Ezhalah does not guarantee the payment method or the provider\. Confirm with the lister directly\.': '([^']+)'/.exec(i18n)?.[1] ?? '';
+// Reworded 2026-11-12 (owner, with the one-chip instalments merge): the lister says instalments or monthly payments,
+// through one of these providers or another way, and Ezhalah cannot guarantee it — confirm with the lister.
+const PAY_EN = 'Listers say you can pay in instalments or monthly, through one of these providers or another way. Ezhalah cannot guarantee it; confirm with the lister.';
+assert.ok(card.includes(`{t('${PAY_EN}')}`), 'card: the payment note renders the 2026-11-12 wording');
+const payAr = new RegExp(`'${PAY_EN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}': '([^']+)'`).exec(i18n)?.[1] ?? '';
 assert.ok(payAr.length > 20 && !hasHarakat(payAr) && !hasEmoji(payAr), 'i18n: the Arabic payment note has no diacritics and no emoji');
+// it says both halves the owner asked for: «another way» (not only these providers) and «cannot guarantee»
+const payNoteSaysBoth = (ar: string) => /بطريقة أخرى/.test(ar) && /لا تضمن/.test(ar) && /المعلن/.test(ar);
+assert.ok(payNoteSaysBoth(payAr), `i18n: the Arabic payment note names «another way», «cannot guarantee» and the lister (got «${payAr}»)`);
+assert.ok(!card.includes("t('Ezhalah does not guarantee the payment method or the provider."), 'card: the pre-2026-11-12 payment note is gone');
 
 // MUTATION PROOF — each predicate watched failing on a deliberately broken input.
 function mustCatch(label: string, caught: boolean): void { assert.ok(caught, `mutation NOT caught: ${label}`); console.log(`  (mutation) catches ${label}`); }
@@ -83,6 +91,8 @@ mustCatch('a section dropped', [...AF_HOW_IT_WORKS.ar].slice(0, 5).length !== 6)
 mustCatch('a diacritic smuggled into a section', hasHarakat('٣. الرقم\n\nعدد الإعلانات التي ذكرت الميزة صراحةً'));
 mustCatch('the reader widened back to the Terms width', !(640 === cardMaxW));
 mustCatch('the payment note moved out of the brand strip', !/<Image source=\{BRAND_IMAGES\[brandImage\]\}[\s\S]{0,600}<Text testID="af-payment-note"/.test('<Text testID="af-payment-note"/> … <Image source={BRAND_IMAGES[brandImage]} />'));
+mustCatch('the old provider-only payment note (no «another way»)', !payNoteSaysBoth('إزهله لا تضمن طريقة الدفع ولا مزود التقسيط. تأكد من المعلن مباشرة.'));
+mustCatch('a payment note that drops «cannot guarantee»', !payNoteSaysBoth('يذكر المعلن إمكانية الدفع بالتقسيط أو على دفعات، عبر أحد هؤلاء المزودين أو بطريقة أخرى.'));
 mustCatch('the Skip note rendered unconditionally', !/\{hideSkip \? null : \(\s*<Text testID="af-skip-note"/.test('<Text testID="af-skip-note">'));
 
 console.log('verify-af-how-it-works-note: OK — short line + «كيف يشتغل؟», six emoji-free, diacritic-free sections in AR and EN, card-sized reader, Skip note wired');

@@ -1,39 +1,48 @@
-// The «كيف نحسبها؟» popup's words (owner-approved 2026-11-11, replacing the 2026-10-22 «كيف تشتغل؟» sheet), kept pure so
+// The «كيف نحسبها؟» popup's words (owner-approved text 2026-11-11; title back to «كيف نحسبها؟» by the owner 2026-11-12), kept pure so
 // tests can read them. The same title is the small underlined link under the home headline's market fact.
 // Formal Arabic, no diacritics (owner: «keep it professional like» the «نماذج إزهله» card). {N} is the LIVE site count —
 // the same number the share card and the welcome line show (src/data/siteCount.ts); while it is unknown the clause that
-// carries it is left out, never a guessed number («وعددها {N}» keeps the Arabic correct for any N).
+// carries it is left out, never a guessed number. sitesAr() picks the Arabic counted form for any N (3–10 مواقع, 11–99 موقعا, …).
 export type Rule = { title: string; body: string };
 export type Copy = { title: string; falconer: string; story: (n: number | null) => string; rulesTitle: string; rules: Rule[]; close: string };
+
+// Arabic counted noun after a number: 3–10 take «مواقع», 11–99 take «موقعا», and 1, 2 or a round hundred take «موقع»
+// (the last two digits decide, so 105 → مواقع, 149 → موقعا, 200 → موقع).
+export function sitesAr(n: number): string {
+  const r = n % 100;
+  if (r >= 3 && r <= 10) return `${n} مواقع عقارية`;
+  if (r >= 11) return `${n} موقعا عقاريا`;
+  return `${n} موقع عقاري`;
+}
 
 export const HOW_IT_WORKS: Record<'ar' | 'en', Copy> = {
   ar: {
     title: 'كيف نحسبها؟',
-    falconer: 'صقارنا',
+    falconer: 'من صقار إزهله؟',
     story: (n) =>
-      `الصقار يربي صقره ويعتني به ويحسن إطعامه. وصقارنا يجمع كل يوم الإعلانات من جميع المواقع العقارية في السعودية${n ? `، وعددها ${n}` : ''}، ويقدم هذه البيانات الثمينة لصقره شاهين، ليجيبك بدقة عند سؤاله. وشاهين نموذج ذكاء اصطناعي، وقد يخطئ أحيانا، لذا تحقق دائما من الإعلان الأصلي. ومن هذه البيانات نفسها تأتي هذه المعلومة: الأسعار، والإعلانات الجديدة، والتغيرات، للمساكن والأراضي والمحلات.`,
+      `كل صقر بارع يحتاج صقارا خبيرا يجهزه للميدان. صقار إزهله يجوب ${n ? sitesAr(n) : 'المواقع العقارية'} في السعودية ليجمع لك الإعلانات من مصادرها، ويغذي بها «شاهين»، نموذج الذكاء الاصطناعي في إزهله، ليختصر عليك البحث الطويل بإجابات محدثة من إعلانات حقيقية.`,
     rulesTitle: 'القواعد',
     rules: [
-      { title: 'إعلانات حقيقية فقط', body: 'كل معلومة مصدرها إعلانات منشورة في هذه المواقع.' },
-      { title: 'تاريخ الموقع نفسه', body: '«اليوم» و«هذا الأسبوع» و«جديد» تعني تاريخ نشر الإعلان في موقعه، لا تاريخ وصولنا إليه. والإعلان الذي لا يحمل تاريخا لا يحتسب.' },
-      { title: 'أرقام دقيقة', body: 'الأسعار هي المطلوبة في الإعلانات، وليست أسعار صفقات منفذة. ونحتسب العقار المكرر في أكثر من موقع مرة واحدة، ونتحقق من كل رقم مرتين.' },
-      { title: 'مخصصة لك', body: 'معلومة جديدة كل ساعة، غالبا عن المدينة والحي اللذين بحثت فيهما.' },
-      { title: 'معلومة فقط', body: 'ليست نصيحة مالية أو استثمارية، ولا تقييما عقاريا. يرجى التحقق من التفاصيل مع المعلن قبل اتخاذ أي قرار.' },
+      { title: 'إعلانات من مصادرها الأصلية', body: 'كل معلومة نعرضها مأخوذة من إعلان منشور في أحد هذه المواقع.' },
+      { title: 'التاريخ حسب الموقع نفسه', body: '«اليوم» و«هذا الأسبوع» و«جديد» تعني تاريخ نشر الإعلان في موقعه، لا تاريخ وصوله إلينا، والإعلان الذي لا يحمل تاريخا ولا مدة نشر لا يدخل في هذه الفترات.' },
+      { title: 'أرقام دقيقة', body: 'الأسعار هي الأسعار المطلوبة في الإعلانات، وليست أسعار صفقات منفذة، والعقار المعروض في أكثر من موقع نحسبه مرة واحدة.' },
+      { title: 'محتوى مخصص لك', body: 'تظهر معلومات جديدة كل ساعة، وغالبا عن المدينة والحي اللذين تبحث فيهما.' },
+      { title: 'معلومات عقارية فقط', body: 'شاهين نموذج ذكاء اصطناعي وقد يخطئ، فتحقق من تفاصيل الإعلان مع المعلن قبل اتخاذ أي قرار. ما نقدمه ليس نصيحة مالية أو استثمارية ولا تقييما عقاريا.' },
     ],
     close: 'إغلاق',
   },
   en: {
-    title: 'How we calculate it',
-    falconer: 'Our falconer',
+    title: 'How do we calculate it?',
+    falconer: "Who is Ezhalah's falconer?",
     story: (n) =>
-      `A falconer raises his falcon, cares for it and feeds it well. Every day our falconer collects the listings from every property website in Saudi Arabia${n ? `, and there are ${n} of them,` : ''} and gives this valuable data to his falcon Shaheen, so it answers you accurately when you ask. Shaheen is an AI model and can sometimes make mistakes, so always check the original listing. This fact comes from that same data: prices, new listings and changes, for homes, land and shops.`,
+      `Every skilled falcon needs an expert falconer to ready it for the field. Ezhalah's falconer roams ${n ? `${n} real estate websites` : 'the real estate websites'} across Saudi Arabia, gathering listings straight from their sources and feeding them to Shaheen, Ezhalah's AI model. Shaheen saves you the long search, with up-to-date answers drawn from real listings.`,
     rulesTitle: 'The rules',
     rules: [
-      { title: 'Only real listings', body: 'Every fact comes from listings published on these sites.' },
-      { title: "The site's own date", body: '"Today", "this week" and "new" mean the date the ad was posted on its site, not the date we reached it. An ad with no date isn\'t counted.' },
-      { title: 'Accurate numbers', body: 'Prices are the asking prices in the ads, not completed sale prices. A property listed on more than one site is counted once, and we check every number twice.' },
-      { title: 'Made for you', body: 'A new fact every hour, mostly about the city and district you searched.' },
-      { title: 'Information only', body: 'Not financial or investment advice, and not a property valuation. Please check the details with the advertiser before making any decision.' },
+      { title: 'Listings from their original sources', body: 'Every piece of information we show comes from a listing published on one of these websites.' },
+      { title: 'Dates follow the website itself', body: '"Today", "This week" and "New" mean the date the listing was posted on its website, not the date it reached us. A listing that shows neither a date nor how long ago it was posted is not counted in these periods.' },
+      { title: 'Exact figures', body: 'Prices are the asking prices in the listings, not prices from completed deals. A property listed on more than one website is counted once.' },
+      { title: 'Tailored to you', body: 'New insights appear every hour, mostly about the city and district you are searching in.' },
+      { title: 'Real estate information only', body: "Shaheen is an AI model and can make mistakes, so check the listing's details with the advertiser before making any decision. What we provide is not financial or investment advice, and it is not a property valuation." },
     ],
     close: 'Close',
   },

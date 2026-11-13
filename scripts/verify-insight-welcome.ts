@@ -13,7 +13,7 @@ import {
   GREETINGS, localClock, greetingFits, pickGreeting, fillGreeting, renderInsight, chooseInsightLine, insightKey,
   GREETING_SLOT, SEEN_DAYS, GREETING_EMOJI, type Insight, type InsightTemplate, type InsightPack,
 } from '../src/lib/insightWelcome.ts';
-import { HOW_IT_WORKS } from '../src/lib/insightHowItWorks.ts';
+import { HOW_IT_WORKS, sitesAr } from '../src/lib/insightHowItWorks.ts';
 import { fillName, NAME_SLOT } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -244,10 +244,10 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
   check('a user who searches Jeddah: their city in roughly two lines of three (40%–80% here, with only 4 Jeddah facts)', share >= 0.4 && share <= 0.8, `${Math.round(share * 100)}% ${JSON.stringify(jeddah.by)}`);
 }
 
-// ── 8. «كيف نحسبها؟»: the falconer story, the rules, live site count, ✕ on the right (owner 2026-11-11) ──
+// ── 8. «كيف نحسبها؟»: the falconer story, the rules, live site count, ✕ on the right (owner 2026-11-11; title 2026-11-12) ──
 {
   const ar = JSON.stringify(HOW_IT_WORKS.ar); const enS = JSON.stringify(HOW_IT_WORKS.en);
-  check('the sheet is titled «كيف نحسبها؟» / "How we calculate it" (owner 2026-11-11)', HOW_IT_WORKS.ar.title === 'كيف نحسبها؟' && HOW_IT_WORKS.en.title === 'How we calculate it');
+  check('the sheet is titled «كيف نحسبها؟» / "How do we calculate it?" (owner 2026-11-12)', HOW_IT_WORKS.ar.title === 'كيف نحسبها؟' && HOW_IT_WORKS.en.title === 'How do we calculate it?');
   {
     const home = readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
     const link = home.match(/\{welcomeIsInsight \? \(\s*<Pressable onPress=\{\(\) => setHowOpen\(true\)\}[^>]*testID="hero-how-link">\s*<Text style=\{s\.heroHowLink\}>\{HOW_IT_WORKS\[[^\]]+\]\.title\}<\/Text>/);
@@ -256,14 +256,15 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
     check('the link stays small and underlined (≤ 14 px, like «الشروط والخصوصية»)', !!style && Number(style[1]) <= 14);
   }
   const arS = HOW_IT_WORKS.ar.story(155), enStory = HOW_IT_WORKS.en.story(155);
-  check('the falconer story: our falconer collects every site\'s listings and gives them to Shaheen (owner 2026-11-11)',
-    HOW_IT_WORKS.ar.falconer === 'صقارنا' && arS.includes('لصقره شاهين') && enStory.includes('his falcon Shaheen'));
+  check('the falconer story: Ezhalah\'s falconer gathers the listings and feeds them to Shaheen (owner 2026-11-11)',
+    HOW_IT_WORKS.ar.falconer === 'من صقار إزهله؟' && arS.includes('ويغذي بها «شاهين»') && enStory.includes('feeding them to Shaheen'));
   check('the site count is the LIVE number when known, and the clause is LEFT OUT when unknown — never a guessed number',
-    arS.includes('وعددها 155') && enStory.includes('there are 155 of them') && !/\d/.test(HOW_IT_WORKS.ar.story(null)) && !/\d/.test(HOW_IT_WORKS.en.story(null)));
-  check('it says Shaheen is AI and can make mistakes — check the original listing (owner 2026-11-11)', arS.includes('نموذج ذكاء اصطناعي، وقد يخطئ أحيانا') && enStory.includes('AI model and can sometimes make mistakes'));
-  check('the date rule: the site\'s own posting date, and an undated ad is not counted', ar.includes('تاريخ نشر الإعلان في موقعه') && ar.includes('لا يحتسب') && enS.includes("isn't counted"));
-  check('it says asking prices, duplicates once, checked twice', ar.includes('وليست أسعار صفقات منفذة') && ar.includes('مرة واحدة') && ar.includes('مرتين') && enS.includes('counted once'));
-  check('it says information only, not financial or investment advice', ar.includes('ليست نصيحة مالية أو استثمارية') && enS.includes('Not financial or investment advice'));
+    arS.includes('يجوب 155 موقعا عقاريا') && enStory.includes('roams 155 real estate websites') && !/\d/.test(HOW_IT_WORKS.ar.story(null)) && !/\d/.test(HOW_IT_WORKS.en.story(null)));
+  check('it says Shaheen is AI and can make mistakes — check with the advertiser (owner 2026-11-11)', ar.includes('شاهين نموذج ذكاء اصطناعي وقد يخطئ') && enS.includes('AI model and can make mistakes'));
+  check('the Arabic counted noun is right for any site count (3–10 مواقع, 11–99 موقعا, round hundred موقع)', sitesAr(149) === '149 موقعا عقاريا' && sitesAr(105) === '105 مواقع عقارية' && sitesAr(200) === '200 موقع عقاري' && sitesAr(9) === '9 مواقع عقارية' && sitesAr(42) === '42 موقعا عقاريا');
+  check('the date rule: the site\'s own posting date; an ad with neither a date nor «منذ …» is not counted (owner 2026-11-11)', ar.includes('تاريخ نشر الإعلان في موقعه') && ar.includes('لا يحمل تاريخا ولا مدة نشر لا يدخل في هذه الفترات') && enS.includes('neither a date nor how long ago it was posted is not counted'));
+  check('it says asking prices and duplicates once, and no longer promises «checked twice» (owner 2026-11-11)', ar.includes('وليست أسعار صفقات منفذة') && ar.includes('مرة واحدة') && !ar.includes('مرتين') && enS.includes('counted once') && !enS.includes('twice'));
+  check('it says information only, not financial or investment advice', ar.includes('ليس نصيحة مالية أو استثمارية') && enS.includes('not financial or investment advice'));
   check('it says a new fact every hour', ar.includes('كل ساعة') && enS.includes('every hour'));
   check('no diacritics in the Arabic (owner: «no 7arakat»)', !/[\u064B-\u0652]/.test(ar + arS));
   check('both languages carry the same five rules', HOW_IT_WORKS.ar.rules.length === 5 && HOW_IT_WORKS.en.rules.length === 5);
@@ -271,10 +272,14 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
     const pop = readFileSync(new URL('../src/components/InsightHowItWorks.tsx', import.meta.url), 'utf8');
     check('the ✕ sits on the PHYSICAL right in both languages (owner: «the x is always on the right»)', /close: \{ position: 'absolute', top: [\w.]+, right: [\w.]+/.test(pop) && !/close: \{[^}]*left:/.test(pop));
     check('no «تمام» button: the ✕ or a tap outside closes it', !/insight-how-ok/.test(pop) && /testID="insight-how-backdrop"/.test(pop) && /onPress=\{onClose\}[^>]*testID="insight-how-close"/.test(pop));
-    check('the slow eagle animation and Shaheen\'s mark are shown', pop.includes("falconer-howto.svg") && pop.includes("models/shaheen.png"));
+    check('the slow eagle animation is shown and the falconer is the ONLY logo — no Shaheen mark (owner 2026-11-12)', pop.includes("falconer-howto.svg") && !pop.includes("models/shaheen.png"));
     check('the eagle is preloaded once and each open replays it from memory (a fresh blob: URL, no download on tap)', /export function preloadHowEagle/.test(pop) && /URL\.createObjectURL\(eagleBlob\)/.test(pop) && /useEffect\(\(\) => \{ void preloadHowEagle\(\); \}, \[\]\)/.test(pop));
     check('the «information only» rule is bold as a whole sentence (owner 2026-11-11)', /ruleLast: \{ fontWeight: '700'/.test(pop) && /i === c\.rules\.length - 1 && s\.ruleLast/.test(pop));
     const models = readFileSync(new URL('../src/components/AgentModelSelector.tsx', import.meta.url), 'utf8');
+    check('the «نماذج إزهله» card has no Ezhalah logo inside (owner 2026-11-11: «our logo inside remove it»)', !/logo-cloud|EZHALAH_LOGO|storyLogo/.test(models));
+    check('the model text is the owner\'s 2026-11-11 wording: Saudi real estate facts, Hurr «سيكون», no «دقة متناهية»',
+      models.includes('يجيبك بحقائق العقار السعودي ويقتنص لك الإعلانات المطابقة من أول جملة') && models.includes('وفي إزهله، سيكون محللك العقاري')
+      && models.includes("'سريع للبحث اليومي وحقائق السوق'") && models.includes("'عميق للتحليل والمقارنة والطلبات المعقدة'") && !models.includes('متناهية'));
     check('the «نماذج إزهله» card has no diacritics either (owner 2026-11-11: «we can never have 7arakat»)', !/[\u064B-\u0652]/.test(models), (models.match(/[\u064B-\u0652]/g) ?? []).length + ' found');
     check('the backdrop is pointer-only — not focusable, hidden from screen readers (CodeRabbit)', /focusable=\{false\} accessible=\{false\}[^>]*testID="insight-how-backdrop"/.test(pop));
     check('a failed eagle preload is reported, not swallowed (CodeRabbit)', /reportError\(e, \{ source: 'InsightHowItWorks\.preloadHowEagle' \}\)/.test(pop));

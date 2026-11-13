@@ -31,6 +31,18 @@
 >    `select id, item from ops_engineer_backlog where status = 'open' and item ilike 'OWNER %' and engineer ilike '<your lane>%'`.
 >    Every row is the owner's decision: do it first, never re-ask it in LINE 1, and close it (status 'done') only with customer proof.
 >    The scraping lane missed backlog 1744 (Haraj daily rents → short stays) on 11-11 and asked the owner again.
+>
+> 9. **Fix the ROOT, so the bug never comes back (owner 2026-11-11).** About 1 in 5 bugs is a repeat, and a repeat means the last fix was a patch.
+>    Before you close any alert, check whether the same kind was closed in the last 30 days:
+>    `select count(*) from alert_event where kind = '<kind>' and resolved_at > now() - interval '30 days'`.
+>    If it was, this is a repeat. You MUST:
+>    - (a) write in one line WHY it came back;
+>    - (b) fix it in the shared place every caller goes through, not in the one site or row the alarm named;
+>    - (c) add a guard test that fails if it ever returns, and watch it fail on the old code;
+>    - (d) where the fix is mechanical, make the detector repair it by itself before it raises.
+>    Hiding, widening a threshold or resolving by hand is never a root fix.
+>    **Prove the same night:** pick work you can prove live tonight first, and open no more PRs than you can prove.
+>    In :end write `Repeats: <closed> closed, <root-fixed> root-fixed, <guards> guards added`, plus the one root cause you killed.
 
 
 > **🔒 MERGE LOCK 2026-11-08 (owner: «fully automate with the engineers and CodeRabbit»).** `safe-pr-merge.ts` (and so the robot) REFUSES a PR

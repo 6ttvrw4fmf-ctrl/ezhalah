@@ -18,6 +18,7 @@ Pure functions — no network, no DB. Pinned by scrapers/common/tests/test_haraj
 """
 from __future__ import annotations
 
+import math
 import re
 from typing import Optional
 
@@ -150,18 +151,37 @@ def type_of(title: str, body: str) -> tuple[Optional[str], str]:
 
 
 # ── numbers ───────────────────────────────────────────────────────────────────────────────────
-_NUM = r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
+# «1.250.000»: dotted thousands groups are captured whole first (CodeRabbit on #11799 — it read as 1.250 → 1,250).
+_NUM = r"(\d{1,3}(?:\.\d{3}){2,}(?!\d)|\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
 _SCALE = r"(?:\s*(الف|الاف|آلاف|ألف|k|K|مليون|ملايين|مليونين))?"
 _PHONE = re.compile(r"(?<!\d)(?:\+?966|00966|0)?5\d{8}(?!\d)")
 
 
+def _arabic_decimal_marks(raw: str) -> str:
+    """Each figure written with ONE Arabic decimal mark «٫» («٢٥٠٫٠٠٠» = 250) becomes a decimal the dotted-thousands
+    rule cannot misread: a fraction of 3, 6 … digits gets a trailing 0 («250.0000»). Decided per occurrence, so an area
+    «٢٥٠٫٠٠٠» does not change a price «250.000» in the same post (CodeRabbit on #11799). Two or more «٫» in one figure
+    are a thousands mark typed with the wrong key and are left to norm()."""
+    def one(m: "re.Match[str]") -> str:
+        whole, frac = m.group(1).translate(_DIG), m.group(2).translate(_DIG)
+        return f"{whole}.{frac + '0' if len(frac) % 3 == 0 else frac}"
+    return re.sub(r"(?<![0-9٠-٩٫])([0-9٠-٩]+)٫([0-9٠-٩]+)(?![0-9٠-٩]*٫)", one, raw or "")
+
+
 def _value(num: str, scale: Optional[str]) -> Optional[int]:
+    # «المطلوب:300.000» is 300,000: a dot followed by groups of exactly three digits is the thousands mark sellers type
+    # (HRJ 11188704307 was stored as a 300 SAR plot, 2026-11-11 launch audit; «1.500» read as 2). With a scale word the
+    # dot stays a decimal point — «1.500 مليون» is 1.5 million.
+    if not scale and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", num):
+        num = num.replace(".", "")
     try:
         v = float(num.replace(",", ""))
     except ValueError:
         return None
     if scale:
         v *= 1_000_000 if scale.startswith("مليون") or scale == "ملايين" else 1000
+    if not math.isfinite(v) or v > 1e12:
+        return None                                              # «1.000.000…» × 100 groups: no price, never a crash
     return int(round(v)) if v > 0 else None
 
 
@@ -195,7 +215,7 @@ _RANGE = re.compile(_NUM + _SCALE + r"\s*(?:-|–|الي|الى|لين|حتي|ح
 def asking_price(title: str, body: str) -> dict:
     """{'price', 'period', 'per_meter', 'phrase', 'why'} from the seller's own words. price None = not stated
     (or a bid, or ambiguous) — the card then reads «السعر عند الطلب»."""
-    t = norm(f"{title}\n{body}")
+    t = norm(_arabic_decimal_marks(f"{title}\n{body}"))
     out = {"price": None, "period": None, "per_meter": False, "phrase": None, "why": "no price phrase"}
     if _BID.search(t):
         out["why"] = "bid («السوم»): no price"
@@ -270,7 +290,7 @@ _STREET_BEFORE = re.compile(r"(?:شارع|عرض|عرضه|بعرض|عرضها|ا
 
 
 def area_of(title: str, body: str) -> dict:
-    t = norm(f"{title}\n{body}")
+    t = norm(_arabic_decimal_marks(f"{title}\n{body}"))
     vals: dict[float, str] = {}
     for rx in (_AREA1, _AREA2):
         for m in rx.finditer(t):
@@ -279,6 +299,9 @@ def area_of(title: str, body: str) -> dict:
             num = m.group(1)
             if _DIMS_AFTER.match(t, m.end(1)):
                 continue                                         # «10 في 8» (Haraj 18263149, 2026-10-17)
+            if not m.group(2) and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", num):
+                num = num.replace(".", "")                       # «1.250» / «1.250.000» = thousands, as for the price;
+                                                                 # «1.250 الف» keeps its decimal, as _value() does
             try:
                 v = float(num.replace(",", ""))
             except ValueError:

@@ -8,23 +8,21 @@ import { MODELS_POPUP_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { cardShadow, colors, radius } from '@/theme/tokens';
 import { TAP44, TAP44_DOWN } from '@/theme/palette';
 
-const EZHALAH_LOGO = require('../../assets/images/logo-cloud-green-static.svg'); // solid green cloud eagle: the glowing one looked faded on the white card (owner 2026-10-28, option A)
-
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
     mark: require('../../assets/models/shaheen.png'),
-    descriptionAr: 'سرعة خاطفة ودقة متناهية للإجابات السريعة',
-    descriptionEn: 'Lightning-fast precision for instant answers',
-    // Why the name, and what it does (owner 2026-10-10, approved wording). Describes the model only —
-    // never «best», never a recommendation about a property.
-    storyAr: 'الشاهين أسرع الطيور انقضاضا، ومن هنا جاء اسمه. نموذج يفهم طلبك من أول جملة، ويعرض لك الإعلانات المطابقة بسرعة ودقة.',
-    storyEn: 'The Shaheen (peregrine falcon) is the fastest bird when it dives. That is where the name comes from. A model that understands your request from the first sentence and shows you the matching listings quickly and accurately.' },
+    descriptionAr: 'سريع للبحث اليومي وحقائق السوق',
+    descriptionEn: 'Fast, for everyday search and market facts',
+    // Why the name, and what it does (owner 2026-11-11, approved wording). Describes the model only —
+    // never «best» against other apps, never a promise of perfect accuracy, never a recommendation about a property.
+    storyAr: 'في السماء، لا طير يسبق الشاهين. وفي إزهله، هو خيارك الأسرع: يجيبك بحقائق العقار السعودي ويقتنص لك الإعلانات المطابقة من أول جملة.',
+    storyEn: 'In the sky, no bird outpaces the Shaheen. In Ezhalah, it is your fastest choice: it answers you with facts about Saudi real estate and catches the matching listings for you from your first sentence.' },
   { id: 'hurr', ar: 'حر', en: 'Hurr', version: '4.4',
     mark: require('../../assets/models/hurr.png'),
-    descriptionAr: 'قوة وتحمل فائق لأصعب المهام والمعالجات',
-    descriptionEn: 'Unmatched endurance for your toughest challenges',
-    storyAr: 'الحر أقوى صقور الجزيرة العربية وأكثرها صبرا في الصيد، ومن هنا جاء اسمه. نموذج يبحث بعمق في جميع المواقع، ويتعامل مع الطلبات المعقدة متعددة الشروط.',
-    storyEn: 'The Hurr (saker falcon) is the strongest falcon in the Arabian Peninsula and the most patient hunter. That is where the name comes from. A model that searches deeply across all websites and handles complex requests with many conditions.' },
+    descriptionAr: 'عميق للتحليل والمقارنة والطلبات المعقدة',
+    descriptionEn: 'Deep, for analysis, comparison and complex requests',
+    storyAr: 'في الصحراء، لا صقر يضاهي الحر في الصبر. وفي إزهله، سيكون محللك العقاري: يربط المعلومات ببعضها ليجيب عن أعقد الأسئلة العقارية.',
+    storyEn: "In the desert, no falcon matches the Hurr's patience. In Ezhalah, it will be your real estate analyst: it connects the information to answer your most complex real estate questions." },
 ] as const;
 
 // Decorative: the adjacent model name already labels each control for assistive technology.
@@ -124,12 +122,11 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
         <View style={styles.storyOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setAbout(false)}
             accessibilityLabel={arabic ? 'إغلاق' : 'Close'} accessibilityRole="button" />
-          {/* Bigger in the middle on a laptop, with the Ezhalah logo by the title (owner 2026-10-23). The card
+          {/* Bigger in the middle on a laptop, no logo by the title (owner 2026-11-11: «our logo inside remove it»). The card
               opens only after a tap, so reading the window width here never meets the static export. */}
           <View testID="agent-models-story" style={[styles.storyCard, wide && styles.storyCardWide, { width: Math.min(wide ? 540 : 380, width - 32) }]} accessibilityViewIsModal>
             <View style={[styles.storyHead, { flexDirection: arabic ? 'row-reverse' : 'row' }, arabic && { justifyContent: 'flex-end', gap: 8 }]}>
               <View style={[styles.storyTitleRow, { flexDirection: arabic ? 'row-reverse' : 'row' }]}>
-                <Image source={EZHALAH_LOGO} style={wide ? styles.storyLogoWide : styles.storyLogo} contentFit="contain" accessible={false} />
                 <Text style={[styles.storyTitle, wide && styles.storyTitleWide, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? 'نماذج إزهله' : "Ezhalah's models"}</Text>
               </View>
               <Pressable accessibilityRole="button" accessibilityLabel={arabic ? 'إغلاق' : 'Close'} onPress={() => setAbout(false)} hitSlop={8}
@@ -186,8 +183,6 @@ const styles = StyleSheet.create({
   storyHead: { alignItems: 'center', justifyContent: 'space-between' },
   storyCardWide: { padding: 28, gap: 20, borderRadius: 24 },
   storyTitleRow: { alignItems: 'center', gap: 10, flexShrink: 1 },
-  storyLogo: { width: 30, height: 30 },
-  storyLogoWide: { width: 40, height: 40 },
   storyTitleWide: { fontSize: 22, lineHeight: 32 },
   storyNameWide: { fontSize: 17, lineHeight: 25 },
   storyTextWide: { fontSize: 16, lineHeight: 27 },

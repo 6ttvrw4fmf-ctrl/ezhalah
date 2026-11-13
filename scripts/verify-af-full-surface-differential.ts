@@ -171,7 +171,7 @@ type Opt = ChipOpt & { key: string; params: Record<string, unknown>; pred: Pred 
 const AMENITY_COL: Record<string, string> = {
   kitchen: 'kitchen', parking: 'parking', elevator: 'elevator', ac: 'air_conditioner', private_entrance: 'private_entrance',
   maid_room: 'maid_room', driver_room: 'driver_room', car_entrance: 'car_entrance', sanitation: 'sanitation',
-  electricity: 'electricity', water_supply: 'water_supply', furnished: 'furnished', rnpl: 'rent_now_pay_later',
+  electricity: 'electricity', water_supply: 'water_supply', furnished: 'furnished',
 };
 // The eight residential tokens the CHAT may map (certifiedAmenityKeys) that have a clause predicate
 // but NO chip on the card: predicate-only cases — the click set must still be exact.
@@ -214,9 +214,10 @@ const CARD_ARMS = ['comfort', 'space', 'safety', 'perks', 'build', 'extras', 'wh
 if (CARD_IDS.some((id) => !CARD_ARMS.includes(id))) throw new Error(`optionsFor() has no arm for card(s): ${CARD_IDS.filter((id) => !CARD_ARMS.includes(id)).join(', ')}`);
 function optionsFor(qid: string, types: string[], q: any): Opt[] | null {
   switch (qid) {
-    // two chips since 2026-11-02: the site's installment box, and the ad's own «دفعات» words (a text fact, 20261102100954)
-    case 'rnpl': return [{ key: 'rnpl', col: 'cnt_rnpl', countRpc: 'guided', params: { p_amenities: ['rnpl'] }, pred: { kind: 'true', col: 'rent_now_pay_later' } },
-      { key: 'split_payments', col: 'cnt_split_payments', countRpc: 'guided', params: { p_amenities: ['split_payments'] }, pred: { kind: 'true', col: 'split_payments' } }];
+    // ONE chip since 2026-11-12 (owner, migration 20261112111809): the site's installment box OR the ad's own «دفعات»
+    // words — the union, stated on the two canonical columns
+    case 'rnpl': return [{ key: 'rnpl', col: 'cnt_rnpl', countRpc: 'guided', params: { p_amenities: ['rnpl'] },
+      pred: { kind: 'or', preds: [{ kind: 'true', col: 'rent_now_pay_later' }, { kind: 'true', col: 'split_payments' }] } }];
     case 'amenities': return amenityChipKeys(types, q).map(amenity);
     // the ten themed cards: exactly the chips the real plan offers on this scope (cardKeys reads COHORT_CARDS)
     case 'comfort': return cardKeys(q, qid).map((k) => cardChip(qid, k));
