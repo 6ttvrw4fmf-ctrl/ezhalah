@@ -6,6 +6,9 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { fetchMapCard, type CardTarget } from '@/data/mapCard';
 import { cardRow, quickLook, nearbyPrices, COLUMNS, CARD_NOTE, typeLabel, type MapCard, type Tone } from '@/lib/mapCard';
 
+// «للشقق» (ل + الشقق), never «لـالشقق»
+const forType = (label: string) => (label.startsWith('ال') ? `لل${label.slice(2)}` : `لـ${label}`);
+
 type Props = { target: CardTarget; title: string; signedIn: boolean; loc: 'ar' | 'en'; onClose: () => void; onSignIn: () => void };
 
 export default function MapFactsCard({ target, title, signedIn, loc, onClose, onSignIn }: Props) {
@@ -38,7 +41,7 @@ export default function MapFactsCard({ target, title, signedIn, loc, onClose, on
         <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ paddingBottom: 6 }}>
           <Text style={[s.sub, { writingDirection: dir }]}>
             {ar ? `${card.any.toLocaleString('en-US')} إعلان` : `${card.any.toLocaleString('en-US')} ads`}
-            {card.priceType ? (ar ? ` · الأسعار لـ${typeLabel(card.priceType, 'ar')}` : ` · prices for ${typeLabel(card.priceType, 'en')}`) : ''}
+            {card.priceType ? (ar ? ` · الأسعار ${forType(typeLabel(card.priceType, 'ar'))}` : ` · prices for ${typeLabel(card.priceType, 'en')}`) : ''}
           </Text>
           {/* 1. the table */}
           <View style={s.table} testID="map-card-table">
