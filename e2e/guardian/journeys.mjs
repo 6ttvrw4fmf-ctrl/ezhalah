@@ -543,7 +543,7 @@ const G5 = {
   steps: [
     'Open https://ezhalah-app.vercel.app/, dismiss the sign-in card, pick الرياض and press «بحث».',
     'Read the rendered text of every card-listing-* element.',
-    'For each card assert: a price figure or «السعر عند الطلب»; a visible source domain whose link names the same «سيأخذك إلى <domain>»; a location: a non-empty city before «المملكة العربية السعودية», or (laptop photo-first card) a location line naming the searched city.',
+    'For each card assert: a price figure or «السعر عند الطلب»; a visible website name («مستضاف على <name>», or the older bare domain line) whose link names its domain in «سيأخذك إلى <domain>»; a location: a non-empty city before «المملكة العربية السعودية», or (laptop photo-first card) a location line naming the searched city.',
     'For each card assert no HTML entity, no «[object Object]», no bare «undefined»/«NaN», and no zero-valued money token.',
   ],
   async run(page, ctx) {
@@ -566,11 +566,17 @@ const G5 = {
       if (!hasPrice) bad.push(`${card.id}: no price treatment at all — neither a figure nor «${PRICE_ON_REQUEST}»`);
       const zero = t.match(ZERO_MONEY);
       if (zero) bad.push(`${card.id}: renders a zero-valued money token «${zero[0].trim()}» — a NULL price surfacing as 0`);
-      // Source attribution = the host a customer SEES on the card, and the link's «سيأخذك إلى <host>» names
-      // the same host (a screen reader hears where the tap goes). Either missing, or the two disagreeing, fails.
+      // Source attribution = what a customer SEES on the card, and the link's «سيأخذك إلى <host>» names the
+      // host (a screen reader hears where the tap goes). Since 2026-11-13 the card shows the website's NAME, not
+      // its domain (owner: «ksaaqar.com» → «عقارات السعودية»; ResultCard.tsx «مستضاف على {name}» / the photo
+      // footer), so the visible half is a non-empty «مستضاف على <name>» line OR a bare domain line (the older
+      // card), while the accessible sentence still carries the domain. This guardian was red on every card from
+      // the 10:0x deploy of #12106 (run 43412092212) for asking the new card for the old domain line.
+      const shownName = t.match(/مستضاف على\s+([^\n]+)/u)?.[1]?.trim() || null;
       const shownHost = t.match(/^\s*((?:[a-z0-9-]+\.)+[a-z]{2,})\s*$/imu)?.[1]?.toLowerCase() ?? null;
       const saidHost = [t, ...card.aria].map((x) => x.match(/سيأخذك إلى\s+(\S+\.\S+)/u)?.[1]).find(Boolean)?.toLowerCase() ?? null;
-      if (!shownHost) bad.push(`${card.id}: no source attribution — the card shows no source domain`);
+      if (!shownName && !shownHost) bad.push(`${card.id}: no source attribution — the card shows neither a website name («مستضاف على …») nor a domain`);
+      if (shownName && /^(undefined|null|\[object Object\]|—|-)$/u.test(shownName)) bad.push(`${card.id}: the website name reads «${shownName}» — a placeholder, not a name`);
       if (!saidHost) bad.push(`${card.id}: no source attribution — the «الضغط على هذا الإعلان سيأخذك إلى <منصة>» link names no domain`);
       if (shownHost && saidHost && shownHost !== saidHost) bad.push(`${card.id}: the card shows ${shownHost} but its link says it goes to ${saidHost}`);
       const where = cardLocationProblem(t, SEARCH_CITY);

@@ -23,9 +23,11 @@ def test_a_faithful_card_matches_every_field():
         assert v[f] == MATCH, (f, v[f])
 
 
-def test_planted_licence_not_on_card_is_caught():          # the 11-06 Falcon finding
-    v = _judge(card={**CARD, "text": CARD["text"].replace("رقم رخصة الإعلان 7200767759", "")})
-    assert v["licence"] == cp.CARD_MISSING
+def test_planted_licence_not_on_card_is_match_since_2026_11_13():   # the 11-06 Falcon finding, re-read 11-13
+    """11-06: a card that never showed the licence was the finding. 11-13 (owner, #12123): the card never prints the
+    licence by design — it stays on the ad page — so a card without it is MATCH when the page and our row agree."""
+    v = cp.judge(STORED, {**CARD, "text": CARD["text"].replace("7200767759", "")}, PAGE, platform="aqar", link_kind="ok")
+    assert v["licence"] == cp.MATCH
 
 
 def test_planted_dead_link_is_caught():                    # the 11-05 Dwelleo finding
@@ -199,6 +201,37 @@ def test_a_total_rooms_site_card_never_matches_a_bedroom_count():
     assert v["bedrooms"] == MISMATCH, v
 
 
+def test_exit_code_is_red_when_ads_were_picked_but_no_card_was_read():
+    """CodeRabbit on #10958: run_journeys() ignored the journey's exit code, so a PR dry-run that read every source
+    page and not one card still returned 0. Ads picked + production quiet + zero cards = the journey died = red."""
+    base = {"ads": 6, "cards": 0, "sources": 6, "sites": 3, "pick_errors": 0,
+            "busy_chunks": 0, "unreadable_chunks": 0, "dead_chunks": 1}
+    assert cp.exit_code(base) == 1                                      # a quiet chunk read no card: the journey died
+    assert cp.exit_code({**base, "cards": 6, "dead_chunks": 0}) == 0    # every chunk read cards: green
+    assert cp.exit_code({**base, "dead_chunks": 0, "busy_chunks": 1}) == 0   # cards skipped on purpose: not a death
+    assert cp.exit_code({**base, "ads": 0, "sites": 0, "dead_chunks": 0}) == 0   # nothing to sample: honest green
+    assert cp.exit_code({**base, "ads": 0, "sites": 0, "dead_chunks": 0, "pick_errors": 2}) == 1   # picking failed
+    assert cp.exit_code({**base, "cards": 6, "sites": 0, "dead_chunks": 0}) == 1   # ads read, no site row: red
+    # CodeRabbit on #11512: one busy chunk must not mask a dead quiet chunk, and an unreadable load check is red
+    assert cp.exit_code({**base, "cards": 6, "busy_chunks": 1, "dead_chunks": 1}) == 1
+    assert cp.exit_code({**base, "dead_chunks": 0, "unreadable_chunks": 1}) == 1
+    assert cp.exit_code({**base, "cards": 6, "dead_chunks": 0, "busy_chunks": 2, "unreadable_chunks": 1}) == 1
+
+
+def test_main_loop_tells_unreadable_load_from_busy_and_counts_a_dead_chunk():
+    """The accounting lives in main(): read its source so the three counters are fed from the right branches."""
+    import inspect
+    src = inspect.getsource(cp.main)
+    assert 'busy.startswith("load unreadable")' in src and 'totals["unreadable_chunks"] += 1' in src
+    assert 'elif picks and not cards:' in src and 'totals["dead_chunks"] += 1' in src
+    assert 'totals["busy_chunks"] += 1' in src
+    # database_quiet() really does return that prefix on repeated RPC errors
+    class Boom:
+        def rpc(self, *_a, **_k):
+            raise RuntimeError("down")
+    assert (cp.database_quiet(Boom(), tries=2, wait_s=0) or "").startswith("load unreadable")
+
+
 def _page(lines, meta=None):
     return {**PAGE, "title": "عقار", "meta": meta or {}, "evidence_lines": lines, "text_head": " | ".join(lines),
             "_text": "\n".join(lines)}
@@ -301,3 +334,20 @@ def test_the_link_is_read_where_the_customer_lands(monkeypatch):   # 🔗 2026-1
     assert reader.asked == ["https://gathern.co/ar/view/115498/unit/163423"], reader.asked
     samples = [s for s in rows["gathern"].get("samples") or [] if s.get("field") == "link"]
     assert not samples, samples        # a live unit opened at the customer's address is not a broken link
+
+
+def test_licence_is_not_asked_of_the_card_since_2026_11_13():
+    """Owner 2026-11-13 (#12123): the card never prints the REGA licence; it stays on the ad page. A card whose text
+    lacks the number is MATCH when the page and our row carry the same licence — never CARD_MISSING (13:33 UTC 11-13:
+    justsa, muktamel, nawafeth, nufouth, reinvest all read card_missing for this one owner decision)."""
+    from scrapers.common import card_parity as cp
+    stored = {"card_licence": "7200012345", "price": None}
+    page = {"_text": "رقم رخصة الإعلان 7200012345", "price": None}
+    card = {"text": "شقة للبيع الرياض حي الملقا 850,000 ر.س", "photo": True, "opened_ok": True}
+    out = cp.judge(stored, card, page, platform="justsa", link_kind="ok")
+    assert out["licence"] == cp.MATCH
+    # the data halves still judge: a page that prints another licence and never ours is a MISMATCH …
+    other = {"_text": "رقم رخصة الإعلان 7200099999", "price": None}
+    assert cp.judge(stored, card, other, platform="justsa", link_kind="ok")["licence"] == cp.MISMATCH
+    # … and a row without the licence the page prints is WE_MISS
+    assert cp.judge({"price": None}, card, page, platform="justsa", link_kind="ok")["licence"] == cp.WE_MISS
