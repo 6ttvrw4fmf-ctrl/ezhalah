@@ -26,7 +26,10 @@ if (re) {
   for (const s of ['رقم', '(حي رقم (7', 'حي رقم 7', ' رقم 12 ']) check(`«${s}» is refused as a district`, re.test(s));
   for (const s of ['حي المصيف 1', 'الناصرية 4', 'حي الرقمية', 'حي الرقم الذهبي', 'الشفا']) check(`«${s}» is kept`, !re.test(s));
 }
-check('MUTATION — a definition without rule 11 is caught', raqmRule(body.replace(/\n\s*or t ~ '\^\[\\s[^\n]*رقم[^\n]*/, '')) === null);
+const mutation = (label: string, caught: boolean) => check(`MUTATION — ${label}`, caught);
+mutation('a definition without rule 11 is caught', raqmRule(body.replace(/\n\s*or t ~ '\^\[\\s[^\n]*رقم[^\n]*/, '')) === null);
+const KEPT = ['حي المصيف 1', 'الناصرية 4', 'حي الرقمية', 'حي الرقم الذهبي', 'الشفا'];
+mutation('an over-broad rule («رقم» anywhere) is caught by the kept names', KEPT.some((x) => /رقم/.test(x)));
 
 console.log(failed === 0 ? '\n✓ a district named only «رقم» is never offered as a place' : `\n✗ ${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);
