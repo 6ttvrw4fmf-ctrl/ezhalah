@@ -983,11 +983,11 @@ try {
     // «The baseline number» is the HONEST one the page prints (src/lib/honestTotal.ts): total minus the rows of the
     // baseline page the raw tables did not return — re-measured NOW, because cards hydrated while the round was
     // walked can reveal a drop the first read never saw (run 43424461595: headline 29795, rpc 29796, a false red).
-    const hsAfterSkips: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
-    const skipHeadline = headlineNum(hsAfterSkips[hsAfterSkips.length - 1]);
     // The newest headline belongs to the newest search: the baseline when nothing re-searched, else the all-skip
-    // search (whose total is checked == baseline above). Its drops are measured on THAT page (CodeRabbit on #12166).
+    // search (whose total is checked == baseline above). Its drops are measured on THAT page, and the headline is
+    // read once it settles on that page's honest number (CodeRabbit on #12166).
     const shownSearch = roundEnd ?? baseline;
+    const skipHeadline = await waitForHeadline(shownSearch.total, 25_000, honestOf(shownSearch));
     const skipDrops = dropsOf(shownSearch);
     check('2. R8.1.2 — after skipping every question the newest headline is still the baseline number',
       R.skipHeadlineHolds(skipHeadline, baseline.total, skipDrops.n),
