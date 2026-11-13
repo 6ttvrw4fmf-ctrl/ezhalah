@@ -10,6 +10,11 @@
 // Rule: in every job whose steps invoke raise-workflow-alert.mjs, any setup-node pin must be a
 // major >= 22 (22.18+ when the minor is given). No pin means the runner default, which is Node 24.
 //
+// CORRECTED 2026-11-13 (🦅): «no pin = Node 24» holds only on GitHub-hosted runners. A job whose runs-on can pick the
+// self-hosted runner (vars.EZ_RUNNER / self-hosted) gets THAT machine's default, Node 18, and the bridge died with
+// ERR_UNKNOWN_FILE_EXTENSION (pin-district-nightly run 43492540747). 20 of 55 bridge jobs were unpinned and could land
+// there. Such a job must now carry a setup-node step with an accepted pin.
+//
 //   node --experimental-strip-types scripts/verify-alert-bridge-node-can-load-ts.ts
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -44,6 +49,9 @@ export function badNodePin(jobText: string): string | null {
   return null;
 }
 
+/** A job whose runs-on can resolve to the self-hosted runner (vars.EZ_RUNNER, or a literal self-hosted label). */
+export const mayRunSelfHosted = (jobText: string): boolean => /runs-on:.*(EZ_RUNNER|self-hosted|ezhalah-own)/.test(jobText);
+
 export function problems(files: Record<string, string>): string[] {
   const out: string[] = [];
   for (const [f, yml] of Object.entries(files)) {
@@ -51,6 +59,8 @@ export function problems(files: Record<string, string>): string[] {
       if (!text.includes(BRIDGE)) continue;
       const bad = badNodePin(text);
       if (bad) out.push(`${f} job '${job}' runs ${BRIDGE} on node-version ${bad} (needs >= 22.18 to load .ts)`);
+      else if (mayRunSelfHosted(text) && !/uses:\s*actions\/setup-node@/.test(text))
+        out.push(`${f} job '${job}' runs ${BRIDGE} with no setup-node and can land on the self-hosted runner (Node 18 there)`);
     }
   }
   return out;
@@ -71,6 +81,10 @@ mustCatch('a bridge job pinned to lts/* (unprovable)', flags(job('lts/*')));
 mustCatch('node 24 is NOT flagged', !flags(job('"24"')));
 mustCatch('node 22.18 is NOT flagged', !flags(job('22.18')));
 mustCatch('an unpinned bridge job (runner default) is NOT flagged', !flags(`jobs:\n  bridge:\n    steps:\n      - run: node scripts/ops/${BRIDGE}\n`));
+const selfHosted = (steps: string) => `jobs:\n  bridge:\n    runs-on: \${{ vars.EZ_RUNNER || 'ubuntu-latest' }}\n    steps:\n${steps}      - run: node scripts/ops/${BRIDGE}\n`;
+mustCatch('an UNPINNED bridge job that can run self-hosted (the 2026-11-13 break) is flagged', flags(selfHosted('')));
+mustCatch('a self-hosted-capable bridge job with setup-node 22 is NOT flagged',
+  !flags(selfHosted('      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n')));
 mustCatch('node 20 in a job WITHOUT the bridge is NOT flagged', !flags(`jobs:\n  crawl:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: "20"\n  bridge:\n    steps:\n      - run: node scripts/ops/${BRIDGE}\n`));
 
 const files: Record<string, string> = {};
