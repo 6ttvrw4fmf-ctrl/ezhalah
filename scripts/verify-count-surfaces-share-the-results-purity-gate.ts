@@ -116,6 +116,10 @@ export async function discoverScopedRpcs(sources: Array<{ file: string; text: st
 const RECONCILABLE: Record<string, { countCol: string; cityCol?: string; needsCityId?: boolean }> = {
   top_cities_by_deal_ar: { countCol: 'listing_count', cityCol: 'city_ar' },
   district_options_ar: { countCol: 'total_in_city', needsCityId: true },
+  // «نُشر خلال» (owner 2026-11-11): one object of per-window counts for the CURRENT search, not a per-city row. It is
+  // reconciled in §2b below — `any` == the search total and each window == the search with that window applied —
+  // under the same city scope the chips commit to. Unregistered it turned this barrier red on every run from 11-12.
+  posted_window_counts_ar: { countCol: 'any' },
 };
 // Called with the scope but NOT a per-city count surface — they answer a different question
 // (per-option counts inside one already-scoped search), so a city-level reconciliation does not apply.
@@ -276,6 +280,31 @@ if (clusters.length) {
           `district_options_ar is keyed by the ONE city_id the collapsed chip commits (${rep}), so it must ` +
           `resolve that city the way the search does — through the cluster, not a strict city_id match`);
       }
+    }
+  }
+}
+
+// ── 2b. «نُشر خلال» — every window count is the exact search that picking it runs. ─────────────────────
+{
+  const POSTED_WINDOWS: Array<[keyof Record<string, number>, number | null]> = [['any', null], ['d7', 7], ['d30', 30], ['d365', 365]];
+  for (const sh of SHAPES.filter((x) => !x.broad)) {
+    const RES = S.resTables(sh.q), COM = S.comTables(sh.q);
+    const scope = { p_tables: RES, p_tables2: COM.filter((t) => !RES.includes(t)), p_types2: sh.types! };
+    const cohort = { p_deal: sh.deal, p_category: sh.cat, ...(sh.types ? { p_types: sh.types } : {}) };
+    const chips = await rpc('top_cities_by_deal_ar', { ...cohort, ...scope });
+    const city = chips[0]?.city_ar;
+    if (!city) { check(`${sh.label} — «نُشر خلال»: a city to reconcile in`, false, 'the chip surface returned no city'); continue; }
+    const w = (await rpc('posted_window_counts_ar', { ...cohort, ...scope, p_cities: [city] })) as unknown as Record<string, number> | null;
+    if (!w || typeof w !== 'object' || Array.isArray(w)) { check(`${sh.label} · ${city}: «نُشر خلال» answered an object`, false, JSON.stringify(w)?.slice(0, 200)); continue; }
+    for (const [key, days] of POSTED_WINDOWS) {
+      const rows = await rpc('location_search_candidates_ar', {
+        ...cohort, ...scope, p_cities: [city], p_per_platform: null, p_limit: 1, p_offset: 0,
+        ...(days != null ? { p_posted_within_days: days } : {}),
+      });
+      const delivered = Number(rows[0]?.total_count ?? 0), advertised = Number(w[key]);
+      check(`${sh.label} · ${city}: «نُشر خلال» ${key} ${advertised} == search ${delivered}`,
+        countDescribesTheSearch(advertised, delivered),
+        `posted_window_counts_ar.${key} disagrees with the results RPC under the same scope${days != null ? ` and p_posted_within_days=${days}` : ''}`);
     }
   }
 }
