@@ -37,6 +37,9 @@ import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox
 import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { keepSaudiPlaces } from '@/lib/saudiOutline';
 import { isRealDrawnArea } from '@/lib/drawnArea';
+import { fetchViewFacts } from '@/data/mapViewFacts';
+import { factBox, factsWindowLabel, lockedAsk, factsZoom, FACTS_MIN_ADS, type ViewFacts } from '@/lib/mapViewFacts';
+import { useApp } from '@/store';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
@@ -696,11 +699,30 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   const pinsKey = JSON.stringify(pinFilter ?? null);
   // A number, 'failed' (the read for the view on screen failed — «try again» is shown), or null (nothing read yet).
   const [pinCount, setPinCount] = useState<PillCount | null>(null);
+  // The pill's second line (src/lib/mapViewFacts.ts): asked for the exact box the count was read over, and shown only
+  // when the server counted the same ads. factsBox is set ONLY where the count is a sum over that box.
+  const [factsBox, setFactsBox] = useState<{ s: number; w: number; n: number; e: number } | null>(null);
+  const [viewFacts, setViewFacts] = useState<ViewFacts | null>(null);
+  const { user, openAuth } = useApp();
   const retryPinsRef = useRef<(() => void) | null>(null);
   // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
   const [viewPlace, setViewPlace] = useState<string | null>(null);
   // The named place's OWN count (owner 2026-11-05): beside «في حي النرجس» the pill prints النرجس's number, not the view's.
   const [placeCount, setPlaceCount] = useState<number | null>(null);
+  // Asked once the count has settled (350 ms), only at exact-point zoom and only for a named place with enough ads.
+  useEffect(() => {
+    setViewFacts(null);
+    const m = mapRef.current;
+    // A drawn boundary gets the facts for exactly the ads inside it (the pin read already carries its polygon), at any zoom.
+    if (!m || !pinFilter || !factsBox || drawing || typeof pinCount !== 'number' || pinCount < FACTS_MIN_ADS || (!viewPlace && !hasShape)) return;
+    if (!hasShape && !factsZoom(m.region.span.latitudeDelta)) return;
+    let stale = false;
+    const box = factsBox;
+    const tm = setTimeout(() => { void fetchViewFacts(box, pinFilter, !!user).then((f) => { if (!stale) setViewFacts(f); }); }, 350);
+    return () => { stale = true; clearTimeout(tm); };
+    // pinsKey stands for pinFilter (a new object every render)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [factsBox, pinsKey, hasShape, drawing, pinCount, viewPlace, user]);
   // The deals NOT chosen that do have listings in view — so an empty deal says where the listings are (owner 2026-11-05).
   const [otherDeals, setOtherDeals] = useState<string[]>([]);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
@@ -985,6 +1007,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     };
     const load = async () => {
       const my = ++seq;
+      setFactsBox(null);   // the pill's second line belongs to one counted box; a new read starts without one
       const { center, span } = m.region;
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
@@ -1074,7 +1097,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (drawCell === 0) rows = placeApart(rows, onScreen, headWidth);
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
-      setPinCount(pillCount(rows));
+      setPinCount(pillCount(rows)); setFactsBox(paddedBox(center, span));
       setPlaceCount(null);
       void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc, translitPlace)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
@@ -1368,17 +1391,56 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       {!drawing && pinCount === 'failed' ? (
         <Pressable style={s.countPill} onPress={() => retryPinsRef.current?.()} accessibilityRole="button" testID="map-pin-retry"><Text style={s.countPillT}>{t('Couldn’t load the listings here. Try again')}</Text></Pressable>
       ) : null}
-      {!drawing && typeof pinCount === 'number' ? (
-        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}</Text></View>
-      ) : null}
+      {!drawing && typeof pinCount === 'number' ? (() => {
+        const loc = locale === 'ar' ? 'ar' : 'en';
+        const typePicked = !!(pinFilter?.types?.length || pinFilter?.scope?.types2?.length);
+        const saleOnly = (pinFilter?.deals ?? []).length === 1 && pinFilter?.deals[0] === 'buy';
+        const box = factBox(viewFacts, hasShape ? pinCount : placeCount ?? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape);
+        const locked = box.kind === 'locked';
+        return (
+          <View style={[s.countPill, box.kind !== 'none' && s.countPillTall]} pointerEvents={locked ? 'box-none' : 'none'} testID="map-pin-count">
+            <Text style={s.countPillT}>
+              {hasShape ? t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') }) : viewCountText(placeCount ?? pinCount, viewPlace, locale === 'ar' ? 'ar' : 'en', pins?.deals, otherDeals)}
+              {box.kind !== 'none' ? <Text style={s.factWindow}>{`  · ${factsWindowLabel(loc)}`}</Text> : null}
+            </Text>
+            {box.kind === 'chips' ? (
+              <View style={s.factChips} testID="map-pin-facts">
+                {box.chips.map((c) => (
+                  <Text key={c.text} style={[s.factChip, c.tone === 'up' && s.factUp, c.tone === 'down' && s.factDown]}>{c.text}</Text>
+                ))}
+                {box.hint ? <Text style={[s.factChip, s.factHint]}>{box.hint}</Text> : null}
+              </View>
+            ) : null}
+            {box.kind === 'locked' ? (
+              <Pressable onPress={() => openAuth()} accessibilityRole="button" accessibilityLabel={lockedAsk(loc)} testID="map-pin-facts-locked">
+                <View style={s.factChips} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>
+                  {box.chips.map((c) => <Text key={c} style={[s.factChip, FACT_BLUR]}>{c}</Text>)}
+                </View>
+                <Text style={s.factAsk}>{lockedAsk(loc)}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        );
+      })() : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
   );
 }
 
+// The guest's numbers are shapes, blurred — the real ones are never sent to a guest (src/lib/mapViewFacts.ts).
+const FACT_BLUR = { filter: 'blur(5px)', userSelect: 'none' } as unknown as object;
+
 const s = StyleSheet.create({
   countPill: { position: 'absolute', left: 12, bottom: 12, backgroundColor: 'rgba(36,35,43,0.86)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   countPillT: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  countPillTall: { borderRadius: 14, maxWidth: 360 },
+  factWindow: { color: '#bbb', fontSize: 11.5, fontWeight: '600' },
+  factChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 6 },
+  factChip: { color: '#fff', fontSize: 12.5, fontWeight: '700', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 9, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
+  factUp: { color: '#FF9B8A' },
+  factDown: { color: '#7FE3A0' },
+  factHint: { color: '#ccc', fontWeight: '600' },
+  factAsk: { color: '#FAC775', fontSize: 12.5, fontWeight: '700', marginTop: 6, textAlign: 'center' },
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },

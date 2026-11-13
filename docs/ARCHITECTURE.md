@@ -590,6 +590,37 @@ no touching pair, no id lost, 5 mutations) and the hourly MAP PIN ROBOT `e2e/map
 every pin tappable, district named; red → alert). Never "fix" a red robot by moving its spots, loosening the 1 px
 overlap test or shrinking PIN_GAP_PX.
 
+**THE MAP BOX AND ITS CARD — the agreed design (owner 2026-11-12, «it can't be wrong», «always ADHD-simple»).**
+When a user zooms into a named place, the count pill becomes a small box of word-labelled chips for EXACTLY the ads it
+counts, under EXACTLY the map's filters (deal, type, rooms, furnished, area, price, «نشر خلال» — every filter applies):
+> **1,081 للبيع · حي الملقا** · آخر 30 يوما — `123 جديد` `85 اختفى` `المتر المعروض 6,100 ريال`
+> `أغلى من أحياء قريبة 9%` `15 خفضوا السعر` — اضغط للتفاصيل ›
+Tapping opens ONE card that fits one phone screen (no scrolling): (1) a table, rows إعلانات جديدة · إعلانات اختفت ·
+سعر المتر المعروض · خفضوا السعر, columns **أمس · أسبوع · شهر · 3 أشهر · أحياء قريبة** (red = above the neighbours,
+green = below); (2) «سعر المتر المعروض حي حي» — each nearby district by name; (3) «نظرة سريعة» — 8 boxes (متوسط السعر
+المعروض، متوسط المساحة، مدة بقاء الإعلان، نطاق الأسعار المعروضة، النوع الأكثر، عدد الغرف الأكثر، متوسط عمر العقار،
+مواقع تعرض إعلانات هنا), each but the last with a grey «أحياء قريبة …» line; (4) the line «الأسعار هي أسعار العرض في
+الإعلانات، وليست أسعار البيع النهائية».
+Rules: every price says «المعروض» (asking, never sold); «اختفى» = removed at source, never «sold»; «جديد» = the SITE's
+posting date; a copy on another site counts once; a price is the MEDIAN, shown only from ≥ 10 ads, else the cell says
+«إعلانات قليلة»; with no type picked the price is never mixed — the box says «اختر نوع العقار لعرض السعر» and the card
+lists the price per type; «أحياء قريبة» = the 4 nearest districts of the same city with enough ads, under the SAME
+filters (counts compared as the neighbours' average, so a big district is not compared unfairly), falling back to the
+city — named as such — when the neighbours lack data; a drawn boundary gets the facts for exactly the ads inside it
+(any zoom) but never «أحياء قريبة» (a drawing is not a district); «أمس» is the last FINISHED
+day (never «اليوم», which reads 0 in the morning); a failed read hides the box's facts (never «0»); guests see the same
+layout with blurred shapes and «🔒 سجل الدخول لعرض الأرقام», and the server never sends them a number.
+History: «اختفى» counts confirmed removals from the nightly `map_fact_removal` log (started 2026-11-12 — only 37% of
+older removals kept their district, so no backfill); «خفضوا السعر» counts price-diary drops (`listing_price_history`
+'price' events, started 2026-11-11; a drop of more than half is a page re-read, not a cut). Each shows once its window
+is fully covered. Built on `map_view_facts_ar()` (the «نشر خلال» counter's filter word for word); `audit_map_view_facts()`
+recounts 25 random views nightly another way and switches the facts off (`ops_feature_flags.map_view_facts`) and pages
+(`mon_detect_map_view_facts`) on any mismatch. Freshness (owner 2026-11-13, «we can't have mistakes … strong barrier»): a
+nightly table older than 36 h hides what it feeds — «اختفى» (removal log) and «أحياء قريبة» (`map_district_neighbors`) —
+and the same detector pages; the facts carry `updated_at` for the card's «آخر تحديث». Guards: `scripts/verify-map-view-facts.ts` (server),
+`scripts/verify-map-view-facts-line.ts` (screen). Never widen «اختفى» to crawl-absence sites, show a window before it is
+covered, lower the 10-ad price floor, or loosen the «same ads as the pill» rule to make facts appear more often.
+
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
 Preview tabs have no frame history/loading indicator, and reload remounts their content.
