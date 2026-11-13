@@ -73,6 +73,18 @@ const priceRule = (src: string) => /'ppm', case when p_deals = array\['buy'\]::t
 check('price per metre: sale only, one picked type, never mixed, at least 10 ads', priceRule(core) && /'ppm', case when \(select count\(\*\) from ppmc\) >= 10/.test(area));
 mustCatch('a price from 3 ads', () => priceRule(core.replace('(select count(*) from ppmc) >= 10', '(select count(*) from ppmc) >= 3')));
 mustCatch('a price that mixes property types', () => priceRule(core.replace("and (select place.one_type from place) and (select count(*) from ppmc)", "and (select count(*) from ppmc)")));
+// no type picked (owner 2026-11-13): the most common type's OWN price, named — never a mix, same floor and bounds
+const topRule = (src: string) => /select fd\.type_ar, count\(\*\) as n, percentile_cont\(0\.5\) within group \(order by fd\.price \/ fd\.area_m2\) as ppm\s*from fd where fd\.own and fd\.deal = 'buy' and fd\.price > 0 and fd\.area_m2 > 0 and fd\.type_ar is not null\s*group by fd\.type_ar having count\(\*\) >= 10\s*order by count\(\*\) desc, fd\.type_ar limit 1/.test(src)
+  && (src.match(/and not \(\(p_types is not null or p_types2 is not null\) and \(select place\.one_type from place\)\)\s*and \(select toptype\.ppm from toptype\) between 10 and 200000/g) ?? []).length === 2
+  && (src.match(/case when \(v ->> 'ppm'\) is null then array\[v ->> 'top_type'\] else p_types end/g) ?? []).length === 2;
+check('no type picked: the most common type (≥ 10 priced ads) and its own median, 10–200,000 SAR, neighbours compared on that type', topRule(core));
+mustCatch('a most-common-type price from 3 ads', () => topRule(core.replace('group by fd.type_ar having count(*) >= 10', 'group by fd.type_ar having count(*) >= 3')));
+mustCatch('a most-common-type price with no bounds', () => topRule(core.replace(/(and not \(\(p_types is not null or p_types2 is not null\) and \(select place\.one_type from place\)\)\s*and \(select toptype\.ppm from toptype\)) between 10 and 200000/, '$1 > 0')));
+mustCatch('a no-type view compared with the neighbours\' MIXED price', () => topRule(core.replace("case when (v ->> 'ppm') is null then array[v ->> 'top_type'] else p_types end", 'p_types')));
+const auditTop = (src: string) => /order by random\(\) limit 15/.test(src) && /why := why \|\| 'top_type'; end if;/.test(src) && /why := why \|\| 'top_ppm'; end if;/.test(src)
+  && /why := why \|\| 'top_type_missing';/.test(src) && /why := why \|\| 'nb_ppm_top_type'; end if;/.test(src) && /why := why \|\| 'top_ppm_beside_ppm'; end if;/.test(src);
+check('the nightly checker recounts the no-type price another way (15 more views): the type, its median, the neighbours', auditTop(audit));
+mustCatch('a checker that never recounts the no-type price', () => auditTop(audit.replace("why := why || 'top_ppm'; end if;", 'null; end if;')));
 const nearRule = (src: string) => /having count\(\*\) >= 30/.test(src) && /join d b on b\.city_ar = a\.city_ar and b\.district_ar <> a\.district_ar/.test(src) && /where nb\.rk <= 4/.test(src);
 check('«أحياء قريبة» = the 4 nearest districts of the SAME city, each with at least 30 ads', nearRule(neighbors));
 mustCatch('neighbours from another city', () => nearRule(neighbors.replace('on b.city_ar = a.city_ar and', 'on')));
@@ -80,7 +92,7 @@ mustCatch('ten «nearest» districts', () => nearRule(neighbors.replace('where n
 const fallback = (src: string) => /v_kind := 'near';/.test(src) && /v_kind := 'city';/.test(src) && /case when v_kind = 'near' then to_jsonb\(v_nb\.neighbors\) else to_jsonb\(array\[v_city\]\) end/.test(src);
 check('with no usable neighbours the comparison falls back to the city, and names the city', fallback(core));
 const freshNeighbours = (src: string) => /v_fresh_nb := exists \(select 1 from public\.map_district_neighbors nbt where nbt\.built_at >= now\(\) - interval '36 hours'\)/.test(src)
-  && /if \(v ->> 'ppm'\) is not null and v_city is not null and v_fresh_nb then/.test(src);
+  && /if coalesce\(v ->> 'ppm', v ->> 'top_ppm'\) is not null and v_city is not null and v_fresh_nb then/.test(src);
 check('a neighbours table older than 36 h hides the comparison (never yesterday\'s districts)', freshNeighbours(core));
 mustCatch('a comparison read from a stale neighbours table', () => freshNeighbours(core.replace('and v_city is not null and v_fresh_nb then', 'and v_city is not null then')));
 const detector = latestDef('mon_detect_map_view_facts');
@@ -90,7 +102,7 @@ mustCatch('an alarm blind to an empty neighbours table', () => watchesNeighbours
 check('the facts carry the time of the last nightly run (for «آخر تحديث»)', /'updated_at', \(select max\(cr\.run_at\) from public\.map_fact_capture_run cr where cr\.ok\)/.test(core));
 const sane = (src: string) => /and \(select percentile_cont\(0\.5\) within group \(order by ppmc\.ppm\) from ppmc\) between 10 and 200000/.test(src)
   && /and \(v_area ->> 'ppm'\)::numeric between 10 and 200000/.test(src)
-  && /and abs\(\(v ->> 'ppm'\)::numeric - \(v_area ->> 'ppm'\)::numeric\) <= 2 \* \(v_area ->> 'ppm'\)::numeric then/.test(src);
+  && /and abs\(coalesce\(v ->> 'ppm', v ->> 'top_ppm'\)::numeric - \(v_area ->> 'ppm'\)::numeric\) <= 2 \* \(v_area ->> 'ppm'\)::numeric then/.test(src);
 check('nothing impossible is served: price per metre 10–200,000 SAR, a comparison gap of at most 200%', sane(core));
 mustCatch('a price per metre of 3 million served', () => sane(core.replace('from ppmc) between 10 and 200000', 'from ppmc) between 10 and 9999999999')));
 mustCatch('a 500% «cheaper than nearby» served', () => sane(core.replace('<= 2 * (v_area ->> \'ppm\')::numeric then', '<= 99 * (v_area ->> \'ppm\')::numeric then')));
@@ -112,7 +124,9 @@ const GUEST_KEYS = new Set(['locked', 'any', 'has_new', 'has_gone', 'has_ppm', '
 const guestKeys = (g: string) => [...g.matchAll(/(?:\(|,)\s*'([a-z_0-9]+)',/g)].map((m) => m[1]);
 const guestNoNumbers = (src: string) => { const g = guestBranch(src); const keys = guestKeys(g); return g !== '' && keys.includes('locked') && keys.every((k) => GUEST_KEYS.has(k)) && !/return v;/.test(g); };
 check('a guest gets {locked, any, has_*} — never a number', guestNoNumbers(rpc));
-mustCatch('a guest branch that leaks the price per metre', () => guestNoNumbers(rpc.replace("'has_ppm', (v ->> 'ppm') is not null", "'ppm', v -> 'ppm'")));
+mustCatch('a guest branch that leaks the price per metre', () => guestNoNumbers(rpc.replace("'has_ppm', coalesce(v ->> 'ppm', v ->> 'top_ppm') is not null", "'ppm', v -> 'ppm'")));
+mustCatch('a guest branch that leaks the most common type\'s price', () => guestNoNumbers(rpc.replace("'has_ppm', coalesce(v ->> 'ppm', v ->> 'top_ppm') is not null", "'top_ppm', v -> 'top_ppm'")));
+check('a guest sees the blurred price shape for the most common type\'s price too (still no number)', /'has_ppm', coalesce\(v ->> 'ppm', v ->> 'top_ppm'\) is not null/.test(rpc));
 mustCatch('a guest branch that leaks a count of priced ads', () => guestNoNumbers(rpc.replace("'one_type', v -> 'one_type'", "'one_type', v -> 'one_type', 'ppm_n', v -> 'ppm_n'")));
 const switchable = (src: string) => /if not coalesce\(\(select ff\.enabled from public\.ops_feature_flags ff where ff\.name = 'map_view_facts'\), false\) then\s*return null;/.test(src);
 check('the facts have an off switch the checker uses', switchable(rpc) && /update public\.ops_feature_flags set enabled = false/.test(audit));
