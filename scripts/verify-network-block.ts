@@ -59,14 +59,15 @@ check('the guard\'s refusal is recognised, and nothing else is',
 check('the message is raised on that refusal and mounted at the root, in Arabic and English',
   /isNetworkBlocked\(r\.status, b\)\) window\.dispatchEvent\(new Event\(NETWORK_BLOCKED_EVENT\)\)/.test(client)
   && /<NetworkBlockedNotice \/>/.test(layout)
-  && /'Please turn off your VPN': 'فضلا أوقف الـ VPN'/.test(i18n));
+  && /'Please turn off your VPN': 'يرجى إيقاف شبكة VPN'/.test(i18n));
 // A FULL BLOCK (owner 2026-11-13: «blue screen behind … user has to close vpn to continue»): the notice covers the whole
 // page (fixed, blurred dark blue), has NO way to dismiss it, and its one button reloads the page.
 const notice = readFileSync(join(root, 'src/components/NetworkBlockedNotice.tsx'), 'utf8');
 const fullBlock = (n: string) => /const retry = \(\) => \{ if \(typeof window !== 'undefined'\) window\.location\.reload\(\); \};/.test(n)
   && /onPress=\{retry\}/.test(n) && !/setOpen\(false\)/.test(n)
   && /backdropFilter: 'blur\(/.test(n) && /'fixed'/.test(n)
-  && /'I turned it off — try again': 'أوقفته، حاول مرة ثانية'/.test(i18n);
+  && /'Ezhalah cannot be used while a VPN is on\. Turn off the VPN, then try again\.': 'لا يمكن استخدام إزهله أثناء تشغيل شبكة VPN\. أوقف شبكة VPN ثم حاول مرة أخرى\.'/.test(i18n)
+  && /\{t\('Try again'\)\}/.test(n);
 check('the VPN notice is a full block: blurred cover, no dismiss, the only button reloads (AR + EN)', fullBlock(notice));
 mustCatch('a VPN notice the visitor can simply close', !fullBlock(notice.replace('onPress={retry}', 'onPress={() => setOpen(false)}')));
 mustCatch('a VPN notice without the blurred cover', !fullBlock(notice.replace(/backdropFilter: 'blur\(14px\)', /, '')));

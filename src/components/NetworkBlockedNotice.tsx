@@ -3,11 +3,10 @@
 // src/lib/supabase.ts fires NETWORK_BLOCKED_EVENT — the home page's own first reads already do, so it shows on open.
 // A FULL BLOCK, NOT A CARD (owner 2026-11-13: «vpn detected blue screen behind user has to close vpn to continue»): the
 // whole page is covered by a blurred dark-blue screen, there is no ✕ and no way past it; the one button reloads the page,
-// so with the VPN still on the block simply comes back. Web only (the guard sits behind the web front door).
+// so with the VPN still on the block simply comes back. A plain card (owner 2026-11-13: «keep it plain»). Web only (the guard sits behind the web front door).
 // Mounted at the root in src/app/_layout.tsx. Guard: scripts/verify-network-block.ts.
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useI18n } from '@/i18n';
 import { colors, radius } from '@/theme/tokens';
 import { NETWORK_BLOCKED_EVENT } from '@/lib/supabase';
@@ -30,11 +29,10 @@ export default function NetworkBlockedNotice() {
       // @ts-expect-error web-only: the page behind stays visible but blurred, and nothing behind can be reached
       dataSet={{ ezBlock: 'vpn' }}>
       <View style={s.card}>
-        <View style={s.badge}><Ionicons name="shield-checkmark-outline" size={30} color={colors.surface} /></View>
         <Text style={[s.title, align]}>{t('Please turn off your VPN')}</Text>
-        <Text style={[s.body, align, isRTL && { writingDirection: 'rtl' }]}>{t('Ezhalah is not available over VPN, Tor or server networks. Turn off your VPN and try again.')}</Text>
+        <Text style={[s.body, align, isRTL && { writingDirection: 'rtl' }]}>{t('Ezhalah cannot be used while a VPN is on. Turn off the VPN, then try again.')}</Text>
         <Pressable onPress={retry} style={s.button} accessibilityRole="button" testID="network-blocked-retry">
-          <Text style={s.buttonText}>{t('I turned it off — try again')}</Text>
+          <Text style={s.buttonText}>{t('Try again')}</Text>
         </Pressable>
       </View>
     </View>
@@ -49,7 +47,6 @@ const s = StyleSheet.create({
     ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)' } as object) : {}),
   },
   card: { width: '100%', maxWidth: 380, backgroundColor: colors.surface, borderRadius: radius.card, padding: 24, gap: 12, alignItems: 'center' },
-  badge: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#1d4ed8', alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
   title: { fontSize: 19, fontWeight: '700', color: colors.ink },
   body: { fontSize: 15, lineHeight: 22, color: colors.muted },
   button: { marginTop: 6, alignSelf: 'stretch', backgroundColor: colors.selFill, borderRadius: radius.field, paddingVertical: 13, alignItems: 'center' },
