@@ -523,6 +523,25 @@ _POST_NOT_FACT = {"kitchen": ("راكب", "مركب"), "air_conditioner": ("را
 _BEARINGS = ("شمال", "جنوب", "شرق", "غرب", "الشمال", "الجنوب", "الشرق", "الغرب", "وجه", "الوجه", "واجه", "الواجه", "يحد",
              "حدود")
 # Per-fact context words: (excluded if one of the 2 words BEFORE starts with…, excluded if one of the 2 AFTER…)
+# 🔬 2026-11-13 (P1 14340 «كل خدمات» / «ومناسبات» still served after #11820): words that make «كل خدمات» someone
+# else's or a set-up, an exception before an event word, and a «nearby» read a little past the 2-word window.
+_SERVICES_NOT_OWN = frozenset({"يشمل", "تشمل", "يشملها", "مؤسس", "مؤسسه", "تاسيس"})   # «شامل جميع الخدمات ⚡ الكهرباء» stays a yes
+_EXCEPT_WORDS = frozenset({"عدا", "ماعدا", "باستثناء", "خلا"})
+_NEAR_LATER_BREAK = ("⭐", "✅", "✔", "•", "🔸", "🔹", "-", ".", "،", ",", "؛", ":")
+
+
+def _near_later(words: list[str]) -> bool:
+    """«كل خدمات شمال الرياض قريبة»: a «قريب / بالقرب» within the next 4 words, before a clause break."""
+    for w in words:
+        if any(b in w for b in _NEAR_LATER_BREAK):
+            return False
+        if w.startswith("و"):
+            return False                             # «… بجميع الخدمات وقريبة من الطريق»: «و» opens the NEXT item
+        if _starts(w, ("قريب", "بالقرب")):
+            return True
+    return False
+
+
 _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "electricity": (("غرف", "ضمان", "تمديد", "لوح", "نظام", "انظمه", "فاتور", "فواتير", "مولد", "سباك", "اعمال", "كيبل",
                      "كابل", "مفاتيح", "افياش", "شرك", "محط", "برج", "ابراج", "خط", "خطوط", "تاسيس", "مصعد",
@@ -1249,6 +1268,25 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
             and not _owned_after(gn):
         return None, s, e                            # «أرض سكنية شارع وحديقة»: the plot's neighbours (aqar 3543112);
                                                      # «على شارع وبها حديقة خاصة» keeps its own (CodeRabbit on #11820)
+    if fact == "all_services" and any(_strip_wa(w) in _SERVICES_NOT_OWN for w in gp[-3:]):
+        return None, s, e                            # «ويشمل كل خدمات العمارة» (the rent covers the building's services),
+                                                     # «منطقة مؤسس فيها كل خدمات التاون هاوس من خزان المياة» (a utility
+                                                     # zone): neither says the home is connected (P1 14340, aqar 25431484 /
+                                                     # 35244, 🔬 2026-11-13)
+    if fact == "all_services" and not _strip_wa(t[ws:we].split()[-1]).startswith(_n("مخدوم")) and _near_later(gn[:4]):
+        return None, s, e                            # «كل خدمات شمال الرياض قريبة»: the services NEAR it, read past the
+                                                     # 2-word window (P1 14340, aqar 15134259, 🔬 2026-11-13)
+    if fact == "air_conditioner" and _strip_wa(_n(t[ws:we])) in ("التكييف", "تكييف", "التكيف", "تكيف") \
+            and any(_starts(_strip_wa(w), ("تمديد",)) for w in gp[-3:]):
+        return None, s, e                            # «خزان المياة وتمديدات السباكة و التكييف»: the AC PIPEWORK, not AC
+                                                     # units (aqar 35244 / 7041221 / 9605735, 🔬 2026-11-13)
+    if fact == "for_events" and any(_strip_wa(w) in _EXCEPT_WORDS for w in gp[-4:]):
+        return None, s, e                            # «للايجار الشهري عدا الإيجازات الدراسية ومناسبات الأعياد»: an
+                                                     # exception to the rent, not events allowed (P1 14340, aqar 12109734)
+    if fact == "for_events" and _n(t[ws:we]).startswith("و") and len(gp) >= 3 \
+            and _strip_wa(gp[-3]) in ("قاعه", "صاله", "قاعات", "صالات"):
+        return None, s, e                            # «قاعة استقبال ضيوف ومناسبات»: the compound's hall, named one word
+                                                     # past the 2-word window (P1 14340, aqar 8853052, 🔬 2026-11-13)
     if fact == "for_events" and p2 and _strip_wa(p2[-1]) in ("غرف", "الغرف"):
         return None, s, e                            # «غرف مناسبات واسعة»: the building's event ROOMS — the plural only, so
                                                      # «غرفتين ومسموح للمناسبات» keeps its permission (CodeRabbit on #11820)
@@ -2957,6 +2995,20 @@ def selftest() -> None:
         ("حولها كل خدمات وفي بداية الحي", {}, ("all_services",)),                         # aqar 15789013
         ("المساحة: 130م² كل خدمات الشقه مستقله", {}, ("all_services",)),                 # aqar 15126557
         ("ارض واصل لها جميع الخدمات", {"all_services": True}, ()),
+        # 🔬 2026-11-13 (P1 14340): «كل خدمات» the home does not have, «ومناسبات» that is not a permission
+        ("وبالقرب منها كل الخدمات ولها عداد كهرباء مستقل الايجار الشهري 1650 ريال ويشمل كل خدمات العمارة", {}, ("all_services",)),  # aqar 25431484
+        ("•منطقة مؤسس فيها كل خدمات التاون هاوس من خزان المياة وتمديدات السباكة", {}, ("all_services",)),   # aqar 35244
+        ("⭐️ موقع استراتيجي مميز ⭐️ كل خدمات شمال الرياض قريبة 👷‍♂️إشراف مكتب هندسي", {}, ("all_services",)),  # aqar 15134259
+        ("السعر الشهري 7000 ريال شامل جميع الخدمات ⚡ الكهرباء | 💧 المياه", {"all_services": True}, ()),   # aqar 17133512
+        ("تواجد كثافه سكنيه الحي متوفر كل خدمات", {"all_services": True}, ()),                     # aqar 6987314 (like «الحي مخدوم»)
+        ("موقع شقه ممتاز كل خدمات متوفره تتكون العماره ثلاث شوارع", {"all_services": True}, ()),   # aqar 9613080
+        ("أرض مخدومة بجميع الخدمات وقريبة من الطريق", {"all_services": True}, ()),
+        ("للايجار الشهري . عدا الإيجازات الدراسية ومناسبات الأعياد التفاصيل", {}, ("for_events",)),   # aqar 12109734
+        ("مسبح نسائي قاعة استقبال صيوف ومناسبات واحتفالات قاعة اجتماعات", {}, ("for_events",)),       # aqar 8853052
+        ("فرصة استثمارية قصر أفراح ومناسبات فاخر للإيجار", {"for_events": True}, ()),               # aqar 9152301
+        ("من خزان المياة وتمديدات السباكة و التكييف واطلالات الغرف", {}, ("air_conditioner",)),       # aqar 35244
+        ("تمديدات كهرباء وسباكة ومكيفات راكبة", {"air_conditioner": True}, ()),
+        ("استراحة مناسبة لاستقبال الضيوف والمناسبات", {"for_events": True}, ()),
         # CodeRabbit on #11820
         ("شقة مطلة على طريق", {}, ("main_road",)),
         # a bare «طريق» then the next item is still a generic road view (CodeRabbit on #11820)
