@@ -267,9 +267,11 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
         elif card is not None and v == MATCH and card_shows(f, stored, card.get("text", "")) is False:
             v = CARD_MISSING         # the page and our row agree, the customer does not see it
         out[f] = v
-    # licence: the page's 10-digit REGA ad licence must be ours and on the card
+    # licence: the page's 10-digit REGA ad licence must be OURS. Since 2026-11-13 the card never prints it (owner,
+    # #12123: «licence numbers, ad numbers and other codes are not card facts — they stay on the ad page»), so the
+    # card's text is no longer asked for it: a card without the number is MATCH when the page and our row agree.
+    # On 11-13 13:33 this arm read CARD_MISSING on every site for that owner decision (justsa, muktamel, nawafeth …).
     lic, plic = stored_licence(stored), (licence_on_page(page.get("_text", "")) if page else None)
-    shown = card_shows("licence", stored, card.get("text", "")) if card is not None else None
     if page is None:
         out["licence"] = UNREADABLE
     elif not plic:
@@ -279,7 +281,7 @@ def judge(stored: dict, card: dict | None, page: dict | None, *, platform: str, 
     elif lic != plic and lic not in page.get("_text", "").translate(_DIG):
         out["licence"] = MISMATCH            # the page prints another licence and never ours
     else:
-        out["licence"] = CARD_MISSING if shown is False else MATCH
+        out["licence"] = MATCH
     # photo: the source shows photos; the card must paint one
     has = card.get("photo") if card is not None else bool(stored.get("has_photo"))
     if page is None or has is None:     # has None = the card photo was still loading: unknown, never missing

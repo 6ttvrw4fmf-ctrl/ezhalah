@@ -23,9 +23,11 @@ def test_a_faithful_card_matches_every_field():
         assert v[f] == MATCH, (f, v[f])
 
 
-def test_planted_licence_not_on_card_is_caught():          # the 11-06 Falcon finding
-    v = _judge(card={**CARD, "text": CARD["text"].replace("رقم رخصة الإعلان 7200767759", "")})
-    assert v["licence"] == cp.CARD_MISSING
+def test_planted_licence_not_on_card_is_match_since_2026_11_13():   # the 11-06 Falcon finding, re-read 11-13
+    """11-06: a card that never showed the licence was the finding. 11-13 (owner, #12123): the card never prints the
+    licence by design — it stays on the ad page — so a card without it is MATCH when the page and our row agree."""
+    v = cp.judge(STORED, {**CARD, "text": CARD["text"].replace("7200767759", "")}, PAGE, platform="aqar", link_kind="ok")
+    assert v["licence"] == cp.MATCH
 
 
 def test_planted_dead_link_is_caught():                    # the 11-05 Dwelleo finding
@@ -277,3 +279,20 @@ def test_the_offices_own_address_is_not_the_ads_district():                # sqc
     # ours is on the page: unchanged
     assert _district("الشاطئ", ad + ["حي الشاطئ", _OFFICE_FOOTER]) == "match"
 
+
+
+def test_licence_is_not_asked_of_the_card_since_2026_11_13():
+    """Owner 2026-11-13 (#12123): the card never prints the REGA licence; it stays on the ad page. A card whose text
+    lacks the number is MATCH when the page and our row carry the same licence — never CARD_MISSING (13:33 UTC 11-13:
+    justsa, muktamel, nawafeth, nufouth, reinvest all read card_missing for this one owner decision)."""
+    from scrapers.common import card_parity as cp
+    stored = {"card_licence": "7200012345", "price": None}
+    page = {"_text": "رقم رخصة الإعلان 7200012345", "price": None}
+    card = {"text": "شقة للبيع الرياض حي الملقا 850,000 ر.س", "photo": True, "opened_ok": True}
+    out = cp.judge(stored, card, page, platform="justsa", link_kind="ok")
+    assert out["licence"] == cp.MATCH
+    # the data halves still judge: a page that prints another licence and never ours is a MISMATCH …
+    other = {"_text": "رقم رخصة الإعلان 7200099999", "price": None}
+    assert cp.judge(stored, card, other, platform="justsa", link_kind="ok")["licence"] == cp.MISMATCH
+    # … and a row without the licence the page prints is WE_MISS
+    assert cp.judge({"price": None}, card, page, platform="justsa", link_kind="ok")["licence"] == cp.WE_MISS
