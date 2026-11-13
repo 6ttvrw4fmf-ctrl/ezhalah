@@ -1248,6 +1248,9 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
             and not _owned_after(gn):
         return None, s, e                            # «أرض سكنية شارع وحديقة»: the plot's neighbours (aqar 3543112);
                                                      # «على شارع وبها حديقة خاصة» keeps its own (CodeRabbit on #11820)
+    if fact == "for_events" and p2 and _strip_wa(p2[-1]) in ("غرف", "الغرف"):
+        return None, s, e                            # «غرف مناسبات واسعة»: the building's event ROOMS — the plural only, so
+                                                     # «غرفتين ومسموح للمناسبات» keeps its permission (CodeRabbit on #11820)
     if fact == "reception" and re.match(r"^(?:ل|لل)استقبال(?:ك|كم|كن|كي)$", _n(t[ws:we]).lstrip("و")):
         return None, s, e                            # «جاهزة لاستقبالك», «بيتك جاهز لاستقبالك»: «ready to welcome YOU»,
                                                      # marketing, never a reception desk (P2 13085, 5 of 5 aqar, 🔬 2026-11-09)
@@ -1460,6 +1463,11 @@ _SVC_STOP = frozenset(_n(w) for w in ("المشروع", "للمشروع", "با�
                                       "للعماره", "بالعماره", "للسكان"))
 
 
+# «المبنى الآخر», «العمارة المجاورة»: ANOTHER building — its services are the area's, not the ad's (CodeRabbit on #11820)
+_OTHER_PLACE = frozenset(_n(w) for w in ("الاخر", "الآخر", "الاخري", "الأخرى", "المجاور", "المجاوره", "المجاورة",
+                                         "المقابل", "المقابله", "المقابلة"))
+
+
 def _svc_heading_end(words: list[str]) -> int:
     """Index just past «<near word> من [جميع/كل] الخدمات/المرافق/خدمات …» in `words`, or -1."""
     for k, w in enumerate(words):
@@ -1634,7 +1642,10 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             and any(_starts(_strip_wa(w), _PLACE_WORDS) or _strip_wa(w) in _SERVICES_OBJECT for w in words)
         # «بالقرب من المسجد، المدارس، الخدمات، والحديقة» (aqar 14865940, 🔬 2026-11-11): «الخدمات» is an ITEM of the list,
         # so the park after it is still the area's
-        list_in = list_base and not _owns_item(words) and not any(_strip_wa(w) in _SVC_STOP or w in _SVC_STOP for w in words)   # «خدمات المبنى»: the building's own
+        list_in = list_base and not _owns_item(words) and not any(
+            (_strip_wa(w) in _SVC_STOP or w in _SVC_STOP)
+            and not (k + 1 < len(words) and (words[k + 1] in _OTHER_PLACE or _strip_wa(words[k + 1]) in _OTHER_PLACE))   # «حديقة المبنى الآخر»: another
+            for k, w in enumerate(words))                                              # building's, the list goes on (CodeRabbit #11820)   # «خدمات المبنى»: the building's own
         # …but only the ITEM continues the list: a spaced «*» bullet starts the next one (🔬 2026-11-07, P1 13301). aqar
         # 15128626 «إطلالة ونافذة على: حديقة، جامع، ونادي صحي خدمات الموقع القريبة: * مدارس … * اتحاد ملاك مجاناً مميزات
         # المشروع» — «مميزات» 60 words and eight bullets later is the project's heading, not the gym's owner. The item's
@@ -2960,6 +2971,8 @@ def selftest() -> None:
         ("مخازن وحديقة خاصة. ☀️ الدور الأول: صالة عائلية", {"garden": True}, ()),                          # aqar 18338000
         ("فيلا على شارع وبها حديقة خاصة", {"garden": True}, ()),                                           # CodeRabbit on #11820
         ("فيلا على شارع وحديقة خاصة", {"garden": True}, ()),
+        ("غرف مناسبات واسعة", {}, ("for_events",)),                                              # CodeRabbit on #11820
+        ("قريب من المسجد، حديقة المبنى الآخر، بقالة", {}, ("garden", "market")),                 # CodeRabbit on #11820
         ("كل خدمات الشقة منفصلة", {}, ("all_services",)),
         ("جميع الخدمات ومطبخ مستقل", {"all_services": True}, ()),
         ("لا يوجد مطبخ أو مكيفات أو مصعد متوفر لا يوجد حوش", {"elevator": False}, ()),   # CodeRabbit on #11820: denied, never yes
