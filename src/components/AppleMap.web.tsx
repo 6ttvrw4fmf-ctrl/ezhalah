@@ -717,6 +717,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // download. A new map read closes it — it belongs to the view it was opened on.
   const [cardTarget, setCardTarget] = useState<CardTarget | null>(null);
   const [CardComp, setCardComp] = useState<null | typeof import('@/components/MapFactsCard').default>(null);
+  const [cardLoadFailed, setCardLoadFailed] = useState(false);   // the card's own download failed: say so, offer a retry
   const { user, openAuth } = useApp();
   const signedInRef = useRef(false); signedInRef.current = !!user;
   const retryPinsRef = useRef<(() => void) | null>(null);
@@ -1446,7 +1447,13 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           : factsBox ? { kind: 'box', box: factsBox, filter: pinFilter } : null;
         const openCard = () => {
           if (!target) return;
-          if (!CardComp) void import('@/components/MapFactsCard').then((m) => setCardComp(() => m.default));
+          setCardLoadFailed(false);
+          if (!CardComp) {
+            void import('@/components/MapFactsCard').then((m) => setCardComp(() => m.default)).catch((e: unknown) => {
+              reportError(e, { where: 'map card module download (import MapFactsCard)' });
+              setCardLoadFailed(true);
+            });
+          }
           setCardTarget(target);
         };
         return (
@@ -1476,6 +1483,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           </View>
         );
       })() : null}
+      {cardTarget && !CardComp && cardLoadFailed ? (
+        <Pressable style={s.cardFail} onPress={() => { setCardLoadFailed(false); void import('@/components/MapFactsCard').then((m) => setCardComp(() => m.default)).catch((e: unknown) => { reportError(e, { where: 'map card module download (retry)' }); setCardLoadFailed(true); }); }}
+          accessibilityRole="button" testID="map-card-load-failed">
+          <Text style={s.cardFailT}>{locale === 'ar' ? 'تعذر فتح التفاصيل، اضغط للمحاولة مرة أخرى' : 'The details could not open. Tap to try again.'}</Text>
+        </Pressable>
+      ) : null}
       {cardTarget && CardComp ? (
         <CardComp target={cardTarget} signedIn={!!user} loc={locale === 'ar' ? 'ar' : 'en'} onClose={() => setCardTarget(null)} onSignIn={() => openAuth()}
           title={`${viewPlace ?? (locale === 'ar' ? 'هذه المنطقة' : 'This area')}${pinFilter?.deals.length === 1 ? (locale === 'ar' ? (pinFilter.deals[0] === 'buy' ? ' · للبيع' : ' · للإيجار') : (pinFilter.deals[0] === 'buy' ? ' · for sale' : ' · for rent')) : ''}`} />
@@ -1497,6 +1510,8 @@ const s = StyleSheet.create({
   factDown: { color: '#7FE3A0' },
   factHint: { color: '#ccc', fontWeight: '500' },
   factAsk: { color: '#FAC775', fontSize: 11.5, fontWeight: '700', marginTop: 2 },
+  cardFail: { position: 'absolute', left: 12, right: 12, bottom: 12, backgroundColor: '#fff', borderRadius: 12, padding: 14 },
+  cardFailT: { color: '#1f1e24', fontSize: 13, fontWeight: '600', textAlign: 'center' },
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },

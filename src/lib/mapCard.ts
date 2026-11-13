@@ -14,12 +14,15 @@ export type CardSide = {
   medianPrice: number | null; medianArea: number | null; priceLow: number | null; priceHigh: number | null;
   stayDays: number | null; topType: CardTopType; topRooms: CardTopRooms; medianAge: number | null;
 };
+/** too few removals in the view yet: the whole city's number, NAMED («86 يوما في الرياض») — owner 2026-11-13 «ok ok» */
+export type StayCity = { city: string; days: number } | null;
 export type MapCard = CardSide & {
   any: number;
   priceType: string | null;
   districtAr: string | null;
   cityAr: string | null;
   sites: number;
+  stayCity: StayCity;
   table: { y: CardWindow; w: CardWindow; m: CardWindow; q: CardWindow };
   updatedAt: string | null;
   nb: (CardSide & { names: string[]; nDistricts: number; month: CardWindow | null; byDistrict: { district: string; ppm: number | null }[] }) | null;
@@ -64,7 +67,8 @@ export function parseMapCard(result: { data: unknown; error: unknown }): MapCard
   return {
     ...side(d), any, priceType: typeof d.price_type === 'string' ? d.price_type : null,
     districtAr: typeof d.district_ar === 'string' ? d.district_ar : null, cityAr: typeof d.city_ar === 'string' ? d.city_ar : null,
-    sites: int(d.sites) ?? 0, table: { y, w, m, q }, updatedAt: typeof d.updated_at === 'string' ? d.updated_at : null,
+    sites: int(d.sites) ?? 0, table: { y, w, m, q },
+    stayCity: (() => { const sc = obj(d.stay_city); return sc && typeof sc.city === 'string' && int(sc.days) !== null ? { city: sc.city, days: int(sc.days) as number } : null; })(), updatedAt: typeof d.updated_at === 'string' ? d.updated_at : null,
     nb: n && names.length ? { ...side(n), names, nDistricts: Math.max(1, int(n.n_districts) ?? 1), month: win(n.month), byDistrict } : null,
   };
 }
@@ -125,6 +129,12 @@ const TYPE_PLURAL: Record<string, { ar: string; en: string }> = {
   'مستودع': { ar: 'المستودعات', en: 'warehouses' }, 'معرض': { ar: 'المعارض', en: 'showrooms' },
 };
 export const typeLabel = (t: string, loc: 'ar' | 'en'): string => TYPE_PLURAL[t]?.[loc] ?? t;
+const TYPE_SINGULAR_EN: Record<string, string> = {
+  'شقة': 'Apartment', 'فيلا': 'Villa', 'أرض سكنية': 'Residential land', 'دور': 'Floor', 'عمارة': 'Building', 'أرض': 'Land',
+  'أرض تجارية': 'Commercial land', 'استراحة': 'Rest house', 'مزرعة': 'Farm', 'محل': 'Shop', 'مكتب': 'Office', 'مستودع': 'Warehouse', 'معرض': 'Showroom',
+};
+/** the English card never prints an Arabic type name (review of #12119) */
+export const typeSingularEn = (t: string): string => TYPE_SINGULAR_EN[t] ?? TYPE_PLURAL[t]?.en ?? 'Other';
 
 // Arabic counted nouns: 1 · 2 · 3–10 · 11+
 const counted = (n: number, f: [string, string, string, string]) => (n === 1 ? f[0] : n === 2 ? f[1] : n <= 10 ? `${n} ${f[2]}` : `${num(n)} ${f[3]}`);
@@ -151,14 +161,16 @@ export function quickLook(c: MapCard, loc: 'ar' | 'en'): QuickItem[] {
   const area = (s: CardSide) => (s.medianArea !== null ? (ar ? `${num(s.medianArea)} م²` : `${num(s.medianArea)} m²`) : null);
   const stay = (s: CardSide) => (s.stayDays !== null ? (ar ? daysAr(s.stayDays) : `${s.stayDays} days`) : null);
   const range = (s: CardSide) => (s.priceLow !== null && s.priceHigh !== null ? `${money(s.priceLow, loc)} – ${money(s.priceHigh, loc)}` : null);
-  const ttype = (s: CardSide) => (s.topType ? `${s.topType.type} ${s.topType.pct}%` : null);
+  const ttype = (s: CardSide) => (s.topType ? `${ar ? s.topType.type : typeSingularEn(s.topType.type)} ${s.topType.pct}%` : null);
   const rooms = (s: CardSide) => (s.topRooms ? (ar ? `${roomsAr(s.topRooms.rooms)} (${s.topRooms.pct}%)` : `${s.topRooms.rooms} rooms (${s.topRooms.pct}%)`) : null);
   const age = (s: CardSide) => (s.medianAge !== null ? (ar ? yearsAr(s.medianAge) : s.medianAge === 0 ? 'new' : `${s.medianAge} years`) : null);
   const nb = c.nb;
   return [
     { label: ar ? 'متوسط السعر المعروض' : 'Typical asking price', value: price(c) ?? few, nearby: nbLine(nb ? price(nb) : null) },
     { label: ar ? 'متوسط المساحة' : 'Typical size', value: area(c) ?? few, nearby: nbLine(nb ? area(nb) : null) },
-    { label: ar ? 'مدة بقاء الإعلان' : 'How long ads stay up', value: stay(c) ?? SOON[loc], nearby: nbLine(nb ? stay(nb) : null) },
+    { label: ar ? 'مدة بقاء الإعلان' : 'How long ads stay up',
+      value: stay(c) ?? (c.stayCity ? (ar ? `${daysAr(c.stayCity.days)} في ${c.stayCity.city}` : `${c.stayCity.days} days in ${c.stayCity.city}`) : SOON[loc]),
+      nearby: nbLine(nb ? stay(nb) : null) },
     { label: ar ? 'نطاق الأسعار المعروضة' : 'Asking price range', value: range(c) ?? few, nearby: nbLine(nb ? range(nb) : null) },
     { label: ar ? 'النوع الأكثر' : 'Most common type', value: ttype(c) ?? few, nearby: nbLine(nb ? ttype(nb) : null) },
     { label: ar ? 'عدد الغرف الأكثر' : 'Most common rooms', value: rooms(c) ?? few, nearby: nbLine(nb ? rooms(nb) : null) },
