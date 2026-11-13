@@ -79,6 +79,15 @@ mustCatch('neighbours from another city', () => nearRule(neighbors.replace('on b
 mustCatch('ten «nearest» districts', () => nearRule(neighbors.replace('where nb.rk <= 4', 'where nb.rk <= 10')));
 const fallback = (src: string) => /v_kind := 'near';/.test(src) && /v_kind := 'city';/.test(src) && /case when v_kind = 'near' then to_jsonb\(v_nb\.neighbors\) else to_jsonb\(array\[v_city\]\) end/.test(src);
 check('with no usable neighbours the comparison falls back to the city, and names the city', fallback(core));
+const freshNeighbours = (src: string) => /v_fresh_nb := exists \(select 1 from public\.map_district_neighbors nbt where nbt\.built_at >= now\(\) - interval '36 hours'\)/.test(src)
+  && /if \(v ->> 'ppm'\) is not null and v_city is not null and v_fresh_nb then/.test(src);
+check('a neighbours table older than 36 h hides the comparison (never yesterday\'s districts)', freshNeighbours(core));
+mustCatch('a comparison read from a stale neighbours table', () => freshNeighbours(core.replace('and v_city is not null and v_fresh_nb then', 'and v_city is not null then')));
+const detector = latestDef('mon_detect_map_view_facts');
+const watchesNeighbours = (src: string) => /select max\(built_at\) into nb_at from public\.map_district_neighbors;/.test(src) && /nb_at is null or nb_at < now\(\) - interval '36 hours'/.test(src) && /'map_view_facts:neighbors_stale'/.test(src);
+check('the alarm pages when the neighbours table is empty or older than 36 h', watchesNeighbours(detector));
+mustCatch('an alarm blind to an empty neighbours table', () => watchesNeighbours(detector.replace('nb_at is null or ', '')));
+check('the facts carry the time of the last nightly run (for «آخر تحديث»)', /'updated_at', \(select max\(cr\.run_at\) from public\.map_fact_capture_run cr where cr\.ok\)/.test(core));
 const cutsRule = (src: string) => src.includes('h.price_total < h.old_price_total and h.price_total >= h.old_price_total * 0.5') && /ss\.source = 'price_diary' and ss\.started_at <= now\(\) - interval '30 days'/.test(src);
 check('«خفضوا السعر»: a real drop (not a page re-read), shown once the diary covers 30 days', cutsRule(core));
 mustCatch('a 90% «cut» counted (a page re-read)', () => cutsRule(core.replace(' and h.price_total >= h.old_price_total * 0.5', '')));
