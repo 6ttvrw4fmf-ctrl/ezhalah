@@ -1296,7 +1296,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if fact == "all_services" and not _strip_wa(t[ws:we].split()[-1]).startswith(_n("مخدوم")) and _near_later(gn[:4]):
         return None, s, e                            # «كل خدمات شمال الرياض قريبة»: the services NEAR it, read past the
                                                      # 2-word window (P1 14340, aqar 15134259, 🔬 2026-11-13)
-    if fact == "air_conditioner" and _strip_wa(_n(t[ws:we])) in ("التكييف", "تكييف", "التكيف", "تكيف") \
+    if fact in ("air_conditioner", "central_ac") \
+            and _strip_wa(_n(t[ws:we]).split()[0]) in ("التكييف", "تكييف", "التكيف", "تكيف") \
             and any(_starts(_strip_wa(w), ("تمديد",)) for w in gp[-3:]) \
             and not any(_starts(_strip_wa(w), ("راكب", "مركب", "موجود", "متوفر", "يعمل", "شغال")) for w in gn[:3]):
         # only an INSTALLED word keeps the AC: «تكييف سبليت راكب» yes; «والتكييف المركزي» names a type, so pipework alone
@@ -2992,7 +2993,10 @@ def selftest() -> None:
         ("تشمل الأرض جميع الخدمات من كهرباء وماء وصرف صحي", {"all_services": True}, ()),          # CodeRabbit #12178
         ("جميع الخدمات متوفرة في موقع قريب من الطريق", {"all_services": True}, ()),              # CodeRabbit #12178
         ("تمديدات كهرباء وتكييف سبليت راكب", {"air_conditioner": True}, ()),                      # CodeRabbit #12178
-        ("تمديدات السباكة والتكييف المركزي", {}, ("air_conditioner",)),                            # CodeRabbit #12178
+        ("تمديدات السباكة والتكييف المركزي", {}, ("air_conditioner", "central_ac")),              # CodeRabbit #12178
+        ("تمديدات السباكة وتكييف مركزي", {}, ("air_conditioner", "central_ac")),                  # CodeRabbit #12178
+        ("تمديدات كهرباء وتكييف مركزي راكب", {"central_ac": True, "air_conditioner": True}, ()),
+        ("تكييف مركزي", {"central_ac": True}, ()),
         ("شترات كاملة لجميع النوافذ * مكيفات راكبة * أرضيات Glass Fiber * صيانة شاملة", {}, ("optical_fibers",)),  # aqar 9561593
         ("Fiber glass water tank", {}, ("optical_fibers", "internet")),
         ("أرضيات Glass Fiber * صيانة شاملة", {}, ("optical_fibers", "internet")),                 # CodeRabbit #12178
