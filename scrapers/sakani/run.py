@@ -348,7 +348,17 @@ def enumerate_catalogue(s: cc.Session, purpose: str) -> list[tuple[dict, dict]]:
                 print(f"   ↻ {purpose} page {page} unreadable — cool-down, fresh session "
                       f"{renewed}/{WALK_RENEGOTIATIONS}", flush=True)
                 time.sleep(PAUSE * 20)
-                _oracle_sess = s = _walk_renew()
+                try:
+                    _oracle_sess = s = _walk_renew()
+                except Exception as e:  # noqa: BLE001 — a failed renewal after real pages is a late wall
+                    # 2026-11-13 nightly: the renewal itself raised («no TLS profile was served … 429»)
+                    # and escaped the walk, so the 8 sale pages AND the 276 rent units already read were
+                    # lost (rows_upserted 0). After page 1 it is the same late wall as an unreadable page.
+                    msg = (f"{purpose} catalogue page {page} unreadable and the fresh session failed "
+                           f"({type(e).__name__}: {str(e)[:160]}) — walk aborted")
+                    if page > 1 and out:
+                        raise WalkIncomplete(msg, out) from e
+                    raise
                 continue
             msg = (f"{purpose} catalogue page {page} unreadable "
                    f"({'HTTP %s' % got[0] if got else 'challenge/transport'}) — walk aborted")
