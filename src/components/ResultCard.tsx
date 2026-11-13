@@ -244,7 +244,7 @@ export function ResultCard({
   // Information" panel, which reads as self-contradicting even though the two sections cover different
   // data. Same filter AdditionalInformationPanel uses below, so the empty-state only fires when BOTH
   // panels would otherwise be blank. (owner-reported 2026-09-13, found while re-testing amlakalahsa.)
-  const hasAddlInfo = !!listing.additional_info?.some((r) => r && r.label && r.value);
+  const hasAddlInfo = pickKeyFacts((listing.additional_info ?? []).filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value))).length > 0;
 
 
   // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───────────────────────────────────────────────
@@ -265,7 +265,7 @@ export function ResultCard({
     // usage — exactly as published, at most 3 on one fixed row (so every card stays the same size). A fact the
     // source did not give is simply absent; nothing is derived or guessed.
     const factRows = (listing.additional_info ?? []).filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
-    const FACT_ORDER = [/age|عمر/i, /facade|الواجهة/i, /street|عرض الشارع|الشارع/i, /plan|المخطط/i, /usage|استخدام/i];
+    const FACT_ORDER = KEY_FACT_ORDER;
     const lpFacts: Array<{ k: string; label: string; value: string }> = [];
     for (const re of FACT_ORDER) {
       const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
@@ -652,7 +652,7 @@ export function ResultCard({
       <View style={[card.rightCol, row && card.rightColRow]}>
         {visible.length > 0 ? (
           <View style={card.featGrid}>
-            {visible.map((f) => {
+            {visible.slice(0, CARD_CHIP_CAP).map((f) => {
               const picked = pickedFeatures.has(f.key);
               return (
                 <View key={f.key} style={[card.featCell, picked && card.featCellPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
@@ -661,6 +661,9 @@ export function ResultCard({
                 </View>
               );
             })}
+            {visible.length > CARD_CHIP_CAP ? (
+              <View style={card.featCell} testID="card-feature-more"><Text style={card.featText}>{`+${visible.length - CARD_CHIP_CAP}`}</Text></View>
+            ) : null}
           </View>
         ) : hasAddlInfo ? null : (
           <Text style={card.noFeat}>{t('No additional features listed')}</Text>
@@ -851,6 +854,24 @@ export function arAttrValue(label: string, value: string, locale: string): strin
 // Render Wasalt's "Additional Information" rows on the card. Shows first 4 rows, with a
 // "See more" toggle that reveals the rest. Hidden entirely for Aqar (and for any Wasalt row
 // where the field hasn't been backfilled yet). Mirrors the on-site Wasalt panel design.
+// THE CARD'S KEY FACTS — one list for the phone and the laptop card (owner 2026-10-11 laptop rule, made the phone's too on
+// 2026-11-13: «I don't like how it shows the licence number … balance it»). At most CARD_FACT_CAP of the source's own facts,
+// in this order, exactly as published; licence numbers, ad numbers and other codes are not card facts (they stay on the
+// site's page, one tap away). Every card therefore carries the same few lines.
+const KEY_FACT_ORDER = [/age|عمر/i, /facade|الواجهة/i, /street|عرض الشارع|الشارع/i, /plan|المخطط/i, /usage|استخدام/i];
+const CARD_FACT_CAP = 3;
+/** The source rows a card shows: the first row matching each KEY_FACT_ORDER entry, at most CARD_FACT_CAP. Pure. */
+export function pickKeyFacts<R extends { key: string; label: string }>(rows: R[]): R[] {
+  const out: R[] = [];
+  for (const re of KEY_FACT_ORDER) {
+    const r = rows.find((x) => re.test(`${x.key} ${x.label}`) && !out.includes(x));
+    if (r && out.length < CARD_FACT_CAP) out.push(r);
+  }
+  return out;
+}
+/** At most this many extras on the phone card, then «+N» (the laptop's CHIP_CAP). */
+const CARD_CHIP_CAP = 3;
+
 function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
   listing: Listing; t: (k: string, p?: any) => string; locale: string;
   /** Laptop 'tight' row: the same rows as one truncated line (the card unfolds it on tap). */
@@ -858,10 +879,10 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
 }) {
   const rows = listing.additional_info;
   if (!rows || rows.length === 0) return null;
-  // Preserve the existing valid-row filter; all rows are visible without an expander.
+  // The existing valid-row filter, then only the card's key facts (pickKeyFacts) — never the licence or other codes.
   const all = rows.filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
-  if (all.length === 0) return null;
-  const visible = all;
+  const visible = pickKeyFacts(all);
+  if (visible.length === 0) return null;
   if (oneLine) {
     return (
       <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, locale === 'ar' ? card.oneLineRtl : card.oneLineLtr]}>
