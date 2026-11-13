@@ -777,3 +777,28 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   and `migration_drift` stayed open 1 h+ while every frontend deploy was refused; 🔬 11-02 #9949; 🆕 11-10 #11615.
   Rule: before judging a red check, `git fetch origin main && git merge origin/main && git push`; cut a mirror from
   CURRENT main; a PR «red» for more than one CI round is first a question about its base.
+
+## 📚 FLEET LESSONS 2026-11-09 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① CodeRabbit's hourly allowance is the fleet's bottleneck — spend it on the deploy-blocker, once.** The plan allows
+  1 review an hour after 68 in 7 days (overages OFF), and a never-reviewed PR reads «Review rate limited» = NEUTRAL, which
+  `scripts/safe-pr-merge.ts` refuses. ⚡ 11-09: three green PRs held 40+ min, the sakani proof slipped past the 07:17 run.
+  🔬 11-08: four PRs plus three «generate unit tests» runs spent the hour. ♻️ 11-09: `@coderabbitai generate unit tests`
+  draws on the same allowance while mirror #11485 held every deploy. 🔧 11-09 13:02: the merge robot refused every
+  robot-lane PR it visited (~25), 9 applied migrations had no copy on main and 5 frontend deploys were refused
+  01:49–11:43 UTC (runs 42547600064 … 42611336724). Rule: one PR per bug class, ONE push, ONE `@coderabbitai review` —
+  for the mirror or deploy-blocker first; skip `generate unit tests` on a rate-limited night; never push «re-run review»
+  commits (#11421 carried eight). A hand-made mirror PR costs a review the robot's does not: `migration-auto-mirror.yml`
+  (every 15 min) opens a «mirror (auto)» PR that CodeRabbit skips by design (`.coderabbit.yaml` ignore_title_keywords) and
+  the robot merges on green — open a mirror by hand only when the robot has not within 20 minutes of the apply.
+- **② A proof listing must be one the tool can READ, or the slot is spent on UNKNOWN.** 🔧 11-09: 3 of 6 blind-spot
+  re-reads (kellerwilliams 24214435, almajdiah 24217846, muhaysini 25935715) returned a JavaScript shell — no fields, no
+  verdict; 🔧 11-08: muhaysini 25529698 the same; 🔬 11-09: gudai 12390333/4 store a title only, so findability read 0/2.
+  Rule: before dispatching a re-read or a score, check how the site renders (server HTML, API record, or app shell) and
+  read the API record for app-shell sites; a listing the tool cannot render is swapped, never reported UNKNOWN as a proof.
+- **③ A measuring tool counts only after it FAILS on a known bug and PASSES on the fix — and a fixed tool is re-run
+  before the data is blamed.** 🆕 11-09: re-scoring alshawaf on the branch turned a «scorer cap» into a real truncation
+  (507.63 stored 507). 🔬 11-09: every count barrier compared the index with itself, so a `NULL::boolean` arm hid souq24's
+  ticked amenities for weeks. 🔧 11-08: the iPhone robot passed three times on the site that HAD the bug (it walked a
+  first-time guest's screen). Rule: prove both directions on production before trusting a robot or scorer; when a tool
+  is fixed, re-score on the branch the same hour.
