@@ -16,6 +16,7 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
   if (!ok) failed++;
 };
+const mutation = (label: string, caught: boolean, detail = '') => check(`MUTATION — ${label}`, caught, detail);
 
 const m = await liftSymbols(SRC, [
   { header: 'export function rotationOffset(' },
@@ -37,11 +38,11 @@ check('the budget stops the stage once spent', pairBudgetSpent(0, 40 * 60_000, 4
 check('…and not one millisecond before', !pairBudgetSpent(0, 40 * 60_000, 40 * 60_000 - 1));
 
 // Mutations: a fixed start (the old exhaustive walk) and a stride sharing a factor with n starve pairs.
-check('MUTATION — a fixed start offset is caught', !coversAll(() => 0, 182));
-check('MUTATION — a stride that shares a factor with n (2 for n=182) is caught', !coversAll((n, d) => (d * 2) % n, 182));
+mutation('a fixed start offset is caught', !coversAll(() => 0, 182));
+mutation('a stride that shares a factor with n (2 for n=182) is caught', !coversAll((n, d) => (d * 2) % n, 182));
 const stopsWhenSpent = (f: (s: number, b: number, n: number) => boolean) => f(0, 40 * 60_000, 41 * 60_000) && !f(0, 0, 41 * 60_000);
-check('MUTATION — a budget that never stops is caught', stopsWhenSpent(pairBudgetSpent) && !stopsWhenSpent(() => false));
-check('MUTATION — a «budget» that stops even unbudgeted local runs is caught', !stopsWhenSpent(() => true));
+mutation('a budget that never stops is caught', stopsWhenSpent(pairBudgetSpent) && !stopsWhenSpent(() => false));
+mutation('a «budget» that stops even unbudgeted local runs is caught', !stopsWhenSpent(() => true));
 
 // The workflow must actually set the budget, below the job's own cap.
 const wf = readFileSync(join(ROOT, '.github', 'workflows', 'af-live-truth-check.yml'), 'utf8');

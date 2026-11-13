@@ -8,6 +8,7 @@ import { dismissStrayOverlay } from './lib/liveClick.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); if (!ok) failed++; };
+const mutation = (label: string, caught: boolean, detail = '') => check(`MUTATION — ${label}`, caught, detail);
 
 const stub = (opts: { open: boolean; hasX: boolean }) => {
   const seen: string[] = [];
@@ -43,7 +44,7 @@ const stub = (opts: { open: boolean; hasX: boolean }) => {
   const { page, seen } = stub({ open: true, hasX: true });
   const oldBody = async (p: any) => { const open = await p.evaluate(() => 'ad-viewer'); if (!open) return false; await p.keyboard.press('Escape'); return true; };
   await oldBody(page);
-  check('MUTATION — the Escape-only body is caught (it never taps ✕)', !seen.includes('click:[data-testid="ad-viewer-close"]'));
+  mutation('the Escape-only body is caught (it never taps ✕)', !seen.includes('click:[data-testid="ad-viewer-close"]'));
 }
 
 console.log(failed === 0 ? '\n✓ a stray ad viewer is closed by its own ✕' : `\n✗ ${failed} check(s) failed`);

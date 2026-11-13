@@ -16,6 +16,7 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
   if (!ok) failed++;
 };
+const mutation = (label: string, caught: boolean, detail = '') => check(`MUTATION — ${label}`, caught, detail);
 
 /** Rule 1 on a journeys.mjs text: inside trendingDistrict, a district_options_ar listener precedes pickCity(). */
 export const listensBeforeCityPick = (src: string): boolean => {
@@ -38,8 +39,8 @@ check('run.mjs retries the trending-district journey in الرياض when the dr
 
 // Mutations: the pre-fix shapes must fail.
 const lateListener = journeys.replace(/    const early = \{[\s\S]*?\n    \}\);\n/, '');
-check('MUTATION — a journey that listens only at the district tap is caught', !listensBeforeCityPick(lateListener));
-check('MUTATION — a run without the الرياض retry is caught', !retriesInRiyadh(run.replace('if (!done.tDistrict && tdCity !== RIYADH)', 'if (false)')));
+mutation('a journey that listens only at the district tap is caught', !listensBeforeCityPick(lateListener));
+mutation('a run without the الرياض retry is caught', !retriesInRiyadh(run.replace('if (!done.tDistrict && tdCity !== RIYADH)', 'if (false)')));
 
 console.log(failed === 0 ? '\n✓ the district journey hears the city-pick answer and keeps its floor' : `\n✗ ${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);

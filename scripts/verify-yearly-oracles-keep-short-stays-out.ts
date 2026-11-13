@@ -20,6 +20,7 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
   if (!ok) failed++;
 };
+const mutation = (label: string, caught: boolean, detail = '') => check(`MUTATION — ${label}`, caught, detail);
 
 /** A line that builds a yearly-rent filter and lets every no-price row in, pooled short stays included. */
 export const leaksPooledShortStays = (line: string): boolean => {
@@ -59,9 +60,9 @@ const NEW = [
   "+ `&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.شهري)))${extra}`;",
   "f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${enc('شهري')})))`;",
 ];
-OLD.forEach((l, i) => check(`MUTATION — the pre-2026-11-13 oracle term #${i + 1} is caught`, leaksPooledShortStays(l)));
-NEW.forEach((l, i) => check(`MUTATION — the corrected oracle term #${i + 1} passes (a rule red for everything guards nothing)`, !leaksPooledShortStays(l)));
-check('MUTATION — a «شهري»-only filter with the gathern/aqarmonthly arm is not judged as yearly',
+OLD.forEach((l, i) => mutation(`the pre-2026-11-13 oracle term #${i + 1} is caught`, leaksPooledShortStays(l)));
+NEW.forEach((l, i) => mutation(`the corrected oracle term #${i + 1} passes (a rule red for everything guards nothing)`, !leaksPooledShortStays(l)));
+mutation('a «شهري»-only filter with the gathern/aqarmonthly arm is not judged as yearly',
   !leaksPooledShortStays("'&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))'"));
 
 console.log(failed === 0 ? '\n✓ every yearly-rent oracle keeps the short-stays pool out, as the clause does' : `\n✗ ${failed} check(s) failed`);

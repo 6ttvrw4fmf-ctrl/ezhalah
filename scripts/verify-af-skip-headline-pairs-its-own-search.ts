@@ -10,6 +10,7 @@ import { join } from 'node:path';
 const SRC = readFileSync(join(import.meta.dirname, 'verify-af-option-card-truth-live.ts'), 'utf8');
 let failed = 0;
 const check = (label: string, ok: boolean) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); if (!ok) failed++; };
+const mutation = (label: string, caught: boolean, detail = '') => check(`MUTATION — ${label}`, caught, detail);
 
 /** The R8.1.2 block: from the all-skip headline comment to its check() call. */
 const block = (src: string): string => {
@@ -33,10 +34,10 @@ check('no re-search → the baseline supplies it (the no-refresh fallback)', pic
 
 // Mutations: each pre-fix shape must fail.
 const b = block(SRC);
-check('MUTATION — restoring dropsOf(baseline) is caught', !pairsItsOwnSearch(SRC.replace(b, b.replace('dropsOf(shownSearch)', 'dropsOf(baseline)'))));
-check('MUTATION — reading the headline without waiting on that search is caught',
+mutation('restoring dropsOf(baseline) is caught', !pairsItsOwnSearch(SRC.replace(b, b.replace('dropsOf(shownSearch)', 'dropsOf(baseline)'))));
+mutation('reading the headline without waiting on that search is caught',
   !pairsItsOwnSearch(SRC.replace(b, b.replace(/await waitForHeadline\([^\n]*\n/, 'headlineNum(hs[hs.length - 1]);\n'))));
-check('MUTATION — always using the baseline (no roundEnd branch) is caught',
+mutation('always using the baseline (no roundEnd branch) is caught',
   !pairsItsOwnSearch(SRC.replace(b, b.replace('roundEnd ?? baseline', 'baseline'))));
 
 console.log(failed === 0 ? '\n✓ the all-skip headline is judged against the search that printed it' : `\n✗ ${failed} check(s) failed`);
