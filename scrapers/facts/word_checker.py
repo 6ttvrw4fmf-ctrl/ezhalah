@@ -1301,6 +1301,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «معرض للمطابخ» (a showroom), «تكييف كاسيت للمطابخ», «مراوح شفط
                                                      # للمطابخ»: something FOR the kitchens, not a fitted kitchen (P2 13085
                                                      # «للمطابخ», 4 of 4 aqar, 🔬 2026-11-13; like «للحمامات» 11-09)
+    if fact == "optical_fibers" and ((p2 and p2[-1] == "glass") or (gn[:1] and gn[0] == "glass")
+                                     or _n(t[ws:we]).startswith(("fiberglass", "fibreglass"))):
+        return None, s, e                            # «أرضيات Glass Fiber», «fiber glass»: a building material, not optical
+                                                     # fibre internet (P2 13085 «fiber», aqar 9561593, 🔬 2026-11-13)
     if fact == "for_events" and any(_strip_wa(w) in _EXCEPT_WORDS for w in gp[-4:]):
         return None, s, e                            # «للايجار الشهري عدا الإيجازات الدراسية ومناسبات الأعياد»: an
                                                      # exception to the rent, not events allowed (P1 14340, aqar 12109734)
@@ -2975,6 +2979,9 @@ def selftest() -> None:
         ("ميزات المشروع / Project Features: • نادي رياضي • Gym • ممشى مشترك • Shared Walking Path • مسبح • Swimming Pool", {"pool": True}, ()),  # aqar 20965749
         ("وحدات ذكيه مكانس كهربائيه مسبح غرفة خادمه وسائق ديوانيه", {"pool": True}, ()),   # aqar 14998996
         ("مكان مسبح", {}, ("pool",)),
+        ("شترات كاملة لجميع النوافذ * مكيفات راكبة * أرضيات Glass Fiber * صيانة شاملة", {}, ("optical_fibers",)),  # aqar 9561593
+        ("Fiber glass water tank", {}, ("optical_fibers",)),
+        ("High-speed fiber internet 📺 Smart TV", {"optical_fibers": True}, ()),
         ("ارض مسورة للايجار مساحتها 615م وعليها رخصة انشاء وبها قسم معزول بمسبح وغرف", {"pool": True}, ()),   # aqar 27587225
         ("توجد رخصة بناء تسوير وملاحق", {}, ("annex", "fence")),
         ("يوجد تصريح لبناء مسبح", {}, ("pool",)),
