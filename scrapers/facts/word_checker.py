@@ -1872,7 +1872,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             hedges = [w for k, w in enumerate(before) if w in _LAND_NOT_STATED
                       and not (k + 1 < len(before) and before[k + 1].startswith(_n("للتفاوض")[:5]))]
             # a near word owns everything after it up to the next heading — see _near_open (CodeRabbit on #11819)
-            if carried or _near_open(_c, t, _i, m.start()) or hedges \
+            if _near_open(_c, t, _i, m.start(), carried) or hedges \
                     or any(_strip_wa(w) in _LAND_WANTED for w in t[:m.start()].split()):
                 continue           # «قريبه من ارض تجاريه», a broker's «مطلوب اراضي تجاريه»: not this ad's land
             nxt = clauses[ci + 1][2].split()[:1] if ci + 1 < len(clauses) and not t[m.end():].strip() else []
@@ -1899,15 +1899,16 @@ _NEAR_RELATIVE = frozenset(_n(w) for w in ("فيه", "فيها", "به", "بها
                                             "يضم", "تضم"))
 
 
-def _near_open(c: str, t: str, idx: list[int], end: int) -> bool:
-    """True when a near word stands in t[:end] with no heading between it and end."""
+def _near_open(c: str, t: str, idx: list[int], end: int, near: bool = False) -> bool:
+    """True when a near word stands in t[:end] with no heading between it and end. `near` is the state carried in from
+    the clause before («قريبة من حي، فيه …»); a heading in this clause ends it too (CodeRabbit on #11819)."""
     start = 0
     raw_end = idx[end] if end < len(idx) else len(c)       # the head's own raw position: a collapsed space maps short
     cut = [h.end() for h in _NEAR_HEADING_RAW.finditer(c, 0, raw_end)]
     if cut:
         start = bisect.bisect_left(idx, cut[-1], 0, end)
+        near = False
     words = t[start:end].split()
-    near = False
     for w in words:
         if w in _NEAR_HEADING_WORDS or _strip_wa(w) in _NEAR_HEADING_WORDS:   # «وصف» starts with «و» itself
             near = False

@@ -77,3 +77,12 @@ def test_a_near_word_owns_what_follows_until_a_heading():
     # a comma does not hand a «فيه» clause back to the ad
     assert lu("أرض للبيع قريبة من حي، فيه أرض تجارية") is None
     assert lu("قريبة من الخدمات، أرض سكنية") == "سكني"
+
+
+def test_a_heading_ends_a_near_word_carried_across_a_comma():
+    # CodeRabbit on #11819: the «فيه» clause continues the neighbour, but «وصف العقار:» inside it opens the ad's own deed
+    from scrapers.facts import word_checker as W
+    lu = lambda t: W.facts_of(W.clean_text(None, t)).get("land_use_ar")
+    assert lu("أرض للبيع قريبة من حي، فيه شارع وصف العقار: صك سكني") == "سكني"
+    assert lu("أرض للبيع قريبة من حي، فيه شارع وصف العقار صك سكني") == "سكني"
+    assert lu("أرض للبيع قريبة من حي، فيه أرض تجارية") is None
