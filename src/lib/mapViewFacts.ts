@@ -25,6 +25,11 @@ export type ViewFacts = {
   cityAr: string | null;
   cuts30: number | null;
   oneType: boolean;
+  /** with no single type picked: the most common type and its own median asking price per metre (named, never mixed) */
+  topType: string | null;
+  topPpm: number | null;
+  /** the facts are a place's PREPARED numbers (city/district label zoom): the pill's count is compared with a tolerance */
+  place: boolean;
   /** guest only: which chips a signed-in user would see (the server sends yes/no, never the number) */
   has?: { new: boolean; gone: boolean; ppm: boolean; cmp: boolean; cuts: boolean };
 };
@@ -43,7 +48,8 @@ export function parseViewFacts(result: { data: unknown; error: unknown }): ViewF
   const any = count(d.any);
   if (any === null) return null;
   const nbKind: 'near' | 'city' | null = d.nb_kind === 'near' ? 'near' : d.nb_kind === 'city' ? 'city' : null;
-  const base = { any, nbKind, oneType: d.one_type === true, nbNames: [] as string[], cityAr: null as string | null };
+  const base = { any, nbKind, oneType: d.one_type === true, nbNames: [] as string[], cityAr: null as string | null,
+                 topType: null as string | null, topPpm: null as number | null, place: d.place === true };
   if (d.locked === true) {
     const has = { new: d.has_new === true, gone: d.has_gone === true, ppm: d.has_ppm === true, cmp: d.has_cmp === true, cuts: d.has_cuts === true };
     return { ...base, locked: true, new30: null, gone30: null, ppm: null, nbPpm: null, cuts30: null, has };
@@ -52,6 +58,7 @@ export function parseViewFacts(result: { data: unknown; error: unknown }): ViewF
   return {
     ...base, locked: false, nbNames: names, cityAr: typeof d.city_ar === 'string' ? d.city_ar : null,
     new30: count(d.new30), gone30: count(d.gone30), ppm: money(d.ppm), nbPpm: money(d.nb_ppm), cuts30: count(d.cuts30),
+    topType: typeof d.top_type === 'string' && d.top_type ? d.top_type : null, topPpm: money(d.top_ppm),
   };
 }
 
@@ -66,6 +73,33 @@ export function comparisonChip(ppm: number, nbPpm: number, nbKind: 'near' | 'cit
   return { text: loc === 'ar' ? `أرخص من ${whom} ${p}` : `${p} cheaper than ${whom}`, tone: 'down' };
 }
 
+/** «الشقق» for شقة … — the label of the most common type on its price chip. */
+const TYPE_PLURAL_AR: Record<string, string> = {
+  'شقة': 'الشقق', 'فيلا': 'الفلل', 'أرض سكنية': 'الأراضي السكنية', 'دور': 'الأدوار', 'عمارة': 'العمائر', 'أرض': 'الأراضي',
+  'أرض تجارية': 'الأراضي التجارية', 'استراحة': 'الاستراحات', 'مزرعة': 'المزارع', 'أرض زراعية': 'الأراضي الزراعية',
+  'محل': 'المحلات', 'معرض': 'المعارض', 'مكتب': 'المكاتب', 'مستودع': 'المستودعات',
+};
+export const typePluralAr = (t: string): string => TYPE_PLURAL_AR[t] ?? t;
+const TYPE_PLURAL_EN: Record<string, string> = {
+  'شقة': 'Apartments', 'فيلا': 'Villas', 'أرض سكنية': 'Residential land', 'دور': 'Floors', 'عمارة': 'Buildings', 'أرض': 'Land',
+  'أرض تجارية': 'Commercial land', 'استراحة': 'Rest houses', 'مزرعة': 'Farms', 'أرض زراعية': 'Farmland',
+  'محل': 'Shops', 'معرض': 'Showrooms', 'مكتب': 'Offices', 'مستودع': 'Warehouses',
+};
+export const typePluralEn = (t: string): string | null => TYPE_PLURAL_EN[t] ?? null;
+
+/** Prepared place facts describe ALL of one deal's ads in a city or district, so they are asked for only when the count
+ *  is exactly that: one deal and no other filter (category, type, rooms, area, price, furnished, posted-within, drawing). */
+export function placeFactsFit(p: { deals: string[]; category?: unknown; scope?: unknown; furnished?: unknown; postedWithinDays?: unknown;
+  types?: readonly unknown[] | null; beds?: readonly unknown[] | null; areaMin?: unknown; areaMax?: unknown; priceMin?: unknown; priceMax?: unknown; poly?: unknown }): boolean {
+  return p.deals.length === 1 && !(p.category || p.scope || p.furnished != null || p.postedWithinDays != null || p.types?.length || p.beds?.length
+    || p.areaMin != null || p.areaMax != null || p.priceMin != null || p.priceMax != null || p.poly);
+}
+/** The prepared facts are an hour old at most and the pill's count comes from another table: they describe the same
+ *  place, so a small drift (new ads arriving) is allowed — never more than 3% (or 3 ads). */
+export const PLACE_TOLERANCE_PCT = 3;
+export const sameCount = (any: number, shown: number, place: boolean): boolean =>
+  place ? Math.abs(any - shown) <= Math.max(3, Math.round((shown * PLACE_TOLERANCE_PCT) / 100)) : any === shown;
+
 export type FactBox =
   | { kind: 'none' }
   | { kind: 'locked'; chips: string[] }
@@ -76,7 +110,7 @@ export type FactBox =
  *  the count is a drawn boundary (then the facts are for the ads inside it, without «أحياء قريبة»). */
 export function factBox(f: ViewFacts | null, shown: number | null, loc: 'ar' | 'en', typePicked: boolean, saleOnly = true,
                         latin: (s: string) => string = (s) => s, drawn = false): FactBox {
-  if (!f || shown === null || f.any !== shown || f.any < FACTS_MIN_ADS) return { kind: 'none' };
+  if (!f || shown === null || !sameCount(f.any, shown, f.place) || f.any < FACTS_MIN_ADS) return { kind: 'none' };
   const n = (x: number) => x.toLocaleString('en-US');
   if (f.locked) {
     const h = f.has;
@@ -92,13 +126,19 @@ export function factBox(f: ViewFacts | null, shown: number | null, loc: 'ar' | '
   const chips: FactChip[] = [];
   if (f.new30) chips.push({ text: loc === 'ar' ? `${n(f.new30)} جديد` : `${n(f.new30)} new`, tone: 'plain' });
   if (f.gone30) chips.push({ text: loc === 'ar' ? `${n(f.gone30)} اختفى` : `${n(f.gone30)} gone`, tone: 'plain' });
-  if (f.ppm) {
-    chips.push({ text: loc === 'ar' ? `المتر المعروض ${n(f.ppm)} ريال` : `asking ${n(f.ppm)} SAR/m²`, tone: 'plain' });
-    // a drawn boundary is not a district: nothing fair to compare it with, so «أحياء قريبة» is not said
-    if (f.nbPpm && f.nbKind && !drawn) chips.push(comparisonChip(f.ppm, f.nbPpm, f.nbKind, f.cityAr, loc, latin));
+  const price = f.ppm ?? f.topPpm;
+  if (price) {
+    // no single type picked: the most common type's own price, NAMED («الشقق: …») — a price is never a mix of types
+    const topName = f.topType ? (loc === 'ar' ? typePluralAr(f.topType) : typePluralEn(f.topType)) : null;
+    const label = f.ppm ? '' : topName ? `${topName}: ` : '';
+    if (f.ppm || label) {
+      chips.push({ text: loc === 'ar' ? `${label}المتر المعروض ${n(price)} ريال` : `${label}asking ${n(price)} SAR/m²`, tone: 'plain' });
+      // a drawn boundary is not a district: nothing fair to compare it with, so «أحياء قريبة» is not said
+      if (f.nbPpm && f.nbKind && !drawn) chips.push(comparisonChip(price, f.nbPpm, f.nbKind, f.cityAr, loc, latin));
+    }
   }
   if (f.cuts30) chips.push({ text: loc === 'ar' ? `${n(f.cuts30)} خفضوا السعر` : `${n(f.cuts30)} price cuts`, tone: 'plain' });
-  const hint = saleOnly && !typePicked && !f.ppm ? (loc === 'ar' ? 'اختر نوع العقار لعرض السعر' : 'Pick a property type to see the price') : null;
+  const hint = saleOnly && !typePicked && !f.ppm && !f.topPpm ? (loc === 'ar' ? 'اختر نوع العقار لعرض السعر' : 'Pick a property type to see the price') : null;
   if (chips.length === 0 && !hint) return { kind: 'none' };
   return { kind: 'chips', chips, hint };
 }

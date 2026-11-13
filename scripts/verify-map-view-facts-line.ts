@@ -3,7 +3,8 @@
 // box its count was read over. The server half is scripts/verify-map-view-facts.ts.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { factBox, comparisonChip, parseViewFacts, FACTS_MIN_ADS, type ViewFacts, type FactBox } from '../src/lib/mapViewFacts.ts';
+import { factBox, comparisonChip, parseViewFacts, sameCount, placeFactsFit, FACTS_MIN_ADS, type ViewFacts, type FactBox } from '../src/lib/mapViewFacts.ts';
+import { areaPlace, type AreaRow } from '../src/lib/mapAreas.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -12,7 +13,7 @@ const mustCatch = (name: string, mutantPasses: () => boolean) => check(`(mutatio
 const MARKS = /[ً-ْ]/;
 const plain = (x: string) => x.replace(/[⁦⁩]/g, '');
 
-const full: ViewFacts = { any: 560, locked: false, new30: 72, gone30: 40, ppm: 9722, nbPpm: 11766, nbKind: 'near', nbNames: ['حي القيروان', 'حي الصحافة'], cityAr: 'الرياض', cuts30: 9, oneType: true };
+const full: ViewFacts = { any: 560, locked: false, new30: 72, gone30: 40, ppm: 9722, nbPpm: 11766, nbKind: 'near', nbNames: ['حي القيروان', 'حي الصحافة'], cityAr: 'الرياض', cuts30: 9, oneType: true, topType: null, topPpm: null, place: false };
 const texts = (b: FactBox) => (b.kind === 'chips' ? b.chips.map((c) => plain(c.text)) : b.kind === 'locked' ? b.chips : []);
 
 // 1. what the box says
@@ -55,6 +56,28 @@ check('a guest never sees whether the area is pricier or cheaper', gb.kind === '
 check('a guest\'s drawing shows no blurred «أحياء قريبة» shape either', (() => { const d = factBox(guest, 560, 'ar', true, true, (x) => x, true); return d.kind === 'locked' && !d.chips.some((c) => c.includes('أحياء قريبة')); })());
 check('parse: an error or no data is null', parseViewFacts({ data: null, error: null }) === null && parseViewFacts({ data: { any: 5 }, error: { message: 'x' } }) === null);
 
+// 3b. with no type picked: the most common type's own price, NAMED (owner 2026-11-13: «if nothing is selected … just show a general»)
+const top = { ...full, ppm: null, nbPpm: null, topType: 'شقة', topPpm: 3500 };
+const namesTop = (x: FactBox) => x.kind === 'chips' && texts(x).includes('الشقق: المتر المعروض 3,500 ريال') && x.hint === null;
+check('no type picked: the box names the most common type with its own price («الشقق: …»), no «اختر نوع العقار»', namesTop(factBox(top, 560, 'ar', false)));
+check('…and in English', (() => { const e = factBox(top, 560, 'en', false); return e.kind === 'chips' && texts(e).includes('Apartments: asking 3,500 SAR/m²'); })());
+check('a type the English names do not know shows no price at all (never an unnamed mix)', (() => { const e = factBox({ ...top, topType: 'نوع جديد' }, 560, 'en', false); return e.kind === 'chips' && !texts(e).some((t) => t.includes('SAR')); })());
+check('the neighbours are compared with that same type\'s price', (() => { const c = factBox({ ...top, nbPpm: 4200, nbKind: 'near' as const }, 560, 'ar', false); return texts(c).includes('أرخص من أحياء قريبة 17%'); })());
+mustCatch('a no-type price shown without its type name', () => namesTop(factBox({ ...top, ppm: 3500 }, 560, 'ar', false)));
+
+// 3c. city/district label zoom reads that place's PREPARED facts
+check('a place\'s prepared count may drift by new ads, never more than 3% (or 3 ads)', sameCount(1030, 1000, true) && !sameCount(1031, 1000, true) && sameCount(43, 40, true) && !sameCount(44, 40, true));
+check('a live box keeps the exact match (no tolerance)', !sameCount(560, 559, false) && sameCount(560, 560, false));
+check('facts for a place whose count is far off say nothing', factBox({ ...full, any: 1000, place: true }, 1500, 'ar', true).kind === 'none' && factBox({ ...full, any: 1000, place: true }, 1020, 'ar', true).kind === 'chips');
+mustCatch('a place compared with no limit', () => factBox({ ...full, any: 1000, place: true }, 1500, 'ar', true).kind !== 'none');
+const fit = placeFactsFit;
+check('prepared place facts only for one deal with no other filter', fit({ deals: ['buy'] }) && !fit({ deals: ['buy', 'rent'] }) && !fit({ deals: ['buy'], types: ['شقة'] })
+  && !fit({ deals: ['buy'], priceMin: 0 }) && !fit({ deals: ['buy'], beds: [3] }) && !fit({ deals: ['buy'], poly: [[1, 2]] }) && !fit({ deals: ['buy'], postedWithinDays: 7 }) && !fit({ deals: ['buy'], category: 'تجاري' }));
+const rows: AreaRow[] = [{ city: 'الرياض', district: 'الملقا', lat: 24.8, lng: 46.6, n: 900 }, { city: 'الرياض', district: 'حطين', lat: 24.76, lng: 46.6, n: 100 }];
+const atDistrict = areaPlace(rows, 'district', 'ar', (x) => x, { latitude: 24.8, longitude: 46.6 }, { latitudeDelta: 0.3, longitudeDelta: 0.3 });
+check('the district the pill names carries its own facts key (city + district)', atDistrict?.facts?.level === 'district' && atDistrict.facts.city === 'الرياض' && atDistrict.facts.district === 'الملقا' && atDistrict.n === 900);
+check('the whole-Kingdom view carries no place facts', !areaPlace(rows, 'country', 'ar', (x) => x, { latitude: 24, longitude: 45 }, { latitudeDelta: 17, longitudeDelta: 17 })?.facts);
+
 // 4. the screen asks for the box the count was read over, and compares with the number it shows
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(paddedBox\(center, span\)\);/.test(src)
@@ -65,6 +88,13 @@ const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(p
   && /factBox\(viewFacts, hasShape \? pinCount : placeCount \?\? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape\)/.test(src)
   && /fetchViewFacts\(box, pinFilter, !!user\)/.test(src);
 check('the map asks for the counted box and shows the facts only against the number it shows', wired(web));
+const placeWired = (src: string) => /factsPlace && !hasShape && !drawing && pinFilter && placeFactsFit\(pinFilter\) && typeof placeCount === 'number'/.test(src)
+  && /fetchPlaceFacts\(place, deals, !!user\)/.test(src)
+  && /setFactsPlace\(!whole && place\?\.facts \? place\.facts : null\);/.test(src)
+  && /setFactsBox\(null\); setFactsExact\(false\); setFactsPlace\(null\);/.test(src);
+check('label zoom asks for the named place\'s facts only when the count is all of one deal there, and a new read forgets it', placeWired(web));
+mustCatch('place facts asked for under a type or price filter', () => placeWired(web.replace('placeFactsFit(pinFilter)', 'pinFilter.deals.length === 1')));
+mustCatch('a new map read that keeps the last place (facts for the previous city)', () => placeWired(web.replace('setFactsExact(false); setFactsPlace(null);', 'setFactsExact(false);')));
 mustCatch('facts compared with a different number than the pill shows', () => wired(web.replace('factBox(viewFacts, hasShape ? pinCount : placeCount ?? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape)', 'factBox(viewFacts, viewFacts?.any ?? null, loc, typePicked, saleOnly, translitPlace, hasShape)')));
 mustCatch('facts asked for an area total (a box the count was not read over)', () => wired(web.replace('setPinCount(areasTotal(areas));', 'setPinCount(areasTotal(areas)); setFactsBox(paddedBox(center, span));')));
 mustCatch('a new map read that keeps the last box (facts for the previous view)', () => wired(web.replace(/(const my = \+\+seq;)\s*setFactsBox\(null\); setFactsExact\(false\);[^\n]*/, '$1')));

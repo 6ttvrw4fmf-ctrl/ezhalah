@@ -37,8 +37,8 @@ import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox
 import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
 import { keepSaudiPlaces } from '@/lib/saudiOutline';
 import { isRealDrawnArea } from '@/lib/drawnArea';
-import { fetchViewFacts } from '@/data/mapViewFacts';
-import { factBox, factsWindowLabel, lockedAsk, factsZoom, factsWide, FACTS_MIN_ADS, type ViewFacts } from '@/lib/mapViewFacts';
+import { fetchViewFacts, fetchPlaceFacts } from '@/data/mapViewFacts';
+import { factBox, factsWindowLabel, lockedAsk, factsZoom, factsWide, placeFactsFit, FACTS_MIN_ADS, type ViewFacts } from '@/lib/mapViewFacts';
 import { useApp } from '@/store';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
@@ -706,6 +706,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // Wider district views show an ESTIMATED count (the dots feed, by 1 km cell); there the facts read the exact count for
   // the same box and the pill shows that exact number, so the count and the box are always the same ads.
   const [factsExact, setFactsExact] = useState(false);
+  // At city/district LABEL zoom the pill names a place with its own count: the box reads that place's prepared facts.
+  const [factsPlace, setFactsPlace] = useState<{ level: 'city' | 'district'; city: string; district: string } | null>(null);
   const { user, openAuth } = useApp();
   const retryPinsRef = useRef<(() => void) | null>(null);
   // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
@@ -716,6 +718,14 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   useEffect(() => {
     setViewFacts(null);
     const m = mapRef.current;
+    // City/district label zoom: the named place's prepared facts — only when the count is all of one deal's ads there.
+    if (factsPlace && !hasShape && !drawing && pinFilter && placeFactsFit(pinFilter) && typeof placeCount === 'number' && placeCount >= FACTS_MIN_ADS) {
+      let staleP = false;
+      const place = factsPlace;
+      const deals = pinFilter.deals;
+      const tmP = setTimeout(() => { void fetchPlaceFacts(place, deals, !!user).then((f) => { if (!staleP) setViewFacts(f); }); }, 350);
+      return () => { staleP = true; clearTimeout(tmP); };
+    }
     // A drawn boundary gets the facts for exactly the ads inside it (the pin read already carries its polygon), at any zoom.
     if (!m || !pinFilter || !factsBox || drawing || typeof pinCount !== 'number' || pinCount < FACTS_MIN_ADS || (!viewPlace && !hasShape && !factsExact)) return;
     if (!hasShape && !factsExact && !factsZoom(m.region.span.latitudeDelta)) return;
@@ -730,7 +740,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     return () => { stale = true; clearTimeout(tm); };
     // pinsKey stands for pinFilter (a new object every render)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [factsBox, factsExact, pinsKey, hasShape, drawing, pinCount, viewPlace, user]);
+  }, [factsBox, factsExact, factsPlace, pinsKey, hasShape, drawing, pinCount, placeCount, viewPlace, user]);
   // The deals NOT chosen that do have listings in view — so an empty deal says where the listings are (owner 2026-11-05).
   const [otherDeals, setOtherDeals] = useState<string[]>([]);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
@@ -946,6 +956,8 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       const place = whole ? areaPlace(whole, 'country', loc, translitPlace, m.region.center, m.region.span) : areaPlace(areas, level, loc, translitPlace, m.region.center, m.region.span);
       setViewPlace(place?.name ?? null); setPlaceCount(place?.n ?? null);
       clearStems();   // area labels replace the pins: no line may outlive the head it belonged to
+      // the box at city/district label zoom reads that place's prepared facts (the whole-Kingdom view keeps its count only)
+      setFactsPlace(!whole && place?.facts ? place.facts : null);
       const next = new Map<string, AreaRow>();
       for (const a of areas) next.set(`A|${level}|${a.city}|${a.district}|${a.n}`, a);
       for (const [k, ann] of keyed) if (!next.has(k)) { m.removeAnnotation(ann); keyed.delete(k); }
@@ -1015,7 +1027,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     };
     const load = async () => {
       const my = ++seq;
-      setFactsBox(null); setFactsExact(false);   // the pill's facts belong to one counted box; a new read starts without one
+      setFactsBox(null); setFactsExact(false); setFactsPlace(null);   // the pill's facts belong to one counted view; a new read starts without one
       const { center, span } = m.region;
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);

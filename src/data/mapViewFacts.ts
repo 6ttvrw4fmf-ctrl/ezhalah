@@ -32,3 +32,27 @@ export async function fetchViewFacts(box: { s: number; w: number; n: number; e: 
     return null;
   }
 }
+
+/** The prepared facts of the city or district the pill names at area-label zoom (map_place_facts_ar). null when the read
+ *  failed, the facts are stale or switched off, or the deal is not exactly one — the box then stays hidden, never «0». */
+export async function fetchPlaceFacts(place: { level: 'city' | 'district'; city: string; district: string }, deals: string[], signedIn: boolean): Promise<ViewFacts | null> {
+  if (!supabase || deals.length !== 1) return null;
+  const args = { p_level: place.level, p_city: place.city, p_district: place.district || null, p_deals: deals };
+  const key = `${signedIn ? 'u' : 'g'}|place|${JSON.stringify(args)}`;
+  const hit = recent.get(key);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.f;
+  try {
+    const result = await boundedRpc<unknown>(supabase.rpc('map_place_facts_ar', args));
+    const { error } = result as { error: unknown };
+    if (error) { reportMessage('map_place_facts_ar failed (map box hidden at label zoom)', { error: String((error as { message?: string }).message ?? error) }); return null; }
+    const f = parseViewFacts(result as { data: unknown; error: unknown });
+    if (f) {
+      recent.delete(key); recent.set(key, { at: Date.now(), f });
+      if (recent.size > CACHE_MAX) recent.delete(recent.keys().next().value as string);
+    }
+    return f;
+  } catch (e) {
+    reportError(e, { where: 'map box place facts (map_place_facts_ar)' });
+    return null;
+  }
+}

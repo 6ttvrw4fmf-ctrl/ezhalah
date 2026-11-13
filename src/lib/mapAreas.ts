@@ -8,6 +8,9 @@ export type AreaLevel = 'country' | 'region' | 'city' | 'district';
 /** `at`: where a region's label is drawn (REGION_LABEL_AT); `lat`/`lng` stay the count-weighted centre a tap zooms to.
  *  `offLabel`: the label point is outside the view (not drawn, still counted); `offCount`: the weighted centre is outside
  *  the view (drawn, not counted) — the count and the labels are decided separately (review of #11608). */
+/** The place the pill names at area-label zoom, its own count, and (city or district only) the key of its prepared facts
+ *  (map_place_facts_ar — the map box from city level to district level, owner 2026-11-13). */
+export type AreaPlace = { name: string; n: number; facts?: { level: 'city' | 'district'; city: string; district: string } };
 export type AreaRow = { city: string; district: string; lat: number; lng: number; n: number; at?: { lat: number; lng: number }; offLabel?: true; offCount?: true };
 
 // ZOOM GOES COUNTRY → REGION → CITY → DISTRICT → PINS (owner 2026-11-05: «when the user zooms in, first thing Saudi, the
@@ -211,7 +214,7 @@ export function areaPlaceName(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en
  *  «14,531 إعلان في حي النرجس» (every district in view) where النرجس alone holds ~5,900, and «127,013 … في منطقة
  *  الرياض» where the region holds 108K. A number beside a name is that place's number. */
 export function areaPlace(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', latin: (s: string) => string,
-  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): { name: string; n: number } | null {
+  center: { latitude: number; longitude: number }, span: { latitudeDelta: number; longitudeDelta: number }): AreaPlace | null {
   if (level === 'country') { const n = rows.reduce((t, a) => t + a.n, 0); return n > 0 ? { name: COUNTRY_NAME[loc], n } : null; }
   // A region is on screen where its label is drawn OR where its listings are (review of #11608); anything else by its
   // own point.
@@ -222,14 +225,18 @@ export function areaPlace(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', l
   const top = seen.reduce((b, a) => (a.n > b.n ? a : b));
   if (top.n / total >= AREA_PLACE_SHARE) {
     const name = areaName(top, level, loc, latin);
-    return { name: level === 'district' && loc === 'ar' ? `حي ${name}` : name, n: top.n };
+    const facts = level === 'district' ? { level: 'district' as const, city: top.city, district: top.district }
+      : level === 'city' ? { level: 'city' as const, city: top.city, district: '' } : undefined;
+    const named: AreaPlace = { name: level === 'district' && loc === 'ar' ? `حي ${name}` : name, n: top.n };
+    return facts ? { ...named, facts } : named;
   }
   if (level === 'district') {
     const byCity = new Map<string, number>();
     for (const a of seen) byCity.set(a.city, (byCity.get(a.city) ?? 0) + a.n);
     const [city, n] = [...byCity].reduce((b, x) => (x[1] > b[1] ? x : b));
     if (city && n / total >= AREA_PLACE_SHARE) {
-      return { name: areaName({ city, district: '' }, 'city', loc, latin), n: rows.filter((a) => a.city === city).reduce((t, a) => t + a.n, 0) };
+      return { name: areaName({ city, district: '' }, 'city', loc, latin), n: rows.filter((a) => a.city === city).reduce((t, a) => t + a.n, 0),
+               facts: { level: 'city', city, district: '' } };
     }
   }
   return null;
