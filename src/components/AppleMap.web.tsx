@@ -38,7 +38,7 @@ import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, 
 import { keepSaudiPlaces } from '@/lib/saudiOutline';
 import { isRealDrawnArea } from '@/lib/drawnArea';
 import { fetchViewFacts } from '@/data/mapViewFacts';
-import { factBox, factsWindowLabel, lockedAsk, factsZoom, FACTS_MIN_ADS, type ViewFacts } from '@/lib/mapViewFacts';
+import { factBox, factsWindowLabel, lockedAsk, factsZoom, factsWide, FACTS_MIN_ADS, type ViewFacts } from '@/lib/mapViewFacts';
 import { useApp } from '@/store';
 import { fetchMapNoPin, noPinPinRow, noPinKey, isNoPinKey, noPinHead, noPinTag, showNoPin, NO_PIN_COLOR, type NoPinRow } from '@/data/mapNoPin';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
@@ -703,6 +703,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // when the server counted the same ads. factsBox is set ONLY where the count is a sum over that box.
   const [factsBox, setFactsBox] = useState<{ s: number; w: number; n: number; e: number } | null>(null);
   const [viewFacts, setViewFacts] = useState<ViewFacts | null>(null);
+  // Wider district views show an ESTIMATED count (the dots feed, by 1 km cell); there the facts read the exact count for
+  // the same box and the pill shows that exact number, so the count and the box are always the same ads.
+  const [factsExact, setFactsExact] = useState(false);
   const { user, openAuth } = useApp();
   const retryPinsRef = useRef<(() => void) | null>(null);
   // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
@@ -714,15 +717,20 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     setViewFacts(null);
     const m = mapRef.current;
     // A drawn boundary gets the facts for exactly the ads inside it (the pin read already carries its polygon), at any zoom.
-    if (!m || !pinFilter || !factsBox || drawing || typeof pinCount !== 'number' || pinCount < FACTS_MIN_ADS || (!viewPlace && !hasShape)) return;
-    if (!hasShape && !factsZoom(m.region.span.latitudeDelta)) return;
+    if (!m || !pinFilter || !factsBox || drawing || typeof pinCount !== 'number' || pinCount < FACTS_MIN_ADS || (!viewPlace && !hasShape && !factsExact)) return;
+    if (!hasShape && !factsExact && !factsZoom(m.region.span.latitudeDelta)) return;
     let stale = false;
     const box = factsBox;
-    const tm = setTimeout(() => { void fetchViewFacts(box, pinFilter, !!user).then((f) => { if (!stale) setViewFacts(f); }); }, 350);
+    const exact = factsExact;
+    const tm = setTimeout(() => { void fetchViewFacts(box, pinFilter, !!user).then((f) => {
+      if (stale) return;
+      setViewFacts(f);
+      if (exact && f) setPinCount(f.any);   // the estimate gives way to the exact count of the same box
+    }); }, 350);
     return () => { stale = true; clearTimeout(tm); };
     // pinsKey stands for pinFilter (a new object every render)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [factsBox, pinsKey, hasShape, drawing, pinCount, viewPlace, user]);
+  }, [factsBox, factsExact, pinsKey, hasShape, drawing, pinCount, viewPlace, user]);
   // The deals NOT chosen that do have listings in view — so an empty deal says where the listings are (owner 2026-11-05).
   const [otherDeals, setOtherDeals] = useState<string[]>([]);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
@@ -1007,7 +1015,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     };
     const load = async () => {
       const my = ++seq;
-      setFactsBox(null);   // the pill's second line belongs to one counted box; a new read starts without one
+      setFactsBox(null); setFactsExact(false);   // the pill's facts belong to one counted box; a new read starts without one
       const { center, span } = m.region;
       void noteOtherDeals(center, span, my);
       const cell = cellForSpan(span.latitudeDelta);
@@ -1034,7 +1042,11 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         if (all !== 'unknown') {
           const inView = dotsInView(all, pins.deals, paddedBox(center, span));
           clear();
-          if (paint(inView)) { setPinCount(dotsTotal(inView)); return; }
+          if (paint(inView)) {
+            setPinCount(dotsTotal(inView));
+            if (factsWide(span.latitudeDelta)) { setFactsBox(paddedBox(center, span)); setFactsExact(true); }
+            return;
+          }
         }
         // The feed failed (or the projection could not be calibrated): the live grid path below, never an empty map.
       }

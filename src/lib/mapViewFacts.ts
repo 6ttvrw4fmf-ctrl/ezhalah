@@ -107,6 +107,12 @@ export function factBox(f: ViewFacts | null, shown: number | null, loc: 'ar' | '
 export const factsWindowLabel = (loc: 'ar' | 'en'): string => (loc === 'ar' ? `آخر ${FACTS_DAYS} يوما` : `last ${FACTS_DAYS} days`);
 export const lockedAsk = (loc: 'ar' | 'en'): string => (loc === 'ar' ? '🔒 سجل الدخول لعرض الأرقام' : '🔒 Sign in to see the numbers');
 
+/** A wider district view (up to ~22 km tall) also gets the box: there the pill's count is the dots-feed estimate, so the
+ *  facts read the exact count of the same box and the pill shows it. Wider than this the read gets slow — count only. */
+export const FACTS_WIDE_SPAN = 0.2;
+export function factsWide(latitudeDelta: number): boolean {
+  return latitudeDelta <= FACTS_WIDE_SPAN;
+}
 /** Facts are asked for only at exact-point zoom (a view under ~13 km tall), where the read takes tens of ms. */
 export function factsZoom(latitudeDelta: number): boolean {
   return latitudeDelta <= 0.12;

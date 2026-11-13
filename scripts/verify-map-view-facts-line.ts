@@ -36,7 +36,7 @@ mustCatch('a box that ignores the pill\'s count', () => { const ignoresPill = (f
 const drawnBox = factBox(full, 560, 'ar', true, true, (x) => x, true);
 check('a drawn boundary gets the facts for the ads inside it, without «أحياء قريبة»', drawnBox.kind === 'chips' && texts(drawnBox).includes('72 جديد') && !texts(drawnBox).some((t) => t.includes('أحياء قريبة')));
 mustCatch('a drawing compared with «nearby districts»', () => { const b2 = factBox(full, 560, 'ar', true, true, (x) => x, false); return b2.kind === 'chips' && !texts(b2).some((t) => t.includes('أحياء قريبة')); });
-check('the map asks for facts inside a drawing too (its pin read carries the polygon)', /\(!viewPlace && !hasShape\)\) return;/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')) && !/hasShape \|\| drawing \|\|/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+check('the map asks for facts inside a drawing too (its pin read carries the polygon)', /\(!viewPlace && !hasShape && !factsExact\)\) return;/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')) && !/hasShape \|\| drawing \|\|/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
 
 // 2. the comparison
 check('pricier than the neighbours reads red with the percentage', plain(comparisonChip(10900, 10000, 'near', 'الرياض', 'ar').text) === 'أغلى من أحياء قريبة 9%' && comparisonChip(10900, 10000, 'near', 'الرياض', 'ar').tone === 'up');
@@ -58,14 +58,17 @@ check('parse: an error or no data is null', parseViewFacts({ data: null, error: 
 // 4. the screen asks for the box the count was read over, and compares with the number it shows
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(paddedBox\(center, span\)\);/.test(src)
-  && (src.match(/setFactsBox\(paddedBox/g) ?? []).length === 1
-  && /const my = \+\+seq;\s*setFactsBox\(null\);/.test(src)
+  && (src.match(/setFactsBox\(paddedBox/g) ?? []).length === 2
+  && /if \(factsWide\(span\.latitudeDelta\)\) \{ setFactsBox\(paddedBox\(center, span\)\); setFactsExact\(true\); \}/.test(src)
+  && /if \(exact && f\) setPinCount\(f\.any\);/.test(src)
+  && /const my = \+\+seq;\s*setFactsBox\(null\); setFactsExact\(false\);/.test(src)
   && /factBox\(viewFacts, hasShape \? pinCount : placeCount \?\? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape\)/.test(src)
   && /fetchViewFacts\(box, pinFilter, !!user\)/.test(src);
 check('the map asks for the counted box and shows the facts only against the number it shows', wired(web));
 mustCatch('facts compared with a different number than the pill shows', () => wired(web.replace('factBox(viewFacts, hasShape ? pinCount : placeCount ?? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape)', 'factBox(viewFacts, viewFacts?.any ?? null, loc, typePicked, saleOnly, translitPlace, hasShape)')));
 mustCatch('facts asked for an area total (a box the count was not read over)', () => wired(web.replace('setPinCount(areasTotal(areas));', 'setPinCount(areasTotal(areas)); setFactsBox(paddedBox(center, span));')));
-mustCatch('a new map read that keeps the last box (facts for the previous view)', () => wired(web.replace(/(const my = \+\+seq;)\s*setFactsBox\(null\);[^\n]*/, '$1')));
+mustCatch('a new map read that keeps the last box (facts for the previous view)', () => wired(web.replace(/(const my = \+\+seq;)\s*setFactsBox\(null\); setFactsExact\(false\);[^\n]*/, '$1')));
+mustCatch('a wide view whose estimate is never replaced by the exact count (box and count could differ)', () => wired(web.replace('if (exact && f) setPinCount(f.any);', '')));
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nverify-map-view-facts-line: all checks passed');
 process.exit(failed ? 1 : 0);
