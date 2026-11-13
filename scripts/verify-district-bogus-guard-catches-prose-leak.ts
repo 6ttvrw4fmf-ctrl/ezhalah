@@ -44,8 +44,14 @@ check('at least one migration defines district_ar_looks_bogus', defining.length 
 const latest = defining[defining.length - 1] ?? '';
 const sql = latest ? readFileSync(join(MIG_DIR, latest), 'utf8') : '';
 
-check('the LATEST defining migration is the prose-leak extension (not the original alone)',
-  latest.includes('district_bogus_guard_prose_leak') || latest.includes('20260919171833'));
+// A LATER migration may add a rule (🦅 2026-11-13: rule 11 «رقم»); it must then KEEP every prose-leak rule (#1/#2/#6
+// run on the LATEST defining file), while the prose-leak migration's own apply-time self-tests, purge and scope note
+// (#3–#5) are judged on the newest prose-leak-family file that carried them.
+const proseFamily = defining.filter((f) => f.includes('district_bogus_guard_prose_leak') || f.includes('20260919171833'));
+const proseLatest = proseFamily[proseFamily.length - 1] ?? '';
+const proseSql = proseLatest ? readFileSync(join(MIG_DIR, proseLatest), 'utf8') : '';
+check('the prose-leak extension is among the defining migrations, and nothing older than it is the latest',
+  proseLatest !== '' && latest >= proseLatest);
 
 // ── 1. THE FOUR NEW RULES MUST ALL BE PRESENT, none silently dropped ─────────────────────────────
 // Named functions, not inline regex tests, so section 6 below can apply the SAME predicate this
@@ -74,28 +80,28 @@ check('#2 rule 5 (known non-place literals) still present', /'حكومي1'/.test
 
 // ── 3. APPLY-TIME SELF-TESTS MUST EXECUTE AGAINST THE REAL COHORT, not a hand-picked fixture ─────
 check('#3 T1 asserts every one of the 8 known-bad entries is caught',
-  sql.includes('الجوهرة الشقه مكونه من :') && sql.includes('النسيم مساحه')
-  && sql.includes(': الجوهره') && /bool_and\(public\.district_ar_looks_bogus/.test(sql));
+  proseSql.includes('الجوهرة الشقه مكونه من :') && proseSql.includes('النسيم مساحه')
+  && proseSql.includes(': الجوهره') && /bool_and\(public\.district_ar_looks_bogus/.test(proseSql));
 check('#3 T2 is the sibling-branch POSITIVE assertion — real district names must NOT be flagged '
     + '(the exact asymmetry PRODUCTION_RED_TEAM_ENGINEER.md PART 3.3 shape-4 looks for)',
-  sql.includes('حي الجوهرة') && sql.includes('حي الناصرية')
-  && /bool_or\(public\.district_ar_looks_bogus/.test(sql));
+  proseSql.includes('حي الجوهرة') && proseSql.includes('حي الناصرية')
+  && /bool_or\(public\.district_ar_looks_bogus/.test(proseSql));
 check('#3 T3/T4 execute against the LIVE canonical catalog, not only the hand-picked fixture',
-  sql.includes('from public.loc_canonical_district') && sql.includes("source = 'live'"));
-check('#3 self-test failure rolls back the whole migration', /raise exception 'T1 FAILED/.test(sql));
+  proseSql.includes('from public.loc_canonical_district') && proseSql.includes("source = 'live'"));
+check('#3 self-test failure rolls back the whole migration', /raise exception 'T1 FAILED/.test(proseSql));
 
 // ── 4. THE PURGE — garbage already promoted must be removed immediately, not left for the next ──
 //      scheduled rebuild ─────────────────────────────────────────────────────────────────────────
 check('#4 the migration calls refresh_loc_canonical_district() to purge existing garbage',
-  sql.includes('select public.refresh_loc_canonical_district()'));
+  proseSql.includes('select public.refresh_loc_canonical_district()'));
 check('#4 the purge is itself verified by execution, not merely invoked',
-  /PURGE FAILED/.test(sql) && /v_remaining/.test(sql));
+  /PURGE FAILED/.test(proseSql) && /v_remaining/.test(proseSql));
 
 // ── 5. SCOPE — the live fallback branch ONLY, never the curated catalog or raw listing rows ──────
 check('#5 the scope note names the curated catalog as explicitly untouched',
-  sql.toLowerCase().includes('never the') && sql.includes('curated catalog'));
+  proseSql.toLowerCase().includes('never the') && proseSql.includes('curated catalog'));
 check('#5 the scope note names the underlying listing rows as explicitly untouched',
-  sql.toLowerCase().includes('never') && sql.includes('underlying listing rows'));
+  proseSql.toLowerCase().includes('never') && proseSql.includes('underlying listing rows'));
 
 // ── 6. MUTATION PROOF — a length-only oracle (the trap this migration fixes) fails contract #1 ──
 {
