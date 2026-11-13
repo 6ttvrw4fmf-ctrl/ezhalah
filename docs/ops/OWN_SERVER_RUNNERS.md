@@ -40,6 +40,8 @@ runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_
 - `scripts/verify-runner-switch.ts` (in `npm test`) fails if any job hard-codes a runner or if the expression could
   route a pull-request event to our server.
 
+**Kept on GitHub on purpose (`HOSTED_ONLY` in `scripts/verify-runner-switch.ts`):** `web-runtime-smoke.yml` (owner 2026-11-13, «we can split for now»). Its phone-speed robots drive Apple's map at a 4× slowed CPU; on the AX42 the page froze ~10 s whenever all 8 helpers were busy, while the same robot passed on a quiet server (0.1–0.2 s switches) and on GitHub. Moving it back needs a bigger server or fewer, larger runners — re-measure first.
+
 ## Setup (about 30 minutes, after the owner buys the server)
 
 1. Create a **fine-grained GitHub token**: only repository `6ttvrw4fmf-ctrl/ezhalah`, permission **Administration: read

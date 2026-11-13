@@ -29,14 +29,23 @@ function evalSwitch(expr: string, event: string, ezRunner: string): string {
   return ok ? String(ok) : m[2];
 }
 
+// Workflows that stay on GitHub's machines whatever EZ_RUNNER says — a reviewed list, each with its reason. Every job in a
+// listed file says exactly `ubuntu-latest`; every other file uses the switch. Keeping a job on GitHub is always safe (it is
+// where pull requests run anyway); the list only exists so the choice is deliberate, never a stray hard-code.
+export const HOSTED_ONLY: Record<string, string> = {
+  'web-runtime-smoke.yml': 'phone-speed robots froze on the own server under full load (owner 2026-11-13: «we can split for now»)',
+};
 function problems(files: Record<string, string>, expr = SWITCH): string[] {
   const fail: string[] = [];
   for (const [f, src] of Object.entries(files)) {
     for (const line of src.split('\n')) {
       const m = /^\s*runs-on:\s*(.*?)\s*$/.exec(line);
-      if (m && m[1] !== expr) fail.push(`${f}: runs-on is "${m[1]}", not the switch`);
+      if (!m) continue;
+      if (f in HOSTED_ONLY) { if (m[1] !== 'ubuntu-latest') fail.push(`${f}: listed as GitHub-only but runs-on is "${m[1]}"`); }
+      else if (m[1] !== expr) fail.push(`${f}: runs-on is "${m[1]}", not the switch`);
     }
   }
+  for (const f of Object.keys(HOSTED_ONLY)) if (Object.keys(files).length > 1 && !(f in files)) fail.push(`HOSTED_ONLY names ${f}, which does not exist`);
   for (const ev of ['pull_request', 'pull_request_target']) {
     if (evalSwitch(expr, ev, 'ezhalah-own') !== 'ubuntu-latest') fail.push(`a ${ev} event would run on our own server`);
   }
@@ -56,6 +65,7 @@ const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 
 const p = problems(files);
 const jobs = Object.values(files).reduce((n, s) => n + (s.match(/^\s*runs-on:/gm) ?? []).length, 0);
 check(`all ${jobs} jobs in ${Object.keys(files).length} workflows use the runner switch; PRs never reach our server`, p.length === 0, p.slice(0, 5).join('; '));
+mustCatch('a GitHub-only workflow moved to the switch or our server', problems({ ...files, 'web-runtime-smoke.yml': 'jobs:\n  a:\n    runs-on: ezhalah-own\n' }).length > 0);
 mustCatch('a workflow hard-coding ubuntu-latest', problems({ ...files, 'x.yml': 'jobs:\n  a:\n    runs-on: ubuntu-latest\n' }).length > 0);
 mustCatch('a workflow hard-coding our server', problems({ ...files, 'x.yml': 'jobs:\n  a:\n    runs-on: ezhalah-own\n' }).length > 0);
 mustCatch('the pull_request guard dropped (fork code on our server)',
