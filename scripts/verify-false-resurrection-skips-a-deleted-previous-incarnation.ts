@@ -42,12 +42,13 @@ const MUTANTS: Array<[string, (b: string) => string]> = [
   ['row id not carried', (b) => b.replace('p.listing_id::bigint as probe_row', 'null::bigint as probe_row')],
   ['alive condition dropped', (b) => b.replace(/and \(t\.last_verified_alive_at is null or t\.last_verified_alive_at < l\.probed_at\)/i, '')],
 ];
+function mustCatch(name: string, mutated: string, original: string): void {
+  if (mutated === original) problems.push(`mutant «${name}» did not apply: the guard's anchor drifted`);
+  else if (problemsIn(mutated).length === 0) problems.push(`mutant «${name}» was NOT caught`);
+}
 if (r.body) {
-  for (const [name, m] of MUTANTS) {
-    const mutated = m(r.body);
-    if (mutated === r.body) problems.push(`mutant «${name}» did not apply: the guard's anchor drifted`);
-    else if (problemsIn(mutated).length === 0) problems.push(`mutant «${name}» was NOT caught`);
-  }
+  const body = r.body;
+  for (const [name, m] of MUTANTS) mustCatch(name, m(body), body);
 }
 
 if (problems.length) {
