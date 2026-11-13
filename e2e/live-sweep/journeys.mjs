@@ -45,8 +45,9 @@ const scrapeDistrictRows = () => {
 export function truthFilter({ city, deal, period, types }) {
   let f = `city_ar=eq.${enc(city)}`;
   if (deal === 'بيع' || deal === 'إيجار') f += `&deal_ar=eq.${enc(deal)}`;
-  // price on request (price_annual NULL) is in every period — owner 2026-09-28
-  if (deal === 'إيجار' && period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`;
+  // price on request (price_annual NULL) is in every period — owner 2026-09-28 — except a pooled short stay
+  // (rent_period_ar شهري, Haraj daily/weekly) under «سنوي» (migration 20261111141500; scripts/lib/afOracleFilter.ts).
+  if (deal === 'إيجار' && period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${enc('شهري')})))`;
   if (deal === 'إيجار' && period === 'شهري') f += '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))';
   if (types?.length) f += `&type_ar=in.(${enc(types.map((t) => `"${t}"`).join(','))})`;
   return f;

@@ -875,8 +875,9 @@ function dbFilterFromRequest(req, tax, cities) {
   // p_region_ids is a plain column predicate in the served index, so it needs no interpretation.
   if (req.p_region_ids?.length) f += `&region_id=in.(${req.p_region_ids.map((n) => Number(n)).join(',')})`;
   if (req.p_deal) f += `&deal_ar=eq.${enc(req.p_deal)}`;
-  // price on request (price_annual NULL) is in every period — owner 2026-09-28
-  if (req.p_rent_period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`;
+  // price on request (price_annual NULL) is in every period — owner 2026-09-28 — except a pooled short stay
+  // (rent_period_ar شهري, Haraj daily/weekly) under «سنوي» (migration 20261111141500; scripts/lib/afOracleFilter.ts).
+  if (req.p_rent_period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${enc('شهري')})))`;
   // Unpriced rows join «إقامات قصيرة» only from gathern + aqarmonthly (af_eligibility_clause, 20261026071543).
   if (req.p_rent_period === 'شهري') f += '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))';
   // ── المدينة: mirror the RPC's THREE arms, never the label alone ───────────────────────────────

@@ -193,7 +193,12 @@ export function oracleFilterFromRequest(p, typesForCategory = null) {
   const inList = (vals) => `(${vals.map((v) => `"${String(v).replace(/"/g, '')}"`).join(',')})`;
   const parts = [];
   if (p.p_deal) parts.push(`deal_ar=eq.${encodeURIComponent(p.p_deal)}`);
-  if (p.p_rent_period) parts.push(`or=(rent_period_ar.eq.${encodeURIComponent(p.p_rent_period)},price_annual.is.null)`); // price on request: every period (owner 2026-09-28)
+  // The rent-period arms of af_eligibility_clause (scripts/lib/afOracleFilter.ts is the canonical translation): price on
+  // request joins «سنوي» only when it is not a pooled short stay (20261111141500), and «شهري» only from gathern/aqarmonthly.
+  const e = encodeURIComponent;
+  if (p.p_rent_period === 'سنوي') parts.push(`or=(rent_period_ar.eq.${e('سنوي')},and(rent_period_ar.eq.${e('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${e('شهري')})))`);
+  else if (p.p_rent_period === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))`);
+  else if (p.p_rent_period) parts.push(`or=(rent_period_ar.eq.${e(p.p_rent_period)},price_annual.is.null)`);
   if (p.p_cities?.length) parts.push(`city_ar=in.${encodeURIComponent(inList(p.p_cities))}`);
   if (p.p_districts?.length) parts.push(`district_ar=in.${encodeURIComponent(inList(p.p_districts))}`);
   if (p.p_platforms?.length) parts.push(`platform=in.${encodeURIComponent(inList(p.p_platforms))}`);
