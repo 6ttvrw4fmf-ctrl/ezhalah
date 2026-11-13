@@ -1233,7 +1233,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e                            # «دخل شهري: متوقع للشقه بعد التاثيث», «فرص تحقيق دخل شهري»: a
                                                      # forecast, not income the property earns (P2 13085 «دخل شهري», aqar
                                                      # 113914 / 38786, 🔬 2026-11-10)
-    if fact == "main_road" and (_n(t[ws:we]).endswith("الطريق") or (_n(t[ws:we]).endswith("طريق") and not gn)) \
+    if fact == "main_road" and (_n(t[ws:we]).endswith("الطريق") or (_n(t[ws:we]).endswith("طريق") and (not gn or gn[0].startswith("و")))) \
             and (_starts(_strip_wa(t[ws:we].split()[0]), tuple(_VIEW_WORDS)) or any(_strip_wa(w) in _VIEW_WORDS for w in p2)) \
             and not (gn[:1] and (gn[0] in _ROAD_NAMED or _strip_wa(gn[0]) in _ROAD_NAMED or "ال" + _strip_wa(gn[0]) in _ROAD_NAMED)):
         return None, s, e                            # «بلكونه (شرفه) مطلة على الطريق», «شقه … مطله على الطريق»: a view of
@@ -2959,6 +2959,9 @@ def selftest() -> None:
         ("ارض واصل لها جميع الخدمات", {"all_services": True}, ()),
         # CodeRabbit on #11820
         ("شقة مطلة على طريق", {}, ("main_road",)),
+        # a bare «طريق» then the next item is still a generic road view (CodeRabbit on #11820)
+        ("شقة مطلة على طريق وبها مطبخ راكب", {"kitchen": True}, ("main_road",)),
+        ("مطلة على طريق الملك فهد", {"main_road": True}, ()),
         ("عمارة مطلة على الطريق المسمى طريق الملك فهد", {"main_road": True}, ()),
         ("جميع خدمات الشقة متوفرة", {"all_services": True}, ()),
         ("شاليه فيه غرفتين ومسموح للمناسبات", {"for_events": True}, ()),
