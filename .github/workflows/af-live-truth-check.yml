@@ -513,6 +513,10 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
           AF_FSD_SCOPES: region:1
+          # Pairs are O(types²): 182 of them took 84 min and the job was cancelled before the combined and both-period
+          # stages ever ran (run 43424461595). 40 min per day with a daily rotation covers every pair across days.
+          # Guard: scripts/verify-af-surface-pair-rotation.ts.
+          AF_FSD_PAIR_BUDGET_MIN: '40'
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
 
   # ONE SWEEP AT A TIME (🔧 2026-11-02, owner rule 2026-10-09 «our own robots must not take production
