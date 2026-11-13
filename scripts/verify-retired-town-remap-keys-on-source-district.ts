@@ -27,6 +27,22 @@ const FIX = '20261112071500';
 const count = (s: string, needle: string): number => s.split(needle).length - 1;
 const REDEFINE = /create\s+or\s+replace\s+function\s+public\.retired_place_remap_rows\s*\(/i;
 
+// The text inside «<name> as ( … )», bounded by its matching close paren (quoted '…' strings skipped), or null.
+function cteBody(body: string, name: string): string | null {
+  const m = new RegExp(String.raw`\b${name}\s+as\s*\(`, 'i').exec(body);
+  if (!m) return null;
+  let depth = 1;
+  let inStr = false;
+  for (let i = m.index + m[0].length; i < body.length; i++) {
+    const c = body[i];
+    if (inStr) { if (c === "'") inStr = false; continue; }
+    if (c === "'") inStr = true;
+    else if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return body.slice(m.index + m[0].length, i);
+  }
+  return null;
+}
+
 export function problems(ms: Mig[]): string[] {
   const p: string[] = [];
   const fix = ms.find((m) => m.f.startsWith(FIX));
@@ -58,12 +74,12 @@ export function problems(ms: Mig[]): string[] {
       // Count the PREDICATE both arms use, with SQL comments removed — a mention in a comment or a select list
       // is not a key (CodeRabbit #11974).
       const body = rest.slice(open!.index + tag.length, close).replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
-      // Each ARM on its own (CodeRabbit #11974: two hits in g2 and none in g2n must fail): g2 runs from «g2 as (» to
-      // «g2n as (», g2n from «g2n as (» to the end of the body.
-      const g2 = body.search(/\bg2\s+as\s*\(/i);
-      const g2n = body.search(/\bg2n\s+as\s*\(/i);
+      // Each ARM on its own, bounded to ITS CTE body by balanced parentheses (CodeRabbit #11974: two hits in g2 and
+      // none in g2n, or a hit in a later CTE / the final select, must not count for an arm).
       const pred = `from public.${KEY} sd`;
-      if (g2 < 0 || g2n < 0 || g2n < g2 || count(body.slice(g2, g2n), pred) < 1 || count(body.slice(g2n), pred) < 1)
+      const g2 = cteBody(body, 'g2');
+      const g2n = cteBody(body, 'g2n');
+      if (g2 === null || g2n === null || count(g2, pred) < 1 || count(g2n, pred) < 1)
         p.push(`${m.f}: redefines retired_place_remap_rows() without the ${KEY} key in both g2 and g2n — the hourly city swap returns`);
     }
   }
@@ -106,6 +122,14 @@ mustCatch(
   problems([...real, { f: '29991231235959_regress_one_arm.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ ${ARMS(ARM + ', ' + ARM, '1')} $function$;` }]).length > 0,
 );
 mustCatch(
+  'a later redefinition keeps the predicate only in a later CTE after g2n',
+  problems([...real, { f: '29991231235959_regress_later_cte.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ with g2 as (select ${ARM}), g2n as (select 1), g3 as (select ${ARM}) select 1 $function$;` }]).length > 0,
+);
+mustCatch(
+  'a later redefinition keeps the predicate only in the final select',
+  problems([...real, { f: '29991231235959_regress_final.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ with g2 as (select ${ARM}), g2n as (select 1) select ${ARM} $function$;` }]).length > 0,
+);
+mustCatch(
   'a compliant later redefinition is NOT flagged (the check tells the cases apart)',
   problems([...real, { f: '29991231235959_ok.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ ${ARMS(ARM, ARM)} $function$;` }]).length === 0,
 );
@@ -114,4 +138,4 @@ if (now.length || failures.length) {
   for (const x of [...now, ...failures]) console.error(`❌ ${x}`);
   process.exit(1);
 }
-console.log(`✅ retired_place_remap_rows() keys a retired town on the source's own district in g2 and g2n (${FIX}); 10 mutations caught`);
+console.log(`✅ retired_place_remap_rows() keys a retired town on the source's own district in g2 and g2n (${FIX}); 12 mutations caught`);
