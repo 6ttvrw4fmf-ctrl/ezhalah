@@ -71,3 +71,15 @@ def test_a_healthy_prune_adds_nothing_and_a_trip_is_reported_once(ledger):
     db.prune_unseen("x_residential_listings", [str(i) for i in range(100)])                  # full coverage
     _end()
     assert not DETECTOR.search(ledger[-1]["notes"])
+
+
+def test_the_browser_recheck_line_reaches_the_run_notes_once(ledger):
+    """Owner order 1828: the browser re-check's answer is recorded where the alert reads it (last_attempt_notes)."""
+    from scrapers.common import browser_recheck
+    browser_recheck.log[:] = ["browser re-check x.test: captcha after HTTP 403"]
+    _end("sitemap failed | browser re-check x.test: captcha after HTTP 403")
+    assert ledger[-1]["notes"].count("browser re-check x.test") == 1
+    browser_recheck.log[:] = ["browser re-check y.test: ok (HTTP 200) after HTTP 403"]
+    _end()
+    assert ledger[-1]["notes"].endswith("| browser re-check y.test: ok (HTTP 200) after HTTP 403")
+    assert browser_recheck.log == []
