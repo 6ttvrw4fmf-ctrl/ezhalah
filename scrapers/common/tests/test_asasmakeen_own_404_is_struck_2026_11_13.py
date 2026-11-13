@@ -90,3 +90,43 @@ def test_page_maps_plain_404_and_prints_an_unreadable_page(monkeypatch, capsys):
     monkeypatch.setattr(M.H, "request", timeout)
     assert M._page(U + "4/d") == (None, "")
     assert "unreadable (TimeoutError: read timed out)" in capsys.readouterr().out
+
+
+def test_a_challenge_latches_no_more_requests_for_target_or_control():
+    calls = []
+
+    def page(url):
+        calls.append(url)
+        if url.endswith("2/b"):
+            raise H.Blocked(f"HTTP 404 wall at {url}: 'captcha'")
+        return PAGES.get(url, (None, ""))
+    g = M._make_gone(U + "1/a", page=page, url_for=URLS.get)
+    assert g("ASM2")[0] == "unknown"
+    n = len(calls)
+    assert g("ASM1")[0] == "unknown" and g("ASM3")[0] == "unknown"
+    assert len(calls) == n, "no page may be requested after a challenge"
+
+    calls.clear()
+
+    def control_walled(url):
+        calls.append(url)
+        if url.endswith("1/a"):
+            raise H.Blocked(f"HTTP 403 wall at {url}: 'captcha'")
+        return PAGES.get(url, (None, ""))
+    g = M._make_gone(U + "1/a", page=control_walled, url_for=URLS.get)
+    assert g("ASM2")[0] == "unknown", "a challenged control can never testify a removal"
+    n = len(calls)
+    assert g("ASM2")[0] == "unknown" and len(calls) == n
+
+
+def test_a_project_page_wall_stops_the_run(monkeypatch):
+    def wall(url, **_):
+        raise H.Blocked(f"HTTP 404 wall at {url}: 'captcha'")
+    monkeypatch.setattr(M.H, "get_text", wall)
+    with pytest.raises(H.Blocked):
+        M._project("x")
+
+    def plain(url, **_):
+        raise H.Blocked(f"HTTP 404 at {url} (not a 200 — stopping, never guessing)")
+    monkeypatch.setattr(M.H, "get_text", plain)
+    assert M._project("x") is None

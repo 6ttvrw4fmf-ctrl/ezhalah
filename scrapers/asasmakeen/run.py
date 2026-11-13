@@ -215,9 +215,9 @@ def _project(slug: str) -> Optional[dict]:
     try:
         return parse_project(H.get_text(SITE + PROJECT_PATH + quote(slug), allowed=_allowed))
     except H.Blocked as e:
-        if " 404 " in str(e) or " 410 " in str(e):
+        if _PLAIN_GONE_RE.search(str(e)):
             return None                 # a gone project page: its units carry no pin claim either way
-        raise
+        raise                           # «HTTP 404 wall at …» is a challenge: the run stops (CodeRabbit #12130)
 
 
 def walk(limit: int = 0, log=print) -> dict:
@@ -348,10 +348,23 @@ def _make_gone(control_url: Optional[str], page=_page, url_for=None):
     held every candidate UNKNOWN, so ASM2676 (24218552) sat at 3 strikes, served, while its page answered 404 to the
     09:05 dead-visible score (2 of 10 sampled gone). 404/410 is gone, 200 WITH the unit block is live, anything else
     (a 200 shell, a wall, a timeout) is unknown — and a removal counts only while this run's control unit reads live."""
-    memo: dict[str, bool] = {}
+    memo: dict[str, Any] = {}
     url_for = url_for or stored_listing_url((RES_TABLE,))
 
     def gone(ad_number: str) -> tuple[str, str]:
+        # A challenge LATCHES: prune_unseen treats an oracle that raises as one unknown and moves to the next
+        # candidate, so re-raising alone would keep requesting pages behind a wall. After the first challenge every
+        # later candidate is unknown with NO further request (honest client: a challenge stops; CodeRabbit #12130).
+        if memo.get("wall"):
+            return "unknown", f"not read: the site challenged this run ({memo['wall']})"
+        try:
+            return _decide(ad_number)
+        except H.Blocked as e:
+            memo["wall"] = str(e)[:160]
+            print(f"asasmakeen: challenge — no more own-page reads this run: {memo['wall']}", flush=True)
+            return "unknown", f"not read: the site challenged this run ({memo['wall']})"
+
+    def _decide(ad_number: str) -> tuple[str, str]:
         url = url_for(ad_number)
         if not url or not url.startswith(SITE + UNIT_PATH):
             return "unknown", f"{ad_number!r} has no stored {SITE}{UNIT_PATH} page to read"
