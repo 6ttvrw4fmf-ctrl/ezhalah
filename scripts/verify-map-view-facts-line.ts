@@ -30,7 +30,13 @@ check('with no type picked the price is never mixed — the box asks for a type'
 const rentNoType = factBox({ ...full, ppm: null, nbPpm: null }, 560, 'ar', false, false);
 check('a rent or mixed-deal view never asks for a type (no price can appear there)', rentNoType.kind === 'chips' && rentNoType.hint === null);
 check('the English city fallback goes through the transliterator', comparisonChip(11800, 10000, 'city', 'الرياض', 'en', () => 'Riyadh').text.includes('Riyadh') && comparisonChip(11800, 10000, 'city', 'الرياض', 'ar', () => 'Riyadh').text.includes('الرياض'));
-check('screen readers hear the sign-in ask, not the fake numbers', /accessibilityLabel=\{lockedAsk\(loc\)\}/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')) && /importantForAccessibility="no-hide-descendants"/.test(readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8')));
+const screenSrc = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
+const guestSmall = (src: string) => /accessibilityLabel=\{lockedAsk\(loc\)\}/.test(src) && /\{box\.kind === 'locked' \? \(\s*<Pressable onPress=\{\(\) => openAuth\(\)\}[^>]*>\s*<Text style=\{s\.factAsk\}>\{lockedAsk\(loc\)\}<\/Text>\s*<\/Pressable>/.test(src) && !/FACT_BLUR/.test(src);
+check('a guest sees only the small sign-in ask (no blurred row), and screen readers hear it', guestSmall(screenSrc));
+mustCatch('the big blurred guest row coming back', () => guestSmall(screenSrc.replace('<Text style={s.factAsk}>{lockedAsk(loc)}</Text>', '<View style={[s.factLine, FACT_BLUR]} /><Text style={s.factAsk}>{lockedAsk(loc)}</Text>')));
+const small = (src: string) => /countPillTall: \{ borderRadius: 12, maxWidth: '64%', paddingVertical: 6 \}/.test(src) && /factLine: \{ color: '#fff', fontSize: 11\.5,/.test(src) && !/factChip:/.test(src);
+check('the box is small: one line of 11.5px words, at most 64% of the map wide (clear of the buttons)', small(screenSrc));
+mustCatch('boxed chips back (the big box)', () => small(screenSrc + "\n  factChip: { color: '#fff' },"));
 check('no Arabic diacritics anywhere in the box', texts(b).every((t) => !MARKS.test(t)) && !MARKS.test(String(noType.kind === 'chips' ? noType.hint : '')));
 mustCatch('a box that ignores the pill\'s count', () => { const ignoresPill = (f: ViewFacts, _shown: number) => factBox(f, f.any, 'ar', true); return ignoresPill(full, 559).kind === 'none'; });
 

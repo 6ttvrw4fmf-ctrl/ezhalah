@@ -621,8 +621,10 @@ keeps its count only; after a DISTRICT search (owner 2026-11-13, «it shows late
 «13,528 إعلان للبيع في الرياض» for Malqa's screen) the pill and its box follow that district — its own count and facts —
 while its label is on screen and the view is at most 1.5× as tall as where the search landed (`AreaFocus`,
 src/lib/mapAreas.ts); «أمس» is the last FINISHED
-day (never «اليوم», which reads 0 in the morning); a failed read hides the box's facts (never «0»); guests see the same
-layout with blurred shapes and «🔒 سجل الدخول لعرض الأرقام», and the server never sends them a number.
+day (never «اليوم», which reads 0 in the morning); a failed read hides the box's facts (never «0»); the box is SMALL
+(owner 2026-11-13, «the box is very very big»): the count line, then one line of small words separated by «·» (never
+boxed chips), at most 64% of the map wide so it stays clear of the round buttons; guests see only the count and a small
+gold «🔒 سجل الدخول لعرض الأرقام» (no blurred row), and the server never sends them a number.
 History: «اختفى» counts confirmed removals from the nightly `map_fact_removal` log (started 2026-11-12 — only 37% of
 older removals kept their district, so no backfill); «خفضوا السعر» counts price-diary drops (`listing_price_history`
 'price' events, started 2026-11-11; a drop of more than half is a page re-read, not a cut). Each shows once its window
