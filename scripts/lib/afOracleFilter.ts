@@ -17,6 +17,10 @@
 
 export type RpcBody = Record<string, unknown>;
 
+// The rent pools have ONE spelling, shared with the e2e oracles: scripts/lib/rentPoolOracle.mjs (2026-11-13).
+import { annualPoolOr, monthlyPoolOr, bothPoolOr } from './rentPoolOracle.mjs';
+export { annualPoolOr, monthlyPoolOr, bothPoolOr };
+
 // TOKEN → COLUMN, mirroring the production `af_eligibility_clause()` vocabulary guard exactly.
 //
 // This is a MAP, not a set of column names, because the token the RPC receives is not always the
@@ -763,15 +767,15 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         // كلاهما arms admit an unpriced row only when it is NOT in the short-stays pool (rent_period_ar is distinct
         // from 'شهري' → PostgREST or(is.null, neq)): Haraj's daily/weekly rents carry no price by owner order and
         // were leaking into yearly searches.
-        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${enc('شهري')})))`);
-        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))`);
+        if (v === 'سنوي') parts.push(`or=${annualPoolOr()}`);
+        else if (v === 'شهري') parts.push(`or=${monthlyPoolOr()}`);
         // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
         //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
         //                                 or s.rent_period_ar = 'سنوي'
         //                                 or (s.rent_period_ar = 'شهري' and coalesce(s.rent_now_pay_later,false)))
         // It is the union of the two single-period arms — NOT "no period filter": a rent row whose
         // source published no period at all stays OUT (R1.5.1; migration rent_period_both_monthly_and_annual).
-        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),and(price_annual.is.null,or(rent_period_ar.is.null,rent_period_ar.neq.${enc('شهري')})))`);
+        else if (v === 'كلاهما') parts.push(`or=${bothPoolOr()}`);
         else unhandled.push(`p_rent_period=${v}`);
         break;
       // beds/bath/price/floor are handled ABOVE, where the clause's exact-vs-min and

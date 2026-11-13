@@ -31,6 +31,7 @@
 //   node --experimental-strip-types scripts/verify-trending-filter-state-live.ts
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { annualPoolOr } from './lib/afOracleFilter.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase(process.env);
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}` };
@@ -61,7 +62,7 @@ const independent = async (extra: string): Promise<number | null> => {
   const q = `${URL_BASE}/rest/v1/search_listings_ar?select=listing_id&production_ready=is.true`
     + `&deal_ar=eq.${encodeURIComponent('إيجار')}&type_ar=in.(${encodeURIComponent(t)})`
     + `&city_ar=eq.${encodeURIComponent(CITY)}`
-    + `&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),price_annual.is.null)${extra}`;
+    + `&or=${annualPoolOr(false)}${extra}`;
   const r = await fetch(q, { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } });
   const cr = r.headers.get('content-range');
   return cr && cr.includes('/') ? Number(cr.split('/')[1]) : null;
@@ -124,7 +125,7 @@ const independentDistrict = async (cityAr: string, districtAr: string, deal: str
 const DISTRICT = 'حي النرجس';
 const distBase = await districtCount(CITY, DISTRICT, 'إيجار', { p_rent_period: 'سنوي', p_types: TYPES });
 const distBaseInd = await independentDistrict(CITY, DISTRICT, 'إيجار',
-  `&type_ar=in.(${TYPES.map((x) => `"${x}"`).join(',')})&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),price_annual.is.null)`);
+  `&type_ar=in.(${TYPES.map((x) => `"${x}"`).join(',')})&or=${annualPoolOr(false)}`);
 check('LIVE DISTRICT baseline (حي النرجس): RPC == independent SQL', distBase != null && distBase === distBaseInd,
   `rpc=${distBase} independent=${distBaseInd}`);
 
@@ -136,7 +137,7 @@ for (const [label, rpcExtra, qs] of [
 ] as const) {
   const withPred = await districtCount(CITY, DISTRICT, 'إيجار', { p_rent_period: 'سنوي', p_types: TYPES, ...rpcExtra });
   const ind = await independentDistrict(CITY, DISTRICT, 'إيجار',
-    `&type_ar=in.(${TYPES.map((x) => `"${x}"`).join(',')})&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),price_annual.is.null)${qs}`);
+    `&type_ar=in.(${TYPES.map((x) => `"${x}"`).join(',')})&or=${annualPoolOr(false)}${qs}`);
   check(`LIVE DISTRICT ${label}: applies it (count strictly narrows the district baseline)`,
     withPred != null && distBase != null && withPred < distBase, `base=${distBase} withPredicate=${withPred}`);
   check(`LIVE DISTRICT ${label}: RPC == independent SQL`, withPred != null && withPred === ind,
@@ -154,7 +155,7 @@ const KHOBAR = 'الخبر', DOHA_S = 'حي الدوحة الجنوبية';
 const dohaBuy = await districtCount(KHOBAR, DOHA_S, 'بيع');
 const dohaBuyInd = await independentDistrict(KHOBAR, DOHA_S, 'بيع', '');
 const dohaRent = await districtCount(KHOBAR, DOHA_S, 'إيجار', { p_rent_period: 'سنوي' });
-const dohaRentInd = await independentDistrict(KHOBAR, DOHA_S, 'إيجار', '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),price_annual.is.null)');
+const dohaRentInd = await independentDistrict(KHOBAR, DOHA_S, 'إيجار', `&or=${annualPoolOr(false)}`);
 check('LIVE DISTRICT (owner example, الخبر/حي الدوحة الجنوبية) Buy: RPC == independent SQL — never a bigger, un-narrowed number',
   dohaBuy != null && dohaBuy === dohaBuyInd, `rpc=${dohaBuy} independent=${dohaBuyInd}`);
 check('LIVE DISTRICT (owner example) Rent+Annual: RPC == independent SQL',

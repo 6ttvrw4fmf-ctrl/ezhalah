@@ -145,7 +145,9 @@ async function main() {
     rpcCount({ p_deal: RENT, p_rent_period: 'سنوي' }),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=eq.${enc('سنوي')}`),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=eq.${enc('شهري')}&rent_now_pay_later=is.true`),
-    tableCount(`deal_ar=eq.${enc(RENT)}&price_annual=is.null&or=(rent_period_ar.is.null,and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.not.is.true))`),
+    // price on request OUTSIDE both counted periods: since 20261111141500 an unpriced «شهري» row is a short stay
+    // (Haraj daily/weekly) and stays out of «سنوي» — only a row with NO period remains (annualPoolOr in afOracleFilter.ts).
+    tableCount(`deal_ar=eq.${enc(RENT)}&price_annual=is.null&rent_period_ar=is.null`),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=is.null&price_annual=not.is.null`),
   ]);
   check('annual rent = SOURCE-published annual + SOURCE-marked monthly-RNPL + price on request, exactly',
