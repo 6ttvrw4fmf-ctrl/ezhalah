@@ -985,7 +985,10 @@ try {
     // walked can reveal a drop the first read never saw (run 43424461595: headline 29795, rpc 29796, a false red).
     const hsAfterSkips: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
     const skipHeadline = headlineNum(hsAfterSkips[hsAfterSkips.length - 1]);
-    const skipDrops = dropsOf(baseline);
+    // The newest headline belongs to the newest search: the baseline when nothing re-searched, else the all-skip
+    // search (whose total is checked == baseline above). Its drops are measured on THAT page (CodeRabbit on #12166).
+    const shownSearch = roundEnd ?? baseline;
+    const skipDrops = dropsOf(shownSearch);
     check('2. R8.1.2 — after skipping every question the newest headline is still the baseline number',
       R.skipHeadlineHolds(skipHeadline, baseline.total, skipDrops.n),
       `headline=${skipHeadline} baseline=${baseline.total} drops=${skipDrops.n ?? 'unobserved'}${skipDrops.keys.length ? ` [${skipDrops.keys.slice(0, 5).join(' ')}]` : ''}`);
