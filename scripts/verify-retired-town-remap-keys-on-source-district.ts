@@ -42,9 +42,17 @@ export function problems(ms: Mig[]): string[] {
   if (!/n_pin < 32 or n_other < 524/.test(check)) p.push(`${fix.f}: the check block no longer refuses a remap that shrank`);
   for (const m of ms) {
     if (m.f <= fix.f || !REDEFINE.test(m.s)) continue;
-    const body = m.s.slice(m.s.search(REDEFINE));
-    const end = body.search(/\$function\$\s*;|\$\$\s*;/);
-    if (count(end > 0 ? body.slice(0, end) : body, KEY) < 2)
+    // Read the body's ACTUAL dollar tag and require its matching close (verify-function-body-windows-fail-closed:
+    // `$function$`, `$$`, `$mig$` … are all legal; a guessed tag turns «the body» into the rest of the file).
+    const rest = m.s.slice(m.s.search(REDEFINE));
+    const open = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
+    const tag = open?.[0];
+    const close = tag ? rest.indexOf(tag, open!.index + tag.length) : -1;
+    if (!tag || close < 0) {
+      p.push(`${m.f}: redefines retired_place_remap_rows() but its body has no matching dollar-quote close — unreadable, so refused`);
+      continue;
+    }
+    if (count(rest.slice(open!.index + tag.length, close), KEY) < 2)
       p.push(`${m.f}: redefines retired_place_remap_rows() without the ${KEY} key in both g2 and g2n — the hourly city swap returns`);
   }
   return p;
