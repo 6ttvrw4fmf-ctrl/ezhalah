@@ -235,6 +235,11 @@ export const PLATFORM_META: LoaderPlatform[] = [
 // in a result set, AND (c) filter PLATFORM_META against the live-active set returned by
 // loader_active_platforms_ar().
 const SOURCE_TOKENS: Array<[string, string]> = [
+  // Live since 2026-11-04/05 (Property Finder, Keller Williams, Almajdiah, Asas Makeen, Al Rajhi Development, Steam):
+  // no strip logo yet (assets/images/<slug>.png absent, so they stay hidden), but every live raw name must still resolve
+  // to ONE name or the sources filter and the loader check cannot see them (loader-active-platforms-check red 11-07).
+  ['propertyfinder', 'بروبرتي فايندر'], ['kellerwilliams', 'كيلر وليامز'], ['almajdiah', 'الماجدية'],
+  ['asasmakeen', 'أساس مكين'], ['mrajhi', 'الراجحي للتنمية'], ['steam', 'ستيم العربية'],
   ['wasalt', 'Wasalt'], ['aldarim', 'Aldarim'], ['aqargate', 'Aqargate'], ['aqarcity', 'Aqarcity'],
   ['aqaratikom', 'Aqaratikom'], ['aqarmonthly', 'Aqar'],
   ['alhoshan', 'Alhoshan'], ['alkhaas', 'Al Khaas'],
