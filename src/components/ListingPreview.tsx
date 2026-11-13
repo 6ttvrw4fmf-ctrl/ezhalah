@@ -48,10 +48,11 @@ const MAP_MIN = 150;
 const SHEET_MARK = 'ezAdMap';
 const DEALS_MARK = 'ezAdDeals';
 const SIMILAR_MARK = 'ezAdSimilar';
-// THE TAP MOMENT (owner 2026-10-10): the open happens OPEN_DELAY_MS after the tap — inside the browser's
-// user-activation window, so Safari lets the new tab through — while confetti marks the hand-off. Keep
-// it under ~1s or the tab is blocked.
-const OPEN_DELAY_MS = 950;
+// THE SITE OPENS INSIDE THE TAP (owner 2026-11-12: «it takes so long for me to get redirected … totally unacceptable»).
+// Until then the confetti played first and the site opened 950 ms later (owner 2026-10-10) — measured 1.1 s on
+// ezhalah.com, past Safari's ~1 s user-activation window, so a phone could block the first tap outright. Now the new tab
+// opens in the tap itself and the confetti plays on Ezhalah's page beside it. Guard: scripts/verify-in-app-viewer-allowlist.ts;
+// live: e2e/speed/site-speed-live.mjs times the tap to the source site every 30 minutes.
 // Numerals only — the app's Poppins token; Arabic text keeps the system face (no letter-spacing, ever).
 const NUM_FONT = IS_WEB ? `${font.family.semibold}, Poppins, ui-sans-serif, system-ui, sans-serif` : undefined;
 const NUM_RUN = /(\d[\d,.]*)/;
@@ -127,16 +128,13 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   const wide = useAtLeast(PICKER_SHEET_BREAKPOINT);
   const reduced = useReducedMotion();
 
-  // ── the tap moment: the buzzer pushes, a gold ring bursts, confetti everywhere, then the open fires
-  //    at OPEN_DELAY_MS. No card, no text, nothing in the middle — a lot of confetti, then the redirect. ──
+  // ── the tap moment: the site opens at once, and the buzzer pushes, a gold ring bursts, confetti everywhere. ──
   const [pressing, setPressing] = useState<string | null>(null);
   const [burst, setBurst] = useState(0);
   const [partyOn, setPartyOn] = useState(false);
   const canvasRef = useRef<any>(null);
   const rootRef = useRef<any>(null);
   const busy = useRef(false);
-  // A tab the browser blocked once: the next tap opens at once, inside the tap itself, with no delay.
-  const blockedOnce = useRef(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
   const later = (fn: () => void, ms: number) => { timers.current.push(setTimeout(fn, ms)); };
@@ -182,9 +180,12 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   };
   // ONE handler for the bar, its floating twin and the host badge (the barrier checks they share it).
   const goOpen = (e?: any) => {
+    // The site first, inside the tap — nothing waits for the confetti. A double tap opens ONE tab, and a blocked tab
+    // never moves Ezhalah's own page.
     if (busy.current) return;
-    if (reduced || blockedOnce.current || !IS_WEB) { if (!open()) blockedOnce.current = true; return; }
     busy.current = true;
+    later(() => { busy.current = false; }, 600);
+    if (!open() || reduced || !IS_WEB) return;
     setBurst(Date.now());
     later(() => setBurst(0), 600);
     setPartyOn(true);
@@ -195,12 +196,6 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
       if (root && from) origin = { x: from.left + from.width / 2 - root.left, y: from.top + from.height / 2 - root.top };
     } catch { /* no origin: the rain still falls */ }
     later(() => party(origin?.x ?? box.w / 2, origin?.y ?? box.h), 0);
-    const fire = () => {
-      // Blocked: never navigate Ezhalah's own tab away — the next tap opens at once instead.
-      if (!open()) blockedOnce.current = true;
-      busy.current = false;
-    };
-    later(fire, OPEN_DELAY_MS);
   };
 
   // ── the first-screen budget: root − top bar − hero − head − address row − CTA row → the map ────

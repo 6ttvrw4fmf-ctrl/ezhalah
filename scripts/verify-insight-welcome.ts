@@ -244,14 +244,14 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
   check('a user who searches Jeddah: their city in roughly two lines of three (40%–80% here, with only 4 Jeddah facts)', share >= 0.4 && share <= 0.8, `${Math.round(share * 100)}% ${JSON.stringify(jeddah.by)}`);
 }
 
-// ── 8. «كيف نعمل؟»: the falconer story, the rules, live site count, ✕ on the right (owner 2026-11-11) ──
+// ── 8. «كيف نحسبها؟»: the falconer story, the rules, live site count, ✕ on the right (owner 2026-11-11; title 2026-11-12) ──
 {
   const ar = JSON.stringify(HOW_IT_WORKS.ar); const enS = JSON.stringify(HOW_IT_WORKS.en);
-  check('the sheet is titled «كيف نعمل؟» / "How do we work?" (owner 2026-11-11)', HOW_IT_WORKS.ar.title === 'كيف نعمل؟' && HOW_IT_WORKS.en.title === 'How do we work?');
+  check('the sheet is titled «كيف نحسبها؟» / "How do we calculate it?" (owner 2026-11-12)', HOW_IT_WORKS.ar.title === 'كيف نحسبها؟' && HOW_IT_WORKS.en.title === 'How do we calculate it?');
   {
     const home = readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
     const link = home.match(/\{welcomeIsInsight \? \(\s*<Pressable onPress=\{\(\) => setHowOpen\(true\)\}[^>]*testID="hero-how-link">\s*<Text style=\{s\.heroHowLink\}>\{HOW_IT_WORKS\[[^\]]+\]\.title\}<\/Text>/);
-    check('a small «كيف نعمل؟» link under the market fact opens the sheet, only when the headline is a fact (owner 2026-11-11)', !!link);
+    check('a small «كيف نحسبها؟» link under the market fact opens the sheet, only when the headline is a fact (owner 2026-11-11)', !!link);
     const style = home.match(/heroHowLink: \{ fontSize: (\d+),[^}]*textDecorationLine: 'underline'/);
     check('the link stays small and underlined (≤ 14 px, like «الشروط والخصوصية»)', !!style && Number(style[1]) <= 14);
   }
@@ -272,7 +272,7 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
     const pop = readFileSync(new URL('../src/components/InsightHowItWorks.tsx', import.meta.url), 'utf8');
     check('the ✕ sits on the PHYSICAL right in both languages (owner: «the x is always on the right»)', /close: \{ position: 'absolute', top: [\w.]+, right: [\w.]+/.test(pop) && !/close: \{[^}]*left:/.test(pop));
     check('no «تمام» button: the ✕ or a tap outside closes it', !/insight-how-ok/.test(pop) && /testID="insight-how-backdrop"/.test(pop) && /onPress=\{onClose\}[^>]*testID="insight-how-close"/.test(pop));
-    check('the slow eagle animation and Shaheen\'s mark are shown', pop.includes("falconer-howto.svg") && pop.includes("models/shaheen.png"));
+    check('the slow eagle animation is shown and the falconer is the ONLY logo — no Shaheen mark (owner 2026-11-12)', pop.includes("falconer-howto.svg") && !pop.includes("models/shaheen.png"));
     check('the eagle is preloaded once and each open replays it from memory (a fresh blob: URL, no download on tap)', /export function preloadHowEagle/.test(pop) && /URL\.createObjectURL\(eagleBlob\)/.test(pop) && /useEffect\(\(\) => \{ void preloadHowEagle\(\); \}, \[\]\)/.test(pop));
     check('the «information only» rule is bold as a whole sentence (owner 2026-11-11)', /ruleLast: \{ fontWeight: '700'/.test(pop) && /i === c\.rules\.length - 1 && s\.ruleLast/.test(pop));
     const models = readFileSync(new URL('../src/components/AgentModelSelector.tsx', import.meta.url), 'utf8');

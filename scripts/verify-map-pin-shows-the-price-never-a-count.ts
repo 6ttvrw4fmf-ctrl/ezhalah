@@ -98,6 +98,13 @@ mustCatch('«رجوع» floating on its own again under «رسم»', !BACK(web.r
 mustCatch('«رجوع» after «رسم» again', !BACK(web.replace("{locale === 'ar' ? null : backEl}", 'X').replace("{locale === 'ar' ? backEl : null}", "{locale === 'ar' ? null : backEl}").replace('X', "{locale === 'ar' ? backEl : null}")));
 mustCatch('the hint shown over «رسم» + «رجوع» on a phone', !BACK(web.replace('roomy && !(narrow && zoomed)', 'roomy')));
 
+// 3g. The draw bar: «تطبيق» on the right and «إلغاء» on the left in both languages (owner 2026-11-12: «replace them
+// both»). The children stay Cancel → title → Apply; an RTL row starts at the right, so Arabic reverses it.
+const DRAWBAR = (src: string) => /<View style=\{\[s\.drawBar, \{ flexDirection: locale === 'ar' \? 'row-reverse' : 'row' \}\]\} testID="map-draw-bar">\s*(?:\{\/\*[^\n]*\*\/\}\s*)?<Pressable style=\{s\.drawBarBtn\} onPress=\{cancelDrawing\}/.test(src)
+  && /\{t\('Draw an area'\)\}<\/Text>\s*<Pressable style=\{s\.drawBarBtn\} onPress=\{applyDrawing\}/.test(src);
+check('the draw bar puts «تطبيق» on the right and «إلغاء» on the left, in Arabic and English', DRAWBAR(web));
+mustCatch('«إلغاء» back on the right in Arabic', !DRAWBAR(web.replace("[s.drawBar, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row' }]", 's.drawBar')));
+
 // 4. The database half (the committed migration production runs).
 const dir = join(root, 'supabase/migrations');
 const file = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().reverse()

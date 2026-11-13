@@ -348,7 +348,17 @@ def parse_bathrooms(text: str) -> Optional[int]:
     if not v:
         return None
     vals = set()
-    for tok, in [(m.group(1),) for m in _BATH_RE.finditer(v)]:
+    ms = list(_BATH_RE.finditer(v))
+    # «دورتين مياه» is the DUAL with no count word before it: the regex reads «دور…تين» as the noun,
+    # so group(1) is None. It is two, not one.
+    toks = ["دورتين" if m.group(1) is None and "دورتين" in m.group(0) else m.group(1) for m in ms]
+    # The room list names each component once, « . »-separated. Two BARE «دورة مياه» items are two
+    # bathrooms (26702388 «… دورة مياة . مطبخ . غرفه ماستر . غرفه نوم . دورة مياة» = 2; a set of {1}
+    # stored 1, 🆕 2026-11-12 score mismatch). Only bare items are counted; counted items that
+    # disagree still mean UNKNOWN below.
+    if len(toks) > 1 and all(t is None for t in toks):
+        return len(toks) if len(toks) <= 50 else None
+    for tok in toks:
         if tok is None:
             vals.add(1)                      # «دورة مياه» with no count word = one
             continue

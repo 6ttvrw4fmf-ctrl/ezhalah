@@ -140,6 +140,9 @@ def _bucket(rs: list[dict]) -> dict:
         "region_pct": _pct(sum(1 for r in rs if r.get("region_ar") is not None), n),
         "city_pct": _pct(sum(1 for r in rs if r.get("city_id") is not None), n),
         "district_pct": _pct(sum(1 for r in rs if r.get("district_ar") is not None), n),
+        # Searchable arrivals a customer cannot reach from any district picker (🔧 coach 11-11: a COMPUTED number,
+        # never hand-counted). Served = production_ready; a NULL district is city-only.
+        "served_no_district": sum(1 for r in rs if r.get("production_ready") and r.get("district_ar") is None),
         "deal_split": dict(deals),
         "price": {
             "buy": _rng([p for r, p in zip(rs, price) if r.get("deal_ar") == BUY]),
@@ -163,17 +166,19 @@ def render(rep: dict) -> str:
     else:
         out.append(f"**Total:** {t['new']} new · searchable {_n(t['searchable_pct'])}% · "
                    f"region {_n(t['region_pct'])}% · city {_n(t['city_pct'])}% · "
-                   f"district {_n(t['district_pct'])}%")
+                   f"district {_n(t['district_pct'])}% · "
+                   f"searchable arrivals with no district {t['served_no_district']}")
         out.append("deal split: " + (", ".join(f"{k}={v}" for k, v in t["deal_split"].items()) or "none"))
         for k in ("buy", "rent"):
             r = t["price"][k]
             out.append(f"price {k}: " + ("?" if r is None else f"{r['min']}–{r['max']} (typical {r['median']})"))
     out += ["", f"**No-district backlog (production_ready, NULL district):** {_n(rep['no_district_backlog'])}", "",
-            "| website | new | searchable | region | city | district | deal split |", "|---|---|---|---|---|---|---|"]
+            "| website | new | searchable | region | city | district | served, no district | deal split |",
+            "|---|---|---|---|---|---|---|---|"]
     for p, s in rep["sites"].items():
         split = " ".join(f"{k}:{v}" for k, v in s["deal_split"].items())
         out.append(f"| {p} | {s['new']} | {_n(s['searchable_pct'])}% | {_n(s['region_pct'])}% | "
-                   f"{_n(s['city_pct'])}% | {_n(s['district_pct'])}% | {split} |")
+                   f"{_n(s['city_pct'])}% | {_n(s['district_pct'])}% | {s['served_no_district']} | {split} |")
     out += ["", "**Advanced Filter, all new listings (yes / no / unknown):**"]
     if t:
         for c, v in t["af"].items():

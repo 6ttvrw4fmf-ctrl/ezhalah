@@ -31,6 +31,9 @@ class _Q:
     def gt(self, col, v): self.f.append(lambda r: (r.get(col) or 0) > v); return self
     def gte(self, col, v): self.f.append(lambda r: (r.get(col) or "") >= v); return self
     def in_(self, col, vals): vs = set(vals); self.f.append(lambda r: r.get(col) in vs); return self
+    def or_(self, expr):   # only the shape fleet_liveness sends: "missing_count.is.null,missing_count.eq.0"
+        assert expr == "missing_count.is.null,missing_count.eq.0", expr
+        self.f.append(lambda r: not r.get("missing_count")); return self
     def order(self, col, desc=False, nullsfirst=False): self.orders.append((col, desc)); return self
     def limit(self, n): self.n = n; return self
     def range(self, a, b): self.off, self.n = a, b - a + 1; return self

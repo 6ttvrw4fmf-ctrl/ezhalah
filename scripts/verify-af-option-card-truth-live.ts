@@ -138,7 +138,9 @@ const NON_PREDICATE_KEYS = new Set(['p_limit', 'p_offset', 'p_sort_by', 'p_rotat
 const EXPECTED_LABEL: Record<string, string[]> = {
   kitchen: ['المطبخ', 'مطبخ'], parking: ['مواقف'], elevator: ['مصعد'], ac: ['تكييف'], private_entrance: ['مدخل خاص'],
   maid_room: ['غرفة خادمة'], driver_room: ['غرفة سائق'], car_entrance: ['مدخل سيارة'], sanitation: ['صرف صحي'],
-  electricity: ['كهرباء'], water_supply: ['توفر الماء'], furnished: ['مفروش'], rnpl: ['يقبل التقسيط'],
+  electricity: ['كهرباء'], water_supply: ['توفر الماء'], furnished: ['مفروش'], rnpl: ['تقسيط أو دفعات شهرية'],
+  // the clause's alias of rnpl (a derived union since 2026-11-12): never a rendered key, same label if it ever is
+  rent_now_pay_later: ['تقسيط أو دفعات شهرية'],
   // The rich residential set certified 2026-08-31 (20260831205347_af_amenity_tokens_residential_
   // rich_set.sql). Labels read from src/i18n.tsx, same as every row above.
   gym: ['صالة رياضية'], pool: ['مسبح'], garden: ['حديقة'], balcony: ['بلكونة'],
