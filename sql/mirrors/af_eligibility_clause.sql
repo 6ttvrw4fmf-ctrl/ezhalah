@@ -1,4 +1,9 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-11-12 (migration 20261112111809 af_rnpl_one_chip_either, owner «merge … we cannot guarantee»): CHANGED —
+--   the ''rnpl'' / ''rent_now_pay_later'' token arm reads `s.rent_now_pay_later or s.split_payments` (the site's instalment
+--   box OR the ad's monthly / split-payment words: one chip). The ''split_payments'' token arm and the rent-period arms are
+--   unchanged. One arm, everything else byte-identical.
+--   md5 of pg_get_functiondef (verify-sql-mirrors-not-stale): 7ab80384970ac5d93d26d0f646f965eb
 -- Refreshed 2026-11-11 (migration 20261111141500 pooled_short_stays_never_under_yearly, 🔧): CHANGED — the price-on-request
 --   arm admits a no-price rent under «سنوي»/«كلاهما» only when the row is NOT in the short-stays pool (s.rent_period_ar is
 --   distinct from ''شهري''); the شهري half (gathern + aqarmonthly) is unchanged. One arm, everything else byte-identical.
@@ -545,7 +550,7 @@ AS $function$ select E'
            and (not (''building_rules'' = any(p_amenities)) or s.building_rules)
            and (not (''pool_gym'' = any(p_amenities)) or (s.pool or s.gym))
            and (not (''furnished''        = any(p_amenities)) or s.furnished)
-           and (not (''rnpl''             = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later)))
+           and (not (''rnpl''             = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later or s.split_payments)))
       and ((p_street_width_min is null and p_street_width_max is null)
            or (s.street_width_m is not null
                and s.street_width_m >= coalesce(p_street_width_min, 0) and s.street_width_m <= coalesce(p_street_width_max, 32767)))

@@ -21,7 +21,7 @@ export type RpcBody = Record<string, unknown>;
 //
 // This is a MAP, not a set of column names, because the token the RPC receives is not always the
 // column it filters: the clause reads «'ac' → s.air_conditioner» and «'rnpl'/'rent_now_pay_later'
-// → s.rent_now_pay_later». The previous version listed COLUMN names as if they were tokens, so the
+// → s.rent_now_pay_later or s.split_payments» (the latter a derived union since 2026-11-12). The previous version listed COLUMN names as if they were tokens, so the
 // two most common real chips were invisible to the oracle:
 //
 //   • 'ac' (Air conditioning) — 2,831 of the 11,153 Riyadh/Rent-Annual/شقة cohort, the single
@@ -68,8 +68,8 @@ export const AMENITY_TOKEN_COL: Record<string, string> = {
   separate_electricity_meter: 'separate_electricity_meter',
   separate_water_meter: 'separate_water_meter',
   furnished: 'furnished',
-  rnpl: 'rent_now_pay_later',
-  rent_now_pay_later: 'rent_now_pay_later',
+  // rnpl / rent_now_pay_later are NOT column tokens since 2026-11-12 (owner: one instalments chip) — they are the
+  // union of the site's box and the ad's «دفعات» words; see AMENITY_TOKEN_DERIVED.
   // The 39 column-backed chips of the Apartments & Co-living cards (owner handoff 2026-10-31, migration
   // 20261101100930): the clause guards each as `and (not ('tok' = any(p_amenities)) or s.tok)` — token = column.
   roof: 'roof', two_entrances: 'two_entrances', annex: 'annex', yard: 'yard', garage: 'garage', grill: 'grill',
@@ -206,6 +206,10 @@ export const AMENITY_TOKEN_DERIVED: Record<string, DerivedAmenity> = {
   camels_horses: { cols: ['camels', 'horses_stable'], filter: 'camels.is.true,horses_stable.is.true', orGroup: true },
   palm_fruit_trees: { cols: ['palms', 'fruit_trees'], filter: 'palms.is.true,fruit_trees.is.true', orGroup: true },
   pool_gym: { cols: ['pool', 'gym'], filter: 'pool.is.true,gym.is.true', orGroup: true },
+  // the merged instalments chip (owner 2026-11-12, migration 20261112111809): the clause's rnpl / rent_now_pay_later
+  // arm reads `s.rent_now_pay_later or s.split_payments` — the site's box OR the ad's monthly / split-payment words
+  rnpl: { cols: ['rent_now_pay_later', 'split_payments'], filter: 'rent_now_pay_later.is.true,split_payments.is.true', orGroup: true },
+  rent_now_pay_later: { cols: ['rent_now_pay_later', 'split_payments'], filter: 'rent_now_pay_later.is.true,split_payments.is.true', orGroup: true },
   apts4: { cols: ['apartments_count'], filter: 'apartments_count=gte.4' },
   apts8: { cols: ['apartments_count'], filter: 'apartments_count=gte.8' },
   apts12: { cols: ['apartments_count'], filter: 'apartments_count=gte.12' },

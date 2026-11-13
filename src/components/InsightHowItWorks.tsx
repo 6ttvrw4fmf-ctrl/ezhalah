@@ -1,4 +1,4 @@
-// «كيف نعمل؟» — the popup a signed-in user sees after tapping the home headline's market fact, or the small link under it
+// «كيف نحسبها؟» — the popup a signed-in user sees after tapping the home headline's market fact, or the small link under it
 // (owner 2026-11-11, replacing the 2026-10-22 «كيف تشتغل؟» sheet). Laid out like the «نماذج إزهله» card:
 //   · the ✕ is ALWAYS on the physical right, in both languages (owner: «the x is always on the right, no matter what»);
 //   · in the centre, our eagle glides in and lands on the falconer's glove — the sign-in story, played slowly
@@ -17,7 +17,6 @@ import { HOW_IT_WORKS } from '@/lib/insightHowItWorks';
 import { loadSiteCount, siteCountNow } from '@/data/siteCount';
 
 const EAGLE = require('../../assets/images/falconer-howto.svg');
-const SHAHEEN = require('../../assets/models/shaheen.png');
 // the eagle art: 310×385 canvas units drawn at ART_W px; the falconer's centre sits (68.5, 73.5) units off the canvas centre
 const ART_W = 120, ART_H = Math.round(ART_W * 385 / 310);
 const ART_DX = Math.round(68.5 / 310 * ART_W), ART_DY = Math.round(73.5 / 385 * ART_H) - 10;
@@ -89,7 +88,7 @@ export function InsightHowItWorks({ visible, locale, onClose }: { visible: boole
               ) : null}
             </View>
             <View style={[s.falconerRow, row]}>
-              <XImage source={SHAHEEN} contentFit="contain" tintColor={colors.primary} accessible={false} style={s.mark} testID="insight-how-shaheen" />
+              {/* ONE LOGO, THE FALCONER (owner 2026-11-12: «let's just make 1 logo which is the صقار»): no Shaheen mark here. */}
               <Text style={[s.falconer, align]}>{c.falconer}</Text>
             </View>
             <Text style={[s.story, align]}>{c.story(sites)}</Text>
@@ -118,7 +117,6 @@ const s = StyleSheet.create({
   eagle: { width: ART_W, height: ART_H },
   flip: { transform: [{ scaleX: -1 }] },
   falconerRow: { alignItems: 'center', gap: space.base, marginBottom: space.base / 2 },
-  mark: { width: 26, height: 26 },
   falconer: { fontSize: 17, fontWeight: '700', color: colors.ink },
   story: { fontSize: 14, lineHeight: 21, color: colors.body, marginBottom: 8 },
   rulesTitle: { fontSize: 15, fontWeight: '700', color: colors.ink, marginBottom: 2 },

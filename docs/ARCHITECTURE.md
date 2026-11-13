@@ -575,7 +575,7 @@ not, you put them beside each other. That's the rule. Just don't make them on to
 click»; it keeps the owner's 2026-11-05 «user cannot select what he wants» and replaces that day's join-when-touching
 rule, which read two different places a few metres apart as one «N إعلانات» head).** Listings on the SAME coordinates
 (a building, a same-site twin snapped by `map_pin_snap`) arrive as one row from `map_pins_ar` and are one head with their
-count. Before the map draws its street-level heads, `placeApart()` (src/lib/mapPins.ts) places every head (measured in
+count. «The same coordinates» means equal to 6 decimals (~0.1 m) — haraj and dealapp wrote one point as 24.333833307351 and 24.333833307351153 and got two pins (owner 2026-11-12, الجلة). A sale pin is priced like the Filter and the card, `coalesce(price_total_effective, price_total)`: 7,817 per-metre-priced ads read «السعر عند الطلب» on the pin over a priced card until then (migration `20261112184000`, guard `scripts/verify-map-pin-reads-the-filters-price.ts`). The pin's sheet asks for the card and its place in one parallel round trip. Before the map draws its street-level heads, `placeApart()` (src/lib/mapPins.ts) places every head (measured in
 the font it is drawn in, through MapKit's projection, 4 px of air): a head whose own spot is taken is DRAWN in the
 nearest free place beside its neighbours, at most `PIN_MAX_SHIFT_PX` (84 px: one head across, two rows down) away,
 keeps its own price and ad list, and gets a thin line and dot back to its own spot (`pinStemTo()`, drawn as MapKit
@@ -589,6 +589,58 @@ no touching pair, no id lost, 5 mutations) and the hourly MAP PIN ROBOT `e2e/map
 (`.github/workflows/map-pins-live.yml`: real phone browser on ezhalah.com, densest Jeddah streets — no overlapping pin,
 every pin tappable, district named; red → alert). Never "fix" a red robot by moving its spots, loosening the 1 px
 overlap test or shrinking PIN_GAP_PX.
+
+**THE MAP BOX AND ITS CARD — the agreed design (owner 2026-11-12, «it can't be wrong», «always ADHD-simple»).**
+When a user zooms into a named place, the count pill becomes a small box of word-labelled chips for EXACTLY the ads it
+counts, under EXACTLY the map's filters (deal, type, rooms, furnished, area, price, «نشر خلال» — every filter applies):
+> **1,081 للبيع · حي الملقا** · آخر 30 يوما — `123 جديد` `85 اختفى` `المتر المعروض 6,100 ريال`
+> `أغلى من أحياء قريبة 9%` `15 خفضوا السعر` — اضغط للتفاصيل ›
+Tapping opens ONE card that fits one phone screen (no scrolling): (1) a table, rows إعلانات جديدة · إعلانات اختفت ·
+سعر المتر المعروض · خفضوا السعر, columns **أمس · أسبوع · شهر · 3 أشهر · أحياء قريبة** (red = above the neighbours,
+green = below); (2) «سعر المتر المعروض حي حي» — each nearby district by name; (3) «نظرة سريعة» — 8 boxes (متوسط السعر
+المعروض، متوسط المساحة، مدة بقاء الإعلان، نطاق الأسعار المعروضة، النوع الأكثر، عدد الغرف الأكثر، متوسط عمر العقار،
+مواقع تعرض إعلانات هنا), each but the last with a grey «أحياء قريبة …» line; (4) the line «الأسعار هي أسعار العرض في
+الإعلانات، وليست أسعار البيع النهائية».
+Rules: every price says «المعروض» (asking, never sold); «اختفى» = removed at source, never «sold»; «جديد» = the SITE's
+posting date; a copy on another site counts once; a price is the MEDIAN, shown only from ≥ 10 ads, else the cell says
+«إعلانات قليلة»; with no type picked the price is never mixed — the box shows the most common type's OWN price, named
+(«الشقق: المتر المعروض 3,500 ريال»; owner 2026-11-13 «if nothing is selected … just show a general»), and says «اختر نوع
+العقار لعرض السعر» only when no type has 10 priced ads; the card lists the price per type; «أحياء قريبة» = the 4 nearest districts of the same city with enough ads, under the SAME
+filters (counts compared as the neighbours' average, so a big district is not compared unfairly), falling back to the
+city — named as such — when the neighbours lack data; a drawn boundary gets the facts for exactly the ads inside it
+(any zoom) but never «أحياء قريبة» (a drawing is not a district); at a wider district view (up to ~22 km tall) the pill's estimated count (dots feed)
+gives way to the exact count of the same box, so the box shows there too; at city and district LABEL zoom (owner
+2026-11-13, «from city level to district level») the box reads the named place's prepared facts (`map_place_facts`,
+rebuilt hourly by `bundle-hourly-monitors`; `map_place_facts_ar()`), only when the count is all of one deal's ads there
+(no type, rooms, price, area or other filter) and the pill's count is within 3% (or 3 ads) of the prepared count — new
+ads in the hour — else nothing; where the pill names a city but counts only the districts on screen, the box reads those
+districts' prepared facts added up (`map_place_facts_sum_ar()`: counts only — a median cannot be added — unless they are
+the whole city, then the city's own facts; every named district must have a row, else nothing); a bubble view (counted
+by whole map squares) takes the box's exact count of the view, as the wider district view does; the whole-Kingdom view
+keeps its count only; after a DISTRICT search (owner 2026-11-13, «it shows later … it's not true» — the pill had said
+«13,528 إعلان للبيع في الرياض» for Malqa's screen) the pill and its box follow that district — its own count and facts —
+while its label is on screen and the view is at most 1.5× as tall as where the search landed (`AreaFocus`,
+src/lib/mapAreas.ts); «أمس» is the last FINISHED
+day (never «اليوم», which reads 0 in the morning); a failed read hides the box's facts (never «0»); the box is SMALL
+(owner 2026-11-13, «the box is very very big»): the count line, then one line of small words separated by «·» (never
+boxed chips), at most 64% of the map wide so it stays clear of the round buttons; guests see only the count and a small
+gold «🔒 سجل الدخول لعرض الأرقام» (no blurred row), and the server never sends them a number. The box is read AT THE SAME TIME as the pins (no pause), a second
+ask for the same view joins the read already out, and the box is cleared only when asked about another view — never
+blinked off when the count or the place name lands (owner 2026-11-13, «it takes time … it feels glitchy»).
+The card is built (2026-11-13): `map_view_card_ar()` (`map_view_card_core`, the facts filter word for word plus one
+line naming a district) for the box's own view, or for a named district (all its ads); a guest gets `{locked}` only;
+«قريبا» where a log does not yet cover a window; the card module loads on the first tap only (src/components/
+MapFactsCard.tsx, rules in src/lib/mapCard.ts); a new map view closes it. Guard: `scripts/verify-map-card.ts`.
+History: «اختفى» counts confirmed removals from the nightly `map_fact_removal` log (started 2026-11-12 — only 37% of
+older removals kept their district, so no backfill); «خفضوا السعر» counts price-diary drops (`listing_price_history`
+'price' events, started 2026-11-11; a drop of more than half is a page re-read, not a cut). Each shows once its window
+is fully covered. Built on `map_view_facts_ar()` (the «نشر خلال» counter's filter word for word); `audit_map_view_facts()`
+recounts 25 random views nightly another way and switches the facts off (`ops_feature_flags.map_view_facts`) and pages
+(`mon_detect_map_view_facts`) on any mismatch. Freshness (owner 2026-11-13, «we can't have mistakes … strong barrier»): a
+nightly table older than 36 h hides what it feeds — «اختفى» (removal log) and «أحياء قريبة» (`map_district_neighbors`) —
+and the same detector pages; the facts carry `updated_at` for the card's «آخر تحديث». Guards: `scripts/verify-map-view-facts.ts` (server),
+`scripts/verify-map-view-facts-line.ts` (screen). Never widen «اختفى» to crawl-absence sites, show a window before it is
+covered, lower the 10-ad price floor, or loosen the «same ads as the pill» rule to make facts appear more often.
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
@@ -1333,6 +1385,8 @@ new detector needing a longer history must raise the retention in the same chang
 
 ## 20. Permanent rules (the non-negotiables)
 
+**The card layout (owner, 2026-11-13: «build it, make it a rule … we don't want mistakes»):** on every result card (phone and laptop) the **price leads its line** (the right edge in Arabic, nothing before it); the 📍 line is **«district، city»** (never «… المملكة العربية السعودية»); the site's own posting date reads **«اليوم / أمس / قبل يومين / قبل N أيام / قبل N يوم»** up to 29 days, **first** in the facts row, by Riyadh's calendar day — older, future or unreadable dates show the date itself, never a guess (`src/lib/listedAgo.ts`); the photo strip and «مستضاف على» name the **website in Arabic** («عقارات السعودية»), not its domain; and what the Advanced Filter asked for keeps its **✓ and moves to the front**, building up round by round (2026-10-05 rule). The card keeps its size. **Balanced (same day, «I don't like how it shows the licence number … balance it»):** every card — phone like laptop — shows at most **3 of the source's key facts** (age, facade, street width, plan, usage, as published) and at most **3 extras then «+N»**; licence numbers, ad numbers and other codes are not on the card (they stay on the site's page, and the licence still powers «مرخص» and the same-property match). Every Advanced Filter pick stays visible in «مطابق لطلبك», never capped. Guards: `scripts/verify-card-says-today.ts`, `scripts/verify-card-is-balanced.ts`.
+
 **Hidden listings → hidden logo → the count drops (owner, 2026-10-27, one rule everywhere):** a site's logo and its place in «N منصة» exist only while a user can see at least one of its ads. ONE list decides both: `loader_active_platforms_ar()` (active in `platform_registry` AND at least one `production_ready` row in `search_listings_ar`). The site count (`src/data/siteCount.ts`: welcome line, share sentence, WhatsApp card) and every logo strip / platform picker (`hiddenFromVisibleSlugs()` in `src/data/loaderPlatforms.ts`, read by `loaderActivePlatforms.ts`) take it. A down, retired or logo-only brand shows no logo and is not counted; a site that comes back returns by itself on the next read. This supersedes the 2026-09-19 «keep Toor's logo», the 2026-09-24 logo-only brands, and the 2026-10-20 «make it 148» (that count included the four dormant sites, whose hidden rows stay in the index). Measured the day it landed: 149 → 145 sites. Guard: `scripts/verify-loader-hides-down-sites.ts`.
 
 **The headline ads total is what search can find (owner, 2026-11-09: «I noticed that the number sometimes is wrong»):** `loader_scale_stats_ar()` — the WhatsApp card, the search loader's «نتحقق من N إعلان» and the welcome line — counts `production_ready` rows only, the same base every search reads (`loader_scale_stats_ready_mv`, migration `20261109051420`). Measured the day it landed: 463,281 → 462,476; the 805 removed rows had almost all no readable city, so no search could return them. Same rule as the site count above. Supersedes the 2026-10-20 «count every listing in the index» (`20261020164834`); one number on all three surfaces still holds. Guard: `scripts/verify-headline-total-counts-only-searchable.ts`.
@@ -1708,7 +1762,7 @@ new detector needing a longer history must raise the retention in the same chang
   it cannot repair is hidden. A count kind with no declared search is never shown, and `welcome_template_problem()`
   refuses its line (trigger + P1 wording audit); P1 `welcome_insights_audit:repro:<kind>` when half a kind fails.
   `city_land` = sale + residential land («الأراضي السكنية المعروضة للبيع»); `city_bld_sale` is off because
-  «عمارة» spans two Filter groups (migration `20261108214500`). Where plain «أرض» belongs is an open owner question.
+  «عمارة» spans two Filter groups (migration `20261108214500`). Plain «أرض» stays where it is (owner 2026-11-12 left it to the engineer, «your choice»): home macro Commercial, no box, found by every search that names no type. Measured that day: 8,366 rows, all from residential tables; showing them under سكني too would change the category gate in ~14 search functions plus the oracle for a small gain (land searchers pick a land type, and «أرض» is in none by the 2026-10-11 decision). Likewise the 202 plots whose text says «خام» while the site's own boxes tick electricity/water stay out of «Raw land»: there «خام» usually means an empty plot, and `sync_raw_land_subtype()` tags raw only when the boxes agree.
   Big and medium cities (≥300 ads) only until 3 clean checker nights. The line ends with its greeting's
   emoji (☀️ 🌙 🕌 🌴 👋), changes every hour, two lines in three about the user's searched city, city
   picked before fact, never the same city or kind twice in a row; tapping it opens «كيف تشتغل؟».
@@ -1770,10 +1824,14 @@ new detector needing a longer history must raise the retention in the same chang
      the services field, never across aqar's form labels. (Not built yet.)
   3. «Villa» ads that call themselves تاون هاوس are townhouses; Duplex + Townhouse become ONE type «Duplex & Townhouse».
      (Not built yet; needs its own owner go.)
-  4. One payment question on every rent list, «💳 Rent now, pay later / split payments», two chips; under the provider
-     logos a disclaimer: Ezhalah does not guarantee the payment method or the provider — confirm with the lister
-     (owner 2026-11-02, `af-payment-note`). Both chips live since 2026-11-02 (split_payments is a text fact; picking both
-     narrows to listings with both, like every chip card).
+  4. One payment question on every rent list, «💳 Rent now, pay later / split payments», with ONE chip since 2026-11-12
+     (owner: «merge … we cannot guarantee»): «تقسيط أو دفعات شهرية» / «Instalments / monthly payments» matches a listing
+     when the site's own instalment box (rent_now_pay_later) OR the ad's monthly / split-payment words (split_payments,
+     a text fact) is TRUE — the clause's rnpl arm `s.rent_now_pay_later or s.split_payments`, cnt_rnpl the same union,
+     cnt_rnpl_unknown = box unknown and no «دفعات» words (migration 20261112111809). A chat-typed split_payments token
+     still means the words alone. Under the provider logos (`af-payment-note`): the lister says you can pay in
+     instalments or monthly, through one of these providers or another way; Ezhalah cannot guarantee it — confirm with
+     the lister. (2026-11-02 to 2026-11-12 it was two chips that ANDed in SQL.)
   5. No «Nearby» / «suitable for» chips — the seller's opinion; the map shows what's near. «On a main road» is a fact
      about the plot and stays.
   6. A chip says only what the ad says · Skip on every question · pick many · a chip at 0 hides itself · source tables

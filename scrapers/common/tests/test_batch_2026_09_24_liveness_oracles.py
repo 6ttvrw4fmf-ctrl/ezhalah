@@ -222,6 +222,18 @@ def _serve(monkeypatch, R, platform: str, responder):
         monkeypatch.setattr(L.LivenessProbe, "fetch", lambda self, url: responder(url))
 
 
+_SN_CTRL = "https://senanrealestate.sa/projects/ctrl.html"
+_SN_DEAD = "https://senanrealestate.sa/projects/dead.html"
+_SN_404 = "<html><head><title>This Page Does Not Exist</title></head></html>"
+
+
+def _senan_page(url: str) -> str:
+    ld = {"@type": "Apartment", "@id": url + "#property", "url": url,
+          "offers": {"availability": "https://schema.org/InStock"}}
+    return ('<script type="application/ld+json">' + json.dumps(ld) + "</script>"
+            "<div><span>الحالة</span><b>متاح</b></div>")
+
+
 def _nuzul_engine(R):
     return R.make_verify_gone(R.BASE, R.PREFIX, R.SLUG, {"ad_number": f"{R.PREFIX}7"})
 
@@ -231,7 +243,9 @@ def _nuzul_engine(R):
 SEAM = {
     "jawher": (_nuzul_engine, "JWH9", (404, _NUZUL_404, False), (200, _nuzul(7), False), lambda u: u.endswith("/7")),
     "m3tmd": (_nuzul_engine, "MQR9", (404, _NUZUL_404, False), (200, _nuzul(7), False), lambda u: u.endswith("/7")),
-    "senan": (_nuzul_engine, "SNN9", (404, _NUZUL_404, False), (200, _nuzul(7), False), lambda u: u.endswith("/7")),
+    # senan left Nuzul 2026-11-12: its own project page, the host's «This Page Does Not Exist» 404 is the death
+    "senan": (lambda R: R._make_verify_gone("SNN-ctrl", {"SNN-ctrl": _SN_CTRL, "SNN-dead": _SN_DEAD}),
+              "SNN-dead", (404, _SN_404, False), (200, _senan_page(_SN_CTRL), False), lambda u: u == _SN_CTRL),
     "yameen": (lambda R: R.verify_gone_for(R.TENANT, lambda: (True, "control served")),
                "YMN9", (404, _NUZUL_404, False), None, lambda u: False),
     "alrifai": (lambda R: (lambda ad: R.verify_gone(ad, s=object())),

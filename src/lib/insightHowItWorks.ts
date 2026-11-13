@@ -1,4 +1,4 @@
-// The «كيف نعمل؟» popup's words (owner-approved text 2026-11-11, replacing «كيف نحسبها؟»), kept pure so
+// The «كيف نحسبها؟» popup's words (owner-approved text 2026-11-11; title back to «كيف نحسبها؟» by the owner 2026-11-12), kept pure so
 // tests can read them. The same title is the small underlined link under the home headline's market fact.
 // Formal Arabic, no diacritics (owner: «keep it professional like» the «نماذج إزهله» card). {N} is the LIVE site count —
 // the same number the share card and the welcome line show (src/data/siteCount.ts); while it is unknown the clause that
@@ -17,7 +17,7 @@ export function sitesAr(n: number): string {
 
 export const HOW_IT_WORKS: Record<'ar' | 'en', Copy> = {
   ar: {
-    title: 'كيف نعمل؟',
+    title: 'كيف نحسبها؟',
     falconer: 'من صقار إزهله؟',
     story: (n) =>
       `كل صقر بارع يحتاج صقارا خبيرا يجهزه للميدان. صقار إزهله يجوب ${n ? sitesAr(n) : 'المواقع العقارية'} في السعودية ليجمع لك الإعلانات من مصادرها، ويغذي بها «شاهين»، نموذج الذكاء الاصطناعي في إزهله، ليختصر عليك البحث الطويل بإجابات محدثة من إعلانات حقيقية.`,
@@ -32,7 +32,7 @@ export const HOW_IT_WORKS: Record<'ar' | 'en', Copy> = {
     close: 'إغلاق',
   },
   en: {
-    title: 'How do we work?',
+    title: 'How do we calculate it?',
     falconer: "Who is Ezhalah's falconer?",
     story: (n) =>
       `Every skilled falcon needs an expert falconer to ready it for the field. Ezhalah's falconer roams ${n ? `${n} real estate websites` : 'the real estate websites'} across Saudi Arabia, gathering listings straight from their sources and feeding them to Shaheen, Ezhalah's AI model. Shaheen saves you the long search, with up-to-date answers drawn from real listings.`,

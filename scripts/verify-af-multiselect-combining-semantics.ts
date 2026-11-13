@@ -91,6 +91,19 @@ for (const m of clause.matchAll(guardRe)) {
 const derivedRe = /and \(not \(''([a-z_0-9]+)''\s*=\s*any\(p_amenities\)\)\s*or\s*(\(s\.[a-z_]+ or s\.[a-z_]+\)|s\.[a-z_]+ >= \d+)\)/g;
 const derivedGuards = new Map<string, string>();   // token -> SQL predicate
 for (const m of clause.matchAll(derivedRe)) derivedGuards.set(m[1], m[2]);
+// The merged instalments arm (owner 2026-11-12, migration 20261112111809): the rnpl / rent_now_pay_later alias pair
+// reads the UNION of the site's box and the ad's «دفعات» words, written without parentheses:
+//   `and (not (''rnpl'' = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later or s.split_payments)`
+const unionPairRe = /and \(not \(''([a-z_]+)''\s*=\s*any\(p_amenities\)\s*or\s*''([a-z_]+)''\s*=\s*any\(p_amenities\)\)\s*or\s*(s\.[a-z_]+ or s\.[a-z_]+)\)/g;
+const unionPairs = (sql: string) => [...sql.matchAll(unionPairRe)].map((m) => ({ a: m[1], b: m[2], pred: m[3] }));
+for (const u of unionPairs(clause)) { derivedGuards.set(u.a, u.pred); derivedGuards.set(u.b, u.pred); }
+const RNPL_UNION = 's.rent_now_pay_later or s.split_payments';
+check('the rnpl / rent_now_pay_later alias pair reads the box OR the words (owner 2026-11-12)',
+  derivedGuards.get('rnpl') === RNPL_UNION && derivedGuards.get('rent_now_pay_later') === RNPL_UNION,
+  `rnpl → ${derivedGuards.get('rnpl') ?? 'none'}`);
+// mutation: the pre-2026-11-12 rnpl-only arm must not read as the union
+check('(mutation) the rnpl-only arm (box alone) is not read as the union',
+  unionPairs("           and (not (''rnpl''             = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later)))").length === 0);
 const ORACLE_DERIVED: Record<string, string> = {
   separate_meters: 'or=(separate_electricity_meter.is.true,separate_water_meter.is.true)',
   apts4: 'apartments_count=gte.4', apts8: 'apartments_count=gte.8', apts12: 'apartments_count=gte.12', apts20: 'apartments_count=gte.20',
@@ -102,6 +115,9 @@ const ORACLE_DERIVED: Record<string, string> = {
   camels_horses: 'or=(camels.is.true,horses_stable.is.true)',
   palm_fruit_trees: 'or=(palms.is.true,fruit_trees.is.true)',
   pool_gym: 'or=(pool.is.true,gym.is.true)',
+  // the merged instalments chip (owner 2026-11-12): the box OR the ad's «دفعات» words
+  rnpl: 'or=(rent_now_pay_later.is.true,split_payments.is.true)',
+  rent_now_pay_later: 'or=(rent_now_pay_later.is.true,split_payments.is.true)',
 };
 check('every derived token the clause guards has a stated oracle translation (and no stray derived guard exists)',
   [...derivedGuards.keys()].sort().join() === Object.keys(ORACLE_DERIVED).sort().join(),

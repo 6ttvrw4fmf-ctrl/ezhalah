@@ -31,7 +31,7 @@ const cases: Array<[string[], string, string | null]> = [
   [['20', '25'], 'cnt_stw_unknown', 'street_width_m=is.null'],
   [['9.5', '9.0'], 'cnt_rating_unknown', 'rating=is.null'],
   [['استديو', 'شقة'], 'cnt_sub_unknown', 'unit_subtype_ar=is.null'],
-  [['rnpl'], 'cnt_rnpl_unknown', 'rent_now_pay_later=is.null'],
+  [['rnpl'], 'cnt_rnpl_unknown', 'rent_now_pay_later=is.null&split_payments=not.is.true'],   // 2026-11-12: box OR words
 ];
 for (const [keys, rpcCol, qs] of cases) {
   const u = unknownColumnFilter(keys, AMEN);

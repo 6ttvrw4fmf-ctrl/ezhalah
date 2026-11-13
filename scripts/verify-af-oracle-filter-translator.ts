@@ -104,8 +104,13 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
     buildOracleQS({ ...BASE, p_unit_subtypes: ['استوديو'] }).qs.includes('unit_subtype_ar=in.'));
   check('a plain amenity token maps to <token>=is.true',
     buildOracleQS({ ...BASE, p_amenities: ['elevator'] }).qs.includes('elevator=is.true'));
-  check('rnpl is the ONE special-cased amenity token → rent_now_pay_later, not a literal "rnpl" column',
-    buildOracleQS({ ...BASE, p_amenities: ['rnpl'] }).qs.includes('rent_now_pay_later=is.true'));
+  // owner 2026-11-12: the ONE instalments chip = the site's box OR the ad's «دفعات» words (migration 20261112111809)
+  check('rnpl → the union of rent_now_pay_later and split_payments, not a literal "rnpl" column',
+    buildOracleQS({ ...BASE, p_amenities: ['rnpl'] }).qs.includes('or=(rent_now_pay_later.is.true,split_payments.is.true)')
+    && buildOracleQS({ ...BASE, p_amenities: ['rent_now_pay_later'] }).qs.includes('or=(rent_now_pay_later.is.true,split_payments.is.true)'));
+  check('a chat-typed split_payments token alone still reads only its own column',
+    buildOracleQS({ ...BASE, p_amenities: ['split_payments'] }).qs.includes('split_payments=is.true')
+    && !buildOracleQS({ ...BASE, p_amenities: ['split_payments'] }).qs.includes('rent_now_pay_later'));
   check('multiple amenities AND together (every one must hold)', (() => {
     const qs = buildOracleQS({ ...BASE, p_amenities: ['elevator', 'parking'] }).qs;
     return qs.includes('elevator=is.true') && qs.includes('parking=is.true');
@@ -301,6 +306,13 @@ mustCatch('a direction key matched LITERALLY (would drop every «…ي» spellin
   })());
 mustCatch('rnpl amenity resolving to a nonexistent "rnpl" column instead of rent_now_pay_later',
   !buildOracleQS({ ...BASE, p_amenities: ['rnpl'] }).qs.includes('rnpl=is.true'));
+// the 2026-11-12 merge: reverting the oracle to the rnpl-only column (a bare `rent_now_pay_later=is.true` part) or to an
+// AND of the two columns must not pass for the union
+mustCatch('rnpl read as the box alone (the pre-2026-11-12 rnpl-only arm)',
+  !/(^|&)rent_now_pay_later=is\.true(&|$)/.test(buildOracleQS({ ...BASE, p_amenities: ['rnpl'] }).qs));
+mustCatch('rnpl read as box AND words (both columns required)',
+  !(buildOracleQS({ ...BASE, p_amenities: ['rnpl'] }).qs.includes('rent_now_pay_later=is.true')
+    && buildOracleQS({ ...BASE, p_amenities: ['rnpl'] }).qs.includes('split_payments=is.true')));
 mustCatch('a monthly rent budget compared raw against the annual column (would return ~1/12th the band)',
   buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'شهري', p_price_min: 2000 }).qs
     .includes('price_annual=gte.24000'));

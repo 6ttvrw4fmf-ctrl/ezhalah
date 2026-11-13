@@ -17,10 +17,12 @@ PR «feat/af-words-all-groups». Guard: `scripts/verify-af-remaining-groups-card
 
 ## Rules that shape these lists (owner 2026-11-01)
 - **Commercial is never mixed with residential**: the Filter home picks ONE category, so no scope can span both.
-- **One payment question on every rent list**, «💳 Rent now, pay later / split payments», two chips (the site's own
-  installment box + the ad's words «دفعات / دفع شهري»); picking both narrows to listings with both, like every other
-  chip card (intersection never union); under the logos the disclaimer that Ezhalah does not guarantee the method or
-  the provider. Hidden where both chips are at 0.
+- **One payment question on every rent list**, «💳 Rent now, pay later / split payments», ONE chip since 2026-11-12
+  (owner: «merge … we cannot guarantee»): «تقسيط أو دفعات شهرية» matches the site's own installment box OR the ad's
+  words «دفعات / دفع شهري» (a union by owner decision — the one exception to «intersection never union», migration
+  20261112111809); under the logos the note that the lister says instalments or monthly payments, through one of
+  these providers or another way, and Ezhalah cannot guarantee it. Hidden where the chip is at 0. (Two ANDed chips
+  2026-11-02 → 2026-11-12.)
 - **No «Nearby» / «suitable for» chips** (the seller's opinion; the map shows what is near). «On a main road» is a fact
   about the plot and stays.
 - **Short stays**: the Apartments & Co-living types stay ONE pool (owner 2026-10-31); Villa, Chalet, Rest house, Camp and
