@@ -41,19 +41,26 @@ export function problems(ms: Mig[]): string[] {
     p.push(`${fix.f}: the check block no longer executes the remap on aqar 9594877 / 26273326 → جواثا (3700)`);
   if (!/n_pin < 32 or n_other < 524/.test(check)) p.push(`${fix.f}: the check block no longer refuses a remap that shrank`);
   for (const m of ms) {
-    if (m.f <= fix.f || !REDEFINE.test(m.s)) continue;
-    // Read the body's ACTUAL dollar tag and require its matching close (verify-function-body-windows-fail-closed:
-    // `$function$`, `$$`, `$mig$` … are all legal; a guessed tag turns «the body» into the rest of the file).
-    const rest = m.s.slice(m.s.search(REDEFINE));
-    const open = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
-    const tag = open?.[0];
-    const close = tag ? rest.indexOf(tag, open!.index + tag.length) : -1;
-    if (!tag || close < 0) {
-      p.push(`${m.f}: redefines retired_place_remap_rows() but its body has no matching dollar-quote close — unreadable, so refused`);
-      continue;
+    if (m.f <= fix.f) continue;
+    // EVERY redefinition in the file, not only the first (CodeRabbit #11974: a compliant body followed by a
+    // regressing one must not pass).
+    for (const hit of m.s.matchAll(new RegExp(REDEFINE.source, 'gi'))) {
+      // Read the body's ACTUAL dollar tag and require its matching close (verify-function-body-windows-fail-closed:
+      // `$function$`, `$$`, `$mig$` … are all legal; a guessed tag turns «the body» into the rest of the file).
+      const rest = m.s.slice(hit.index);
+      const open = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
+      const tag = open?.[0];
+      const close = tag ? rest.indexOf(tag, open!.index + tag.length) : -1;
+      if (!tag || close < 0) {
+        p.push(`${m.f}: redefines retired_place_remap_rows() but its body has no matching dollar-quote close — unreadable, so refused`);
+        continue;
+      }
+      // Count the PREDICATE both arms use, with SQL comments removed — a mention in a comment or a select list
+      // is not a key (CodeRabbit #11974).
+      const body = rest.slice(open!.index + tag.length, close).replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
+      if (count(body, `from public.${KEY} sd`) < 2)
+        p.push(`${m.f}: redefines retired_place_remap_rows() without the ${KEY} key in both g2 and g2n — the hourly city swap returns`);
     }
-    if (count(rest.slice(open!.index + tag.length, close), KEY) < 2)
-      p.push(`${m.f}: redefines retired_place_remap_rows() without the ${KEY} key in both g2 and g2n — the hourly city swap returns`);
   }
   return p;
 }
@@ -79,8 +86,22 @@ mustCatch(
   problems([...real, { f: '29991231235959_regress.sql', s: 'create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ select 1 $function$;' }]).length > 0,
 );
 
+const ARM = `(select sd.source_district_ar from public.${KEY} sd where sd.listing_id = v1.listing_id)`;
+mustCatch(
+  'a later migration redefines twice: compliant body first, regressing body second',
+  problems([...real, { f: '29991231235959_regress_twice.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ select ${ARM}, ${ARM} $function$;\ncreate or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ select 1 $function$;` }]).length > 0,
+);
+mustCatch(
+  'a later redefinition keeps the key only in a comment and a select list, one arm lost',
+  problems([...real, { f: '29991231235959_regress_comment.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$\n -- both arms read ${KEY}\n select ${KEY}, ${ARM} $function$;` }]).length > 0,
+);
+mustCatch(
+  'a compliant later redefinition is NOT flagged (the check tells the cases apart)',
+  problems([...real, { f: '29991231235959_ok.sql', s: `create or replace function public.retired_place_remap_rows()\n returns table(x int) language sql as $function$ select ${ARM}, ${ARM} $function$;` }]).length === 0,
+);
+
 if (now.length || failures.length) {
   for (const x of [...now, ...failures]) console.error(`❌ ${x}`);
   process.exit(1);
 }
-console.log(`✅ retired_place_remap_rows() keys a retired town on the source's own district in g2 and g2n (${FIX}); 6 mutations caught`);
+console.log(`✅ retired_place_remap_rows() keys a retired town on the source's own district in g2 and g2n (${FIX}); 9 mutations caught`);
