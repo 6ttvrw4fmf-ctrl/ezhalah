@@ -88,6 +88,15 @@ const watchesNeighbours = (src: string) => /select max\(built_at\) into nb_at fr
 check('the alarm pages when the neighbours table is empty or older than 36 h', watchesNeighbours(detector));
 mustCatch('an alarm blind to an empty neighbours table', () => watchesNeighbours(detector.replace('nb_at is null or ', '')));
 check('the facts carry the time of the last nightly run (for «آخر تحديث»)', /'updated_at', \(select max\(cr\.run_at\) from public\.map_fact_capture_run cr where cr\.ok\)/.test(core));
+const sane = (src: string) => /and \(select percentile_cont\(0\.5\) within group \(order by ppmc\.ppm\) from ppmc\) between 10 and 200000/.test(src)
+  && /and \(v_area ->> 'ppm'\)::numeric between 10 and 200000/.test(src)
+  && /and abs\(\(v ->> 'ppm'\)::numeric - \(v_area ->> 'ppm'\)::numeric\) <= 2 \* \(v_area ->> 'ppm'\)::numeric then/.test(src);
+check('nothing impossible is served: price per metre 10–200,000 SAR, a comparison gap of at most 200%', sane(core));
+mustCatch('a price per metre of 3 million served', () => sane(core.replace('from ppmc) between 10 and 200000', 'from ppmc) between 10 and 9999999999')));
+mustCatch('a 500% «cheaper than nearby» served', () => sane(core.replace('<= 2 * (v_area ->> \'ppm\')::numeric then', '<= 99 * (v_area ->> \'ppm\')::numeric then')));
+const auditSane = (src: string) => /order by random\(\) limit 40/.test(src) && /'ppm_out_of_bounds'/.test(src) && /'new30_over_any'/.test(src) && /'ppm_n_over_any'/.test(src);
+check('the nightly checker samples 40 views and fails on any impossible number', auditSane(audit));
+mustCatch('a checker back to 5 samples', () => auditSane(audit.replace('limit 40', 'limit 5')));
 const cutsRule = (src: string) => src.includes('h.price_total < h.old_price_total and h.price_total >= h.old_price_total * 0.5') && /ss\.source = 'price_diary' and ss\.started_at <= now\(\) - interval '30 days'/.test(src);
 check('«خفضوا السعر»: a real drop (not a page re-read), shown once the diary covers 30 days', cutsRule(core));
 mustCatch('a 90% «cut» counted (a page re-read)', () => cutsRule(core.replace(' and h.price_total >= h.old_price_total * 0.5', '')));
