@@ -31,7 +31,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow } from '@/data/mapAreas';
+import { fetchMapAreas, fetchAreasFeed, CROWD_ESTIMATE, visibleAreas, areaLevelFor, areaLevelShown, COUNTRY_BOX, areaCount, areaName, areaZoomSpan, areasTotal, denseShowsDistricts, bubbleTapSpan, inView, areaPlace, type AreaLevel, type AreaRow, type PlaceFactsKey } from '@/data/mapAreas';
 import { translitPlace } from '@/lib/translitPlace';
 import { fetchMapDots, bubblesFromDots, dotsInView, dotsTotal, dotsEstimateInBox, projectorFrom, dotRadius, nearestDot, type MapDot } from '@/data/mapDots';
 import { fetchMapPins, fetchMapPostedWindowCounts, fetchViewPlace, cellForSpan, fineCellForSpan, bubblesCanZoomIn, PIN_LIMIT, PIN_SHOW_MAX, PIN_COLOR, PIN_PAD_PX, paddedBox, pinColor, dotColor, pinHead, isFreshHead, freshTag, polygonOf, placeApart, pinAnchorOffset, pinStemTo, pinWidthGuess, viewPlaceName, viewCountText, type PinFilter, type PinRow } from '@/data/mapPins';
@@ -707,7 +707,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
   // the same box and the pill shows that exact number, so the count and the box are always the same ads.
   const [factsExact, setFactsExact] = useState(false);
   // At city/district LABEL zoom the pill names a place with its own count: the box reads that place's prepared facts.
-  const [factsPlace, setFactsPlace] = useState<{ level: 'city' | 'district'; city: string; district: string } | null>(null);
+  const [factsPlace, setFactsPlace] = useState<PlaceFactsKey | null>(null);
   const { user, openAuth } = useApp();
   const retryPinsRef = useRef<(() => void) | null>(null);
   // The district (or city) most of the view sits in, for the count pill (owner 2026-11-05); null = «في هذه المنطقة».
@@ -1121,7 +1121,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       if (drawCell === 0) rows = placeApart(rows, onScreen, headWidth);
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
-      setPinCount(pillCount(rows)); setFactsBox(paddedBox(center, span));
+      setPinCount(pillCount(rows)); setFactsBox(paddedBox(center, span)); if (drawCell > 0 && factsWide(span.latitudeDelta)) setFactsExact(true);   // bubbles count whole map squares: the box's exact count of the view replaces it
       setPlaceCount(null);
       void placeRead.then((p) => { if (my === seq && mapRef.current === m) setViewPlace(viewPlaceName(p, loc, translitPlace)); });
       // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,

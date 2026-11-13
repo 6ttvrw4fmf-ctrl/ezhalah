@@ -10,7 +10,10 @@ export type AreaLevel = 'country' | 'region' | 'city' | 'district';
  *  the view (drawn, not counted) — the count and the labels are decided separately (review of #11608). */
 /** The place the pill names at area-label zoom, its own count, and (city or district only) the key of its prepared facts
  *  (map_place_facts_ar — the map box from city level to district level, owner 2026-11-13). */
-export type AreaPlace = { name: string; n: number; facts?: { level: 'city' | 'district'; city: string; district: string } };
+/** Which prepared facts belong to the pill's place: one city, one district, or — when the pill names a city but counts only
+ *  the districts on screen — exactly those districts (summed on the server, so the facts are the same ads as the count). */
+export type PlaceFactsKey = { level: 'city' | 'district' | 'districts'; city: string; district: string; districts?: string[] };
+export type AreaPlace = { name: string; n: number; facts?: PlaceFactsKey };
 export type AreaRow = { city: string; district: string; lat: number; lng: number; n: number; at?: { lat: number; lng: number }; offLabel?: true; offCount?: true };
 
 // ZOOM GOES COUNTRY → REGION → CITY → DISTRICT → PINS (owner 2026-11-05: «when the user zooms in, first thing Saudi, the
@@ -236,7 +239,7 @@ export function areaPlace(rows: AreaRow[], level: AreaLevel, loc: 'ar' | 'en', l
     const [city, n] = [...byCity].reduce((b, x) => (x[1] > b[1] ? x : b));
     if (city && n / total >= AREA_PLACE_SHARE) {
       return { name: areaName({ city, district: '' }, 'city', loc, latin), n: rows.filter((a) => a.city === city).reduce((t, a) => t + a.n, 0),
-               facts: { level: 'city', city, district: '' } };
+               facts: { level: 'districts', city, district: '', districts: rows.filter((a) => a.city === city).map((a) => a.district) } };
     }
   }
   return null;

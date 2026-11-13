@@ -78,6 +78,19 @@ const atDistrict = areaPlace(rows, 'district', 'ar', (x) => x, { latitude: 24.8,
 check('the district the pill names carries its own facts key (city + district)', atDistrict?.facts?.level === 'district' && atDistrict.facts.city === 'الرياض' && atDistrict.facts.district === 'الملقا' && atDistrict.n === 900);
 check('the whole-Kingdom view carries no place facts', !areaPlace(rows, 'country', 'ar', (x) => x, { latitude: 24, longitude: 45 }, { latitudeDelta: 17, longitudeDelta: 17 })?.facts);
 
+// 3d. the pill names a city but counts only the districts on screen: the facts of EXACTLY those districts (summed)
+const part: AreaRow[] = [{ city: 'الرياض', district: 'حي الملقا', lat: 24.8, lng: 46.6, n: 400 }, { city: 'الرياض', district: 'حي حطين', lat: 24.76, lng: 46.6, n: 350 },
+  { city: 'الرياض', district: 'حي النرجس', lat: 24.85, lng: 46.65, n: 380 }, { city: 'جدة', district: 'حي الروضة', lat: 24.82, lng: 46.62, n: 20 }];
+const cityNamed = areaPlace(part, 'district', 'ar', (x) => x, { latitude: 24.8, longitude: 46.62 }, { latitudeDelta: 0.3, longitudeDelta: 0.3 });
+const keyedToItsDistricts = (p: typeof cityNamed) => p?.facts?.level === 'districts' && p.facts.city === 'الرياض'
+  && JSON.stringify([...(p.facts.districts ?? [])].sort()) === JSON.stringify(['حي الملقا', 'حي النرجس', 'حي حطين'].sort()) && p.n === 1130;
+check('a city-named view of part of the city reads the facts of exactly its districts (same ads as its count)', keyedToItsDistricts(cityNamed), JSON.stringify(cityNamed));
+mustCatch('a part-of-the-city view keyed to the WHOLE city (facts for ads it does not count)', () => keyedToItsDistricts(cityNamed ? { ...cityNamed, facts: { level: 'city', city: 'الرياض', district: '' } } : null));
+const data = readFileSync(join(root, 'src/data/mapViewFacts.ts'), 'utf8');
+check('the districts on screen are summed by map_place_facts_sum_ar', /place\.level === 'districts' \? 'map_place_facts_sum_ar' : 'map_place_facts_ar'/.test(data) && /p_districts: \[\.\.\.new Set\(place\.districts \?\? \[\]\)\]\.sort\(\)/.test(data));
+check('a place\'s facts (all types) never ask «اختر نوع العقار» — picking a type would leave them', (() => { const x = factBox({ ...full, ppm: null, nbPpm: null, place: true }, 560, 'ar', false); return x.kind === 'chips' && x.hint === null; })());
+mustCatch('a place box that asks for a type', () => { const x = factBox({ ...full, ppm: null, nbPpm: null, place: false }, 560, 'ar', false); return x.kind === 'chips' && x.hint === null; });
+
 // 4. the screen asks for the box the count was read over, and compares with the number it shows
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(paddedBox\(center, span\)\);/.test(src)
@@ -88,6 +101,9 @@ const wired = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(p
   && /factBox\(viewFacts, hasShape \? pinCount : placeCount \?\? pinCount, loc, typePicked, saleOnly, translitPlace, hasShape\)/.test(src)
   && /fetchViewFacts\(box, pinFilter, !!user\)/.test(src);
 check('the map asks for the counted box and shows the facts only against the number it shows', wired(web));
+const bubblesExact = (src: string) => /setPinCount\(pillCount\(rows\)\); setFactsBox\(paddedBox\(center, span\)\); if \(drawCell > 0 && factsWide\(span\.latitudeDelta\)\) setFactsExact\(true\);/.test(src);
+check('a bubble view (whole map squares) takes the exact count of the view from the box, so the box can show', bubblesExact(web));
+mustCatch('a bubble view whose square count never meets the box\'s exact count (box never shows)', () => bubblesExact(web.replace(' if (drawCell > 0 && factsWide(span.latitudeDelta)) setFactsExact(true);', '')));
 const placeWired = (src: string) => /factsPlace && !hasShape && !drawing && pinFilter && placeFactsFit\(pinFilter\) && typeof placeCount === 'number'/.test(src)
   && /fetchPlaceFacts\(place, deals, !!user\)/.test(src)
   && /setFactsPlace\(!whole && place\?\.facts \? place\.facts : null\);/.test(src)

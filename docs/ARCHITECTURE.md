@@ -613,7 +613,11 @@ gives way to the exact count of the same box, so the box shows there too; at cit
 2026-11-13, «from city level to district level») the box reads the named place's prepared facts (`map_place_facts`,
 rebuilt hourly by `bundle-hourly-monitors`; `map_place_facts_ar()`), only when the count is all of one deal's ads there
 (no type, rooms, price, area or other filter) and the pill's count is within 3% (or 3 ads) of the prepared count — new
-ads in the hour — else nothing; the whole-Kingdom view keeps its count only; «أمس» is the last FINISHED
+ads in the hour — else nothing; where the pill names a city but counts only the districts on screen, the box reads those
+districts' prepared facts added up (`map_place_facts_sum_ar()`: counts only — a median cannot be added — unless they are
+the whole city, then the city's own facts; every named district must have a row, else nothing); a bubble view (counted
+by whole map squares) takes the box's exact count of the view, as the wider district view does; the whole-Kingdom view
+keeps its count only; «أمس» is the last FINISHED
 day (never «اليوم», which reads 0 in the morning); a failed read hides the box's facts (never «0»); guests see the same
 layout with blurred shapes and «🔒 سجل الدخول لعرض الأرقام», and the server never sends them a number.
 History: «اختفى» counts confirmed removals from the nightly `map_fact_removal` log (started 2026-11-12 — only 37% of
