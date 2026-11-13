@@ -32,13 +32,36 @@ try {
   await page.getByText('الضروري فقط', { exact: true }).click({ timeout: 3_000 }).catch(() => {});
   await page.locator('[role=tab]', { hasText: 'خريطة' }).first().click();
   await page.waitForFunction(() => location.pathname === '/map' && !!window.mapkit?.maps?.length, null, { timeout: 30_000 });
+  // THE MAP MUST HAVE ITS REAL SIZE BEFORE THE FIRST MOVE (🔧 2026-11-09, runs 42543196305 / 42583716199). `mapkit.maps`
+  // exists the instant the map is constructed, while the tab is still laying out and the host box can be a few pixels
+  // tall. MapKit keeps the centre and the metres-per-pixel of a region set then; when the host grows to the phone's
+  // height the latitude span grows with it (24× is enough to cross DISTRICT_LABELS_ABOVE = 0.06), the map re-emits the
+  // region, the app draws the DISTRICT labels for that wide view and the pill reads «1,388 إعلان للبيع في جدة» while the
+  // street-level heads it had just drawn are still on screen as the 6 s bridge. Both red runs read exactly that: a pill
+  // from one view over heads from another. A user cannot move a map that has no size yet, so this is the robot's own
+  // condition, not the product's — wait for a host at least 300 px tall whose size has not changed for 400 ms.
+  await page.waitForFunction(() => {
+    const el = document.querySelector('[data-testid=map-dots-canvas]') ?? window.mapkit.maps[window.mapkit.maps.length - 1].element;
+    const r = el?.getBoundingClientRect(); const w = window;
+    const sig = r ? `${Math.round(r.width)}x${Math.round(r.height)}` : '';
+    if (w.__hostSig !== sig) { w.__hostSig = sig; w.__hostAt = performance.now(); return false; }
+    return !!r && r.height >= 300 && performance.now() - w.__hostAt > 400;
+  }, null, { timeout: 30_000, polling: 100 }).catch(() => {});
+
+  const moveTo = (spot, span) => page.evaluate(({ lat, lng, span }) => {
+    const mk = window.mapkit; const m = mk.maps[mk.maps.length - 1];
+    m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(lat, lng), new mk.CoordinateSpan(span, span)), false);
+  }, { lat: spot.lat, lng: spot.lng, span });
+  // What the map is actually showing: its own region (MapKit widens one axis to the screen's shape, never 2×) and
+  // whether area labels — the zoomed-out surface — are on it. Printed with every verdict, so a red run names its view.
+  const readView = () => page.evaluate(() => {
+    const m = window.mapkit.maps[window.mapkit.maps.length - 1]; const r = m.region;
+    return { lat: +r.span.latitudeDelta.toFixed(4), lng: +r.span.longitudeDelta.toFixed(4), areas: document.querySelectorAll('[data-testid=map-area]').length };
+  });
 
   for (const spot of SPOTS) {
     for (const span of spot.spans) {
-      await page.evaluate(({ lat, lng, span }) => {
-        const mk = window.mapkit; const m = mk.maps[mk.maps.length - 1];
-        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(lat, lng), new mk.CoordinateSpan(span, span)), false);
-      }, { lat: spot.lat, lng: spot.lng, span });
+      await moveTo(spot, span);
       // Settled = the map has DRAWN something (a head, a bubble or the count pill) and the set has not changed for 1.5 s.
       // A blank map is not settled: its signature is stable from the first frame, and the pins RPC answers only after the
       // move ends (854 ms measured 14:23 UTC 2026-11-06 under the hourly index sync) — run 42233389216 read «0 pins» on
@@ -48,14 +71,25 @@ try {
       // heads alone are the signal: the count pill is written by a separate place read and can move on its own.
       const readHeads = () => [...document.querySelectorAll('[data-testid=map-pin], [data-testid=map-bubble]')].map((e) => e.textContent).join('|');
       const readPill = () => document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '';
-      await page.evaluate((readHeads) => { const w = window; w.__headsBefore = eval(readHeads)(); w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); }, readHeads.toString());
-      await page.waitForFunction(({ readHeads, readPill }) => {
-        const heads = eval(readHeads)(); const sig = heads + '#' + eval(readPill)();
-        const w = window; if (w.__pinSig !== sig) { w.__pinSig = sig; w.__pinAt = performance.now(); return false; }
-        // Unchanged heads: the 1.5 s stability clock starts when the 12 s gate opens, not at the first poll.
-        const since = heads === w.__headsBefore ? Math.max(w.__pinAt, w.__pinT0 + 12_000) : w.__pinAt;
-        return performance.now() - since > 1500;
-      }, { readHeads: readHeads.toString(), readPill: readPill.toString() }, { timeout: 25_000, polling: 100 }).catch(() => {});
+      const settle = async () => {
+        await page.evaluate((readHeads) => { const w = window; w.__headsBefore = eval(readHeads)(); w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); }, readHeads.toString());
+        await page.waitForFunction(({ readHeads, readPill }) => {
+          const heads = eval(readHeads)(); const sig = heads + '#' + eval(readPill)();
+          const w = window; if (w.__pinSig !== sig) { w.__pinSig = sig; w.__pinAt = performance.now(); return false; }
+          // Unchanged heads: the 1.5 s stability clock starts when the 12 s gate opens, not at the first poll.
+          const since = heads === w.__headsBefore ? Math.max(w.__pinAt, w.__pinT0 + 12_000) : w.__pinAt;
+          return performance.now() - since > 1500;
+        }, { readHeads: readHeads.toString(), readPill: readPill.toString() }, { timeout: 25_000, polling: 100 }).catch(() => {});
+      };
+      await settle();
+      // THE VIEW UNDER JUDGEMENT MUST BE THE VIEW ASKED FOR. If the map is not at this span (a late host resize undid the
+      // move — see the wait above) or still carries area labels, the pill and the heads describe different views and no
+      // verdict about either is honest. Move once more and settle again; the verdict then prints the view it judged.
+      let view = await readView();
+      if (view.lat > span * 2 || view.areas > 0) {
+        console.log(`        view was not the one requested (span ${view.lat}°×${view.lng}°, ${view.areas} area label(s)) — moving again`);
+        await moveTo(spot, span); await settle(); view = await readView();
+      }
       const seen = await page.evaluate(() => {
         // THE VISIBLE MAP, not the viewport (🔧 2026-11-06, diag 42226056422): MapKit draws heads under the map's own
         // control strip («شراء» / «تصفية», above the canvas) and past its right edge; those a user cannot see or reach
@@ -82,11 +116,12 @@ try {
         return { count: pins.length, overlaps, blocked, pill: document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '' };
       });
       const where = `${spot.name} (span ${span}°)`;
+      const judged = `view ${view.lat}°×${view.lng}°, ${view.areas} area label(s)`;
       say(seen.overlaps.length === 0, `${where}: no two pins overlap (${seen.count} on screen)`, seen.overlaps.slice(0, 8).join(', '));
       say(seen.blocked.length === 0, `${where}: every pin can be tapped`, `covered: ${seen.blocked.slice(0, 8).join(', ')}`);
       if (span === spot.spans[0]) {
-        say(seen.count >= spot.minPins, `${where}: the map shows pins at all (≥ ${spot.minPins})`, `${seen.count} pins`);
-        say(seen.pill.includes(spot.district) && !seen.pill.includes('هذه المنطقة'), `${where}: the count names the district («${seen.pill}»)`, `expected «${spot.district}» in the pill`);
+        say(seen.count >= spot.minPins, `${where}: the map shows pins at all (≥ ${spot.minPins})`, `${seen.count} pins — ${judged}`);
+        say(seen.pill.includes(spot.district) && !seen.pill.includes('هذه المنطقة'), `${where}: the count names the district («${seen.pill}»)`, `expected «${spot.district}» in the pill — ${judged}`);
       }
     }
   }

@@ -52,6 +52,13 @@ export interface SentenceReading {
   numbersInSentence: number[];
   /** Nearest results-shaped text, quoted when nothing matched so a human can act on the failure. */
   evidence: string;
+  /**
+   * Cards the page could not hydrate — rows the index served minus cards on screen (optional; absent = 0).
+   * THE COUNT FOLLOWS THE CARDS (src/lib/honestTotal.ts, 🔧 1153): the app prints `total_count − dropped`, so a
+   * sentence exactly that far below the RPC total is the honest number, not a wrong one (2026-11-09 run
+   * 42597206618: «quotes 73350, RPC total_count 73351» over one dropped card). Anything else is still a defect.
+   */
+  droppedAtHydration?: number | null;
 }
 
 /**
@@ -91,9 +98,13 @@ export function sentenceProblems(r: SentenceReading): string[] {
       + '#331 report its «عرض المزيد» headline as null');
   } else if (r.rpcTotal != null && r.quoted !== r.rpcTotal && !r.numbersInSentence.includes(r.rpcTotal)) {
     // The 500-cap terminal sentence legitimately quotes 500 alongside the true total, so the true
-    // total appearing ANYWHERE in the sentence is enough — but it must appear.
-    problems.push(`the displayed sentence does not carry the true total: quotes ${r.quoted}, `
-      + `RPC total_count ${r.rpcTotal}`);
+    // total appearing ANYWHERE in the sentence is enough — but it must appear. The one other number
+    // that is honest is `total − dropped` with dropped > 0: the cards the page could not hydrate.
+    const dropped = Math.max(0, Math.trunc(r.droppedAtHydration ?? 0));
+    if (!(dropped > 0 && r.quoted === r.rpcTotal - dropped)) {
+      problems.push(`the displayed sentence does not carry the true total: quotes ${r.quoted}, `
+        + `RPC total_count ${r.rpcTotal}${dropped ? ` (${dropped} card(s) dropped at hydration would explain ${r.rpcTotal - dropped}, not ${r.quoted})` : ''}`);
+    }
   }
 
   return problems;

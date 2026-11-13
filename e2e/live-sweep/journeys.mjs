@@ -6,6 +6,15 @@ import {
   onOneIndex, judgeAdvertisedVsLanded,
 } from './sweep.mjs';
 import { searchSettled, settledSource, resultsFoundCount } from '../lib/resultsSentence.mjs';
+import { cardBadges } from '../lib/honestTotal.mjs';
+
+// What the landing page asked the index for and what it could render — the two numbers that let judgeAdvertisedVsLanded()
+// tell the app's honest «total − dropped cards» (src/lib/honestTotal.ts) from a wrong count. `requests` is the page's own
+// search traffic (withPage); the last real search (p_limit > 1) is the page the sentence describes.
+const honestOf = (requests, body) => {
+  const req = requests.filter((r) => (r.p_limit ?? 0) > 1).pop();
+  return req ? { pageLimit: req.p_limit, cards: cardBadges(body) } : null;
+};
 
 const enc = encodeURIComponent;
 
@@ -95,11 +104,12 @@ export async function trendingCity(plan) {
       const advertised = num(countText);
       if (!await pickCity(page, cityName)) { note(`${name}: could not select «${cityName}» — skipped`); return null; }
       await runSearch(page);
-      return { cityName, advertised, landed: lastCount(await page.evaluate(() => document.body.innerText)) };
+      const body = await page.evaluate(() => document.body.innerText);
+      return { cityName, advertised, landed: lastCount(body), honest: honestOf(requests, body) };
     });
     const seen = settled.result;
     if (!seen) return null;
-    judgeAdvertisedVsLanded(name, `trending city «${seen.cityName}»`, seen.advertised, seen.landed, settled);
+    judgeAdvertisedVsLanded(name, `trending city «${seen.cityName}»`, seen.advertised, seen.landed, settled, seen.honest);
     return assertChain(`${name}:${seen.cityName}`, {
       intent: { city: seen.cityName, deal: plan.deal, period: plan.period }, page, requests,
     });
@@ -177,12 +187,13 @@ export async function trendingDistrict(plan) {
       if (drow) { await drow.scrollIntoViewIfNeeded().catch(() => {}); await drow.click().catch(() => {}); }
       await sleep(1400);
       await runSearch(page);
-      return { districtName, advertised, landed: lastCount(await page.evaluate(() => document.body.innerText)) };
+      const body = await page.evaluate(() => document.body.innerText);
+      return { districtName, advertised, landed: lastCount(body), honest: honestOf(requests, body) };
     });
     const seen = settled.result;
     if (!seen) return null;
     const { districtName, advertised, landed } = seen;
-    judgeAdvertisedVsLanded(name, `district «${districtName}»`, advertised, landed, settled);
+    judgeAdvertisedVsLanded(name, `district «${districtName}»`, advertised, landed, settled, seen.honest);
     return assertChain(`${name}:${districtName}`, { intent: { city: plan.city, deal: plan.deal, district: districtName }, page, requests});
   });
 }
@@ -231,7 +242,7 @@ export async function commitOneAfAnswer(page, name, requests, before, served) {
   // than an accusation. A real AF mismatch is deterministic and still fails the first stable read.
   const settled = await onOneIndex(() => afAnswerRound(page, name, requests, before, served));
   const seen = settled.result;
-  if (seen) judgeAdvertisedVsLanded(name, `AF chip «${seen.pick.key}»`, seen.promised, seen.landed, settled);
+  if (seen) judgeAdvertisedVsLanded(name, `AF chip «${seen.pick.key}»`, seen.promised, seen.landed, settled, seen.honest);
   return seen;
 }
 
@@ -314,8 +325,9 @@ async function afAnswerRound(page, name, requests, before, served) {
     { n: beforeTurns, src: turnRe }, { timeout: 50000 }).catch(() => {});
   await sleep(3500);
 
-  const landed = lastCount(await page.evaluate(() => document.body.innerText));
-  return { title: first.title, pick, promised, landed };
+  const body = await page.evaluate(() => document.body.innerText);
+  const landed = lastCount(body);
+  return { title: first.title, pick, promised, landed, honest: honestOf(requests, body) };
 }
 
 export async function advancedFilter(plan) {

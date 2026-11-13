@@ -80,6 +80,11 @@ const reports: Report[] = [];
 const OWN_SECTION: Record<string, string> = {
   abralosol: 'article[data-history-node-id]',
   shomou: 'article[data-history-node-id]',
+  // erapulse (run 42471412830, 2026-11-08): the Next.js page embeds the «similar ads» records — each with its own
+  // latitude/longitude/googleMapsUrl — in the RSC payload below <main>; both «missed» pins (26.3037,44.2583 and
+  // 26.4428,43.8865) were other ads' maps links (cmqo2npye…, cmn3ejv63…), while the sampled ads' own API records carry no
+  // coordinates and an empty googleMapsUrl. The ad's own content is the <main id="main-content"> block.
+  erapulse: 'main#main-content',
 };
 // A site whose page map is DELIBERATELY not read, with the evidence (2026-10-21 audit): flagging it every week
 // would be noise, and reading it would show a wrong pin.

@@ -37,6 +37,7 @@
 // defect — while the old fallback («use the whole document») is what read a card in the first place.
 
 import { resultsFoundCount, zeroRendered } from '../lib/resultsSentence.mjs';
+import { cardBadges } from '../lib/honestTotal.mjs';
 
 /** Labels are matched at line start only; the value is the rest of that one line. */
 const FIELD_MAX = 120;
@@ -73,6 +74,9 @@ export function parseVisibleState(all) {
     // pinned here. Pinning «لقينا N إعلان» is what darkened this field — and with it the whole
     // RPC→RENDERED layer — on every journey of 2026-09-19. See e2e/lib/resultsSentence.mjs.
     headline: resultsFoundCount(all),
+    // The cards a customer can reach: the app prints total − (rows asked − cards hydrated) when a raw row is gone
+    // (src/lib/honestTotal.ts), so an RPC→RENDERED oracle needs this number to tell honesty from a wrong count.
+    cards: cardBadges(all),
     // ONE zero vocabulary, shared with the settle clock — see zeroRendered()’s header for why
     // a hand-written subset here made a healthy honest zero read as zero:false.
     zero: zeroRendered(all),

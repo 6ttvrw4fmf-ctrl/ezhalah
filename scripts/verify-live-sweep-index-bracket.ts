@@ -94,6 +94,24 @@ const counts = () => [findings.length, undecideds.length] as const;
   findings.length = f0;
 }
 {
+  // THE LANDED NUMBER FOLLOWS THE CARDS (src/lib/honestTotal.ts): advertised − dropped is honest, only that, only stable.
+  const [f0, u0] = counts();
+  check('honest — landed = advertised − the cards the page could not hydrate is NOT a defect (run 42466204757: 99015 → 99014 over 9 of 10 cards)',
+    judgeAdvertisedVsLanded('j', 'city', 99015, 99014, stable, { pageLimit: 10, cards: 9 }) === 'honest'
+    && findings.length === f0 && undecideds.length === u0);
+  check('MUTATION — the same pair with every card on screen is still a DEFECT',
+    judgeAdvertisedVsLanded('j', 'city', 99015, 99014, stable, { pageLimit: 10, cards: 10 }) === 'defect'
+    && findings.length === f0 + 1);
+  findings.length = f0;
+  check('MUTATION — a landing lower than the drop explains is still a DEFECT',
+    judgeAdvertisedVsLanded('j', 'city', 99015, 99013, stable, { pageLimit: 10, cards: 9 }) === 'defect'
+    && findings.length === f0 + 1);
+  findings.length = f0;
+  check('the honest allowance never outranks the bracket — a moved index is still UNDECIDED',
+    judgeAdvertisedVsLanded('j', 'city', 99015, 99014, moved, { pageLimit: 10, cards: 9 }) === 'undecided'
+    && findings.length === f0 && undecideds.length === u0 + 1);
+}
+{
   const [f0, u0] = counts();
   check('C — a mismatch across a rebuilt index is UNDECIDED, never a defect',
     judgeAdvertisedVsLanded('j', 'city', 35900, 35907, moved) === 'undecided'

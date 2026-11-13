@@ -534,8 +534,24 @@ export const storedHistory = (page) => page.evaluate((sub) => {
 let lastClickReason = '';
 export const clickReason = () => lastClickReason;
 
+/**
+ * The ENGINE died under the journey — the page, context or browser is gone. That is a fact about the
+ * runner (WebKit on Linux does this; 2026-11-08 run 42476070862 had «الوسيط الذكي» fail with
+ * «Target page, context or browser has been closed» and filed it as a product defect), never about
+ * the product: nothing a user does closes their own browser mid-tap. Thrown rather than returned, so
+ * the journey cannot read it as «the control was not reachable»; the runner files it as a HARNESS skip.
+ */
+export class EngineDiedError extends Error {}
+const ENGINE_DIED = /has been closed|Target crashed|browser has disconnected|Browser closed|Protocol error.*Target closed/i;
+export const isEngineDeath = (e) => e instanceof EngineDiedError || ENGINE_DIED.test(String(e));
+
 export async function clickText(page, text, { exact = true, nth = 0, timeout = 15_000 } = {}) {
   const loc = page.getByText(text, { exact }).nth(nth);
+  // «NOT PRESENT» MEANS NOT PRESENT AFTER A SHORT WAIT, NOT «NOT PAINTED YET». A bare count() read the
+  // DOM at one instant: on WebKit the agent screen's «تصفية» tab was absent 1.5 s after the switch on
+  // run 2/2 and present on run 1/2 of the same journey (42476070862), so the same product state
+  // produced a pass and a defect. A control that never appears is still reported absent — 5 s later.
+  await loc.first().waitFor({ state: 'attached', timeout: Math.min(timeout, 5_000) }).catch((e) => { if (isEngineDeath(e)) throw new EngineDiedError(String(e).split('\n')[0]); });
   if (!(await loc.count())) { lastClickReason = `«${text}» is not present`; return false; }
   await loc.scrollIntoViewIfNeeded().catch(() => {});
   try {
@@ -543,6 +559,7 @@ export async function clickText(page, text, { exact = true, nth = 0, timeout = 1
     lastClickReason = '';
     return true;
   } catch (e) {
+    if (isEngineDeath(e)) throw new EngineDiedError(`«${text}» click: ${String(e).split('\n')[0].slice(0, 140)}`);
     // Playwright's own log names the interceptor ("… subtree intercepts pointer events"), which is
     // exactly the discriminator PART 9.1 asks a finding to state. Keep it; do not swallow it.
     const first = String(e).split('\n').find((l) => /intercepts pointer events/.test(l));

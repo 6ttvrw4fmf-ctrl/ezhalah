@@ -36,6 +36,7 @@ import { appendFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { parseVisibleState } from './visibleState.mjs';
 import { pickCityOptionIndex } from './cityOption.mjs';
 import { resultsFoundCount, settledSource } from '../lib/resultsSentence.mjs';
+import { droppedAtHydration, isHonestlyLower } from '../lib/honestTotal.mjs';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
@@ -539,9 +540,21 @@ const undecide = (journey, detail) => {
  *                                        never weaken: a real mismatch still accuses production)
  *   different, index moved / unreadable / no bracket at all → UNDECIDED, never a verdict
  */
-export function judgeAdvertisedVsLanded(journey, what, advertised, landed, settled) {
+export function judgeAdvertisedVsLanded(journey, what, advertised, landed, settled, honest = null) {
   if (advertised == null || landed == null) return 'unknown';
   if (advertised === landed) return 'agree';
+  // THE LANDED NUMBER FOLLOWS THE CARDS (src/lib/honestTotal.ts): when `honest` says how many rows the landing page asked
+  // for and how many cards it rendered, a landing EXACTLY `dropped` below the promise is the app subtracting the cards
+  // it could not hydrate — 2026-11-08 «trending city «الرياض» advertised 99015, landed 99014» over 9 of 10 cards. Only
+  // that one number is accepted, only on a stable index (a moved index is still the bracket's verdict below), and it is
+  // said out loud, never folded into a silent agree.
+  if (honest && settled?.stable) {
+    const dropped = droppedAtHydration({ total: advertised, pageLimit: honest.pageLimit, cards: honest.cards });
+    if (isHonestlyLower(landed, advertised, dropped)) {
+      note(`${journey}: ${what} advertised ${advertised}, landed ${landed} = advertised − ${dropped} card(s) the raw hydration dropped (${honest.cards} of ${honest.pageLimit} on screen) — the honest total`);
+      return 'honest';
+    }
+  }
   if (!settled || !settled.stable) {
     undecide(journey, `${what} advertised ${advertised}, landed ${landed} — the two reads `
       + `${settled ? `straddle an index rebuild (${settled.stamp})` : 'were taken with NO index bracket (harness)'}`
@@ -1149,7 +1162,14 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   } else { j.dbSkipped = dbf.reason; }
   // 5→6 what the user actually sees
   if (rendered != null && j.rpc != null && rendered !== j.rpc) {
-    defect(name, 'RPC→RENDERED', `page shows ${rendered}, RPC returned ${j.rpc}`); j.ok = false;
+    // THE COUNT FOLLOWS THE CARDS (src/lib/honestTotal.ts, e2e/lib/honestTotal.mjs): a row the raw hydration dropped is
+    // still in the index's total, and the app prints total − dropped. Allowed EXACTLY when the page is short by that many
+    // cards — 2026-11-08 «page shows 99014, RPC returned 99015» over 9 cards of a 10-row page; anything else still accuses.
+    const dropped = droppedAtHydration({ total: j.rpc, pageLimit: req?.p_limit, cards: ui.cards });
+    if (isHonestlyLower(rendered, j.rpc, dropped)) {
+      j.honestDrop = dropped;
+      note(`${name}: page shows ${rendered} = RPC ${j.rpc} − ${dropped} card(s) the raw hydration dropped (${ui.cards} of ${req?.p_limit} on screen) — the honest total, not a mismatch`);
+    } else { defect(name, 'RPC→RENDERED', `page shows ${rendered}, RPC returned ${j.rpc}${dropped ? ` (${dropped} card(s) short of the page, which would explain ${j.rpc - dropped}, not ${rendered})` : ''}`); j.ok = false; }
   }
   // A COUNT THE HARNESS CANNOT READ IS A BLIND JOURNEY, NEVER A QUIET PASS (2026-09-19).
   // `rendered == null` gates BOTH the RPC→RENDERED comparison above and the page-cap watch below, so

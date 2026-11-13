@@ -10,7 +10,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { readFileSync } from 'node:fs';
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
-         findings, skips, skip, passes, classifyRunOutcome, classifyBlockedControl,
+         findings, skips, skip, passes, classifyRunOutcome, classifyBlockedControl, isEngineDeath,
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
@@ -1762,17 +1762,34 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
   // So sample tightly THROUGH the tap: if the app was ever in the speaking state, it was (b).
   // PART 10.2's rule for a surface that is hard to observe — make the failure visible rather than
   // guess again.
-  const sawSpeaking = { ever: false, atMs: null };
+  // THE WATCH RUNS INSIDE THE PAGE, AND IT WATCHES THE SENTENCE TOO (🔧 2026-11-09, run 42476070862:
+  // 2/2 «silent dead control» on Firefox desktop, 0/4 on Chromium, same production bundle). The
+  // refusal line auto-hides 3,200 ms after the tap (FeedbackRow.tsx setTimeout). The old loop was 24
+  // page.evaluate round trips at ≥50 ms each PLUS a 700 ms sleep before the first read of the
+  // sentence; on Gecko a round trip is ~100 ms, so the first read landed at ~4 s — after the sentence
+  // had gone — and an honest refusal was filed as silence. ops_incident #856's 3-in-32 on Chromium is
+  // the same clock on a loaded runner. One in-page poll every 50 ms for 1.2 s sees the speaking state
+  // AND the sentence the moment either appears; the +700 ms read below stays as the second witness.
   const t1 = Date.now();
   await btn.click();
-  for (let i = 0; i < 24; i++) {          // 24 x 50ms = 1.2s, straddling the 700ms verdict below
-    const live = await page.evaluate((stopLabel) =>
-      !!(window.speechSynthesis?.speaking || window.speechSynthesis?.pending)
-      || document.querySelectorAll(`[aria-label="${stopLabel}"]`).length > 0,
-    RA_STOP_BUTTON).catch(() => false);
-    if (live) { sawSpeaking.ever = true; sawSpeaking.atMs = Date.now() - t1; break; }
-    await sleep(50);
-  }
+  const watched = await page.evaluate(async ({ stopLabel, device, preparing }) => {
+    const out = { speakingAtMs: null, sentenceAtMs: null, sentence: null };
+    const t0 = performance.now();
+    for (let i = 0; i < 24 && (out.speakingAtMs == null || out.sentenceAtMs == null); i++) {
+      const now = Math.round(performance.now() - t0);
+      if (out.speakingAtMs == null && (!!(window.speechSynthesis?.speaking || window.speechSynthesis?.pending)
+        || document.querySelectorAll(`[aria-label="${stopLabel}"]`).length > 0)) out.speakingAtMs = now;
+      if (out.sentenceAtMs == null) {
+        const dom = document.body.textContent || '';
+        if (dom.includes(device)) { out.sentenceAtMs = now; out.sentence = 'device'; }
+        else if (dom.includes(preparing)) { out.sentenceAtMs = now; out.sentence = 'preparing'; }
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return out;
+  }, { stopLabel: RA_STOP_BUTTON, device: RA_DEVICE_VERDICT, preparing: RA_STILL_PREPARING })
+    .catch(() => ({ speakingAtMs: null, sentenceAtMs: null, sentence: null }));
+  const sawSpeaking = { ever: watched.speakingAtMs != null, atMs: watched.speakingAtMs };
   await sleep(700);
   // READ THE DOM TWO WAYS (🔧 2026-10-24, backlog 799). The refusal line is a conditionally rendered
   // <Text>, so its presence in the DOM IS the sentence on screen; `innerText` alone has read "" for
@@ -1780,11 +1797,13 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
   // a silent control. Both reads are reported so a miss names the layer that missed.
   const body = await bodyText(page);
   const dom = await page.evaluate(() => document.body.textContent || '').catch(() => '');
-  const saidDevice = body.includes(RA_DEVICE_VERDICT) || dom.includes(RA_DEVICE_VERDICT);
-  const saidPreparing = body.includes(RA_STILL_PREPARING) || dom.includes(RA_STILL_PREPARING);
+  const saidDevice = body.includes(RA_DEVICE_VERDICT) || dom.includes(RA_DEVICE_VERDICT) || watched.sentence === 'device';
+  const saidPreparing = body.includes(RA_STILL_PREPARING) || dom.includes(RA_STILL_PREPARING) || watched.sentence === 'preparing';
   const seenVia = (saidDevice || saidPreparing)
-    ? (body.includes(RA_DEVICE_VERDICT) || body.includes(RA_STILL_PREPARING) ? 'innerText' : 'textContent only')
-    : 'neither innerText nor textContent';
+    ? (body.includes(RA_DEVICE_VERDICT) || body.includes(RA_STILL_PREPARING) ? 'innerText'
+      : (dom.includes(RA_DEVICE_VERDICT) || dom.includes(RA_STILL_PREPARING) ? 'textContent only'
+        : `the in-page watch only (at +${watched.sentenceAtMs}ms; gone by the +700ms read)`))
+    : 'neither innerText nor textContent nor the in-page watch';
 
   const after = await page.evaluate((stopLabel) => ({
     stop: document.querySelectorAll(`[aria-label="${stopLabel}"]`).length,
@@ -3212,7 +3231,12 @@ for (const [key, fn] of Object.entries(JOURNEYS)) {
       const skipsBefore = skips.length;
       const passesBefore = passes.length;
       console.log(`\n▶ ${key} [${mobile ? 'mobile' : 'desktop'}] run ${i}/${N}`);
-      try { await fn(mobile); } catch (e) { defect(key, 'journey threw', String(e).slice(0, 220)); }
+      try { await fn(mobile); } catch (e) {
+        // The engine dying mid-journey is the RUNNER's event (harness.mjs EngineDiedError): a skip that
+        // names it, never a product defect — and never a quiet pass either (classifyRunOutcome below).
+        if (isEngineDeath(e)) skip(`${key}:${mobile ? 'mobile375' : 'desktop1440'}`, `HARNESS — the browser engine died under the journey: ${String(e).slice(0, 160)}`);
+        else defect(key, 'journey threw', String(e).slice(0, 220));
+      }
       ran++;
       // A RUN THAT ASSERTED NOTHING IS NOT A PASS. The verdict used to be a subtraction with no
       // bottom: no finding and no skip meant `pass`, which silently also covered "this journey
