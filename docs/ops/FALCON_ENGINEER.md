@@ -437,7 +437,7 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    20261111141500 kept pooled short stays (Haraj daily/weekly) out of «سنوي»; the shared translator was updated, six
    hand copies were not, and af-live-truth-check plus the live sweep read the correct RPC as «1 eligible listing never
    served» for two days (haraj 18957735 is a weekly rent). When a robot says RPC < oracle by a handful, read the extra
-   rows' own period first. `scripts/verify-yearly-oracles-keep-short-stays-out.ts` now finds the shape anywhere.
+   rows' own period first. `scripts/verify-oracle-rent-pool-is-one-spelling.ts` now finds the shape anywhere.
    Same night, same class: a robot that listens late (the app fetches the district list at the CITY pick) and an
    alert bridge with no setup-node on the self-hosted runner (Node 18) — check the robot before the product.
 
