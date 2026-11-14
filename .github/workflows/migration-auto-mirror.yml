@@ -24,7 +24,9 @@ env:
 jobs:
   mirror:
     name: Open save PRs for unmirrored migrations
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14, measured): the mirror robot keeps the drift gate from refusing every deploy; it queued
+    # 5 h on the own server (run 43575067881). Listed in HOSTED_ONLY.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       # A queued run checks out the commit of the moment it was DISPATCHED unless told otherwise. 2026-11-04: run

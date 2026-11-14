@@ -46,6 +46,15 @@ runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_
 
 **And the four aqar crawls (2026-11-14): `aqar-sweep`, `aqar-commercial-sweep`, `aqar-deep-fill`, `aqar-commercial-fill`.** sa.aqar.fm answered the server HTTP 403 on all four TLS profiles: aqar_commercial runs after the switch 12 of 22 ok (10 with «direct/chrome124:HTTP 403 … edge101:403»), the 3 days before on GitHub 567 of 571. gathern liveness read «the SOURCE refused this egress» on 2 of 2 runs (55/60 on GitHub; routed to ♻️). Before moving any crawl to the server: one crawl of that site from the server, read rate compared with GitHub's.
 
+**Control-plane jobs stay on GitHub whatever `EZ_RUNNER` says (🔧 2026-11-14, `HOSTED_ONLY`):** the merge robot
+(`engineer-automerge`, PR #12196), `deploy-frontend`, `auto-deploy-merged-fixes`, `apply-migration`, `migration-auto-mirror`,
+`alert-dispatch`, the 4×-CPU-throttled phone robots (`site-speed-live`, `map-pins-live`, `ad-viewer-speed-live`,
+`iphone-robot-live`) and `common-location-tests` (the «test» check on scrapers PRs). Measured 2026-11-14 on the 6-runner
+AX42: the robot completed no pass 08:54–13:18 UTC, `deploy-frontend` waited 10 h, `apply-migration` 1.8 h+, the mirror robot
+5 h, and the speed robot got a runner twice in 17 h (red both times). A job the fleet waits on never queues behind a 4-hour
+crawl; a job's runner is part of its SLA. Dispatching one of these robots from a PR branch attaches its verdict to that PR
+as a check — dispatch live robots from `main` or a non-PR branch.
+
 ## Setup (about 30 minutes, after the owner buys the server)
 
 1. Create a **fine-grained GitHub token**: only repository `6ttvrw4fmf-ctrl/ezhalah`, permission **Administration: read

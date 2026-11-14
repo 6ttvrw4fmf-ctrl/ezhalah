@@ -25,7 +25,10 @@ env:
 jobs:
   speed:
     name: Phone journey — open, search, tap within budget
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14, measured): a 4x-CPU-throttled phone robot. After the 20:30 UTC 11-13 switch it got an own
+    # runner twice in 17 h, red both times (04:43, 09:34 waitForFunction 30 s timeout), 30+ passes cancelled; the 22 passes before
+    # on GitHub ran every 30 min, 18 green. Same class as web-runtime-smoke (owner 11-13). Listed in HOSTED_ONLY.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.conclusion != 'skipped')
     steps:
