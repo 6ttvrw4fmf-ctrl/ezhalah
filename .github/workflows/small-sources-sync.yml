@@ -43,7 +43,7 @@ jobs:
   # lines otherwise; an unknown name fails the plan instead of running nothing. Guarded by
   # scripts/verify-small-sources-targeted-dispatch-is-one-job.ts.
   plan:
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -471,7 +471,7 @@ jobs:
 
   sync:
     needs: plan
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     # Per-source override via matrix.tmo — souq24's ~1.3k-GET sweep through the metered Saudi proxy
     # sometimes needs >90m (killed at exactly 90:16 on 07-03 AND 07-04, marking those RUNS
     # "cancelled"). Default stays 90 for everyone else (covers aqarcity ~2.3k Cloudflare pages).
