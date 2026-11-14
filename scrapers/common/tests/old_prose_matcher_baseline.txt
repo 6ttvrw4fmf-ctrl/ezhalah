@@ -1,6 +1,7 @@
 # Scrapers that still fill amenity columns from prose with the OLD matcher (normalize.prose_amenities /
 # amenities_from_text) instead of scrapers/facts/one_reader.amenity_answers (owner 2026-11-03, «one reader»).
 # SHRINK-ONLY: migrate one and delete its line; a new scraper must never appear here (test_one_reader_is_used_by_new_scrapers.py).
+# 2026-11-14: four callers of amenities_from_lines() added — they called the old matcher all along, the guard just could not see them.
 scrapers/aalbarrak/run.py
 scrapers/abaad/run.py
 scrapers/abralosol/run.py
@@ -23,6 +24,8 @@ scrapers/compoundin/run.py
 scrapers/daraa/run.py
 scrapers/daryusuf/run.py
 scrapers/dwelleo/run.py
+scrapers/eaqartabuk/run.py
+scrapers/eastabha/run.py
 scrapers/ebriza/run.py
 scrapers/ego/run.py
 scrapers/eilmalriyada/run.py
@@ -34,6 +37,7 @@ scrapers/flow/run.py
 scrapers/fursaghyr/run.py
 scrapers/goldendeal/run.py
 scrapers/gomenassat/run.py
+scrapers/hajer/run.py
 scrapers/haraj/prose.py
 scrapers/haraj/run.py
 scrapers/hasaad/run.py
@@ -65,6 +69,7 @@ scrapers/sadiqeltajer/run.py
 scrapers/sakan/run.py
 scrapers/shatri/run.py
 scrapers/shomou/run.py
+scrapers/sirdab/run.py
 scrapers/sqcc/run.py
 scrapers/sukna/run.py
 scrapers/superoffice/run.py
