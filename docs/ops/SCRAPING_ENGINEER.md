@@ -154,6 +154,19 @@ These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace t
 > **Owner bar (10-13, still standing):** fix rate ≥ 6/10 proven like a customer · 0 sites broken on our side at the end ·
 > rating ≥ 9 · the owner never has to ask for a fix afterwards · no over-claim.
 
+**NEW (11-14): THE OWN SERVER IS A NEW EGRESS — MEASURE A SITE'S READ RATE ACROSS THE SWITCH, NOT GREEN/RED.** `EZ_RUNNER =
+ezhalah-own` (owner, ~20:30 UTC 11-13; `docs/ops/OWN_SERVER_RUNNERS.md`) moved every non-PR job onto ONE Hetzner address with
+6–8 runners. Same code, dealapp: 11-12 fleet on GitHub 22/24 shards ok, 54,901 of 59,177 read → 11-13 fleet on ezhalah-own
+0/17 ok, 4,514 of 29,768 (origin renders with ng-state and no listing schema); dealapp_liveness 11 alive of 2,400; gathern
+liveness 0/2 «SOURCE refused this egress» (55/60 on GitHub). The broken shards held the own runners ~4 h each and FIFO hands
+each freed runner to the next queued shard, so the 04:22 nightly, every proof, every probe and the merge robot (whose pending
+runs cancel each other) waited the whole slot. #12181 puts dealapp-sharded + dealapp-liveness in HOSTED_ONLY. **Job 0 on
+11-15:** (1) #12181 merged? (2) the 20:23 UTC 11-14 dealapp fleet: every shard on a «GitHub Actions» runner and ≥ 90 % of
+attempted read; (3) per site, `scrape_runs` read rate since 20:30 11-13 vs the 3 days before — any site that fell is the
+same root (HOSTED_ONLY with its measured reason, or a proxy leg); (4) then the owed proofs: sakani journey
+(22223062 / 22223114, run 43560343465 if it ever ran), alqasem probe (branch `probe/alqasem-1114`, prints the rebuilt
+/properties shape) → rebuild. Before relying on any dispatch, read the queue: `gh api repos/…/actions/runs/<dealapp run>/jobs`.
+
 **Kept hard rules:** ONE PR early (`pytest scrapers/common/tests` + `npm run test:all` locally, then push once); read
 every failed site's exception TEXT in the first 15 min; a parser fix is fixed only when the RAW row changed;
 `issues_fixed` = PASS `:proof` rows for tonight's backlog items, counted by query; pick the proof before the fix.

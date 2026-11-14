@@ -32,7 +32,9 @@ jobs:
   liveness:
     name: Liveness ${{ matrix.table }} #${{ matrix.shard }}
     if: inputs.only != 'aqarmonthly'
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (2026-11-14, measured; CodeRabbit on #12181): sa.aqar.fm answers the own server 403, so its
+    # controls read 0/5 and every run quarantined (3 of 3 after the EZ_RUNNER switch, 1 of 107 the 3 days before).
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false   # each shard/table runs independently, in parallel
@@ -76,7 +78,9 @@ jobs:
   aqarmonthly:
     name: Liveness aqarmonthly_residential_listings
     if: inputs.only != 'aqar'
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (2026-11-14, measured; CodeRabbit on #12181): sa.aqar.fm answers the own server 403, so its
+    # controls read 0/5 and every run quarantined (3 of 3 after the EZ_RUNNER switch, 1 of 107 the 3 days before).
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
