@@ -109,7 +109,7 @@ env:
 
 jobs:
   liveness:
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 300
     # actions: read — the sweep asks GitHub whether the run holding the apply lock has FINISHED
     # (scrapers/gathern/liveness.py _reclaim_stale_ci_lock, 2026-11-09): a lost runner left run

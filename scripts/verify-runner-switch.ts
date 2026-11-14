@@ -32,8 +32,18 @@ function evalSwitch(expr: string, event: string, ezRunner: string): string {
 // Workflows that stay on GitHub's machines whatever EZ_RUNNER says — a reviewed list, each with its reason. Every job in a
 // listed file says exactly `ubuntu-latest`; every other file uses the switch. Keeping a job on GitHub is always safe (it is
 // where pull requests run anyway); the list only exists so the choice is deliberate, never a stray hard-code.
+const LIFECYCLE = 'the lifecycle checkers are deadline jobs (gathern 24 h, others 48 h); on the 6-runner own server they queued 10-14 h behind long matrix jobs and every hourly gathern/dealapp sweep was cancelled from 18:37 UTC 2026-11-13 (♻️ 2026-11-14)';
 export const HOSTED_ONLY: Record<string, string> = {
   'dealapp-sharded.yml': 'dealapp throttles PER IP; its 24 shards were built for one IP each, and on our one server they all shared one IP and held 5 of 8 workers for 11 h (2026-11-14)',
+  'aqar-liveness.yml': LIFECYCLE,
+  'aqar-liveness-recheck.yml': LIFECYCLE,
+  'dead-visible-score.yml': LIFECYCLE,
+  'dealapp-liveness.yml': LIFECYCLE,
+  'fleet-liveness.yml': LIFECYCLE,
+  'fleet-liveness-recheck.yml': LIFECYCLE,
+  'gathern-liveness.yml': LIFECYCLE,
+  'gathern-recheck-dead.yml': LIFECYCLE,
+  'wasalt-enum-liveness.yml': LIFECYCLE,
   'web-runtime-smoke.yml': 'phone-speed robots froze on the own server under full load (owner 2026-11-13: «we can split for now»)',
 };
 function problems(files: Record<string, string>, expr = SWITCH): string[] {

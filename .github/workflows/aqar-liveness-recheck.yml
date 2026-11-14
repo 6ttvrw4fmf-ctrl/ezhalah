@@ -27,7 +27,7 @@ env:
 jobs:
   recheck:
     name: Recheck ${{ matrix.table }} #${{ matrix.shard }}
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -54,7 +54,7 @@ jobs:
 
   aqarmonthly:
     name: Recheck aqarmonthly_residential_listings
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
