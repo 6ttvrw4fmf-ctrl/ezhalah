@@ -631,7 +631,7 @@
   },
   {
     "platform": "opensooq",
-    "strategy": "SOURCE_LIST_PRESENCE",
+    "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
     "grace": 3
   },
@@ -751,8 +751,8 @@
   },
   {
     "platform": "sanadak",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {

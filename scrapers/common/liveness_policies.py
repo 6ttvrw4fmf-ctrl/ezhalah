@@ -1593,6 +1593,13 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # waited for three crawl misses on screen (AC30220 dead-visible 11-07). Second reader 11-08
     # (lifecycle-spot-check 42474692308, site-oracle, canaries 5/5) read all 4 struck ads gone: 4 of 4 agree.
     "aqarcity",
+    # 2026-11-14 (♻️): sanadak and opensooq. Their shadow passes read the same struck ads dead at every
+    # daily run and every recheck (sanadak dead=10 would_hide=9, opensooq dead=12 would_hide=4, 11-12..11-14)
+    # and could hide none, so dead ads stayed on screen until three crawl misses (both over the line on the
+    # 11-13 dead-visible score). Second reader 11-14 (lifecycle-spot-check 43590055799 sanadak, 43590058205
+    # opensooq, site-oracle, canaries 5/5): 8 of 8 and 11 of 11 struck shown ads read gone — all agree.
+    # opensooq leaves SOURCE_LIST_DAILY: its daily direct revisit reads every active ad's own page.
+    "sanadak", "opensooq",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
@@ -1673,7 +1680,7 @@ SOURCE_LIST_DAILY: tuple[str, ...] = (
     "remal", "ryadah", "sirdab", "superoffice", "tawia", "wajaf", "wslnaa",
     # 2026-10-03
     "abralosol", "albukaeri", "aqaratikom", "aqarnajran", "arkaan", "awal", "dallali",
-    "fahadalshahri", "fursaghyr", "maqrat", "muajarh", "nafithh", "october", "opensooq",
+    "fahadalshahri", "fursaghyr", "maqrat", "muajarh", "nafithh", "october",
     "ramzalqasim", "safera", "satel", "shmoualshmal", "shomou", "squares", "vmksa", "wahadat",
     # Property Finder launch (owner 2026-11-04 approved the source; launched by the owner's switch)
     "propertyfinder",
