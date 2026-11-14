@@ -81,10 +81,11 @@ export const CARD_SAME_PCT = 5;
 export type Tone = 'up' | 'down' | 'plain';
 /** `near`: too few ads here, so the cell shows the NEARBY districts' month price, labelled «قريبة» (owner 2026-11-13:
  *  «focus on the nearby if little ads») — never passed off as this area's own. */
-export type Cell = { text: string; tone: Tone; near?: boolean };
+export type Cell = { text: string; tone: Tone; near?: boolean; nearPeriod?: 'month' };
 /** A price cell with no figure here and none nearby. */
 export const NONE = '—';
-export const NEAR = { ar: 'قريبة', en: 'nearby' } as const;
+// the fallback is ALWAYS the neighbours' last-month price, whatever column it sits in, and its tag says so (CodeRabbit #12180)
+export const NEAR = { ar: 'قريبة · شهر', en: 'nearby · month' } as const;
 
 export const tone = (mine: number | null, theirs: number | null): Tone => {
   if (mine === null || theirs === null || theirs === 0) return 'plain';
@@ -108,7 +109,7 @@ export function cardRow(c: MapCard, key: RowKey, loc: 'ar' | 'en'): { label: str
     if (key === 'ppm') {
       if (wd.ppm !== null) return { text: num(wd.ppm), tone: 'plain' };
       const nbPpm = c.nb?.month?.ppm ?? null;
-      return nbPpm !== null ? { text: num(nbPpm), tone: 'plain', near: true } : { text: NONE, tone: 'plain' };
+      return nbPpm !== null ? { text: num(nbPpm), tone: 'plain', near: true, nearPeriod: 'month' } : { text: NONE, tone: 'plain' };
     }
     const v = wd[key];
     return v !== null ? { text: num(v), tone: 'plain' } : { text: SOON[loc], tone: 'plain' };
@@ -203,7 +204,7 @@ export const restIsSoon = (cells: Cell[], loc: 'ar' | 'en'): boolean =>
   cells.length === 5 && cells.slice(1).every((x) => x.text === SOON[loc] || x.text === NONE) && cells.slice(1, 4).every((x) => x.text === SOON[loc]);
 export const REST_SOON = { ar: 'باقي المدد تتوفر قريبا', en: 'Longer periods coming soon' } as const;
 export const LEGEND = {
-  near: { ar: '«قريبة» = إعلانات قليلة هنا، فنعرض سعر الأحياء القريبة', en: '«nearby» = too few ads here, so the nearby districts\' price is shown' },
+  near: { ar: '«قريبة · شهر» = إعلانات قليلة هنا، فنعرض سعر الأحياء القريبة لآخر شهر', en: '«nearby · month» = too few ads here, so the nearby districts\' last-month price is shown' },
   up: { ar: 'أعلى من الأحياء القريبة', en: 'above nearby districts' },
   down: { ar: 'أقل', en: 'below' },
 } as const;

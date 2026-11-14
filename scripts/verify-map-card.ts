@@ -5,7 +5,7 @@
 // the box's own view and loads it only on the first tap.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseMapCard, cardRow, quickLook, nearbyPrices, tone, filterChips, restIsSoon, FEW, SOON, NONE, type MapCard } from '../src/lib/mapCard.ts';
+import { parseMapCard, cardRow, quickLook, nearbyPrices, tone, filterChips, restIsSoon, FEW, SOON, NONE, NEAR, LEGEND, type MapCard } from '../src/lib/mapCard.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -38,6 +38,8 @@ check('a window the removal log does not cover yet says «قريبا», never 0'
 const rPpm = cardRow(c, 'ppm', 'ar');
 check('a price from fewer than 10 ads shows the NEARBY month price, flagged «قريبة» (owner 2026-11-13)', rPpm.cells[0].text === '11,733' && rPpm.cells[0].near === true && rPpm.cells[1].near === true && rPpm.cells[2].text === '10,755' && !rPpm.cells[2].near, JSON.stringify(rPpm.cells));
 mustCatch('a nearby price shown without its «قريبة» flag (passed off as this area\'s own)', () => cardRow(c, 'ppm', 'ar').cells[0].near !== true);
+check('a nearby fallback in the yesterday / week column says it is the neighbours\' MONTH price (place AND period)', rPpm.cells[0].nearPeriod === 'month' && rPpm.cells[1].nearPeriod === 'month' && NEAR.ar.includes('شهر') && LEGEND.near.ar.includes('شهر'));
+mustCatch('a fallback tag that names the place but not the period', () => NEAR.ar.replace(' · شهر', '').includes('شهر'));
 const noNb = parseMapCard({ data: { ...raw, nb: null }, error: null }) as MapCard;
 check('few ads here and none nearby: a plain «—», never a number', cardRow(noNb, 'ppm', 'ar').cells[0].text === NONE && !cardRow(noNb, 'ppm', 'ar').cells[0].near);
 check('a row with no history after «أمس» collapses to one «باقي المدد تتوفر قريبا» line', restIsSoon(cardRow(c, 'gone', 'ar').cells, 'ar') && !restIsSoon(cardRow(c, 'new', 'ar').cells, 'ar'));
