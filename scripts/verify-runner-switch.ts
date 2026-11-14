@@ -35,6 +35,16 @@ function evalSwitch(expr: string, event: string, ezRunner: string): string {
 export const HOSTED_ONLY: Record<string, string> = {
   'dealapp-sharded.yml': 'dealapp throttles PER IP; its 24 shards were built for one IP each, and on our one server they all shared one IP and held 5 of 8 workers for 11 h (2026-11-14)',
   'web-runtime-smoke.yml': 'phone-speed robots froze on the own server under full load (owner 2026-11-13: «we can split for now»)',
+  'deploy-frontend.yml': 'the production deploy is a short control-plane job; on the own server run 43547632389 waited 10 h for a runner behind the crawls, so merged customer fixes did not ship (🔧 2026-11-14)',
+  'auto-deploy-merged-fixes.yml': 'the hourly canary deploy of merged src/ fixes is a short control-plane job; it queued 5.6 h on the own server 2026-11-14 (run 43572437722) (🔧 2026-11-14)',
+  'apply-migration.yml': 'applying a night migration is a 2-minute job the engineers wait on inside their slot; run 43590661927 queued 1.8 h+ on the own server 2026-11-14 (🔧 2026-11-14)',
+  'migration-auto-mirror.yml': 'the mirror robot is what keeps the drift gate from refusing every deploy; it queued 5 h on the own server 2026-11-14 (run 43575067881) (🔧 2026-11-14)',
+  'alert-dispatch.yml': 'alert delivery has a 5-minute P0 SLA (alert_delivery P1 14661 and repeat_bug:alert_delivery 14670 opened 2026-11-14 00:44 while its runs queued); a delivery job never waits behind a crawl (🔧 2026-11-14)',
+  'site-speed-live.yml': 'phone-speed robot (4x CPU throttle): on the own server it got a runner twice in 17 h after the 20:30 UTC 11-13 switch, red both times (04:43, 09:34: waitForFunction 30 s timeout) and 30+ passes were cancelled; the 22 passes before on GitHub ran every 30 min, 18 green (🔧 2026-11-14)',
+  'map-pins-live.yml': 'phone map robot (same CPU-throttled class as web-runtime-smoke, owner 2026-11-13); red 17:55 UTC 11-13 after the switch and its runs queued 3 h+ (🔧 2026-11-14)',
+  'ad-viewer-speed-live.yml': 'phone 4G ad-viewer speed robot (owner: in-app sites must stay under 3 s); same throttled class as web-runtime-smoke; queued 2.3 h on the own server 2026-11-14 (🔧 2026-11-14)',
+  'common-location-tests.yml': 'reports the merge-gating «test» check on every scrapers/ PR head through its push trigger; 12 push runs queued 3-4 h on the own server and the robot refused #12188 #12189 #12190 with «test is PENDING» at 13:21 UTC (🔧 2026-11-14)',
+  'iphone-robot-live.yml': 'iPhone-emulation robot, same throttled class as web-runtime-smoke (owner 2026-11-13); queued 5 h on the own server 2026-11-14 (run 43574663651) (🔧 2026-11-14)',
   // A SITE THAT JUDGES OUR ADDRESS (2026-11-14, measured with the same code): dealapp hands the own server's single
   // address its no-listing page. 11-12 fleet on GitHub: 22/24 shards ok, 54,901 of 59,177 ads read; 11-13 fleet on
   // ezhalah-own: 0/17 ok, 4,514 of 29,768 (24,776 origin renders with no listing schema); the liveness sweep read 11

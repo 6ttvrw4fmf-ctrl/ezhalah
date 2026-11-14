@@ -35,7 +35,10 @@ env:
 
 jobs:
   test:
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14, measured): this suite reports the «test» check on every scrapers/ PR head through its
+    # push trigger. On the 6-runner own server 12 of its push runs sat queued 3-4 h behind the crawls, so the merge robot refused
+    # #12188 #12189 #12190 at 13:21 UTC with «test is PENDING». A merge-gating check is a PR check: it stays on GitHub.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

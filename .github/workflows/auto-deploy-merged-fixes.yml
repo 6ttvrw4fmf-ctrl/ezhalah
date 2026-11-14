@@ -29,7 +29,9 @@ env:
 
 jobs:
   dispatch:
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14, measured): the hourly canary deploy queued 5.6 h on the own server (run 43572437722),
+    # so no merged src/ fix reached a customer. Listed in HOSTED_ONLY.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
