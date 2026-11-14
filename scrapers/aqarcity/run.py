@@ -41,6 +41,7 @@ Usage:  python -m scrapers.aqarcity.run [--limit N] [--type residential|commerci
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
@@ -59,6 +60,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.facts.one_reader import amenity_answers  # noqa: E402
 from scrapers.common.page_pin import pin_from_html  # noqa: E402
 from scrapers.common.posting_date import site_posting_date  # noqa: E402
 
@@ -394,6 +396,37 @@ def _float(v: Any) -> Optional[float]:
 
 def _strip_tags(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", s or "")).strip()
+
+
+# THE JSON-LD DESCRIPTION IS A CUT COPY (🔬 AF engineer, 2026-11-14). It stops near 800 characters and ends «…» —
+# 278 of 2,058 active ads that day — and the cut usually falls on the ad's feature list: /property/29874 (2292946)
+# stored «… حوش واسع بمساحة 14 × 15 متر. حديقة وأشج…» while the page shows «✨ المميزات ✔️ مصعد إيطالي … ✔️ عدد 18
+# مكيف Gree», so a customer asking for an elevator or AC never found it (af-score 11-13, findability miss). The page
+# renders the whole text in <div class="description-body">: <p> paragraphs, <br /> lines. Read there, line by line,
+# and stop at the contact line («📞 للتواصل والاستفسار» + an agency name): nothing after it describes the property.
+_DESC_BODY = re.compile(r'<div class="description-body[^"]*"[^>]*>(.*?)</div>', re.S)
+_DESC_CUT = re.compile(r"(?:…|\.\.\.)\s*$")
+_CONTACT_LINE = re.compile(r"^\W*(?:للتواصل|للاتصال|للاستفسار|تواصل معنا|اتصل)")
+
+
+def full_description(body: str, ld_desc: Optional[str]) -> Optional[str]:
+    """The ad's whole description: the JSON-LD copy when it is complete, else the page's own description box."""
+    if ld_desc and not _DESC_CUT.search(ld_desc):
+        return ld_desc
+    m = _DESC_BODY.search(body or "")
+    if not m:
+        return ld_desc
+    marked = re.sub(r"(?i)<br\s*/?>|</p>|</li>|</h\d>", "\n", m.group(1))
+    lines = []
+    for raw in re.sub(r"<[^>]+>", " ", marked).split("\n"):
+        line = re.sub(r"\s+", " ", html.unescape(raw)).strip()
+        if not line:
+            continue
+        if _CONTACT_LINE.search(line):
+            break
+        lines.append(line)
+    text = "\n".join(lines)
+    return text if len(text) > len(_DESC_CUT.sub("", ld_desc or "").strip()) else ld_desc
 
 
 def _redact(text: Optional[str]) -> Optional[str]:
@@ -976,7 +1009,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
 
     # ── PDPL-safe text ──
     title = _redact(_strip_tags(title_raw))
-    description = _redact(ld.get("description"))
+    # one line per source line (the reader reads a list item as its own clause), each redacted (PDPL)
+    description = "\n".join(x for x in (_redact(ln) for ln in (full_description(body, ld.get("description")) or "").split("\n")) if x) or None
 
     # ── JSON-LD additionalProperty (clean, structured — preferred over HTML/desc regex) ──
     ap = {p.get("name"): p.get("value") for p in (ld.get("additionalProperty") or [])
@@ -1024,9 +1058,9 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     # (_pi_table) has NO amenity field — only خدمات العقار (utilities) — so the description is the
     # source (ADVANCED_FILTER_SOURCE_TRUTH: prose only where nothing structured exists; four outcomes
     # via the shared normalize matcher; silence stays NULL). Utilities stay structured-only.
-    for col, val in normalize.amenities_from_lines(description).items():
-        if col in PROSE_AMENITY_COLUMNS:
-            amenities[col] = val
+    # ONE READER (owner 2026-11-03): the word reader, never the older normalize matcher (🔬 2026-11-14).
+    for col, val in amenity_answers(description, PROSE_AMENITY_COLUMNS, {"balcony": "balcony_terrace"}).items():
+        amenities[col] = val
     # The site's own structured checklist wins over the prose (a contradictory checklist keeps what is ticked).
     for name in ticked:
         if (col := CHECKLIST_AMENITY_COLS.get(str(name).strip())):

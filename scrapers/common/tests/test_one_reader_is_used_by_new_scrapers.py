@@ -13,7 +13,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 BASELINE = Path(__file__).with_name("old_prose_matcher_baseline.txt")
-OLD = re.compile(r"\b(?:prose_amenities|amenities_from_text)\(")
+# amenities_from_lines() is the same old matcher run per line (🔬 2026-11-14): five scrapers called it and the guard,
+# matching only the two names above, could not see them (aqarcity, eaqartabuk, eastabha, hajer, sirdab).
+OLD = re.compile(r"\b(?:prose_amenities|amenities_from_text|amenities_from_lines)\(")
 
 
 def _callers() -> set[str]:
