@@ -757,6 +757,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     // pinsKey stands for pinFilter (a new object every render)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factsBox, factsExact, factsPlace, pinsKey, hasShape, drawing, pinCount, placeCount, viewPlace, user]);
+  // FIRST TAP FAST (owner 2026-11-13: «it felt slow»): once a signed-in user sees the box, the card's code downloads in
+  // the background, so the tap only waits for the numbers. It still never joins the first download of the page.
+  useEffect(() => {
+    if (!user || CardComp || !(factsBox || factsPlace)) return;
+    const t = setTimeout(() => {
+      void import('@/components/MapFactsCard').then((m) => setCardComp(() => m.default)).catch((e: unknown) => {
+        reportError(e, { where: 'map card module prefetch (import MapFactsCard)' });
+      });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [user, CardComp, factsBox, factsPlace]);
   // The deals NOT chosen that do have listings in view — so an empty deal says where the listings are (owner 2026-11-05).
   const [otherDeals, setOtherDeals] = useState<string[]>([]);
   const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
@@ -1495,7 +1506,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
         </Pressable>
       ) : null}
       {cardTarget && CardComp ? (
-        <CardComp target={cardTarget} signedIn={!!user} loc={locale === 'ar' ? 'ar' : 'en'} onClose={() => setCardTarget(null)} onSignIn={() => openAuth()}
+        <CardComp target={cardTarget} filter={cardTarget.kind === 'box' ? cardTarget.filter : null} signedIn={!!user} loc={locale === 'ar' ? 'ar' : 'en'} onClose={() => setCardTarget(null)} onSignIn={() => openAuth()}
           title={`${viewPlace ?? (locale === 'ar' ? 'هذه المنطقة' : 'This area')}${pinFilter?.deals.length === 1 ? (locale === 'ar' ? (pinFilter.deals[0] === 'buy' ? ' · للبيع' : ' · للإيجار') : (pinFilter.deals[0] === 'buy' ? ' · for sale' : ' · for rent')) : ''}`} />
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
