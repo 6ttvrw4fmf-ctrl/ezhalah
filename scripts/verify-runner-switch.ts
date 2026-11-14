@@ -45,7 +45,6 @@ export const HOSTED_ONLY: Record<string, string> = {
   'gathern-liveness.yml': LIFECYCLE,
   'gathern-recheck-dead.yml': LIFECYCLE,
   'lifecycle-spot-check.yml': LIFECYCLE,
-  'wasalt-enum-liveness.yml': LIFECYCLE,
   'web-runtime-smoke.yml': 'phone-speed robots froze on the own server under full load (owner 2026-11-13: «we can split for now»)',
 };
 function problems(files: Record<string, string>, expr = SWITCH): string[] {
