@@ -5,7 +5,7 @@
 // the box's own view and loads it only on the first tap.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseMapCard, cardRow, quickLook, nearbyPrices, tone, FEW, SOON, type MapCard } from '../src/lib/mapCard.ts';
+import { parseMapCard, cardRow, quickLook, nearbyPrices, tone, filterChips, restIsSoon, FEW, SOON, NONE, NEAR, LEGEND, type MapCard } from '../src/lib/mapCard.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -36,7 +36,15 @@ check('a month far above the neighbours\' average is red', rNew.cells[2].tone ==
 const rGone = cardRow(c, 'gone', 'ar');
 check('a window the removal log does not cover yet says «قريبا», never 0', rGone.cells.slice(0, 4).every((x) => x.text === SOON.ar) && rGone.cells[4].text === SOON.ar);
 const rPpm = cardRow(c, 'ppm', 'ar');
-check('a price from fewer than 10 ads says «إعلانات قليلة»', rPpm.cells[0].text === FEW.ar && rPpm.cells[1].text === FEW.ar && rPpm.cells[2].text === '10,755');
+check('a price from fewer than 10 ads shows the NEARBY month price, flagged «قريبة» (owner 2026-11-13)', rPpm.cells[0].text === '11,733' && rPpm.cells[0].near === true && rPpm.cells[1].near === true && rPpm.cells[2].text === '10,755' && !rPpm.cells[2].near, JSON.stringify(rPpm.cells));
+mustCatch('a nearby price shown without its «قريبة» flag (passed off as this area\'s own)', () => cardRow(c, 'ppm', 'ar').cells[0].near !== true);
+check('a nearby fallback in the yesterday / week column says it is the neighbours\' MONTH price (place AND period)', rPpm.cells[0].nearPeriod === 'month' && rPpm.cells[1].nearPeriod === 'month' && NEAR.ar.includes('شهر') && LEGEND.near.ar.includes('شهر'));
+mustCatch('a fallback tag that names the place but not the period', () => NEAR.ar.replace(' · شهر', '').includes('شهر'));
+const noNb = parseMapCard({ data: { ...raw, nb: null }, error: null }) as MapCard;
+check('few ads here and none nearby: a plain «—», never a number', cardRow(noNb, 'ppm', 'ar').cells[0].text === NONE && !cardRow(noNb, 'ppm', 'ar').cells[0].near);
+check('a row with no history after «أمس» collapses to one «باقي المدد تتوفر قريبا» line', restIsSoon(cardRow(c, 'gone', 'ar').cells, 'ar') && !restIsSoon(cardRow(c, 'new', 'ar').cells, 'ar'));
+check('the filter pills say what the user picked', JSON.stringify(filterChips({ types: ['دور'], beds: [3, 4], priceMax: 1500000 }, 'ar')) === JSON.stringify(['دور', '3، 4 غرف', 'حتى 1.5 مليون']), JSON.stringify(filterChips({ types: ['دور'], beds: [3, 4], priceMax: 1500000 }, 'ar')));
+check('no filter → no pills; English pills never print Arabic type names', filterChips(null, 'ar').length === 0 && filterChips({ types: ['فيلا'] }, 'en')[0] === 'Villa');
 check('the price row names its ONE type and says «المعروض»', rPpm.label === 'سعر المتر المعروض (الشقق)');
 check('cheaper than the neighbours is green', rPpm.cells[2].tone === 'down' && tone(100, 102) === 'plain');
 mustCatch('the neighbours\' TOTAL printed instead of their per-district average (a big district compared unfairly)', () => cardRow({ ...c, nb: { ...c.nb!, nDistricts: 1 } }, 'new', 'ar').cells[4].text === '26');
@@ -50,7 +58,7 @@ check('with too few removals here, the CITY\'s number — named («86 يوما �
 mustCatch('a city\'s number shown without naming the city', () => quickLook(withCity, 'ar')[2].value === '86 يوما');
 const own = parseMapCard({ data: { ...raw, stay_days: 40, stay_city: { city: 'الرياض', days: 86 } }, error: null }) as MapCard;
 check('the area\'s own number wins once it has 10 removals', quickLook(own, 'ar')[2].value === '40 يوما');
-check('a nearby district with too few ads says so', JSON.stringify(nearbyPrices(c, 'ar')) === JSON.stringify([{ name: 'القيروان', text: '9,396' }, { name: 'الصحافة', text: FEW.ar }]));
+check('a nearby district with too few ads is left out of the chips', JSON.stringify(nearbyPrices(c, 'ar')) === JSON.stringify([{ name: 'القيروان', text: '9,396' }]));
 check('no Arabic diacritics anywhere on the card', [...rNew.cells, ...rPpm.cells].every((x) => !MARKS.test(x.text)) && q.every((x) => !MARKS.test(x.label + x.value + (x.nearby ?? ''))));
 
 // 2. the server reads the box's own ads, gates every window, floors every price, and gives a guest nothing
