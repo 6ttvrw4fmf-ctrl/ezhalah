@@ -631,6 +631,13 @@ The card is built (2026-11-13): `map_view_card_ar()` (`map_view_card_core`, the 
 line naming a district) for the box's own view, or for a named district (all its ads); a guest gets `{locked}` only;
 «قريبا» where a log does not yet cover a window; the card module loads on the first tap only (src/components/
 MapFactsCard.tsx, rules in src/lib/mapCard.ts); a new map view closes it. Guard: `scripts/verify-map-card.ts`.
+**Card clean-up (owner 2026-11-13, «focus on the nearby if little ads», «I selected some things in the filter, why doesn't
+it show»):** the filters the card counts show as pills under the title (`filterChips()`; «نُشر خلال» is not applied to the
+card, so never shown); a price cell from fewer than 10 ads shows the NEARBY districts' month price in grey with «قريبة»
+under it — never passed off as the area's own — and «—» when the neighbours have none; a row with no history after «أمس»
+reads one «باقي المدد تتوفر قريبا» line instead of «قريبا» in every box; a small key explains «قريبة» and red/green; a
+nearby district with too few ads is left out of the chips; the falconer + «كيف نحسبها؟» at the top opens the same popup
+as the home fact; for a signed-in user the card's code downloads in the background once the box shows (first tap fast).
 History: «اختفى» counts confirmed removals from the nightly `map_fact_removal` log (started 2026-11-12 — only 37% of
 older removals kept their district, so no backfill); «خفضوا السعر» counts price-diary drops (`listing_price_history`
 'price' events, started 2026-11-11; a drop of more than half is a page re-read, not a cut). Each shows once its window
@@ -641,6 +648,38 @@ nightly table older than 36 h hides what it feeds — «اختفى» (removal lo
 and the same detector pages; the facts carry `updated_at` for the card's «آخر تحديث». Guards: `scripts/verify-map-view-facts.ts` (server),
 `scripts/verify-map-view-facts-line.ts` (screen). Never widen «اختفى» to crawl-absence sites, show a window before it is
 covered, lower the 10-ad price floor, or loosen the «same ads as the pill» rule to make facts appear more often.
+
+**THE RESIDENTIAL-SALE CARD (owner 2026-11-14, «it should strictly follow what the user selected … we can get sued»,
+«we can go to jail», «we are focusing on buy residential right now»).** A residential SALE (`isSaleCard()`) opens the
+redesigned card (`src/components/MapSaleCard.tsx`, words decided in `src/lib/mapCard.ts`); rent and commercial keep the
+table card until the owner says otherwise. Top to bottom: the TITLE is the user's own choice read out (`saleTitle()`:
+«فلل للبيع · 5 غرف · من 250 إلى 400 م²» — every filter, «نشر خلال» and a drawn area included; Arabic ranges are
+«من … إلى …», never a dash that flips); the place and «الأسعار المعروضة في الإعلانات · من N مواقع»; the site LOGOS
+(most ads first, at most 6, «و… أخرى») and «المصادر: …» by name — never a per-site count (it reads against the card's
+copies-once total); ONE disclaimer sentence (`DISCLAIMER`, never a second repeated box): computed automatically from
+displayed prices in published ads, may not be accurate, not sale prices, not a valuation, not advice, check with the
+advertiser, Ezhalah takes no responsibility; type buttons only when the user picked no type (the sale types with ≥ 10
+priced ads, `price_types`); one sentence with the displayed price per metre of ALL the ads of the one type (`ppm_all`)
+and the comparison — under 5% «قريب من الأحياء القريبة», else «أعلى/أقل … بحوالي N بالمئة»; three numbers (typical
+displayed price, displayed price per metre, new this month); «مقارنة بالأحياء القريبة (بنفس الفلاتر)» — measured facts
+only, both sides present: price per metre, size, the SAME room count's share (left out when the user picked rooms), ads
+per nearby district (the neighbours' average, never their total); price by rooms (top 3 room counts with ≥ 10 ads,
+hidden when rooms are picked); a clear «عرض تفاصيل أكثر» button (new this week, gone / price cuts only once their log
+covers the window, typical size, price range, how long ads stay up — a city number is named), the nearby districts under
+the same filters; the falconer «كيف نحسبها؟». Never: «أرخص / فرصة / صفقة / سعر السوق / cheap / deal» (`BANNED_WORDS`,
+executed against every sentence), an age claim, a location claim, or a number from fewer than 10 ads. «نشر خلال» now
+narrows the card exactly as it narrows the pins (`p_posted_within_days`, every card type).
+**The weekly graph** (owner: «full filters, from December») is drawn ONLY from `map_fact_ad_seen` — the complete record
+of every ad as first seen, kept after it leaves (written nightly by `map_fact_capture_removals()`, started 2026-11-14) —
+because the older history (`listing_comparables`) has no pin, no furnished and only ~80% of districts by name, so it
+cannot follow every filter. A point = Saudi week (Sunday first) that ended 3 days ago, the record written on every day
+from its start to then, ads posted that week and seen within 3 days of posting (an old back catalogue never rewrites a
+past week), from sites read for 30 days (`map_fact_site_start` — a newly added site never makes a jump), one type, copies
+once, ≥ 10 ads; the card draws the latest run of ≥ 3 such weeks (`saleWeeks()`), Arabic right to left; never with «نشر
+خلال». First graph: early December 2026. Checks: `scripts/verify-map-card.ts` (executes every sentence, title, number,
+comparison and the banned words; pins the graph's filter block word for word against the card's own); the night checker
+`audit_map_view_card()` recounts `ppm_all`, `n_priced`, `by_rooms`, `price_types` and the weeks another way and switches
+the card off on any mismatch (migrations 20261114110613, 20261114110815).
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.

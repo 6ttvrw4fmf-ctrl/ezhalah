@@ -384,6 +384,27 @@ def _body_lines(p: dict) -> str:
     return "\n".join(x.strip() for x in re.split(r"[\n•▪️]+", txt) if x.strip())
 
 
+# THE AD'S OWN TEXT CAN LIVE IN ITS TIKTOK CAPTION (🔬 2026-11-11, backlog 1776). 55 of 122 active hajer posts have an
+# EMPTY WordPress `content` (`<div class="description"> </div>`), and the advertiser's description of the ad sits in the
+# same page's TikTok embed instead — 10674101: «✅ دبلكسات للبيع … الدور الأرضي/ مجلس +دور مياه، غرفة طعام،صالة+دورة
+# مياه،مطبخ+مستودع، حديقة خلفية …». Read only when `content` is empty. Every <a> is dropped: the account handle, the
+# hashtags and the music credit (which names the advertiser — PDPL).
+_TIKTOK_SECTION = re.compile(r"<blockquote class='tiktok-embed'[^>]*>\s*<section>(.*?)</section>", re.S)
+
+
+def _tiktok_caption_lines(html_text: str) -> str:
+    m = _TIKTOK_SECTION.search(html_text or "")
+    if not m:
+        return ""
+    raw = re.sub(r"<a\b[^>]*>.*?</a>", " ", m.group(1), flags=re.S)
+    txt = ihtml.unescape(re.sub(r"<[^>]+>", " ", raw))
+    return "\n".join(x.strip(" -/") for x in re.split(r"[\n•▪️✅–]+", txt) if x.strip(" -/"))
+
+
+def _ad_body(p: dict, html_text: str) -> str:
+    return _body_lines(p) or _tiktok_caption_lines(html_text)
+
+
 def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     """Return (row, category, gone). gone=True → sold/rented, mark inactive."""
     f = rem_fields(html_text)
@@ -479,12 +500,12 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         # hajer's REM block has NO amenity field (its 20 labels are rooms/area/facade/street/age/…), so
         # the law allows prose here, four outcomes, line by line (🔬 AF engineer 2026-10-07: 0/4 hajer
         # findability, source-reread 37608383084).
-        **normalize.amenities_from_lines(_body_lines(p)),
+        **normalize.amenities_from_lines(_ad_body(p, html_text)),
         # The ad body itself — the page's own `<div class="description">` (WordPress `content`): «يتكون من
         # دورين وملحق: الدور الأرضي •صالة+دورة مياه …» (2026-10-30: 123 of 123 active rows stored none, so the
         # AI facts reader had nothing to read). Stored verbatim through redact_pii (PDPL); an empty body is
         # NULL, never ''.
-        "description": redact_pii(_body_lines(p)) or None,
+        "description": redact_pii(_ad_body(p, html_text)) or None,
         # A per-metre rate is never a total and never an annual rent — see `rate_only` above.
         "price_total": None if (is_rent or rate_only) else price,
         "price_annual": price_annual,
