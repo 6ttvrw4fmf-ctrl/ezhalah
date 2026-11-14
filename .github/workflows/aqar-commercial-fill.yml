@@ -52,7 +52,10 @@ env:
 
 jobs:
   setup:
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (2026-11-14, measured): sa.aqar.fm answers our own server's ONE address HTTP 403 on every TLS profile.
+    # aqar_commercial runs since the EZ_RUNNER switch: 12 of 22 ok, 10 with «direct/chrome124:HTTP 403 … edge101:403»;
+    # the 3 days before on GitHub: 567 of 571 ok. Listed in HOSTED_ONLY in scripts/verify-runner-switch.ts.
+    runs-on: ubuntu-latest
     outputs:
       cities: ${{ steps.pick.outputs.cities }}
     steps:
@@ -67,7 +70,10 @@ jobs:
   commercial-fill:
     needs: setup
     name: Commercial ${{ matrix.city }}
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (2026-11-14, measured): sa.aqar.fm answers our own server's ONE address HTTP 403 on every TLS profile.
+    # aqar_commercial runs since the EZ_RUNNER switch: 12 of 22 ok, 10 with «direct/chrome124:HTTP 403 … edge101:403»;
+    # the 3 days before on GitHub: 567 of 571 ok. Listed in HOSTED_ONLY in scripts/verify-runner-switch.ts.
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false

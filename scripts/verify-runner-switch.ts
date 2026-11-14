@@ -45,6 +45,16 @@ export const HOSTED_ONLY: Record<string, string> = {
   'ad-viewer-speed-live.yml': 'phone 4G ad-viewer speed robot (owner: in-app sites must stay under 3 s); same throttled class as web-runtime-smoke; queued 2.3 h on the own server 2026-11-14 (🔧 2026-11-14)',
   'common-location-tests.yml': 'reports the merge-gating «test» check on every scrapers/ PR head through its push trigger; 12 push runs queued 3-4 h on the own server and the robot refused #12188 #12189 #12190 with «test is PENDING» at 13:21 UTC (🔧 2026-11-14)',
   'iphone-robot-live.yml': 'iPhone-emulation robot, same throttled class as web-runtime-smoke (owner 2026-11-13); queued 5 h on the own server 2026-11-14 (run 43574663651) (🔧 2026-11-14)',
+  // A SITE THAT JUDGES OUR ADDRESS (2026-11-14, measured with the same code): dealapp hands the own server's single
+  // address its no-listing page. 11-12 fleet on GitHub: 22/24 shards ok, 54,901 of 59,177 ads read; 11-13 fleet on
+  // ezhalah-own: 0/17 ok, 4,514 of 29,768 (24,776 origin renders with no listing schema); the liveness sweep read 11
+  // alive of 2,400 (canary_live 0-2/3). Its shards then held the own runners ~4 h each, so the 04:22 nightly waited.
+  'dealapp-liveness.yml': 'same address judgement as dealapp-sharded: 11 alive of 2,400 read on the own server (2026-11-14)',
+  'aqar-sweep.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
+  'aqar-commercial-sweep.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
+  'aqar-deep-fill.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
+  'aqar-commercial-fill.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
+  'aqar-liveness.yml': 'same 403 from sa.aqar.fm: controls 0/5, 3 of 3 runs quarantined on the own server vs 1 of 107 on GitHub (2026-11-14)',
 };
 function problems(files: Record<string, string>, expr = SWITCH): string[] {
   const fail: string[] = [];
@@ -77,6 +87,7 @@ const p = problems(files);
 const jobs = Object.values(files).reduce((n, s) => n + (s.match(/^\s*runs-on:/gm) ?? []).length, 0);
 check(`all ${jobs} jobs in ${Object.keys(files).length} workflows use the runner switch; PRs never reach our server`, p.length === 0, p.slice(0, 5).join('; '));
 mustCatch('a GitHub-only workflow moved to the switch or our server', problems({ ...files, 'web-runtime-smoke.yml': 'jobs:\n  a:\n    runs-on: ezhalah-own\n' }).length > 0);
+mustCatch('the dealapp crawl moved back to the switch (its site refuses our server)', problems({ ...files, 'dealapp-sharded.yml': `jobs:\n  a:\n    runs-on: ${SWITCH}\n` }).length > 0);
 mustCatch('a workflow hard-coding ubuntu-latest', problems({ ...files, 'x.yml': 'jobs:\n  a:\n    runs-on: ubuntu-latest\n' }).length > 0);
 mustCatch('a workflow hard-coding our server', problems({ ...files, 'x.yml': 'jobs:\n  a:\n    runs-on: ezhalah-own\n' }).length > 0);
 mustCatch('the pull_request guard dropped (fork code on our server)',
