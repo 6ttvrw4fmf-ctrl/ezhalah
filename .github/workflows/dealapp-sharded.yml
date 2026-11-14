@@ -57,7 +57,7 @@ env:
 jobs:
   crawl:
     name: Deal App shard ${{ matrix.shard }}/24
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 250
     strategy:
       fail-fast: false   # one blocked shard must never cancel the others
