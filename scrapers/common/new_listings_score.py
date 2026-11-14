@@ -867,13 +867,22 @@ def unprepared(x: str, kw: str) -> str:
 
 
 def _cmp_bool(stored, lines: list[str], kw: str) -> str:
-    hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
+    hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x) and not _bare_label(x, kw)]
     if not hit:
         return PAGE_SILENT
     page_yes = not all(re.search(NEG + "(?:" + kw + ")", x) or re.search("(?:" + kw + ")" + LABEL_NO, x) for x in hit)
     if stored is None:
         return WE_MISS
     return MATCH if bool(stored) == page_yes else MISMATCH
+
+
+# A BARE LABEL is not a «yes» (🔬 2026-11-14, af-score 11-13 ksaaqar 12226834 / 12225842). ksaaqar prints
+# `<li>التكييف : <span>لا</span></li>`; text_head splits on every tag, so «التكييف :» reaches `lines` alone, beside the
+# joined evidence line «التكييف : لا». The lone label named the field, so the page read as «yes» and a correct stored
+# «no» scored MISMATCH (2 of ksaaqar's 3 mismatches that night). A label with no value says nothing; its value is
+# judged on the joined line.
+def _bare_label(line: str, kw: str) -> bool:
+    return bool(re.fullmatch(r"\s*[ء-ي]*(?:" + kw + r")[ء-ي]*\s*[:：]\s*", line))
 
 
 # A LABELLED «no» after the field (🔬 2026-11-11, af-score 11-10 tuba 13261393): tuba's description lists «- مفروشة: لا»,
