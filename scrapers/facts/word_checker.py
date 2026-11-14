@@ -773,6 +773,10 @@ _KITCHEN_WORDS = frozenset(_n(w) for w in ("مطبخ", "المطبخ", "مطاب
 # «مناسب للعائلات» / «الأنشطة المتوفرة … تشمل ركوب الخيل» are not possible uses (CodeRabbit #12188), so only these words.
 _POSSIBLE_ACTIVITY = frozenset(_n(w) for w in ("مثالي", "مثاليه", "لمشاريع", "مشاريع", "لمزاوله", "لمزواله", "لممارسه",
                                                "يصلح", "تصلح"))
+# A possible-use LIST opener reaches every item after it in the clause, however long the list (🔬 2026-11-14, P1 14340,
+# dealapp 24545744 «مناسبة لعدة أنشطة استثمارية: 🔹 منتجع سياحي 🔹 … 🔹 مشروع فعاليات ومناسبات خاصة»)
+# «تصلح لإقامة مشروع قصور أفراح ومناسبات» (dealapp 21597198) is a project to build; «تصلح للمناسبات» stays a yes.
+_POSSIBLE_OPENER = re.compile(r"مناسب(?:ه)?\s+ل(?:عده|انشطه|مشاريع)|انشطه\s+استثماري|لاقامه\s+مشروع")
 # …and an existence word between the possible use and the horses says the plot HAS them («مثالية للاستثمار، يوجد اسطبل خيل»)
 _HAS_NOW = frozenset(_n(w) for w in ("يوجد", "توجد", "فيها", "فيه", "بها", "به", "يتوفر", "تتوفر", "متوفر", "متوفره",
                                      "تشمل", "يشمل", "نوفر", "داخل"))
@@ -1813,11 +1817,18 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
                         v = None                     # «مطبخ … (ثلاجة، فرن، موقد، شفاط)», «موقد سيراميكي»: the kitchen
                                                      # cooktop, not a fire pit (🔬 2026-11-08: 28 of 30 served apartment
                                                      # «موقد» yeses were the stove)
-                    if v is True and fact == "horses_stable":
+                    if v is True and fact in ("horses_stable", "for_events"):
                         before = [_strip_wa(w) for w in t[:m.start()].split()]
-                        at = max((k for k, w in enumerate(before) if w in _POSSIBLE_ACTIVITY), default=-1)
+                        # for_events reads only the explicit list opener: «المخيم خيار مثالي لقضاء أوقات ممتعة» is an
+                        # ideal stay, not a possible use (real-ad lock, gathern 23125750)
+                        at = max((k for k, w in enumerate(before) if w in _POSSIBLE_ACTIVITY), default=-1) \
+                            if fact == "horses_stable" else -1
+                        opener = _POSSIBLE_OPENER.search(t[:m.start()])   # «مناسبة لعدة أنشطة استثمارية: 🔹 …» (any distance)
+                        if opener and at < 0:
+                            at = len(t[:opener.start()].split())
                         if not any(w in _HAS_NOW for w in before[at + 1:]) and (
-                                at >= 0 and at >= len(before) - 8 or (at < 0 and use_list and comma)):
+                                at >= 0 and (at >= len(before) - 8 or opener)
+                                or (at < 0 and use_list and comma and fact == "horses_stable")):
                             v = None                 # «مثالية لمشاريع المستودعات، اسطبلات الخيل», «لمزاولة الأنشطة المختلفة
                                                      # كركوب الخيل»: a possible use, not horses on the plot — and the list
                                                      # goes on across commas (P2 13085 «الخيل», aqar 1769697, haraj
@@ -2698,6 +2709,11 @@ def selftest() -> None:
         ("الأنشطة المتوفرة داخل المخيم تشمل ركوب الخيل", {"horses_stable": True}, ()),                    # CodeRabbit #12188
         ("أرض مثالية للاستثمار، يوجد اسطبل خيل", {"horses_stable": True}, ()),                             # CodeRabbit #12188
         ("مناسب للعائلات، خيل للركوب", {"horses_stable": True}, ()),                                       # CodeRabbit #12188
+        ("مناسبة لعدة أنشطة استثمارية: 🔹 منتجع سياحي وتأجير يومي 🔹 شاليهات ريفية للعوائل 🔹 مشروع فعاليات ومناسبات خاصة",
+         {}, ("for_events",)),                                                                             # dealapp 24545744
+        ("تصلح لإقامة مشروع قصور أفراح ومناسبات أو أي مشروع استثمار", {}, ("for_events",)),               # dealapp 21597198
+        ("استراحة تصلح للمناسبات والحفلات", {"for_events": True}, ()),                                     # suitable for events = the chip
+        ("شاليه كبير للعائلة ويخدم كثيراً الجمعات العائلية ومناسبات الخطوبة والملكة", {"for_events": True}, ()),  # gathern 21142142
         ("إبل وهجن", {"camels": True}, ()),
         ("ركوب الجمال", {"camels": True}, ()),
         ("مكان جمال", {}, ("camels",)),
