@@ -641,6 +641,12 @@
         "evidence": "mon_image_coverage / ops_image_coverage_latest() daily snapshots 2026-09-30 … 10-07 (queried 2026-10-07 05:40 UTC)."
       }
     },
+    "propertyfinder": {
+      "floor_pct": 99,
+      "today_pct": 100.0,
+      "active_rows": 4566,
+      "note": "Declared 2026-11-07 by 🔧 from the production snapshot (ops_image_coverage_latest 03:xx UTC): 4,566 of 4,566 live ads carry images (13,116 photos). The site went live 2026-11-04 behind the owner's switch and was never declared, so loader-active-platforms-check read it as «live undeclared» on every run. Floor 99 %: at 4,566 live ads it tolerates 45 without images (the asasmakeen pattern); the observation is 100 %."
+    },
     "qmra": {
       "floor_pct": 60,
       "today_pct": 100.0,
