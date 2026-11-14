@@ -48,7 +48,7 @@ try {
       // heads alone are the signal: the count pill is written by a separate place read and can move on its own.
       const readHeads = () => [...document.querySelectorAll('[data-testid=map-pin], [data-testid=map-bubble]')].map((e) => e.textContent).join('|');
       const readPill = () => document.querySelector('[data-testid=map-pin-count]')?.textContent ?? '';
-      await page.evaluate((readHeads) => { const w = window; w.__headsBefore = eval(readHeads)(); w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); }, readHeads.toString());
+      await page.evaluate(({ readHeads, readPill }) => { const w = window; w.__headsBefore = eval(readHeads)(); w.__pillBefore = eval(readPill)(); w.__pinSig = undefined; w.__pinAt = undefined; w.__pinT0 = performance.now(); }, { readHeads: readHeads.toString(), readPill: readPill.toString() });
       await page.waitForFunction(({ readHeads, readPill }) => {
         const heads = eval(readHeads)(); const sig = heads + '#' + eval(readPill)();
         const w = window; if (w.__pinSig !== sig) { w.__pinSig = sig; w.__pinAt = performance.now(); return false; }
@@ -56,6 +56,11 @@ try {
         const since = heads === w.__headsBefore ? Math.max(w.__pinAt, w.__pinT0 + 12_000) : w.__pinAt;
         return performance.now() - since > 1500;
       }, { readHeads: readHeads.toString(), readPill: readPill.toString() }, { timeout: 25_000, polling: 100 }).catch(() => {});
+      // The PILL settles on its own clock (🔧 2026-11-13, run 43477279299): heads were stable while the pill still read the
+      // previous view's «1,347 إعلان للبيع في جدة» over حي البوادي, because the place read answers after the pins. Wait
+      // for the pill to leave its pre-move text, up to 12 s. A pill that never updates still reads the old text and FAILS
+      // the district check below — the wait only stops the robot judging a read that has not landed yet.
+      await page.waitForFunction((readPill) => eval(readPill)() !== window.__pillBefore, readPill.toString(), { timeout: 12_000, polling: 100 }).catch(() => {});
       const seen = await page.evaluate(() => {
         // THE VISIBLE MAP, not the viewport (🔧 2026-11-06, diag 42226056422): MapKit draws heads under the map's own
         // control strip («شراء» / «تصفية», above the canvas) and past its right edge; those a user cannot see or reach
