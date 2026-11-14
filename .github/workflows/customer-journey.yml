@@ -37,7 +37,7 @@ on:
       - .github/workflows/customer-journey.yml
 
 concurrency:
-  group: production-browser-customer-journey
+  group: production-browser-customer-journey-lifecycle-scratch
   cancel-in-progress: false
 
 env:
