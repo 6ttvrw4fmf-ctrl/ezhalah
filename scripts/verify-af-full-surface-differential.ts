@@ -728,6 +728,17 @@ export function rotationOffset(n: number, day: number): number {
 }
 /** The pair stage stops at its budget; 0 means no budget (local runs). */
 export const pairBudgetSpent = (start: number, budgetMs: number, now: number): boolean => budgetMs > 0 && now - start >= budgetMs;
+/** Today's pair walk: starts at the rotated offset, visits in order, stops when the budget is spent. Returns how many were deferred. */
+export async function walkPairs<T>(pairs: T[], day: number, budgetMs: number, now: () => number, visit: (p: T) => Promise<void>): Promise<number> {
+  const off = rotationOffset(pairs.length, day);
+  const ordered = [...pairs.slice(off), ...pairs.slice(0, off)];
+  const start = now();
+  for (let k = 0; k < ordered.length; k++) {
+    if (pairBudgetSpent(start, budgetMs, now())) return ordered.length - k;
+    await visit(ordered[k]);
+  }
+  return 0;
+}
 
 // ── STAGE 2 — multi-type, combined deal, both periods (region scope only) ───────────────────────
 if (!SKIP_MULTI) {
@@ -743,7 +754,6 @@ if (!SKIP_MULTI) {
   // proved nothing. AF_FSD_PAIR_BUDGET_MIN bounds this stage; the walk starts at a DAILY offset, so every pair is
   // still covered across days and the stages after it run every day. Pairs not reached are reported, never passed.
   const PAIR_BUDGET_MS = Number(process.env.AF_FSD_PAIR_BUDGET_MIN || 0) * 60_000;
-  const pairStageStart = Date.now();
   const allPairs: Array<{ leg: (typeof legs)[number]; types: string[] }> = [];
   for (const leg of legs) {
     const inLeg = cleanTypes.filter((t) => COHORTS.some((c) => c.clean === t && c.leg === leg));
@@ -752,33 +762,26 @@ if (!SKIP_MULTI) {
     }
   }
   const pairOffset = rotationOffset(allPairs.length, Math.floor(Date.now() / 86_400_000));
-  const orderedPairs = [...allPairs.slice(pairOffset), ...allPairs.slice(0, pairOffset)];
   info(`multi-type pairs: ${allPairs.length} in all, starting at offset ${pairOffset} today${PAIR_BUDGET_MS ? `, budget ${PAIR_BUDGET_MS / 60_000} min` : ''}`);
-  for (let k = 0; k < orderedPairs.length; k++) {
+  M.pairsDeferred = await walkPairs(allPairs, Math.floor(Date.now() / 86_400_000), PAIR_BUDGET_MS, Date.now, async ({ leg, types }) => {
     {
-      if (pairBudgetSpent(pairStageStart, PAIR_BUDGET_MS, Date.now())) {
-        M.pairsDeferred = orderedPairs.length - k;
-        info(`multi-type pairs: budget spent — ${M.pairsDeferred} pair(s) deferred to the next days' rotation (NOT measured this run)`);
-        break;
-      }
-      const { leg, types } = orderedPairs[k];
       const q = queryFor(types, leg);
       const base = scopeBody(types, leg, scope);
-      if (!base) continue;
+      if (!base) return;
       const qids = ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction', 'rating', 'unit_subtype'].filter((id) => cohortAllows(q, id));
       const tag = `${types.join('+')}/${leg} @${scope.label}`;
       M.multiTypePairs++;
-      if (!qids.length) { info(`${tag}: empty certified intersection — the card offers nothing (correct, R2.2.4)`); continue; }
+      if (!qids.length) { info(`${tag}: empty certified intersection — the card offers nothing (correct, R2.2.4)`); return; }
       let guided: any = null, age: any = null;
       try {
         guided = (await rpc('apartment_guided_counts_ar', countBody(base, {})))?.[0] ?? null;
         if (qids.includes('property_age')) age = (await rpc('property_age_option_counts_ar', countBody(base, {})))?.[0] ?? null;
       } catch (e: any) {
-        if (isSchemaCacheUnresolved(e)) { unmeasured(`${tag} · count RPCs`, e); continue; }
-        fail(`${tag} · count RPCs`, e.message); continue;
+        if (isSchemaCacheUnresolved(e)) { unmeasured(`${tag} · count RPCs`, e); return; }
+        fail(`${tag} · count RPCs`, e.message); return;
       }
       const total = guided ? Number(guided.cnt_total_base) : null;
-      if (!total) { info(`${tag}: empty in this scope`); continue; }
+      if (!total) { info(`${tag}: empty in this scope`); return; }
       // baseline union purity: the pair's set must be exactly the union of the two types' sets
       await withSlot(async () => {
         const label = `${tag} · baseline (type union, no AF)`;
@@ -817,7 +820,8 @@ if (!SKIP_MULTI) {
       }
       await Promise.all(jobs);
     }
-  }
+  });
+  if (M.pairsDeferred) info(`multi-type pairs: budget spent — ${M.pairsDeferred} pair(s) deferred to the next days' rotation (NOT measured this run)`);
 
   // combined Buy+Rent (p_deal null): only questions certified for ALL THREE legs (R2.4.1)
   for (const clean of cleanTypes) {

@@ -179,20 +179,22 @@ async function main() {
   // ── 2. TRENDING city + district ────────────────────────────────────────────────────────────────
   await run('trending city', () => trendingCity({ deal: 'بيع', period: null }), () => { done.tCity++; });
   const tdCity = reachableFor('بيع');
+  let tdTested = null;   // the city whose district journey actually COMPLETED — the only one the ledger may credit
   await run('trending district (narrowed)',
     () => trendingDistrict({ city: tdCity, deal: 'بيع', period: null, priceMax: 900000 }),
-    () => { done.tDistrict++; citiesTested.add(tdCity); });
+    () => { done.tDistrict++; citiesTested.add(tdCity); tdTested = tdCity; });
   // A drawn city can stock the deal and still have NO districts (2026-11-13 حرض: 54 sale ads, none with a district):
   // the journey then honestly skips and the floor was lost on a healthy production. الرياض always has districts.
   if (!done.tDistrict && tdCity !== RIYADH) {
     await run('trending district (narrowed) · last resort', () => trendingDistrict({ city: RIYADH, deal: 'بيع', period: null, priceMax: 900000 }),
-      () => { done.tDistrict++; citiesTested.add(RIYADH); });
+      () => { done.tDistrict++; citiesTested.add(RIYADH); tdTested = RIYADH; });
   }
   await ledgerRecord('trending_city', 'live-sweep', 'pass', 'live browser sweep');
   // Record the city the journey ACTUALLY ran against, not pickCities[0] — crediting coverage to a
   // city that was never reached marks it fresh and pushes it to the back of the stalest-first
   // rotation, which is the same quiet-rot failure the skip-vs-pass rule above exists to prevent.
-  await ledgerRecord('trending_district', tdCity, 'pass', 'live browser sweep');
+  if (tdTested) await ledgerRecord('trending_district', tdTested, 'pass', 'live browser sweep');
+  else await ledgerRecord('trending_district', tdCity, 'skip', 'no district journey completed (drawn city and الرياض retry)');
 
   // ── 3. ADVANCED FILTER (needs a scope big enough to open) ──────────────────────────────────────
   await run('advanced filter', () => advancedFilter({ city: RIYADH, deal: 'بيع', group: 'الفلل والبيوت', typeLabel: 'فيلا' }),

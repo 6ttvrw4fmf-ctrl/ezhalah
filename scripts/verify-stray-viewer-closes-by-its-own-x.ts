@@ -8,7 +8,7 @@ import { dismissStrayOverlay } from './lib/liveClick.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); if (!ok) failed++; };
-const mutation = (label: string, caught: boolean, detail = '') => check(`MUTATION — ${label}`, caught, detail);
+const mutation = (label: string, caught: boolean) => check(`MUTATION — ${label}`, caught);
 
 const stub = (opts: { open: boolean; hasX: boolean }) => {
   const seen: string[] = [];

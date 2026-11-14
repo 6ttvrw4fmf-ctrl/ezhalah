@@ -108,6 +108,17 @@ export async function trendingCity(plan) {
 }
 
 /** 3 — TRENDING DISTRICT: same contract one level down, under an active narrowing filter. */
+/**
+ * What an EMPTY district panel means, from the panel's own district_options_ar answer (🦅 2026-11-14, CodeRabbit #12166):
+ * 'unanswered' → never answered; 'failed' → answered with an error status or a non-array body (a 429/5xx is a failed
+ * fetch the user also sees as an empty panel, never «no districts»); 'has-rows' → options arrived and the surface did not
+ * show them; 'empty' → a successful [] — only this one is an honest skip.
+ */
+export const districtPanelVerdict = (rpc) =>
+  !rpc.returned ? 'unanswered'
+    : (rpc.status != null && (rpc.status < 200 || rpc.status >= 300)) || rpc.rows == null || rpc.rows < 0 ? 'failed'
+      : rpc.rows > 0 ? 'has-rows' : 'empty';
+
 export async function trendingDistrict(plan) {
   const name = `trending-district:${plan.city}/${plan.deal}`;
   return withPage(false, async (page, requests) => {
@@ -170,6 +181,9 @@ export async function trendingDistrict(plan) {
         if (!rpc.returned) {
           defect(name, 'R14.4.2', `district panel never rendered: district_options_ar had not answered `
             + `${renderMs} ms after the field was opened. The user is left with an empty surface.`);
+        } else if (districtPanelVerdict(rpc) === 'failed') {
+          defect(name, 'R14.4.2', `district panel is empty because district_options_ar FAILED (status ${rpc.status}, `
+            + `body ${rpc.rows === -1 ? 'not a row array' : 'unread'}) — a failed fetch, never «this scope has no districts».`);
         } else if (rpc.rows > 0) {
           defect(name, 'R14.4.2', `district panel rendered NO rows ${renderMs} ms after the field was `
             + `opened, but district_options_ar answered ${rpc.rows} option(s) in ${rpc.ms} ms `

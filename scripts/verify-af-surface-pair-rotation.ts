@@ -22,9 +22,12 @@ const mutation = (label: string, caught: boolean, detail = '') => check(`MUTATIO
 const m = await liftSymbols(SRC, [
   { header: 'export function rotationOffset(' },
   { header: 'export const pairBudgetSpent', endsWith: /;\s*$/ },
-], ['rotationOffset', 'pairBudgetSpent']);
+  { header: 'export async function walkPairs<T>(', endsWith: /^\}$/ },
+], ['rotationOffset', 'pairBudgetSpent', 'walkPairs']);
 const rotationOffset = m.rotationOffset as (n: number, day: number) => number;
 const pairBudgetSpent = m.pairBudgetSpent as (start: number, budgetMs: number, now: number) => boolean;
+type Walk = (pairs: number[], day: number, budgetMs: number, now: () => number, visit: (p: number) => Promise<void>) => Promise<number>;
+const walkPairs = m.walkPairs as Walk;
 
 /** Over n consecutive days the start offset visits every pair index — no pair is starved forever. */
 const coversAll = (rot: (n: number, d: number) => number, n: number) => {
@@ -44,6 +47,27 @@ mutation('a stride that shares a factor with n (2 for n=182) is caught', !covers
 const stopsWhenSpent = (f: (s: number, b: number, n: number) => boolean) => f(0, 40 * 60_000, 41 * 60_000) && !f(0, 0, 41 * 60_000);
 mutation('a budget that never stops is caught', stopsWhenSpent(pairBudgetSpent) && !stopsWhenSpent(() => false));
 mutation('a «budget» that stops even unbudgeted local runs is caught', !stopsWhenSpent(() => true));
+
+// The production pair LOOP, executed (CodeRabbit #12166): stub pairs, a stub clock that advances 1 ms per visited pair.
+/** The walk starts at the rotated offset and stops after exactly `budget` visits, deferring the rest. */
+const walkHolds = async (walk: Walk) => {
+  const pairs = Array.from({ length: 10 }, (_, i) => i);
+  const day = 20_405;
+  let t = 0; const seen: number[] = [];
+  const deferred = await walk(pairs, day, 3, () => t, async (p) => { seen.push(p); t++; });
+  const unbudgeted: number[] = [];
+  const none = await walk(pairs, day, 0, () => t, async (p) => { unbudgeted.push(p); t += 1000; });
+  return seen[0] === rotationOffset(10, day) && seen.length === 3 && deferred === 7 && none === 0 && unbudgeted.length === 10;
+};
+check('the real pair walk starts at the rotated offset, stops when the budget is spent, and reports the deferred pairs', await walkHolds(walkPairs));
+const fixedStart: Walk = async (pairs, _d, b, now, visit) => { const s0 = now(); for (let k = 0; k < pairs.length; k++) { if (pairBudgetSpent(s0, b, now())) return pairs.length - k; await visit(pairs[k]); } return 0; };
+const noStop: Walk = async (pairs, d, _b, _now, visit) => { const o = rotationOffset(pairs.length, d); for (const p of [...pairs.slice(o), ...pairs.slice(0, o)]) await visit(p); return 0; };
+mutation('a walk with a fixed start is caught', !(await walkHolds(fixedStart)));
+mutation('a walk with the budget stop removed is caught', !(await walkHolds(noStop)));
+const diffSrc = readFileSync(SRC, 'utf8');
+const callsWalk = (src: string) => /M\.pairsDeferred = await walkPairs\(allPairs,/.test(src);
+check('the sweep drives its pair stage through walkPairs()', callsWalk(diffSrc));
+mutation('a sweep that walks its pairs inline again is caught', !callsWalk(diffSrc.replace('M.pairsDeferred = await walkPairs(allPairs,', 'M.pairsDeferred = await inlineWalk(allPairs,')));
 
 // The workflow must actually set the budget, below the job's own cap.
 const wf = readFileSync(join(ROOT, '.github', 'workflows', 'af-live-truth-check.yml'), 'utf8');
