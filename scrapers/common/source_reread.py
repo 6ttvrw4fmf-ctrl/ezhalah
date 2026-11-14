@@ -327,6 +327,37 @@ def _redacted_lines(raw: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+# An ICON spec box: ramzalqasim prints the ad's own fields as «<li><svg><path d="…"/></svg> VALUE</li>» with no label
+# word, the icon IS the label (ramzalqasim.com/x/118, read 2026-11-14): area «715 م», bathtub «5», «(4) ماستر»,
+# «(0) نوم». Split on tags the bare values carried no keyword, so the score read only the seller's prose («المساحة:
+# 710م²», «ثلاث غرف نوم … غرفتين نوم») and called our structured 715 m² / 4 bedrooms / 5 bathrooms wrong (card parity
+# alerts 14642 / 14643, 615847 + 615831). Each value is rejoined with the label its icon means, keyed by the icon's
+# own path; an icon not in this table is never guessed. Bedrooms are the site's form's two counts together
+# (master suites + other bedrooms — scrapers/ramzalqasim/run.py rooms(), backlog #582).
+_ICON_SPEC_ITEM = re.compile(r'<li class="flex items-center gap-2">\s*<svg[^>]*>\s*<path d="([^"]{0,14})[^>]*/?>.*?</svg>'
+                             r'\s*([^<]{1,40}?)\s*</li>', re.S)
+_ICON_SPEC_LABEL = {"M16,9h5a1,1,0,": "area", "M22 12H5V6.41a": "bath", "M20,3.5H4a3,3,": "master", "M7,12.5a3,3,0,": "bed"}
+
+
+def _icon_spec_lines(body: str) -> list[str]:
+    got: dict[str, str] = {}
+    for icon, value in _ICON_SPEC_ITEM.findall(body or ""):
+        label = _ICON_SPEC_LABEL.get(icon)
+        if label and label not in got:
+            got[label] = re.sub(r"\s+", " ", html.unescape(value)).strip()
+    out = []
+    area = re.fullmatch(r"([\d٠-٩][\d٠-٩.,٬]*)\s*م", got.get("area", ""))
+    if area:
+        out.append(f"مساحة العقار {area.group(1)} م²")
+    if re.fullmatch(r"[1-9]\d*", got.get("bath", "")):   # «0» is the form left unset (run.py), never «no bathroom»
+        out.append(f"دورات المياه {got['bath']}")
+    m = re.fullmatch(r"\((\d+)\)\s*ماستر", got.get("master", ""))
+    b = re.fullmatch(r"\((\d+)\)\s*نوم", got.get("bed", ""))
+    if m and b and int(m.group(1)) + int(b.group(1)) > 0:
+        out.append(f"غرف النوم {int(m.group(1)) + int(b.group(1))}")
+    return out
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     body = HTML_COMMENT.sub(" ", body or "")
@@ -356,7 +387,7 @@ def page_evidence(body: str) -> dict:
         # still prints only the first n_evidence lines.
         # PDPL: every line and the head pass through the repo's one redactor (scrapers/common/pii.py) — they reach
         # reread.json and the job log, and a phone can sit under any permitted label (CodeRabbit on #11465).
-        "evidence_lines": _redacted_lines(_payload_area_lines(body) + _payload_place_lines(body) + _houzez_place_lines(body) + _label_value_lines(body)
+        "evidence_lines": _redacted_lines(_icon_spec_lines(body) + _payload_area_lines(body) + _payload_place_lines(body) + _houzez_place_lines(body) + _label_value_lines(body)
                            + _number_first_lines(body) + _feature_block_lines(shown) + _title_value_lines(shown)
                            + _with_values(lines))[:400],   # once each: duplicates never push a later field past the cap
         "text_head": (redact_pii(" | ".join(lines)) or "")[:1500],   # redact BEFORE the cut: a phone across it leaves no digits
