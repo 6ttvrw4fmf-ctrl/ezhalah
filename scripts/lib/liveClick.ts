@@ -111,7 +111,19 @@ export const STRAY_OVERLAY_SRC = () => [...document.querySelectorAll('[data-test
 export async function dismissStrayOverlay(page: any): Promise<boolean> {
   const open = await page.evaluate(STRAY_OVERLAY_SRC).catch(() => false);
   if (!open) return false;
-  try { await page.keyboard.press('Escape'); } catch { /* a page without a keyboard keeps its sheet */ }
+  // TAP ✕ FIRST, THE WAY A PERSON DOES (🦅 2026-11-13, backlog 1108). The app closes on Escape through a keydown
+  // listener on the TOP window (AdViewer.tsx), so once a stray tap has put focus inside the viewer's iframe the key
+  // goes to the iframe and the sheet stays — and every later tap then lands in the iframe, which the top document never
+  // sees («(no click event seen)», six times). The viewer's own ✕ (testID ad-viewer-close) works wherever focus is.
+  let closed = false;
+  try {
+    const x = typeof page.locator === 'function' ? page.locator('[data-testid="ad-viewer-close"]').filter({ visible: true }).first() : null;
+    if (x) { await x.click({ timeout: 2000 }); closed = true; }
+  } catch { /* no visible ✕ (the split pane hides instead) — fall back to the key */ }
+  if (!closed) {
+    try { await page.evaluate(() => { (document.activeElement as any)?.blur?.(); window.focus(); }); } catch { /* best effort */ }
+    try { await page.keyboard.press('Escape'); } catch { /* a page without a keyboard keeps its sheet */ }
+  }
   await page.waitForTimeout(600);
   return true;
 }

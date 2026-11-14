@@ -60,6 +60,8 @@ const VIEWPORT = MOBILE ? { width: 390, height: 844 } : { width: 1440, height: 9
 
 let failed = 0;
 const skipped: string[] = [];
+/** A results response is a search only when it answered 200 with a row array; a 429/5xx error object is a FAILED fetch, never «rows». */
+export const searchRows = (ok: boolean, json: unknown): any[] | null => (ok && Array.isArray(json) ? json : null);
 const check = (label: string, ok: boolean, detail = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
@@ -110,12 +112,14 @@ async function main() {
 
   // Every results request the app sends, with the body — the carrier of the ACTIVE predicates.
   const searches: Array<{ body: any; rows: any[] }> = [];
+  const failedSearches: number[] = [];   // HTTP status of every results call that did NOT answer with rows
   page.on('response', async (res) => {
     if (!res.url().includes('/rpc/location_search_candidates_ar')) return;
     try {
       const body = JSON.parse(res.request().postData() || '{}');
-      searches.push({ body, rows: await res.json() });
-    } catch { /* a non-JSON body is not a search we can reason about */ }
+      const rows = searchRows(res.ok(), await res.json());
+      if (rows) searches.push({ body, rows }); else failedSearches.push(res.status());
+    } catch { failedSearches.push(res.status()); /* a non-JSON body is not a search we can reason about */ }
   });
 
   console.log(`── scope: ${CITY} · ${GROUP} · ${TYPE} · ${MOBILE ? 'MOBILE 390x844' : 'desktop 1440x900'} ──\n`);
@@ -162,7 +166,9 @@ async function main() {
   await tap(TYPE);
   await tap('بحث');
   const plain = await waitForSearch(armed0);
-  check('a plain search landed', !!plain, plain ? `total ${plain.rows?.[0]?.total_count}, ${plain.rows?.length} row(s)` : 'no results-shaped request captured in 45s');
+  check('a plain search landed', !!plain, plain ? `total ${plain.rows?.[0]?.total_count}, ${plain.rows?.length} row(s)` : failedSearches.length
+    ? `no search answered with rows in 45s — ${failedSearches.length} failed call(s), HTTP ${[...new Set(failedSearches)].join('/')}`
+    : 'no results-shaped request captured in 45s');
   if (!plain) { await browser.close(); process.exit(1); }
   await page.waitForTimeout(4000);
   check('R12A/gate — a search with NO AF answer carries no af_canon (the payload gate holds live)',

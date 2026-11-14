@@ -357,6 +357,10 @@ const R = {
   honestCount: (headline: number | null, rpc: number | null, oracle: number | null, drops: number | null) =>
     headline != null && rpc != null && oracle != null && rpc === oracle &&
     (drops == null ? headline === rpc : drops <= MAX_HYDRATION_DROPS && headline === rpc - drops),
+  /** R8.1.2 — after an all-skip round the newest headline is still the baseline's HONEST number (the same rule as
+   *  honestCount, with the baseline as its own oracle): never the raw total when a drop was measured. */
+  skipHeadlineHolds: (headline: number | null, baselineTotal: number | null, drops: number | null) =>
+    R.honestCount(headline, baselineTotal, baselineTotal, drops),
   /** R10.1.1 — no card repeats across pages. */
   noDuplicates: (ids: string[]) => new Set(ids).size === ids.length,
   /** R10.1.1 — a later page carries byte-identical scope + AF predicate; only paging may differ. */
@@ -976,9 +980,18 @@ try {
       check('2. R8.1.1 — the all-skip search carries NO predicate', R.noPredicate(roundEnd.body), `AF keys: ${afKeysOn(roundEnd.body).join(', ') || '(none)'}`);
       check('2. R8.1.2 — the all-skip search total == baseline total', roundEnd.total === baseline.total, `baseline=${baseline.total} after skips=${roundEnd.total}`);
     } else console.log('      [diag] no search fired after the all-skip round — nothing committed, nothing re-searched');
-    const hsAfterSkips: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
+    // «The baseline number» is the HONEST one the page prints (src/lib/honestTotal.ts): total minus the rows of the
+    // baseline page the raw tables did not return — re-measured NOW, because cards hydrated while the round was
+    // walked can reveal a drop the first read never saw (run 43424461595: headline 29795, rpc 29796, a false red).
+    // The newest headline belongs to the newest search: the baseline when nothing re-searched, else the all-skip
+    // search (whose total is checked == baseline above). Its drops are measured on THAT page, and the headline is
+    // read once it settles on that page's honest number (CodeRabbit on #12166).
+    const shownSearch = roundEnd ?? baseline;
+    const skipHeadline = await waitForHeadline(shownSearch.total, 25_000, honestOf(shownSearch));
+    const skipDrops = dropsOf(shownSearch);
     check('2. R8.1.2 — after skipping every question the newest headline is still the baseline number',
-      R.chipEquals(headlineNum(hsAfterSkips[hsAfterSkips.length - 1]), baseline.total), `headline=${headlineNum(hsAfterSkips[hsAfterSkips.length - 1])} baseline=${baseline.total}`);
+      R.skipHeadlineHolds(skipHeadline, baseline.total, skipDrops.n),
+      `headline=${skipHeadline} baseline=${baseline.total} drops=${skipDrops.n ?? 'unobserved'}${skipDrops.keys.length ? ` [${skipDrops.keys.slice(0, 5).join(' ')}]` : ''}`);
   }
 
   // ── 3. fresh load; SELECT the smallest option on the first question; the landed set ──────────
@@ -1527,6 +1540,10 @@ try {
     mut('drops above MAX_HYDRATION_DROPS are drift, caught by honestCount', !R.honestCount(T - (MAX_HYDRATION_DROPS + 1), T, T, MAX_HYDRATION_DROPS + 1));
     mut('rpc ≠ oracle is caught by honestCount whatever the drops', !R.honestCount(T - 1, T, T + 1, 1));
     mut('a headline one below with exactly one measured drop is accepted by honestCount', R.honestCount(T - 1, T, T, 1));
+    mut('an all-skip headline one below with ONE measured drop is accepted by skipHeadlineHolds (run 43424461595)', R.skipHeadlineHolds(T - 1, T, 1));
+    mut('an all-skip headline one below with ZERO measured drops is caught by skipHeadlineHolds', !R.skipHeadlineHolds(T - 1, T, 0));
+    mut('an all-skip headline one below with NO observed hydration is caught by skipHeadlineHolds', !R.skipHeadlineHolds(T - 1, T, null));
+    mut('an UNSUBTRACTED all-skip headline with one measured drop is caught by skipHeadlineHolds', !R.skipHeadlineHolds(T, T, 1));
     if (unionIds.length) mut('a duplicated card across pages is caught by noDuplicates', !R.noDuplicates([...unionIds, unionIds[0]]));
     const later = { ...landed.body, p_offset: 1500, [k]: null };
     mut(`a later page that dropped ${k} is caught by samePredicate`, k != null && !R.samePredicate(landed.body, later));
