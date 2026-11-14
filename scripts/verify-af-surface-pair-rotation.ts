@@ -1,0 +1,92 @@
+// The AF region sweep's multi-type pair stage is BUDGETED and ROTATED, so the job finishes and every pair is still covered
+// across days (🦅 2026-11-13).
+//
+// af-live-truth-check run 43424461595: stage 1 took 65 min, then 182 pairs ran for 84 min (0 failures) and the job was
+// CANCELLED at its 150-min cap mid-pair — the combined Buy∪Rent and both-period stages never ran, on any day, and the
+// whole robot read «cancelled». This guard EXECUTES the real rotationOffset()/pairBudgetSpent() lifted from
+// verify-af-full-surface-differential.ts (importing that file would run the live sweep) and pins the workflow's budget.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { liftSymbols } from './lib/liftSymbols.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
+
+const ROOT = join(import.meta.dirname, '..');
+const SRC = join(ROOT, 'scripts', 'verify-af-full-surface-differential.ts');
+let failed = 0;
+const check = (label: string, ok: boolean, detail = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
+  if (!ok) failed++;
+};
+const mutation = (label: string, caught: boolean, detail = '') => check(`MUTATION — ${label}`, caught, detail);
+
+const m = await liftSymbols(SRC, [
+  { header: 'export function rotationOffset(' },
+  { header: 'export const pairBudgetSpent', endsWith: /;\s*$/ },
+  { header: 'export async function walkPairs<T>(', endsWith: /^\}$/ },
+], ['rotationOffset', 'pairBudgetSpent', 'walkPairs']);
+const rotationOffset = m.rotationOffset as (n: number, day: number) => number;
+const pairBudgetSpent = m.pairBudgetSpent as (start: number, budgetMs: number, now: number) => boolean;
+type Walk = (pairs: number[], day: number, budgetMs: number, now: () => number, visit: (p: number) => Promise<void>) => Promise<number>;
+const walkPairs = m.walkPairs as Walk;
+
+/** Over n consecutive days the start offset visits every pair index — no pair is starved forever. */
+const coversAll = (rot: (n: number, d: number) => number, n: number) => {
+  const seen = new Set<number>();
+  for (let d = 20_000; d < 20_000 + n; d++) seen.add(rot(n, d));
+  return seen.size === n;
+};
+for (const n of [1, 2, 37, 74, 182, 250, 333]) check(`rotation visits every offset across ${n} days (n=${n})`, coversAll(rotationOffset, n));
+check('rotation is stable within one day (re-runs start at the same pair)', rotationOffset(182, 20_405) === rotationOffset(182, 20_405));
+check('budget 0 never stops a local run', !pairBudgetSpent(0, 0, 10 ** 12));
+check('the budget stops the stage once spent', pairBudgetSpent(0, 40 * 60_000, 40 * 60_000));
+check('…and not one millisecond before', !pairBudgetSpent(0, 40 * 60_000, 40 * 60_000 - 1));
+
+// Mutations: a fixed start (the old exhaustive walk) and a stride sharing a factor with n starve pairs.
+mutation('a fixed start offset is caught', !coversAll(() => 0, 182));
+mutation('a stride that shares a factor with n (2 for n=182) is caught', !coversAll((n, d) => (d * 2) % n, 182));
+const stopsWhenSpent = (f: (s: number, b: number, n: number) => boolean) => f(0, 40 * 60_000, 41 * 60_000) && !f(0, 0, 41 * 60_000);
+mutation('a budget that never stops is caught', stopsWhenSpent(pairBudgetSpent) && !stopsWhenSpent(() => false));
+mutation('a «budget» that stops even unbudgeted local runs is caught', !stopsWhenSpent(() => true));
+
+// The production pair LOOP, executed (CodeRabbit #12166): stub pairs, a stub clock that advances 1 ms per visited pair.
+/** The walk starts at the rotated offset and stops after exactly `budget` visits, deferring the rest. */
+const walkHolds = async (walk: Walk) => {
+  const pairs = Array.from({ length: 10 }, (_, i) => i);
+  const day = 20_405;
+  let t = 0; const seen: number[] = [];
+  const deferred = await walk(pairs, day, 3, () => t, async (p) => { seen.push(p); t++; });
+  const unbudgeted: number[] = [];
+  const none = await walk(pairs, day, 0, () => t, async (p) => { unbudgeted.push(p); t += 1000; });
+  return seen[0] === rotationOffset(10, day) && seen.length === 3 && deferred === 7 && none === 0 && unbudgeted.length === 10;
+};
+check('the real pair walk starts at the rotated offset, stops when the budget is spent, and reports the deferred pairs', await walkHolds(walkPairs));
+const fixedStart: Walk = async (pairs, _d, b, now, visit) => { const s0 = now(); for (let k = 0; k < pairs.length; k++) { if (pairBudgetSpent(s0, b, now())) return pairs.length - k; await visit(pairs[k]); } return 0; };
+const noStop: Walk = async (pairs, d, _b, _now, visit) => { const o = rotationOffset(pairs.length, d); for (const p of [...pairs.slice(o), ...pairs.slice(0, o)]) await visit(p); return 0; };
+mutation('a walk with a fixed start is caught', !(await walkHolds(fixedStart)));
+mutation('a walk with the budget stop removed is caught', !(await walkHolds(noStop)));
+const diffSrc = readFileSync(SRC, 'utf8');
+/** The sweep's call passes TODAY (whole days since the epoch), the workflow's budget and the real clock — every argument
+ *  pinned, because a call with day 0 fixes the start and one with budget 0 switches the stop off (CodeRabbit #12166). */
+const CALL = 'M.pairsDeferred = await walkPairs(allPairs, Math.floor(Date.now() / 86_400_000), PAIR_BUDGET_MS, Date.now, async';
+const callsWalk = (src: string) => src.includes(CALL)
+  && /const PAIR_BUDGET_MS = Number\(process\.env\.AF_FSD_PAIR_BUDGET_MIN \|\| 0\) \* 60_000;/.test(src);
+check('the sweep drives its pair stage through walkPairs() with today, the workflow budget and the real clock', callsWalk(diffSrc));
+mutation('a sweep that walks its pairs inline again is caught', !callsWalk(diffSrc.replace(CALL, CALL.replace('walkPairs(', 'inlineWalk('))));
+mutation('a call with day 0 (a fixed start) is caught',
+  !callsWalk(diffSrc.replace(CALL, CALL.replace('Math.floor(Date.now() / 86_400_000)', '0'))));
+mutation('a call with budget 0 (the stop switched off) is caught',
+  !callsWalk(diffSrc.replace(CALL, CALL.replace('PAIR_BUDGET_MS, Date.now', '0, Date.now'))));
+mutation('a budget that no longer reads the workflow variable is caught',
+  !callsWalk(diffSrc.replace('Number(process.env.AF_FSD_PAIR_BUDGET_MIN || 0) * 60_000', '0')));
+
+// The workflow must actually set the budget, below the job's own cap.
+const wf = readFileSync(join(ROOT, '.github', 'workflows', 'af-live-truth-check.yml'), 'utf8');
+const job = windowBetween(wf, '  af-surface-region:', '  af-surface-city:', 'af-live-truth-check.yml');
+const budget = Number(/AF_FSD_PAIR_BUDGET_MIN:\s*['"]?(\d+)/.exec(job)?.[1] ?? NaN);
+const cap = Number(/timeout-minutes:\s*(\d+)/.exec(job)?.[1] ?? NaN);
+check('af-surface-region sets AF_FSD_PAIR_BUDGET_MIN', Number.isFinite(budget) && budget > 0, `budget=${budget}`);
+check('…and stage 1 (65 min measured) + the pair budget leaves ≥ 30 min of the job cap for the later stages',
+  Number.isFinite(cap) && 65 + budget + 30 <= cap, `65 + ${budget} + 30 vs cap ${cap}`);
+
+console.log(failed === 0 ? '\n✓ the pair stage is budgeted and rotated; the region sweep can finish' : `\n✗ ${failed} check(s) failed`);
+process.exit(failed === 0 ? 0 : 1);

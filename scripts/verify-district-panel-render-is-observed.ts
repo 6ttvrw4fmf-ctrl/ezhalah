@@ -176,7 +176,9 @@ const muts: Mut[] = [
     apply: (s) => s.replace(/if \(!rpc\.returned\) \{[\s\S]*?\} else if/, 'if ('),
     rule: (b) => /!\s*rpc\.returned[\s\S]{0,300}?defect\(/.test(emptyPanelBranch(b)) },
   { name: 'M4 stop observing the RPC (the adjudication loses its evidence)',
-    apply: (s) => s.replace(/page\.on\(\s*'response'[\s\S]*?\}\);\n/, ''),
+    // EVERY observer goes: since 2026-11-13 the journey also listens from before the city pick (the app fetches the
+    // panel there), so deleting only the first one would leave evidence behind and prove nothing.
+    apply: (s) => s.replace(/page\.on\(\s*'response'[\s\S]*?\}\);\n/g, ''),
     rule: (b) => /page\.on\(\s*['"]response['"][\s\S]{0,400}?district_options_ar/.test(b) },
   { name: 'M5 attach the observer AFTER the click, so it can miss the response',
     apply: (s) => {
