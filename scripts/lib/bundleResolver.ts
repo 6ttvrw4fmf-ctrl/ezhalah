@@ -19,6 +19,7 @@ export async function bundleResolver(srcRoot: string, rows: IndexRow[]): Promise
   const stubs: Record<string, string> = {
     '@/lib/supabase': `const rows = ${JSON.stringify(rows)}; export const supabase = { from: () => ({ select: () => ({ abortSignal: async () => ({ data: rows, error: null }) }) }) };`,
     '@/i18n': `export const LOCATION_UNRESOLVED_AR = 'غير محدد';`,
+    '@/lib/observability': `export const reportError = () => {};`, // locations.ts reports a give-up (#11370); the real module pulls in expo-router
   };
   const out = await build({
     stdin: { contents: `export { ensureLocationIndex, resolveLocation, liveShelfCount } from './data/locations.ts';`, resolveDir: join(srcRoot, 'src'), loader: 'ts' },

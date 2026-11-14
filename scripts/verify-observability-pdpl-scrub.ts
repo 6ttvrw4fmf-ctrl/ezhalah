@@ -8,7 +8,7 @@
 
 import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
-import { scrubEvent, isEnabled, type SentryEventShape } from '../src/lib/observability.ts';
+import { scrubEvent, isEnabled, pseudonymousId, type SentryEventShape } from '../src/lib/observability.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => {
@@ -74,8 +74,20 @@ check('user.ip_address dropped', !('ip_address' in (e.user ?? {})));
 check('user.username dropped', !('username' in (e.user ?? {})));
 check('user.phone dropped', !('phone' in (e.user ?? {})));
 check('future SDK-added user PII field dropped', !('extra_new_pii_field' in (e.user ?? {})));
-// The id here IS an email in the sample, so it must be scrubbed even though we kept the field.
-check('user.id itself scrubbed if it happens to be an email', e.user!.id === '[redacted]');
+// The id here IS an email in the sample (AuthUser.sub is `email || name`, src/lib/auth.ts), so it leaves
+// only as a one-way hash — never the address, never a recoverable form (CodeRabbit Major on #11370).
+check('user.id that is an email leaves only as a one-way hash', /^u_[0-9a-f]{16}$/.test(e.user!.id ?? '') && !String(e.user!.id).includes('@'));
+const byName = scrubEvent({ user: { id: 'يوسف النشوان' } } as SentryEventShape)!;
+check('user.id that is a NAME leaves only as a one-way hash (scrubString cannot see a name)', /^u_[0-9a-f]{16}$/.test(byName.user?.id ?? '') && !String(byName.user?.id).includes('يوسف'));
+check('the hash is stable per user (errors still group per person)', pseudonymousId('يوسف النشوان') === byName.user?.id && pseudonymousId('a@b.c') === pseudonymousId('a@b.c'));
+check('an id that is already our hash passes through unchanged', scrubEvent({ user: { id: pseudonymousId('x') } } as SentryEventShape)!.user?.id === pseudonymousId('x'));
+const storeSrc = readFileSync(new URL('../src/store.tsx', import.meta.url), 'utf8');
+const authSrc = readFileSync(new URL('../src/lib/auth.ts', import.meta.url), 'utf8');
+const idsByAccount = (st: string, au: string) => /identifyUser\(user\?\.accountId \?\? null\)/.test(st) && !/identifyUser\(user\?\.sub/.test(st) && /accountId: u\.id/.test(au);
+check('Sentry identifies a user by the account UUID, never by sub (email || name) — a guessable hash input', idsByAccount(storeSrc, authSrc));
+check('(mutation) catches identifyUser fed the sub again', !idsByAccount(storeSrc.replace('identifyUser(user?.accountId ?? null)', 'identifyUser(user?.sub ?? null)'), authSrc));
+check('(mutation) catches accountId no longer mapped from the auth account', !idsByAccount(storeSrc, authSrc.replace('accountId: u.id', 'accountId: u.email')));
+check('identifyUser hashes before setUser (mutation: the raw sub may never reach Sentry)', /SentryImpl\.setUser\(\{ id: pseudonymousId\(sub\) \}\)/.test(readFileSync(new URL('../src/lib/observability.ts', import.meta.url), 'utf8')));
 
 // 4. Free-text fields have JWTs, publishable keys, phones and emails redacted anywhere they occur.
 const asJson = JSON.stringify(e);
@@ -125,8 +137,9 @@ check('_layout.tsx forwards unhandledrejection and window.error through reportEr
   /reportError\(ev\?\.reason \?\? new Error\('unhandledrejection'\)/.test(layout)
   && /reportError\(ev\?\.error \?\? new Error/.test(layout));
 const store = readFileSync(new URL('../src/store.tsx', import.meta.url), 'utf8');
-check('store.tsx identifies the user by `sub` only (never phone/email/name)',
-  /identifyUser\(user\?\.sub \?\? null\)/.test(store) && !/identifyUser\([^)]*phone/i.test(store));
+// Was «by `sub` only» — but sub IS email || name (src/lib/auth.ts), so this pinned the leak as correct (fixed 2026-11-08).
+check('store.tsx identifies the user by the account UUID only (never sub / phone / email / name)',
+  /identifyUser\(user\?\.accountId \?\? null\)/.test(store) && !/identifyUser\([^)]*(phone|email|\.sub|name)/i.test(store));
 
 console.log(failed ? `\n✗ ${failed} check(s) FAILED — observability scrubber contract broken` : '\n✓ observability PDPL/security scrubber holds — no PII, no tokens, no query strings can escape');
 process.exit(failed ? 1 : 0);

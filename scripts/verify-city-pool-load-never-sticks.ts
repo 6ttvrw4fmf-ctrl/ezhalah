@@ -35,6 +35,7 @@ const PRELUDE = `
 type CityOption = any; type Deal = any; type Category = any; type AfParams = any; type PoolStatus = any;
 let supabase: any = null;
 const setClient = (c: any) => { supabase = c; };
+const reportError = (_e: unknown, _c?: unknown, _o?: unknown) => {}; // src/lib/observability stub: the give-up report is pinned by verify-location-pool-failures-are-reported.ts
 const CITY_FIELD_POOLS = new Map<string, any>();
 const _cityFieldPromises = new Map<string, any>();
 const _cityPoolFetchedAt = new Map<string, number>();
