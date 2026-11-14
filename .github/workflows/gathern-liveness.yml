@@ -119,6 +119,12 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+      # The alert bridge imports a .ts file: the self-hosted runner defaults to Node 18, which cannot load it
+      # (pin-district-nightly run 43492540747, 2026-11-13: ERR_UNKNOWN_FILE_EXTENSION, the failure never reached alert_event).
+      - if: always()   # a failed crawl must not skip the Node the bridge needs
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
