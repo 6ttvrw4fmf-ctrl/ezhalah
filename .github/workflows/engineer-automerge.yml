@@ -37,7 +37,12 @@ env:
 
 jobs:
   merge:
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14, measured): this is a 10-minute control-plane job, and on the 6-runner own server it sat
+    # behind 70+ queued crawl runs all morning — every 15-minute pass from 08:02 to 13:02 UTC was cancelled or pending before
+    # it got a runner, so 11 green engineer PRs (#12181 #12182 #12184 #12185 #12188 #12189 #12190 #12193 #12175 #12173 #12169)
+    # could not merge and no fix reached a customer. A merge robot that cannot run is the whole fleet stopped: it stays on
+    # GitHub's runners whatever EZ_RUNNER says. Listed in HOSTED_ONLY in scripts/verify-runner-switch.ts.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
