@@ -848,6 +848,26 @@ _STOVE_CUES = tuple(_n(w) for w in ("فرن", "الفرن", "افران", "شف�
                                     "built", "اجهز", "الاجهز", "ادوات", "صحون", "الصحون", "فريزر", "قهوه", "القهوه", "اسطوان",
                                     "مزدوج", "انفرا", "حراري", "ستيل", "اطباق", "الاطباق", "قدور", "القدور", "ملاعق",
                                     "كاسات", "اواني", "الاواني", "اوني", "سرفيس", "لطبخ", "لطهي", "كهري"))
+_LAND_USE_WORD = r"(?:ال)?(?:سكني|سكنيه|تجاري|تجاريه|زراعي|زراعيه|صناعي|صناعيه)"
+_LAND_WANTED = frozenset(_n(w) for w in ("مطلوب", "مطلوبه", "نشتري", "نبحث", "نرغب", "شراء"))
+_LAND_USE_WORD_RE = re.compile(r"(?:و)?" + _LAND_USE_WORD)
+_LAND_USE_OF = {"سكني": "سكني", "تجار": "تجاري", "زراع": "زراعي", "صناع": "صناعي"}
+_LAND_USE = re.compile(
+    r"(?<!\w)(?:"
+    r"(?:و|ب|ل|ال|وال|بال)?(?:ارض|ارضين|اراضي|ارضيه|قطعه|قطعتين|قطع)(?:[ _](?:ال)?(?:زاويه|مميزه|مميز|فضاء))?(?: (?:للبيع|للايجار))?"
+    r"|(?:و|ب)?صك(?: (?:ال)?(?:الكتروني|الكترونى))?"
+    r"|(?:استخدام|استخدامات) (?:ال)?(?:عقار|ارض)|(?:ال)?(?:استخدام|استخدامات)|نوع (?:ال)?ارض|تصريح بناء|رخصه بناء"
+    r")[ _]+(?P<u>" + _LAND_USE_WORD + r")(?:[ _]+(?:او |و)?(?P<u2>" + _LAND_USE_WORD + r"))?(?!\w)")
+_LAND_CONVERT = re.compile(r"(?<!\w)(?:لل|ل|ب)?(?:تحويل|تحول|تحويلها|تحويله|تغيير|تغييرها|تغييره|تغير)(?:\s+\S+){0,3}?\s+(?:الي\s+|لل|ل)?"
+                           + _LAND_USE_WORD + r"(?!\w)")
+# «أرض سكنية قابلة للتحويل» names no destination but still says the use may change (CodeRabbit on #11819)
+_LAND_CONVERTIBLE = re.compile(r"(?<!\w)و?(?:قابل|قابله|يمكن|ممكن|امكانيه)\s+(?:لل|ل)?(?:تحويل|تحويلها|تحويله|تغيير|تغييرها|تغييره)(?!\w)"
+                               # «يمكن تحويل ثمن العقار إلى حساب بنكي» is a payment, not the use (CodeRabbit on #11819)
+                               r"(?!\s+(?:ال)?(?:ثمن|مبلغ|المبلغ|الدفع|دفعه|العربون|الي حساب|لحساب))")
+# a use the ad DENIES or only calls POSSIBLE is not its use (CodeRabbit on #11819: «ليست أرض سكنية», «يمكن استخدام
+# العقار تجاري», «تصلح ارض تجارية»)
+_LAND_NOT_STATED = frozenset(_n(w) for w in ("ليست", "ليس", "غير", "مو", "مش", "لا", "يمكن", "ممكن", "بالامكان", "تصلح",
+                                             "يصلح", "مناسب", "مناسبه", "قابل", "قابله", "امكانيه"))
 _SENTENCE_END = re.compile(r"[.!?؟\n]")
 
 
@@ -1916,7 +1936,72 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
             if ci0 == ci1:
                 q = quote_of(ci0, m0.start(), m1.end())
                 emit("boundaries", " ".join(q.split())[:300], q)
+    # LAND USE (owner decision 2026-11-08, backlog 1650/1718): what a plain «أرض» ad says its land is zoned for. Only a
+    # head that NAMES the land or its deed carries it — «ارض/قطعه/اراضي (زاويه|مميزه)? سكنيه», «صك زراعي», «استخدام
+    # العقار: تجاري», «نوع الارض: صناعي», «تصريح بناء سكني». «شارع تجاري», «موقع تجاري», «السجل التجاري», «مشروع سكني»,
+    # «مجمع سكني» never: they are a street, a pitch, a broker licence, a building. Two different uses anywhere in the ad
+    # («ارض زاويه تجاريه سكنيه», «استخدام العقار: سكني-تجاري»), a conversion («قابله للتحويل») or a near word before the
+    # head («قريبه من ارض تجاريه») → none: silence is unknown, never a pick.
+    land_uses: dict[str, tuple[int, int, int]] = {}
+    near_carry = False
+    for ci, (_o, _c, t, _i) in enumerate(clauses):
+        # «قريبة من حي، فيه أرض تجارية»: a clause that opens with «فيه / بها / منها» continues the neighbour the last
+        # clause was near to (CodeRabbit on #11819)
+        carried = near_carry and bool(t.split()) and _strip_wa(t.split()[0]) in _NEAR_RELATIVE
+        near_carry = _near_open(_c, t, _i, len(t))
+        if _LAND_CONVERT.search(t) or _LAND_CONVERTIBLE.search(t):
+            land_uses["?"] = (ci, 0, 0)
+            continue
+        for m in _LAND_USE.finditer(t):
+            before = t[:m.start()].split()[-3:]
+            # a wanted request runs to the end of its clause: «مطلوب من مالك الأرض قطعة أرض تجارية» (CodeRabbit on #11819)
+            # «السعر قابل للتفاوض أرض سكنية»: the price is negotiable, not the use (CodeRabbit on #11819)
+            hedges = [w for k, w in enumerate(before) if w in _LAND_NOT_STATED
+                      and not (k + 1 < len(before) and before[k + 1].startswith(_n("للتفاوض")[:5]))]
+            # a near word owns everything after it up to the next heading — see _near_open (CodeRabbit on #11819)
+            if _near_open(_c, t, _i, m.start(), carried) or hedges \
+                    or any(_strip_wa(w) in _LAND_WANTED for w in t[:m.start()].split()):
+                continue           # «قريبه من ارض تجاريه», a broker's «مطلوب اراضي تجاريه»: not this ad's land
+            nxt = clauses[ci + 1][2].split()[:1] if ci + 1 < len(clauses) and not t[m.end():].strip() else []
+            more = _LAND_USE_WORD_RE.fullmatch(nxt[0]).group(0) if nxt and _LAND_USE_WORD_RE.fullmatch(nxt[0]) else None
+            for u in (m.group("u"), m.group("u2"), more):    # «( تجاري / سكني )»: «/» breaks the clause, not the pair
+                if u:
+                    land_uses.setdefault(_LAND_USE_OF[u.removeprefix("و").removeprefix("ال")[:4]], (ci, m.start(), m.end()))
+    if len(land_uses) == 1 and "?" not in land_uses:
+        u, (ci, s0, e0) = next(iter(land_uses.items()))
+        emit("land_use_ar", u, quote_of(ci, s0, e0))
     return out
+
+
+# A NEAR WORD OWNS WHAT FOLLOWS IT UNTIL A HEADING (CodeRabbit on #11819, 2026-11-11). «قريبة من حي تتوفر فيه قطع
+# متعددة منها أرض تجارية» — however many words later, the land is the neighbourhood's; a word window cannot see that, so
+# none is used. What ends the reach is a new heading: a «: / ⸻ / —» in the RAW clause (norm_map strips them, so they are
+# found through its position map — «قريب من شارع الملك وصف العقار: صك سكني»), or a description label even without its
+# colon («… وصف العقار صك سكني»). aqar 1341293 («قريب من جميع الخدمات ⸻ وصف العقار: ارض مسوره صك سكني») is the lock's
+# witness. Known price: «وقريبة من الخدمات أرض سكنية» stays unstated — silence is unknown; a neighbour's use is a lie.
+_NEAR_HEADING_RAW = re.compile(r"[:⸻—]")
+_NEAR_HEADING_WORDS = frozenset(_n(w) for w in ("وصف", "الوصف", "نوع", "استخدام", "الاستخدام", "مواصفات", "المواصفات",
+                                                 "تفاصيل", "التفاصيل", "بيانات", "معلومات"))
+_NEAR_RELATIVE = frozenset(_n(w) for w in ("فيه", "فيها", "به", "بها", "منها", "منه", "يوجد", "توجد", "تتوفر", "يتوفر",
+                                            "يضم", "تضم"))
+
+
+def _near_open(c: str, t: str, idx: list[int], end: int, near: bool = False) -> bool:
+    """True when a near word stands in t[:end] with no heading between it and end. `near` is the state carried in from
+    the clause before («قريبة من حي، فيه …»); a heading in this clause ends it too (CodeRabbit on #11819)."""
+    start = 0
+    raw_end = idx[end] if end < len(idx) else len(c)       # the head's own raw position: a collapsed space maps short
+    cut = [h.end() for h in _NEAR_HEADING_RAW.finditer(c, 0, raw_end)]
+    if cut:
+        start = bisect.bisect_left(idx, cut[-1], 0, end)
+        near = False
+    words = t[start:end].split()
+    for w in words:
+        if w in _NEAR_HEADING_WORDS or _strip_wa(w) in _NEAR_HEADING_WORDS:   # «وصف» starts with «و» itself
+            near = False
+        elif w in _NEAR_WORDS or (w.startswith("و") and w[1:] in _NEAR_WORDS):
+            near = True
+    return near
 
 
 def quote_of_t(c: str, t: str, idx: list[int], s: int, e: int) -> str:
@@ -3059,6 +3144,45 @@ def selftest() -> None:
         ("عمارة 4 أدوار", {"floors": 4.0}, ("building_rules",)),
         ("عدد الشقق 12", {"apartments_count": 12.0}, ()),
         ("عمارة فيها محلين", {"shops_count": 2.0}, ()),
+        # 🔬 2026-11-11 (backlog 1718, owner's plain-«أرض» decision 2026-11-08): a land's use only from a head that names
+        # the land or its deed; two uses, a conversion or a near word → none
+        ("للبيع ارض زاوية سكنية شرق بريدة", {"land_use_ar": "سكني"}, ()),                 # aqar 6989916
+        ("قطعة زراعيه للبيع – النبقية", {"land_use_ar": "زراعي"}, ()),                     # haraj 19324720
+        ("ارض بصك زراعي", {"land_use_ar": "زراعي"}, ()),                                   # aqar 11510463
+        ("ارض مميزة تجارية على خط الرياض", {"land_use_ar": "تجاري"}, ()),                  # aqar 21176062
+        ("للبيع ارض صناعيه مساحة : 5000 متر", {"land_use_ar": "صناعي"}, ()),               # haraj 23548266
+        ("الأرض بمخطط معتمد وصك الكتروني سكني", {"land_use_ar": "سكني"}, ()),              # aqar 10932898
+        ("نوع الأرض : تجارية", {"land_use_ar": "تجاري"}, ()),
+        ("الاستخدام: صناعي", {"land_use_ar": "صناعي"}, ()),
+        ("ارض زاويه تجاريه سكنيه للايجار", {}, ("land_use_ar",)),                          # aqar 20871284
+        ("استخدام العقار: سكني-تجاري. عدد الشوارع: شارع واحد", {}, ("land_use_ar",)),      # aqar 17753606
+        ("ارض سكنية قريبة من ارض تجارية", {"land_use_ar": "سكني"}, ()),                 # the nearby one is not this land
+        ("أرض زراعية قابلة للتحويل إلى سكني", {}, ("land_use_ar",)),
+        ("خلف الأرض شارع تجاري • قريبه من جميع الخدمات", {}, ("land_use_ar",)),           # haraj 18743550
+        ("موقع تجاري للبيع", {}, ("land_use_ar",)),                                       # haraj 20641041
+        ("رخص فال السجل التجاري", {}, ("land_use_ar",)),                                   # haraj 18946243
+        ("للبيع مجمع سكني مطل", {}, ("land_use_ar",)),
+        ("مناسبة لإقامة مشروع استثماري أو قصر سكني", {}, ("land_use_ar",)),               # aqar 114530
+        ("أرض ليست زراعية", {}, ("land_use_ar",)),
+        ("أرض للبيع تجارية في حي طويق بالرياض", {"land_use_ar": "تجاري"}, ()),            # aqar 18818283
+        ("ارض للبيع( سكنيه ) التفاصيل", {"land_use_ar": "سكني"}, ()),                       # aqar 10530615
+        ("الارض للبيع تجاري سكني من المالك مباشرة", {}, ("land_use_ar",)),                # aqar 8017472
+        ("مطلوب أراضي تجارية على شارع الملك عبدالعزيز", {}, ("land_use_ar",)),
+        ("قطعتي ارض للبيع الاستخدام ( تجاري / سكني ) الارض على صكين", {}, ("land_use_ar",)),   # aqar 11518885
+        # CodeRabbit on #11819 (6 findings, each a real sentence shape)
+        ("استخدامات العقار: سكني", {"land_use_ar": "سكني"}, ()),
+        ("أرض سكنية، الدفع عن طريق تحويل بنكي", {"land_use_ar": "سكني"}, ()),
+        ("ليست أرض سكنية", {}, ("land_use_ar",)),
+        ("يمكن استخدام العقار تجاري", {}, ("land_use_ar",)),
+        ("أرض سكنية أو تجارية", {}, ("land_use_ar",)),
+        ("أرض سكنية يمكن تغييرها إلى تجارية", {}, ("land_use_ar",)),
+        ("مطلوب من مالك الأرض قطعة أرض تجارية", {}, ("land_use_ar",)),
+        ("أرض سكنية قابلة للتحويل", {}, ("land_use_ar",)),
+        ("السعر قابل للتفاوض أرض سكنية", {"land_use_ar": "سكني"}, ()),
+        ("أرض سكنية ويمكن تحويلها", {}, ("land_use_ar",)),                                # CodeRabbit on #11819
+        ("أرض سكنية يمكن تحويل ثمن العقار إلى حساب بنكي", {"land_use_ar": "سكني"}, ()),
+        ("أرض للبيع وقريبة من أرض تجارية", {}, ("land_use_ar",)),
+        ("أرض سكنية وقريبة من أرض تجارية", {"land_use_ar": "سكني"}, ()),
         # 🔬 2026-11-11 (P2 13085, backlog 1773): a view of «the road», a shop's goods, a building's own events room and
         # services AROUND the home are not the feature
         ("+ بلكونه (شرفه) مطلة على الطريق. شاشه TV", {}, ("main_road",)),                 # aqar 15126306
