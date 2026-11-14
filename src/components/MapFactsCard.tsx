@@ -5,8 +5,9 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { fetchMapCard, type CardTarget } from '@/data/mapCard';
 import { Image as XImage } from 'expo-image';
-import { cardRow, quickLook, nearbyPrices, filterChips, restIsSoon, COLUMNS, CARD_NOTE, NEAR, REST_SOON, LEGEND, typeLabel,
+import { cardRow, quickLook, nearbyPrices, filterChips, restIsSoon, isSaleCard, COLUMNS, CARD_NOTE, NEAR, REST_SOON, LEGEND, typeLabel,
   type ChipFilter, type MapCard, type Tone } from '@/lib/mapCard';
+import MapSaleCard from '@/components/MapSaleCard';
 import { InsightHowItWorks } from '@/components/InsightHowItWorks';
 import { HOW_IT_WORKS } from '@/lib/insightHowItWorks';
 
@@ -20,23 +21,29 @@ type Props = { target: CardTarget; title: string; filter?: ChipFilter | null; si
 export default function MapFactsCard({ target, title, filter, signedIn, loc, onClose, onSignIn }: Props) {
   const [card, setCard] = useState<MapCard | 'locked' | null | undefined>(undefined);
   const [howOpen, setHowOpen] = useState(false);
+  // the type the user tapped on a sale card (null = the card shows the most common type, named)
+  const [priceType, setPriceType] = useState<string | null>(null);
+  useEffect(() => { setPriceType(null); }, [target]);
   useEffect(() => {
     let stale = false;
     setCard(undefined);
-    void fetchMapCard(target, signedIn).then((c) => { if (!stale) setCard(c); });
+    void fetchMapCard(target, signedIn, priceType).then((c) => { if (!stale) setCard(c); });
     return () => { stale = true; };
-  }, [target, signedIn]);
+  }, [target, signedIn, priceType]);
+  // a residential SALE gets the redesigned card (owner 2026-11-14); rent and commercial keep this one for now
+  const sale = isSaleCard(target.kind === 'box' ? target.filter : { deals: target.deals });
   const ar = loc === 'ar';
   const dir = ar ? 'rtl' : 'ltr';
   const toneStyle = (t: Tone) => (t === 'up' ? s.up : t === 'down' ? s.down : null);
   return (
     <View style={s.wrap} testID="map-card">
       {/* plain 'row' everywhere: the page is already right-to-left in Arabic (see PostedWindowMenu) */}
+      {sale && card && card !== 'locked' ? null : (
       <View style={s.head}>
         <Text style={[s.title, { writingDirection: dir }]} numberOfLines={1}>{title}</Text>
-      </View>
+      </View>)}
       {/* what the user picked in the filter, as pills under the title (owner 2026-11-13) */}
-      {filterChips(filter, loc).length ? (
+      {!(sale && card && card !== 'locked') && filterChips(filter, loc).length ? (
         <View style={[s.pills, { flexDirection: 'row' }]} testID="map-card-filters">
           {filterChips(filter, loc).map((p) => <Text key={p} style={s.pill}>{p}</Text>)}
         </View>
@@ -50,7 +57,13 @@ export default function MapFactsCard({ target, title, filter, signedIn, loc, onC
       {card === 'locked' ? (
         <Pressable onPress={onSignIn} accessibilityRole="button"><Text style={[s.ask, s.center]}>{ar ? '🔒 سجل الدخول لعرض الأرقام' : '🔒 Sign in to see the numbers'}</Text></Pressable>
       ) : null}
-      {card && card !== 'locked' ? (
+      {sale && card && card !== 'locked' ? (
+        <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ paddingBottom: 6 }}>
+          <MapSaleCard card={card} filter={target.kind === 'box' ? target.filter : null} place={title.split(' · ')[0]} loc={loc}
+            priceType={priceType} onPickType={setPriceType} onHow={() => setHowOpen(true)} />
+        </ScrollView>
+      ) : null}
+      {!sale && card && card !== 'locked' ? (
         <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ paddingBottom: 6 }}>
           <View style={[s.subRow, { flexDirection: 'row' }]}>
             <Text style={[s.sub, { writingDirection: dir, flex: 1 }]}>
