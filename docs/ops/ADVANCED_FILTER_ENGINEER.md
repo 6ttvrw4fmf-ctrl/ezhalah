@@ -758,3 +758,34 @@ the owner:** (1) «3 دورات مياه» + «مجلس بدورة مياه» (~
   ticked amenities for weeks. 🔧 11-08: the iPhone robot passed three times on the site that HAD the bug (it walked a
   first-time guest's screen). Rule: prove both directions on production before trusting a robot or scorer; when a tool
   is fixed, re-score on the branch the same hour.
+
+## Lesson written as a rule (🔧 2026-11-14, second night: 11-13 + 11-14)
+
+**The runner queue is read before the first job is chosen.** 11-13: «a dispatched re-read is not a started re-read» —
+pending facts-words runs cancelled each other (21:43 cancelled at 22:43). 11-14: 13 found, 11 fixed in code, 0 proven,
+because every proof and the merge robot queued behind the own-server crawls; the robot refused #12188 #12189 #12190 at
+13:21 UTC only for the push-event «test» check still queued there. Rule: at minute 0 read the queued runs (age, runner
+labels) and the in-progress jobs; when the own pool is jammed, choose jobs whose proof is a hosted PR check, an in-DB
+read or a hosted dispatch, ship ≤ 2 PRs with one push each, and route the jam to 🔧 instead of waiting on it.
+
+## 📚 FLEET LESSONS 2026-11-14 (copied by 🔧 under contract K; each verified against the run list, the robot log or the rows)
+
+- **① Read the runner queue at minute 0 — a jammed pool jams every proof and the merge robot.** All four engineers lost
+  their night to one cause: `EZ_RUNNER = ezhalah-own` (owner, ~20:30 UTC 11-13) put every non-PR job on 6 runners, the
+  old Deal App shard run 43501036892 (24 shards × ~3 h 50, 21/21 FAILED) and dealapp liveness 43541940989 held 4 of them,
+  73 runs queued, and the merge robot completed no pass between 08:54 and 13:18 UTC (every 15-min dispatch replaced the
+  previous pending one). 🔬 said it on 11-13 too («a dispatched re-read is not a started re-read»). Rule: at minute 0 read
+  `actions/runs?status=queued` (age, runner labels) and the in-progress jobs; if the own pool is jammed, pick jobs whose
+  proof is a hosted PR check, an in-DB read or a hosted dispatch, route the jam to 🔧, and never date a proof to a run
+  that has not STARTED.
+- **② A control-plane job never queues behind a crawl.** The merge robot, the deploy (run 43547632389 waited 10 h), the
+  hourly canary (5.6 h), apply-migration (1.8 h+), the mirror robot (5 h) and alert dispatch (P1 14661 at 00:44) all sat
+  behind 4-hour crawls; 🔧 dispatched the robot from a hosted branch and it merged two PRs in 4 minutes (#12196, #12197).
+  Rule: a job the fleet waits on runs on GitHub whatever `EZ_RUNNER` says (`HOSTED_ONLY`), and a job's runner is part
+  of its SLA.
+- **③ A site that judges the caller's address is a trial criterion of its own.** ⚡ 11-14: same code, dealapp 22/24
+  shards ok on GitHub → 0/17 on the own server (54,901 → 4,514 ads read); aqar 567/571 → 12/22 (HTTP 403 on every TLS
+  profile). ♻️ 11-14: the aqar cleanup read 1,025 of 1,025 re-checks with no usable evidence from that IP (every
+  deletion froze, correctly); tamyaz 17/17 live on GitHub, every control timed out from the server. Rule: before moving a
+  crawl or a checker to a new egress, compare its READ RATE across the move, not green/red; a walled IP yields UNKNOWN,
+  never «dead».
