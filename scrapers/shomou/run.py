@@ -45,7 +45,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from curl_cffi import requests as cc
 
@@ -115,6 +115,20 @@ def get(s: cc.Session, url: str) -> Optional[str]:
                 raise
             time.sleep(2 + attempt * 3)
     return None
+
+
+def read_gone_with_controls(table: str, reached: set) -> Callable[[str], Any]:
+    """prune_unseen's own-page oracle with its live controls drawn ONLY from ads this run read.
+
+    Built on the first at-grace read (a prune with nothing at grace never opens a client)."""
+    box: list = []
+
+    def verify_gone(ad_number: str):
+        if not box:
+            box.append(db.own_page_status_oracle(db.sb(), table, reached))
+        return box[0](ad_number)
+
+    return verify_gone
 
 
 def parse_index(page: str) -> list[str]:
@@ -299,9 +313,28 @@ def main() -> int:
             break
         try:
             html = get(s, f"{BASE}/?field_nw_al_qar_value=All&page={page}") or ""
-        except Exception:  # noqa: BLE001 — page 0 is judged below; a later page ends the walk
+        except Exception:  # noqa: BLE001 — page 0 is judged below
             html = ""
+            if page:
+                # CodeRabbit on #11484: a later index page that FAILED (every retry raised) is not the
+                # end of the list. Reading it as the end made the index look whole, so ads listed on
+                # the unread pages would be re-checked as «dropped off the index». Incomplete: no prune.
+                index_cut = True
+                print(f"  ✗ index page {page} failed ({_LAST.get('status')}): walk incomplete, no prune", flush=True)
+                break
         got = [n for n in parse_index(html) if n not in nids]
+        if not got and page and _LAST.get("status") != 200:
+            # CodeRabbit on #11484: a later page that answered 404 (get() returns None) or any non-200 is a
+            # failed read, not the end of the list. The catalogue's own end is a 200 page with no new ad.
+            index_cut = True
+            print(f"  ✗ index page {page} answered {_LAST.get('status')}: walk incomplete, no prune", flush=True)
+            break
+        if not got and page:
+            # The shape of the page that ENDED the walk, so the crawl log measures what a real end looks
+            # like (the cloud container cannot reach this site): a 200 with no <tbody> is the case still
+            # to be measured before it can be told apart from an unparseable page.
+            print(f"  index ends at page {page}: HTTP 200, {_LAST.get('bytes')} bytes, "
+                  f"tbody={'<tbody>' in html}", flush=True)
         if not got:
             if page == 0:
                 why = (f"index page 0 held no ad ({BASE}/?field_nw_al_qar_value=All&page=0): "
@@ -365,14 +398,30 @@ def main() -> int:
                                       com_ads={r["ad_number"] for r in com}, source=SOURCE)
         # Complete walk only: an expired ad is on the index but not in the kept set → pruned today.
         complete = unreadable == 0 and cut == 0 and not index_cut and len(nids) > 0 and not a.limit
+        # ♻️ 2026-11-09: the index was read to its end and every ad page reached was readable, only the
+        # deadline stopped the page walk. The INDEX is then complete: an ad missing from it really left the
+        # site's list, while an ad on it that we did not reach is merely unread. So the unreached ads count
+        # as seen (protected, never probed) and prune_unseen re-checks only the ads that dropped off the
+        # index, each by its default direct read (404/410 only, 3 strikes). Before this, the 22-min deadline
+        # cut 68 of 1,046 pages on 11-09 (520 on 11-07), no prune ran, and SHQ8303 stayed served after its
+        # page went 404 (dead-visible score 11-09: shomou 1 gone of 5, over the line).
+        index_whole = unreadable == 0 and cut > 0 and not index_cut and len(nids) > 0 and not a.limit
+        unreached = {f"{PREFIX}{n}" for n in nids[len(nids) - cut:]} if index_whole else set()
+        if index_whole:
+            print(f"  index complete, {cut} ad page(s) unread: pruning only ads absent from the index", flush=True)
         for tbl, rr in ((RES_TABLE, res), (COM_TABLE, com)):
-            if complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+            if complete or index_whole:
+                reached = {r["ad_number"] for r in rr}
+                # Controls come from ads this run READ (CodeRabbit on #11484): the unread ads are only
+                # protected from the prune; they must not fill the oracle's three control slots, or an
+                # unread ad with no row could leave no control and every at-grace 404 would stay shown.
+                n = db.prune_unseen(tbl, reached | unreached, source=SOURCE,
+                                    verify_gone=read_gone_with_controls(tbl, reached))
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
-        if not complete:
+        if not (complete or index_whole):
             print(f"  NOT pruning: {unreadable} of {len(nids)} page(s) unreadable, {cut} not reached", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(nids), rows_upserted=len(res) + len(com),
                              check_tables=["shomou_residential_listings", "shomou_commercial_listings"],

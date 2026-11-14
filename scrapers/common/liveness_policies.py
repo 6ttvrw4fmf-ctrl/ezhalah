@@ -1356,7 +1356,8 @@ POLICIES: dict[str, _P] = {
     "shomou": _P(
         _pol("shomou", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set of in-date ads over the 26-page index; an ad past its own «تاريخ إنتهاء الإعلان» drops out. "
-        "run.py suppresses prune_unseen unless every page was readable.",
+        "run.py suppresses prune_unseen unless the whole index and every page reached were readable; a walk cut "
+        "only by its deadline prunes with the unread index ads protected (2026-11-09).",
         "No oracle is written yet, so this does not claim a direct check."),
     "maktab": _P(
         _pol("maktab", 3, 168), CRAWL_PRESENCE_ONLY,
