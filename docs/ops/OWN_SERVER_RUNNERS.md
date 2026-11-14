@@ -42,6 +42,8 @@ runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_
 
 **Kept on GitHub on purpose (`HOSTED_ONLY` in `scripts/verify-runner-switch.ts`):** `web-runtime-smoke.yml` (owner 2026-11-13, «we can split for now»). Its phone-speed robots drive Apple's map at a 4× slowed CPU; on the AX42 the page froze ~10 s whenever all 8 helpers were busy, while the same robot passed on a quiet server (0.1–0.2 s switches) and on GitHub. Moving it back needs a bigger server or fewer, larger runners — re-measure first.
 
+**Also kept on GitHub (2026-11-14, ⚡ measured): `dealapp-sharded.yml` and `dealapp-liveness.yml`.** dealapp hands the own server's ONE address its no-listing page: with the same code the 11-12 fleet on GitHub ran 22/24 shards ok (54,901 of 59,177 ads read) and the 11-13 fleet on `ezhalah-own` 0/17 ok (4,514 of 29,768; 24,776 origin renders with no listing schema), and the liveness sweep read 11 alive of 2,400. Each shard then held an own runner ~4 h, so the 04:22 nightly crawl's plan job was still queued 50 min later (trial step 4: «no job waits > 10 min»). **Lesson for every crawl moved to the server: a site that judges the caller's address is a trial criterion of its own — compare its read rate before and after the move, not only green/red.** Once the repo is private these minutes are billed; moving them back needs a dealapp read from the server (or a proxy leg) first.
+
 ## Setup (about 30 minutes, after the owner buys the server)
 
 1. Create a **fine-grained GitHub token**: only repository `6ttvrw4fmf-ctrl/ezhalah`, permission **Administration: read

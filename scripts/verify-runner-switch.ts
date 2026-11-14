@@ -34,6 +34,12 @@ function evalSwitch(expr: string, event: string, ezRunner: string): string {
 // where pull requests run anyway); the list only exists so the choice is deliberate, never a stray hard-code.
 export const HOSTED_ONLY: Record<string, string> = {
   'web-runtime-smoke.yml': 'phone-speed robots froze on the own server under full load (owner 2026-11-13: «we can split for now»)',
+  // A SITE THAT JUDGES OUR ADDRESS (2026-11-14, measured with the same code): dealapp hands the own server's single
+  // address its no-listing page. 11-12 fleet on GitHub: 22/24 shards ok, 54,901 of 59,177 ads read; 11-13 fleet on
+  // ezhalah-own: 0/17 ok, 4,514 of 29,768 (24,776 origin renders with no listing schema); the liveness sweep read 11
+  // alive of 2,400 (canary_live 0-2/3). Its shards then held the own runners ~4 h each, so the 04:22 nightly waited.
+  'dealapp-sharded.yml': 'dealapp serves the own server\'s one address a no-listing page: 0/17 shards ok vs 22/24 on GitHub (2026-11-14)',
+  'dealapp-liveness.yml': 'same address judgement as dealapp-sharded: 11 alive of 2,400 read on the own server (2026-11-14)',
 };
 function problems(files: Record<string, string>, expr = SWITCH): string[] {
   const fail: string[] = [];
@@ -66,6 +72,7 @@ const p = problems(files);
 const jobs = Object.values(files).reduce((n, s) => n + (s.match(/^\s*runs-on:/gm) ?? []).length, 0);
 check(`all ${jobs} jobs in ${Object.keys(files).length} workflows use the runner switch; PRs never reach our server`, p.length === 0, p.slice(0, 5).join('; '));
 mustCatch('a GitHub-only workflow moved to the switch or our server', problems({ ...files, 'web-runtime-smoke.yml': 'jobs:\n  a:\n    runs-on: ezhalah-own\n' }).length > 0);
+mustCatch('the dealapp crawl moved back to the switch (its site refuses our server)', problems({ ...files, 'dealapp-sharded.yml': `jobs:\n  a:\n    runs-on: ${SWITCH}\n` }).length > 0);
 mustCatch('a workflow hard-coding ubuntu-latest', problems({ ...files, 'x.yml': 'jobs:\n  a:\n    runs-on: ubuntu-latest\n' }).length > 0);
 mustCatch('a workflow hard-coding our server', problems({ ...files, 'x.yml': 'jobs:\n  a:\n    runs-on: ezhalah-own\n' }).length > 0);
 mustCatch('the pull_request guard dropped (fork code on our server)',
