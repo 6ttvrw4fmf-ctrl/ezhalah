@@ -601,7 +601,10 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "separate_electricity_meter": (("غرف", "لوح", "مولد", "تمديد", "خزان"), ()),
     "laundry_room": ((), ("سيار", "السيار", "صحون", "الصحون", "اطباق", "الاطباق", "مواعين")),   # «غسالة صحون» is a dishwasher
     "kitchen": (("ادوات",), ()),          # «سطح مطبخ» (a countertop) is checked adjacent only — «سطح واسع مطبخ راكب» has both
-    "pool": (("ادوات", "مستلزمات"), ("table",)),                 # «pool table» is billiards
+    "pool": (("ادوات", "مستلزمات"), ("table",                    # «pool table» is billiards
+                                    # «المسبح غير مجهز» (aqarmonthly 14439308, ialqarawi 12594693, 🔬 2026-11-14): not fitted,
+                                    # nothing to swim in — silent. «مسبح غير مستخدم» (unused) still exists and stays a yes.
+                                    "غير مجهز", "غير مجهزه", "غير جاهز", "غير جاهزه")),
     # bench-v2: «مدخل مكيّف», «مداخل مكيفة», «ممرات مكيفة» — the building's lobby, not the unit's AC
     "air_conditioner": (("مدخل", "مداخل", "ممر", "لوبي", "ردهه", "بهو", "مصلي"), ()),
     "furnished": (("محل", "معرض", "مستودع", "محلات", "معارض"), ()),
@@ -2713,6 +2716,9 @@ def selftest() -> None:
          {}, ("for_events",)),                                                                             # dealapp 24545744
         ("تصلح لإقامة مشروع قصور أفراح ومناسبات أو أي مشروع استثمار", {}, ("for_events",)),               # dealapp 21597198
         ("استراحة تصلح للمناسبات والحفلات", {"for_events": True}, ()),                                     # suitable for events = the chip
+        ("وسماعه تصلح للمناسبات (المكان يعتبر قسمين بمدخل واحد) يوجد حواجز لفصل القسمين المسبح غير مجهز", {}, ("pool",)),  # aqarmonthly 14439308
+        ("مسبح غير مجهز حظيرة ماشية باب كراج شرائح", {}, ("pool",)),                                       # ialqarawi 12594693
+        ("مسبح غير مستخدم، مع إمكانية ردمه والاستفادة من مساحته", {"pool": True}, ()),                    # aqar 12069307: it exists
         ("شاليه كبير للعائلة ويخدم كثيراً الجمعات العائلية ومناسبات الخطوبة والملكة", {"for_events": True}, ()),  # gathern 21142142
         ("إبل وهجن", {"camels": True}, ()),
         ("ركوب الجمال", {"camels": True}, ()),
