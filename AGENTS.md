@@ -125,6 +125,22 @@ by widening a pool, raising the threshold or shrinking the type list. Off switch
 `ops_feature_flags.short_stays_pool`, `ops_feature_flags.cheap_yearly_is_monthly`. Guards:
 `verify-short-stays-pool.ts`, `verify-cheap-yearly-is-monthly.ts`.
 
+# THE POSTING DATE IS THE DAY THE SOURCE SITE SAYS THE AD WAS PUBLISHED (owner, 2026-11-10 — root rule, permanent)
+
+**In the owner's words: «lets make it a root … date is considered when did they publish it … and make sure every
+new listings we get it».** `date_added` holds the date and time the SOURCE WEBSITE says the ad was published, in a
+form `public.source_posted_at()` reads (canonical text and per-site table: `docs/ARCHITECTURE.md` §20).
+
+- Never our first-seen / scrape time, a licence date, a «last updated» date, a date that MOVES FORWARD when the ad is
+  re-published (amlakalahsa, hajer: WordPress `date`), one stamp shared by a whole site (nofodh), relative text
+  («منذ يومين») or a guessed year. Unknown stays NULL; a wrong date is worse than none.
+- Every NEW listing on a site that publishes a date must get it. Write it through `scrapers/common/posting_date.py`
+  `site_posting_date()`; declare the site in `ops_source_posting_date_policy`. `mon_detect_source_posting_date_fill_regressed()`
+  fires when a site's new live ads stop getting it, `mon_detect_shared_posting_stamp()` on a site-wide stamp, and
+  `welcome_posting_date_verdict()` distrusts a table whose dates fall after our first sight.
+- Guards: `scripts/verify-source-posting-date-is-written.ts`, `scripts/verify-source-posting-date-more-sites.ts`
+  (each site's real mapper), `scripts/verify-posting-date-alarm-judges-live-ads.ts`.
+
 # Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
 
 **Reading order before any research task: `AGENTS.md` (this file) → `docs/ARCHITECTURE.md` →

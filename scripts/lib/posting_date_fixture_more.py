@@ -38,6 +38,7 @@ GROUP_MODULES = [
     "scripts.lib.posting_date_fixture_g6",
     "scripts.lib.posting_date_fixture_g8",
     "scripts.lib.posting_date_fixture_g10",
+    "scripts.lib.posting_date_fixture_g11",
 ]
 
 
