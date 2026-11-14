@@ -35,6 +35,7 @@ function evalSwitch(expr: string, event: string, ezRunner: string): string {
 export const HOSTED_ONLY: Record<string, string> = {
   'dealapp-sharded.yml': 'dealapp throttles PER IP; its 24 shards were built for one IP each, and on our one server they all shared one IP and held 5 of 8 workers for 11 h (2026-11-14)',
   'web-runtime-smoke.yml': 'phone-speed robots froze on the own server under full load (owner 2026-11-13: «we can split for now»)',
+  'engineer-automerge.yml': 'the merge robot is a 10-minute control-plane job; on the 6-runner own server it queued behind 70+ crawl runs and every 15-min pass 08:02-13:02 UTC 2026-11-14 was cancelled before it ran, so 11 green engineer PRs sat unmerged (🔧 2026-11-14)',
 };
 function problems(files: Record<string, string>, expr = SWITCH): string[] {
   const fail: string[] = [];
