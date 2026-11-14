@@ -100,6 +100,9 @@ env:
 
 jobs:
   liveness:
+    # ALWAYS ON GITHUB (2026-11-14, measured): dealapp serves our own server's ONE address a page with no listing in it.
+    # Same code: 11-12 fleet on GitHub 22/24 shards ok, 54,901 of 59,177 read; 11-13 fleet on ezhalah-own 0/17 ok, 4,514 of 29,768.
+    # Listed in HOSTED_ONLY in scripts/verify-runner-switch.ts; moving it back needs a dealapp read from our server first.
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
