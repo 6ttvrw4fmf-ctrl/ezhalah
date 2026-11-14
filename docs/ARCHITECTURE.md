@@ -649,6 +649,38 @@ and the same detector pages; the facts carry `updated_at` for the card's «آخ�
 `scripts/verify-map-view-facts-line.ts` (screen). Never widen «اختفى» to crawl-absence sites, show a window before it is
 covered, lower the 10-ad price floor, or loosen the «same ads as the pill» rule to make facts appear more often.
 
+**THE RESIDENTIAL-SALE CARD (owner 2026-11-14, «it should strictly follow what the user selected … we can get sued»,
+«we can go to jail», «we are focusing on buy residential right now»).** A residential SALE (`isSaleCard()`) opens the
+redesigned card (`src/components/MapSaleCard.tsx`, words decided in `src/lib/mapCard.ts`); rent and commercial keep the
+table card until the owner says otherwise. Top to bottom: the TITLE is the user's own choice read out (`saleTitle()`:
+«فلل للبيع · 5 غرف · من 250 إلى 400 م²» — every filter, «نشر خلال» and a drawn area included; Arabic ranges are
+«من … إلى …», never a dash that flips); the place and «الأسعار المعروضة في الإعلانات · من N مواقع»; the site LOGOS
+(most ads first, at most 6, «و… أخرى») and «المصادر: …» by name — never a per-site count (it reads against the card's
+copies-once total); ONE disclaimer sentence (`DISCLAIMER`, never a second repeated box): computed automatically from
+displayed prices in published ads, may not be accurate, not sale prices, not a valuation, not advice, check with the
+advertiser, Ezhalah takes no responsibility; type buttons only when the user picked no type (the sale types with ≥ 10
+priced ads, `price_types`); one sentence with the displayed price per metre of ALL the ads of the one type (`ppm_all`)
+and the comparison — under 5% «قريب من الأحياء القريبة», else «أعلى/أقل … بحوالي N بالمئة»; three numbers (typical
+displayed price, displayed price per metre, new this month); «مقارنة بالأحياء القريبة (بنفس الفلاتر)» — measured facts
+only, both sides present: price per metre, size, the SAME room count's share (left out when the user picked rooms), ads
+per nearby district (the neighbours' average, never their total); price by rooms (top 3 room counts with ≥ 10 ads,
+hidden when rooms are picked); a clear «عرض تفاصيل أكثر» button (new this week, gone / price cuts only once their log
+covers the window, typical size, price range, how long ads stay up — a city number is named), the nearby districts under
+the same filters; the falconer «كيف نحسبها؟». Never: «أرخص / فرصة / صفقة / سعر السوق / cheap / deal» (`BANNED_WORDS`,
+executed against every sentence), an age claim, a location claim, or a number from fewer than 10 ads. «نشر خلال» now
+narrows the card exactly as it narrows the pins (`p_posted_within_days`, every card type).
+**The weekly graph** (owner: «full filters, from December») is drawn ONLY from `map_fact_ad_seen` — the complete record
+of every ad as first seen, kept after it leaves (written nightly by `map_fact_capture_removals()`, started 2026-11-14) —
+because the older history (`listing_comparables`) has no pin, no furnished and only ~80% of districts by name, so it
+cannot follow every filter. A point = Saudi week (Sunday first) that ended 3 days ago, the record written on every day
+from its start to then, ads posted that week and seen within 3 days of posting (an old back catalogue never rewrites a
+past week), from sites read for 30 days (`map_fact_site_start` — a newly added site never makes a jump), one type, copies
+once, ≥ 10 ads; the card draws the latest run of ≥ 3 such weeks (`saleWeeks()`), Arabic right to left; never with «نشر
+خلال». First graph: early December 2026. Checks: `scripts/verify-map-card.ts` (executes every sentence, title, number,
+comparison and the banned words; pins the graph's filter block word for word against the card's own); the night checker
+`audit_map_view_card()` recounts `ppm_all`, `n_priced`, `by_rooms`, `price_types` and the weeks another way and switches
+the card off on any mismatch (migrations 20261114110613, 20261114110815).
+
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
 Preview tabs have no frame history/loading indicator, and reload remounts their content.

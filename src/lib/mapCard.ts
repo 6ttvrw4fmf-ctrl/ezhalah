@@ -16,8 +16,16 @@ export type CardSide = {
 };
 /** too few removals in the view yet: the whole city's number, NAMED («86 يوما في الرياض») — owner 2026-11-13 «ok ok» */
 export type StayCity = { city: string; days: number } | null;
-export type MapCard = CardSide & {
+/** The residential-sale card's extra numbers (owner 2026-11-14), each of the ONE price type, from ≥ 10 ads. */
+export type SaleExtra = { nPriced: number | null; ppmAll: number | null; roomsShare: Record<number, number> | null };
+export type RoomPrice = { rooms: number; n: number; price: number };
+export type WeekPoint = { start: string; n: number; ppm: number | null };
+export type MapCard = CardSide & SaleExtra & {
   any: number;
+  byRooms: RoomPrice[];
+  priceTypes: string[];
+  siteList: string[];
+  weeks: WeekPoint[];
   priceType: string | null;
   districtAr: string | null;
   cityAr: string | null;
@@ -25,7 +33,7 @@ export type MapCard = CardSide & {
   stayCity: StayCity;
   table: { y: CardWindow; w: CardWindow; m: CardWindow; q: CardWindow };
   updatedAt: string | null;
-  nb: (CardSide & { names: string[]; nDistricts: number; month: CardWindow | null; byDistrict: { district: string; ppm: number | null }[] }) | null;
+  nb: (CardSide & SaleExtra & { names: string[]; nDistricts: number; month: CardWindow | null; byDistrict: { district: string; ppm: number | null }[] }) | null;
 };
 
 const int = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
@@ -37,6 +45,17 @@ function win(v: unknown): CardWindow | null {
   if (!o) return null;
   return { new: int(o.new), gone: int(o.gone), cuts: int(o.cuts), ppm: pos(o.ppm), ppmN: int(o.ppm_n) ?? 0 };
 }
+function shares(v: unknown): Record<number, number> | null {
+  const o = obj(v);
+  if (!o) return null;
+  const out: Record<number, number> = {};
+  for (const [k, x] of Object.entries(o)) { const r = Number(k); const p = int(x); if (Number.isInteger(r) && r > 0 && p !== null && p <= 100) out[r] = p; }
+  return out;
+}
+function extra(o: Record<string, unknown>): SaleExtra {
+  return { nPriced: int(o.n_priced), ppmAll: pos(o.ppm_all), roomsShare: shares(o.rooms_share) };
+}
+const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 function side(o: Record<string, unknown>): CardSide {
   const tt = obj(o.top_type); const tr = obj(o.top_rooms);
   return {
@@ -65,11 +84,16 @@ export function parseMapCard(result: { data: unknown; error: unknown }): MapCard
         .map((x) => ({ district: x.district as string, ppm: pos(x.ppm) }))
     : [];
   return {
-    ...side(d), any, priceType: typeof d.price_type === 'string' ? d.price_type : null,
+    ...side(d), ...extra(d), any, priceType: typeof d.price_type === 'string' ? d.price_type : null,
     districtAr: typeof d.district_ar === 'string' ? d.district_ar : null, cityAr: typeof d.city_ar === 'string' ? d.city_ar : null,
     sites: int(d.sites) ?? 0, table: { y, w, m, q },
+    byRooms: (Array.isArray(d.by_rooms) ? d.by_rooms : []).map((x) => obj(x)).filter((x): x is Record<string, unknown> => !!x)
+      .map((x) => ({ rooms: int(x.rooms) ?? 0, n: int(x.n) ?? 0, price: pos(x.price) ?? 0 })).filter((x) => x.rooms > 0 && x.n >= 10 && x.price > 0),
+    priceTypes: strs(d.price_types), siteList: strs(d.site_list),
+    weeks: (Array.isArray(d.weeks) ? d.weeks : []).map((x) => obj(x)).filter((x): x is Record<string, unknown> => !!x && typeof x.start === 'string')
+      .map((x) => ({ start: x.start as string, n: int(x.n) ?? 0, ppm: pos(x.ppm) })),
     stayCity: (() => { const sc = obj(d.stay_city); return sc && typeof sc.city === 'string' && int(sc.days) !== null ? { city: sc.city, days: int(sc.days) as number } : null; })(), updatedAt: typeof d.updated_at === 'string' ? d.updated_at : null,
-    nb: n && names.length ? { ...side(n), names, nDistricts: Math.max(1, int(n.n_districts) ?? 1), month: win(n.month), byDistrict } : null,
+    nb: n && names.length ? { ...side(n), ...extra(n), names, nDistricts: Math.max(1, int(n.n_districts) ?? 1), month: win(n.month), byDistrict } : null,
   };
 }
 
@@ -214,7 +238,7 @@ export const LEGEND = {
 export type ChipFilter = {
   category?: 'residential' | 'commercial' | null; types?: string[] | null; scope?: { types2: string[] | null } | null;
   beds?: number[] | null; areaMin?: number | null; areaMax?: number | null; priceMin?: number | null; priceMax?: number | null;
-  furnished?: boolean | null; poly?: unknown;
+  furnished?: boolean | null; poly?: unknown; postedWithinDays?: number | null;
 };
 export function filterChips(f: ChipFilter | null | undefined, loc: 'ar' | 'en'): string[] {
   if (!f) return [];
@@ -235,4 +259,170 @@ export function filterChips(f: ChipFilter | null | undefined, loc: 'ar' | 'en'):
   if (f.furnished === false) out.push(ar ? 'غير مفروش' : 'Unfurnished');
   if (f.poly) out.push(ar ? 'منطقة مرسومة' : 'Drawn area');
   return out;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// THE RESIDENTIAL-SALE CARD (owner 2026-11-14 — the picture agreed in chat; docs/ARCHITECTURE.md «THE MAP BOX AND ITS
+// CARD»). The title is the user's own choice read out («فلل للبيع · 5 غرف · من 250 إلى 400 م²»); every number follows
+// EVERY filter; the comparison is the nearby districts under the SAME filters; words are neutral (أعلى · أقل · متقارب,
+// never أرخص / فرصة / صفقة); every price says «المعروض»; one disclaimer sentence sits at the top; Arabic reads from the
+// right (a range is «من … إلى …», never a dash that flips).
+
+/** The new card is for a residential SALE only (owner: «we are focusing on buy residential right now»). */
+export function isSaleCard(f: { deals: readonly string[]; category?: string | null; scope?: { macro?: string | null } | null } | null | undefined): boolean {
+  return !!f && f.deals.length === 1 && f.deals[0] === 'buy' && f.category !== 'commercial' && f.scope?.macro !== 'Commercial';
+}
+
+export const DISCLAIMER = {
+  ar: 'هذه أرقام محسوبة آليا من أسعار معروضة في إعلانات منشورة وقد لا تكون دقيقة، وليست أسعار بيع ولا تقييما عقاريا ولا نصيحة. تحقق دائما من المعلن، ولا تتحمل إزهله أي مسؤولية عن أي قرار يبنى عليها.',
+  en: 'These figures are calculated automatically from displayed prices in published ads and may not be accurate. They are not sale prices, a property valuation or advice. Always check with the advertiser; Ezhalah accepts no responsibility for any decision based on them.',
+} as const;
+/** Words the card must never say (owner 2026-11-14: «we can get sued»). Executed against every sentence by the guard. */
+export const BANNED_WORDS = ['أرخص', 'رخيص', 'فرصة', 'صفقة', 'استثمار جيد', 'سعر السوق', 'القيمة السوقية', 'cheap', 'bargain', 'deal', 'opportunity', 'market value', 'worth'];
+
+// «الفلل» → «فلل», «الأراضي السكنية» → «أراضي سكنية»
+const indefinite = (label: string) => label.split(' ').map((w) => (w.startsWith('ال') ? w.slice(2) : w)).join(' ');
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const roomsWithAr = (n: number) => (n === 1 ? 'بغرفة واحدة' : n === 2 ? 'بغرفتين' : `بـ${n} غرف`);
+const countedAds = (n: number) => counted(n, ['إعلان واحد', 'إعلانان', 'إعلانات', 'إعلانا']);
+
+/** The title: the type and the user's choices, as one line («فلل للبيع · 5 غرف · من 250 إلى 400 م²»). */
+export function saleTitle(type: string | null, f: ChipFilter | null | undefined, loc: 'ar' | 'en'): string {
+  const ar = loc === 'ar';
+  const head = type ? (ar ? `${indefinite(typeLabel(type, 'ar'))} للبيع` : `${cap(typeLabel(type, 'en'))} for sale`) : (ar ? 'عقارات للبيع' : 'Properties for sale');
+  const parts = [head];
+  if (f) {
+    const beds = [...new Set(f.beds ?? [])].filter((n) => Number.isInteger(n) && n > 0).sort((a, b) => a - b);
+    if (beds.length === 1) parts.push(ar ? roomsAr(beds[0]) : `${beds[0]} ${beds[0] === 1 ? 'room' : 'rooms'}`);
+    else if (beds.length) parts.push(ar ? `${beds.join('، ')} غرف` : `${beds.join(', ')} rooms`);
+    const range = (lo: number | null | undefined, hi: number | null | undefined, fmt: (v: number) => string, unitAr = '', unitEn = '') =>
+      lo != null && hi != null ? (ar ? `من ${fmt(lo)} إلى ${fmt(hi)}${unitAr}` : `${fmt(lo)}–${fmt(hi)}${unitEn}`)
+      : lo != null ? (ar ? `من ${fmt(lo)}${unitAr}` : `from ${fmt(lo)}${unitEn}`)
+      : hi != null ? (ar ? `حتى ${fmt(hi)}${unitAr}` : `up to ${fmt(hi)}${unitEn}`) : null;
+    const area = range(f.areaMin, f.areaMax, num, ' م²', ' m²');
+    if (area) parts.push(area);
+    const price = range(f.priceMin, f.priceMax, (v) => money(v, loc), ar ? ' ريال' : '', ar ? '' : ' SAR');
+    if (price) parts.push(price);
+    if (f.furnished === true) parts.push(ar ? 'مفروشة' : 'furnished');
+    if (f.furnished === false) parts.push(ar ? 'غير مفروشة' : 'unfurnished');
+    if (f.postedWithinDays != null) parts.push(ar ? `نشرت خلال ${daysAr(f.postedWithinDays)}` : `posted in the last ${f.postedWithinDays} ${f.postedWithinDays === 1 ? 'day' : 'days'}`);
+    if (f.poly) parts.push(ar ? 'منطقة مرسومة' : 'drawn area');
+  }
+  return parts.join(' · ');
+}
+
+/** Under the title: the place, what the prices are, and how many sites. */
+export function saleSubtitle(c: MapCard, fallbackPlace: string, loc: 'ar' | 'en', translit: (s: string) => string = (x) => x): string {
+  const ar = loc === 'ar';
+  const district = c.districtAr ? (ar ? c.districtAr : translit(c.districtAr.replace(/^حي\s+/, ''))) : null;
+  const city = c.cityAr ? (ar ? c.cityAr : translit(c.cityAr)) : null;
+  const place = district && city ? `${district}${ar ? '، ' : ', '}${city}` : city ?? fallbackPlace;
+  return ar ? `${place} · الأسعار المعروضة في الإعلانات · من ${sitesAr(c.sites)}` : `${place} · Displayed prices from ads · from ${c.sites} ${c.sites === 1 ? 'website' : 'websites'}`;
+}
+
+/** Percent difference from the neighbours, rounded; null when either side is missing. */
+export const pctVs = (mine: number | null, theirs: number | null): number | null =>
+  mine === null || theirs === null || theirs <= 0 ? null : Math.round(((mine - theirs) / theirs) * 100);
+
+/** The one sentence: the displayed price per metre here, and how it compares (neutral words; under 5% = «قريب»). */
+export function saleSentence(c: MapCard, filtered: boolean, loc: 'ar' | 'en'): string | null {
+  if (c.ppmAll === null || !c.priceType) return null;
+  const ar = loc === 'ar';
+  const about = num(Math.round(c.ppmAll / 100) * 100);
+  const these = ar ? (filtered ? `لهذه ${typeLabel(c.priceType, 'ar')}` : forTypeAr(typeLabel(c.priceType, 'ar'))) : (filtered ? `these ${typeLabel(c.priceType, 'en')}` : typeLabel(c.priceType, 'en'));
+  const head = ar ? `سعر المتر المعروض ${these} هنا حوالي ${about} ريال` : `The displayed price per m² for ${these} here is about ${about} SAR`;
+  const pct = c.nb ? pctVs(c.ppmAll, c.nb.ppmAll) : null;
+  const same = ar ? (filtered ? ' بنفس الفلاتر' : '') : (filtered ? ' with the same filters' : '');
+  if (pct === null) return `${head}.`;
+  if (Math.abs(pct) < CARD_SAME_PCT) return ar ? `${head}، وقريب من الأحياء القريبة${same}.` : `${head}, close to nearby districts${same}.`;
+  return ar ? `${head}، و${pct > 0 ? 'أعلى' : 'أقل'} من الأحياء القريبة بحوالي ${Math.abs(pct)} بالمئة${same}.`
+            : `${head}, about ${Math.abs(pct)}% ${pct > 0 ? 'higher' : 'lower'} than nearby districts${same}.`;
+}
+const forTypeAr = (label: string) => (label.startsWith('ال') ? `لل${label.slice(2)}` : `لـ${label}`);
+
+/** The three big numbers. A number from too few ads says so. */
+export function saleNumbers(c: MapCard, loc: 'ar' | 'en'): { value: string; label: string }[] {
+  const ar = loc === 'ar';
+  return [
+    { value: c.medianPrice !== null ? money(c.medianPrice, loc) : FEW[loc], label: ar ? 'السعر المعروض المعتاد' : 'Typical displayed price' },
+    { value: c.ppmAll !== null ? num(c.ppmAll) : FEW[loc], label: ar ? 'سعر المتر المعروض' : 'Displayed price / m²' },
+    { value: c.table.m.new !== null ? num(c.table.m.new) : SOON[loc], label: ar ? 'جديد هذا الشهر' : 'New this month' },
+  ];
+}
+
+/** «مقارنة بالأحياء القريبة (بنفس الفلاتر)»: only measured facts, both sides present, neutral words. The rooms line is
+ *  left out when the user picked the rooms (it would read 100% against 100%). */
+export function saleDiffs(c: MapCard, bedsPicked: boolean, loc: 'ar' | 'en'): string[] {
+  const nb = c.nb;
+  if (!nb || !c.priceType) return [];
+  const ar = loc === 'ar';
+  const out: string[] = [];
+  const pct = pctVs(c.ppmAll, nb.ppmAll);
+  if (pct !== null && c.ppmAll !== null && nb.ppmAll !== null) {
+    const how = pct === 0 ? (ar ? 'تقريبا نفس المستوى' : 'about the same') : ar ? `${pct > 0 ? 'أعلى' : 'أقل'} بحوالي ${Math.abs(pct)} بالمئة` : `about ${Math.abs(pct)}% ${pct > 0 ? 'higher' : 'lower'}`;
+    out.push(ar ? `سعر المتر المعروض ${num(c.ppmAll)} هنا مقابل ${num(nb.ppmAll)}، ${how}` : `Displayed price per m²: ${num(c.ppmAll)} here vs ${num(nb.ppmAll)} (${how})`);
+  }
+  const ap = pctVs(c.medianArea, nb.medianArea);
+  if (ap !== null && c.medianArea !== null && nb.medianArea !== null) {
+    const a = num(c.medianArea); const b = num(nb.medianArea);
+    if (Math.abs(ap) < CARD_SAME_PCT) out.push(ar ? `المساحة متقاربة، ${a} م² هنا مقابل ${b} م²` : `Similar size (${a} m² here vs ${b} m²)`);
+    else out.push(ar ? `${typeLabel(c.priceType, 'ar')} المعروضة هنا ${ap > 0 ? 'أكبر' : 'أصغر'} بالمتوسط، ${a} م² مقابل ${b} م²` : `${cap(typeLabel(c.priceType, 'en'))} listed here are ${ap > 0 ? 'larger' : 'smaller'} on average (${a} m² vs ${b} m²)`);
+  }
+  if (!bedsPicked && c.topRooms && nb.roomsShare) {
+    const r = c.topRooms.rooms; const here = c.topRooms.pct; const there = nb.roomsShare[r] ?? 0;
+    const d = here - there;
+    const t = typeLabel(c.priceType, loc);
+    if (Math.abs(d) < CARD_SAME_PCT) out.push(ar ? `نسبة ${t} ${roomsWithAr(r)} متقاربة، ${here}% مقابل ${there}%` : `A similar share of ${r}-room ${t} (${here}% vs ${there}%)`);
+    else out.push(ar ? `${t} ${roomsWithAr(r)} ${d > 0 ? 'أكثر' : 'أقل'} هنا، ${here}% من الإعلانات مقابل ${there}%` : `${d > 0 ? 'More' : 'Fewer'} ${r}-room ${t} here (${here}% of ads vs ${there}%)`);
+  }
+  if (c.nPriced !== null && nb.nPriced !== null) {
+    const avg = nb.nPriced / nb.nDistricts;
+    const cp = pctVs(c.nPriced, avg);
+    if (cp !== null) {
+      const a = num(c.nPriced); const b = num(avg);
+      if (Math.abs(cp) < CARD_SAME_PCT) out.push(ar ? `عدد الإعلانات متقارب، ${a} هنا مقابل حوالي ${b} لكل حي قريب` : `A similar number of ads (${a} here vs about ${b} per nearby district)`);
+      else out.push(ar ? `عدد الإعلانات هنا ${cp > 0 ? 'أكثر' : 'أقل'}، ${a} مقابل حوالي ${b} لكل حي قريب` : `${cp > 0 ? 'More' : 'Fewer'} ads here (${a} vs about ${b} per nearby district)`);
+    }
+  }
+  return out;
+}
+
+/** «السعر المعروض حسب عدد الغرف» — hidden when the user picked the rooms. */
+export function saleRooms(c: MapCard, bedsPicked: boolean, loc: 'ar' | 'en'): { label: string; value: string }[] {
+  if (bedsPicked) return [];
+  return c.byRooms.map((r) => ({ label: loc === 'ar' ? roomsAr(r.rooms) : `${r.rooms} ${r.rooms === 1 ? 'room' : 'rooms'}`, value: loc === 'ar' ? `حوالي ${money(r.price, 'ar')}` : `about ${money(r.price, 'en')}` }));
+}
+
+/** «عرض تفاصيل أكثر»: a row is shown only when its number exists (a log too young to cover a window shows nothing). */
+export function saleDetails(c: MapCard, loc: 'ar' | 'en'): { label: string; value: string }[] {
+  const ar = loc === 'ar';
+  const ads = (n: number) => (ar ? countedAds(n) : `${num(n)} ${n === 1 ? 'ad' : 'ads'}`);
+  const out: { label: string; value: string }[] = [];
+  if (c.table.w.new !== null) out.push({ label: ar ? 'جديد هذا الأسبوع' : 'New this week', value: ads(c.table.w.new) });
+  const longest = (k: 'gone' | 'cuts') => (c.table.m[k] !== null ? ['m', c.table.m[k]] : c.table.w[k] !== null ? ['w', c.table.w[k]] : c.table.y[k] !== null ? ['y', c.table.y[k]] : null) as ['m' | 'w' | 'y', number] | null;
+  const when = { m: { ar: 'هذا الشهر', en: 'this month' }, w: { ar: 'هذا الأسبوع', en: 'this week' }, y: { ar: 'أمس', en: 'yesterday' } } as const;
+  const g = longest('gone');
+  if (g) out.push({ label: ar ? `اختفت ${when[g[0]].ar}` : `Gone ${when[g[0]].en}`, value: ads(g[1]) });
+  const k = longest('cuts');
+  if (k) out.push({ label: ar ? `خفضت سعرها ${when[k[0]].ar}` : `Lowered their price ${when[k[0]].en}`, value: ads(k[1]) });
+  if (c.medianArea !== null) out.push({ label: ar ? 'المساحة المعتادة' : 'Typical size', value: ar ? `${num(c.medianArea)} م²` : `${num(c.medianArea)} m²` });
+  if (c.priceLow !== null && c.priceHigh !== null) out.push({ label: ar ? 'نطاق الأسعار المعروضة' : 'Displayed price range', value: ar ? `من ${money(c.priceLow, 'ar')} إلى ${money(c.priceHigh, 'ar')}` : `${money(c.priceLow, 'en')} – ${money(c.priceHigh, 'en')}` });
+  if (c.stayDays !== null) out.push({ label: ar ? 'مدة بقاء الإعلان' : 'How long ads stay up', value: ar ? daysAr(c.stayDays) : `${c.stayDays} days` });
+  else if (c.stayCity) out.push({ label: ar ? 'مدة بقاء الإعلان' : 'How long ads stay up', value: ar ? `${daysAr(c.stayCity.days)} في ${c.stayCity.city}` : `${c.stayCity.days} days in ${c.stayCity.city}` });
+  return out;
+}
+
+/** The weekly graph: the latest run of finished weeks that each have a price (≥ 10 ads), at least 3, at most 8. */
+export function saleWeeks(c: MapCard): WeekPoint[] | null {
+  const run: WeekPoint[] = [];
+  for (let i = c.weeks.length - 1; i >= 0 && run.length < 8; i--) { const w = c.weeks[i]; if (w.ppm === null || w.n < 10) break; run.unshift(w); }
+  return run.length >= 3 ? run : null;
+}
+
+/** The logos: the sites with the most ads first, at most 6; the rest are counted («و3 مواقع أخرى»). */
+export function saleSites(c: MapCard, loc: 'ar' | 'en'): { shown: string[]; more: string | null } {
+  const shown = c.siteList.slice(0, 6);
+  const rest = c.siteList.length - shown.length;
+  return { shown, more: rest > 0 ? (loc === 'ar' ? (rest === 1 ? 'وموقع آخر' : rest === 2 ? 'وموقعان آخران' : `و${sitesAr(rest)} أخرى`) : `and ${rest} more`) : null };
 }
