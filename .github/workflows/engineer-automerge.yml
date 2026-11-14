@@ -23,6 +23,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write   # bot-merge follow-ups: a merge made with this token starts no push workflow, so we dispatch it
   checks: read
   statuses: read
 
@@ -162,6 +163,12 @@ jobs:
             gate_out=$(node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/safe-pr-merge.ts "$pr" \
               --expect-files "$(printf '%s\n' "$files" | paste -sd, -)" 2>&1) && gate_rc=0 || gate_rc=$?
             printf '%s\n' "$gate_out"
+            if [ "$gate_rc" = 0 ]; then
+              # A merge made with the built-in token starts NO push workflow on main (2026-11-03: #10140 merged, the
+              # reader's 8-shard re-read never ran). Start the follow-ups the merged files owe (scripts/bot-merge-follow-ups.mjs).
+              node scripts/bot-merge-follow-ups.mjs "$(printf '%s\n' "$files" | paste -sd, -)" \
+                || echo "::error::#$pr merged, but its follow-up workflow could not be dispatched"
+            fi
             if [ "$gate_rc" != 0 ]; then
               echo "#$pr: gate refused (not green / moved) — next pass"
               # The gate itself knows BEHIND (it reads the PR's own mergeStateStatus right before merging);
