@@ -79,7 +79,13 @@ export const FEW = { ar: 'إعلانات قليلة', en: 'too few ads' } as con
 /** Under this difference from the neighbours a cell is plain, not red or green. */
 export const CARD_SAME_PCT = 5;
 export type Tone = 'up' | 'down' | 'plain';
-export type Cell = { text: string; tone: Tone };
+/** `near`: too few ads here, so the cell shows the NEARBY districts' month price, labelled «قريبة» (owner 2026-11-13:
+ *  «focus on the nearby if little ads») — never passed off as this area's own. */
+export type Cell = { text: string; tone: Tone; near?: boolean; nearPeriod?: 'month' };
+/** A price cell with no figure here and none nearby. */
+export const NONE = '—';
+// the fallback is ALWAYS the neighbours' last-month price, whatever column it sits in, and its tag says so (CodeRabbit #12180)
+export const NEAR = { ar: 'قريبة · شهر', en: 'nearby · month' } as const;
 
 export const tone = (mine: number | null, theirs: number | null): Tone => {
   if (mine === null || theirs === null || theirs === 0) return 'plain';
@@ -100,7 +106,11 @@ const ROW_LABEL: Record<RowKey, { ar: string; en: string }> = {
  *  not compared unfairly). The «أحياء قريبة» cell is red above the area's own month, green below. */
 export function cardRow(c: MapCard, key: RowKey, loc: 'ar' | 'en'): { label: string; cells: Cell[] } {
   const value = (wd: CardWindow): Cell => {
-    if (key === 'ppm') return wd.ppm !== null ? { text: num(wd.ppm), tone: 'plain' } : { text: FEW[loc], tone: 'plain' };
+    if (key === 'ppm') {
+      if (wd.ppm !== null) return { text: num(wd.ppm), tone: 'plain' };
+      const nbPpm = c.nb?.month?.ppm ?? null;
+      return nbPpm !== null ? { text: num(nbPpm), tone: 'plain', near: true, nearPeriod: 'month' } : { text: NONE, tone: 'plain' };
+    }
     const v = wd[key];
     return v !== null ? { text: num(v), tone: 'plain' } : { text: SOON[loc], tone: 'plain' };
   };
@@ -109,7 +119,7 @@ export function cardRow(c: MapCard, key: RowKey, loc: 'ar' | 'en'): { label: str
   let nbCell: Cell = { text: '—', tone: 'plain' };
   if (c.nb && nm) {
     if (key === 'ppm') {
-      nbCell = nm.ppm !== null ? { text: num(nm.ppm), tone: 'plain' } : { text: FEW[loc], tone: 'plain' };
+      nbCell = nm.ppm !== null ? { text: num(nm.ppm), tone: 'plain' } : { text: NONE, tone: 'plain' };
       if (nm.ppm !== null) cells[2] = { ...cells[2], tone: tone(c.table.m.ppm, nm.ppm) };
     } else {
       const v = nm[key];
@@ -181,7 +191,48 @@ export function quickLook(c: MapCard, loc: 'ar' | 'en'): QuickItem[] {
 
 /** «سعر المتر المعروض حي حي»: each nearby district by name, nearest first. */
 export function nearbyPrices(c: MapCard, loc: 'ar' | 'en'): { name: string; text: string }[] {
-  return (c.nb?.byDistrict ?? []).map((d) => ({ name: d.district.replace(/^حي\s+/, ''), text: d.ppm !== null ? num(d.ppm) : FEW[loc] }));
+  // a nearby district with too few ads is left out, not shown as «إعلانات قليلة» (owner 2026-11-13: a cleaner card)
+  void loc;
+  return (c.nb?.byDistrict ?? []).filter((d) => d.ppm !== null).map((d) => ({ name: d.district.replace(/^حي\s+/, ''), text: num(d.ppm as number) }));
 }
 
 export const CARD_NOTE = { ar: 'الأسعار هي أسعار العرض في الإعلانات، وليست أسعار البيع النهائية', en: 'Prices are the asking prices in the ads, not final sale prices' } as const;
+
+/** The row's windows after «أمس» have no history yet (the removal log / price diary is young): the card shows ONE line,
+ *  «باقي المدد تتوفر قريبا», instead of «قريبا» in every box (owner 2026-11-13: «12 قريبا looks vibe coded»). */
+export const restIsSoon = (cells: Cell[], loc: 'ar' | 'en'): boolean =>
+  cells.length === 5 && cells.slice(1).every((x) => x.text === SOON[loc] || x.text === NONE) && cells.slice(1, 4).every((x) => x.text === SOON[loc]);
+export const REST_SOON = { ar: 'باقي المدد تتوفر قريبا', en: 'Longer periods coming soon' } as const;
+export const LEGEND = {
+  near: { ar: '«قريبة · شهر» = إعلانات قليلة هنا، فنعرض سعر الأحياء القريبة لآخر شهر', en: '«nearby · month» = too few ads here, so the nearby districts\' last-month price is shown' },
+  up: { ar: 'أعلى من الأحياء القريبة', en: 'above nearby districts' },
+  down: { ar: 'أقل', en: 'below' },
+} as const;
+
+/** What the user picked, for the pills under the card's title (owner 2026-11-13: «I selected some things in the filter,
+ *  why doesn't it show»). Only what the card really counts: «نُشر خلال» is not applied to the card, so it is never shown. */
+export type ChipFilter = {
+  category?: 'residential' | 'commercial' | null; types?: string[] | null; scope?: { types2: string[] | null } | null;
+  beds?: number[] | null; areaMin?: number | null; areaMax?: number | null; priceMin?: number | null; priceMax?: number | null;
+  furnished?: boolean | null; poly?: unknown;
+};
+export function filterChips(f: ChipFilter | null | undefined, loc: 'ar' | 'en'): string[] {
+  if (!f) return [];
+  const ar = loc === 'ar';
+  const out: string[] = [];
+  const types = [...new Set([...(f.types ?? []), ...(f.scope?.types2 ?? [])])];
+  if (types.length) out.push(types.map((t) => (ar ? t : typeSingularEn(t))).join(ar ? '، ' : ', '));
+  else if (f.category) out.push(ar ? (f.category === 'residential' ? 'سكني' : 'تجاري') : (f.category === 'residential' ? 'Residential' : 'Commercial'));
+  const beds = [...new Set(f.beds ?? [])].filter((n) => Number.isInteger(n) && n > 0).sort((a, b) => a - b);
+  if (beds.length) out.push(ar ? `${beds.join('، ')} غرف` : `${beds.join(', ')} rooms`);
+  const range = (lo: number | null | undefined, hi: number | null | undefined, fmt: (v: number) => string) =>
+    lo != null && hi != null ? `${fmt(lo)} – ${fmt(hi)}` : lo != null ? (ar ? `من ${fmt(lo)}` : `from ${fmt(lo)}`) : hi != null ? (ar ? `حتى ${fmt(hi)}` : `up to ${fmt(hi)}`) : null;
+  const price = range(f.priceMin, f.priceMax, (v) => money(v, loc));
+  if (price) out.push(price);
+  const area = range(f.areaMin, f.areaMax, (v) => (ar ? `${num(v)} م²` : `${num(v)} m²`));
+  if (area) out.push(area);
+  if (f.furnished === true) out.push(ar ? 'مفروش' : 'Furnished');
+  if (f.furnished === false) out.push(ar ? 'غير مفروش' : 'Unfurnished');
+  if (f.poly) out.push(ar ? 'منطقة مرسومة' : 'Drawn area');
+  return out;
+}
