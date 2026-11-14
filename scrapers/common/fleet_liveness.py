@@ -328,6 +328,36 @@ def run_label(site: str, struck_only: bool = False) -> str:
     return f"fleet_liveness:{site}:recheck" if struck_only else f"fleet_liveness:{site}"
 
 
+SHADOW_KIND = "liveness_shadow_reads_dead"
+
+
+def shadow_alarm(client, site: str, would_hide: list, *, struck_only: bool = False) -> int:
+    """A SHADOW site that reads ads dead is a dead ad on screen nobody hides (♻️ 2026-11-14).
+
+    sanadak (would_hide=9), opensooq (4) and sakan (30) read the same ads dead at every daily run
+    and every recheck from 11-12 to 11-14 and hid none, because a site outside APPLY writes nothing;
+    the only trace was a `would_hide=` number in scrape_runs.notes that no detector read, so 44 dead
+    ads stayed on screen until the 11-13 dead-visible score put sanadak and opensooq over the line.
+    Shadow is a gate before promotion, not a resting place: a non-empty would-hide list raises a P2
+    for the lifecycle lane (promote the site once a second reader agrees, or fix its oracle), and a
+    clean shadow DAILY pass resolves it. A recheck reads only struck rows, so its silence is not a
+    clean bill and never resolves. Never raises out of the run: the reading is already saved."""
+    dedup = f"{SHADOW_KIND}:{site}"
+    try:
+        if would_hide:
+            return client.rpc("mon_raise", {
+                "p_sev": "P2", "p_kind": SHADOW_KIND, "p_platform": site, "p_dedup": dedup,
+                "p_detail": {"would_hide": len(would_hide), "examples": [str(x)[:200] for x in would_hide[:5]],
+                             "why": "this site's daily check runs in SHADOW: it read these ads dead on their own page "
+                                    "and hid none. Second-read them (lifecycle-spot-check ids=…) and promote the site "
+                                    "to FLEET_DAILY_DIRECT, or fix its oracle if they read live."}}).execute().data or 0
+        if not struck_only:
+            client.rpc("mon_resolve_key", {"p_kind": SHADOW_KIND, "p_dedup": dedup}).execute()
+    except Exception as e:  # noqa: BLE001 — an alarm that failed must not undo the run's own record
+        print(f"  ⚠ {site}: shadow alarm not written: {e}", flush=True)
+    return 0
+
+
 def run_site(site: str, *, shadow: bool, struck_only: bool = False, budget_s: float | None = None) -> dict:
     spec = SITES[site]
     shadow = shadow or site not in APPLY
@@ -475,6 +505,8 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False, budget_s: fl
             print(f"  would hide: {line}", flush=True)
         end_run(run_id, ok=True, rows_seen=st["probed"], rows_upserted=st["verified"] + st["hidden"],
                 notes=note, allow_empty=True)
+        if site not in APPLY and not st["quarantined"]:
+            shadow_alarm(client, site, st["would_hide"], struck_only=struck_only)
         return st
     except Exception as e:
         end_run(run_id, ok=False, rows_seen=st["probed"], rows_upserted=0, notes=f"error: {e}")
