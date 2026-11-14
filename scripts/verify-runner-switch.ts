@@ -40,6 +40,10 @@ export const HOSTED_ONLY: Record<string, string> = {
   // alive of 2,400 (canary_live 0-2/3). Its shards then held the own runners ~4 h each, so the 04:22 nightly waited.
   'dealapp-sharded.yml': 'dealapp serves the own server\'s one address a no-listing page: 0/17 shards ok vs 22/24 on GitHub (2026-11-14)',
   'dealapp-liveness.yml': 'same address judgement as dealapp-sharded: 11 alive of 2,400 read on the own server (2026-11-14)',
+  'aqar-sweep.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
+  'aqar-commercial-sweep.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
+  'aqar-deep-fill.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
+  'aqar-commercial-fill.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
 };
 function problems(files: Record<string, string>, expr = SWITCH): string[] {
   const fail: string[] = [];

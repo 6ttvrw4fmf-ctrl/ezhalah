@@ -44,6 +44,8 @@ runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_
 
 **Also kept on GitHub (2026-11-14, ⚡ measured): `dealapp-sharded.yml` and `dealapp-liveness.yml`.** dealapp hands the own server's ONE address its no-listing page: with the same code the 11-12 fleet on GitHub ran 22/24 shards ok (54,901 of 59,177 ads read) and the 11-13 fleet on `ezhalah-own` 0/17 ok (4,514 of 29,768; 24,776 origin renders with no listing schema), and the liveness sweep read 11 alive of 2,400. Each shard then held an own runner ~4 h, so the 04:22 nightly crawl's plan job was still queued 50 min later (trial step 4: «no job waits > 10 min»). **Lesson for every crawl moved to the server: a site that judges the caller's address is a trial criterion of its own — compare its read rate before and after the move, not only green/red.** Once the repo is private these minutes are billed; moving them back needs a dealapp read from the server (or a proxy leg) first.
 
+**And the four aqar crawls (2026-11-14): `aqar-sweep`, `aqar-commercial-sweep`, `aqar-deep-fill`, `aqar-commercial-fill`.** sa.aqar.fm answered the server HTTP 403 on all four TLS profiles: aqar_commercial runs after the switch 12 of 22 ok (10 with «direct/chrome124:HTTP 403 … edge101:403»), the 3 days before on GitHub 567 of 571. gathern liveness read «the SOURCE refused this egress» on 2 of 2 runs (55/60 on GitHub; routed to ♻️). Before moving any crawl to the server: one crawl of that site from the server, read rate compared with GitHub's.
+
 ## Setup (about 30 minutes, after the owner buys the server)
 
 1. Create a **fine-grained GitHub token**: only repository `6ttvrw4fmf-ctrl/ezhalah`, permission **Administration: read
