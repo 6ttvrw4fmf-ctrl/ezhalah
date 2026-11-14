@@ -123,6 +123,20 @@ def listing_urls_from_archive(page_html: str) -> set[str]:
             if "/property/pro-" not in u}
 
 
+def archive_link_shapes(page_html: str, limit: int = 12) -> list[str]:
+    """The distinct href shapes a page carries that mention a property (URLs only, digits folded) —
+    printed when the archive names no listing, so a layout change names itself (2026-11-13)."""
+    hrefs = re.findall(r'href=["\']([^"\']+)["\']', page_html)
+    shapes = []
+    for h in hrefs:
+        if "propert" not in h and "عقار" not in h:
+            continue
+        sh = re.sub(r"\d+", "N", h)[:120]
+        if sh not in shapes:
+            shapes.append(sh)
+    return shapes[:limit]
+
+
 def archive_walk(s: cc.Session, max_pages: int = 40) -> list[str]:
     """Every listing the paginated archive names (/property/, /property/page/N/), in order.
 
@@ -139,6 +153,9 @@ def archive_walk(s: cc.Session, max_pages: int = 40) -> list[str]:
         if r.status_code != 200:
             raise RuntimeError(f"{url} → HTTP {r.status_code}")
         new = [u for u in sorted(listing_urls_from_archive(r.text)) if u not in urls]
+        if not new and n == 1:
+            print(f"   ✗ {url} answered 200 ({len(r.text)} bytes) but names no /property/<slug>/ link; "
+                  f"link shapes it does carry: {archive_link_shapes(r.text)}", flush=True)
         if not new:
             break
         urls += new
