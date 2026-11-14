@@ -15,9 +15,18 @@ const CACHE_MS = 120_000;
 const recent = new Map<string, { at: number; c: MapCard | 'locked' }>();
 const inflight = new Map<string, Promise<MapCard | 'locked' | null>>();
 
-export function fetchMapCard(t: CardTarget, signedIn: boolean): Promise<MapCard | 'locked' | null> {
+/** `priceType`: the type the user tapped on the card (null = the card picks the most common one). The card counts
+ *  EXACTLY the pins the map shows, «نشر خلال» included (owner 2026-11-14: «it should strictly follow what the user selected»). */
+export function cardArgs(t: CardTarget, priceType: string | null = null): Record<string, unknown> {
+  const base = t.kind === 'box'
+    ? { ...postedCountArgs(t.box, t.filter), ...(t.filter.postedWithinDays != null ? { p_posted_within_days: t.filter.postedWithinDays } : {}) }
+    : { p_deals: t.deals, p_city: t.city, p_district: t.district };
+  return priceType ? { ...base, p_price_type: priceType } : base;
+}
+
+export function fetchMapCard(t: CardTarget, signedIn: boolean, priceType: string | null = null): Promise<MapCard | 'locked' | null> {
   if (!supabase) return Promise.resolve(null);
-  const args = t.kind === 'box' ? postedCountArgs(t.box, t.filter) : { p_deals: t.deals, p_city: t.city, p_district: t.district };
+  const args = cardArgs(t, priceType);
   const key = `${signedIn ? 'u' : 'g'}|${JSON.stringify(args)}`;
   const hit = recent.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return Promise.resolve(hit.c);

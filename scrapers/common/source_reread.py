@@ -327,12 +327,23 @@ def _redacted_lines(raw: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+# The new Saudi riyal SIGN drawn as an inline SVG right after the figure («<span>799,000</span><svg><path
+# d="M13.663 20.545A7.827 …"/></svg>»): wahadat prints every unit's price this way (wahadat.sa/project/وشاح-11, read
+# 2026-11-14 through net.http_get). DROP removes every <svg>, so the figure reached the score with no currency word,
+# while the project's JSON-LD «الأسعار تبدأ من 759,000 ريال» did — and our unit's own 799,000 (source_capture price,
+# the page's unitsData) read as a mismatch on 6 of 12 wahadat cards (card parity alert 14669). The glyph is keyed by
+# its own path (the sign's outline), never by «any svg after a number».
+RIYAL_GLYPH = re.compile(r'([\d٠-٩][\d٠-٩,٬.]*)\s*(?:</[a-z]+>\s*)?<svg\b[^>]*>\s*<path d="M13\.663 20\.545A7\.827[^"]*"[^>]*>'
+                         r'\s*(?:</path>)?\s*</svg>', re.I)
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     body = HTML_COMMENT.sub(" ", body or "")
     body = HOUZEZ_CARD.sub(" ", RESULT_CARD_TEXT.sub(" ", body))   # every reader below (labels, numbers, lines) sees the ad, not its neighbours
     body = FACET_CHECKBOX.sub(" ", SELECT_BLOCK.sub(" ", drop_radio_controls(body)))   # …nor the site's own search-filter choices
     body = MENU_ITEM_LINK.sub(r"\1 ", BUTTON_BLOCK.sub(" ", body))  # …nor its buttons and menu links
+    body = RIYAL_GLYPH.sub(r"\1 ريال", body)                        # the riyal SIGN drawn as an icon is the currency word
     jsonld = []
     for block in JSONLD.findall(body or ""):
         try:

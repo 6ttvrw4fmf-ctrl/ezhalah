@@ -33,12 +33,12 @@ function evalSwitch(expr: string, event: string, ezRunner: string): string {
 // listed file says exactly `ubuntu-latest`; every other file uses the switch. Keeping a job on GitHub is always safe (it is
 // where pull requests run anyway); the list only exists so the choice is deliberate, never a stray hard-code.
 export const HOSTED_ONLY: Record<string, string> = {
+  'dealapp-sharded.yml': 'dealapp throttles PER IP; its 24 shards were built for one IP each, and on our one server they all shared one IP and held 5 of 8 workers for 11 h (2026-11-14)',
   'web-runtime-smoke.yml': 'phone-speed robots froze on the own server under full load (owner 2026-11-13: «we can split for now»)',
   // A SITE THAT JUDGES OUR ADDRESS (2026-11-14, measured with the same code): dealapp hands the own server's single
   // address its no-listing page. 11-12 fleet on GitHub: 22/24 shards ok, 54,901 of 59,177 ads read; 11-13 fleet on
   // ezhalah-own: 0/17 ok, 4,514 of 29,768 (24,776 origin renders with no listing schema); the liveness sweep read 11
   // alive of 2,400 (canary_live 0-2/3). Its shards then held the own runners ~4 h each, so the 04:22 nightly waited.
-  'dealapp-sharded.yml': 'dealapp serves the own server\'s one address a no-listing page: 0/17 shards ok vs 22/24 on GitHub (2026-11-14)',
   'dealapp-liveness.yml': 'same address judgement as dealapp-sharded: 11 alive of 2,400 read on the own server (2026-11-14)',
   'aqar-sweep.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
   'aqar-commercial-sweep.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
