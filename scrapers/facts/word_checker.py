@@ -767,6 +767,11 @@ _NEAR_PUBLIC_FACTS = frozenset({"mosque", "market", "in_mall", "in_tower", "rest
 # is the unit's. Kept to the AC: a kitchen or a lift CAN be a nearby place's («قريب من مطبخ السلطان», a tower's lifts).
 # Furniture is never a nearby place either (🔬 2026-11-05): «قريبة من المروج بدون اثاث» is the flat's own no.
 _NEAR_NEVER_FACTS = frozenset({"air_conditioner", "furnished"})
+# A furnished word right after the KITCHEN is the kitchen's («مطبخ ماثث», «مطبخ مؤثث بدون اجهزة»), not the home's (🔬 2026-11-14)
+_KITCHEN_WORDS = frozenset(_n(w) for w in ("مطبخ", "المطبخ", "مطابخ", "المطابخ"))
+# A horse word inside a POSSIBLE use or an activity list is not horses on the plot (🔬 2026-11-14, P2 13085 «الخيل»)
+_POSSIBLE_ACTIVITY = frozenset(_n(w) for w in ("مثالي", "مثاليه", "لمشاريع", "مشاريع", "لمزاوله", "لمزواله", "لممارسه",
+                                               "الانشطه", "انشطه", "يصلح", "تصلح", "مناسب", "مناسبه", "ينفع", "تنفع"))
 # A VIEW is not a distance (🔬 2026-11-05): «صالة معيشة مطلة بلكونة مطبخ أمريكي» has a balcony and a kitchen. A view word only
 # silences what can be outside (a park, a pool, a sea) — never the home's own rooms.
 _SEPARATE = frozenset(_n(w) for w in ("مستقل", "مستقله", "منفصل", "منفصله", "مستقلة", "منفصلة"))
@@ -1369,6 +1374,17 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
                 return None, s, e                    # «لا يوجد عداد ماء»: a missing meter is not «no water»
             if any(_starts(_strip_wa(w), ex0) or _starts(w, ex0) for w in p2[:-1]):
                 return None, s, e                    # «رسوم / تأسيس / توصيل عداد كهرباء»: a fee or a set-up, not a supply
+    if fact == "furnished" and p2 and _strip_wa(p2[-1].strip("()[]:-")) in _KITCHEN_WORDS \
+            and not _n(t[ws:we]).rstrip("()[]:-.").endswith("ه"):
+        return None, s, e                            # «مطبخ ماثث», «مطبخ ( مأثث) بدون اجهزة»: the KITCHEN is fitted, the
+                                                     # home is not said to be furnished (P2 13085 «ماثث», haraj 20944851,
+                                                     # aqarcity 17945592, 🔬 2026-11-14). The FEMININE «ومطبخ مفروشه
+                                                     # بالكامل» agrees with the flat, not the (masculine) kitchen: kept
+                                                     # (propertyfinder 23820293, aqar 14850742, aqarmonthly 7060038)
+    if fact == "horses_stable" and any(_strip_wa(w) in _POSSIBLE_ACTIVITY for w in gp[-8:]):
+        return None, s, e                            # «مثالية لمشاريع المستودعات، اسطبلات الخيل», «لمزاولة الأنشطة المختلفة
+                                                     # كركوب الخيل»: a possible use, not horses on the plot (P2 13085
+                                                     # «الخيل», aqar 1769697, haraj 27188602, 🔬 2026-11-14)
     if any(_starts(_strip_wa(w), ex_before) or _starts(w, ex_before) or _starts(_bare(w), ex_before) for w in p2) or \
             any(_starts(w, ex_after) for w in n2) or any(x in " ".join(n2) for x in ex_after if " " in x):
         return None, s, e
@@ -1725,7 +1741,7 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
                                                place_names), idx) for off, c, t, idx in clauses]
     bool_hits: dict[str, dict[bool, tuple[int, int, int]]] = {}
     num_hits: dict[str, list[Hit]] = {}
-    cue_in = near_in = near_list = False
+    cue_in = near_in = near_list = use_list = False
     prev_end = 0
     list_idx = _list_index_values(raw)
     void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
@@ -1796,8 +1812,12 @@ def check(text: str, place_names: tuple[str, ...] = ()) -> list[dict[str, Any]]:
                         v = None                     # «مطبخ … (ثلاجة، فرن، موقد، شفاط)», «موقد سيراميكي»: the kitchen
                                                      # cooktop, not a fire pit (🔬 2026-11-08: 28 of 30 served apartment
                                                      # «موقد» yeses were the stove)
+                    if v is True and fact == "horses_stable" and use_list and comma:
+                        v = None                     # «مثالية لمشاريع المستودعات، اسطبلات الخيل، المزارع»: an item of a
+                                                     # possible-use list goes on across commas (🔬 2026-11-14, aqar 1769697)
                     if v is not None:
                         bool_hits.setdefault(fact, {}).setdefault(v, (ci, qs, qe))
+        use_list = (use_list and comma) or any(_strip_wa(w) in _POSSIBLE_ACTIVITY for w in words)
         # what this clause hands to the next one: a cue (or a cued utility list going on), a «nearby» heading
         # (a cue alone does not carry: «لا يوجد مصعد, مياه …» must not cue the next clause)
         cue_in = (any(_starts(w, _CUES) for w in words) and any(_starts(_strip_wa(w), _UTILITY) for w in words)) \
@@ -2037,6 +2057,13 @@ def selftest() -> None:
         ("الصالة بدون فرش موكيت", {}, ("furnished",)),                                  # a floor covering, not furniture
         ("قريب من معارض المفروشات", {}, ("furnished",)),
         ("غرفتين وصاله ومطبخ ماثثة بالكامل يوجد فرن غاز", {"furnished": True}, ()),            # haraj 23236459
+        # P2 13085 «ماثث» (🔬 2026-11-14): a masculine furnished word right after the kitchen is the kitchen's
+        ("حمام فيها مطبخ ماثث الارضيات سرميك", {"kitchen": True}, ("furnished",)),                     # haraj 20944851
+        ("مطبخ ( مأثث) بدون اجهزة. ⁠٣ دورات مياه", {"kitchen": True}, ("furnished",)),                   # aqarcity 17945592
+        ("ثلاث دورات مياه مطبخ مؤثث كامل دورة غسيل او خادمة بلكونه", {"kitchen": True}, ("furnished",)),  # aqar 15126526
+        ("غرفتين وصاله وحمام ومطبخ مفروشه الايجار 6000 شهري", {"furnished": True}, ()),                 # propertyfinder 23820293
+        ("ثلاث غرف وصاله وثلاث دورات مياه ومطبخ مؤثثه بالكامل باثاث فاخر", {"furnished": True}, ()),     # aqarmonthly 7060038
+        ("استديو للايجار سويت غرفه ودورة مياه ماثث", {"furnished": True}, ()),                          # haraj 25938268
         ("شقق مرفروشة للإيجار الشهري والسنوي", {"furnished": True}, ()),                       # dealapp 21598204
         ("شقق للإيجار في جدة مفروووووش شقق مكونة من غرفتين", {"furnished": True}, ()),          # dealapp 17640912
         ("نظافة يومية - أثاث مكتبي راقٍ وجاهز - خصوصية", {"furnished": True}, ()),             # aqar 15113813
@@ -2655,6 +2682,11 @@ def selftest() -> None:
         ("ركوب الخيل", {"horses_stable": True}, ()),
         ("خيول للركوب", {"horses_stable": True}, ()),
         ("مزرعة الخيليين", {}, ("horses_stable",)),
+        # P2 13085 «الخيل» (🔬 2026-11-14): a possible use or an activity list is not horses on the plot
+        ("الأرض مثالية لمشاريع المستودعات، اسطبلات الخيل، المزارع، أو الاستراحات", {}, ("horses_stable",)),   # aqar 1769697
+        ("مساحات واسعة و كبيرة لمزوالة الأنشطة المختلفة كركوب الخيل!", {}, ("horses_stable",)),             # haraj 27188602
+        ("ولعشاق الخيل… نوفر تجربة ركوب حصان مجاناً داخل المضمار", {"horses_stable": True}, ()),           # gathern 21147934
+        ("مخيم لقضاء أجواء ممتعة مع الخيل", {"horses_stable": True}, ()),                                   # gathern 21144915
         ("إبل وهجن", {"camels": True}, ()),
         ("ركوب الجمال", {"camels": True}, ()),
         ("مكان جمال", {}, ("camels",)),
