@@ -91,7 +91,7 @@ const info = (s: string) => console.log(`      ${s}`);
 
 const M = {
   cohorts: 0, scopes: 0, options: 0, optionsRendered: 0, predicateOnly: 0, zeroOptions: 0,
-  orCombos: 0, andCombos: 0, stacked: 0, secondRoundChips: 0, multiTypePairs: 0, combinedDeal: 0, bothPeriod: 0,
+  orCombos: 0, andCombos: 0, stacked: 0, secondRoundChips: 0, multiTypePairs: 0, pairsDeferred: 0, combinedDeal: 0, bothPeriod: 0,
   unknownCaptions: 0, boundariesExercised: 0, boundariesUnexercised: 0,
   missing: 0, extra: 0, dupes: 0, countMismatch: 0, nullLeaks: 0, rowViolations: 0, renderGateViolations: 0,
   basePurity: 0,
@@ -718,6 +718,28 @@ for (const scope of SCOPES) {
   }
 }
 
+/** Where today's pair walk starts: a stride that is coprime with n visits every offset across n days. */
+export function rotationOffset(n: number, day: number): number {
+  if (n <= 0) return 0;
+  let stride = 37 % n || 1;
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+  while (gcd(stride, n) !== 1) stride++;
+  return (day * stride) % n;
+}
+/** The pair stage stops at its budget; 0 means no budget (local runs). */
+export const pairBudgetSpent = (start: number, budgetMs: number, now: number): boolean => budgetMs > 0 && now - start >= budgetMs;
+/** Today's pair walk: starts at the rotated offset, visits in order, stops when the budget is spent. Returns how many were deferred. */
+export async function walkPairs<T>(pairs: T[], day: number, budgetMs: number, now: () => number, visit: (p: T) => Promise<void>): Promise<number> {
+  const off = rotationOffset(pairs.length, day);
+  const ordered = [...pairs.slice(off), ...pairs.slice(0, off)];
+  const start = now();
+  for (let k = 0; k < ordered.length; k++) {
+    if (pairBudgetSpent(start, budgetMs, now())) return ordered.length - k;
+    await visit(ordered[k]);
+  }
+  return 0;
+}
+
 // ── STAGE 2 — multi-type, combined deal, both periods (region scope only) ───────────────────────
 if (!SKIP_MULTI) {
   const scope = SCOPES[0];
@@ -725,28 +747,41 @@ if (!SKIP_MULTI) {
   const legs = ['Buy', 'RentAnnual', 'RentMonthly'] as const;
 
   // multi-type pairs within one category: the surviving questions are the INTERSECTION (R2.2.1)
+  //
+  // A BUDGET WITH A ROTATION, never a cancel (🦅 2026-11-13). The pairs grow as the square of the type list: run
+  // 43424461595 spent 65 min on stage 1, walked 182 pairs in 84 min with 0 failures and was CANCELLED at the 150-min
+  // job cap mid-pair — so the combined Buy∪Rent and both-period stages below had not run on any day, and the robot
+  // proved nothing. AF_FSD_PAIR_BUDGET_MIN bounds this stage; the walk starts at a DAILY offset, so every pair is
+  // still covered across days and the stages after it run every day. Pairs not reached are reported, never passed.
+  const PAIR_BUDGET_MS = Number(process.env.AF_FSD_PAIR_BUDGET_MIN || 0) * 60_000;
+  const allPairs: Array<{ leg: (typeof legs)[number]; types: string[] }> = [];
   for (const leg of legs) {
     const inLeg = cleanTypes.filter((t) => COHORTS.some((c) => c.clean === t && c.leg === leg));
     for (let i = 0; i < inLeg.length; i++) for (let j = i + 1; j < inLeg.length; j++) {
-      const types = [inLeg[i], inLeg[j]];
-      if (CLEAN_MACRO[types[0]] !== CLEAN_MACRO[types[1]]) continue;
+      if (CLEAN_MACRO[inLeg[i]] === CLEAN_MACRO[inLeg[j]]) allPairs.push({ leg, types: [inLeg[i], inLeg[j]] });
+    }
+  }
+  const pairOffset = rotationOffset(allPairs.length, Math.floor(Date.now() / 86_400_000));
+  info(`multi-type pairs: ${allPairs.length} in all, starting at offset ${pairOffset} today${PAIR_BUDGET_MS ? `, budget ${PAIR_BUDGET_MS / 60_000} min` : ''}`);
+  M.pairsDeferred = await walkPairs(allPairs, Math.floor(Date.now() / 86_400_000), PAIR_BUDGET_MS, Date.now, async ({ leg, types }) => {
+    {
       const q = queryFor(types, leg);
       const base = scopeBody(types, leg, scope);
-      if (!base) continue;
+      if (!base) return;
       const qids = ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction', 'rating', 'unit_subtype'].filter((id) => cohortAllows(q, id));
       const tag = `${types.join('+')}/${leg} @${scope.label}`;
       M.multiTypePairs++;
-      if (!qids.length) { info(`${tag}: empty certified intersection — the card offers nothing (correct, R2.2.4)`); continue; }
+      if (!qids.length) { info(`${tag}: empty certified intersection — the card offers nothing (correct, R2.2.4)`); return; }
       let guided: any = null, age: any = null;
       try {
         guided = (await rpc('apartment_guided_counts_ar', countBody(base, {})))?.[0] ?? null;
         if (qids.includes('property_age')) age = (await rpc('property_age_option_counts_ar', countBody(base, {})))?.[0] ?? null;
       } catch (e: any) {
-        if (isSchemaCacheUnresolved(e)) { unmeasured(`${tag} · count RPCs`, e); continue; }
-        fail(`${tag} · count RPCs`, e.message); continue;
+        if (isSchemaCacheUnresolved(e)) { unmeasured(`${tag} · count RPCs`, e); return; }
+        fail(`${tag} · count RPCs`, e.message); return;
       }
       const total = guided ? Number(guided.cnt_total_base) : null;
-      if (!total) { info(`${tag}: empty in this scope`); continue; }
+      if (!total) { info(`${tag}: empty in this scope`); return; }
       // baseline union purity: the pair's set must be exactly the union of the two types' sets
       await withSlot(async () => {
         const label = `${tag} · baseline (type union, no AF)`;
@@ -785,7 +820,8 @@ if (!SKIP_MULTI) {
       }
       await Promise.all(jobs);
     }
-  }
+  });
+  if (M.pairsDeferred) info(`multi-type pairs: budget spent — ${M.pairsDeferred} pair(s) deferred to the next days' rotation (NOT measured this run)`);
 
   // combined Buy+Rent (p_deal null): only questions certified for ALL THREE legs (R2.4.1)
   for (const clean of cleanTypes) {
@@ -844,7 +880,7 @@ ZERO-RESULT OPTIONS VERIFIED:     ${M.zeroOptions}
 SAME-FIELD OR COMBOS:             ${M.orCombos}
 CROSS-FIELD AND COMBOS:           ${M.andCombos} (each with its round-2 chip)
 FULL STACKS:                      ${M.stacked}
-MULTI-TYPE PAIRS:                 ${M.multiTypePairs}
+MULTI-TYPE PAIRS:                 ${M.multiTypePairs} (deferred to the rotation: ${M.pairsDeferred})
 COMBINED BUY∪RENT OPTIONS:        ${M.combinedDeal}
 BOTH-PERIOD OPTIONS:              ${M.bothPeriod}
 UNKNOWN CAPTIONS VERIFIED:        ${M.unknownCaptions}
