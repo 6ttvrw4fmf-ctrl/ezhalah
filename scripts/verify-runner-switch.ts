@@ -43,6 +43,7 @@ export const HOSTED_ONLY: Record<string, string> = {
   'site-speed-live.yml': 'phone-speed robot (4x CPU throttle): on the own server it got a runner twice in 17 h after the 20:30 UTC 11-13 switch, red both times (04:43, 09:34: waitForFunction 30 s timeout) and 30+ passes were cancelled; the 22 passes before on GitHub ran every 30 min, 18 green (🔧 2026-11-14)',
   'map-pins-live.yml': 'phone map robot (same CPU-throttled class as web-runtime-smoke, owner 2026-11-13); red 17:55 UTC 11-13 after the switch and its runs queued 3 h+ (🔧 2026-11-14)',
   'ad-viewer-speed-live.yml': 'phone 4G ad-viewer speed robot (owner: in-app sites must stay under 3 s); same throttled class as web-runtime-smoke; queued 2.3 h on the own server 2026-11-14 (🔧 2026-11-14)',
+  'common-location-tests.yml': 'reports the merge-gating «test» check on every scrapers/ PR head through its push trigger; 12 push runs queued 3-4 h on the own server and the robot refused #12188 #12189 #12190 with «test is PENDING» at 13:21 UTC (🔧 2026-11-14)',
   'iphone-robot-live.yml': 'iPhone-emulation robot, same throttled class as web-runtime-smoke (owner 2026-11-13); queued 5 h on the own server 2026-11-14 (run 43574663651) (🔧 2026-11-14)',
 };
 function problems(files: Record<string, string>, expr = SWITCH): string[] {
