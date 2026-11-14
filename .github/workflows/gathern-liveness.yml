@@ -99,7 +99,7 @@ on:
         default: false
 
 concurrency:
-  group: gathern-liveness
+  group: gathern-liveness-hosted-scratch
   cancel-in-progress: false   # never interrupt a sweep mid-run
 
 env:
