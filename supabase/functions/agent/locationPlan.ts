@@ -131,7 +131,25 @@ async function validatePlan(
     if (!["city", "region_or_city", "twin_city"].includes(String(city.kind))) return blocked("حدد مدينة داخل السعودية للبحث، واذكر المنطقة إذا كان الاسم مشترك. 📍", "Please specify a Saudi city, and its region if the city name is shared. 📍");
     let candidates = [...rows(city.cities), ...rows(city.regions)].filter(c => c.city_id != null && typeof c.city_ar === "string" && typeof c.region_ar === "string");
     candidates = [...new Map(candidates.map(c => [`${c.city_id}:${c.region_ar}`, c])).values()];
-    if (requestedRegion.trim()) candidates = candidates.filter(c => norm(String(c.region_ar)) === norm(requestedRegion));
+    // An English region answer («Eastern Province») names the same region as «المنطقة الشرقية» (backlog 805, owner
+    // 2026-10-23: «villa for sale in Hofuf» → «Which region…?» → «Eastern Province» → asked again, three clarifications,
+    // zero results). Compare through the region catalogue, never letters against letters of another language.
+    const regionKey = (name: string) => {
+      const hit = REGION_NAMES.find(([en, ar]) => norm(name) === norm(ar) || norm(name) === norm(ar.replace(/^منطقة\s+/, "")) || name.trim().toLowerCase() === en.toLowerCase());
+      return norm(hit ? hit[1] : name);
+    };
+    if (requestedRegion.trim()) candidates = candidates.filter(c => regionKey(String(c.region_ar)) === regionKey(requestedRegion));
+    // A twin whose namesake holds no listings is not a question (owner, backlog 805: «Hofuf IS a city … the region is
+    // derivable, this question should never be asked»). loc_classify('الهفوف') = the Eastern Province city (7,204 ads)
+    // and a Riyadh-region namesake with 0. Only when exactly one twin has listings; two populated twins still ask.
+    let twinNotice: string | undefined;
+    if (!requestedRegion.trim() && candidates.length > 1) {
+      const populated = candidates.filter(c => Number(c.inv ?? 0) > 0);
+      if (populated.length === 1) {
+        candidates = populated;
+        twinNotice = en ? `Searching ${populated[0].city_ar} in ${populated[0].region_ar}.` : `أبحث في ${populated[0].city_ar} (${populated[0].region_ar}).`;
+      }
+    }
     if (candidates.length !== 1) return blocked("أي منطقة تقصد لهالمدينة؟ 📍", "Which region do you mean for this city? 📍");
     const chosen = candidates[0];
     const cityChanged = typeof previous?.location === "string" && norm(previous.location) !== norm(String(chosen.city_ar));
@@ -198,7 +216,7 @@ async function validatePlan(
     }
     const notice = removed.length ? (en
       ? `Removed ${removed.join(", ")} because they do not belong to ${chosen.city_ar}.`
-      : `شلت ${removed.join("، ")} لأنها ما تتبع ${chosen.city_ar}.`) : undefined;
+      : `شلت ${removed.join("، ")} لأنها ما تتبع ${chosen.city_ar}.`) : twinNotice;
     return { status: "ready", location: String(chosen.city_ar), regionPin: String(chosen.region_ar), districts, notice };
   } catch {
     return { status: "blocked", failed: true, reply: en ? "I couldn't verify the location because of a temporary connection problem. Please try again." : "تعذر التحقق من الموقع بسبب مشكلة اتصال مؤقتة. جرب مرة ثانية." };

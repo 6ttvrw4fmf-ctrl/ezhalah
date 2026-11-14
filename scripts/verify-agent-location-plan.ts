@@ -25,6 +25,20 @@ const lookup = async (n: string) => catalog[n] ?? catalog[n.replace(/^حي\s+/, 
 const ready = (cities = ['الرياض'], districts: string[] = [], region = '') => ({ status: 'ready', cities, districts, region });
 const run = (p: unknown, f = lookup) => validateLocationPlan(p, f, false, 'أي مدينة تقصد؟');
 assert.equal((await run(ready())).status, 'ready'); // zero inventory is still a valid place
+// backlog 805 (owner 2026-10-23): «الهفوف» is a twin — the Eastern Province city with listings and an empty Riyadh-region
+// namesake (loc_classify, 2026-11-14: inv 7,204 vs 0). One populated twin is the place: no «Which region…?».
+const hofuf = { kind: 'twin_city', name: 'الهفوف', regions: [{ city_ar: 'الهفوف', city_id: 12, region_ar: 'المنطقة الشرقية', inv: 7204 }, { city_ar: 'الهفوف', city_id: 501, region_ar: 'منطقة الرياض', inv: 0 }] };
+const both = { kind: 'twin_city', name: 'المسمى', regions: [{ city_ar: 'المسمى', city_id: 7, region_ar: 'المنطقة الشرقية', inv: 30 }, { city_ar: 'المسمى', city_id: 8, region_ar: 'منطقة الرياض', inv: 12 }] };
+const twins = async (n: string) => n === 'الهفوف' ? hofuf : n === 'المسمى' ? both : lookup(n);
+const h = await validateLocationPlan(ready(['الهفوف']), twins, true, '');
+assert.equal(h.status, 'ready'); assert.equal(h.location, 'الهفوف'); assert.equal(h.regionPin, 'المنطقة الشرقية');
+assert.match(String(h.notice), /الهفوف in المنطقة الشرقية/);
+assert.equal((await validateLocationPlan(ready(['المسمى']), twins, true, '')).status, 'blocked');          // two populated twins still ask
+// …and the English answer to that question names the same region as the Arabic one
+assert.equal((await validateLocationPlan(ready(['المسمى'], [], 'Eastern Province'), twins, true, '')).regionPin, 'المنطقة الشرقية');
+assert.equal((await validateLocationPlan(ready(['المسمى'], [], 'المنطقة الشرقية'), twins, false, '')).regionPin, 'المنطقة الشرقية');
+assert.equal((await validateLocationPlan(ready(['الهفوف'], [], 'Riyadh'), twins, true, '')).regionPin, 'منطقة الرياض');   // a stated region wins
+assert.equal((await validateLocationPlan(ready(['جدة'], [], 'Eastern Province'), twins, true, '')).status, 'blocked');  // a wrong region still blocks
 assert.equal((await run(ready(['الرياض', 'جدة']))).status, 'blocked');
 assert.equal((await run(ready([]))).status, 'blocked');
 assert.equal((await run(ready([], ['الملقا']))).location, 'الرياض');
