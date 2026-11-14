@@ -33,6 +33,7 @@ function evalSwitch(expr: string, event: string, ezRunner: string): string {
 // listed file says exactly `ubuntu-latest`; every other file uses the switch. Keeping a job on GitHub is always safe (it is
 // where pull requests run anyway); the list only exists so the choice is deliberate, never a stray hard-code.
 export const HOSTED_ONLY: Record<string, string> = {
+  'dealapp-sharded.yml': 'dealapp throttles PER IP; its 24 shards were built for one IP each, and on our one server they all shared one IP and held 5 of 8 workers for 11 h (2026-11-14)',
   'web-runtime-smoke.yml': 'phone-speed robots froze on the own server under full load (owner 2026-11-13: «we can split for now»)',
 };
 function problems(files: Record<string, string>, expr = SWITCH): string[] {
