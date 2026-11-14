@@ -32,8 +32,27 @@ function evalSwitch(expr: string, event: string, ezRunner: string): string {
 // Workflows that stay on GitHub's machines whatever EZ_RUNNER says — a reviewed list, each with its reason. Every job in a
 // listed file says exactly `ubuntu-latest`; every other file uses the switch. Keeping a job on GitHub is always safe (it is
 // where pull requests run anyway); the list only exists so the choice is deliberate, never a stray hard-code.
+const CLEANUP = 'the 30-day cleanups re-check each ad at its source before deleting; from the own server aqar answered 1,025 of 1,025 re-checks with no usable evidence (403/429/5xx) on 2026-11-14 10:43, so every deletion froze (♻️ 2026-11-14)';
+const LIFECYCLE = 'the lifecycle checkers are deadline jobs (gathern 24 h, others 48 h); on the 6-runner own server they queued 10-14 h behind long matrix jobs and every hourly gathern/dealapp sweep was cancelled from 18:37 UTC 2026-11-13 (♻️ 2026-11-14)';
 export const HOSTED_ONLY: Record<string, string> = {
   'dealapp-sharded.yml': 'dealapp throttles PER IP; its 24 shards were built for one IP each, and on our one server they all shared one IP and held 5 of 8 workers for 11 h (2026-11-14)',
+  'aqar-cleanup.yml': CLEANUP,
+  'aqarcity-cleanup.yml': CLEANUP,
+  'fleet-cleanup.yml': CLEANUP,
+  'gathern-cleanup.yml': CLEANUP,
+  'platform-cleanup.yml': CLEANUP,
+  'wasalt-cleanup.yml': CLEANUP,
+  'aqar-liveness.yml': LIFECYCLE,
+  'aqar-liveness-recheck.yml': LIFECYCLE,
+  'customer-journey.yml': 'every engineer\'s live-site proof; queued 3 h on the own server 2026-11-14, so no fix could be proven (♻️)',
+  'dead-visible-score.yml': LIFECYCLE,
+  'dealapp-liveness.yml': LIFECYCLE,
+  'dealapp-recover.yml': 'dealapp throttles PER IP and caches its wall page under each ad for days; on the one own-server IP the dealapp sweep read 0-9 of 600 alive from 18:00 UTC 2026-11-13 (♻️ 2026-11-14), so no dealapp reader may share it',
+  'fleet-liveness.yml': LIFECYCLE,
+  'fleet-liveness-recheck.yml': LIFECYCLE,
+  'gathern-liveness.yml': LIFECYCLE,
+  'gathern-recheck-dead.yml': LIFECYCLE,
+  'lifecycle-spot-check.yml': LIFECYCLE,
   'web-runtime-smoke.yml': 'phone-speed robots froze on the own server under full load (owner 2026-11-13: «we can split for now»)',
   // A SITE THAT JUDGES OUR ADDRESS (2026-11-14, measured with the same code): dealapp hands the own server's single
   // address its no-listing page. 11-12 fleet on GitHub: 22/24 shards ok, 54,901 of 59,177 ads read; 11-13 fleet on

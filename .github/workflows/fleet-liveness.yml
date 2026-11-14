@@ -34,7 +34,7 @@ env:
 
 jobs:
   plan:
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     outputs:
       sites: ${{ steps.plan.outputs.sites }}
     steps:
@@ -54,7 +54,7 @@ jobs:
   liveness:
     needs: plan
     name: Liveness ${{ matrix.site }}
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:
       fail-fast: false
