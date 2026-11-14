@@ -121,7 +121,7 @@ mustCatch('a half-fix that only looks at the first segment',
 console.log('\n§2  WIRING — the component asks THIS predicate, not a second one');
 const fr = readFileSync('src/components/FeedbackRow.tsx', 'utf8');
 check('2.a  FeedbackRow gates the 🔊 on hasSpeakableContent(...)',
-  /hasSpeakableContent\(readAloudSegments\)\s*\?/.test(fr),
+  /hasSpeakableContent\(readAloudSegments\)/.test(fr) && /const speakable = useMemo\(\(\) => hasSpeakableContent\(readAloudSegments\), \[readAloudSegments\]\)/.test(fr) && /\{speakable\s*\?/.test(fr),
   'the control must be rendered behind the same predicate speakReadAloud() enforces');
 check('2.b  …and no longer on the bare segment count',
   !/\{readAloudSegments\?\.length\s*\?/.test(fr),

@@ -60,6 +60,7 @@ type Bus = {
   state: Record<string, number>; renders: number[]; revealing: boolean[]; frames: (() => void)[];
   timers: (() => void)[]; active: { id: string; count: number } | null; ref: Record<string, number>;
   cardRow?: 'roomy' | 'tight';
+  cardCols?: 2 | 3;
   live?: Set<string>; // results turns a search produced live in this conversation (liveTurnsRef)
 };
 const gb = globalThis as unknown as { __bus: Bus };
@@ -68,6 +69,7 @@ const PRELUDE = [
   'const CASCADE_VISIBLE = 14;',
   'const LOAD_MORE_STEP_MS = 55;',
   'const cardRow = bus.cardRow;',
+  'const cardCols = bus.cardCols;',
   'const cascadeWindowRef: any = { current: {} };',
   'const liveTurnsRef: any = { get current() { return bus.live; } };',
   'const revealCountRef: any = { get current() { return bus.ref; } };',
@@ -79,6 +81,7 @@ const PRELUDE = [
   'const setTimeout = (f: () => void, _ms?: number) => { bus.timers.push(f); return 0; };',
 ].join('\n');
 const lift = (file: string) => liftSymbols(file, [
+  { header: 'const STILL_CARD_HEIGHT = ', endsWith: /^  cols === 3 \? .*;$/ },
   { header: '  const cascadeIn = (mid: string, from: number, target: number) => {', endsWith: /^  \};$/ },
   { header: '  const cardInMotion = (mid: string, i: number) => {', endsWith: /^  \};$/ },
 ], ['cascadeIn', 'cardInMotion'], PRELUDE);
@@ -105,11 +108,16 @@ const motion = (i: number) => JSON.stringify(p2.cardInMotion('mid', i));
 check('CardIn: on-screen cards stagger 55 ms apart from the press point; earlier cards untouched',
   motion(99) === '{}' && motion(100) === '{"delayMs":0}' && motion(113) === '{"delayMs":715}',
   `${motion(99)} ${motion(100)} ${motion(113)}`);
-check('CardIn: every card past the on-screen batch mounts still (phone placeholder 340px)',
-  motion(114) === '{"stillHeight":340}' && motion(499) === '{"stillHeight":340}', motion(114));
-const laptop = await press(AGENT, 100, 500, { cardRow: 'roomy' });
-check('CardIn: on a laptop the still placeholder is the row card (140px), not the phone card',
-  JSON.stringify(laptop.cardInMotion('mid', 200)) === '{"stillHeight":140}');
+check('CardIn: every card past the on-screen batch mounts still (phone placeholder 370px)',
+  motion(114) === '{"stillHeight":370}' && motion(499) === '{"stillHeight":370}', motion(114));
+// THE PLACEHOLDER IS THE CARD'S REAL HEIGHT in the layout on screen (owner 2026-10-25, saved chats glitched): it was 140 for
+// every laptop layout while the photo cards three across are ~400, so a reopened 500-card chat believed it was a third of
+// its height and jumped as the cards filled in. Measured medians: phone 367 · 3 across 396 · 2 across 414–463 · pane open 148.
+const heightIn = async (seed: Partial<Bus>) => JSON.stringify((await press(AGENT, 100, 500, seed)).cardInMotion('mid', 200));
+check('CardIn: laptop, three cards across → the 400px photo card', await heightIn({ cardRow: 'roomy', cardCols: 3 }) === '{"stillHeight":400}');
+check('CardIn: laptop, two across → the 440px photo card', await heightIn({ cardRow: 'roomy', cardCols: 2 }) === '{"stillHeight":440}');
+check('CardIn: laptop with the ad pane open (one tight row) → 148px', await heightIn({ cardRow: 'tight' }) === '{"stillHeight":148}');
+check('MUTATION — the old 140px placeholder on a three-across laptop is caught', await heightIn({ cardRow: 'roomy', cardCols: 3 }) !== '{"stillHeight":140}');
 check('CardIn: a LIVE turn no press touched animates as before', JSON.stringify(p2.cardInMotion('other', 3)) === '{}');
 // A REOPENED chat renders in its final state (owner 2026-10-10, iPhone: switching chats went blank). Its
 // turns are not live, so every card mounts still — measured locally before this: switching to a 100-card
@@ -117,9 +125,9 @@ check('CardIn: a LIVE turn no press touched animates as before', JSON.stringify(
 const reopened = await press(AGENT, 100, 500, { live: new Set() });
 const still = (i: number, mid = 'restored') => JSON.stringify(reopened.cardInMotion(mid, i));
 check('CardIn: a reopened turn mounts every card still (no mount-in replayed on a chat switch)',
-  still(0) === '{"stillHeight":340}' && still(3) === '{"stillHeight":340}', still(0));
+  still(0) === '{"stillHeight":370}' && still(3) === '{"stillHeight":370}', still(0));
 check('CardIn: «عرض المزيد» on a reopened turn still cascades its new batch; its earlier cards stay still',
-  still(99, 'mid') === '{"stillHeight":340}' && still(100, 'mid') === '{"delayMs":0}', `${still(99, 'mid')} ${still(100, 'mid')}`);
+  still(99, 'mid') === '{"stillHeight":370}' && still(100, 'mid') === '{"delayMs":0}', `${still(99, 'mid')} ${still(100, 'mid')}`);
 
 const small = await press(AGENT, 24, 30);
 check('a press that fits on screen is ONE render with nothing left pending',
@@ -153,7 +161,7 @@ await mustCatch('dropping the ownership guard is caught',
 await mustCatch('a reopened chat replaying every card\'s mount-in is caught',
   '    if (!w || i < w.from) return liveTurnsRef.current.has(mid) ? {} : still;',
   '    if (!w || i < w.from) return {};',
-  async (f) => JSON.stringify((await press(f, 100, 500, { live: new Set() })).cardInMotion('restored', 0)) === '{"stillHeight":340}');
+  async (f) => JSON.stringify((await press(f, 100, 500, { live: new Set() })).cardInMotion('restored', 0)) === '{"stillHeight":370}');
 check('loadMore still hands its reveal to cascadeIn(mid, cur, revealTo)', /else cascadeIn\(mid, cur, revealTo\);/.test(agentSrc));
 
 // ── 1. the prompt observer ignores mutations that cannot touch a prompt ─────────────────────────
