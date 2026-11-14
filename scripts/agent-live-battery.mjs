@@ -90,6 +90,7 @@ const en = [
   ['2 bedroom apartment for rent in Khobar', { type: ['Apartment'], loc: 'الخبر', deal: 'Rent', detail: '2' }], ['office for rent in Dammam', { type: ['Office'], loc: 'الدمام', deal: 'Rent' }],
   ['warehouse for rent in Riyadh', { type: ['Warehouse'], loc: 'الرياض', deal: 'Rent' }], ['land for sale in Madinah', { loc: 'المدينة', deal: 'Buy' }],
   ['villa in Jeddah up to 3 million', { type: ['Villa'], loc: 'جدة', price: 3e6 }], ['apartment in Riyadh 60000 per year', { type: ['Apartment'], loc: 'الرياض', price: 60000 }],
+  ['villa for sale in Hofuf', { type: ['Villa'], loc: 'الهفوف', deal: 'Buy' }], // backlog 805: a twin city with an empty namesake asked «Which region…?» three times
   ['shop for rent in Taif', { type: ['Shop'], loc: 'الطائف', deal: 'Rent' }], ['rest house for sale in Riyadh', { type: ['Rest House'], loc: 'الرياض', deal: 'Buy' }],
   ['I want a big villa in Riyadh', { type: ['Villa'], loc: 'الرياض' }], ['3 bedroom flat in Abha for rent', { type: ['Apartment'], loc: 'أبها', deal: 'Rent', detail: '3' }],
 ].map(([text, exp]) => ({ g: 'search', text, exp, en: true }));
