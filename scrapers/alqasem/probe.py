@@ -1,44 +1,30 @@
-"""PROBE ONLY (branch probe/alqasem-cg-1114, never merged): per-row verdict for every served alqasem link."""
-import re, sys, time, html
+"""PROBE ONLY (branch probe/alqasem-cg-1114, never merged): the rebuilt site's JSON API + full sitemap."""
+import json, re, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scrapers.alqasem.run import session
-ROWS = [
-('C',13107276,'%d8%a7%d8%b1%d8%b6-%d8%aa%d8%ac%d8%a7%d8%b1%d9%8a%d8%a9-%d8%b3%d9%83%d9%86%d9%8a%d8%a9-%d9%84%d9%84%d8%a8%d9%8a%d8%b9'),
-('R',13107227,'%d8%b9%d9%85%d8%a7%d8%b1%d8%a9-%d9%83%d8%a7%d9%85%d9%84%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1'),
-('R',13107228,'%d9%81%d9%8a%d9%84%d8%a7-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1'),
-('R',13107229,'%d8%b4%d9%82%d8%a9-%d8%b1%d8%a7%d9%82%d9%8a%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1'),
-('R',13107230,'%d9%81%d9%8a%d9%84%d8%a7-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-%d9%81%d9%8a-%d8%b4%d8%a7%d8%b1%d8%b9-%d8%ad%d8%b3%d9%86-%d8%a7%d9%84%d8%a8%d8%af%d8%b1'),
-('R',13107231,'%d8%b4%d9%82%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-%d9%81%d9%8a-%d8%b4%d8%a7%d8%b1%d8%b9-%d8%b7%d9%86%d8%ac%d8%a9'),
-('R',13107232,'%d8%b4%d9%82%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-%d9%81%d9%8a-%d8%b4%d8%a7%d8%b1%d8%b9-%d8%a7%d9%84%d9%82%d8%b4%d8%a7%d8%b4%d9%8a%d8%a9'),
-('R',13107242,'%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%af%d9%88%d8%b1-%d9%81%d8%a7%d8%ae%d8%b1-%d8%a8%d8%ad%d9%8a-%d8%b9%d9%84%d9%8a%d8%b4%d8%a9-f4a'),
-('R',13107243,'%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%af%d9%88%d8%b1-%d9%81%d8%a7%d8%ae%d8%b1-%d8%a8%d8%ad%d9%8a-%d8%b9%d9%84%d9%8a%d8%b4%d8%a9-f5b'),
-('R',13107246,'%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%af%d9%88%d8%b1-%d9%81%d8%a7%d8%ae%d8%b1-%d8%a8%d8%ad%d9%8a-%d8%b9%d9%84%d9%8a%d8%b4%d8%a9-r9c'),
-('R',13107252,'%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%af%d9%88%d8%b1-%d9%81%d8%a7%d8%ae%d8%b1-%d8%a8%d8%ad%d9%8a-%d8%b9%d9%84%d9%8a%d8%b4%d8%a9-r7a'),
-('R',13107253,'%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%af%d9%88%d8%b1-%d9%81%d8%a7%d8%ae%d8%b1-%d8%a8%d8%ad%d9%8a-%d8%b9%d9%84%d9%8a%d8%b4%d8%a9-f6c'),
-('R',13107256,'%d8%af%d9%88%d8%b1-vip-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-r2b'),
-('R',13107257,'%d8%af%d9%88%d8%b1-vip-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-r1a'),
-('R',13107258,'%d8%af%d9%88%d8%b1-vip-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-f2b'),
-('R',13107259,'%d8%af%d9%88%d8%b1-vip-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-f1a'),
-('R',13107260,'%d8%af%d9%88%d8%b1-vip-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-g2b'),
-('R',13107261,'%d8%af%d9%88%d8%b1-vip-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-g1a'),
-('R',13107263,'%d8%af%d9%88%d8%b1-%d9%84%d9%84%d8%a7%d9%8a%d8%ac%d8%a7%d8%b1-vip-g2'),
-('R',13107267,'%d8%af%d9%88%d8%b1-%d9%84%d9%84%d8%a7%d9%8a%d8%ac%d8%a7%d8%b1-vip'),
-('R',13107268,'%d8%af%d9%88%d8%b1-vip-%d9%84%d9%84%d8%a7%d9%8a%d8%ac%d8%a7%d8%b1'),
-('R',13107271,'%d8%aa%d8%a7%d9%88%d9%86-%d9%87%d8%a7%d9%88%d8%b3-%d9%84%d9%84%d8%a8%d9%8a%d8%b9'),
-('R',13107273,'%d9%81%d9%8a%d9%84%d8%a7-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81-%d8%ad%d9%8a-%d8%b9%d9%84%d9%8a%d8%b4%d9%87'),
-]
+from scrapers.alqasem.run import session, BASE
+def shape(o, d=0):
+    if d > 5: return "…"
+    if isinstance(o, dict): return {k: shape(v, d+1) for k, v in list(o.items())[:60]}
+    if isinstance(o, list): return [shape(o[0], d+1), f"len={len(o)}"] if o else []
+    if isinstance(o, str): return re.sub(r"(?:\+?966|0)5\d{8}", "<PHONE>", o[:90])
+    return o
 s = session()
-for t, i, slug in ROWS:
-    u = f"https://alqasem.com.sa/property/{slug}/"
+st = s.get(BASE + "/sitemap.xml", timeout=30)
+locs = re.findall(r"<loc>([^<]+)</loc>", st.text)
+print("SITEMAP", st.status_code, len(locs), [u for u in locs if "/properties/" in u and "/en/" not in u])
+time.sleep(1)
+for p in ["/api/properties?limit=3&depth=1", "/api/properties?limit=0", "/api/listings?limit=2", "/api/units?limit=2", "/api/access"]:
     try:
-        r = s.get(u, timeout=30, allow_redirects=True); st, body, fin = r.status_code, r.text or "", str(r.url)
+        r = s.get(BASE + p, timeout=30); time.sleep(1.2)
+        print(f"\n=== {p} -> {r.status_code} {r.headers.get('content-type')} {len(r.text)}B")
+        if "json" in (r.headers.get("content-type") or ""):
+            j = r.json()
+            print({k: j[k] for k in j if k != "docs"} if isinstance(j, dict) else type(j))
+            if isinstance(j, dict) and j.get("docs"):
+                print("DOC0:", json.dumps(shape(j["docs"][0]), ensure_ascii=False)[:6000])
+                print("ALL:", [(d.get("id"), d.get("slug"), d.get("legacyId") or d.get("wpId") or d.get("oldId"), d.get("status")) for d in j["docs"]])
+        else:
+            print(r.text[:300])
     except Exception as e:
-        st, body, fin = -1, "", repr(e)[:80]
-    time.sleep(1.2)
-    gone = "هذا العقار لم يعد متاحاً" in body
-    stamp = re.search(r"(تم البيع|تم التأجير|تم الإيجار)\s*\n?\s*(في [^<\n]{0,20})?", re.sub(r"<[^>]+>", "\n", body))
-    title = (re.search(r"<title>(.*?)</title>", body, re.S) or [None, ""])[1][:70]
-    lic = re.findall(r"72\d{8}", body)[:1]
-    price = re.findall(r'"price"\s*:\s*"?([\d.]+)', body)[:1]
-    print(f"VERDICT {t} {i} status={st} final={fin} gone_banner={gone} stamp={stamp.group(0).strip()[:30] if stamp else None} lic={lic} ldprice={price} title={html.unescape(title)}", flush=True)
+        print(p, "ERR", repr(e)[:200])
