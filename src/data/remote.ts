@@ -1730,6 +1730,27 @@ async function bounded<T = any>(builder: any, ms = RPC_TIMEOUT_MS, signal?: Abor
 // chunks, and fail-closed — any chunk error rejects the table (caller → null → retry UI, never a short
 // grid) and no NEW chunk starts after it. Pinned by scripts/verify-raw-card-chunks-run-concurrently.ts.
 const RAW_CHUNK_CONCURRENCY = 4;
+// The index's bath count for one page of a PLAIN search (no af_canon): key `${table}:${id}` → index bathrooms.
+// Only rows with a figure are asked for. A failed read is REPORTED and leaves the card's box as the site left it —
+// the same card as before this read existed, never a blank-for-error and never a search failure (A FAILED FETCH IS
+// NOT AN EMPTY ANSWER: the failure is logged, not read as «no bathrooms»).
+export async function indexBathsForPage(entries: [string, number[]][], signal?: AbortSignal): Promise<Map<string, unknown>> {
+  const out = new Map<string, unknown>();
+  if (!supabase) return out;
+  // Same id chunks as the raw card read (fetchRawByIds), so the request URL stays the size it already is.
+  const jobs: [string, number[]][] = [];
+  for (const [tbl, ids] of entries) for (let i = 0; i < ids.length; i += ID_CHUNK) jobs.push([tbl, ids.slice(i, i + ID_CHUNK)]);
+  const reads = await Promise.all(jobs.map(([tbl, ids]) =>
+    bounded(supabase!.from('search_listings_ar').select('listing_id,bathrooms')
+      .eq('source_table', tbl).in('listing_id', ids).not('bathrooms', 'is', null).limit(ids.length), RPC_TIMEOUT_MS, signal)
+      .catch((e: unknown) => ({ data: null, error: e }))));
+  reads.forEach(({ data, error }, i) => {
+    if (error) { if ((error as { cancelled?: boolean })?.cancelled) return; reportMessage('indexBathsForPage: search_listings_ar read failed', { table: jobs[i][0], error: String((error as { message?: string })?.message ?? error) }); return; }
+    for (const x of (data ?? []) as { listing_id: number; bathrooms: unknown }[]) out.set(`${jobs[i][0]}:${Number(x.listing_id)}`, x.bathrooms);
+  });
+  return out;
+}
+
 async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?: AbortSignal): Promise<Listing[]> {
   const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
   const pages: Listing[][] = [];
@@ -1913,11 +1934,18 @@ export async function fetchListingsForQuery(
   // to commercial type_ar), so the plain by-id fetch returns exactly them — no separate type re-filter needed.
   const entries = [...byTable];
   let fetched: Listing[][];
+  // A PLAIN search carries no af_canon (the payload gate: SQL NULL without an AF answer), so the index's bath count —
+  // the seller's own words filling a box the site left empty (Rule B) — never reached the card: aqarcity 5720470 /
+  // squares 13602721 / aqargate 10028936 printed no bath count on the live card while the index served 3–5
+  // (card_parity_card_missing, 🔧 2026-11-13). Read it beside the raw cards — in PARALLEL, so it adds no wait.
+  const needIndexBaths = !cleanCands.some((c) => c.af_canon);
+  const baths = needIndexBaths ? indexBathsForPage(entries, signal) : Promise.resolve(new Map<string, unknown>());
   try {
     fetched = await Promise.all(entries.map(([tbl, ids]) => fetchRawByIds(q, tbl, ids, signal)));
   } catch {
     return { listings: null, pageCandidates, pageTotal };   // RC-A: a raw-card chunk failed or timed out → retry UI, not a misleadingly-partial grid (incl. Stop-cancelled)
   }
+  const indexBaths = await baths;
   const map = new Map<string, Listing>();
   entries.forEach(([tbl], i) => { for (const l of fetched[i]) { l.sourceTable = tbl; map.set(`${tbl}:${l.id}`, l); } });
 
@@ -1945,7 +1973,7 @@ export async function fetchListingsForQuery(
     // The bath count the card prints is the one the index SERVES when the site's own box is empty (Rule B: the
     // seller's words fill it) — otherwise a customer who filtered «3 حمامات» reaches a card showing none
     // (card_parity_card_missing fkralemar/aqargate, 🔧 2026-11-10; src/lib/indexBathrooms.ts).
-    const servedBaths = c.af_canon?.bathrooms;   // read only; the canonical row itself is attached verbatim above
+    const servedBaths = c.af_canon ? c.af_canon.bathrooms : indexBaths.get(`${c.source_table}:${c.listing_id}`);   // read only; the canonical row itself is attached verbatim above
     l.bathrooms = bathroomsForCard(l.bathrooms, servedBaths) ?? 0;
     // A land «total» the index read as a PER-METRE price (owner 2026-11-04) prints the index's «≈ figure × area», so the
     // client budget net below keeps the card the server matched (src/lib/landPerMeterTotal.ts).

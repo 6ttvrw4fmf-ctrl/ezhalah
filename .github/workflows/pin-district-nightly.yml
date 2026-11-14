@@ -21,6 +21,9 @@ on:
       run_id:
         description: 'run_id for a replay (apple-ring-YYYY-MM-DD)'
         default: ''
+      name_check:
+        description: 'true = READ-ONLY: ask Apple about the district names the Filter list refuses (scripts/district-name-map-check.mjs); posts nothing'
+        default: 'false'
 
 concurrency:
   group: pin-district-nightly
@@ -54,7 +57,17 @@ jobs:
             echo "::error::Apple Maps secrets missing:$missing — the owner adds them in Settings → Secrets (repository). Nothing ran."
             exit 78
           fi
+      - name: Read-only — what Apple says about the names the Filter list refuses (backlog 1743)
+        if: github.event.inputs.name_check == 'true'
+        env:
+          APPLE_MAPS_P8: ${{ secrets.APPLE_MAPS_P8 }}
+          APPLE_MAPS_KEY_ID: ${{ secrets.APPLE_MAPS_KEY_ID }}
+          APPLE_MAPS_TEAM_ID: ${{ secrets.APPLE_MAPS_TEAM_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/district-name-map-check.mjs
       - name: Ask Apple and load
+        if: github.event.inputs.name_check != 'true'
         env:
           APPLE_MAPS_P8: ${{ secrets.APPLE_MAPS_P8 }}
           APPLE_MAPS_KEY_ID: ${{ secrets.APPLE_MAPS_KEY_ID }}
