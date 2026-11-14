@@ -35,7 +35,7 @@ from scrapers.facts.extract import _STRIP_RE, _TRANS, BOOL_FACTS, NUM_FACTS, TEX
 
 MODEL = "word-checker-v1"
 MAX_TEXT = 8000
-_W = re.compile(r"\w")
+_W = re.compile(r"[^\W_]")   # letters and digits; «_» is a bullet mark («_مسبح وجم», dealapp 21612879, 🔬 2026-11-14)
 # A SHORT AD IS READ WHEN IT IS A PHRASE, NOT A LABEL (2026-10-30, backlog 936). Under 20 folded characters used to be
 # skipped outright, so bahadhabab 10777798 «مفروشه سنه كامله» (16) never answered furnished. A lone word («مصعد») is
 # still never a fact: it reads like a field label with no value, so a short text needs two words or more.
@@ -2719,6 +2719,8 @@ def selftest() -> None:
         ("وسماعه تصلح للمناسبات (المكان يعتبر قسمين بمدخل واحد) يوجد حواجز لفصل القسمين المسبح غير مجهز", {}, ("pool",)),  # aqarmonthly 14439308
         ("مسبح غير مجهز حظيرة ماشية باب كراج شرائح", {}, ("pool",)),                                       # ialqarawi 12594693
         ("مسبح غير مستخدم، مع إمكانية ردمه والاستفادة من مساحته", {"pool": True}, ()),                    # aqar 12069307: it exists
+        ("منطقة انتضار واستقبال مبردة _مسبح وجم وغرفة رعاية اطفال", {"pool": True}, ()),                  # dealapp 21612879: «_» is a bullet
+        ("2 غرف نوم ماستر _مطبخ _ سطح _ مدخل سيارة", {"kitchen": True}, ()),                                # dealapp 22671555
         ("شاليه كبير للعائلة ويخدم كثيراً الجمعات العائلية ومناسبات الخطوبة والملكة", {"for_events": True}, ()),  # gathern 21142142
         ("إبل وهجن", {"camels": True}, ()),
         ("ركوب الجمال", {"camels": True}, ()),
