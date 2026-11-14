@@ -1194,6 +1194,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     if (any(_starts(w, _PREPARED) for w in gp[-2:] + gn[:2]) if public
             else _prepared_applies(neg(gp[-3:] + [""])[:-1], neg(gn[:4]), t[ws:we])) or "prepared for" in " ".join(n2):
         return None, s, e
+    # «مصعد جاهز أو تأسيس مرحلة أولى حسب تجهيز الوحدة» (aqarcity 9340308, 🔬 2026-11-14): installed OR only prepared,
+    # depending on the unit — neither is stated, so silent. Only an «أو» right before a prepared word, within 3 words.
+    if any(gn[k] in ("او", "أو") and _starts(_strip_wa(gn[k + 1]), _PREPARED) for k in range(min(3, len(gn) - 1))):
+        return None, s, e
     if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) and not _strip_wa(w).startswith(_n("مكانس")) for w in p2):
         return None, s, e
     g5 = " ".join(gp[-5:])                           # «توجد رخصة بناء تسوير وملاحق»: allowed to build ≠ built
@@ -2721,6 +2725,8 @@ def selftest() -> None:
         ("مسبح غير مستخدم، مع إمكانية ردمه والاستفادة من مساحته", {"pool": True}, ()),                    # aqar 12069307: it exists
         ("منطقة انتضار واستقبال مبردة _مسبح وجم وغرفة رعاية اطفال", {"pool": True}, ()),                  # dealapp 21612879: «_» is a bullet
         ("2 غرف نوم ماستر _مطبخ _ سطح _ مدخل سيارة", {"kitchen": True}, ()),                                # dealapp 22671555
+        ("🛗 مصعد جاهز أو تأسيس مرحلة أولى حسب تجهيز الوحدة", {}, ("elevator",)),                         # aqarcity 9340308
+        ("مصعد راكب أو حسب الطلب", {"elevator": True}, ()),                                                   # «أو» alone is not prepared
         ("شاليه كبير للعائلة ويخدم كثيراً الجمعات العائلية ومناسبات الخطوبة والملكة", {"for_events": True}, ()),  # gathern 21142142
         ("إبل وهجن", {"camels": True}, ()),
         ("ركوب الجمال", {"camels": True}, ()),
