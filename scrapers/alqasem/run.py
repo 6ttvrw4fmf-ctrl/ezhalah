@@ -432,4 +432,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    import runpy; runpy.run_module("scrapers.alqasem.probe", run_name="__main__"); raise SystemExit(0)
+    import runpy; runpy.run_module("scrapers.alqasem.probe_dealapp", run_name="__main__"); runpy.run_module("scrapers.alqasem.probe", run_name="__main__"); raise SystemExit(0)
