@@ -65,9 +65,19 @@ const noStop: Walk = async (pairs, d, _b, _now, visit) => { const o = rotationOf
 mutation('a walk with a fixed start is caught', !(await walkHolds(fixedStart)));
 mutation('a walk with the budget stop removed is caught', !(await walkHolds(noStop)));
 const diffSrc = readFileSync(SRC, 'utf8');
-const callsWalk = (src: string) => /M\.pairsDeferred = await walkPairs\(allPairs,/.test(src);
-check('the sweep drives its pair stage through walkPairs()', callsWalk(diffSrc));
-mutation('a sweep that walks its pairs inline again is caught', !callsWalk(diffSrc.replace('M.pairsDeferred = await walkPairs(allPairs,', 'M.pairsDeferred = await inlineWalk(allPairs,')));
+/** The sweep's call passes TODAY (whole days since the epoch), the workflow's budget and the real clock — every argument
+ *  pinned, because a call with day 0 fixes the start and one with budget 0 switches the stop off (CodeRabbit #12166). */
+const CALL = 'M.pairsDeferred = await walkPairs(allPairs, Math.floor(Date.now() / 86_400_000), PAIR_BUDGET_MS, Date.now, async';
+const callsWalk = (src: string) => src.includes(CALL)
+  && /const PAIR_BUDGET_MS = Number\(process\.env\.AF_FSD_PAIR_BUDGET_MIN \|\| 0\) \* 60_000;/.test(src);
+check('the sweep drives its pair stage through walkPairs() with today, the workflow budget and the real clock', callsWalk(diffSrc));
+mutation('a sweep that walks its pairs inline again is caught', !callsWalk(diffSrc.replace(CALL, CALL.replace('walkPairs(', 'inlineWalk('))));
+mutation('a call with day 0 (a fixed start) is caught',
+  !callsWalk(diffSrc.replace(CALL, CALL.replace('Math.floor(Date.now() / 86_400_000)', '0'))));
+mutation('a call with budget 0 (the stop switched off) is caught',
+  !callsWalk(diffSrc.replace(CALL, CALL.replace('PAIR_BUDGET_MS, Date.now', '0, Date.now'))));
+mutation('a budget that no longer reads the workflow variable is caught',
+  !callsWalk(diffSrc.replace('Number(process.env.AF_FSD_PAIR_BUDGET_MIN || 0) * 60_000', '0')));
 
 // The workflow must actually set the budget, below the job's own cap.
 const wf = readFileSync(join(ROOT, '.github', 'workflows', 'af-live-truth-check.yml'), 'utf8');
