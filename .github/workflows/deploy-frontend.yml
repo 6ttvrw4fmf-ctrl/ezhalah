@@ -66,7 +66,9 @@ env:
 jobs:
   deploy:
     name: safe-deploy.sh → ezhalah-app.vercel.app
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14, measured): the deploy is a short control-plane job. On the 6-runner own server run
+    # 43547632389 waited 10 h behind queued crawls, so merged customer fixes did not ship. Listed in HOSTED_ONLY.
+    runs-on: ubuntu-latest
     # 30 + the canary gate's guardian journeys (owner 2026-10-23)
     timeout-minutes: 45
 

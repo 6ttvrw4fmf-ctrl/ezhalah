@@ -48,7 +48,9 @@ env:
 jobs:
   apply:
     name: Apply ${{ inputs.file }}
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14, measured): a 2-minute job the engineers wait on inside their slot; run 43590661927
+    # queued 1.8 h+ on the own server. Listed in HOSTED_ONLY.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

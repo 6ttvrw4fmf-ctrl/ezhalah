@@ -24,7 +24,9 @@ env:
 jobs:
   iphone:
     name: iPhone (WebKit) — lists open above the keyboard, every tap answers
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14): an iPhone-emulation robot, same class as web-runtime-smoke (owner 11-13); queued 5 h on the
+    # own server (run 43574663651). Listed in HOSTED_ONLY.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

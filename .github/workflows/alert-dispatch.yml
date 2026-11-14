@@ -73,7 +73,9 @@ env:
 
 jobs:
   dispatch:
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14, measured): delivery has a 5-minute P0 SLA; alert_delivery 14661 and repeat_bug:alert_delivery
+    # 14670 opened at 00:44 UTC while this job's runs queued on the own server. Listed in HOSTED_ONLY.
+    runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

@@ -24,7 +24,9 @@ env:
 jobs:
   pins:
     name: Phone map — no overlapping pins, every pin tappable, district named
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ALWAYS ON GITHUB (🔧 2026-11-14): a throttled phone map robot, same class as web-runtime-smoke (owner 11-13); red at 17:55 UTC
+    # 11-13 after the switch and queued 3 h+ since. Listed in HOSTED_ONLY.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.conclusion != 'skipped')
     steps:
