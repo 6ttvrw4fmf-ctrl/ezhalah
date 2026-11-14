@@ -6,6 +6,7 @@ import {
   onOneIndex, judgeAdvertisedVsLanded,
 } from './sweep.mjs';
 import { searchSettled, settledSource, resultsFoundCount } from '../lib/resultsSentence.mjs';
+import { annualPoolOr, monthlyPoolOr } from '../../scripts/lib/rentPoolOracle.mjs';
 
 const enc = encodeURIComponent;
 
@@ -46,8 +47,8 @@ export function truthFilter({ city, deal, period, types }) {
   let f = `city_ar=eq.${enc(city)}`;
   if (deal === 'بيع' || deal === 'إيجار') f += `&deal_ar=eq.${enc(deal)}`;
   // price on request (price_annual NULL) is in every period — owner 2026-09-28
-  if (deal === 'إيجار' && period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`;
-  if (deal === 'إيجار' && period === 'شهري') f += '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))';
+  if (deal === 'إيجار' && period === 'سنوي') f += `&or=${annualPoolOr()}`; // one spelling: scripts/lib/rentPoolOracle.mjs
+  if (deal === 'إيجار' && period === 'شهري') f += `&or=${monthlyPoolOr()}`;
   if (types?.length) f += `&type_ar=in.(${enc(types.map((t) => `"${t}"`).join(','))})`;
   return f;
 }
