@@ -90,6 +90,34 @@ try {
   check('the checkout is left clean (a leftover commit would jam the NEXT preflight)',
     git(work, 'status', '--porcelain') === '' && git(work, 'rev-parse', 'HEAD') === git(work, 'rev-parse', 'origin/main'));
 
+  // ── 3b. a redeploy finds its baseline PR ALREADY OPEN (2026-10-30, PR #9452: two shipped deploys
+  // went RED on «a pull request for branch … already exists»). The branch was force-pushed with the
+  // new commit, so the open PR carries it: that is recorded, exit 0. Any OTHER gh failure stays RED.
+  const bin = join(sandbox, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const stubGh = (msg: string) => {
+    writeFileSync(join(bin, 'gh'), `#!/bin/sh\necho "${msg}" >&2\nexit 1\n`);
+    chmodSync(join(bin, 'gh'), 0o755);
+  };
+  const recordWithGh = (arg: string) => {
+    const r = spawnSync('scripts/record-deploy-baseline.sh', [arg], {
+      cwd: work, encoding: 'utf8', shell: false,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_TOKEN: 'stub', GITHUB_TOKEN: '', BASELINE_PR_TOKEN: '' },
+    });
+    return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+  stubGh('a pull request for branch \\"deploy/baseline-3333333\\" into branch \\"main\\" already exists:\nhttps://github.com/o/r/pull/9452');
+  const reopen = recordWithGh('3'.repeat(40));
+  check('a baseline PR that is already open counts as recorded (exit 0, not RED)',
+    reopen.status === 0 && !reopen.out.includes('REFUSING TO ADVANCE THE BASELINE'), `exit ${reopen.status}`);
+  check('and it names the open PR', reopen.out.includes('/pull/9452'));
+  check('the checkout is still left clean after it',
+    git(work, 'status', '--porcelain') === '' && git(work, 'rev-parse', 'HEAD') === git(work, 'rev-parse', 'origin/main'));
+  stubGh('HTTP 403: Resource not accessible by integration');
+  const denied = recordWithGh('4'.repeat(40));
+  check('MUTATION: any OTHER gh failure is still RED with the report phrase',
+    denied.status === 1 && denied.out.includes('REFUSING TO ADVANCE THE BASELINE'), `exit ${denied.status}`);
+
   // ── 4. the same act where a direct push IS allowed (a laptop run) ─────────────────────────────
   rmSync(join(remote, 'hooks/pre-receive'));
   const sha2 = '2'.repeat(40);
