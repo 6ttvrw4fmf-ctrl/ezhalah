@@ -44,6 +44,7 @@ export const HOSTED_ONLY: Record<string, string> = {
   'aqar-commercial-sweep.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
   'aqar-deep-fill.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
   'aqar-commercial-fill.yml': 'sa.aqar.fm answers the own server HTTP 403 on every TLS profile: aqar_commercial 12/22 ok vs 567/571 on GitHub (2026-11-14)',
+  'aqar-liveness.yml': 'same 403 from sa.aqar.fm: controls 0/5, 3 of 3 runs quarantined on the own server vs 1 of 107 on GitHub (2026-11-14)',
 };
 function problems(files: Record<string, string>, expr = SWITCH): string[] {
   const fail: string[] = [];
