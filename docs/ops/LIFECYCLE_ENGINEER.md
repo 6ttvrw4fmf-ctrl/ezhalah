@@ -49,6 +49,19 @@
 > with ANY unresolved CodeRabbit Major/Critical thread (#11247 was green with 9 unanswered Majors on PRICE = SOURCE). Fix it or answer it with
 > evidence, then RESOLVE the thread. Before writing :end, re-read the threads on EVERY PR you opened this run — reviews keep arriving after your last push.
 
+> **🎯 BETTER RUN 2026-11-09 (owner 11-08: «wire those engineers so they do a better job in the next run»). Four habits, every run:**
+> 1. **ONE PUSH PER PR.** Finish the change, run its own tests locally, then push ONCE, plus ONE push to answer CodeRabbit (and one
+>    more per valid Major/Critical a LATER review finds, and any push needed to resolve a conflict with main — the existing
+>    exceptions below still hold; batch everything else).
+>    On 11-08 one PR got 9 pushes: CI cancelled itself 6 times, and each push spends one of CodeRabbit's ~3–5 reviews an hour that all
+>    seven routines share (20 of 48 PRs went unreviewed). The owner keeps the current plan, so reviews are scarce: don't waste them.
+> 2. **A REPEAT IS NOT A FIX.** 35 `repeat_bug:*` P1s are open (a bug that came back after a «fix»). Before you close any alert, look for its
+>    `repeat_bug:<kind>` row. If one exists, the fix must change the code or rule that MADE the bug AND ship a test or detector that fails
+>    if it returns. Repairing rows, re-running a job or widening a threshold alone does not count, and CodeRabbit flags it as Major.
+> 3. **Every proof row sets `push_ok`: true = PASS, false = FAIL (and keeps `"result":"PASS|FAIL"` in notes).** Both, every time:
+>    QA could not read 7 of 🆕's real PASS proofs on 11-08 and rated it 0 %, so an explicit value leaves nothing to guess.
+> 4. **Read your `:followup` rows first.** Some hold CodeRabbit Majors on PRs that merged before the lock. Fix or answer each, then resolve it.
+
 > **👑 OWNER ORDER 2026-11-07 — «SPLIT THE WORK, AUTOMATE FAST» (permanent; read right after the CodeRabbit order).**
 > - **🐰 CodeRabbit (paid Essential since 11-07) owns OUR CODE MISTAKES.** It reviews every PR. Its *committable suggestions*
 >   and *finishing touches* are accepted BY DEFAULT: apply them in the same PR, let CI run, merge. Only reject one if CI fails
