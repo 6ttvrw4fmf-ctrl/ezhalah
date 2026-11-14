@@ -47,6 +47,7 @@ export const HOSTED_ONLY: Record<string, string> = {
   'customer-journey.yml': 'every engineer\'s live-site proof; queued 3 h on the own server 2026-11-14, so no fix could be proven (♻️)',
   'dead-visible-score.yml': LIFECYCLE,
   'dealapp-liveness.yml': LIFECYCLE,
+  'dealapp-recover.yml': 'dealapp throttles PER IP and caches its wall page under each ad for days; on the one own-server IP the dealapp sweep read 0-9 of 600 alive from 18:00 UTC 2026-11-13 (♻️ 2026-11-14), so no dealapp reader may share it',
   'fleet-liveness.yml': LIFECYCLE,
   'fleet-liveness-recheck.yml': LIFECYCLE,
   'gathern-liveness.yml': LIFECYCLE,
