@@ -37,6 +37,11 @@ delete from ops_blocked_ip where ip = '<address>';                    -- unblock
 
 If a blocked address turns out to be ours, unblock it and add it to the repo variable `SCRAPE_ALARM_KNOWN_IPS`
 (comma-separated). The owner's home connection is already there.
+**Our own server is there too (owner 2026-11-14, «Yeah unblock»):** `138.201.255.218` (Hetzner, Falkenstein — the
+`ezhalah-own` runners, `docs/ops/OWN_SERVER_RUNNERS.md`). Every non-PR job runs from that ONE address, so our own scrapers
+and robots read ~400,000 listing rows an hour from it; the alarm blocked it at 14:40 UTC that day and the drift gate of
+every deploy then answered HTTP 429 (`robot_gate()` → `guard.ip_is_blocked`), so nothing could ship. It was unblocked and
+added to `SCRAPE_ALARM_KNOWN_IPS`. If the server's address ever changes, add the new one the same day.
 
 ## Known gaps (stated, not hidden)
 
