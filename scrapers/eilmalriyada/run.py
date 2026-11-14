@@ -31,8 +31,8 @@ SOURCE SHAPE (probed live before any code — every number below is measured, no
              the source states no price → AUTHORITATIVE_NULL.
       location — «حي X - City» (240 Riyadh, 15 Khobar, 11 «القصيم» which is a REGION and not a
              catalog city → SKIP, 9 Dammam, …). The part before the dash is the card's
-             neighbourhood; «ضاحية خزام» (66 rows) is a suburb, not a catalog district → district_ar
-             NULL with the text kept.
+             neighbourhood; «ضاحية خزام» (66 rows) now resolves to catalog «حي ضاحية خزام»; its spelling «ضاحية الخزام» is mapped (2026-11-14).
+             The card keeps the site's words.
       property_area «8,250m²» (264), bare «N» (17), one range «N-Nm²» → NULL, raw kept.
       bedrooms/bathrooms — digits, or «.»/«0» (unset) or «+4» (open bound) → NULL.
       property_age — «0» 141 (UNSET, not «new»), «حديث» 66 (not in the vocabulary → NULL),
@@ -294,6 +294,22 @@ def photo_urls(it: dict, detail: Optional[dict]) -> list[str]:
     return out
 
 
+
+# This site's own spellings of catalog districts (rule G, 2026-11-14): a spelling is MAPPED here,
+# never added to the catalog. «ضاحية الخزام» (5 live ads, 11-14) is the same suburb the site
+# writes «ضاحية خزام» on 66 other ads — the catalog's «حي ضاحية خزام» (Riyadh); the titles of
+# both spellings say «ضاحية الخزام» / «بضاحية خزام» interchangeably.
+_SITE_DISTRICT_SPELLINGS = {
+    "ضاحية الخزام": "ضاحية خزام",
+}
+
+
+def _district_spelling(hood: str) -> str:
+    """The site's neighbourhood words with its known spellings mapped onto the catalog form."""
+    h = re.sub(r"^حي\s+", "", (hood or "").strip())
+    return _SITE_DISTRICT_SPELLINGS.get(h, hood)
+
+
 def map_listing(it: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, str]:
     pid = it.get("id")
     if not isinstance(pid, int):
@@ -331,7 +347,7 @@ def map_listing(it: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     city_id, region_id = to_catalog(city_ar)
     if not city_id:
         return None, category, "city_not_in_catalog"
-    district_ar = find_district_in_text(hood or location, city_id)
+    district_ar = find_district_in_text(_district_spelling(hood) or location, city_id)
 
     amount, unit = parse_price_cell(it.get("price"))
     price_cell = str(it.get("price") or "")

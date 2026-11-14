@@ -608,3 +608,21 @@ def test_session_asks_for_arabic_json_and_never_sets_a_user_agent():
     s = R.session()
     assert s.headers["Accept"] == "application/json" and s.headers["Accept-Language"].startswith("ar")
     assert "User-Agent" not in s.headers and "user-agent" not in s.headers
+
+
+def test_the_sites_khuzam_spelling_maps_onto_the_catalog_suburb(monkeypatch):
+    """11-14: 5 live ads say «ضاحية الخزام - الرياض» where 66 others say «ضاحية خزام» — the same
+    suburb, catalog «حي ضاحية خزام». The spelling is mapped in this scraper (rule G), never added
+    to the catalog; the resolver must be handed the catalog form, and the card keeps the site's words."""
+    seen = []
+    cat = {"ضاحية خزام": "حي ضاحية خزام"}
+    monkeypatch.setattr(R, "find_district_in_text", lambda t, cid: seen.append(t) or cat.get(t))
+    row, _, why = R.map_listing(dict(ELR_245, location="ضاحية الخزام - الرياض"), None)
+    assert why == "" and row["district_ar"] == "حي ضاحية خزام" and row["neighborhood"] == "ضاحية الخزام"
+    row, _, _ = R.map_listing(dict(ELR_245, location="حي ضاحية الخزام - الرياض"), None)
+    assert row["district_ar"] == "حي ضاحية خزام"
+    row, _, _ = R.map_listing(dict(ELR_245, location="ضاحية خزام - الرياض"), None)
+    assert row["district_ar"] == "حي ضاحية خزام"
+    # any other neighbourhood is handed over untouched
+    row, _, _ = R.map_listing(dict(ELR_245, location="حي الملقا - الرياض"), None)
+    assert seen[-1] == "حي الملقا"
