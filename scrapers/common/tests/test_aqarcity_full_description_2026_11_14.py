@@ -57,3 +57,15 @@ def test_the_mapped_row_reads_the_feature_list():
     assert row, why
     assert row["elevator"] is True and row["air_conditioner"] is True and row["kitchen"] is True
     assert "للتواصل" not in row["description"]
+
+
+# PDPL: aqarcity 20504187 (re-read 2026-11-14) prints the phone in split spans; digits replaced, markup verbatim
+_PHONE_BOX = ('<div class="description-body x"><p>• 3 غرف نوم.<br />• مطبخ.</p><p>جوال '
+              '<span class="desc-phone" dir="ltr"><span>05</span><span>00</span><span>00</span><span>00</span><span>00</span></span>'
+              ' متاح للمعاينة</p></div>')
+
+
+def test_a_split_phone_never_reaches_the_description():
+    full = R.full_description(_PHONE_BOX, "• 3 غرف نوم…")
+    assert "05" not in full and "00 00" not in full
+    assert "متاح للمعاينة" in full and "مطبخ" in full

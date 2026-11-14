@@ -406,6 +406,7 @@ def _strip_tags(s: str) -> str:
 # and stop at the contact line («📞 للتواصل والاستفسار» + an agency name): nothing after it describes the property.
 _DESC_BODY = re.compile(r'<div class="description-body[^"]*"[^>]*>(.*?)</div>', re.S)
 _DESC_CUT = re.compile(r"(?:…|\.\.\.)\s*$")
+_DESC_PHONE = re.compile(r'<span[^>]*class="[^"]*desc-phone[^"]*"[^>]*>(?:\s*<span[^>]*>[^<]*</span>)*\s*</span>', re.I)
 _CONTACT_LINE = re.compile(r"^\W*(?:للتواصل|للاتصال|للاستفسار|تواصل معنا|اتصل)")
 
 
@@ -416,7 +417,10 @@ def full_description(body: str, ld_desc: Optional[str]) -> Optional[str]:
     m = _DESC_BODY.search(body or "")
     if not m:
         return ld_desc
-    marked = re.sub(r"(?i)<br\s*/?>|</p>|</li>|</h\d>", "\n", m.group(1))
+    # PDPL: the box prints a phone as <span class="desc-phone"><span>05</span><span>60</span>…</span>; stripped, that is
+    # «05 60 65 60 72», a shape _redact does not catch (aqarcity 20504187, 2026-11-14). Drop the whole block first.
+    inner = _DESC_PHONE.sub(" ", m.group(1))
+    marked = re.sub(r"(?i)<br\s*/?>|</p>|</li>|</h\d>", "\n", inner)
     lines = []
     for raw in re.sub(r"<[^>]+>", " ", marked).split("\n"):
         line = re.sub(r"\s+", " ", html.unescape(raw)).strip()
