@@ -47,10 +47,16 @@
       "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 11 of 11 active rows carry photo_urls (100%). TINY: one listing is ~9 points; floor set one listing below the observation, as villassa is at the same size."
     },
     "albdah": {
-      "floor_pct": 85,
-      "today_pct": 100.0,
-      "active_rows": 9,
-      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 9 of 9 rows carried photo_urls (the whole catalogue). TINY: one listing is ~11 points; floor set one listing below the observation."
+      "floor_pct": 59,
+      "today_pct": 60.7,
+      "active_rows": 89,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 9 of 9 rows carried photo_urls (the whole catalogue). TINY: one listing is ~11 points; floor set one listing below the observation. Rebased 2026-11-14 by 🔧: see `rebased`.",
+      "rebased": {
+        "from": 85,
+        "to": 59,
+        "why": "The 85 was declared 2026-09-24 from 9 onboarding rows (9 of 9 with photos). With 89 active rows the SOURCE itself omits photos on 35 ads: 🔧 read all 35 photo-less ad pages on 2026-11-14 13:4x UTC through net.http_get (ids 13153, 13154, 13157-13189): 35 of 35 HTTP 200, 34 carry only the empty lightbox <img id=\"lbImg\" src=\"\"> and no /media/property/images/ gallery image, 1 (13159) carries other ads' thumbnails inside <a class=\"card\"> and no gallery of its own. Our capture keeps every gallery the site prints (54 of 54 pages with a <div class=\"gal\">). Floor set one listing (1.1 pt) below the measured 60.7 %. Not a weakening: the page is the proof; a scraper regression below 59 still fails.",
+        "evidence": "ops_photo_capture_trust albdah_residential_listings 2026-11-14 13:22: reachable 89, real_photo 54 (60.7 %); net._http_response 13153, 13154, 13157-13189 (35 pages, 0 own gallery images); the 54 photo rows match 54 pages with class=\"gal\" (sample 13152: 11 gallery images stored 11); loader-active-platforms-check red on this floor every day since 2026-11-02 (backlog 1338)"
+      }
     },
     "albukaeri": {
       "floor_pct": 95,
